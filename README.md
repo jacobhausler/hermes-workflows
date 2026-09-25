@@ -16,7 +16,7 @@ runner executes it, survives restarts, and hands results back through the same
 | **Human + machine gates** | A `gate` holds on a question until `release`; `gate.wait` holds for a timer or an argv probe; `when` predicates branch on upstream output; `on_skip:"prune"` kills the losing arm |
 | **Fingerprint resume** | Every finished node records an effective fingerprint. Crash, restart, or `amend` the graph — only what actually changed re-runs |
 | **Cooperative steer** | `steer` queues text; a running child pulls it at its next seam via the tool's `inbox` action |
-| **Typed failures** | Every `node.failed` event carries `error_class` + `attempts` (`timeout`, `max_turns`, `provider_400`, `schema_fail`, …) — the parent never infers a cause from prose |
+| **Typed failures** | Every `node.failed` event carries `error_class` + `attempts` (`timeout`, `cap_exhausted`, `provider_400`, `schema`, `cancelled`, …) — the parent never infers a cause from prose |
 | **Compact status** | Mid-run `status`/`wait` return output *pointers*; `detail:"full"` opts into everything; terminal payloads are always full |
 | **Desktop DAG view** | Live graph, fan-out stacks, timeline, and a `::workflow{id="…"}` inline card in any reply |
 | **Library** | `save` a proven graph, `library` lists it, `run` with `from:` replays it |
@@ -62,7 +62,7 @@ differs, and it is optional:
 |  | stock Hermes (catalog install) | with the optional core patch |
 |---|---|---|
 | graphs, fan-out, gates, steer, resume, desktop view, cards | ✓ | ✓ |
-| a child that dies on its `max_turns` cap | `error_class: unknown` + preserved partial/log | typed `error_class: max_turns` + reason |
+| a child that dies on its `max_turns` cap | `error_class: unknown` + preserved partial/log | typed `error_class: cap_exhausted` + reason |
 | how | nothing to do | one sha-stamped patch — [docs/patched-core.md](docs/patched-core.md) |
 
 The tier is self-reported: after a failed child, `status` shows
@@ -85,7 +85,7 @@ Changes are gated by the serial suite (`python3 scripts/suite.py . ci-out`) and
 `hermes plugins validate .` — both run in [CI](.github/workflows/ci.yml).
 
 The repo ships a [graphify](https://github.com/Graphify-Labs/graphify) knowledge
-graph (`graphify-out/`, 832 nodes / 1679 edges, deterministic AST — no LLM in the
+graph (`graphify-out/`, 941 nodes / 1920 edges, deterministic AST — no LLM in the
 build). `graphify query "<question>"` returns a scoped subgraph instead of a grep
 dump; `graphify-out/GRAPH_REPORT.md` is the architecture overview. CI fails if the
 committed graph drifts from the tree.

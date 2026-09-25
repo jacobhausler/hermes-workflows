@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import re
 import subprocess
 import sys
 import tempfile
@@ -13,6 +14,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
+VERSION = re.search(r"^version:\s*([\d.]+)", (ROOT / "plugin.yaml").read_text(), re.M).group(1)
 
 
 def check(label: str, condition: bool) -> None:
@@ -64,7 +66,7 @@ def main() -> None:
 
         with zipfile.ZipFile(first) as archive:
             members = set(archive.namelist())
-            root = "hermes-workflows-0.9.0/"
+            root = f"hermes-workflows-{VERSION}/"
             check("archive includes runtime, docs, skill, examples, tests, and checksum manifest",
                   all(root + rel in members for rel in (
                       "plugin.yaml", "__init__.py", "wf.py", "wfcommon.py",

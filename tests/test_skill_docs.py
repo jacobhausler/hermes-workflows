@@ -22,5 +22,7 @@ assert "interrupted" in skill
 assert "seat default" in skill.lower() and "not" in skill.lower()
 assert all((root / "references" / f).is_file() for f in ("grammar.md", "operations.md", "development.md"))
 assert "agent.when" in (root / "references/grammar.md").read_text()
-assert "workflow 0.9.0" in (root / "references/grammar.md").read_text().lower()
+_ver = re.search(r"^version:\s*([\d.]+)", (root / "plugin.yaml").read_text(), re.M).group(1)
+assert f"workflow {_ver}" in (root / "references/grammar.md").read_text().lower(), f"grammar.md must name {_ver}"
+assert f"version: {_ver}" in skill, f"SKILL.md front-matter must name {_ver}"
 print("ALL PASS: portable workflow skill")

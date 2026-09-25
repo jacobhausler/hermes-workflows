@@ -2,7 +2,7 @@
 
 Budgets are authored wrong in the common case: caps too tall, walls too short. Measured across 42 done spawns and 9 timeout deaths — the median timeout child died at 18 api calls against a 35–45 turn cap (utilization 0.49) because the wall-clock `timeout` fires first; `run_budget` is only checked between turns, so one slow call outruns it. Successful children finish near HALF their turn cap. The binding unit is the wall: at the observed ~80 s/call pace, a 900 s wall admits ~11 calls no matter how tall `max_turns` is.
 
-Size to the shape; prefer a typed `max_turns` death (partial + log preserved, cheap) over a timeout death (wastes half the cap, untyped work):
+Size to the shape; prefer a typed `cap_exhausted` death (partial + log preserved, cheap) over a timeout death (wastes half the cap, untyped work):
 
 | shape | max_turns | run_budget | timeout | reasoning | write-first law |
 |---|---|---|---|---|---|

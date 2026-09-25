@@ -11,7 +11,7 @@ Cases:
     NOT visible to this spawn — it waits for the next spawn.
  3. A fresh spawn re-delivers every addressed line (per-spawn cursor starts 0).
  4. Done-node steer still refused (steer-truth law), no inbox line left.
- 5. Status read model reports steer {queued, baked, delivered} from files only.
+ 5. Status read model reports steer {queued, baked, consumed} from files only.
  6. Stranger inbox: no baked env -> honest refusal, ok=False.
 
 Run: cd tests && /opt/hermes/.venv/bin/python3 test_steer_live_40.py
@@ -141,12 +141,12 @@ check("done-node steer refused naming the state",
       ans.get("ok") is False and "done" in ans.get("error", ""), json.dumps(ans)[:200])
 check("refusal leaves no inbox line", (r2 / "inbox.jsonl").read_text() == before)
 
-# ---- 5: status read model steer {queued, baked, delivered} ------------------
+# ---- 5: status read model steer {queued, baked, consumed} ------------------
 (r2 / "inbox.jsonl").write_text(before + json.dumps({"node": "w", "text": "post-done", "at": "t2"}) + "\n")
 st = door.act_status({"run_id": r2.name})
 sm = (st.get("nodes", {}).get("w") or {}).get("steer")
 check("status carries steer evidence from files only",
-      sm == {"queued": 3, "baked": 2, "delivered": 2}, json.dumps(sm))
+      sm == {"queued": 3, "baked": 2, "consumed": 2}, json.dumps(sm))
 
 # ---- 6: stranger session cannot pull someone else's steering ----------------
 os.environ.pop("HERMES_WF_STEER_FILE", None)

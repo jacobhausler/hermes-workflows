@@ -13,7 +13,13 @@ def jload(p, default=None):
     except Exception:
         return default
 
+_BUDGET_KEYS = ("max_turns", "timeout", "run_budget", "shape")
+
 def def_hash(node):
+    # Budgets are not work: raising a wall or naming a shape must not invalidate a
+    # committed node (and apply_graph_defaults baking budgets into an old run's
+    # frozen graph at amend must not re-run everything it already finished).
+    node = {k: v for k, v in node.items() if k not in _BUDGET_KEYS}
     return hashlib.sha256(json.dumps(node, sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:16]
 
 _EFP_SEP = "\u241f"
@@ -55,9 +61,103 @@ ID_OK = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 # graph it baked itself. `reasoning` is validated per node (Q5).
 AGENT_KEYS = {"id", "type", "after", "goal", "context", "schema", "model", "provider", "toolsets",
               "max_turns", "timeout", "run_budget", "inputs", "fanout", "reasoning",
-              "tier"}
-GATE_KEYS = {"id", "type", "after", "question", "options", "context", "when", "wait", "on_skip"}
+              "tier", "shape"}
+GATE_KEYS = {"id", "type", "after", "question", "options", "context", "when", "wait", "on_skip",
+             "default_option", "hold_timeout"}
+ECHO_KEYS = {"id", "type", "after", "output"}
 FANOUT_KEYS = {"items", "items_from", "goal", "schema", "quorum"}
+DEFAULTS_KEYS = {"schema", "timeout", "max_turns", "reasoning", "provider", "model", "context"}
+# Shape presets (sprint101 #11): max_turns/timeout per rough node shape = the p95 of
+# SUCCESSFUL agent nodes per shape, measured 2026-09-25 over the run dirs behind
+# census.json (80 runs, 219 committed-success agent nodes; shape classified from
+# node id/goal keywords). The table IS the measured p95 per shape
+# (max_turns / timeout_s); samples: recon 97, build 62, review 57,
+# publish 3 (thin sample — keep an eye on it).
+# Explicit per-node keys always win; the preset only fills what the author left unset.
+SHAPE_PRESETS = {
+    "recon":   {"max_turns": 100, "timeout": 2400},
+    "build":   {"max_turns": 65,  "timeout": 1500},
+    "review":  {"max_turns": 65,  "timeout": 2400},
+    "publish": {"max_turns": 75,  "timeout": 1500},
+}
+DEFAULT_SHAPE = "build"
+
+def _defaults_errors(d):
+    """Per-key rules for a graph-level `defaults:` block — the SAME checks a node key
+    gets (numbers in range, reasoning from the enum, schema subset, provider needs
+    model, strings for model/context). Returns [{node:None, field, msg}]."""
+    errs = []
+    def E(field, msg):
+        errs.append({"node": None, "field": field, "msg": msg})
+    if not isinstance(d, dict):
+        return [{"node": None, "field": "defaults", "msg": "defaults must be an object"}]
+    for k in sorted(set(d) - DEFAULTS_KEYS):
+        E(f"defaults.{k}", "unknown key; allowed: " + json.dumps(sorted(DEFAULTS_KEYS)))
+    for k, hi in (("timeout", 86400), ("max_turns", 200)):
+        v = d.get(k)
+        if v is not None and (not isinstance(v, (int, float)) or isinstance(v, bool)
+                              or v <= 0 or v > hi):
+            E(f"defaults.{k}", f"{k} must be a number in (0, {hi}]")
+    if d.get("reasoning") is not None and d["reasoning"] not in reasoning_levels():
+        E("defaults.reasoning", f"reasoning {d['reasoning']!r} invalid; allowed: "
+                                f"{list(reasoning_levels())}")
+    if d.get("schema") is not None and not isinstance(d["schema"], dict):
+        E("defaults.schema", "schema must be an object")
+    if d.get("model") is not None and not isinstance(d.get("model"), str):
+        E("defaults.model", "model must be a string")
+    if "provider" in d:
+        p = d.get("provider")
+        if not isinstance(p, str) or not p or p.strip() != p:
+            E("defaults.provider", "provider must be a non-empty provider id without "
+                                   "surrounding whitespace")
+        m = d.get("model")
+        if not isinstance(m, str) or not m.strip():
+            E("defaults.provider", "provider requires a non-empty model")
+    if d.get("context") is not None and not isinstance(d["context"], str):
+        E("defaults.context", "context must be a string")
+    return errs
+
+def apply_graph_defaults(graph):
+    """Bake run-level `defaults` + per-node `shape` presets into the agent node defs,
+    called by the door BEFORE graph.json is written: the runner and every fingerprint
+    then see ONE resolved truth (no second resolution path to drift). Precedence:
+    explicit node key > node shape preset > graph defaults. `defaults.context` is the
+    shared preamble, prepended once to each agent node's own context. Returns the new
+    graph (defaults key stays on it; it is idempotent to re-apply). Raises ValueError
+    with the error list on invalid shape/defaults (door validates first; this is the
+    runner's load-time net)."""
+    graph = graph if isinstance(graph, dict) else {"nodes": graph}
+    defaults = graph.get("defaults") or {}
+    errs = _defaults_errors(defaults)
+    if errs:
+        raise ValueError(json.dumps(errs))
+    nodes = []
+    for n in graph.get("nodes", []):
+        n = dict(n)
+        if n.get("type", "agent") == "agent":
+            if n.get("shape") is not None and n["shape"] not in SHAPE_PRESETS:
+                raise ValueError(json.dumps(
+                    [{"node": n.get("id"), "field": "shape",
+                      "msg": f"shape {n['shape']!r} invalid; allowed: "
+                             f"{sorted(SHAPE_PRESETS)}"}]))
+            preset = SHAPE_PRESETS.get(n.get("shape", DEFAULT_SHAPE), {})
+            for k in ("max_turns", "timeout"):
+                if n.get(k) is None:
+                    # precedence: an author-named shape preset is per-node
+                    # intent and wins; otherwise graph defaults fill, with the
+                    # DEFAULT_SHAPE preset as the floor ([D] smart default).
+                    v = preset.get(k) if n.get("shape") is not None else \
+                        defaults.get(k, preset.get(k))
+                    if v is not None:
+                        n[k] = v
+            for k in ("schema", "reasoning", "provider", "model"):
+                if n.get(k) is None and defaults.get(k) is not None:
+                    n[k] = defaults[k]
+            pre = defaults.get("context") or ""
+            if pre and not str(n.get("context") or "").startswith(pre):
+                n["context"] = pre + ("\n\n" + n["context"] if n.get("context") else "")
+        nodes.append(n)
+    return dict(graph, nodes=nodes)
 
 REASONING_FALLBACK = ("none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra")
 REASONING_IMPORT_PATH = [None]  # "hermes_constants" | "fallback-literal" — which tuple validated
@@ -133,10 +233,11 @@ def validate_graph_errors(nodes):
     parents = {n["id"]: [a for a in n.get("after", []) if a in idset] for n in nodes}
     for n in nodes:
         nid = n["id"]
-        if n.get("type") not in ("agent", "gate"):
-            E(nid, "type", "type must be agent|gate")
+        if n.get("type") not in ("agent", "gate", "echo"):
+            E(nid, "type", "type must be agent|gate|echo")
             continue  # per-type key grammar is undefined without a type
-        for k in sorted(set(n) - (AGENT_KEYS if n["type"] == "agent" else GATE_KEYS)):
+        _type_keys = {"agent": AGENT_KEYS, "gate": GATE_KEYS, "echo": ECHO_KEYS}[n["type"]]
+        for k in sorted(set(n) - _type_keys):
             # dedicated errors below own these keys (clearer messages, no double-report)
             if n["type"] == "agent" and k == "wait":
                 continue
@@ -145,8 +246,7 @@ def validate_graph_errors(nodes):
             if n["type"] == "agent" and k == "when":
                 E(nid, "when", "only gate nodes take when; use a gate with on_skip:prune to branch")
                 continue
-            E(nid, k, "unknown key; allowed: "
-                      + json.dumps(sorted(AGENT_KEYS if n["type"] == "agent" else GATE_KEYS)))
+            E(nid, k, "unknown key; allowed: " + json.dumps(sorted(_type_keys)))
         for a in n.get("after", []):
             if a not in idset:
                 E(nid, "after", f"references unknown 'after': {a}")
@@ -159,7 +259,30 @@ def validate_graph_errors(nodes):
             if lv not in reasoning_levels():
                 E(nid, "reasoning", f"reasoning {lv!r} invalid; allowed: "
                                     f"{list(reasoning_levels())}")
+        if n["type"] == "gate" and n.get("options") is not None:
+            opts = n["options"]
+            if not isinstance(opts, list) or not opts \
+                    or not all(isinstance(o, str) and o.strip() for o in opts):
+                E(nid, "options", "gate options must be a non-empty list of non-empty strings "
+                                  "(or omit the key for a free-form answer)")
+        if n["type"] == "gate":
+            # sprint101 #14: gate defaults are validated at the door, never discovered at the wall.
+            dopt = n.get("default_option")
+            if dopt is not None:
+                opts = n.get("options")
+                if not isinstance(dopt, str) or not dopt.strip():
+                    E(nid, "default_option", "default_option must be a non-empty string")
+                elif not isinstance(opts, list) or dopt not in opts:
+                    E(nid, "default_option", f"default_option {dopt!r} must be one of the gate's options")
+                if n.get("wait") is not None:
+                    E(nid, "default_option", "default_option applies to human gates, not machine wait-gates")
+            hto = n.get("hold_timeout")
+            if hto is not None and (not isinstance(hto, (int, float)) or isinstance(hto, bool) or hto <= 0):
+                E(nid, "hold_timeout", "hold_timeout must be a positive number of seconds")
         if n["type"] == "agent":
+            shp = n.get("shape")
+            if shp is not None and shp not in SHAPE_PRESETS:
+                E(nid, "shape", f"shape {shp!r} invalid; allowed: {sorted(SHAPE_PRESETS)}")
             if n.get("model") is not None and not isinstance(n.get("model"), str):
                 E(nid, "model", "model must be a string")
             if "provider" in n:
@@ -179,6 +302,9 @@ def validate_graph_errors(nodes):
                                               + json.dumps(sorted(FANOUT_KEYS)))
                     if fo.get("items") is None and not fo.get("items_from"):
                         E(nid, "fanout", "fanout needs items or items_from")
+                    elif fo.get("items") is None and not isinstance(fo.get("items_from"), str):
+                        E(nid, "fanout.items_from", "fanout.items_from must be a "
+                                                    "'<node_id>.<dotted.path>' string")
                     if fo.get("items") is not None and not isinstance(fo["items"], list):
                         E(nid, "fanout.items", "fanout.items must be a list")
                     items = fo.get("items") if isinstance(fo.get("items"), list) else []
@@ -191,6 +317,13 @@ def validate_graph_errors(nodes):
                     q = fo.get("quorum")
                     if q is not None and (not isinstance(q, int) or isinstance(q, bool) or q < 1):
                         E(nid, "fanout.quorum", "fanout.quorum must be a positive int")
+                    if fo.get("items") is None and isinstance(fo.get("items_from"), str):
+                        head = fo["items_from"].split(".")[0]
+                        if head == nid or head not in idset or head not in n.get("after", []):
+                            E(nid, "fanout.items_from",
+                              f"fanout.items_from ref {fo['items_from']!r} head {head!r} must be an "
+                              f"ancestor — a node in this node's `after` list "
+                              f"(its committed output feeds the fan-out)")
                     fsc = fo.get("schema")
                     if fsc is not None:
                         if not isinstance(fsc, dict):
@@ -347,14 +480,17 @@ def _legacy_chain_unchanged(r, n, byid):
                for a in n.get("after", []))
 
 def node_rec(r, n, byid):
-    """Return (status, rec): done|failed|pending. Stale (efp mismatch after an
+    """Return (status, rec): done|partial|failed|pending. Stale (efp mismatch after an
     amend) == pending — its stored result must never be presented as current.
     Legacy (pre-efp) records carried def_hash only; a bare stamp is a downgrade
     attack on the validity law, so the whole ancestor chain must be proven
-    unchanged legacy commits."""
+    unchanged legacy commits. `partial` (#4 harvest-on-death) IS a commit:
+    partial output is committed output, downstream may consume it."""
     rec = jload(r / "nodes" / f"{n['id']}.json")
     st = (rec or {}).get("status")
-    if st in ("done", "failed", "skipped"):
+    if st == "failed" and (rec or {}).get("error_class") == "cancelled":
+        return "pending", rec   # stop != failure (#7): a resume re-drives cancelled work
+    if st in ("done", "partial", "failed", "skipped"):
         if rec.get("efp") == efp(byid, n):
             return st, rec
         if "efp" not in rec and _legacy_chain_unchanged(r, n, byid):
@@ -549,7 +685,7 @@ def blocked_by(n, states, nodes_meta=None):
     out = []
     for a in n.get("after", []):
         st = states.get(a)
-        if st in ("done", "skipped"):
+        if st in ("done", "skipped", "partial"):   # #4: partial satisfies — not an unfinished ancestor
             continue
         m = (nodes_meta or {}).get(a) or {}
         if st == "failed":
@@ -583,7 +719,8 @@ def prune_states(nodes, states):
     return derived
 
 def dep_satisfied(states, a):
-    return states.get(a) in ("done", "skipped")
+    # #4: a harvested `partial` satisfies downstream exactly like done.
+    return states.get(a) in ("done", "skipped", "partial")
 
 def _active_spawns(r, n, byid):
     """All verified uncommitted child identities, never historical DB liveness."""
@@ -635,7 +772,7 @@ def run_state(r):
     for n in graph["nodes"]:
         st, rec = node_rec(r, n, byid)
         states[n["id"]] = st; recs[n["id"]] = rec
-        if st == "done":
+        if st in ("done", "partial"):   # #4: partial output IS output for when/refs
             outputs[n["id"]] = (rec or {}).get("output")
     prune_states(graph["nodes"], states)   # derived view: pruned-but-uncommitted read as skipped
     for n in graph["nodes"]:
@@ -643,7 +780,7 @@ def run_state(r):
         active = _active_spawns(r, n, byid) if live and st == "pending" and n["type"] == "agent" else []
         nodes[n["id"]] = {"type": n["type"], "status": "running" if active else st, "after": n.get("after", []),
                           "fanout": bool(n.get("fanout")),
-                          "stale_of_amend": bool(rec) and st == "pending" and rec.get("status") in ("done", "failed", "skipped") or None}
+                          "stale_of_amend": bool(rec) and st == "pending" and rec.get("status") in ("done", "partial", "failed", "skipped") or None}
         if active:
             nodes[n["id"]]["active_spawn"] = active[0]
             nodes[n["id"]]["active_spawns"] = active
@@ -664,7 +801,7 @@ def run_state(r):
         status = "stopped"
     elif any(s == "failed" for s in states.values()):
         status = "failed"
-    elif all(s in ("done", "skipped") for s in states.values()):
+    elif all(s in ("done", "partial", "skipped") for s in states.values()):   # #4: partial closes the run
         status = "done"
     else:
         gate = next((n for n in graph["nodes"] if n["type"] == "gate"
@@ -718,7 +855,7 @@ def run_state(r):
             "runner_exit": exit_state,
             "started": (jload(r / "run.json", {}) or {}).get("started"),
             "owner": (jload(r / "run.json", {}) or {}).get("owner"),
-            "done": sum(1 for s in states.values() if s in ("done", "skipped")),
+            "done": sum(1 for s in states.values() if s in ("done", "skipped", "partial")),   # #4: a harvest counts done
             "skipped": sum(1 for s in states.values() if s == "skipped"), "total": len(graph["nodes"])}
 
 def run_summary(runs):
@@ -759,7 +896,7 @@ def amend_preview(r, new_nodes):
     for n in new_nodes:
         st, rec = node_rec(r, n, byid)
         status[n["id"]] = st
-        if st == "pending" and (rec or {}).get("status") in ("done", "failed", "skipped"):
+        if st == "pending" and (rec or {}).get("status") in ("done", "partial", "failed", "skipped"):
             committed_mismatch.add(n["id"])  # committed but efp-stale
     changed = sorted(committed_mismatch)
     will = set()
@@ -772,7 +909,7 @@ def amend_preview(r, new_nodes):
         stack.extend(kids.get(x, []))
     will_rerun = [n["id"] for n in new_nodes if n["id"] in will]
     unchanged = [n["id"] for n in new_nodes
-                 if status[n["id"]] in ("done", "skipped") and n["id"] not in will]
+                 if status[n["id"]] in ("done", "skipped", "partial") and n["id"] not in will]
     return {"added": added, "removed": removed, "changed": changed,
             "will_rerun": will_rerun, "unchanged": unchanged}
 

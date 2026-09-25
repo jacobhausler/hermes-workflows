@@ -36,7 +36,7 @@ def _coerce_graph(graph):
     return graph, None
 
 GRAPH_MAX_BYTES = 1024 * 1024
-GRAPH_KEYS = {"name", "nodes", "description"}
+GRAPH_KEYS = {"name", "nodes", "description", "defaults"}
 
 def _input_graph(args, *, run_id=False, library=False):
     """Choose one explicitly supplied source; never discover files on the caller's behalf."""
@@ -76,6 +76,10 @@ def _validation_error(graph):
     for key in sorted(set(graph) - GRAPH_KEYS):
         errs.append({"node": None, "field": key,
                      "msg": f"unknown graph key; allowed: {sorted(GRAPH_KEYS)}"})
+    if "defaults" in graph:
+        # ONE truth: the same per-key rules a node key gets; apply_graph_defaults
+        # bakes this block into the agent defs before graph.json is written.
+        errs.extend(_common._defaults_errors(graph["defaults"]))
     for key in ("name", "description"):
         if key in graph and (not isinstance(graph[key], str) or not graph[key].strip()):
             errs.append({"node": None, "field": key, "msg": f"{key} must be a non-empty string"})
@@ -151,7 +155,7 @@ WORKFLOW_PARAMS = {
         "graph_path": {"type": "string", "description": "run/save/amend: absolute path to a caller-supplied local regular UTF-8 JSON graph file (max 1 MiB, no final symlink). Choose exactly one of graph, graph_path, or run's from / save's run_id. Validated before any write or spawn."},
         "graph": {
             "type": "object",
-            "description": "For run/amend: {name, nodes:[...]} where node = {id, type:'agent'|'gate', after:[node ids], goal, context, schema (json-schema for child output), model, provider (optional explicit Hermes provider paired with model; passed as --provider), toolsets, max_turns, timeout (s wall-clock kill, default 900), run_budget (s, child's own budget), reasoning ('none' or a hermes reasoning effort: minimal|low|medium|high|xhigh|max|ultra — passed to the child as --reasoning), inputs:['<ancestor>' | '<ancestor>.<dotted.path>', ...] (inject a committed upstream output into the prompt as a labelled json block under '## Inputs'; unresolvable ref fails the node at spawn), fanout:{items | items_from:'<node_id>.<dotted.path>', goal (template; an item's own `goal` key overrides it), schema, quorum (default=ALL items)}} — agent node. A provider requires a non-empty model; model aliases and literal IDs are preserved (tiers resolve explicitly, and a matching provider/model prefix is removed for the CLI). Run/amend responses include requested/resolved provider/model routes. Gate node: {id, type:'gate', after, question, options, context, when (bounded expr: out.<node>.<dotted.path> with == != > >= < <=, and/or/not, parens; malformed when is rejected at run/amend validation and holds the gate at fire — never a silent skip), wait:{wait_s, until_argv:[fixed argv, no shell], every_s (default 60), timeout_s (default 3600)} (machine-answered gate: parks the run at zero tokens — wait_s alone = timer; until_argv re-runs until exit 0; timeout → gate fails; its last stdout/stderr tail is the gate's output, usable via inputs). A human release pre-empts a park), on_skip:'pass'|'prune' (with when: prune commits the gate `skipped` and every node whose deps are ALL skipped is skipped too — terminal, not a failure; a join with one live dep runs; default pass = the arm still runs)}. Any key outside these closed sets is rejected at run/amend with errors:[{node, field, msg}] for EVERY defect.",
+            "description": "For run/amend: {name, nodes:[...], defaults:{schema, timeout, max_turns, reasoning, provider, model, context}} where `defaults` fills agent node keys the author left unset (explicit node keys always win; defaults.context is the shared preamble prepended once to each agent's own context) and where node = {id, type:'agent'|'gate'|'echo', after:[node ids], goal, context, schema (json-schema for child output), model, provider (optional explicit Hermes provider paired with model; passed as --provider; when unset it is INHERITED from a provider-qualified model alias/tier), toolsets, max_turns, timeout (s wall-clock kill, default 900), shape (recon|build|review|publish — fills max_turns/timeout from the measured p95 census presets when the author left them unset; explicit keys win), run_budget (s, child's own budget), reasoning (a hermes reasoning effort: none|minimal|low|medium|high|xhigh|max|ultra — passed to the child as --reasoning; levels are validated PER ROUTE at the door against the resolved (provider, model) route's supported set, with the supported list and nearest level in the error — no silent downgrade), inputs:['<ancestor>' | '<ancestor>.<dotted.path>', ...] (inject a committed upstream output into the prompt as a labelled json block under '## Inputs'; unresolvable ref fails the node at spawn; DIRECT parents from `after` are auto-injected capped at 8KB with a truncation marker — use inputs only to pick a dotted path or a non-parent ancestor; a parent listed in both appears once), fanout:{items | items_from:'<node_id>.<dotted.path>', goal (OPTIONAL template; an item's own `goal` key overrides it — when items carry their own goals the shared node goal prefixes each item prompt, so no placeholder template is ever needed), schema, quorum (default = majority, floor(n/2)+1; once quorum is reached the remaining stragglers are cancelled with error_class 'cancelled' and excluded from the failure math)}} — agent node. A provider requires a non-empty model; model aliases and literal IDs are preserved (tiers resolve explicitly, and a matching provider/model prefix is removed for the CLI). Run/amend responses include requested/resolved provider/model routes. Gate node: {id, type:'gate', after, question, options, context, when (bounded expr: out.<node>.<dotted.path> with == != > >= < <=, and/or/not, parens; malformed when is rejected at run/amend validation and holds the gate at fire — never a silent skip), wait:{wait_s, until_argv:[fixed argv, no shell], every_s (default 60), timeout_s (default 3600)} (machine-answered gate: parks the run at zero tokens — wait_s alone = timer; until_argv re-runs until exit 0; timeout → gate fails; its last stdout/stderr tail is the gate's output, usable via inputs). A human release pre-empts a park), on_skip:'pass'|'prune' (with when: prune commits the gate `skipped` and every node whose deps are ALL skipped is skipped too — terminal, not a failure; a join with one live dep runs; default pass = the arm still runs)}. Echo node: {id, type:'echo', after, output} — commits its `output` verbatim as the node result with zero tokens and no child spawn; downstream nodes consume it via after/inputs like any done node. Any key outside these closed sets is rejected at run/amend with errors:[{node, field, msg}] for EVERY defect.",
         },
         "answer": {"type": "string", "description": "release: the human's answer text (from clarify)."},
         "gate_id": {"type": "string", "description": "release: gate node id."},
@@ -198,6 +202,65 @@ def model_tiers():
 _PREFLIGHT_NOT_LIVENESS = ("preflight proves RESOLUTION, not liveness — a literal model id "
                            "is never checked for reachability and is left as-is.")
 
+import difflib
+
+def _route_efforts(provider, model):
+    """Reasoning levels the (provider, model) route accepts; the global set when the
+    route is unknown or core is not importable (bare CLI / non-core hosts)."""
+    if provider or model:
+        try:
+            from agent.reasoning_effort import route_supported_efforts
+            sup = tuple(route_supported_efforts(provider, model))
+            if sup:
+                return sup
+        except Exception:
+            pass
+    return _common.reasoning_levels()
+
+def _nearest_effort(level, supported):
+    """Nearest supported ladder level (weaker first — never an escalation), or None."""
+    try:
+        from agent.reasoning_effort import EFFORT_LADDER
+    except Exception:
+        return None
+    if level not in EFFORT_LADDER:
+        return None
+    idx = EFFORT_LADDER.index(level)
+    pool = [l for l in supported if l in EFFORT_LADDER and l != "none"]
+    below = [l for l in pool if EFFORT_LADDER.index(l) < idx]
+    if below:
+        return max(below, key=EFFORT_LADDER.index)
+    above = [l for l in pool if EFFORT_LADDER.index(l) > idx]
+    return min(above, key=EFFORT_LADDER.index) if above else None
+
+def _alias_provider_pair(requested, seat_raw, tiers, known_names=()):
+    """(provider, model) the alias/tier TARGET names — 'provider/model'-prefixed seat
+    aliases/tier targets and the core model_aliases (DIRECT_ALIASES) table; provider None
+    when the target is bare (the seat default route stays authoritative), model = the
+    bare target itself so the reasoning route table still speaks the real model id.
+    Names the SEAT already owns (seat aliases/default/tiers) never consult the core
+    table — the seat config is authoritative for its own names."""
+    name = str(requested or "").strip()
+    for target in ((dict((seat_raw or {}).get("aliases") or {}).get(name) or "").strip(),
+                   str((tiers or {}).get(name) or "").strip()):
+        if "/" in target:
+            p, _, m = target.partition("/")
+            if p.strip() and m.strip():
+                return p.strip(), m.strip()
+        elif target:
+            return None, target
+    if name.lower() in {str(k).strip().lower() for k in known_names}:
+        return None, None
+    try:
+        from hermes_cli.model_switch import _ensure_direct_aliases, DIRECT_ALIASES
+        _ensure_direct_aliases()
+        da = DIRECT_ALIASES.get(name.lower())
+        if da and da.provider and da.model:
+            return da.provider, da.model
+    except Exception:
+        pass
+    return None, None
+
 def model_preflight(requests, tiers, seat_raw):
     """Pure (no I/O): the FEEDBACK #43 model preflight, run at run/amend submit time
     after the route table is computed and before the first wave (spawn).
@@ -211,23 +274,44 @@ def model_preflight(requests, tiers, seat_raw):
     proves RESOLUTION, not liveness — a literal model id is never checked for
     reachability and is left as-is. The error text states this verbatim.
 
-    `requests` = [(node_id, requested_model, provider), ...]. Returns an error string
-    or None. Exactly one call site: the tail of ``_resolve_models`` (reuses its
-    resolution pass; no duplicate resolution logic).
+    `requests` = [(node_id, requested_model, provider), ...]; the tail of
+    ``_resolve_models`` passes the extended shape (..., node, eff_provider,
+    eff_model) so the PER-ROUTE reasoning check validates the resolved route
+    (inherited provider included) without a second resolution pass. Returns an
+    error string or None. Exactly one call site (no duplicate resolution logic).
     """
     aliases = dict((seat_raw or {}).get("aliases") or {})
     default = (seat_raw or {}).get("default")
     dead = {}
-    for nid, m, _provider in requests:
-        if not m or m in tiers or m == default:
+    route_errs = []
+    for req in requests:
+        nid, m, _provider = req[0], req[1], req[2]
+        node = req[3] if len(req) > 3 else None
+        if not m:
             continue
         if m in aliases and not str(aliases[m]).strip():
             dead.setdefault(m, []).append(nid)
+        if node is not None:
+            lv = node.get("reasoning")
+            pp = req[4] if len(req) > 4 else node.get("provider")
+            mm = req[5] if len(req) > 5 else node.get("model")
+            if lv and (mm or pp):
+                sup = _route_efforts(pp, mm)
+                if lv not in sup:
+                    near = _nearest_effort(lv, sup)
+                    route = f"{pp}/{mm}" if pp and mm else (pp or mm)
+                    suggest = (f" — nearest supported level: {near!r}" if near else "")
+                    route_errs.append(
+                        f"node {nid!r}: reasoning {lv!r} is not supported by route {route!r} "
+                        f"(supported: {list(sup)}){suggest} — pick a supported level; the door "
+                        f"never silently downgrades reasoning.")
     if dead:
         listed = "; ".join(f"{m!r} (nodes: {', '.join(ids)})" for m, ids in sorted(dead.items()))
         return (f"model preflight: {listed} — dead seat alias: the name resolves to nothing "
                 f"(empty alias target in the seat config). Fix the seat's model.aliases or "
                 f"repoint these nodes. Note: {_PREFLIGHT_NOT_LIVENESS}")
+    if route_errs:
+        return "model preflight: " + " | ".join(route_errs)
     return None
 
 def _resolve_models(nodes) -> tuple[str | None, dict | None, dict | None]:
@@ -244,7 +328,7 @@ def _resolve_models(nodes) -> tuple[str | None, dict | None, dict | None]:
     known = set(_seat_aliases()) | ({_seat_default()} - {None})
     requests = []
     for n in nodes:
-        if n.get("type") == "gate":
+        if n.get("type") in ("gate", "echo"):
             continue
         requested_model = n.get("model")
         provider = n.get("provider")
@@ -260,22 +344,45 @@ def _resolve_models(nodes) -> tuple[str | None, dict | None, dict | None]:
         elif "/" in m or m in known or provider:
             pass
         else:
-            return (f"node {n['id']!r}: unknown model {m!r} — not a tier, alias, or provider/model id; "
-                    f"tiers: {sorted(tiers)}; aliases: {sorted(known)}", None, None)
+            near = difflib.get_close_matches(m, sorted(set(tiers) | known), n=3)
+            hint = f" — did you mean {near}?" if near else ""
+            return (f"node {n['id']!r}: unknown model {m!r}{hint} — not a tier, alias, or "
+                    f"provider/model id; tiers: {sorted(tiers)}; aliases: {sorted(known)}", None, None)
+        # provider INHERITED from the model's alias when the node sets model but not
+        # provider: a 'provider/model'-prefixed seat alias, a tier target, or a core
+        # model_aliases entry carries its own route (the 19 "model X not supported when
+        # using Codex" provider_400s were nodes that left provider unset). [N]-tier: the
+        # author never writes the provider the alias already names. The model string
+        # itself stays verbatim (house contract: aliases are preserved); only the
+        # provider is baked so the runner's --provider matches the alias's own route.
+        ip = im = None
+        if m and not provider and (tier or m in known):
+            ip, im = _alias_provider_pair(requested_model, _seat_model_cfg(), tiers, known)
+            if ip:
+                n["provider"] = ip
+        eff_provider = provider or ip
         if m and provider:
             prefix, sep, remainder = m.partition("/")
             if sep and prefix == provider and remainder:
                 n["model"] = m = remainder
         if m:
+            # display: author-explicit provider names the route (base semantics);
+            # an inherited provider shows in `routes` only.
             display = f"{provider}/{m}" if provider else str(m)
             if tier:
                 display += f"  ({tier})"
         table[n["id"]] = display
         routes[n["id"]] = {
+            # requested = what the AUTHOR wrote (an inherited provider is not a request);
+            # resolved = the effective route (node def after resolution, base semantics).
             "requested": {"provider": provider or None, "model": requested_model or None},
-            "resolved": {"provider": provider or None, "model": n.get("model") or None},
+            "resolved": {"provider": n.get("provider") or None, "model": n.get("model") or None},
         }
-        requests.append((n["id"], requested_model, provider))
+        # route for the PER-ROUTE reasoning check: the alias/tier TARGET's model when the
+        # name is an alias (the CLI resolves it; the route table speaks the real model id),
+        # else the baked literal.
+        requests.append((n["id"], requested_model, provider, n,
+                         eff_provider, (im if (tier or m in known) and im else m)))
     pf_err = model_preflight(requests, tiers, _seat_model_cfg())
     if pf_err:
         return pf_err, None, None
@@ -434,6 +541,12 @@ def act_run(args):
     if not isinstance(name, str) or not name.strip():
         return {"error": "run name must be a non-empty string"}
     graph = dict(graph, name=name)
+    # Bake `defaults` + shape presets into the node defs BEFORE graph.json: the
+    # runner and every fingerprint then see ONE resolved truth (#8/#11).
+    try:
+        graph = _common.apply_graph_defaults(graph)
+    except ValueError as e:
+        return {"error": f"graph invalid: defaults/shape: {e}"}
     err, models, routes = _resolve_models(graph["nodes"])
     if err:
         return {"error": err}
@@ -467,16 +580,25 @@ def act_run(args):
     _note_launch(rid)
     return {"run_id": rid, "models": models, "routes": routes, "hint":
             f"call workflow wait run_id={rid} (blocks to the next hold/done boundary)",
-            # papercut 2026-09-23: the card was DESCRIBED in prose and never rendered — hand
-            # the agent the exact line to paste, not a hint to interpret.
-            "card": _card(rid),
-            "card_rule": "PASTE the `card` value ALONE on its own line in your reply — that renders the live card; describing it does not."}
+            # #15: the card is emitted by the transform_llm_output machinery (_auto_card),
+            # never pasted by the author — no card_rule prose. The `card` field stays as
+            # the machine-readable line for the desktop/owner; the author is never the
+            # fallback: if the hook misses, the machinery is the bug.
+            "card": _card(rid)}
+
+def _steer_event(r, ev, **kw):
+    """#17: steer is only real if it lands in events.jsonl — the 45 real steers
+    across 16 runs that were invisible are the bug being fixed."""
+    with open(r / "events.jsonl", "a") as f:
+        f.write(json.dumps({"ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                            "event": ev, **kw}, ensure_ascii=False) + "\n")
 
 def _steer_state(r, nid):
-    """B1 evidence read model for one node: queued = lines addressed to the node
-    in the run inbox; baked = how many its LATEST spawn copied into its bake
-    file; delivered = how far the spawn's cursor advanced (pulls). All derived
-    from files only — no model self-report is trusted."""
+    """B1 + #17 evidence read model for one node: queued = lines addressed to the
+    node in the run inbox; baked = how many its LATEST spawn copied into its bake
+    file; consumed = how far the spawn's cursor advanced (inbox pulls; also
+    echoed as `delivered` for existing readers). All derived from files only —
+    no model self-report is trusted."""
     try:
         raw = [l for l in (r / "inbox.jsonl").read_text(encoding="utf-8").splitlines() if l.strip()]
     except OSError:
@@ -509,7 +631,7 @@ def _steer_state(r, nid):
             delivered = 0
     if not addressed and not baked:
         return None
-    return {"queued": addressed, "baked": baked, "delivered": delivered}
+    return {"queued": addressed, "baked": baked, "consumed": delivered}
 
 def _output_pointer(rec):
     """Compact stand-in for a committed node output: enough to DECIDE to pay for
@@ -528,6 +650,9 @@ def act_status(args):
     st = run_state(r)
     if not st:
         return {"error": f"no run at {r}"}
+    # #15(b): watching a run registers its card for THIS session too — a session
+    # that only ever waits on a run launched elsewhere still gets the card once.
+    _note_launch(st["run_id"])
     full = str(args.get("detail") or "").lower() == "full"
     alive = runner_alive(r)
     out = {"run_id": st["run_id"], "name": st["name"], "status": st["status"],
@@ -562,9 +687,12 @@ def act_status(args):
         # (feedback #76: 91% of a real wait payload). Terminal payload always full;
         # running payload compact unless detail=full.
         show_out = full or st["status"] not in ("running", "pending")
-        if rec and v["status"] == "done":
+        if rec and v["status"] in ("done", "partial"):   # #4: partial output ships like done (harvest carries the death cause)
             out["nodes"][nid]["output"] = rec.get("output") if show_out else _output_pointer(rec)
             out["nodes"][nid]["ms"] = rec.get("ms")
+            if v["status"] == "partial":
+                out["nodes"][nid]["error"] = rec.get("error")
+                out["nodes"][nid]["harvest"] = rec.get("harvest")
         elif rec and v["status"] == "failed":
             out["nodes"][nid]["error"] = rec.get("error")
             out["nodes"][nid]["output"] = rec.get("output") if show_out else _output_pointer(rec)
@@ -595,6 +723,7 @@ def act_status(args):
                 line["live"] = current["live"]
                 line["idle_s"] = int(_t.time() - la) if la is not None else None
                 line["last"] = current["last_desc"]
+                line["last_tool_at"] = la  # #18: the epoch of the last verified activity
             out["nodes"][nid]["metrics"] = line
             for k in tot: tot[k] += f[k]
         out["metrics"] = {"tokens": f"{tot['tokens_in']}▸{tot['tokens_out']}", "api_calls": tot["api_calls"],
@@ -700,20 +829,29 @@ def act_steer(args):
         return {"ok": False,
                 "error": f"run is {run_status} — steering not queued: no live runner will spawn that node, "
                          "so the text would never be delivered; amend is the correct verb (or re-run)"}
-    if node_status in ("done", "failed", "skipped"):
+    if node_status in ("done", "partial", "failed", "skipped"):   # #4: a harvested partial never re-spawns either
         return {"ok": False,
                 "error": f"node is {node_status} — steering not queued: a {node_status} node never spawns again, "
                          "so the text would never be delivered; amend is the correct verb to make it eligible again"}
     with open(r / "inbox.jsonl", "a") as f:
         f.write(json.dumps({"node": node["id"], "text": args.get("text", ""),
                             "at": datetime.now(timezone.utc).isoformat(timespec="seconds")}) + "\n")
-    if run_status == "held":
-        delivery = "queued for the next spawn after the held gate is released"
+    _steer_event(r, "steer.queued", node=node["id"],
+                 chars=len(args.get("text", "") or ""))  # #17: the door logs the queue
+    if node_status == "running":
+        # A verified live child pulls at its NEXT inbox call; lines it never
+        # pulled are still baked into the node's next spawn. Both facts, no hedging.
+        delivery = (f"queued; the running child will pull it at its next inbox call "
+                    f"— no delivery guarantee; anything it does not pull is baked "
+                    f"into the next spawn of {node['id']}")
+    elif run_status == "held":
+        delivery = f"queued; baked into the next spawn of {node['id']} when the held gate releases"
     elif runner_alive(r):
-        delivery = ("queued; a child already running pulls it at its next seam via the workflow "
-                    "inbox tool, otherwise it lands at the next spawn; the prompt is never rewritten")
+        delivery = (f"queued; baked into the next spawn of {node['id']} — a running "
+                    f"child's prompt is never rewritten")
     else:
-        delivery = "queued for the next spawn; call wait to resume the idle/crashed runner"
+        delivery = (f"queued; baked into the next spawn of {node['id']} when the runner "
+                    f"resumes — call wait to resume it")
     return {"ok": True, "delivery": delivery}
 
 def _steer_lines(path, cursor, hwm):
@@ -763,6 +901,13 @@ def act_inbox(args):
     except ValueError:
         hwm = 0
     texts, n = _steer_lines(f, c, hwm)
+    if n:  # #17: the pull is a fact — log it beside the cursor advance
+        try:
+            _steer_event(Path(f).parent.parent, "steer.consumed",
+                         node=os.environ.get("HERMES_WF_STEER_NODE"),
+                         spawn=os.environ.get("HERMES_WF_STEER_SPAWN"), pulled=n)
+        except OSError:
+            pass
     return {"ok": True, "steering": texts, "pulled": n,
             "node": os.environ.get("HERMES_WF_STEER_NODE"),
             "spawn": os.environ.get("HERMES_WF_STEER_SPAWN")}
@@ -781,6 +926,12 @@ def act_amend(args):
         return bad
     old = jload(r / "graph.json") or {}
     new = dict(new, name=new.get("name", old.get("name", "workflow")))
+    # Same resolved-truth rule as run: bake defaults/shape before the write, so
+    # the preview, the fingerprints, and the runner all see the resolved defs.
+    try:
+        new = _common.apply_graph_defaults(new)
+    except ValueError as e:
+        return {"error": f"graph invalid: defaults/shape: {e}"}
     err, _models, _routes = _resolve_models(new["nodes"])
     if err:
         return {"error": err}
@@ -897,7 +1048,9 @@ _LAUNCH_LOCK = threading.Lock()
 def _note_launch(rid):
     sid = _session_env("HERMES_SESSION_ID") or ""
     with _LAUNCH_LOCK:
-        _LAUNCHED.setdefault(sid, []).append(rid)
+        rows = _LAUNCHED.setdefault(sid, [])
+        if rid not in rows:  # #15(b): wait/status re-register each tick — emit once
+            rows.append(rid)
 
 def _clear_launch(session_id=None, **_):
     # Interrupted/blank turns never transform (the core gates the hook on a

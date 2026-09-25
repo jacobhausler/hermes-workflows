@@ -83,6 +83,10 @@ with tempfile.TemporaryDirectory(prefix=".routing-test-", dir=HERE) as tmp:
             captured[0][1]["stdout"].write('```json\n{"routed": true}\n```\n')
             captured[0][1]["stdout"].flush()
 
+        def poll(self):            # the runner polls (#18 liveness) instead of blocking
+            self.communicate()
+            return self.returncode
+
     def fake_popen(argv, **kwargs):
         captured.append((argv, kwargs))
         return FakeProcess()

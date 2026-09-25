@@ -90,8 +90,51 @@ def extract_json(text):
         try:
             return json.loads(text.strip()), None
         except Exception:
+            obj = last_balanced_object(text)   # sprint101 #9: tolerate prose around the object
+            if obj is not None:
+                return obj, None
             return {"result": text.strip()}, None  # unstructured but usable
+    obj = last_balanced_object(text) if text and text.strip() else None
+    if obj is not None:   # #9: a fence that won't parse must not hide a valid trailing object
+        return obj, None
     return None, err
+
+def _match_object(text, i):
+    """Index of the '}' closing the '{' at i (string-aware), or -1 if unbalanced."""
+    depth = 0; in_str = False; esc = False
+    for j in range(i, len(text)):
+        ch = text[j]
+        if in_str:
+            if esc: esc = False
+            elif ch == "\\": esc = True
+            elif ch == '"': in_str = False
+            continue
+        if ch == '"': in_str = True
+        elif ch == "{": depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0: return j
+    return -1
+
+def last_balanced_object(text):
+    """Sprint101 #9: the LAST top-level balanced {...} in stdout that json.loads
+    accepts (string-aware; fence markers, prose, and stray unbalanced braces
+    around it tolerated — a broken earlier candidate never hides a good later
+    one). Returns None when no candidate parses."""
+    text = text or ""
+    starts = [m.start() for m in re.finditer(r"\{", text)][-200:]
+    last = None; skip_until = -1
+    for i in starts:
+        if i <= skip_until: continue   # nested inside an already-accepted object
+        j = _match_object(text, i)
+        if j < 0: continue
+        try:
+            cand = json.loads(text[i:j + 1])
+        except Exception:
+            continue
+        if isinstance(cand, dict):
+            last = cand; skip_until = j
+    return last
 
 def validate(out, schema):
     """Tiny forgiving validator: type / required / properties / items."""
@@ -147,6 +190,22 @@ def schema_prompt_block(schema):
                                  ensure_ascii=False, separators=(",", ":"))[:SCHEMA_PROMPT_CAP]
     return "\n\n## Required answer shape\n```json\n" + compact + "\n```"
 
+def derived_contract(schema):
+    """Sprint101 #9: when a node carries `schema`, the runner states the reply
+    contract itself — 'Reply with ONLY a fenced ```json block whose keys are:
+    <required>' (+ types from properties) — so authors stop hand-writing JSON
+    contract prose in goals. Derived only; empty when there's nothing to say."""
+    if not isinstance(schema, dict) or not schema:
+        return ""
+    req = [k for k in (schema.get("required") or []) if isinstance(k, str) and k]
+    if not req:
+        return ""
+    props = schema.get("properties") or {}
+    types = ", ".join(f"{k}={(props[k].get('type') if isinstance(props.get(k), dict) else None) or 'any'}"
+                      for k in req)
+    return ("Reply with ONLY a fenced ```json block whose keys are: "
+            + ", ".join(req) + f" (types: {types}).")
+
 def _spawn_log_name(node, index, spawn_no):
     base = re.sub(r"[^A-Za-z0-9_.-]", "_", str(node["id"]))
     return f"{base}" + (f".{index}" if index is not None else "") + f".a{spawn_no}.log"
@@ -181,6 +240,17 @@ _RETRYABLE_CLASSES = ("transport", "unknown")
 DEFAULT_RETRY_BACKOFF = (5.0, 20.0)
 DEFAULT_RETRY_BUDGET = 6
 
+# #5 bounded auto-retry (sprint101w2): ONE machine-resume re-drive — never a
+# loop — for classes where the dead attempt made TOOL PROGRESS (state.db join):
+# transport / early_death / cap_exhausted / timeout (the latter two land with
+# B1's renames; plain strings, the integrator reconciles). The never-retry list
+# below is documentary law — membership in _BOUNDED_RETRY_CLASSES is the gate:
+# provider_400, unresolved_model, graph_invalid, schema/no_json, cancelled,
+# spawn (3 real runs retried a permfail byte-identically 3x).
+_BOUNDED_RETRY_CLASSES = ("transport", "early_death", "cap_exhausted", "timeout")
+_BOUNDED_RETRY_BACKOFF = 5.0
+RESUME_LINE = "Do not redo finished work; continue from the state above."
+
 # The machine-readable lines the child CLI actually emits (verified against
 # /opt/hermes/hermes_cli/oneshot.py: an escaping provider error reaches the
 # runner's merged stdout ONLY as `real_stderr.write("hermes -z: agent failed:
@@ -198,7 +268,23 @@ _TRANSPORT_EXACT = ("connection error.", "request timed out.",
                     "connecttimeout", "readtimeout")
 _TRANSPORT_TOKENS = _TRANSPORT_EXACT + ("rate limit", "too many requests")
 _TRANSPORT_STATUS = (408, 409, 425, 429, 500, 502, 503, 504)
-_PROVIDER400_TOKENS = ("badrequesterror",)
+_PROVIDER400_TOKENS = ("badrequesterror", "not supported")
+# sprint101 #3: a dead/renamed model id surfaces as 404 or a model-not-found
+# marker — a distinct class from a generic 400, and never retryable.
+_UNRESOLVED_MODEL_TOKENS = ("model not found", "no such model", "unknown model",
+                            "model does not exist", "unresolved model")
+_MODEL404_TOKENS = ("error code: 404", "http 404")
+# sprint101 #3: typed budget deaths the core -Q report can carry beyond the
+# loop's own max_iterations_reached( stamp (report TEXT only — stdout prose
+# naming a cap stays unpinnable, the 0923 law).
+_CAP_TOKENS = ("tool-call limit", "tool call limit", "turn limit",
+               "max_turns", "max_iterations_reached(")
+# The CLOSED set every node.failed (record + event) must carry (sprint101 #3).
+ERROR_CLASSES = frozenset(("provider_400", "unresolved_model", "cap_exhausted",
+                           "timeout", "transport", "transport_exhausted",
+                           "incomplete_work", "early_death", "cancelled",
+                           "schema", "spawn", "graph_invalid", "inputs",
+                           "quorum", "fanout_empty", "crashed", "unknown"))
 _AGENT_FAIL_PREFIX = "hermes -z: agent failed:"
 # turn_failure_copy.py ends every non-retryable failure with a fixed-format trailer
 # `Provider said: <summary>`; api_error_summary.py:49 formats the summary as
@@ -216,8 +302,8 @@ def _typed_error_class(report_path):
     except Exception:
         return None, ""
     reason = str((rec or {}).get("turn_exit_reason") or "")
-    if reason.startswith("max_iterations_reached("):
-        return "max_turns", reason
+    if any(t in reason.lower() for t in _CAP_TOKENS):
+        return "cap_exhausted", reason        # sprint101 #3: was 'max_turns'
     return None, reason
 
 
@@ -267,14 +353,84 @@ def _classify_rc_output(out):
     if marker is None:
         return "unknown", None
     low = marker.lower()
+    if any(t in low for t in _UNRESOLVED_MODEL_TOKENS) or any(t in low for t in _MODEL404_TOKENS):
+        return "unresolved_model", marker
     if any(t in low for t in _PROVIDER400_TOKENS) or "error code: 400" in low or "http 400" in low:
         return "provider_400", marker
+    if any(t in low for t in ("tool-call limit", "tool call limit", "turn limit")):
+        return "cap_exhausted", marker
     if any(t in low for t in _TRANSPORT_TOKENS):
         return "transport", marker
     m = re.search(r"(?:error code:|http)\s*(\d{3})", low)
     if m and int(m.group(1)) in _TRANSPORT_STATUS:
         return "transport", marker
     return "unknown", marker
+
+# ---------- #4 harvest-on-death / #5 bounded auto-retry (sprint101w2) ----------
+
+def _harvest_death(out, schema):
+    """#4 harvest-on-death: a child that died (rc!=0 / timeout / cap — the
+    CALLER gates the death mode; never `cancelled`) whose stdout still carries
+    a fenced json block validating against the node schema IS an answer —
+    21 nodes / 15 runs died with a valid answer on stdout the runner
+    discarded. Returns {output, harvest} only when the capture holds a FENCED
+    block (bare-prose coercion is NOT harvest) that parses to a dict and
+    validates; else None (the death is classified exactly as before). A
+    child-declared terminal `status` field (e.g. 'BLOCKED') is honored
+    verbatim in the record."""
+    fences = JSON_FENCE.findall(out or "")
+    if not fences:
+        return None
+    try:
+        parsed = json.loads(fences[-1])
+    except Exception:
+        return None
+    if not isinstance(parsed, dict) or validate(parsed, schema):
+        return None
+    declared = parsed.get("status")
+    return {"output": parsed,
+            "harvest": {"declared_status": declared if isinstance(declared, str) and declared else None}}
+
+def _tool_progress(run, skey, out):
+    """Tool-progress evidence for the #5 bounded retry: True only when the
+    dead attempt's state.db row EXPLICITLY carried tool_call_count > 0 — the
+    same join the Q4 gate uses; missing db / missing row / null counter is
+    honest 'no evidence', never permission to re-drive a possibly side-
+    effecting child. `out` (the attempt's merged capture) is the fall-through
+    evidence channel reserved for log-shaped proof; prose is never grepped."""
+    if not skey:
+        return False
+    try:
+        m = child_metrics(run.name).get(skey)
+    except Exception:
+        return False
+    return bool(m) and isinstance(m.get("tool_calls"), int) and m["tool_calls"] > 0
+
+def _resume_preamble(r):
+    """Machine-generated resume preamble prepended to the goal for the ONE
+    #5 re-drive: the prior attempt's error_class, the last 20 lines of its
+    final message (the death record's `final` — captured from the core -Q
+    turn report before unlink — with the merged stdout capture as fall-
+    through), `git status --short` of the child's cwd when it is a git tree,
+    and the don't-redo law."""
+    lines = ["## Resume from a dead attempt (machine preamble)",
+             f"Prior attempt died: error_class={r.get('error_class')}"]
+    final = (r.get("final") or "") or (r.get("raw") or "")
+    tail = [l for l in final.splitlines() if l.strip()][-20:]
+    if tail:
+        lines.append("Last 20 lines of the prior final message:")
+        lines.extend("> " + l for l in tail)
+    cwd = Path.cwd()
+    if (cwd / ".git").exists():
+        try:
+            gs = subprocess.run(["git", "status", "--short"], cwd=str(cwd), capture_output=True,
+                                text=True, timeout=10).stdout.strip()
+            lines.append(f"git status --short of the child cwd ({cwd}):")
+            lines.append(gs if gs else "(clean)")
+        except Exception:
+            pass
+    lines.append(RESUME_LINE)
+    return "\n".join(lines)
 
 def _verdict_lines(text, limit=200):
     """Verdict line(s) only: inherited CLI advice is stripped (Unknown toolsets:,
@@ -304,6 +460,35 @@ def _retry_conf_params(meta):
         else DEFAULT_RETRY_BUDGET
     return tb, budget
 
+_LOG_ACTIVITY_WINDOW_S = 120
+
+def _log_recent(lp, created):
+    """True when the child's merged log shows a write after its spawn-time
+    creation stamp and within the last 120 s — a tool event proves the child is
+    producing, so the wall may extend once (#11)."""
+    try:
+        st = lp.stat()
+    except OSError:
+        return False
+    return st.st_mtime > created + 1e-6 and time.time() - st.st_mtime <= _LOG_ACTIVITY_WINDOW_S
+
+FIRST_MESSAGE_S = 120  # run-level default; NEVER an author key (tier law)
+
+def _first_message_s(meta):
+    """#18 child liveness window: how long a spawned child may stay SILENT — zero
+    bytes on its spawn stdout log — before the runner kills it as early_death.
+    Run-level meta only (run.json); 0 disables."""
+    v = meta.get("first_message_s")
+    return v if isinstance(v, (int, float)) and not isinstance(v, bool) and v >= 0 \
+        else FIRST_MESSAGE_S
+
+def _child_spoke(lp):
+    """Deterministic proof of life: any byte the child has flushed to its spawn log."""
+    try:
+        return lp.stat().st_size > 0
+    except OSError:
+        return False
+
 def _next_spawn_no(meta, node, index):
     """One counter per (node, item) — every Popen gets a fresh spawn number so
     log names, session titles, and spawn-record `attempt` are unique per spawn."""
@@ -314,10 +499,10 @@ def _next_spawn_no(meta, node, index):
     return n
 
 def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering=None, attempt=0, skey=None,
-              inputs="", index=None):
+              inputs="", index=None, resume_preamble=""):
     run = meta["_run"]
     spawn_no = _next_spawn_no(meta, node, index)
-    prompt = goal + ("\n\n" + context if context else "")
+    prompt = ((resume_preamble + "\n\n" + goal) if resume_preamble else goal) + ("\n\n" + context if context else "")
     if inputs:
         prompt += "\n\n" + inputs
     if steering:
@@ -325,6 +510,9 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
     block = schema_prompt_block(schema)   # Q8: whole schema before CONTRACT, first prompt
     if block and block not in prompt:
         prompt += block
+    dc = derived_contract(schema)         # #9: runner states the reply contract itself
+    if dc and dc not in prompt:
+        prompt += "\n\n" + dc
     prompt += "\n\n" + CONTRACT
     if attempt_note:
         prompt += "\n\n⚠ " + attempt_note
@@ -363,6 +551,7 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
                HERMES_WF_RUN_ID=run.name)
     t0 = time.time()
     logf = open(lp, "w", encoding="utf-8", errors="replace")
+    log_created = time.time()   # the file's own creation stamp: never counts as activity
     try:
         proc = None
         with meta["_procs_lock"]:
@@ -401,24 +590,54 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
     evd = {"log_path": str(lp), "pid": proc.pid, "spawn_cmd": spawn_cmd,
            "started": started_iso, "spawn": spawn_no}
     timed_out = False
+    early_death = False
+    extended = False
+    first_msg_s = _first_message_s(meta)
+    wall = node.get("timeout", meta.get("node_timeout", 900))
+    deadline = t0 + wall if wall is not None else float("inf")
+    silence_deadline = t0 + first_msg_s if first_msg_s > 0 else None
     rc = None
     tclass, treason = None, ""
+    timeout_s = node.get("timeout", meta.get("node_timeout", 900))
+    final_reply = ""
     try:
-        proc.communicate(timeout=node.get("timeout", meta.get("node_timeout", 900)))
-        rc = proc.returncode
-        if rc != 0 and rc >= 0:  # typed verdict BEFORE finally unlinks the report; signal-kill (stop) has no verdict
+        # #18 child liveness (replaces the blind blocking communicate): poll the
+        # spawn log — a child that has written NOTHING by silence_deadline never
+        # got past its first API call (frontporch-rem died after 732 s blind).
+        while True:
+            rc = proc.poll()
+            if rc is not None:
+                break
+            now_s = time.time()
+            if silence_deadline is not None and now_s >= silence_deadline \
+                    and not _child_spoke(lp):
+                early_death = True
+            if not early_death and now_s >= deadline and not extended \
+                    and not meta["_stop"].is_set() and _log_recent(lp, log_created):
+                # EXTEND-NOT-KILL (#11): a child whose log shows a write within the
+                # last 120 s is working, not hung — grant ONE extension of 50% of the
+                # wall (node.extended); the second expiry kills.
+                extended = True
+                extra_s = round(timeout_s * 0.5) or 1
+                log(run, "node.extended", node=node["id"], extra_s=extra_s)
+                timeout_s += extra_s
+                deadline += extra_s
+                continue
+            if early_death or now_s >= deadline:
+                timed_out = not early_death
+                try:
+                    os.killpg(os.getpgid(proc.pid), signal.SIGKILL)  # child is the group leader
+                except Exception:
+                    try: proc.kill()
+                    except Exception: pass
+                try:
+                    proc.communicate(timeout=10)  # always reap
+                except Exception:
+                    pass
+                break
+            time.sleep(0.1)
+        if rc is not None and rc != 0 and rc >= 0 and not early_death:  # typed verdict BEFORE finally unlinks the report; signal-kill (stop) has no verdict
             tclass, treason = _typed_error_class(report_path)
-    except subprocess.TimeoutExpired:
-        timed_out = True
-        try:
-            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)  # child is the group leader
-        except Exception:
-            try: proc.kill()
-            except Exception: pass
-        try:
-            proc.communicate(timeout=10)  # always reap
-        except Exception:
-            pass
     finally:
         try: os.unlink(pf.name)
         except OSError: pass
@@ -428,8 +647,13 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
         except Exception: pass
         # Tier self-report BEFORE the report is unlinked: failed children only
         # (timeout or non-zero exit); success leaves no trace (honest absence).
-        if timed_out or (rc is not None and rc != 0):
+        if timed_out or early_death or (rc is not None and rc != 0):
             _note_turn_tier(run, node["id"], report_path)
+            try:   # #5: the final message rides the death record BEFORE unlink
+                _rep = json.loads(Path(report_path).read_text())
+                final_reply = str(_rep.get("reply") or "") if isinstance(_rep, dict) else ""
+            except Exception:
+                final_reply = ""
         try: os.unlink(report_path)
         except OSError: pass
     try:
@@ -438,26 +662,57 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
         out = ""
     ms = int((time.time() - t0) * 1000)
     sk = {"skey": skey, "attempts": attempt + 1} if skey else {}
+    if early_death:
+        return {"status": "failed",
+                "error": f"early_death: child produced no output within {first_msg_s}s of spawn "
+                         f"(killed; log empty — never got past its first call)",
+                "error_class": "early_death", "raw": "", "ms": ms, **sk, **evd}
     if timed_out:
-        return {"status": "failed", "error": f"timeout after {node.get('timeout', meta.get('node_timeout', 900))}s",
-                "error_class": "timeout", "raw": (out or "")[-2000:], "ms": ms, **sk, **evd}
+        hv = _harvest_death(out, schema)   # #4: a timeout that printed a valid answer keeps it
+        if hv:
+            return {"status": "partial", "error": f"timeout after {timeout_s}s "
+                    "(answer harvested from stdout before the kill)",
+                    "error_class": "timeout", "ms": ms, "final": final_reply, **hv, **sk, **evd}
+        return {"status": "failed", "error": f"timeout after {timeout_s}s",
+                "error_class": "timeout", "raw": (out or "")[-2000:], "ms": ms, "final": final_reply, **sk, **evd}
     # unsuccessful exit = failure, PERIOD — diagnostic prose on stdout must never
     # be committed as a successful result (fleet-review F: crash-with-prose).
     if rc != 0:
         if (rc or 0) < 0 and meta["_stop"].is_set():
             return {"status": "failed", "error": "cancelled by stop", "error_class": "cancelled",
-                    "raw": (out or "")[-2000:], "ms": ms, **sk, **evd}
-        if tclass == "max_turns":
+                    "raw": (out or "")[-2000:], "ms": ms, "final": final_reply, **sk, **evd}
+        if (rc or 0) < 0 and not timed_out and not early_death:
+            # signal-killed by the runner itself with no stop pending = a fan-out
+            # straggler killed at quorum (#12). Not a failure of the child's making.
+            return {"status": "failed", "error": "cancelled: quorum already met", "error_class": "cancelled",
+                    "raw": (out or "")[-2000:], "ms": ms, "final": final_reply, **sk, **evd}
+        if tclass == "cap_exhausted":
+            hv = _harvest_death(out, schema)   # #4: every cap death that "said so precisely" keeps its answer
+            if hv:
+                return {"status": "partial",
+                        "error": f"child hit its turn budget: {treason} (max_turns={node.get('max_turns')}; "
+                                 "answer harvested from stdout)",
+                        "error_class": "cap_exhausted", "ms": ms, "final": final_reply, **hv, **sk, **evd}
             # Typed budget exhaustion: the loop's own stamp, not prose — never
             # transport-retryable, and the author sees why + where (log, partial output).
             return {"status": "failed",
                     "error": f"child hit its turn budget: {treason} (max_turns={node.get('max_turns')}; "
                              f"partial answer + log preserved; write-first + reserve final turns for the json block)",
-                    "error_class": "max_turns", "raw": (out or "")[-2000:], "ms": ms, **sk, **evd}
+                    "error_class": "cap_exhausted", "raw": (out or "")[-2000:], "ms": ms, "final": final_reply, **sk, **evd}
+        if not (out or "").strip():
+            # sprint101 #3: an empty child log (the 74-byte 'no messages' shape)
+            # is the runner-known fact that the child died before saying anything.
+            return {"status": "failed", "error": "child died with an empty log (no messages)",
+                    "error_class": "early_death", "raw": "", "ms": ms, **sk, **evd}
         eclass, marker = _classify_rc_output(out)
+        hv = _harvest_death(out, schema)       # #4: rc!=0 with a valid fenced answer on stdout
+        if hv:
+            return {"status": "partial",
+                    "error": f"child exited rc={rc} (answer harvested from stdout)",
+                    "error_class": eclass, "ms": ms, "final": final_reply, **hv, **sk, **evd}
         verdict = _verdict_lines(marker if marker else out)
         return {"status": "failed", "error": f"child exited rc={rc}: {verdict}",
-                "error_class": eclass, "raw": (out or "")[-2000:], "ms": ms, **sk, **evd}
+                "error_class": eclass, "raw": (out or "")[-2000:], "ms": ms, "final": final_reply, **sk, **evd}
     parsed, perr = extract_json(out)
     if parsed is not None and perr is None:
         errs = validate(parsed, schema)
@@ -470,7 +725,7 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
         r = run_child(meta, node, byid, goal, context, schema, attempt_note=note + ". Redo the work and return valid json.", steering=steering, attempt=attempt + 1, skey=skey, inputs=inputs, index=index)
         r["ms"] = r.get("ms", 0) + ms   # wall time of BOTH attempts
         return r
-    eclass = "schema" if (parsed is not None and perr is None) else "no_json"
+    eclass = "schema"   # sprint101 #3: was 'no_json' when unparseable, 'schema' when invalid
     return {"status": "failed", "error": note, "error_class": eclass, "output": parsed,
             "raw": (out or "")[-2000:], "ms": ms, **sk, **evd}
 
@@ -494,7 +749,9 @@ def _transient_retry(meta, r, respawn, ev, ev_kw):
     attempt made api_calls == 0 AND stop is not set AND the per-run retry budget
     (6) is not exhausted. Never retries schema/no_json/timeout/max_turns/
     provider_400/cancelled/spawn. attempts_log records every failed attempt; a
-    final retryable death after retries = error_class transport_exhausted."""
+    final retryable death after retries = error_class transport_exhausted.
+    A `partial` harvest (#4) enters here as non-failed and is NEVER retried;
+    a still-retryable death hands off to _bounded_retry (#5) once Q4 is spent."""
     run = meta["_run"]
     backoff = _retry_conf_params(meta)[0]
     attempts_log = []
@@ -535,6 +792,44 @@ def _transient_retry(meta, r, respawn, ev, ev_kw):
         if r.get("error_class") in _RETRYABLE_CLASSES:
             r["error_class"] = "transport_exhausted"
     return r
+
+def _bounded_retry(meta, r, respawn, ev, ev_kw):
+    """#5 bounded auto-retry, run ONCE after _transient_retry: a death whose
+    error_class ∈ {transport, early_death, cap_exhausted, timeout} (B1's new
+    names; `max_turns` included until the rename lands) AND whose dead attempt
+    made tool progress gets EXACTLY ONE resume re-drive with a machine-
+    generated preamble — never a loop, never a second bounded retry (a retry
+    of a retry would need the class tuple to widen, which it does not).
+    Never retried: provider_400 / unresolved_model / graph_invalid /
+    schema(no_json) / cancelled / spawn — permfails redrive byte-identically —
+    and never a `partial` harvest (#4: harvested, so not retried). The
+    re-drive is a fresh spawn: steer rides it via _steer_bake, the fresh
+    skey keeps it a fresh session, and node.retry logs the reason."""
+    run = meta["_run"]
+    if r.get("status") != "failed" or r.get("harvest"):
+        return r
+    eclass = r.get("error_class")
+    if eclass not in _BOUNDED_RETRY_CLASSES:
+        return r
+    if meta["_stop"].is_set() or not _tool_progress(run, r.get("skey"), r.get("raw")):
+        return r                                   # no positive progress evidence: fail closed
+    if meta["_stop"].wait(_BOUNDED_RETRY_BACKOFF) or meta["_stop"].is_set():
+        return r
+    with meta["_procs_lock"]:
+        if meta["_retries_left"] <= 0:
+            log(run, ev + ".retry_skipped", reason="retry budget exhausted (bounded retry)",
+                error_class=eclass, **ev_kw)
+            return r
+        meta["_retries_left"] -= 1
+    log(run, ev + ".retry", error_class=eclass,
+        reason=f"bounded auto-retry: {eclass} with tool progress — one machine-resume re-drive",
+        **ev_kw)
+    al = list(r.get("attempts_log") or [])
+    al.append({"attempt": len(al), "error_class": eclass, "at": now(), "resume": True})
+    r2 = respawn(resume_preamble=_resume_preamble(r))
+    r2["attempts_log"] = al
+    r2["attempts"] = (r2.get("spawn") + 1) if isinstance(r2.get("spawn"), int) else len(al) + 1
+    return r2
 
 def drain_inbox(run, consumed):
     """Return {node_id: [steering texts]} for un-consumed steering lines."""
@@ -589,6 +884,7 @@ def _steer_bake(run, node, index, spawn_no):
     tmp.write_text("\n".join(json.dumps(r) for r in recs) + ("\n" if recs else ""), encoding="utf-8")
     os.replace(tmp, path)   # atomic: the child either sees the full bake or none
     cur.write_text("0", encoding="utf-8")
+    log(run, "steer.baked", node=node["id"], spawn_no=spawn_no, n_lines=len(recs))  # #17
     return str(path), str(cur), hwm
 
 def skey_for(run, byid, node, index=None):
@@ -606,7 +902,8 @@ def run_agent_node(run, meta, byid, node, outputs, steering):
     nid = node["id"]
     inputs_txt, inputs_err = build_inputs(run, node, outputs)
     if inputs_err:  # unresolvable input => the node FAILS at spawn, never empty
-        save_node(run, node, byid, {"status": "failed", "error": inputs_err, "ms": 0})
+        save_node(run, node, byid, {"status": "failed", "error": inputs_err,
+                                    "error_class": "inputs", "ms": 0})
         log(run, "node.failed", node=nid, error=inputs_err,
             error_class="inputs", attempts=0)
         return
@@ -620,19 +917,45 @@ def run_agent_node(run, meta, byid, node, outputs, steering):
                 items = resolve_ref(outputs, fo.get("items_from", "")) or []
             if not isinstance(items, list) or not items:
                 save_node(run, node, byid, {"status": "failed", "error": "fanout resolved to no items",
+                                            "error_class": "fanout_empty",
                                             "output": {"items": []}})
                 log(run, "node.failed", node=nid, error="fanout empty", error_class="fanout_empty", attempts=0)
                 return
             cap = min(len(items), meta.get("item_concurrency", 8))
             results = [None] * len(items)
             lock = threading.Lock()
+            # sprint101 #12: quorum defaults to a MAJORITY, not ALL; once it is met
+            # the in-flight stragglers are cancelled (error_class 'cancelled') and
+            # excluded from the failure math — a fast 2-of-3 beats waiting 900s
+            # for a dead lane (ts-svc-refresh-b, w5-witness-close).
+            quorum = fo.get("quorum") or (len(items) // 2 + 1)
+            fo_cancel = threading.Event()
+            done_count = [0]
+            def _cancel_stragglers():
+                # queued items check fo_cancel before launch; in-flight children of
+                # THIS node (registry key "<node_id>:<id(proc)>") get SIGKILLed.
+                fo_cancel.set()
+                with meta["_procs_lock"]:
+                    for k, p in list(meta["_procs"].items()):
+                        if k.startswith(f"{nid}:"):
+                            try:
+                                os.killpg(os.getpgid(p.pid), signal.SIGKILL)
+                            except Exception:
+                                try: p.kill()
+                                except Exception: pass
             def one(i, item):
                 # an item's own `goal` wins over the fan-out template (papercut 2026-09-22:
                 # items[].goal was silently ignored, children got the placeholder template)
-                tmpl = (item.get("goal") if isinstance(item, dict) and isinstance(item.get("goal"), str) and item["goal"].strip()
-                        else fo.get("goal") or node.get("goal", ""))
+                own = (item.get("goal") if isinstance(item, dict) and isinstance(item.get("goal"), str) and item["goal"].strip()
+                       else None)
+                tmpl = own if own is not None \
+                        else fo.get("goal") or node.get("goal", "")
                 goal = fmt_goal(tmpl, item, i)
-                if meta["_stop"].is_set():
+                if own is not None and node.get("goal"):
+                    # sprint101 #12: per-item prompt = node goal + item goal, so the
+                    # shared mission travels with every item (no 'unused' placeholder).
+                    goal = node["goal"] + "\n\n" + goal
+                if meta["_stop"].is_set() or fo_cancel.is_set():
                     r = {"status": "failed", "item": item, "error": "stopped before launch",
                          "error_class": "cancelled", "attempts": 0, "attempts_log": [], "ms": 0}
                     with lock:
@@ -642,22 +965,31 @@ def run_agent_node(run, meta, byid, node, outputs, steering):
                         log_path=str(run / "runner.log"), child_log_path=None, skey=None,
                         ms=0, attempts=0, attempts_log=[])
                     return
-                def spawn():
+                def spawn(resume_preamble=""):
+                    if meta["_stop"].is_set() or fo_cancel.is_set():
+                        return {"status": "failed", "error": "cancelled at quorum",
+                                "error_class": "cancelled", "ms": 0}
                     sk = skey_for(run, byid, node, i)   # fresh nonce per spawn (retry respawns
                     log(run, "item.started", node=nid, index=i, skey=sk)   # are fresh sessions)
                     return run_child(meta, node, byid, goal, node.get("context", ""),
                                      fo.get("schema") or node.get("schema"), steering=steering,
-                                     skey=sk, inputs=inputs_txt, index=i)
+                                     skey=sk, inputs=inputs_txt, index=i, resume_preamble=resume_preamble)
                 try:
                     r = _transient_retry(meta, spawn(), spawn, "item", {"node": nid, "index": i})
+                    r = _bounded_retry(meta, r, spawn, "item", {"node": nid, "index": i})
                 except Exception as e:
-                    r = {"status": "failed", "error": f"worker crashed: {type(e).__name__}: {e}", "ms": 0}
+                    r = {"status": "failed", "error": f"worker crashed: {type(e).__name__}: {e}",
+                         "error_class": "crashed", "ms": 0}
                 with lock:
                     if "attempts" not in r:
                         last_spawn = r.get("spawn")
                         r["attempts"] = last_spawn + 1 if isinstance(last_spawn, int) else 0
                     r.setdefault("attempts_log", [])
                     results[i] = {**r, "item": item}
+                    if r["status"] == "done":
+                        done_count[0] += 1
+                        if done_count[0] >= quorum and any(x is None for x in results):
+                            _cancel_stragglers()
                 # Final item facts carry typed failure + retry evidence so consumers
                 # need not reconstruct attempts from child logs.
                 log(run, "item.finished", node=nid, index=i, status=r["status"],
@@ -669,16 +1001,31 @@ def run_agent_node(run, meta, byid, node, outputs, steering):
                     skey=r.get("skey"), ms=r.get("ms"))
             with ThreadPoolExecutor(max_workers=cap) as ex:
                 list(ex.map(lambda t: one(*t), list(enumerate(items))))
-            results = [r or {"status": "failed", "item": None} for r in results]
-            failed = [r for r in results if r["status"] != "done"]
-            merged = [r.get("output") for r in results if r["status"] == "done"]
-            if len(merged) < fo.get("quorum", len(items)):
+            results = [r or {"status": "failed", "item": None, "error_class": "crashed", "ms": 0} for r in results]
+            # sprint101 #7: stop-killed items are CANCELLED, not failures — they
+            # count toward neither the failure list nor the quorum (hindsight-002946:
+            # 5 stopped items surfaced as a false quorum failure).
+            cancelled = [r for r in results if r.get("error_class") == "cancelled"]
+            failed = [r for r in results if r["status"] not in ("done", "partial") and r.get("error_class") != "cancelled"]
+            merged = [r.get("output") for r in results if r["status"] in ("done", "partial")]
+            quorum_req = min(quorum, len(items) - len(cancelled))
+            if cancelled and len(cancelled) == len(results):
+                # every item died to `stop`: the node is NOT a failure — commit the
+                # evidence with the cancelled class; node_rec demotes it to pending
+                # so an amend/resume re-drives it, and the run reads `stopped`.
+                save_node(run, node, byid, {"status": "failed", "error": "all items cancelled by stop",
+                                            "error_class": "cancelled",
+                                            "output": {"items": [], "all_results": results}})
+                log(run, "node.cancelled", node=nid, cancelled=len(cancelled), attempts=0)
+            elif len(merged) < quorum_req:
                 # partial credit: surviving children's outputs are committed; name each
                 # failure (index + reason) right here so the parent never digs through
                 # events to find why the node darkened (papercut 2026-09-22).
                 fails = [{"index": i, "item": results[i]["item"],
                           "error": (results[i].get("error") or "")[:300]}
-                         for i in range(len(items)) if results[i]["status"] != "done"]
+                         for i in range(len(items))
+                         if results[i]["status"] != "done"
+                         and results[i].get("error_class") != "cancelled"]
                 save_node(run, node, byid, {"status": "failed",
                                             "error": f"{len(failed)}/{len(items)} items failed: "
                                                      + "; ".join(f"[{f['index']}] {f['error']}" for f in fails)[:900],
@@ -689,19 +1036,24 @@ def run_agent_node(run, meta, byid, node, outputs, steering):
             else:
                 save_node(run, node, byid, {"status": "done",
                                             "output": {"items": merged, "failed_items": len(failed),
+                                                       "cancelled_items": len(cancelled) or None,
                                                        "all_results": results}})
-                log(run, "node.finished", node=nid, done=len(merged), failed=len(failed))
+                log(run, "node.finished", node=nid, done=len(merged), failed=len(failed),
+                    cancelled=len(cancelled))
         else:
             first = {"done": False}
-            def spawn():
+            def spawn(resume_preamble=""):
                 sk = solo_key if not first["done"] else skey_for(run, byid, node)
                 first["done"] = True
                 return run_child(meta, node, byid, node.get("goal", ""), node.get("context", ""),
-                                 node.get("schema"), steering=steering, skey=sk, inputs=inputs_txt)
+                                 node.get("schema"), steering=steering, skey=sk, inputs=inputs_txt,
+                                 resume_preamble=resume_preamble)
             r = _transient_retry(meta, spawn(), spawn, "node", {"node": nid})
+            r = _bounded_retry(meta, r, spawn, "node", {"node": nid})
             save_node(run, node, byid, r)
-            if r["status"] == "done":
-                log(run, "node.finished", node=nid, ms=r.get("ms"))
+            if r["status"] in ("done", "partial"):   # #4: a harvested partial IS committed output
+                log(run, "node.finished", node=nid, ms=r.get("ms"),
+                    **({"harvested": True} if r["status"] == "partial" else {}))
             else:
                 log(run, "node.failed", node=nid, ms=r.get("ms"), error=r.get("error"),
                     error_class=r.get("error_class", "unknown"),
@@ -733,25 +1085,37 @@ def resolve_ref(outputs, ref, missing=None):
     return cur
 
 INPUTS_CAP = 12000
+AUTO_INPUTS_CAP = 8000   # #9/#10 lane: per-parent byte cap for auto-injected parents
+
+def _inputs_block(label, val, cap):
+    s = json.dumps(val, ensure_ascii=False, indent=2, default=str)
+    if len(s) > cap:
+        s = (s[:cap]
+             + f"\n…[truncated {len(s) - cap} chars; full record at "
+               f"nodes/{str(label).split('.')[0]}.json]")
+    return f"{label}\n```json\n{s}\n```"
 
 def build_inputs(run, node, outputs):
     """Node-level `inputs: [refs]` -> (prompt section, error). ONE fenced json block per
     ref, labelled by the ref string, resolved against committed outputs via resolve_ref.
     Each block is capped at INPUTS_CAP chars (overflow is truncated with a marker naming
     the full-record path). An unresolvable ref returns an error: the node FAILS at spawn,
-    never silently spawns with empty inputs. Fan-out: identical section for every item."""
+    never silently spawns with empty inputs. Fan-out: identical section for every item.
+    Sprint101 #10: every direct parent (`after:`) that is done gets its committed output
+    injected automatically (capped AUTO_INPUTS_CAP chars, marker on overflow); a parent
+    already covered by an `inputs:` ref (whole or dotted) is not repeated — `inputs:`
+    stays the way to pick a dotted path or a non-parent ancestor."""
     refs = node.get("inputs") or []
     blocks = []
+    covered = {str(r).split(".")[0] for r in refs}
+    for pid in node.get("after") or []:
+        if pid in outputs and pid not in covered:
+            blocks.append(_inputs_block(pid, outputs[pid], AUTO_INPUTS_CAP))
     for ref in refs:
         val = resolve_ref(outputs, ref, missing=_MISSING)
         if val is _MISSING:
             return "", f"inputs: {ref} not resolvable"
-        s = json.dumps(val, ensure_ascii=False, indent=2, default=str)
-        if len(s) > INPUTS_CAP:
-            s = (s[:INPUTS_CAP]
-                 + f"\n…[truncated {len(s) - INPUTS_CAP} chars; full record at "
-                   f"nodes/{str(ref).split('.')[0]}.json]")
-        blocks.append(f"{ref}\n```json\n{s}\n```")
+        blocks.append(_inputs_block(ref, val, INPUTS_CAP))
     return "## Inputs\n\n" + "\n\n".join(blocks), None
 
 # ---------- machine-answered gates (P4, jury form) ----------
@@ -961,13 +1325,22 @@ def main(run_id):
         for n in rs.nodes:
             st, rec = node_rec(run, n, rs.byid)
             states[n["id"]] = st
-            if st == "done": outputs[n["id"]] = (rec or {}).get("output")
+            if st in ("done", "partial"): outputs[n["id"]] = (rec or {}).get("output")  # #4: partial output IS output
         # prune propagation: derived skips become efp-stamped facts (replay-skip law)
         for nid in prune_states(rs.nodes, states):
             save_node(run, rs.byid[nid], rs.byid, {"status": "skipped", "output": {"skipped": "all deps pruned"}})
             log(run, "node.skipped", node=nid, reason="all deps pruned")
         def deps_ok(n):  return all(dep_satisfied(states, a) for a in n.get("after", []))
-        def deps_res(n): return all(states.get(a) in ("done", "failed", "skipped") for a in n.get("after", []))
+        def deps_res(n): return all(states.get(a) in ("done", "partial", "failed", "skipped") for a in n.get("after", []))  # #4: partial resolves
+
+        # #13 echo nodes: an agent whose result is `output` verbatim — commit at the
+        # wave boundary, no spawn, no metrics row. Replay-skip by fingerprint comes
+        # free: state() == pending only when the stored efp matches (node_rec law).
+        for n in rs.nodes:
+            if n["type"] == "echo" and states[n["id"]] == "pending" and deps_ok(n) and deps_res(n):
+                save_node(run, n, rs.byid, {"status": "done", "output": n.get("output"), "ms": 0})
+                log(run, "node.done", node=n["id"], echo=True)
+                states[n["id"]] = "done"; outputs[n["id"]] = n.get("output")
 
         ready = [n for n in rs.nodes if n["type"] == "agent" and states[n["id"]] == "pending"
                  and deps_ok(n) and deps_res(n)]
@@ -1019,14 +1392,51 @@ def main(run_id):
             log(run, "gate.held", node=gate["id"], question=gate.get("question"),
                 options=gate.get("options"), context=gate.get("context"))
             emit(f"WORKFLOW_HELD {run_id} {gate['id']}")
-            return f"held at {gate['id']}"
+            ht = gate.get("hold_timeout")
+            if ht is None:
+                return f"held at {gate['id']}"
+            # sprint101 #14: a human gate with hold_timeout PARKS in-process (zero
+            # tokens, like a wait-gate) instead of exiting: the hold start survives
+            # runner restarts via gates/<id>.held.json (efp-stamped). At expiry, with
+            # default_option the gate releases itself exactly like a human answer;
+            # without one it logs gate.expired ONCE (loud, never silent) and keeps
+            # holding — tour-demo burned 9.3 h on "either button is fine".
+            hf = run / "gates" / f"{gate['id']}.held.json"
+            hdef = efp(rs.byid, gate)
+            hm = jload(hf, {}) or {}
+            if hm.get("_def") != hdef or not isinstance(hm.get("since"), (int, float)):
+                hm = {"since": time.time(), "_def": hdef}
+                hf.write_text(json.dumps(hm))
+            while True:
+                m = consume_markers()
+                if m == "stopped": return "stopped"
+                if m == "reloaded": break
+                if gate_answer_valid(run, gate, rs.byid) is not None:
+                    break                                   # human release lands first
+                held_s = int(time.time() - hm["since"])
+                if held_s >= ht:
+                    dopt = gate.get("default_option")
+                    if dopt:
+                        gp = run / "gates" / f"{gate['id']}.json"
+                        tmpg = gp.with_name(f"{gate['id']}.json.{os.getpid()}.tmp")
+                        tmpg.write_text(json.dumps({"answer": dopt, "_def": hdef, "_machine": "auto_release",
+                                                    "at": now()}, ensure_ascii=False))
+                        os.replace(tmpg, gp)
+                        log(run, "gate.auto_released", node=gate["id"], option=dopt, held_s=held_s)
+                        break
+                    if not hm.get("expired"):
+                        hm["expired"] = True
+                        hf.write_text(json.dumps(hm))
+                        log(run, "gate.expired", node=gate["id"], held_s=held_s)
+                time.sleep(0.5)
+            continue   # top of loop: the answer reads exactly like a human release
         failed = [n for n in rs.nodes if states[n["id"]] == "failed"]
         if failed:
             blocked = [n["id"] for n in rs.nodes if states[n["id"]] == "pending" and not deps_ok(n)]
             log(run, "run.blocked", failed=[n["id"] for n in failed], blocked=blocked)
             emit(f"WORKFLOW_FAILED {run_id} ({','.join(n['id'] for n in failed)})")
             return "blocked by failed " + ",".join(n["id"] for n in failed)
-        if all(states[n["id"]] in ("done", "skipped") for n in rs.nodes):
+        if all(states[n["id"]] in ("done", "partial", "skipped") for n in rs.nodes):   # #4: a harvested partial closes the run
             finalize(run, rs.graph, "done")
             return "done"
         emit(f"WORKFLOW_FAILED {run_id} (graph stuck — check after/refs)")
@@ -1051,7 +1461,7 @@ def finalize(run, graph, status):
     lines = [f"# Workflow '{graph.get('name', 'workflow')}' — {status}"]
     for fid in finals:
         rec = jload(run / "nodes" / f"{fid}.json")
-        if rec and rec.get("status") == "done":
+        if rec and rec.get("status") in ("done", "partial"):   # #4: harvested partial output belongs in the summary
             lines.append(f"\n## {fid}\n\n```json\n"
                          + json.dumps(rec.get("output"), ensure_ascii=False, indent=2, default=str)
                          + "\n```")

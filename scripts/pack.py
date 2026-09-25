@@ -11,7 +11,7 @@ import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = "0.9.0"
+VERSION = "1.0.1"
 PACKAGE_NAME = f"hermes-workflows-{VERSION}"
 
 # Exact files plus deliberately narrow source patterns. Never package a worktree wholesale.

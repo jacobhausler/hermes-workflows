@@ -21,7 +21,7 @@ import sys
 from pathlib import Path
 
 GIT = "/usr/bin/git"
-PATTERN = re.compile(r"192\.168|\bhaus\b|callindor|gaidin|rhuidean|jacob|nous", re.I)
+PATTERN = re.compile(r"192\.168|\bhaus\b|callindor|gaidin|rhuidean|jacob|\bnous\b", re.I)
 EXCLUDE_DIRS = {".git", "__pycache__"}
 EXCLUDE_PATTERNS = ["docs/PUBLISH-SCRUB.md",
                     "*/__pycache__/*", "__pycache__/*",

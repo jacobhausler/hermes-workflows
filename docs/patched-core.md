@@ -1,4 +1,4 @@
-# Patched core: typed `max_turns` deaths (optional)
+# Patched core: typed turn-cap deaths (optional)
 
 > **DELETE THIS FILE when upstream PR #121041 merges.** After that release, stock
 > hermes writes the field natively, the patch is a no-op, and the two install
@@ -28,9 +28,9 @@ additive.
 ## What the plugin gains
 
 `_typed_error_class()` in `wf.py` reads the child's turn report and returns
-`("max_turns", reason)` **only** when `turn_exit_reason` is the loop's own
+`("cap_exhausted", reason)` **only** when `turn_exit_reason` is the loop's own
 budget-depletion stamp. With the patch: `node.failed` carries typed
-`error_class="max_turns"` plus the reason, and the retry gate stops treating a
+`error_class="cap_exhausted"` plus the reason, and the retry gate stops treating a
 budget death as maybe-transient. Without it: the field is absent, the function
 returns honest nothing, and the death keeps the prose-free `unknown` class.
 Nothing on stdout can prove a turn-cap death — the runner will not grep prose for
@@ -84,5 +84,5 @@ EOF
 Or the grep check: `grep -c turn_exit_reason hermes_cli/quiet_single_query.py` → `>= 3`.
 
 After patching, a workflow node that exhausts `max_turns` should arrive as
-`node.failed` with `error_class="max_turns"` on the next run — the read model's
+`node.failed` with `error_class="cap_exhausted"` on the next run — the read model's
 `turn_report` tier note flips from `untyped (core patch not applied)` to typed.

@@ -89,6 +89,36 @@ if _FAKE_MODE == "untyped_report":   # tier self-report (0924): report exists bu
         with open(_rp, "w") as f:
             json.dump({"pid": os.getpid(), "exit_code": 2, "error": "boom", "reply": ""}, f)
     print("prose death without the typed key"); sys.exit(2)
+if _FAKE_MODE == "die_after_json" and "DIETEST" in q:   # #4: dies AFTER a valid fenced answer
+    print("```json\n" + json.dumps({"result": "harvested"}) + "\n```")
+    sys.exit(1)
+if _FAKE_MODE == "die_after_json_blocked" and "DIETEST" in q:  # #4: dies with a declared terminal status
+    print("```json\n" + json.dumps({"status": "BLOCKED", "result": "half done"}) + "\n```")
+    sys.exit(1)
+if _FAKE_MODE == "retry_progress" and "RESUME" in q:    # #5: transport death WITH tool progress, then resumes
+    cnt = 0
+    if os.environ.get("FAKE_ATTEMPT_DIR"):
+        os.makedirs(os.environ["FAKE_ATTEMPT_DIR"], exist_ok=True)
+        p = os.path.join(os.environ["FAKE_ATTEMPT_DIR"], "attempts")
+        cnt = int(open(p).read()) if os.path.exists(p) else 0
+        open(p, "w").write(str(cnt + 1))
+    if cnt == 0:
+        if "--continue" in args:   # dead attempt carries tool_call_count > 0 (bounded-retry gate)
+            import sqlite3
+            title = args[args.index("--continue") + 1]
+            c = sqlite3.connect(os.path.join(_FAKE_HOME, "state.db"))
+            c.execute("create table if not exists sessions (id text primary key, title text, model text, input_tokens int, output_tokens int, "
+                      "cache_read_tokens int, reasoning_tokens int, api_call_count int, tool_call_count int, estimated_cost_usd real, "
+                      "last_activity_at real, last_activity_description text, ended_at real, started_at real)")
+            t = time.time()
+            c.execute("insert or replace into sessions values (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                      ("f-" + title, title, "fake", 0, 0, 0, 0, 1, 1, 0.0, t, "", t, t))
+            c.commit(); c.close()
+        print("Warning: Unknown toolsets: bogus")
+        print("hermes -z: agent failed: openai.APIConnectionError. Connection error.")
+        sys.exit(2)
+    print("```json\n" + json.dumps({"result": "resumed"}) + "\n```")
+    sys.exit(0)
 from pathlib import Path
 if _FAKE_MODE == "poll_steer":     # B1: child pulls baked steering through the real door
     # and prints what it got — proves the file protocol + cursor, not model compliance.
@@ -115,6 +145,13 @@ if _FAKE_MODE == "early":          # writes stdout, then keeps cooking (mid-run 
     _t.sleep(float(os.environ.get("FAKE_EARLY_SLEEP", "3")))
 if _FAKE_MODE == "bad_schema":     # valid json fence that fails the node's schema
     print("```json\n" + json.dumps({"wrong": True}) + "\n```")
+    sys.exit(0)
+if _FAKE_MODE == "noisy":          # sprint101 C2 #9: prose around objects, no clean fence
+    print("I finished the task. Early draft: {\"ok\": false, \"attempt\": 1}")
+    print("```json\n{this fence is broken,,\n```")
+    print("Final answer below — trust this one:")
+    print("{\"ok\": true, \"attempt\": 2}")
+    print("Thanks for reading!")
     sys.exit(0)
 if "FAILME" in q:
     print("", end="")  # simulate a crashed/empty child

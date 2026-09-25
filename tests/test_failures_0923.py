@@ -166,7 +166,7 @@ check("class timeout: runner-killed child, never retried (timeout excluded)",
 r = mk("q1-nojson", [{"id": "a", "type": "agent", "goal": "FAILME q1-nojson"}])
 out = wf("q1-nojson")
 rec = rec_of(r, "a")
-check("class no_json: rc=0 empty output after the 1 retry", rec["error_class"] == "no_json", json.dumps(rec)[:140])
+check("class schema (was no_json): rc=0 empty output after the 1 retry", rec["error_class"] == "schema", json.dumps(rec)[:140])
 
 # schema: valid json failing the node schema, twice
 r = mk("q1-schema", [{"id": "a", "type": "agent", "goal": "sch q1-schema",
@@ -234,8 +234,8 @@ check("max_turns stays unassigned and no-evidence failure is not retried",
 r = mk("q1-typed", [{"id": "a", "type": "agent", "goal": "ty q1-typed", "max_turns": 60}])
 out = wf("q1-typed", {"FAKE_MODE": "typed_maxturns"})
 rec = rec_of(r, "a")
-check("typed report: error_class=max_turns, reason + guidance in error, single spawn, no retry",
-      rec["error_class"] == "max_turns" and not rec.get("attempts_log")
+check("typed report: error_class=cap_exhausted, reason + guidance in error, single spawn, no retry",
+      rec["error_class"] == "cap_exhausted" and not rec.get("attempts_log")
       and "max_iterations_reached(61/60)" in rec["error"] and "turn budget" in rec["error"]
       and (HOME / "fake.log").read_text().count("q1-typed") == 1,
       json.dumps(rec)[:220])
@@ -256,8 +256,8 @@ check("empty typed report stays unknown (absence of type is honest nothing)",
 r = mk("q1-typed-gate", [{"id": "a", "type": "agent", "goal": "tg q1-typed-gate", "max_turns": 5}])
 out = wf("q1-typed-gate", {"FAKE_MODE": "typed_maxturns", "FAKE_API_CALLS": "0"})
 rec = rec_of(r, "a")
-check("typed max_turns NOT transient-retried despite api_calls==0 evidence",
-      rec["error_class"] == "max_turns" and not rec.get("attempts_log")
+check("typed cap_exhausted NOT transient-retried despite api_calls==0 evidence",
+      rec["error_class"] == "cap_exhausted" and not rec.get("attempts_log")
       and (HOME / "fake.log").read_text().count("q1-typed-gate") == 1,
       json.dumps(rec)[:220])
 
@@ -318,7 +318,7 @@ r = mk("q1-noschemaretry", [{"id": "a", "type": "agent", "goal": "FAILME nosr"}]
 out = wf("q1-noschemaretry")
 rec = rec_of(r, "a")
 check("schema/no_json death is NEVER transient-retried (exactly the 1 schema-retry)",
-      rec["error_class"] == "no_json" and (HOME / "fake.log").read_text().count("FAILME nosr") == 2,
+      rec["error_class"] == "schema" and (HOME / "fake.log").read_text().count("FAILME nosr") == 2,
       f"class={rec.get('error_class')} spawns={(HOME / 'fake.log').read_text().count('FAILME nosr')}")
 
 # ============ Q1c: runner_exit on every path ============

@@ -67,11 +67,11 @@ first data fetch failed (backend not yet mounted) stays dropped until reloaded.
 See [INSTALL.md](INSTALL.md) — verify the `.sha256` sidecar and `SHA256SUMS`, unpack,
 copy the backend and desktop halves, validate, enable, restart.
 
-### 2d. Optional: typed `max_turns` deaths
+### 2d. Optional: typed turn-cap deaths
 
 Stock Hermes records a child that dies on its turn cap as `error_class: unknown`
 (partial output and log preserved). Applying the one-field core patch in
-[docs/patched-core.md](docs/patched-core.md) makes it `error_class: max_turns` with the
+[docs/patched-core.md](docs/patched-core.md) makes it `error_class: cap_exhausted` with the
 loop's own reason. It is an operator choice; the plugin never patches your core. After
 a failed child, `status` reports `turn_report: typed|untyped` so you can tell.
 
@@ -108,6 +108,18 @@ Ending your turn after `run` is the single most common way a workflow stalls.
   ] }
 ```
 
+Or, the 1.0.1 way — settings once, nodes carry only their work:
+
+```json
+{ "name": "check",
+  "defaults": { "model": "<model-id>", "provider": "<provider-name>", "reasoning": "medium",
+                "schema": { "type": "object", "required": ["ok"] } },
+  "nodes": [
+    { "id": "inspect", "type": "agent", "shape": "recon", "goal": "Inspect <target>." },
+    { "id": "verdict", "type": "agent", "after": ["inspect"], "goal": "Judge the inspection." }
+  ] }
+```
+
 Rules that bite:
 
 - **Pin `model` + `provider` on every node** unless you have verified the seat
@@ -118,9 +130,14 @@ Rules that bite:
   what the route supports (`agent/reasoning_effort.py`); a level the *relay* itself
   rejects (some local servers accept only `low|medium|xhigh`) comes back as
   `provider_400` with the server's message — read it and pick from that list.
-- **`after` orders; it does not pass data.** Use `inputs:["a"]` or `inputs:["a.key"]`
-  on the downstream node, or `fanout.items_from:"a.items"`. A missing path fails at
-  spawn.
+- **`after` orders AND injects.** Every direct parent's committed output lands under
+  `## Inputs` automatically (8 KB per parent). Use `inputs:["a.key"]` only to pick a
+  dotted path or a non-parent ancestor, or `fanout.items_from:"a.items"`. A missing
+  path fails at spawn.
+- **Shared settings go in `defaults`, once.** `defaults:{schema, timeout, max_turns,
+  reasoning, provider, model, context}` at graph level; `shape:recon|build|review|publish`
+  sizes budgets from measured presets. A `schema` makes the runner write the reply
+  contract itself — no contract prose in goals.
 - **Size budgets from measurement, not guesses.** [references/budgets.md](references/budgets.md)
   has per-shape numbers from real runs. Two invariants: the wall must outlast the
   turn cap at the route's real per-call latency; a lane that runs the whole test
@@ -142,16 +159,27 @@ Rules that bite:
 ```
 
 A human gate holds until `release`; the desktop view shows the question and hands
-the answer back to the owning session. Machine gates: `wait:{"wait_s":N}` or
+the answer back to the owning session. `hold_timeout` + `default_option` makes a
+decorative gate release itself (`gate.auto_released`); `hold_timeout` alone logs
+`gate.expired` once and keeps holding. Fan-out `quorum` defaults to a majority and
+cancels stragglers once met; `goal` is optional when items carry their own. Machine gates: `wait:{"wait_s":N}` or
 `wait:{"until_argv":[…],"every_s":60,"timeout_s":3600}`. Tested examples:
 [examples/approve-publish.json](examples/approve-publish.json),
 [examples/branch-on-verdict.json](examples/branch-on-verdict.json).
 
 ### 3d. Failures, resume, amend
 
-- `node.failed` events carry `error_class` ∈ `timeout | max_turns | provider_400 |
-  transport | crashed | spawn | cancelled | inputs | quorum | fanout_empty | unknown`
-  plus `attempts`. Read the class, not the prose.
+- `node.failed` events carry `error_class` from a closed set — `timeout | cap_exhausted |
+  early_death | provider_400 | unresolved_model | transport | transport_exhausted | schema |
+  crashed | spawn | graph_invalid | cancelled | inputs | quorum | fanout_empty | unknown` —
+  plus `attempts`. Read the class, not the prose. `cancelled` (a `stop`, or a fan-out
+  straggler at quorum) is never a failure: the run reads `stopped`, and a `wait` re-drives it.
+- A child that dies after printing a valid fenced answer (rc≠0, wall, cap) is committed as
+  `status: partial` with the death cause kept as `error_class`; downstream runs on it.
+- `transport | early_death | cap_exhausted | timeout` deaths with tool progress get ONE
+  automatic re-drive with a machine resume preamble (`node.retry`); permfails never retry.
+- A child silent for 120 s after spawn is killed as `early_death`; a child still writing its
+  log when the wall fires gets one 50 % extension (`node.extended`), then dies.
 - A run with unfinished work and no live runner is `interrupted`. Inspect committed
   outputs, then `wait` to resume — finished nodes replay-skip by fingerprint.
 - To change the graph mid-flight: `amend` with the **whole** replacement graph.
@@ -211,7 +239,7 @@ prints `OK`. CI runs the same five gates ([.github/workflows/ci.yml](.github/wor
 ### 4b′. Navigate with the knowledge graph
 
 The repo ships a [graphify](https://github.com/Graphify-Labs/graphify) knowledge
-graph at `graphify-out/` — 832 nodes / 1679 edges over every function, class, test
+graph at `graphify-out/` — 941 nodes / 1920 edges over every function, class, test
 and doc heading, built by deterministic tree-sitter parsing (no LLM, no network).
 Query it before you grep or open files one by one:
 

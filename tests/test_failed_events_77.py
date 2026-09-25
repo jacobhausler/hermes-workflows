@@ -45,7 +45,7 @@ wf("f77-typed", "typed_maxturns")
 nf = [e for e in events(r) if e["event"] == "node.failed"]
 check("solo death emits exactly one node.failed", len(nf) == 1, str(nf))
 e = nf[0] if nf else {}
-check("typed death event carries error_class=max_turns", e.get("error_class") == "max_turns", str(e))
+check("typed death event carries error_class=cap_exhausted", e.get("error_class") == "cap_exhausted", str(e))
 check("typed death event carries attempts>=1", isinstance(e.get("attempts"), int) and e["attempts"] >= 1, str(e))
 
 # --- quorum failure -> typed class on the event too ---

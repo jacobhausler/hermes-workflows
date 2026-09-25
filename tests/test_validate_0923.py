@@ -308,8 +308,8 @@ check(amadd.get("ok") and amadd.get("added") == padd["added"]
       and amadd["changed"] == padd["changed"]
       and amadd["will_rerun"] == padd["will_rerun"]
       and amadd["unchanged"] == padd["unchanged"]
-      and json.loads((radd / "graph.json").read_text()) == Gadd2,
-      "normal amend applies graph and echoes the exact preview impact", amadd)
+      and json.loads((radd / "graph.json").read_text()) == wfcommon.apply_graph_defaults(Gadd2),
+      "normal amend applies the RESOLVED graph (defaults/shape baked) and echoes the exact preview impact", amadd)
 
 # --- (7) runner_exit read model ---
 import re as _re
