@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+tests/home*/
+tests/.tmp*/
+*.log
+artifacts/
+home-40/

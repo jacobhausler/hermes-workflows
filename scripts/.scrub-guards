@@ -1,0 +1,14 @@
+# Publish-scrub allow-list: one entry per line.
+#   file            -> every hit in that file is a GUARD
+#   file:LINE       -> the hit at that source line is a GUARD
+#   regex:PATTERN   -> any hit whose line matches PATTERN is a false-positive guard
+# Kept verbatim per docs/PUBLISH-SCRUB.md.
+tests/test_skill_docs.py
+scripts/make_public.py
+regex:exhaust
+docs/catalog/entry.yaml
+docs/catalog/pr-body.md
+docs/manifest-decisions.md
+plugin.yaml
+regex:NousResearch/hermes-agent
+scripts/.scrub-guards
