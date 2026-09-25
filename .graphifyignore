@@ -4,3 +4,7 @@ graphify-out/
 docs/PUBLISH-SCRUB.md
 home-*/
 tests/home-*/
+tests/fake-*
+tests/prompt-*.log
+ci-out/
+artifacts/
