@@ -1,0 +1,66 @@
+# CI for hermes-workflows: the same five gates the release integrator runs by hand.
+#   1. desktop half parses as ESM
+#   2. serial test suite (stdlib Python + Node .mjs) → ci-out/exits.json
+#   3. private-string scrub audit
+#   4. knowledge-graph drift (committed graphify-out/graph.json == AST of this tree; no LLM)
+#   5. `hermes plugins validate .` against a PINNED upstream commit
+#
+# HERMES_PIN = the measured requires_hermes floor, tag v2026.9.21 (first release
+# whose quiet turn report carries HERMES_QUIET_TURN_REPORT_FILE; evidence in
+# docs/catalog/pr-body.md). Bump deliberately; never track a branch.
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  HERMES_PIN: d337b736aa1e8ebecfab043842d13e4a2d2f48a3   # v2026.9.21
+
+jobs:
+  gates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Desktop half parses (ESM)
+        run: cp desktop/plugin.js /tmp/plugin.check.mjs && node --check /tmp/plugin.check.mjs
+
+      - name: Serial suite
+        run: python3 scripts/suite.py . ci-out
+
+      - name: Upload suite exit ledger
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: exits
+          path: ci-out/exits.json
+
+      - name: Scrub audit (private strings)
+        run: python3 scripts/make_public.py /tmp/public-tree
+
+      - name: Knowledge graph is current (graphify, AST only)
+        run: |
+          pip install "graphifyy==0.9.67"
+          python3 scripts/graph_check.py
+
+      - name: Checkout pinned hermes-agent
+        run: |
+          git clone --filter=blob:none https://github.com/NousResearch/hermes-agent /tmp/hermes-agent
+          git -C /tmp/hermes-agent checkout "$HERMES_PIN"
+
+      - name: Install pinned hermes (editable)
+        run: pip install -e /tmp/hermes-agent
+
+      - name: Validate plugin against pinned hermes
+        run: hermes plugins validate .
