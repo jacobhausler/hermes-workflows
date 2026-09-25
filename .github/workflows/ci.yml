@@ -1,6 +1,6 @@
 # CI for hermes-workflows: the same five gates the release integrator runs by hand.
 #   1. desktop half parses as ESM
-#   2. serial test suite (stdlib Python + Node .mjs) → ci-out/exits.json
+#   2. serial test suite (stdlib Python + Node .mjs) → ci-out/exits.json + per-test logs
 #   3. private-string scrub audit
 #   4. knowledge-graph drift (committed graphify-out/graph.json == AST of this tree; no LLM)
 #   5. `hermes plugins validate .` against a PINNED upstream commit
@@ -8,6 +8,10 @@
 # HERMES_PIN = the measured requires_hermes floor, tag v2026.9.21 (first release
 # whose quiet turn report carries HERMES_QUIET_TURN_REPORT_FILE; evidence in
 # docs/catalog/pr-body.md). Bump deliberately; never track a branch.
+#
+# Order matters: the pinned core is installed BEFORE the suite because the suite
+# asserts vocabulary parity against it (tests/test_validate_0923.py imports
+# hermes_constants — the same import path the plugin uses at runtime).
 
 name: ci
 
@@ -33,34 +37,36 @@ jobs:
         with:
           node-version: "22"
 
+      - name: Checkout pinned hermes-agent
+        run: |
+          git clone --filter=blob:none https://github.com/NousResearch/hermes-agent /tmp/hermes-agent
+          git -C /tmp/hermes-agent checkout "$HERMES_PIN"
+
+      - name: Install pinned hermes (editable) + graphify
+        run: |
+          pip install -e /tmp/hermes-agent
+          pip install "graphifyy==0.9.67"
+          hermes --version || true
+          graphify --version
+
       - name: Desktop half parses (ESM)
         run: cp desktop/plugin.js /tmp/plugin.check.mjs && node --check /tmp/plugin.check.mjs
 
       - name: Serial suite
         run: python3 scripts/suite.py . ci-out
 
-      - name: Upload suite exit ledger
+      - name: Upload suite ledger + per-test logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: exits
-          path: ci-out/exits.json
+          name: ci-out
+          path: ci-out/
 
       - name: Scrub audit (private strings)
         run: python3 scripts/make_public.py /tmp/public-tree
 
       - name: Knowledge graph is current (graphify, AST only)
-        run: |
-          pip install "graphifyy==0.9.67"
-          python3 scripts/graph_check.py
-
-      - name: Checkout pinned hermes-agent
-        run: |
-          git clone --filter=blob:none https://github.com/NousResearch/hermes-agent /tmp/hermes-agent
-          git -C /tmp/hermes-agent checkout "$HERMES_PIN"
-
-      - name: Install pinned hermes (editable)
-        run: pip install -e /tmp/hermes-agent
+        run: python3 scripts/graph_check.py
 
       - name: Validate plugin against pinned hermes
         run: hermes plugins validate .
