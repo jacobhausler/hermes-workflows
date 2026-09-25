@@ -74,10 +74,6 @@ lands, the branch collapses and that doc deletes itself.
 
 - Hermes Agent **≥ v2026.9.21** (the quiet turn-report file the runner reads;
   measured floor, see [docs/catalog/pr-body.md](docs/catalog/pr-body.md))
-  This floor does **not** depend on upstream [PR #121041](https://github.com/NousResearch/hermes-agent/pull/121041):
-  on a stock build a child that dies on its turn cap reports `error_class: unknown`
-  (partial output and log preserved); if #121041 lands it becomes `max_turns`. Same
-  `requires_hermes` either way.
 - Python 3 (stdlib only — the plugin imports nothing outside Hermes)
 - Node for the desktop half's tests only; the app loads `plugin.js` uncompiled
 
@@ -89,7 +85,7 @@ Changes are gated by the serial suite (`python3 scripts/suite.py . ci-out`) and
 `hermes plugins validate .` — both run in [CI](.github/workflows/ci.yml).
 
 The repo ships a [graphify](https://github.com/Graphify-Labs/graphify) knowledge
-graph (`graphify-out/`, 851 nodes / 1685 edges, deterministic AST — no LLM in the
+graph (`graphify-out/`, 832 nodes / 1679 edges, deterministic AST — no LLM in the
 build). `graphify query "<question>"` returns a scoped subgraph instead of a grep
 dump; `graphify-out/GRAPH_REPORT.md` is the architecture overview. CI fails if the
 committed graph drifts from the tree.

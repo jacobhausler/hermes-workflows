@@ -28,6 +28,10 @@ src = {n.get("source_file") for n in g["nodes"] if n.get("source_file")}
 check("graph covers the door, runner, read model and desktop half",
       {"__init__.py", "wf.py", "wfcommon.py", "desktop/plugin.js"} <= src)
 check("graph does not index itself or CI", not any(s.startswith(("graphify-out/", ".github/")) for s in src))
+tracked = set(subprocess.run(["git", "-C", str(ROOT), "ls-files"], capture_output=True, text=True).stdout.split())
+orphans = sorted(s for s in src if s not in tracked)
+check("every file the graph indexes is tracked in THIS tree (public graph built from public tree)",
+      not orphans, str(orphans[:5]))
 ignored = (ROOT / ".gitignore").read_text()
 check(".gitignore keeps viz/cache/cost out of the repo",
       all(k in ignored for k in ("graphify-out/graph.html", "graphify-out/cache/", "graphify-out/cost.json")))

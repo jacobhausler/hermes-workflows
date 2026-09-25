@@ -12,4 +12,4 @@ docs/manifest-decisions.md
 plugin.yaml
 regex:NousResearch/hermes-agent
 scripts/.scrub-guards
-regex:"author": "Jacob Hausler"
+regex:"author": "(Jacob Hausler|jacobhausler)"
