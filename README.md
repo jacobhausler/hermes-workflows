@@ -74,6 +74,10 @@ lands, the branch collapses and that doc deletes itself.
 
 - Hermes Agent **≥ v2026.9.21** (the quiet turn-report file the runner reads;
   measured floor, see [docs/catalog/pr-body.md](docs/catalog/pr-body.md))
+  This floor does **not** depend on upstream [PR #121041](https://github.com/NousResearch/hermes-agent/pull/121041):
+  on a stock build a child that dies on its turn cap reports `error_class: unknown`
+  (partial output and log preserved); if #121041 lands it becomes `max_turns`. Same
+  `requires_hermes` either way.
 - Python 3 (stdlib only — the plugin imports nothing outside Hermes)
 - Node for the desktop half's tests only; the app loads `plugin.js` uncompiled
 
