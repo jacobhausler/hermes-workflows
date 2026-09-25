@@ -1,81 +1,60 @@
-# Catalog PR: add `hermes-workflows` (community, automation)
+# plugin-catalog: add `hermes-workflows` (community, automation)
+
+Submitted by the plugin repository owner (rule 5).
 
 ## What it is
 
-`workflow` tool for Hermes Agent: the spawning agent owns a JSON graph of agent
-nodes and human gates; a background runner executes it with replay-skip resume,
-fan-outs with quorum, per-node retries with backoff, and effective-fingerprint
-staleness. Ships a desktop DAG view, an inline `::workflow{id}` transcript card,
-and the authoring skill (SKILL.md + references/). Submitted by the repo owner
-(jacobhausler), per admission rule 5.
+`workflow` tool for Hermes Agent: the calling agent owns a JSON graph of agent
+nodes, fan-outs and gates; a background runner executes it with fingerprint
+replay-skip resume, fan-out quorum, per-node retries, cooperative steer, and
+typed failure events (`error_class` + `attempts` on every `node.failed` — the
+parent never infers from exit code + prose). Ships a desktop DAG view (SDK
+surface only), an inline `::workflow{id}` transcript card, and the authoring
+skill with measured budget recipes. Children are spawned through the stock quiet
+one-shot CLI (`hermes chat --query-file … -Q --max-turns N`).
 
-## Features
+Repo: https://github.com/jacobhausler/hermes-workflows — README with
+screenshots, `AGENTS.md` (agent front door: install / operate / contribute),
+`INSTALL.md`.
 
-- `workflow` tool: agent-owned DAG of agent nodes, fan-outs, human gates, quorum
-  partial credit, steer via spool, fingerprint-resume (unchanged nodes skip).
-- Typed failure facts: every `node.failed` / `item.finished` carries
-  `error_class` + `attempts` (parent never infers from exit code + prose).
-- Desktop DAG view inside the plugin SDK surface only; inline transcript card.
-- Dashboard page (`dashboard/`), authoring skill, serial-runnable test suite.
-- No self-updating code, no remote fetches anywhere (catalog rule 3); desktop JS
-  is a single SDK-only file (rule 8); capabilities block matches registrations
-  exactly (rule 6).
+## Catalog rules, checked at the pinned SHA
 
-## Validation evidence
+| Rule | Evidence |
+|---|---|
+| 2 — exact pin | `sha` is the 40-char commit of tag `v0.9.0`; `image`/`screenshots` are raw URLs pinned to the same SHA |
+| 3 — no self-updater | No update checks and no remote fetches anywhere: zero `fetch(` in `desktop/plugin.js`, zero `urlopen` outside `tests/`; the plugin never loads code it did not ship |
+| 6 — capabilities match | `provides_tools: [workflow]`; hooks `transform_llm_output`, `on_session_end` (both in stock `VALID_HOOKS`); no middleware; `requires_env: []` — the runner's `HERMES_WF_STEER_*` vars are plugin-internal IPC set by the runner for its own children, never user-provided (`docs/manifest-decisions.md`) |
+| 7 — install scanner | `hermes plugins validate .` → `Validation passed.`, security scan `safe`, zero `caution` findings |
+| 8 — desktop surface | `desktop/plugin.js` imports only `@hermes/plugin-sdk` / `react`; no prototype patching, no `eval`, no dynamic `import()`, no app-store access; passes the `desktop surface` check |
+| 9 — dependencies | None. Stdlib-only Python; no `python_dependencies`, no `pyproject.toml` |
 
-- `hermes plugins validate <release-tree>` — ALL GREEN, including the
-  `desktop surface` check ("stays inside the plugin SDK surface") and the
-  `security scan` check ("safe"). (Evidence inventory:
-  workflow-081/PUBLISH-PLAN.md, run on the live release tree.)
-- Serial suite: 41/41 green on the release tree at commit 42e99d8 — 33 `test_*.py`
-  + 8 `test_*.mjs` (file counts verified against the tree; RELEASE.json records
-  the merge-train qualification 2026-09-24).
-- Spawn contract is stock: `hermes_cli/_parser.py` at the floor tag carries every
-  flag the plugin spawns (`--query-file --oneshot --quiet --source
-  --create-if-missing --max-turns --run-budget --provider --reasoning
-  --toolsets`) and `hermes_cli/quiet_single_query.py` carries the
-  `HERMES_QUIET_TURN_REPORT_FILE` contract. Verified by walking the published tag
-  list newest→older (unauthenticated raw fetches, evidence:
-  publish-0924/catalog-evidence/{tags.json,walk-result.json}):
-  v2026.9.24 PASS, v2026.9.21 PASS, v2026.9.14 FAIL (all 10 flags present but
-  `HERMES_QUIET_TURN_REPORT_FILE` absent from quiet_single_query.py).
-  **requires_hermes floor: v2026.9.21 = 0.21.4** (`pyproject.toml` at the tag).
-- Capabilities block matches reality at the pinned SHA:
-  `provides_tools: [workflow]`, hooks `transform_llm_output`, `on_session_end`
-  (both in stock `VALID_HOOKS`), no middleware, `requires_env: []` — the runner's
-  `HERMES_WF_STEER_*` vars are plugin-internal IPC set by the runner itself and
-  are deliberately not declared (requires_env means user-provided env only).
-- No private/host-specific strings in the shipped tree (scrub pass lane; the
-  packaging tests assert exclusion of the internal examples).
+## `requires_hermes: ">=0.21.4"` — measured, not guessed
 
-## Two-build install table (stock vs full capabilities)
+The spawn contract needs every flag the plugin passes (`--query-file -Q
+--source --create-if-missing --max-turns --run-budget --provider --reasoning
+--toolsets`) in `hermes_cli/_parser.py` and the `HERMES_QUIET_TURN_REPORT_FILE`
+turn-report contract in `hermes_cli/quiet_single_query.py`. Walking published
+tags newest → older: `v2026.9.24` PASS, `v2026.9.21` PASS, `v2026.9.14` FAIL
+(flags present, turn report absent). `v2026.9.21` is `pyproject.toml` version
+`0.21.4`.
 
-From PUBLISH-PLAN.md — one codebase; the only capability needing a patched core is
-typed turn-cap termination, and the plugin degrades honestly without it:
+## Test evidence at the pin
 
-| | catalog / stock-hermes | full-capabilities |
-|---|---|---|
-| graphs, fan-out, gates, steer, resume, dashboard, cards | ✓ | ✓ |
-| `max_turns` death | `unknown` + preserved partial/log | typed `max_turns` + reason |
-| install | `hermes plugins install` at pinned SHA | + one patch step from `docs/patched-core.md` (or a `hermes update` pin, LEAN-NIGHTLY style) |
+- Serial suite `python3 scripts/suite.py . out` — **42/42** green (34 `test_*.py`
+  + 8 `test_*.mjs`), run on the exact tree that was pushed.
+- CI in the repo runs the same four gates (ESM parse, suite, private-string
+  scrub audit, `hermes plugins validate`) against a clone of `hermes-agent`
+  pinned to `v2026.9.21` (`.github/workflows/ci.yml`).
+- Core imports are two, both soft with fallbacks (`hermes_constants`,
+  `hermes_cli.config`); the state.db metrics join reads stock columns only,
+  `mode=ro`.
 
-## Patched-core relationship
+## Relationship to a patched core
 
-The plugin needs exactly ONE carried core patch — upstream PR #121041 (open),
-which adds `turn_exit_reason` to the quiet `-Q` turn report — to type turn-cap
-deaths as `max_turns` instead of `unknown`. Nothing auto-patches anyone's core:
-the catalog install is pure stock; the patch is a documented operator choice
-(`docs/patched-core.md`). The plugin's read model tells you which side you are on
-without guessing: a turn-cap death surfaces `error_class=max_turns` on a core
-that carries the field, and honestly stays `error_class=unknown` on stock
-(`wf.py::_typed_error_class` reads the child's turn report; prose is never
-grepped). The two core imports the plugin makes (`hermes_constants`,
-`hermes_cli.config`) are soft with fallbacks, and the state.db join reads
-stock columns only, `mode=ro`. If #121041 merges, the full-capabilities column
-collapses into the stock column and the docs line deletes itself.
-
-## Pins
-
-- `sha` above is REPLACE_AT_RELEASE — a maintainer should not merge until it is
-  a full 40-char commit SHA of https://github.com/jacobhausler/hermes-workflows
-  (rule 2); the bump stays the review anchor for future updates (rule 4).
+None required. Stock Hermes records a child that dies on its turn cap as
+`error_class: unknown` (partial output and log preserved). Open PR #121041 adds
+`turn_exit_reason` to the quiet turn report; with it the same death is typed
+`max_turns`. The plugin reads the field if present and says `unknown` if not —
+nothing auto-patches anyone's core, and `status` reports which tier a failed
+child ran under (`turn_report: typed|untyped`). If #121041 merges, the
+distinction disappears.

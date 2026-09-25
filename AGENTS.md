@@ -201,11 +201,43 @@ node --experimental-strip-types tests/test_edge_routing.mjs
 python3 scripts/suite.py . ci-out                 # full serial suite → ci-out/exits.json (merge gate)
 hermes plugins validate .                         # manifest + SDK-surface + security scan
 python3 scripts/make_public.py /tmp/public-tree   # private-string audit; must print "0 scrub hits"
+python3 scripts/graph_check.py                    # committed knowledge graph matches the tree
 ```
 
 A change is done when: its targeted test is green, the full suite is green, validate
-prints `Validation passed.`, and the scrub audit prints `0 scrub hits`. CI runs the
-same four gates ([.github/workflows/ci.yml](.github/workflows/ci.yml)).
+prints `Validation passed.`, the scrub audit prints `0 scrub hits`, and the graph gate
+prints `OK`. CI runs the same five gates ([.github/workflows/ci.yml](.github/workflows/ci.yml)).
+
+### 4b′. Navigate with the knowledge graph
+
+The repo ships a [graphify](https://github.com/Graphify-Labs/graphify) knowledge
+graph at `graphify-out/` — 851 nodes / 1685 edges over every function, class, test
+and doc heading, built by deterministic tree-sitter parsing (no LLM, no network).
+Query it before you grep or open files one by one:
+
+```sh
+uv tool install graphifyy                                      # once; the CLI is `graphify`
+graphify query "how does a failed node get its error_class"    # scoped subgraph for a question
+graphify path "act_run" "run_child" --undirected               # how two symbols connect
+graphify explain "run_state"                                   # one symbol + every neighbour
+graphify god-nodes --top 12                                    # the hubs everything flows through
+```
+
+`graphify-out/GRAPH_REPORT.md` is the broad-architecture view (community hubs,
+surprising cross-file links). Every edge is tagged `EXTRACTED` (read from source) or
+`INFERRED` (resolved by graphify) so you know what was found vs guessed.
+
+Keeping it current:
+
+| you did | run |
+|---|---|
+| changed any `.py`/`.js`/`.md` | `graphify update .` (AST only, ~3 s) and commit `graphify-out/{graph.json,GRAPH_REPORT.md,manifest.json}` |
+| want to check without rewriting | `python3 scripts/graph_check.py` (`--fix` rewrites) |
+| added/renamed whole subsystems | `graphify label . --missing-only` names new communities — the ONLY LLM step; any OpenAI-compatible endpoint works (`OPENAI_BASE_URL`, `OPENAI_MODEL`, `GRAPHIFY_MAX_OUTPUT_TOKENS=16000` for thinking models). Never run in CI |
+
+Committed: `graph.json`, `GRAPH_REPORT.md`, `manifest.json`, `.graphify_labels.json(.sig)`,
+`.graphify_analysis.json`, `.graphify_root`. Ignored: `graph.html`, `cache/`, `cost.json`,
+dated backups. `.graphifyignore` excludes `graphify-out/` and `.github/` from the corpus.
 
 ### 4c. Rules
 

@@ -84,6 +84,12 @@ procedures, the test contract, and the rules that keep the tree publishable.
 Changes are gated by the serial suite (`python3 scripts/suite.py . ci-out`) and
 `hermes plugins validate .` — both run in [CI](.github/workflows/ci.yml).
 
+The repo ships a [graphify](https://github.com/Graphify-Labs/graphify) knowledge
+graph (`graphify-out/`, 851 nodes / 1685 edges, deterministic AST — no LLM in the
+build). `graphify query "<question>"` returns a scoped subgraph instead of a grep
+dump; `graphify-out/GRAPH_REPORT.md` is the architecture overview. CI fails if the
+committed graph drifts from the tree.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
