@@ -614,6 +614,12 @@ function MiniGraph({ detail }) {
 // plugin atom — never localStorage.
 
 const $stripFold = atom(null) // focused sid while its terminal fold is expanded
+// Feature-detect the focused-chat atoms: packaged apps older than the SDK
+// checkout may not expose every atom (the Sep-16 build has no runtime-id atom,
+// and `useValue(undefined)` dies as "reading 'get'"). A missing atom degrades
+// to a permanently-null one — the strip/pane go quiet, they never red-banner.
+const $null = atom(null)
+const focusAtom = a => a || $null
 
 /** Runs owned by one chat: owner.session_id === sid (the durable stored id).
  *  Cron launches carry owner.session_id '' and therefore never appear here —
@@ -695,8 +701,8 @@ export function SessionStrip() {
   // inversely to intuition: host.focusedSessionId is $focusedRuntimeId (the runtime id),
   // host.focusedStoredSessionId is the desktop token. Pair each owner key with its SAME-SHAPE
   // host key; a swapped pair silently renders nothing, which no unit test can see.
-  const runtimeSid = useValue(host.focusedSessionId)
-  const storedSid = useValue(host.focusedStoredSessionId)
+  const runtimeSid = useValue(focusAtom(host?.focusedSessionId))
+  const storedSid = useValue(focusAtom(host?.focusedStoredSessionId))
   const { data } = useQuery(listQuery())
   const foldOpen = useValue($stripFold)
   const owned = ownedRuns(data?.runs || [], runtimeSid || '', storedSid || '')
@@ -1640,8 +1646,8 @@ function PaneRow({ run, thisChat }) {
 function WorkflowsPane() {
   const { data } = useQuery(listQuery())
   // Same key pairing as SessionStrip: owner.session_id pairs with the runtime id.
-  const runtimeSid = useValue(host.focusedSessionId)
-  const storedSid = useValue(host.focusedStoredSessionId)
+  const runtimeSid = useValue(focusAtom(host?.focusedSessionId))
+  const storedSid = useValue(focusAtom(host?.focusedStoredSessionId))
   const [showAllDone, setShowAllDone] = useState(false)
   const runs = data?.runs || []
   const owned = new Set(ownedRuns(runs, runtimeSid, storedSid).map(r => r.id))

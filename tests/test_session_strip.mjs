@@ -112,8 +112,8 @@ assert.ok(!/role:\s*'link'/.test(src.slice(src.indexOf('function DirectiveBody')
 // owner.ui_session_id pairs with host.focusedStoredSessionId. A swapped pair
 // renders nothing forever — assert the source wires them same-shape.
 const stripSrc = src.slice(src.indexOf('export function SessionStrip'), src.indexOf('export function SessionStrip') + 1200)
-assert.ok(/const runtimeSid = useValue\(host\.focusedSessionId\)/.test(stripSrc),
-  'owner.session_id (runtime shape) must pair with host.focusedSessionId')
+assert.ok(/const runtimeSid = useValue\(focusAtom\(host\?\.focusedSessionId\)\)/.test(stripSrc),
+  'owner.session_id (runtime shape) must pair with host.focusedSessionId (feature-detected)')
 assert.ok(/ownedRuns\(data\?\.runs \|\| \[\], runtimeSid \|\| ''\, storedSid \|\| ''\)/.test(stripSrc),
   'ownedRuns args must be (runtime, stored), never (stored, runtime)')
 
