@@ -4,7 +4,7 @@ The engine (wf.py) is a separate process per run; this module is the door:
 launch it, read its run-dir via the SHARED read model (wfcommon.run_state), drop
 its input files. No daemon, no control plane, no second opinion on run state.
 """
-import importlib.util, json, os, re, shutil, stat, subprocess, sys, threading, time
+import importlib.util, json, os, re, shutil, stat, subprocess, sys, time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -577,13 +577,10 @@ def act_run(args):
                       "platform": _session_env("HERMES_SESSION_PLATFORM") or None}}
     (r / "run.json").write_text(json.dumps(meta))
     _spawn_runner(r)
-    _note_launch(rid)
     return {"run_id": rid, "models": models, "routes": routes, "hint":
-            f"call workflow wait run_id={rid} (blocks to the next hold/done boundary)",
-            # #15: the card is emitted by the transform_llm_output machinery (_auto_card),
-            # never pasted by the author — no card_rule prose. The `card` field stays as
-            # the machine-readable line for the desktop/owner; the author is never the
-            # fallback: if the hook misses, the machinery is the bug.
+            # Copy-exact inducement (papercut #70): the hint IS the paste line —
+            # no paraphrase, no fallback. The card is agent-authored by ruling.
+            f'PASTE this line alone in your reply, then call wait: {_card(rid)}',
             "card": _card(rid)}
 
 def _steer_event(r, ev, **kw):
@@ -593,45 +590,7 @@ def _steer_event(r, ev, **kw):
         f.write(json.dumps({"ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
                             "event": ev, **kw}, ensure_ascii=False) + "\n")
 
-def _steer_state(r, nid):
-    """B1 + #17 evidence read model for one node: queued = lines addressed to the
-    node in the run inbox; baked = how many its LATEST spawn copied into its bake
-    file; consumed = how far the spawn's cursor advanced (inbox pulls; also
-    echoed as `delivered` for existing readers). All derived from files only —
-    no model self-report is trusted."""
-    try:
-        raw = [l for l in (r / "inbox.jsonl").read_text(encoding="utf-8").splitlines() if l.strip()]
-    except OSError:
-        return None
-    addressed = 0
-    for l in raw:
-        try:
-            m = json.loads(l)
-        except Exception:
-            continue
-        if m.get("node") == nid and m.get("text") is not None and m.get("cmd") != "kill":
-            addressed += 1
-    rec = jload(r / "nodes" / f"{nid}.json") or {}
-    baked = delivered = 0
-    if (r / "steer").is_dir():
-        files = sorted((r / "steer").glob(f"{nid}.a*.jsonl"),
-                       key=lambda p: int(p.name[len(nid) + 2:-len(".jsonl")] or 0))
-        spawn_rec = files[-1] if files else None
-    else:
-        spawn_rec = None
-    if spawn_rec is not None:
-        try:
-            baked = len([l for l in spawn_rec.read_text(encoding="utf-8").splitlines() if l.strip()])
-        except OSError:
-            baked = 0
-        cur = spawn_rec.with_name(spawn_rec.name.replace(".jsonl", ".cursor"))
-        try:
-            delivered = min(int(cur.read_text().strip() or "0"), baked)
-        except (OSError, ValueError):
-            delivered = 0
-    if not addressed and not baked:
-        return None
-    return {"queued": addressed, "baked": baked, "consumed": delivered}
+_steer_state = _common._steer_state  # O2 re-export alias (moved to wfcommon): act_status keeps resolving via the door; bound via _common so a foreign `wfcommon` on sys.path can never hijack it
 
 def _output_pointer(rec):
     """Compact stand-in for a committed node output: enough to DECIDE to pay for
@@ -650,15 +609,15 @@ def act_status(args):
     st = run_state(r)
     if not st:
         return {"error": f"no run at {r}"}
-    # #15(b): watching a run registers its card for THIS session too — a session
-    # that only ever waits on a run launched elsewhere still gets the card once.
-    _note_launch(st["run_id"])
     full = str(args.get("detail") or "").lower() == "full"
     alive = runner_alive(r)
     out = {"run_id": st["run_id"], "name": st["name"], "status": st["status"],
            "runner_live": alive, "nodes": {k: {kk: v[kk] for kk in ("type", "status", "fanout")}
                                            for k, v in st["nodes"].items()},
-           "done": st["done"], "skipped": st["skipped"], "total": st["total"]}
+           "done": st["done"], "skipped": st["skipped"], "total": st["total"],
+           # O1: the card to paste into the report rides on EVERY status (and via
+           # act_wait, every wait) — the inducement never depends on the agent recalling it.
+           "card": _card(st["run_id"])}
     # Tier self-report (2026-09-24): a failed child's core -Q turn report carried
     # its typed verdict key ("typed") or not ("untyped"); absent = never noted.
     tier_rec = jload(r / "turn_report.tier")
@@ -696,6 +655,15 @@ def act_status(args):
         elif rec and v["status"] == "failed":
             out["nodes"][nid]["error"] = rec.get("error")
             out["nodes"][nid]["output"] = rec.get("output") if show_out else _output_pointer(rec)
+        # A2: a failed/partial node also ships the child's last words and the
+        # failure facts — pure passthrough through the ONE node-truth read (O2),
+        # so the parent never tails logs to learn why a child died.
+        if rec and v["status"] in ("failed", "partial"):
+            nf = _common.node_facts(r, nid)
+            if nf:
+                out["nodes"][nid]["node_facts"] = {
+                    k: nf[k] for k in ("error_class", "attempts", "attempts_log",
+                                       "final", "log_path", "prompt_path")}
     # Cumulative spend is independent of heartbeat. Only a verified spawn's exact
     # session title can supply current activity; historical unended rows are not live.
     try:
@@ -728,6 +696,25 @@ def act_status(args):
             for k in tot: tot[k] += f[k]
         out["metrics"] = {"tokens": f"{tot['tokens_in']}▸{tot['tokens_out']}", "api_calls": tot["api_calls"],
                           "tool_calls": tot["tool_calls"], **({"cost_usd": round(tot["cost"], 4)} if tot["cost"] else {})}
+    # A3: derived "what next?" — computed ONLY from the run_state fields already in
+    # hand (derive-only, never a guess; an unreadable state yields no `next` at all).
+    # The agent does what `next` says; an empty `next` means the run is terminal.
+    s = st["status"]
+    if s == "held" and st.get("held_gate"):
+        hg = st["held_gate"]
+        out["next"] = [{"action": "release", "gate_id": hg.get("id"),
+                       "options": hg.get("options") or []}]
+    elif s in ("running", "pending", "interrupted"):
+        out["next"] = [{"action": "wait"}]
+    elif s == "failed":
+        rows = [{"action": "amend", "node": nid, "error_class":
+                 (out["nodes"][nid].get("node_facts")
+                  or _common.node_facts(r, nid) or {}).get("error_class", "unknown")}
+                for nid, v in st["nodes"].items() if v["status"] == "failed"]
+        # failed with no failed node visible (e.g. a recorded crashed runner): amend the run.
+        out["next"] = rows or [{"action": "amend", "node": None, "error_class": "unknown"}]
+    elif s in ("done", "stopped"):
+        out["next"] = []
     return out
 
 def act_wait(args):
@@ -1035,86 +1022,9 @@ def _wf_command(raw_args):
             + (f", then `workflow{{action:\"steer\", run_id, node:<first pending node>, text:{json.dumps(note)}}}`" if note else "")
             + ", emit `::workflow{id=\"<run_id>\"}` on its own line, then `wait` and answer gates via clarify.")
 
-# ---------- auto-card: every launch pops the inline card, no agent option ----------
-# The tool handler runs inside the launching turn; transform_llm_output fires once at the
-# end of that turn with the same session_id. Any run launched this turn whose directive
-# the agent did not write gets it appended — the card is a property of launching, not of
-# the agent remembering (owner ruling 2026-09-23: "no option").
-_LAUNCHED = {}          # session_id -> [run_id, ...] launched since the last turn end
-_HELD = {}              # session_id -> [(monotonic ts, run_id), ...] awaiting replay
-_HELD_TTL_SECONDS = 600 # card belongs to the launching session's near-term UI
-_LAUNCH_LOCK = threading.Lock()
-
-def _note_launch(rid):
-    sid = _session_env("HERMES_SESSION_ID") or ""
-    with _LAUNCH_LOCK:
-        rows = _LAUNCHED.setdefault(sid, [])
-        if rid not in rows:  # #15(b): wait/status re-register each tick — emit once
-            rows.append(rid)
-
-def _clear_launch(session_id=None, **_):
-    # Interrupted/blank turns never transform (the core gates the hook on a
-    # truthy, uninterrupted final_response), so a launch from one would vanish
-    # with the old drop. Hold it for the session's next transform instead, so
-    # the card is delivered then. Per-run age-bound: a session that dies and is
-    # resumed much later is a different UI context, so held runs expire past the
-    # TTL and a stale card can never leak into an unrelated much-later turn.
-    sid = session_id or ""
-    with _LAUNCH_LOCK:
-        rids = _LAUNCHED.pop(sid, [])
-        if rids:
-            now = time.monotonic()
-            _HELD.setdefault(sid, []).extend((now, r) for r in rids)
-
-def _take_held(sid):
-    # Pop the session's held runs; each is returned at most once and entries
-    # older than the TTL are dropped here instead of replayed.
-    with _LAUNCH_LOCK:
-        entries = _HELD.pop(sid, [])
-    now = time.monotonic()
-    return [r for ts, r in entries if (now - ts) < _HELD_TTL_SECONDS]
-
-_VISIBLE_CARD_RE = re.compile(r'(?<!\S)::workflow\{([^{}]{0,1024})\}')
-_CARD_ATTR_RE = re.compile(r'''([a-z][\w-]{0,63})=(?:"([^"]*)"|'([^']*)')''', re.I)
-
-def _visible_cards(text):
-    """Mirror desktop segmenter's quoted-attribute scan, ignoring fenced code."""
-    present = set()
-    fenced = None
-    for line in text.splitlines():
-        stripped = line.strip()
-        marker = stripped[:3]
-        if marker in ("```", "~~~"):
-            fenced = None if marker == fenced else (marker if fenced is None else fenced)
-            continue
-        if not fenced and len(line) <= 4800:
-            for match in _VISIBLE_CARD_RE.finditer(line):
-                attrs = {key.lower(): double or single
-                         for key, double, single in _CARD_ATTR_RE.findall(match.group(1))}
-                if attrs.get("id"):
-                    present.add(attrs["id"])
-    return present
-
-def _auto_card(response_text=None, session_id=None, **_):
-    sid = session_id or ""
-    with _LAUNCH_LOCK:
-        rids = _LAUNCHED.pop(sid, [])
-    rids = _take_held(sid) + rids  # interrupted-turn holds first (launch order)
-    if not rids:
-        return None
-    text = response_text or ""
-    present = _visible_cards(text)
-    missing = [r for r in rids if r not in present]
-    if not missing:
-        return None
-    cards = "\n".join(_card(r) for r in missing)
-    return (text.rstrip() + "\n\n" + cards + "\n") if text.strip() else cards + "\n"
-
 def register(ctx):
     global _CTX
     _CTX = ctx
-    ctx.register_hook("transform_llm_output", _auto_card)
-    ctx.register_hook("on_session_end", _clear_launch)
     ctx.register_skill("workflow", HERE / "SKILL.md", description="Run and orchestrate agent workflows.")
     tiers = model_tiers()
     if tiers:

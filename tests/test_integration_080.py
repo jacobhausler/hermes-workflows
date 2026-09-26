@@ -32,15 +32,6 @@ class Integrated(unittest.TestCase):
                 self.assertEqual(engine.drain_inbox(run, consumed), {'a': ['first', 'second']})
                 self.assertEqual(engine.drain_inbox(run, consumed), {})
 
-    def test_valid_card_attrs_and_fences(self):
-        self.assertEqual(wf._visible_cards("::workflow{mode='compact' id='abc' extra=\"x\"}"), {'abc'})
-        self.assertEqual(wf._visible_cards('```\n::workflow{id="abc"}\n```\n::workflow{abc}'), set())
-        self.assertEqual(wf._visible_cards('::workflow{id=abc}'), set())
-        wf._LAUNCHED['owner'] = ['abc']
-        self.assertIsNone(wf._auto_card("::workflow{mode='compact' id='abc'}", 'owner'))
-        wf._LAUNCHED['owner'] = ['abc']
-        self.assertIn('::workflow{id="abc"}', wf._auto_card('```\n::workflow{id="abc"}\n```', 'owner'))
-
     def test_spawn_projection_is_read_only_and_identity_checked(self):
         with tempfile.TemporaryDirectory(dir=ROOT) as td:
             r = Path(td) / 'run'; (r / 'nodes').mkdir(parents=True)

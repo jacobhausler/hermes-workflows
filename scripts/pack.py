@@ -11,7 +11,7 @@ import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = "1.0.1"
+VERSION = re.search(r"^version:\s*([\d.]+)", (ROOT / "plugin.yaml").read_text(), re.M).group(1)  # single source: the manifest
 PACKAGE_NAME = f"hermes-workflows-{VERSION}"
 
 # Exact files plus deliberately narrow source patterns. Never package a worktree wholesale.

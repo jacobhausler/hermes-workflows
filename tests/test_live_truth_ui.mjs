@@ -19,7 +19,8 @@ const runningCount = new Function('isBusy', `${src.match(/const runningCount = [
 assert.equal(runningCount({counts: {running: 3}, runs: [{status: 'held'}]}), 3, 'count all runs, not the recent page')
 assert.equal(runningCount({runs: [{status: 'held'}, {status: 'interrupted'}, {status: 'running'}]}), 1)
 assert.equal(runningCount({counts: {running: 0}, runs: [{status: 'running'}]}), 0)
-assert.match(src, /const live = runningCount\(data\)/)
+assert.match(src, /WORKFLOWS · \$\{runningCount\(data\)\}/, 'the WORKFLOWS tab title is the sole live count (LiveChip deleted)')
+assert.ok(!src.includes('statusBar.right'), 'the status-bar chip is gone — one live count, not two')
 
 const fanItems = new Function(`${grab('fanItems')}\n${grab('itemLabel')}\n${grab('renderGoal')}; return fanItems`)()
 const def = { id: 'a', fanout: { items: [1, 2], goal: 'x' } }

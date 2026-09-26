@@ -15,8 +15,8 @@ background process owned by the calling session, plus a desktop DAG view.
 
 - **Backend half** (`__init__.py`, `wf.py`, `wfcommon.py`, `dashboard/`): Python,
   stdlib-only, lives under `~/.hermes/plugins/hermes-workflows/` on the machine that
-  runs `hermes serve`. Registers the `workflow` tool, the `workflow` skill, two hooks
-  (`transform_llm_output`, `on_session_end`), and read-only dashboard routes.
+  runs `hermes serve`. Registers the `workflow` tool, the `workflow` skill, and
+  read-only dashboard routes.
 - **Desktop half** (`desktop/plugin.js`): plain ESM on the Hermes Desktop plugin SDK
   surface only. Lives under `~/.hermes/desktop-plugins/hermes-workflows/` on the
   machine that runs the **app**. When app and backend are the same machine, Hermes
@@ -58,9 +58,9 @@ cp desktop/plugin.js ~/.hermes/desktop-plugins/hermes-workflows/plugin.js
 shasum -a 256 ~/.hermes/desktop-plugins/hermes-workflows/plugin.js   # compare to the repo's file
 ```
 
-The app fs-watches that directory and hot-loads. If the sidebar row is missing:
-Settings → Plugins (toggle on), then ⌘K → *Reload desktop plugins*. A nav row whose
-first data fetch failed (backend not yet mounted) stays dropped until reloaded.
+The app fs-watches that directory and hot-loads. If the WORKFLOWS tab is missing from
+the SESSIONS | BOTS | WORKFLOWS strip: Settings → Plugins (toggle on), then ⌘K →
+*Reload desktop plugins*.
 
 ### 2c. From a release zip
 
@@ -108,7 +108,7 @@ Ending your turn after `run` is the single most common way a workflow stalls.
   ] }
 ```
 
-Or, the 1.0.1 way — settings once, nodes carry only their work:
+Or, the 1.1 way — settings once, nodes carry only their work:
 
 ```json
 { "name": "check",
@@ -138,12 +138,7 @@ Rules that bite:
   reasoning, provider, model, context}` at graph level; `shape:recon|build|review|publish`
   sizes budgets from measured presets. A `schema` makes the runner write the reply
   contract itself — no contract prose in goals.
-- **Size budgets from measurement, not guesses.** [references/budgets.md](references/budgets.md)
-  has per-shape numbers from real runs. Two invariants: the wall must outlast the
-  turn cap at the route's real per-call latency; a lane that runs the whole test
-  suite is a lane that times out.
-- **Write-first in every goal.** Tell the child to commit/write its artifact *before*
-  polishing, so a wall or cap death leaves something on disk.
+- **Leave budgets unset and name a `shape`; see [references/budgets.md](references/budgets.md).**
 
 ### 3c. Fan-out, gates, branches
 
@@ -161,8 +156,9 @@ Rules that bite:
 A human gate holds until `release`; the desktop view shows the question and hands
 the answer back to the owning session. `hold_timeout` + `default_option` makes a
 decorative gate release itself (`gate.auto_released`); `hold_timeout` alone logs
-`gate.expired` once and keeps holding. Fan-out `quorum` defaults to a majority and
-cancels stragglers once met; `goal` is optional when items carry their own. Machine gates: `wait:{"wait_s":N}` or
+`gate.expired` once and keeps holding. Fan-out `quorum` (optional) races: once N
+succeed, the rest are cancelled; without it the fan-out waits for every item;
+`goal` is optional when items carry their own. Machine gates: `wait:{"wait_s":N}` or
 `wait:{"until_argv":[…],"every_s":60,"timeout_s":3600}`. Tested examples:
 [examples/approve-publish.json](examples/approve-publish.json),
 [examples/branch-on-verdict.json](examples/branch-on-verdict.json).

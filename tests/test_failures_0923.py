@@ -97,13 +97,18 @@ check("Q1 spawn record carries skey/attempt/started/efp",
       live and live.get("skey", "").startswith(f"wf:{r.name}:live:") and live.get("attempt") == 0
       and live.get("started") and len(live.get("efp", "")) == 16, json.dumps(live)[:200])
 sc = (live or {}).get("spawn_cmd") or []
-check("Q1 spawn_cmd: prompt path REDACTED to <prompt>, argv otherwise intact",
-      "--query-file" in sc and sc[sc.index("--query-file") + 1] == "<prompt>"
+# 1.1: the prompt file is DURABLE (A1) — spawn_cmd names it inside <run>/logs,
+# the <prompt> redaction and the tempfile are gone. The lock inverts: argv must
+# carry the real prompt path and it must live in the run dir, never in tmp.
+check("Q1 spawn_cmd: --query-file names the durable prompt file in the run dir",
+      "--query-file" in sc and sc[sc.index("--query-file") + 1].startswith(str(r / "logs"))
+      and sc[sc.index("--query-file") + 1].endswith(".prompt.md")
       and "--oneshot" in sc and "-m" in sc and sc[sc.index("-m") + 1] == "sol"
       and "-t" in sc and sc[sc.index("-t") + 1] == "web"
-      and not any(a.endswith(".txt") and "prompt" not in a for a in sc), json.dumps(sc)[:220])
-check("Q1 spawn_cmd never carries the temp prompt path",
-      live and str(HOME) not in json.dumps(sc) and not any("/tmp" in a for a in sc), json.dumps(sc)[:160])
+      and "<prompt>" not in sc and not any("/tmp" in a for a in sc), json.dumps(sc)[:220])
+check("Q1 the durable prompt file exists and spawn_cmd leaks no tmp path",
+      live and Path(sc[sc.index("--query-file") + 1]).exists()
+      and not any("/tmp" in a for a in sc), json.dumps(sc)[:160])
 lp = Path((live or {}).get("log_path", "/nonexistent"))
 check("Q1 log_path lives under <run>/logs/",
       str(lp).startswith(str(r / "logs")) and lp.name == "live.a0.log", str(lp))

@@ -858,6 +858,67 @@ def run_state(r):
             "done": sum(1 for s in states.values() if s in ("done", "skipped", "partial")),   # #4: a harvest counts done
             "skipped": sum(1 for s in states.values() if s == "skipped"), "total": len(graph["nodes"])}
 
+# ---------- O2: the ONE node-truth read (1.1) ----------
+# Closed key set read verbatim from nodes/<id>[.<i>].json. Two readers (dashboard
+# _view, the door's A2 facts) share it so they can never disagree. Absent keys read
+# `unknown`, never 0 (AGENTS.md rule 8). `steer` rides along from _steer_state,
+# which moved here from the door — the door re-imports it (move, not copy).
+
+FACT_KEYS = ("status", "error_class", "error", "attempts", "attempts_log", "final",
+             "harvest", "output", "ms", "started", "log_path", "prompt_path", "efp", "skey")
+
+def node_facts(r, nid, index=None):
+    """Record facts for one node (fan-out item via `index`), plus its steer truth.
+    None when the node has no record at all (never fabricate a record)."""
+    name = str(nid) + (f".{index}" if index is not None else "")
+    rec = jload(Path(r) / "nodes" / f"{name}.json")
+    if not isinstance(rec, dict):
+        return None
+    facts = {k: (rec[k] if k in rec and rec[k] is not None else "unknown")
+             for k in FACT_KEYS}
+    facts["steer"] = _steer_state(Path(r), str(nid))
+    return facts
+
+def _steer_state(r, nid):
+    """B1 + #17 evidence read model for one node: queued = lines addressed to the
+    node in the run inbox; baked = how many its LATEST spawn copied into its bake
+    file; consumed = how far the spawn's cursor advanced (inbox pulls; also
+    echoed as `delivered` for existing readers). All derived from files only —
+    no model self-report is trusted."""
+    try:
+        raw = [l for l in (r / "inbox.jsonl").read_text(encoding="utf-8").splitlines() if l.strip()]
+    except OSError:
+        return None
+    addressed = 0
+    for l in raw:
+        try:
+            m = json.loads(l)
+        except Exception:
+            continue
+        if m.get("node") == nid and m.get("text") is not None and m.get("cmd") != "kill":
+            addressed += 1
+    rec = jload(r / "nodes" / f"{nid}.json") or {}
+    baked = delivered = 0
+    if (r / "steer").is_dir():
+        files = sorted((r / "steer").glob(f"{nid}.a*.jsonl"),
+                       key=lambda p: int(p.name[len(nid) + 2:-len(".jsonl")] or 0))
+        spawn_rec = files[-1] if files else None
+    else:
+        spawn_rec = None
+    if spawn_rec is not None:
+        try:
+            baked = len([l for l in spawn_rec.read_text(encoding="utf-8").splitlines() if l.strip()])
+        except OSError:
+            baked = 0
+        cur = spawn_rec.with_name(spawn_rec.name.replace(".jsonl", ".cursor"))
+        try:
+            delivered = min(int(cur.read_text().strip() or "0"), baked)
+        except (OSError, ValueError):
+            delivered = 0
+    if not addressed and not baked:
+        return None
+    return {"queued": addressed, "baked": baked, "consumed": delivered}
+
 def run_summary(runs):
     """Counts cover the complete census, even when a caller returns a recent page."""
     counts = {"running": 0}

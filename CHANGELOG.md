@@ -1,5 +1,52 @@
 # Changelog
 
+## 1.1.0 — 2026-09-26 — the run watches itself
+
+Designed by a 4-seat blind counsel (fable/sol/opus/qwen), critic-voted, and built in 8
+write-set lanes. Four overhauls, six additions — every one paid for by a deletion, zero new
+verbs, zero new graph keys.
+
+### Launching is showing (no agent control)
+- A session-owned strip above the composer shows every run the focused chat launched,
+  live, from the dashboard API — no hooks, no TTL, no transcript. Cron launches (no owner)
+  show only in the pane. The `transform_llm_output`/`on_session_end` auto-card machine
+  (~90 LOC + 2 hooks) is deleted; `provides_hooks` is gone from the manifest.
+- The `::workflow{}` directive is now an agent-authored evidence PILL: one line, click to
+  expand in place. The tool hands you the exact `card` line; paste it alone in the reply
+  that launches or reports a run.
+- KEY PAIRING (measured): `owner.session_id` is the runtime id (pairs with
+  `host.focusedSessionId`); `owner.ui_session_id` is the desktop stored id (pairs with
+  `host.focusedStoredSessionId`).
+
+### Explorer V2: one node truth, two readers
+- `wfcommon.node_facts` is the closed record the panel AND `status` read: `error_class,
+  attempts_log, final` (the child's last words), `log_path, prompt_path, efp, steer`.
+- NodePanel replaces the Drawer: FACTS column + Log/Output/Prompt/Final tabs, default by
+  status; live log tail (4 s, only while open); `unknown` for absent, never zero.
+- New read-only route `GET /runs/{id}/nodes/{nid}/log` (contained tail-seek). The
+  partial-output drop in `_view` is fixed.
+
+### WORKFLOWS beside SESSIONS | BOTS
+- Top-level pane tab (the hermes-bots dock pattern), grouped NEEDS YOU / RUNNING / DONE
+  with the one act-on fact per row; `WORKFLOWS · n` title is the sole live count.
+- Deleted: the sidebar nav row, the status-bar LiveChip, the hand-rolled runs column.
+
+### Archify: no (verdict + evidence), SMIL for candy
+- Edges leaving a running node animate; one fan-stack implementation.
+
+### Additions
+- The prompt as sent is durable at `logs/<id>.a<n>.prompt.md` — "what did my child get?"
+  is one file read; the `<prompt>` redaction and tempfile dance are gone.
+- Failed/partial nodes ship their facts (last words, attempts, paths) in `status`; no
+  detail:full + tail dance.
+- Every `status`/`wait` ends with `next`: release/wait/amend rows derived from state, or [].
+- Children start in a durable `<run>/work/<node>/` cwd — the deleted-cwd crash class dies;
+  the write-first law moves from three doc homes into the spawn CONTRACT.
+- Fan-out without `quorum` waits for ALL items (stragglers cancel only on an explicit
+  `quorum`); the commit threshold is unchanged — partial credit survives.
+- budgets.md shrinks to the `shape` presets the door already bakes; a test locks doc==code.
+
+
 ## 1.0.1 — 2026-09-25
 
 Measured against 80 runs / 64 postmortems: 30.6 % of failures died at 0 s on a route or

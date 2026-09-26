@@ -10,13 +10,16 @@ import {
   Button,
   cn,
   Codicon,
+  COMPOSER_AREAS,
   EmptyState,
   host,
+  PANES_AREA,
+  PanelListRow,
+  PanelPill,
+  PanelSectionLabel,
   ROUTES_AREA,
   ScrollArea,
-  SIDEBAR_NAV_AREA,
   StatusDot,
-  Tip,
   TRANSCRIPT_DIRECTIVE_AREA,
   useMutation,
   useQuery,
@@ -149,7 +152,7 @@ function fanItems(def, st, events) {
       label: itemLabel(item, i),
       output: rec && rec.status === 'done' ? rec.output : (recs == null && out && Array.isArray(out.items) && st?.status === 'done' ? out.items[i] : undefined),
       error: rec?.error || ev?.error || null,
-      tail: rec?.raw || ev?.tail || null,
+      tail: ev?.tail || null, // O2: record `raw` is gone; the log route tails the truth
       ms: rec?.ms ?? ev?.ms,
       metrics
     })
@@ -240,7 +243,8 @@ function useTick(on) {
   }, [on])
 }
 
-/** Per-item detail: goal, output, error, tail. Shared by the card and the drawer. */
+/** Per-item peek for the transcript card's FanStrip ONLY. The page's node truth
+ *  lives in NodePanel (O2); the tail pre is gone — the log route is the one tail. */
 function ItemDetail({ row, compact }) {
   const pre = (name, text, tone) => text
     ? box('', label(name), jsx('pre', {
@@ -265,7 +269,6 @@ function ItemDetail({ row, compact }) {
     pre('goal', row.goal),
     pre('error', row.error, EDGE_TONE.failed),
     pre('output', fmtOutput(row.output)),
-    pre('child output tail', row.tail),
     row.status === 'running' ? box('text-xs text-(--ui-text-tertiary)', 'child running…') : null,
     row.status === 'pending' ? box('text-xs text-(--ui-text-tertiary)', 'not started.') : null
   )
@@ -412,19 +415,52 @@ const inlineHeader = (data, elapsed) => {
   return [first, second]
 }
 
+// The collapsed-pill model, pure so node can test it without a DOM: one
+// line for a transcript card, expanded in place by local useState (never
+// localStorage, never tracking whether the agent emitted the card).
+export function pillModel(run) {
+  const start = parseTime(run?.started)
+  const end = TERMINAL.has(run?.status) ? parseTime(run?.updated) : Date.now()
+  const bits = [run?.name || run?.id || 'workflow', statusLabel(run?.status), nodesCount(run)]
+  const elapsed = start && end > start ? end - start : null
+  if (elapsed != null) bits.push(fmtDur(elapsed))
+  return { collapsedLine: bits.join(' · '), expanded: false }
+}
+
 function DirectiveBody({ id }) {
   const { data, error } = useQuery(runQuery(id))
   const fanOpen = useValue($fanOpen)
   const fanItem = useValue($fanItem)
+  const [open, setOpen] = useState(false)
   // idle seconds on live chips / item vitals move between the 4 s refetches
   useTick(!!data && data.status === 'running')
   const frame = {
     display: 'inline-flex', flexDirection: 'column', gap: 6, maxWidth: '100%',
     border: '1px solid var(--ui-stroke-secondary)', borderRadius: 8, padding: '8px 10px',
-    background: 'var(--ui-bg-secondary, transparent)', cursor: 'pointer', verticalAlign: 'top'
+    background: 'var(--ui-bg-secondary, transparent)', verticalAlign: 'top'
   }
   if (error) return jsx('span', { style: frame, className: 'text-xs text-(--ui-text-tertiary)', children: `workflow ${id}` })
   if (!data) return jsx('span', { style: frame, className: 'text-xs text-(--ui-text-tertiary)', children: 'workflow…' })
+  const openRun = e => { if (e) e.stopPropagation(); $selRun.set(data.id); host.navigate('/workflows') }
+  const pill = pillModel(data)
+  // Collapsed (the default): one line + ▾ toggles expand in place, ↗ opens
+  // /workflows explicitly. One click cannot both, so the whole-card navigate
+  // onClick is gone — no role=link, the card body is inert chrome.
+  if (!open) {
+    return jsxs('span', {
+      style: { ...frame, flexDirection: 'row', alignItems: 'center', gap: 6, cursor: 'pointer' },
+      role: 'button',
+      title: 'Expand',
+      onClick: () => setOpen(true),
+      children: [
+        jsx(Dot, { status: data.status }),
+        jsx('span', { className: 'text-xs text-(--ui-text-secondary)', children: pill.collapsedLine }),
+        jsx('span', { className: 'text-xs text-(--ui-text-tertiary)', children: '▾' }),
+        jsx('button', { type: 'button', title: 'Open in Workflows', className: 'text-xs text-(--ui-text-tertiary)',
+          style: { cursor: 'pointer' }, onClick: openRun, children: '↗' })
+      ]
+    })
+  }
   const start = parseTime(data.started)
   const end = TERMINAL.has(data.status) ? parseTime(data.updated) : Date.now()
   const nodes = data.graph?.nodes || []
@@ -434,9 +470,6 @@ function DirectiveBody({ id }) {
   const headerRows = inlineHeader(data, start ? end - start : null)
   return jsxs('span', {
     style: frame,
-    role: 'link',
-    title: 'Open in Workflows',
-    onClick: () => { $selRun.set(data.id); host.navigate('/workflows') },
     children: [
       jsxs('span', {
         style: { display: 'flex', flexDirection: 'column', gap: 2, maxWidth: '100%' },
@@ -445,7 +478,11 @@ function DirectiveBody({ id }) {
             className: 'text-xs text-(--ui-text-secondary)',
             children: [jsx(Dot, { status: data.status }), ...headerRows[0].map((text, i) => jsx('span', {
               className: i === 0 ? 'font-medium' : 'text-(--ui-text-tertiary)', children: text
-            }, i))] }),
+            }, i)),
+            jsx('button', { type: 'button', title: 'Collapse', 'aria-label': 'Collapse',
+              style: { marginLeft: 'auto', cursor: 'pointer', opacity: 0.8 }, onClick: () => setOpen(false), children: '▾' }),
+            jsx('button', { type: 'button', title: 'Open in Workflows', 'aria-label': 'Open in Workflows',
+              style: { cursor: 'pointer', opacity: 0.8 }, onClick: openRun, children: '↗' })] }),
           headerRows[1].length ? jsx('span', { style: { display: 'flex', flexWrap: 'wrap', gap: '2px 8px', fontSize: 10, fontVariantNumeric: 'tabular-nums' },
             className: 'text-(--ui-text-tertiary)',
             children: headerRows[1].map((text, i) => jsx('span', { children: text }, i)) }) : null
@@ -537,15 +574,9 @@ function MiniGraph({ detail }) {
       ]
     })
     if (!fo) return label
-    // ghost stack: two offset outlines behind the pill
-    return jsxs('span', {
-      style: { position: 'relative', display: 'inline-block', paddingRight: 4, paddingBottom: 4 },
-      children: [
-        jsx('span', { 'aria-hidden': true, style: { position: 'absolute', inset: '4px 0 0 4px', border: `1px solid ${tone}`, borderRadius: 999, opacity: 0.35 } }),
-        jsx('span', { 'aria-hidden': true, style: { position: 'absolute', inset: '2px 2px 2px 2px', border: `1px solid ${tone}`, borderRadius: 999, opacity: 0.55 } }),
-        label
-      ]
-    })
+    // One fan-stack, not two (O4): MiniGraph's pill reuses the page canvas's
+    // FanStack in pill mode — 2px ghost outlines in the pill's own tone.
+    return jsx(FanStack, { count: (items ?? 1) + 1, pill: true, tone, children: label })
   }
   const cols = columnGroups(nodes, depthMap(nodes))
   // Mini canvas: measured width minus padding; pills fall back to MINI.pillW
@@ -574,6 +605,137 @@ function MiniGraph({ detail }) {
       )
     ]
   })
+}
+
+// -- 1b. composer session strip (composer.top) ----------------------------------
+// The runs of the FOCUSED chat, above its composer. Pure core (ownedRuns,
+// splitRuns, pillModel) so node can test the model without a DOM; the O3
+// pane reuses ownedRuns for its "this chat" tag. Fold state is an in-memory
+// plugin atom — never localStorage.
+
+const $stripFold = atom(null) // focused sid while its terminal fold is expanded
+
+/** Runs owned by one chat: owner.session_id === sid (the durable stored id).
+ *  Cron launches carry owner.session_id '' and therefore never appear here —
+ *  honest absence; they surface in the pane only. uiSid is the optional
+ *  second key (owner.ui_session_id, the live runtime id stamped at spawn):
+ *  it catches chats whose durable id rotated (compression) mid-run. */
+export function ownedRuns(runs, sid, uiSid = '') {
+  if (!sid && !uiSid) return []
+  return (runs || []).filter(r =>
+    (sid && r?.owner?.session_id === sid) || (uiSid && r?.owner?.ui_session_id === uiSid))
+}
+
+/** Model split of one chat's runs: held first, then running by started desc,
+ *  active capped at 3 with the rest as an overflow count; terminal runs fold
+ *  into at most 5 lines (most recently updated first). */
+export function splitRuns(runs) {
+  const list = runs || []
+  const live = list.filter(r => !TERMINAL.has(r.status))
+  const terminal = list.filter(r => TERMINAL.has(r.status))
+  const held = live.filter(r => r.status === 'held')
+  const rest = live.filter(r => r.status !== 'held')
+    .sort((a, b) => parseTime(b.started) - parseTime(a.started))
+  const active = [...held, ...rest]
+  return {
+    active: active.slice(0, 3),
+    overflow: Math.max(0, active.length - 3),
+    terminalFold: terminal
+      .sort((a, b) => parseTime(b.updated) - parseTime(a.updated))
+      .slice(0, 5),
+    terminalTotal: terminal.length
+  }
+}
+
+/** O3 pane action-first grouping: NEEDS YOU (held + failed + interrupted — the
+ *  owner must act on all three), RUNNING (running + pending), DONE (done +
+ *  stopped). Within each group, newest `updated` first. Pure, so node can
+ *  test it without a DOM. */
+export function groupRuns(runs) {
+  const byUpdated = (a, b) => parseTime(b.updated) - parseTime(a.updated)
+  const list = runs || []
+  return {
+    needsYou: list.filter(r => ['held', 'failed', 'interrupted'].includes(r.status)).sort(byUpdated),
+    running: list.filter(r => ['running', 'pending'].includes(r.status)).sort(byUpdated),
+    done: list.filter(r => ['done', 'stopped'].includes(r.status)).sort(byUpdated)
+  }
+}
+
+function StripRow({ run }) {
+  const start = parseTime(run.started)
+  const end = TERMINAL.has(run.status) ? parseTime(run.updated) : Date.now()
+  const [row1, row2] = inlineHeader(run, start && end > start ? end - start : null)
+  return jsxs('div', {
+    className: 'flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[0.6875rem]',
+    children: [
+      jsx(Dot, { status: run.status }),
+      ...row1.map((text, i) => jsx('span', {
+        className: i === 0 ? 'font-medium text-(--ui-text-secondary)' : 'text-(--ui-text-tertiary)',
+        children: text
+      }, i)),
+      ...row2.map((text, i) => jsx('span', {
+        className: 'text-(--ui-text-tertiary)', style: { fontSize: 10, fontVariantNumeric: 'tabular-nums' },
+        children: text
+      }, row1.length + i)),
+      run.status === 'held' && run.held_gate
+        ? jsx(GateActions, {
+            runId: run.id, gate: run.held_gate, owner: run.owner || {},
+            // The focused chat IS the owner here — nudgeOwner's hand-off
+            // lands in this composer. No new DOM coupling.
+          }, 'gate')
+        : null
+    ]
+  })
+}
+
+export function SessionStrip() {
+  // KEY PAIRING (measured 2026-09-26 against this desktop): run.json.owner.session_id
+  // carries the GATEWAY runtime id (`20260923_143041_27e8d2` — state.db sessions.id),
+  // owner.ui_session_id carries the DESKTOP stored id (`3184ce5e`). The SDK names them
+  // inversely to intuition: host.focusedSessionId is $focusedRuntimeId (the runtime id),
+  // host.focusedStoredSessionId is the desktop token. Pair each owner key with its SAME-SHAPE
+  // host key; a swapped pair silently renders nothing, which no unit test can see.
+  const runtimeSid = useValue(host.focusedSessionId)
+  const storedSid = useValue(host.focusedStoredSessionId)
+  const { data } = useQuery(listQuery())
+  const foldOpen = useValue($stripFold)
+  const owned = ownedRuns(data?.runs || [], runtimeSid || '', storedSid || '')
+  const pairKey = runtimeSid || storedSid || ''
+  if (!pairKey || !owned.length) return null
+  const { active, overflow, terminalFold, terminalTotal } = splitRuns(owned)
+  const openRun = id => { $selRun.set(id); host.navigate('/workflows') }
+  const folded = foldOpen !== pairKey
+  return box(
+    'flex flex-col gap-0.5 border-b border-(--ui-stroke-secondary) px-3 py-1',
+    ...active.map(r => jsx(StripRow, { run: r }, r.id)),
+    overflow > 0
+      ? jsx('button', {
+          type: 'button', className: 'text-left text-[0.6875rem] text-(--ui-text-tertiary)',
+          style: { cursor: 'pointer', background: 'none', border: 'none', padding: 0 },
+          onClick: () => host.navigate('/workflows'),
+          children: `+${overflow} more → Workflows`
+        })
+      : null,
+    terminalTotal
+      ? jsxs('button', {
+          type: 'button', className: 'text-[0.6875rem] text-(--ui-text-tertiary)',
+          style: { cursor: 'pointer', background: 'none', border: 'none', padding: 0, textAlign: 'left' },
+          onClick: () => $stripFold.set(folded ? pairKey : null),
+          children: [`▸ ${terminalTotal} finished`]
+        })
+      : null,
+    !folded
+      ? box(
+          'flex flex-col gap-0.5 pl-3',
+          ...terminalFold.map(r => jsx('button', {
+            type: 'button', className: 'text-left text-[0.6875rem] text-(--ui-text-tertiary)',
+            style: { cursor: 'pointer', background: 'none', border: 'none', padding: 0 },
+            onClick: () => openRun(r.id),
+            children: `${r.name || r.id} · ${statusLabel(r.status)} · ${ago(r.updated) || 'unknown'}`
+          }, r.id))
+        )
+      : null
+  )
 }
 
 // -- 2. page /workflows ---------------------------------------------------------
@@ -921,13 +1083,20 @@ function Edges({ nodes, rects, states, gate }) {
     const down = nodeState(nodes.find(n => n.id === e.to), states, gate)
     const tone = edgeTone(up, down)
     const dead = up === 'failed'
+    // SMIL candy: edges leaving a RUNNING node flow (dash march via inline
+    // <animate>, no CSS keyframes — purged-Tailwind-safe). Terminal states
+    // stop the animation: no <animate> child leaves a non-running node.
+    const flow = up === 'running'
     paths.push(
       jsx('path', {
         d: routeEdge(x1, y1, x2, y2, rects, [e.from, e.to]),
         fill: 'none', stroke: tone, strokeWidth: 1.5,
-        strokeDasharray: dead ? '3 3' : up === 'pending' ? '2 4' : undefined,
+        strokeDasharray: dead ? '3 3' : flow ? '6 4' : up === 'pending' ? '2 4' : undefined,
         markerEnd: `url(#${mid}-${dead ? 'dead' : 'live'})`,
-        opacity: up === 'pending' ? 0.55 : 0.95
+        opacity: up === 'pending' ? 0.55 : 0.95,
+        children: flow
+          ? jsx('animate', { attributeName: 'stroke-dashoffset', from: 10, to: 0, dur: '0.9s', repeatCount: 'indefinite' })
+          : undefined
       }, `${e.from}->${e.to}`)
     )
   }
@@ -948,23 +1117,33 @@ function Edges({ nodes, rects, states, gate }) {
 }
 
 /** Fan-out: the real card in front, N-1 ghost offsets behind + an items badge.
+ *  THE one fan-stack (O4): the page canvas uses the card geometry (size 6,
+ *  rounded-md, badge); MiniGraph's pills reuse it with size 2 and the pill
+ *  outline tone (pill:true, badge:false — the pill carries its own ×N count).
  *  Expanded (page canvas): the badge becomes a chevron toggle that collapses the
  *  stack back, and the per-item cards render as its sibling (see GraphView). */
-function FanStack({ children, count, terminal, expanded, onToggleExpand }) {
+function FanStack({ children, count, terminal, expanded, onToggleExpand, size = 6, pill = false, tone }) {
   const ghosts = expanded ? 0 : Math.min(Math.max(count - 1, 0), 3)
   return jsxs('div', {
     className: 'relative',
-    style: { paddingRight: ghosts * 6, paddingBottom: ghosts * 6 },
+    style: { paddingRight: ghosts * size, paddingBottom: ghosts * size },
     children: [
       ...Array.from({ length: ghosts }, (_, i) =>
         jsx('div', {
           'aria-hidden': true,
-          className: 'absolute inset-0 rounded-md border border-(--ui-stroke-secondary)',
-          style: { transform: `translate(${(ghosts - i) * 6}px, ${(ghosts - i) * 6}px)`, zIndex: i, right: ghosts * 6, bottom: ghosts * 6, background: 'var(--ui-sidebar-surface-background, var(--card))' }
+          className: pill ? 'absolute inset-0' : 'absolute inset-0 rounded-md border border-(--ui-stroke-secondary)',
+          style: pill
+            ? {
+                transform: `translate(${(ghosts - i) * size}px, ${(ghosts - i) * size}px)`, zIndex: i,
+                right: ghosts * size, bottom: ghosts * size,
+                border: `1px solid ${tone}`, borderRadius: 999, opacity: i === ghosts - 1 ? 0.55 : 0.35
+              }
+            : { transform: `translate(${(ghosts - i) * size}px, ${(ghosts - i) * size}px)`, zIndex: i, right: ghosts * size, bottom: ghosts * size, background: 'var(--ui-sidebar-surface-background, var(--card))' }
         }, `g${i}`)
       ),
       jsx('div', { className: 'relative', style: { zIndex: ghosts + 1 }, children }),
-      onToggleExpand ? jsxs('button', {
+      // Pill mode carries its own ×N count on the pill itself — no badge.
+      pill ? null : onToggleExpand ? jsxs('button', {
         type: 'button',
         title: expanded ? 'Collapse items' : 'Expand items',
         'aria-label': expanded ? 'Collapse fan-out items' : 'Expand fan-out items',
@@ -1189,104 +1368,194 @@ function Timeline({ detail }) {
   )
 }
 
-function Drawer({ detail }) {
+// -- O2 NodePanel: one node truth, two readers --------------------------------
+// Replaces Drawer + the drawer's ItemDetail use. Every field reads verbatim from
+// the record the backend merges into nodes[id] (wfcommon.node_facts via the
+// dashboard _view); an absent fact reads `unknown`, never 0 and never fabricated.
+// The only text sources are the graph def (already in detail.graph) and the one
+// read-only log route — there is NO second prompt assembler here.
+const FACT_TONE = 'var(--ui-text-secondary)'
+const UNKNOWN = 'unknown'
+const TAIL_BYTES = 16384          // the contract's chosen constant, mirrored
+const defaultTabFor = st =>
+  st === 'running' || st === 'failed' || st === 'partial' ? 'Log' : st === 'done' ? 'Output' : 'Prompt'
+const unk = v => v == null || v === '' ? UNKNOWN : v
+const factText = v => typeof v === 'string' ? v : v == null ? UNKNOWN : (() => { try { return JSON.stringify(v, null, 2) } catch { return String(v) } })()
+const logBase = p => { const s = String(p ?? ''); const i = s.lastIndexOf('/'); return i < 0 ? (s || UNKNOWN) : s.slice(i + 1) }
+const attemptNo = facts => {
+  const m = /(\d+)\.log$/.exec(String(facts?.log_path ?? ''))
+  return m ? m[1] : UNKNOWN
+}
+
+function useNodeLogTail(runId, nodeId, facts, tab, open, live) {
+  // ONE read-only route, the client never sends a path; polled at 4 s only while
+  // the panel is open on the Log tab and the node is running.
+  const want = open && (tab === 'Log' || tab === 'Prompt') && facts
+    && (tab === 'Log' ? facts.log_path : facts.prompt_path)
+  const q = want ? `?kind=${tab === 'Log' ? 'log' : 'prompt'}&tail=${TAIL_BYTES}` : null
+  return useQuery({
+    queryKey: [...Q, 'log', runId, nodeId, q || 'off'],
+    enabled: !!q && ID_OK.test(String(runId)) && ID_OK.test(String(nodeId)),
+    queryFn: () => api(`/runs/${encodeURIComponent(runId)}/nodes/${encodeURIComponent(nodeId)}/log${q}`),
+    refetchInterval: tab === 'Log' && live ? 4000 : false
+  })
+}
+
+function NodePanel({ detail }) {
   const sel = useValue($selNode)
   const fanItem = useValue($fanItem)
-  useTick(detail.status === 'running') // only current activity ticks
-  if (!sel || sel.runId !== detail.id || !detail.graph) return null
-  const def = (detail.graph.nodes || []).find(n => n.id === sel.nodeId)
+  const open = !!sel && sel.runId === detail.id && !!detail.graph
+  const def = open ? (detail.graph.nodes || []).find(n => n.id === sel.nodeId) : null
+  const [tab, setTab] = useState(null)
+  const shown = def ? (detail.nodes || {})[def.id] || {} : {}
+  const status = shown.status || 'pending'
+  const live = status === 'running'
+  useTick(live) // only current activity ticks
+  const rows = def && def.fanout ? fanItems(def, shown, detail.events) : null
+  const picked = rows && fanItem && fanItem.runId === detail.id && fanItem.nodeId === def.id
+    ? rows.find(r => r.index === fanItem.index) : null
+  // Picking a fan-out item swaps FACTS to that item's record: the backend ships
+  // per-item records merged as item_records[i] (same closed key set); where they
+  // are absent, the fanItems row is the only truth and every other fact reads
+  // `unknown`. Node-level facts arrive merged flat onto nodes[id] (the _view
+  // merge of wfcommon.node_facts), so `shown` IS the record read.
+  const ITEM_FACTS = ['status', 'error_class', 'error', 'attempts', 'attempts_log', 'final', 'harvest', 'output', 'ms', 'started', 'log_path', 'prompt_path', 'efp', 'skey', 'steer']
+  const facts = picked
+    ? (shown.item_records && shown.item_records[picked.index])
+      || Object.fromEntries(ITEM_FACTS.map(k => k === 'status' ? [k, picked.status]
+        : k === 'error' ? [k, picked.error ?? null]
+        : k === 'output' ? [k, picked.output ?? null]
+        : k === 'ms' ? [k, picked.ms ?? null] : [k, null]))
+    : shown
+  const effStatus = (facts && facts.status != null && facts.status !== UNKNOWN ? facts.status : status) || 'pending'
+  const name = def ? (picked != null ? `${def.id}·${picked.index}` : def.id) : ''
+  // No remembered state: a manual pick lives only for this node+status; a new
+  // selection (or a status change) re-derives the default tab.
+  const activeTab = (tab && tab[0] === `${name}:${effStatus}` ? tab[1] : null) || defaultTabFor(effStatus)
+  const logQ = useNodeLogTail(detail.id, def?.id, facts, activeTab, open && !!def, live && activeTab === 'Log')
   if (!def) return null
-  const st = (detail.nodes || {})[def.id] || {}
-  const rows = def.fanout ? fanItems(def, st, detail.events) : null
-  const picked = rows && fanItem && fanItem.runId === detail.id && fanItem.nodeId === def.id ? rows.find(r => r.index === fanItem.index) : null
-  // fan-out: the merged list is the node's output; per-item truth lives in the chips.
-  const body = rows ? fmtOutput(st.output && Array.isArray(st.output.items) ? st.output.items : st.output) : fmtOutput(st.output)
   const fc = rows && rows.length ? fanCounts(rows) : null
-  const preCls = 'overflow-auto whitespace-pre-wrap break-words rounded border border-(--ui-stroke-secondary) p-2 text-[0.6875rem] text-(--ui-text-secondary)'
-  // Report panel: full width under the graph (the timeline moved to the right rail),
-  // so goal/error/items sit LEFT and the output pane gets the wide RIGHT column.
+  const preCls = 'overflow-auto whitespace-pre-wrap break-words rounded border border-(--ui-stroke-secondary) p-2 text-[0.6875rem]'
+  const sect = (name, child) => child ? box('flex flex-col gap-1 min-w-0', label(name), child) : null
+  const pre = (name, text, tone) => text
+    ? sect(name, jsx('pre', {
+        style: { color: tone || FACT_TONE, maxHeight: '20vh' },
+        className: 'overflow-auto whitespace-pre-wrap break-words rounded border border-(--ui-stroke-secondary) p-2 text-[0.6875rem]',
+        children: text }))
+    : null
+  // FACTS (left column). Absent facts read `unknown`; structured facts print as JSON.
+  const chip = (text, onClick, on) => jsx('button', {
+    type: 'button', onClick,
+    style: {
+      display: 'inline-flex', alignItems: 'center', height: 18, padding: '0 7px', fontSize: 10,
+      lineHeight: 1, whiteSpace: 'nowrap', cursor: 'pointer', borderRadius: 999,
+      border: `1px solid ${on ? 'var(--ui-accent)' : 'var(--ui-stroke-secondary)'}`,
+      background: 'transparent', color: 'var(--ui-text-secondary)'
+    },
+    children: text })
+  const inputChips = box('flex flex-wrap gap-1',
+    ...(def.after || []).map(a => chip(a, () => { $selNode.set({ runId: detail.id, nodeId: a }); $fanItem.set(null) }, false)),
+    ...(Array.isArray(def.inputs) ? def.inputs : []).map(s => chip(String(s), undefined, false)))
   const left = box(
     'flex min-w-0 flex-col gap-3',
     def.type === 'gate'
-      ? jsx(Labeled, { name: 'question', text: def.question })
-      : jsx(Labeled, { name: 'goal', text: def.goal, pre: true }),
-    def.context ? jsx(Labeled, { name: 'context', text: def.context, pre: true }) : null,
-    box('flex flex-wrap gap-x-3 gap-y-1 text-[0.6875rem] text-(--ui-text-tertiary)',
-      def.model ? jsx('span', { children: `model: ${def.model}` }) : null,
-      def.after && def.after.length ? jsx('span', { children: `after: ${def.after.join(', ')}` }) : null,
-      st.ms != null ? jsx('span', { children: fmtDur(st.ms) }) : null,
-      def.timeout ? jsx('span', { children: `timeout ${def.timeout}s` }) : null,
-      def.fanout && def.fanout.quorum ? jsx('span', { children: `quorum ${def.fanout.quorum}` }) : null),
-    st.error ? box('', label('error'), jsx('pre', {
-      style: { color: EDGE_TONE.failed, maxHeight: '20vh' },
-      className: 'overflow-auto whitespace-pre-wrap break-words rounded border border-(--ui-stroke-secondary) p-2 text-[0.6875rem]',
-      children: st.error })) : null,
+      ? sect('question', box('text-xs whitespace-pre-wrap text-(--ui-text-secondary)', unk(def.question)))
+      : sect('goal', box('text-xs whitespace-pre-wrap text-(--ui-text-secondary)', unk(def.goal))),
+    def.context ? sect('context', box('text-xs whitespace-pre-wrap text-(--ui-text-secondary)', def.context)) : null,
+    sect('inputs', inputChips),
+    sect('schema required', box('flex flex-wrap gap-1',
+      ...(def.schema?.required?.length ? def.schema.required.map(k => chip(String(k), undefined, false))
+        : [box('text-xs text-(--ui-text-tertiary)', UNKNOWN)]))),
+    sect('budgets', box('flex flex-wrap gap-x-3 gap-y-1 text-[0.6875rem] text-(--ui-text-tertiary)',
+      jsx('span', { children: `max_turns: ${unk(def.max_turns)}` }),
+      jsx('span', { children: `timeout: ${unk(def.timeout)}` }),
+      jsx('span', { children: `run_budget: ${unk(def.run_budget)}` }),
+      jsx('span', { children: `shape: ${unk(def.shape)}` }))),
+    sect('blocked_by', box('text-xs whitespace-pre-wrap text-(--ui-text-secondary)',
+      Array.isArray(shown.blocked_by) && shown.blocked_by.length ? shown.blocked_by.join(', ') : UNKNOWN)),
+    shown.parked ? sect('parked', box('text-xs text-(--ui-text-secondary)', factText(shown.parked))) : null,
+    pre('error', facts && facts.error !== UNKNOWN ? facts.error : shown.error, EDGE_TONE.failed),
+    sect('attempts_log', box('text-xs whitespace-pre-wrap text-(--ui-text-secondary)',
+      Array.isArray(facts?.attempts_log) && facts.attempts_log.length
+        ? facts.attempts_log.map(a => `#${a.attempt} ${unk(a.error_class)}`).join(' · ') : UNKNOWN)),
+    sect('efp', box('text-xs text-(--ui-text-secondary)',
+      `${unk(facts?.efp)}${shown.stale_of_amend ? ' · stale of amend' : ''}`)),
+    sect('steer', box('text-xs text-(--ui-text-secondary)',
+      facts?.steer ? `queued ${facts.steer.queued ?? UNKNOWN} · baked ${facts.steer.baked ?? UNKNOWN} · consumed ${facts.steer.consumed ?? UNKNOWN}` : UNKNOWN)),
+    sect('skey', box('text-xs select-text text-(--ui-text-tertiary)', unk(facts?.skey))),
     fc
-      ? box(
-          'flex flex-col gap-2',
+      ? box('flex flex-col gap-2',
           label(`items · ${fanSummary(fc)}`),
-          jsx(ItemChips, { runId: detail.id, nodeId: def.id, rows, picked: picked?.index })
-        )
+          jsx(ItemChips, { runId: detail.id, nodeId: def.id, rows, picked: picked?.index }))
       : null
   )
-  const right = box(
-    'flex min-w-0 flex-col gap-3',
-    picked
-      ? box('flex flex-col gap-1', label(`item ${picked.index} · ${statusLabel(picked.status)}`),
-          box('rounded border border-(--ui-stroke-secondary) p-2', jsx(ItemDetail, { row: picked })))
-      : rows ? box('text-xs text-(--ui-text-tertiary)', 'Pick an item for its goal, output, error and child tail.') : null,
-    box(
-      'flex min-h-0 flex-col gap-1',
-      label(rows ? 'merged output' : 'output'),
-      body
-        ? jsx('pre', { style: { maxHeight: '60vh' }, className: preCls, children: body })
+  // TABS (right column): no remembered state across node switches (keyed below).
+  const logHead = activeTab === 'Log'
+    ? box('text-[0.6875rem] text-(--ui-text-tertiary)', `attempt ${attemptNo(facts)} · ${logBase(facts?.log_path)}`)
+    : activeTab === 'Prompt'
+      ? box('text-[0.6875rem] text-(--ui-text-tertiary)', logBase(facts?.prompt_path)) : null
+  const tabBody = () => {
+    if (activeTab === 'Output') {
+      const out = fmtOutput(facts?.output ?? shown.output)
+      return out
+        ? box('flex flex-col gap-1',
+            effStatus === 'partial' ? jsx(Badge, { variant: 'outline', children: 'partial — harvested output' }) : null,
+            pre('output', out))
         : box('text-xs text-(--ui-text-tertiary)', 'No output yet.')
-    )
+    }
+    if (activeTab === 'Final') {
+      const f = facts && typeof facts.final === 'string' ? facts.final : null
+      return f ? pre('final', f, status === 'failed' ? EDGE_TONE.failed : FACT_TONE)
+        : box('text-xs text-(--ui-text-tertiary)', 'final: unknown')
+    }
+    if (activeTab === 'Prompt') {
+      if (!facts?.prompt_path) return box('text-xs text-(--ui-text-tertiary)', 'prompt: unknown (not persisted)')
+      return logQ.data?.content
+        ? jsx('pre', { className: preCls, style: { maxHeight: '60vh' }, children: logQ.data.content })
+        : box('text-xs text-(--ui-text-tertiary)', logQ.isPending ? 'loading…' : 'prompt: unknown (not persisted)')
+    }
+    // Log
+    return logQ.data?.content
+      ? jsx('pre', { className: preCls, style: { maxHeight: '60vh' }, children: logQ.data.content })
+      : box('text-xs text-(--ui-text-tertiary)', facts?.log_path ? (logQ.isPending ? 'loading…' : 'log: unknown') : 'log: unknown')
+  }
+  const right = box(
+    'flex min-w-0 flex-col gap-2',
+    box('flex items-center gap-1',
+      ...['Log', 'Output', 'Prompt', 'Final'].map(t => jsx('button', {
+        type: 'button', onClick: () => setTab([`${name}:${effStatus}`, t]),
+        style: {
+          display: 'inline-flex', height: 20, padding: '0 8px', fontSize: 11, cursor: 'pointer',
+          borderRadius: 6, border: `1px solid ${activeTab === t ? 'var(--ui-accent)' : 'var(--ui-stroke-secondary)'}`,
+          background: 'transparent', color: 'var(--ui-text-secondary)'
+        },
+        children: t }, t))),
+    logHead,
+    box('flex min-h-0 flex-col gap-1', tabBody())
   )
   return box(
     'flex flex-col gap-3 border-t border-(--ui-stroke-secondary) p-4',
     box(
       'flex items-center gap-2',
-      jsx(Dot, { status: st.status || 'pending' }),
-      box('min-w-0 flex-1 truncate text-sm font-medium', def.id),
-      jsx(Badge, { variant: 'outline', children: statusLabel(st.status || 'pending') }),
-      st.metrics ? jsx(Vitals, { m: st.metrics, live: st.status === 'running', cost: true }) : null,
+      jsx(Dot, { status }),
+      box('min-w-0 flex-1 truncate text-sm font-medium', name),
+      jsx(Badge, { variant: 'outline', children: statusLabel(status) }),
+      jsx('span', { className: 'text-[0.6875rem] text-(--ui-text-tertiary)', children: unk(facts?.error_class ?? shown.error_class) }),
+      (facts?.attempts ?? shown.attempts) > 1 ? jsx('span', { className: 'text-[0.6875rem] text-(--ui-text-tertiary)', children: `↻${facts.attempts}` }) : null,
+      box('min-w-0 truncate text-[0.6875rem] text-(--ui-text-tertiary)',
+        `${unk(def.model)} · ${unk(def.provider)} · ${unk(def.reasoning)}`),
+      shown.metrics ? jsx(Vitals, { m: shown.metrics, live, cost: true }) : null,
       jsx(Button, { size: 'xs', variant: 'ghost', 'aria-label': 'Close', onClick: () => { $selNode.set(null); $fanItem.set(null) }, children: '×' })
     ),
-    jsx('div', { style: { display: 'grid', gridTemplateColumns: 'minmax(260px, 2fr) minmax(0, 3fr)', gap: 16 }, children: jsxs(Fragment, { children: [left, right] }) })
+    jsx('div', {
+      key: `${detail.id}:${name}:${status}`,
+      style: { display: 'grid', gridTemplateColumns: 'minmax(260px, 2fr) minmax(0, 3fr)', gap: 16 },
+      children: jsxs(Fragment, { children: [left, right] })
+    })
   )
 }
-
-function RunRow({ run, active }) {
-  return jsxs(
-    'button',
-    {
-      type: 'button',
-      onClick: () => {
-        $selRun.set(run.id)
-        $selNode.set(null)
-      },
-      className: cn(
-        'flex w-full flex-col gap-0.5 rounded-md border border-transparent bg-transparent px-2 py-1.5 text-left transition-colors hover:bg-(--chrome-action-hover)',
-        active && 'border-(--ui-stroke-secondary)'
-      ),
-      children: [
-        box(
-          'flex min-w-0 items-center gap-1.5',
-          jsx(Dot, { status: run.status }),
-          box('min-w-0 flex-1 truncate text-xs font-medium', run.name || run.id),
-          box('text-[0.6875rem] text-(--ui-text-tertiary)', nodesCount(run))
-        ),
-        box(
-          'flex items-center gap-1.5 pl-3 text-[0.6875rem] text-(--ui-text-tertiary)',
-          jsx('span', { children: statusLabel(run.status) }),
-          jsx('span', { children: ago(run.updated) })
-        )
-      ]
-    },
-    run.id
-  )
-}
+// L3 calls the panel under the old name; one alias keeps its region unchanged.
+const Drawer = NodePanel
 
 function WorkflowsPage() {
   const list = useQuery(listQuery())
@@ -1297,19 +1566,6 @@ function WorkflowsPage() {
   const d = detail.data
   return box(
     'flex h-full min-h-0',
-    box(
-      'flex w-60 shrink-0 flex-col border-r border-(--ui-stroke-secondary)',
-      box('px-3 py-2 text-xs font-medium text-(--ui-text-secondary)', 'Workflow runs'),
-      jsx(ScrollArea, {
-        className: 'min-h-0 flex-1',
-        children: runs.length
-          ? box(
-              'flex flex-col gap-0.5 px-1.5 pb-2',
-              ...runs.map(r => jsx(RunRow, { run: r, active: r.id === active?.id }, r.id))
-            )
-          : jsx(EmptyState, { title: 'No runs', description: 'Ask the agent to start a workflow.' })
-      })
-    ),
     box(
       'min-w-0 flex-1 overflow-y-auto',
       !active
@@ -1339,27 +1595,90 @@ function WorkflowsPage() {
   )
 }
 
-// -- 3. sidebar nav + statusbar chip --------------------------------------------
+// -- 3. WORKFLOWS pane (panes area, docked into the sessions strip) -------------
+// The pane is the index; the /workflows route is the record. One global live
+// count (the tab title); no statusbar chip, no second count anywhere.
 
-function LiveChip() {
+function PaneTabTitle() {
   const { data } = useQuery(listQuery())
-  const live = runningCount(data)
-  if (!live) return null
-  return jsx(Tip, {
-    label: 'Workflow runs in progress',
-    children: jsxs('button', {
-      type: 'button',
-      className: cn(
-        'inline-flex h-full items-center gap-1 px-1.5 text-[0.6875rem] transition-colors',
-        'text-(--ui-text-tertiary) hover:bg-(--chrome-action-hover) hover:text-foreground'
-      ),
-      onClick: () => host.navigate('/workflows'),
+  return jsx('span', { children: `WORKFLOWS · ${runningCount(data)}` })
+}
+
+function PaneRow({ run, thisChat }) {
+  const open = () => {
+    $selRun.set(run.id)
+    $selNode.set(null)
+    host.navigate('/workflows')
+  }
+  // Line 2 is the ONE fact to act on, never a decoration.
+  let fact
+  if (run.status === 'held') fact = run.held_gate?.question || `gate · ${run.held_gate?.id || 'unknown'}`
+  else if (run.status === 'failed') fact = run.runner_exit?.reason || 'failed'
+  else if (run.status === 'interrupted') fact = `interrupted · ${nodesCount(run)}`
+  else if (run.status === 'running' || run.status === 'pending') {
+    const start = parseTime(run.started)
+    const elapsed = start ? fmtDur(Date.now() - start) : ''
+    const idle = run.metrics ? idleS(run.metrics) : null
+    fact = [`${nodesCount(run)}`, elapsed, idle != null ? `IDLE ${idle}s` : null].filter(Boolean).join(' · ')
+  } else fact = ago(run.updated)
+  return jsx(PanelListRow, {
+    active: false,
+    lead: jsx(Dot, { status: run.status }),
+    title: jsxs('span', {
+      className: 'inline-flex min-w-0 items-center gap-1',
       children: [
-        jsx('span', { 'aria-hidden': true, className: 'inline-block size-1.5 animate-pulse rounded-full bg-(--ui-accent)' }),
-        `${live} workflow${live > 1 ? 's' : ''}`
+        jsx('span', { className: 'truncate', children: run.name || run.id }),
+        thisChat ? jsx(PanelPill, { tone: 'muted', children: 'this chat' }) : null
       ]
+    }),
+    meta: jsx('span', { className: 'max-w-[8rem] truncate', children: fact }),
+    onSelect: open,
+    rowKey: run.id
+  }, run.id)
+}
+
+function WorkflowsPane() {
+  const { data } = useQuery(listQuery())
+  // Same key pairing as SessionStrip: owner.session_id pairs with the runtime id.
+  const runtimeSid = useValue(host.focusedSessionId)
+  const storedSid = useValue(host.focusedStoredSessionId)
+  const [showAllDone, setShowAllDone] = useState(false)
+  const runs = data?.runs || []
+  const owned = new Set(ownedRuns(runs, runtimeSid, storedSid).map(r => r.id))
+  const { needsYou, running, done } = groupRuns(runs)
+  // The census counts are the backend's full-census numbers (wfcommon
+  // run_summary); absent means unknown, never a fabricated zero.
+  const counts = data?.counts
+  const census = counts
+    ? `runs ${counts.total ?? '?'} · running ${counts.running ?? 0} · held ${counts.held ?? 0} · failed ${counts.failed ?? 0}`
+    : 'runs unknown'
+  const doneShown = showAllDone ? done : done.slice(0, 10)
+  const group = (title, list) => (list.length
+    ? [
+        jsx(PanelSectionLabel, { children: `${title} · ${list.length}` }, title),
+        ...list.map(r => jsx(PaneRow, { run: r, thisChat: owned.has(r.id) }, r.id))
+      ]
+    : [])
+  return box(
+    'flex h-full min-h-0 flex-col',
+    box('px-2 py-1.5 text-[0.6875rem] text-(--ui-text-tertiary)', census),
+    jsx(ScrollArea, {
+      className: 'min-h-0 flex-1',
+      children: box(
+        'flex flex-col gap-0.5 px-1 pb-2',
+        runs.length
+          ? [
+              ...group('NEEDS YOU', needsYou),
+              ...group('RUNNING', running),
+              ...group('DONE', doneShown),
+              !showAllDone && done.length > 10
+                ? jsx(Button, { size: 'xs', variant: 'ghost', onClick: () => setShowAllDone(true), children: `show all ${done.length}` }, 'show-all')
+                : null
+            ]
+          : jsx(EmptyState, { title: 'No runs', description: 'Ask the agent to start a workflow.' })
+      )
     })
-  })
+  )
 }
 
 export default {
@@ -1376,12 +1695,27 @@ export default {
 
     ctx.register({ id: 'page', area: ROUTES_AREA, data: { path: '/workflows' }, render: () => jsx(WorkflowsPage, {}) })
 
+    // SESSIONS | BOTS | WORKFLOWS: verbatim the hermes-bots pane pattern.
+    // dock enforce: standing invariant — the pane re-homes into the sessions
+    // strip at EVERY boot it isn't already there. collapsible: it lives in the
+    // sessions zone, so it must leave the grid with that zone at the
+    // sidebar-collapse breakpoint.
     ctx.register({
-      id: 'nav',
-      area: SIDEBAR_NAV_AREA,
-      data: { path: '/workflows', label: 'Workflows', codicon: 'server-process' }
+      id: 'pane',
+      area: PANES_AREA,
+      title: 'Workflows',
+      data: {
+        placement: 'left',
+        width: '260px',
+        collapsible: true,
+        hideOnly: true,
+        tabTitle: () => jsx(PaneTabTitle, {}),
+        tabTitleText: () => 'Workflows',
+        dock: { pane: 'sessions', pos: 'center', enforce: true }
+      },
+      render: () => jsx(WorkflowsPane, {})
     })
 
-    ctx.register({ id: 'chip', area: 'statusBar.right', order: 130, render: () => jsx(LiveChip, {}) })
+    ctx.register({ id: 'session-strip', area: COMPOSER_AREAS.top, render: () => jsx(SessionStrip, {}) })
   }
 }

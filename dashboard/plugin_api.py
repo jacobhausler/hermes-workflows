@@ -29,7 +29,7 @@ def _workflow_common():
     return module
 
 try:
-    from fastapi import APIRouter
+    from fastapi import APIRouter, HTTPException
     router = APIRouter()
 except ImportError:
     router = None
@@ -57,6 +57,51 @@ def _events(r, limit=400):
         except Exception: pass
     return out
 
+LOG_TAIL = 16384  # O2: chosen constant, not a measured one and not a config.
+
+def _node_log_tail(r, nid, index, attempt, kind, tail):
+    """O2's single read-only log route core. The path comes ONLY from the record's
+    log_path/prompt_path (the client never sends a path) and must resolve inside
+    <run>/logs. Tails the last `tail` bytes by seek, never reads the whole file.
+    Returns dict|None; None = 404-worthy (bad id, no record, escape, missing file)."""
+    common = _workflow_common()
+    if kind not in ("log", "prompt") or not common.ID_OK.match(nid or ""):
+        return None
+    try:
+        tail = int(tail); attempt = None if attempt is None else int(attempt)
+        index = None if index is None else int(index)
+    except (TypeError, ValueError):
+        return None
+    if not 0 < tail <= LOG_TAIL or (attempt is not None and attempt < 0):
+        return None
+    name = nid + (f".{index}" if index is not None else "")
+    rec = common.jload(r / "nodes" / f"{name}.json")
+    if not isinstance(rec, dict):
+        return None
+    p = rec.get("prompt_path" if kind == "prompt" else "log_path")
+    if not isinstance(p, str) or not p:
+        return None
+    lp = Path(p)
+    if attempt is not None:  # sibling spawn log: same base, different .a<n>
+        ext = ".prompt.md" if kind == "prompt" else ".log"
+        lp = lp.with_name(f"{nid}" + (f".{index}" if index is not None else "") + f".a{attempt}{ext}")
+    logs = (r / "logs").resolve()
+    try:
+        rp = lp.resolve()
+        rp.relative_to(logs)  # containment; ValueError on escape
+    except (OSError, ValueError):
+        return None
+    try:
+        size = rp.stat().st_size
+        with open(rp, "rb") as f:
+            if size > tail:
+                f.seek(-tail, os.SEEK_END)
+            data = f.read()
+    except OSError:
+        return None
+    return {"id": r.name, "node": name, "kind": kind, "size": size,
+            "bytes": len(data), "content": data.decode("utf-8", errors="replace")}
+
 def _view(r, full=False):
     st = _workflow_common().run_state(r)
     if not st:
@@ -75,14 +120,14 @@ def _view(r, full=False):
         cm = common.child_metrics(st["run_id"])
         nodes = {}
         for nid, v in st["nodes"].items():
-            rec = None
-            if v["status"] in ("done", "failed"):
-                try: rec = json.loads((r / "nodes" / f"{nid}.json").read_text())
-                except Exception: pass
-            nodes[nid] = {**v, "question": None, "options": None,
-                          "goal": None, "ms": (rec or {}).get("ms"),
-                          "error": (rec or {}).get("error"),
-                          "output": (rec or {}).get("output") if full else None}
+            nodes[nid] = dict(v)
+            # O2: ONE node truth — every node WITH a record gets the closed fact set
+            # verbatim (was: done|failed only, which dropped `partial` output even
+            # though the read model treats partial as output, wfcommon.run_state).
+            facts = common.node_facts(r, nid)
+            if facts is not None:
+                facts = {k: x for k, x in facts.items() if k != "status"}
+                nodes[nid].update(facts)
             # metrics: node-level = the node's own child, or the fold of its items' children.
             # Keys are prefix-matched (any efp suffix) so an amended re-run's fresh rows count.
             prefix = f"wf:{st['run_id']}:{nid}:"
@@ -111,9 +156,6 @@ def _view(r, full=False):
                             if s["skey"].split("#a", 1)[0].startswith(f"{prefix}{i}:")]))
                 if items:
                     nodes[nid]["item_metrics"] = items
-        for n in st["graph"]["nodes"]:
-            nodes[n["id"]].update({"goal": n.get("goal") or (n.get("fanout") or {}).get("goal"),
-                                   "question": n.get("question"), "options": n.get("options")})
         active = [s for v in st["nodes"].values() for s in v.get("active_spawns", [])]
         rollup = _fold_metrics(cm.values()) if cm else ({} if active else None)
         if rollup is not None:
@@ -158,6 +200,20 @@ if router is not None:
     async def get_run(run_id: str):
         r = _safe_run(run_id)
         return (_view(r, full=True) if r else None) or {"error": "unknown run"}
+
+    @router.get("/runs/{run_id}/nodes/{nid}/log")
+    async def get_node_log(run_id: str, nid: str, index: int | None = None,
+                           attempt: int | None = None, kind: str = "log",
+                           tail: int = LOG_TAIL):
+        """O2's ONE tail (the desktop's `rec?.raw` plumbing dies with this route).
+        Read-only; path from the record only; contained to <run>/logs."""
+        r = _safe_run(run_id)
+        if not r:
+            raise HTTPException(status_code=404, detail="unknown run")
+        out = _node_log_tail(r, nid, index, attempt, kind, tail)
+        if out is None:
+            raise HTTPException(status_code=404, detail="no such log")
+        return out
 
     @router.post("/runs/{run_id}/gate")
     async def release_gate(run_id: str, body: dict):

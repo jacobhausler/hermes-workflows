@@ -1,5 +1,5 @@
 name: hermes-workflows
-version: 1.0.1
+version: 1.1.0
 description: Agent-owned workflow graphs — nodes, fan-outs, gates, fingerprint-resume, desktop DAG view
 description_long: |
   Adds a `workflow` tool: the spawning agent owns a JSON graph of agent nodes and
@@ -12,11 +12,3 @@ homepage: https://github.com/jacobhausler/hermes-workflows
 requires_hermes: ">=0.21.4"
 provides_tools:
   - workflow
-provides_hooks:
-  - transform_llm_output
-  - on_session_end
-dashboard:
-  menu:
-    - id: workflows
-      label: Workflows
-      icon: workflow

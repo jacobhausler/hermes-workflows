@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """sprint101 C3 — #12 fan-out ergonomics, #14 gate defaults.
 
-#12  fanout.goal optional (node goal + item goal, no 'unused' placeholder); quorum defaults
-     to a majority; once met, stragglers are cancelled (error_class cancelled) and excluded
-     from failure math; the run ends done.
+#12  fanout.goal optional (node goal + item goal, no 'unused' placeholder); wf1.1 A5:
+     without an explicit quorum the fan-out WAITS FOR ALL items (no straggler
+     cancellation); the commit threshold is explicit quorum else majority (a lone
+     death still commits with partial credit, failed_items reported); explicit
+     quorum races — once met, stragglers are cancelled (error_class cancelled) and
+     excluded from failure math; the run ends done.
 #14  default_option must be one of options (door); hold_timeout + default_option auto-releases
      with gate.auto_released; hold_timeout alone logs gate.expired once and keeps holding until
      a human answer lands.
@@ -65,27 +68,60 @@ check("#12 item prompt carries node goal + item goal, no 'unused' placeholder",
       "SHARED MISSION" in prompts and "item p work" in prompts and "unused" not in prompts.lower(),
       prompts[:300])
 
-# ---- #12b: majority quorum by default; stragglers cancelled; run done ----
+# ---- #12b (wf1.1 A5 split): no quorum => WAIT FOR ALL, no cancellation ever; the
+# commit threshold (majority) is unchanged; explicit quorum races as before. ----
 G = [{"id": "fan", "type": "agent",
       "fanout": {"items": ["fast1", "fast2", "SLEEP 25 slow"], "goal": "{item}"}}]
+r = mk("c3-wait-all", G, "wait-all")
+t0 = time.time(); out = wf("c3-wait-all"); dt = time.time() - t0
+rec = json.loads((r / "nodes/fan.json").read_text())
+check("#12b no quorum: the slow item is awaited and commits (node done)",
+      rec.get("status") == "done" and dt >= 20, f"{dt:.1f}s {json.dumps(rec)[:200]}")
+outp = rec.get("output") or {}
+check("#12b no quorum: cancelled_items carries no value (nothing was cancelled)",
+      not outp.get("cancelled_items") and outp.get("failed_items") == 0,
+      json.dumps(outp)[:200])
+check("#12b no quorum: all 3 items committed", len(outp.get("items") or []) == 3,
+      json.dumps(outp)[:200])
+check("#12b no quorum: run done, no node.failed",
+      out.startswith("WORKFLOW_DONE c3-wait-all")
+      and not any(e["event"] == "node.failed" and e.get("node") == "fan" for e in events(r)),
+      out[-200:])
+# (b) no quorum, one item dies: the node still COMMITS with partial credit (majority
+# threshold unchanged) and reports the failure — it is NOT cancelled and NOT a quorum failure.
+G = [{"id": "fan", "type": "agent",
+      "fanout": {"items": ["fast1", "FAILME dead", "fast3"], "goal": "{item}"}}]
+r = mk("c3-partial", G, "partial")
+out = wf("c3-partial")
+rec = json.loads((r / "nodes/fan.json").read_text())
+outp = rec.get("output") or {}
+check("#12b no quorum + one death: node commits done with failed_items == 1",
+      rec.get("status") == "done" and outp.get("failed_items") == 1
+      and len(outp.get("items") or []) == 2, json.dumps(rec)[:250])
+check("#12b no quorum + one death: cancelled_items carries no value, run done",
+      not outp.get("cancelled_items") and out.startswith("WORKFLOW_DONE c3-partial"),
+      json.dumps(outp)[:200])
+# (c) explicit quorum races: straggler cancelled once met, as today.
+G = [{"id": "fan", "type": "agent",
+      "fanout": {"items": ["fast1", "fast2", "SLEEP 25 slow"], "goal": "{item}", "quorum": 2}}]
 r = mk("c3-quorum", G, "quorum")
 t0 = time.time(); out = wf("c3-quorum"); dt = time.time() - t0
 rec = json.loads((r / "nodes/fan.json").read_text())
-check("#12 majority quorum (2 of 3) closes the node done", rec.get("status") == "done", json.dumps(rec)[:200])
-check("#12 straggler was cancelled, not awaited", dt < 20, f"{dt:.1f}s")
+check("#12c explicit quorum=2 (of 3) closes the node done", rec.get("status") == "done", json.dumps(rec)[:200])
+check("#12c straggler was cancelled, not awaited", dt < 20, f"{dt:.1f}s")
 res = (rec.get("output") or {}).get("all_results") or []
 cls = [x.get("error_class") for x in res if x.get("status") != "done"]
-check("#12 straggler carries error_class=cancelled", cls == ["cancelled"], cls)
-check("#12 cancelled excluded from failure math (failed_items=0, cancelled_items=1)",
+check("#12c straggler carries error_class=cancelled", cls == ["cancelled"], cls)
+check("#12c cancelled excluded from failure math (failed_items=0, cancelled_items=1)",
       (rec.get("output") or {}).get("failed_items") == 0 and (rec.get("output") or {}).get("cancelled_items") == 1,
       json.dumps(rec.get("output"))[:200])
-check("#12 run ends done, not failed", out.startswith("WORKFLOW_DONE c3-quorum"), out[-200:])
-check("#12 no node.failed event for the node",
+check("#12c run ends done, not failed", out.startswith("WORKFLOW_DONE c3-quorum"), out[-200:])
+check("#12c no node.failed event for the node",
       not any(e["event"] == "node.failed" and e.get("node") == "fan" for e in events(r)))
 G[0]["fanout"]["quorum"] = 3
 r = mk("c3-quorum-all", G, "quorum-all")
 t0 = time.time(); out = wf("c3-quorum-all"); dt = time.time() - t0
-check("#12 explicit quorum=ALL still waits for every item", dt >= 20 and out.startswith("WORKFLOW_DONE"), f"{dt:.1f}s {out[-100:]}")
+check("#12c explicit quorum=ALL still waits for every item", dt >= 20 and out.startswith("WORKFLOW_DONE"), f"{dt:.1f}s {out[-100:]}")
 
 # ---- #14a: door validation ----
 bad = {"nodes": [{"id": "g", "type": "gate", "question": "q", "options": ["a", "b"],
