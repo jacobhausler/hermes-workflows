@@ -9,6 +9,6 @@ description_long: |
 author: "Jacob Hausler"
 license: MIT
 homepage: https://github.com/jacobhausler/hermes-workflows
-requires_hermes: ">=0.21.4"
+requires_hermes: ">=0.21"  # the stock -Q one-shot contract; the CI-pinned core may lead the fleet image
 provides_tools:
   - workflow
