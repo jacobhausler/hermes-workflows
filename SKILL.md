@@ -1,13 +1,13 @@
 ---
 name: workflow
 description: "Workflow fan-out audit and census: run agent graphs"
-version: 1.1.0
+version: 1.0.2
 metadata:
   hermes:
     tags: [workflows, fan-out, audit, census, orchestration]
 ---
 
-# Workflow authoring (1.1.0)
+# Workflow authoring (1.0.2)
 
 Use the `workflow` tool when a task needs independent lanes, a human gate, or a resumable graph. For one or two independent calls, use ordinary delegation instead. The authoring agent owns the graph and its side effects; the dashboard is a reader, not an executor.
 

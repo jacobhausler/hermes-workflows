@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.1.0 — 2026-09-26 — the run watches itself
+## 1.0.2 — 2026-09-26 — the run watches itself
 
 Designed by a 4-seat blind counsel (fable/sol/opus/qwen), critic-voted, and built in 8
 write-set lanes. Four overhauls, six additions — every one paid for by a deletion, zero new

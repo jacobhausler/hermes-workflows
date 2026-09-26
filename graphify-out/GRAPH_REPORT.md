@@ -1,7 +1,7 @@
 # Graph Report - tree  (2026-09-26)
 
 ## Corpus Check
-- 84 files · ~115,207 words
+- 84 files · ~115,216 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 4 file(s) not represented in the graph (top: (none) 4)
 
@@ -32,7 +32,7 @@
 - log
 - ref_node_fs
 - test_canvas_wrap.mjs
-- 1.1.0 — 2026-09-26 — the run watches itself
+- 1.0.2 — 2026-09-26 — the run watches itself
 - test_edge_routing.mjs
 - test_session_strip.mjs
 - efp
@@ -183,9 +183,9 @@ Nodes (12): ref_node_fs, ref_node_path, ref_node_url, code, { fanItems, fanCount
 Cohesion: 0.13
 Nodes (13): checkWrap(), cols, { depthMap, columnGroups, bandRows, Edges, CARD_W, MINI }, fan, layout(), many, mini, miniBody (+5 more)
 
-### Community 21 - "1.1.0 — 2026-09-26 — the run watches itself"
+### Community 21 - "1.0.2 — 2026-09-26 — the run watches itself"
 Cohesion: 0.12
-Nodes (15): 0.9.0 — 2026-09-24, 1.0.1 — 2026-09-25, 1.1.0 — 2026-09-26 — the run watches itself, Added, Additions, Archify: no (verdict + evidence), SMIL for candy, Changed, Changelog (+7 more)
+Nodes (15): 0.9.0 — 2026-09-24, 1.0.1 — 2026-09-25, 1.0.2 — 2026-09-26 — the run watches itself, Added, Additions, Archify: no (verdict + evidence), SMIL for candy, Changed, Changelog (+7 more)
 
 ### Community 22 - "test_edge_routing.mjs"
 Cohesion: 0.13
@@ -209,7 +209,7 @@ Nodes (14): 1. What this is (30 seconds), 2. Install, 2a. Catalog install (stock
 
 ### Community 28 - "AGENTS.md"
 Cohesion: 0.19
-Nodes (5): Node budgets, Contributor checks (not ordinary user setup), Run and handoff, Smallest working graph, Workflow authoring (1.1.0)
+Nodes (5): Node budgets, Contributor checks (not ordinary user setup), Run and handoff, Smallest working graph, Workflow authoring (1.0.2)
 
 ### Community 29 - "test_metrics_missing_ui.mjs"
 Cohesion: 0.17
@@ -303,7 +303,7 @@ _Questions this graph is uniquely positioned to answer:_
   _High betweenness centrality (0.044) - this node is a cross-community bridge._
 - **Why does `label()` connect `Graph View UI Components` to `test_card_frontend_contract.mjs`?**
   _High betweenness centrality (0.040) - this node is a cross-community bridge._
-- **Why does `Explorer V2: one node truth, two readers` connect `__init__.py` to `plugin_api.py`, `1.1.0 — 2026-09-26 — the run watches itself`?**
+- **Why does `Explorer V2: one node truth, two readers` connect `__init__.py` to `plugin_api.py`, `1.0.2 — 2026-09-26 — the run watches itself`?**
   _High betweenness centrality (0.032) - this node is a cross-community bridge._
 - **What connects `api`, `hidden`, `Q` to the rest of the system?**
   _177 weakly-connected nodes found - possible documentation gaps or missing edges._

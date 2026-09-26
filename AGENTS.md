@@ -108,7 +108,7 @@ Ending your turn after `run` is the single most common way a workflow stalls.
   ] }
 ```
 
-Or, the 1.1 way — settings once, nodes carry only their work:
+Or, the 1.0.1 way — settings once, nodes carry only their work:
 
 ```json
 { "name": "check",
