@@ -727,6 +727,15 @@ def act_wait(args):
     if st["status"] in ("running", "pending", "interrupted") and not runner_alive(r):
         _spawn_runner(r)  # only this explicit wait resumes unfinished work
     cap = min(float(args.get("timeout", 600)), 1800)
+    # fb-validator-duo (2026-09-26): the clamp stays (harness deadline guard), but a
+    # silent cut is a papercut — echo it in the result when it bites.
+    raw_timeout = args.get("timeout", 600)
+    clamp_note = (f"timeout clamped to 1800s (requested {raw_timeout})"
+                  if float(raw_timeout) > 1800 else None)
+    def _echo(out):
+        if clamp_note and isinstance(out, dict) and "error" not in out:
+            out["timeout_note"] = clamp_note
+        return out
     # The harness kills any tool call at its own concurrent-batch deadline (default
     # 420s). Yield at 330s with a clean "wait again" so the parent is never left with
     # a client-side "timed out after 420.0s" error mid-sleep (papercut 2026-09-22).
@@ -739,13 +748,13 @@ def act_wait(args):
         # commit statuses this door's read model predates; its own verdict is the truth.
         rx = (st.get("runner_exit") or {}).get("reason")
         if rx == "done" and not alive:
-            return act_status(args)
+            return _echo(act_status(args))
         if st["status"] not in ("running", "pending") or not alive:
-            return act_status(args)
+            return _echo(act_status(args))
         if time.time() - t0 > cap:
-            return {**act_status(args), "note": f"still running after {cap}s (wait again)"}
+            return _echo({**act_status(args), "note": f"still running after {cap}s (wait again)"})
         if time.time() - t0 > seg:
-            return {**act_status(args), "note": f"still running after {int(time.time()-t0)}s — call wait again (self-yield at {int(seg)}s keeps us under the harness tool deadline)"}
+            return _echo({**act_status(args), "note": f"still running after {int(time.time()-t0)}s — call wait again (self-yield at {int(seg)}s keeps us under the harness tool deadline)"})
         time.sleep(2)
 
 def _release_core(r, gate_id, answer, ui=False):

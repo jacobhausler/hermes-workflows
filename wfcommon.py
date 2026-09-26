@@ -97,7 +97,9 @@ def _defaults_errors(d):
         v = d.get(k)
         if v is not None and (not isinstance(v, (int, float)) or isinstance(v, bool)
                               or v <= 0 or v > hi):
-            E(f"defaults.{k}", f"{k} must be a number in (0, {hi}]")
+            # fb-validator-duo (2026-09-26): name the offending value AND the cap — the
+            # old message cited only the cap, so 'max_turns 240 vs 200' read as a riddle.
+            E(f"defaults.{k}", f"{k} {v!r} exceeds cap {hi} (must be a number in (0, {hi}])")
     if d.get("reasoning") is not None and d["reasoning"] not in reasoning_levels():
         E("defaults.reasoning", f"reasoning {d['reasoning']!r} invalid; allowed: "
                                 f"{list(reasoning_levels())}")
@@ -253,7 +255,9 @@ def validate_graph_errors(nodes):
         for k, hi in (("timeout", 86400), ("max_turns", 200), ("run_budget", 86400)):
             v = n.get(k)
             if v is not None and (not isinstance(v, (int, float)) or isinstance(v, bool) or v <= 0 or v > hi):
-                E(nid, k, f"{k} must be a number in (0, {hi}]")
+                # fb-validator-duo (2026-09-26): value AND cap in every numeric-bound
+                # rejection; the parenthetical is kept for substring-matchers.
+                E(nid, k, f"{k} {v!r} exceeds cap {hi} (must be a number in (0, {hi}])")
         if n.get("reasoning") is not None:
             lv = n["reasoning"]
             if lv not in reasoning_levels():
@@ -722,6 +726,39 @@ def dep_satisfied(states, a):
     # #4: a harvested `partial` satisfies downstream exactly like done.
     return states.get(a) in ("done", "skipped", "partial")
 
+def _verify_spawn_rec(r, n, byid, rec):
+    """ONE verification law for a spawn record (790c6ad): status=running + efp
+    match + pid alive (non-zombie) + the recorded skey title present in the
+    process's argv. Returns the verified identity
+    {pid, skey, started, attempt, log_path} or None. The skey-in-cmdline check
+    is the PID-reuse guard and is NEVER relaxed: unknown identity is not proof
+    of an active child. Shared by _active_spawns (display path) and
+    active_child (runner adoption) so runner and read model can never disagree.
+    """
+    if not isinstance(rec, dict) or rec.get("status") != "running" \
+            or rec.get("efp") != efp(byid, n):
+        return None
+    pid, skey = rec.get("pid"), rec.get("skey")
+    if not isinstance(pid, int) or pid <= 0 or not isinstance(skey, str) or not skey:
+        return None
+    title = skey if "#a" in skey or not isinstance(rec.get("attempt"), int) else f"{skey}#a{rec['attempt']}"
+    try:
+        os.kill(pid, 0)
+        try:
+            stat_text = Path(f"/proc/{pid}/stat").read_text()
+            state = stat_text.rsplit(")", 1)[1].split()[0]
+            cmd = Path(f"/proc/{pid}/cmdline").read_bytes().decode(errors="replace").replace("\0", " ")
+        except OSError:  # macOS/BSD: verify state and identity without procfs.
+            row = subprocess.run(["ps", "-ww", "-p", str(pid), "-o", "stat=", "-o", "command="],
+                                 capture_output=True, text=True, check=True, timeout=2).stdout
+            state, cmd = row.strip().split(None, 1)
+        if state.startswith("Z") or title not in cmd.split():
+            return None
+    except (OSError, IndexError, ValueError, subprocess.SubprocessError):
+        return None  # unknown identity is not proof of an active child
+    return {**{k: rec[k] for k in ("pid", "started", "attempt", "log_path") if k in rec},
+            "skey": title}
+
 def _active_spawns(r, n, byid):
     """All verified uncommitted child identities, never historical DB liveness."""
     records = [r / "nodes" / f"{n['id']}.json"]
@@ -729,30 +766,21 @@ def _active_spawns(r, n, byid):
         records.extend(sorted((r / "nodes").glob(f"{n['id']}.[0-9]*.json")))
     active = []
     for path in records:
-        rec = jload(path) or {}
-        if rec.get("status") != "running" or rec.get("efp") != efp(byid, n):
-            continue
-        pid, skey = rec.get("pid"), rec.get("skey")
-        if not isinstance(pid, int) or pid <= 0 or not isinstance(skey, str) or not skey:
-            continue
-        title = skey if "#a" in skey or not isinstance(rec.get("attempt"), int) else f"{skey}#a{rec['attempt']}"
-        try:
-            os.kill(pid, 0)
-            try:
-                stat_text = Path(f"/proc/{pid}/stat").read_text()
-                state = stat_text.rsplit(")", 1)[1].split()[0]
-                cmd = Path(f"/proc/{pid}/cmdline").read_bytes().decode(errors="replace").replace("\0", " ")
-            except OSError:  # macOS/BSD: verify state and identity without procfs.
-                row = subprocess.run(["ps", "-ww", "-p", str(pid), "-o", "stat=", "-o", "command="],
-                                     capture_output=True, text=True, check=True, timeout=2).stdout
-                state, cmd = row.strip().split(None, 1)
-            if state.startswith("Z") or title not in cmd.split():
-                continue
-        except (OSError, IndexError, ValueError, subprocess.SubprocessError):
-            continue  # unknown identity is not proof of an active child
-        active.append({**{k: rec[k] for k in ("pid", "started", "attempt", "log_path") if k in rec},
-                       "skey": title})
+        v = _verify_spawn_rec(r, n, byid, jload(path))
+        if v:
+            active.append(v)
     return active
+
+def active_child(r, n, byid, index=None):
+    """Per-item entry point to the verification law (790c6ad): the runner's
+    fan-out branch calls this BEFORE Popen on a resumed runner — a verified live
+    orphan (status=running record + efp match + pid alive + skey in argv) is
+    ADOPTED, never re-spawned; a dead or unverifiable record returns None and
+    the item spawns fresh. The display path (_active_spawns → run_state) shares
+    the same law through _verify_spawn_rec. Returns {pid, skey, started,
+    attempt, log_path} or None."""
+    fname = f"{n['id']}" + (f".{index}" if index is not None else "")
+    return _verify_spawn_rec(r, n, byid, jload(r / "nodes" / f"{fname}.json"))
 
 def _active_spawn(r, n, byid):
     """Compatibility: first verified spawn for existing blocked-by consumers."""

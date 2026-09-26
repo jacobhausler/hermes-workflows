@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.0.3 — 2026-09-26 — the feedback fleet's four lane fixes
+
+Merged from the feedback-triage commander's verified lanes (each:
+adversarial-check ruling, mutation-checked targeted test, full suite green):
+
+- **Deleted-cwd runner resilience (5c37b19)**: the runner degrades instead of
+  dying ENOENT when a written-to dir is gone (deleted cwd, wiped `gates/`);
+  spawn garnish and when-skip writes survive, respawn clean.
+- **Live-orphan adoption (790c6ad)**: a respawned runner ADOPTS verified live
+  fan-out children (pid alive + skey-title-in-argv) instead of re-spawning from
+  zero — no duplicate item.started, deadline re-armed from adoption.
+- **Fan-out own-goal drift guard (fb12da4)**: when `fo.goal` declares
+  `{item.FIELD}` and an item bakes a sibling's value, a loud `item.goal_drift`
+  event fires and the template render wins (warn-and-prefer-template ONLY,
+  never fail-closed); dangling `{item.X}` placeholders warn at spawn.
+- **Validator honesty (validator-duo)**: numeric-bound rejections name the
+  offending value AND the cap (`max_turns 240 exceeds cap 200 (must be a
+  number in (0, 200])`); the wait tool's 1800s clamp echoes a `timeout_note`
+  instead of swallowing it. Pin-test guards the registered graph description.
+
 ## 1.0.2 — 2026-09-26 — the run watches itself
 
 Designed by a 4-seat blind counsel (fable/sol/opus/qwen), critic-voted, and built in 8

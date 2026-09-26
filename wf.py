@@ -22,7 +22,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from wfcommon import (efp, graph_fingerprint, jload, validate_graph, node_rec, gate_answer_valid,
-                      when_true, child_metrics, prune_states, dep_satisfied)
+                      when_true, child_metrics, prune_states, dep_satisfied, active_child)
 
 def hermes_home():
     return Path(os.environ.get("HERMES_HOME") or (Path.home() / ".hermes"))
@@ -173,6 +173,54 @@ def fmt_goal(text, item, idx):
         fields["item"] = item if isinstance(item, str) else json.dumps(item, ensure_ascii=False)
     fields["index"] = idx
     return re.sub(r"\{([^{}]+)\}", lambda m: str(fields.get(m.group(1), m.group(0))), text) if text else ""
+
+_RE_ITEM_FIELD = re.compile(r"\{(?:item\.)?([A-Za-z0-9_]+)\}")
+_RE_PLACEHOLDER = re.compile(r"\{([^{}]+)\}")
+_RE_FIELD_NAME = re.compile(r"[A-Za-z0-9_]+")
+
+def _dangling_placeholders(text, item):
+    """Ordered unique '{NAME}' tokens that survived rendering and resolve to
+    NOTHING at the child. Mirrors fmt_goal's lookup exactly: a bare '{FIELD}'
+    resolves iff FIELD is 'item', 'index', or a key of the item dict; a dotted
+    '{item.FIELD}' NEVER resolves (fmt_goal only interpolates bare {FIELD}),
+    and neither does '{item.index}' — every one of those ships verbatim.
+    Prose braces that can't name a field at all ({ok, findings}, {a: 1}) are
+    skipped so JSON-ish goal text never noise-warns. fb12da4: the 00:47:53
+    amend rewrote the wave-1 bare-{lane} template to dotted {item.lane} and
+    all 14 children shipped the literal — a loud one-line warning at spawn
+    makes that authoring hazard self-diagnosing. Warn only — never fail."""
+    seen = []
+    for m in _RE_PLACEHOLDER.finditer(text or ""):
+        tok, name = m.group(0), m.group(1)
+        if name in ("item", "index"):
+            continue                                    # fmt_goal always resolves these
+        if name.startswith("item."):
+            if not _RE_FIELD_NAME.fullmatch(name[5:]):
+                continue                                # prose, not a field token
+        else:
+            if not _RE_FIELD_NAME.fullmatch(name):
+                continue                                # prose, not a field token
+            if isinstance(item, dict) and name in item:
+                continue                                # fmt_goal resolves bare {FIELD}
+        if tok not in seen:
+            seen.append(tok)
+    return seen
+
+def _tmpl_item_fields(text):
+    """Ordered unique item-field names a fan-out template interpolates: the
+    supported bare '{FIELD}' form plus the dotted '{item.FIELD}' spelling of
+    the same (fmt_goal leaves dotted placeholders verbatim, so they name the
+    same intent). '{item}', '{index}' and '{item.index}' are engine-reserved,
+    not item fields. fb12da4: the own-goal drift guard is scoped to THESE —
+    never to arbitrary substrings of item.goal."""
+    seen = []
+    for m in _RE_ITEM_FIELD.finditer(text or ""):
+        f = m.group(1)
+        if f in ("item", "index") or f.startswith("item."):
+            continue
+        if f not in seen:
+            seen.append(f)
+    return seen
 
 SCHEMA_PROMPT_CAP = 4000
 
@@ -448,8 +496,12 @@ def _resume_preamble(r):
     if tail:
         lines.append("Last 20 lines of the prior final message:")
         lines.extend("> " + l for l in tail)
-    cwd = Path.cwd()
-    if (cwd / ".git").exists():
+    try:
+        cwd = Path.cwd()
+    except FileNotFoundError:
+        cwd = None    # 5c37b19: runner's cwd deleted mid-flight — the git garnish is
+                      # optional; the preamble (error_class, death tail, RESUME_LINE) is not.
+    if cwd is not None and (cwd / ".git").exists():
         try:
             gs = subprocess.run(["git", "status", "--short"], cwd=str(cwd), capture_output=True,
                                 text=True, timeout=10).stdout.strip()
@@ -525,6 +577,196 @@ def _next_spawn_no(meta, node, index):
         n = meta["_spawn_n"].get(key, -1) + 1
         meta["_spawn_n"][key] = n
     return n
+
+# ---------- 790c6ad: live-orphan adoption on a respawned runner ----------
+
+class _AdoptedHandle:
+    """Stand-in for an ADOPTED live child (spawned by a dead runner, verified by
+    wfcommon.active_child's law). Registered in meta['_procs'] so _stop_watcher
+    and _cancel_stragglers keep working: both use only .pid (killpg) with a
+    .kill() fallback — the child owns its pgid (start_new_session at spawn)."""
+    def __init__(self, pid):
+        self.pid = pid
+
+    def kill(self):
+        os.kill(self.pid, signal.SIGKILL)
+
+def _proc_alive(pid):
+    """Liveness for a child THIS process did not spawn (cannot waitpid): os.kill 0
+    + /proc state, zombie = dead. Same identity law as wfcommon._verify_spawn_rec,
+    minus the argv check (identity was verified at adoption time)."""
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    try:
+        state = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[0]
+        return not state.startswith("Z")
+    except (OSError, IndexError):
+        try:  # macOS/BSD: no procfs
+            row = subprocess.run(["ps", "-o", "stat=", "-p", str(pid)],
+                                 capture_output=True, text=True, timeout=2).stdout
+            return not row.strip().startswith("Z")
+        except Exception:
+            return True   # os.kill 0 proved existence; unknown state is not death
+
+def _kill_adopted(pid):
+    try:
+        os.killpg(os.getpgid(pid), signal.SIGKILL)   # the child is its own group leader
+    except Exception:
+        try: os.kill(pid, signal.SIGKILL)
+        except Exception: pass
+
+def _adopt_child(meta, node, byid, index, child, schema, fo_cancel=None):
+    """790c6ad: ADOPT a verified live orphan instead of re-spawning it (the
+    respawned-runner token-loss bug: waveA3 re-ran 8 live children from zero
+    because the fanout branch re-spawned unconditionally). Contract mirrors
+    run_child's result dict so one()/the merge path consume it unchanged:
+      - NO item.started is logged here (the adoption proof is item.adopted);
+      - the deadline is re-armed from the record's ORIGINAL `started` — no
+        fresh full timeout, so total wall stays capped; the #11 extend-once
+        law applies only while the spawn log is still being written;
+      - the child is registered in meta['_procs'] under a synthetic handle so
+        _stop_watcher / quorum cancellation keep reaching it;
+      - the answer is harvested exactly once, from the existing spawn log
+        (rc is unknowable — the child outlived its spawner — so death classes
+        come from the capture and the core -Q turn report, never from a
+        fabricated exit code)."""
+    run = meta["_run"]
+    nid = node["id"]
+    pid = child["pid"]
+    lp = Path(child.get("log_path")) if child.get("log_path") else spawn_log_path(run, node, index, child.get("attempt") or 0)
+    report_path = lp.with_name(lp.name.replace(".log", ".turn.json"))
+    skey_base = str(child.get("skey") or "").split("#a", 1)[0] or None
+    try:
+        started_epoch = datetime.fromisoformat(str(child.get("started"))).timestamp()
+    except (TypeError, ValueError):
+        started_epoch = time.time()
+    wall = node.get("timeout", meta.get("node_timeout", 900))
+    deadline = started_epoch + wall if wall is not None else float("inf")
+    timed_out = cancelled = extended = False
+    was_alive = False                      # did WE observe it live in this wait?
+    key = f"{nid}:adopt:{pid}"
+    handle = _AdoptedHandle(pid)
+    with meta["_procs_lock"]:
+        meta["_procs"][key] = handle
+    log(run, "item.adopted", node=nid, index=index, pid=pid, skey=child.get("skey"),
+        started=child.get("started"), attempt=child.get("attempt"))
+    try:
+        while True:
+            if meta["_stop"].is_set():
+                _kill_adopted(pid)
+                cancelled = True
+                was_alive = True
+                break
+            if not _proc_alive(pid):
+                break
+            was_alive = True
+            now_s = time.time()
+            if now_s >= deadline and not extended and not meta["_stop"].is_set() \
+                    and _log_recent(lp, 0):
+                # EXTEND-NOT-KILL (#11), adoption form: a still-writing orphan gets
+                # ONE +50% grace; a silent one dies — the cap is total wall.
+                extra_s = round(wall * 0.5) if wall else 0
+                log(run, "node.extended", node=nid, extra_s=extra_s, adopted=True)
+                deadline += extra_s or 1
+                extended = True
+                continue
+            if now_s >= deadline:
+                timed_out = True
+                _kill_adopted(pid)
+                grace_deadline = time.time() + 10   # bounded wait for the reaper
+                while _proc_alive(pid) and time.time() < grace_deadline:
+                    time.sleep(0.1)
+                break
+            time.sleep(0.1)
+    finally:
+        with meta["_procs_lock"]:
+            meta["_procs"].pop(key, None)
+        # The spawn record's life ends with the adoption: mark it terminal so no
+        # later runner re-adopts a finished child (status != "running" fails the
+        # verification law). NOT done/failed/partial: node_rec still reads pending.
+        try:
+            np = run / "nodes" / f"{_node_file(node, index)}.json"
+            rec = jload(np) or {}
+            rec["status"] = "adopted"
+            rec["adopted_at"] = now()
+            tmp = np.with_name(f"{np.name}.{os.getpid()}.tmp")
+            tmp.write_text(json.dumps(rec, ensure_ascii=False, default=str))
+            os.replace(tmp, np)
+        except Exception:
+            pass
+    ms = int((time.time() - started_epoch) * 1000)
+    evd = {"log_path": str(lp), "pid": pid, "started": child.get("started"),
+           "spawn": child.get("attempt"), "skey": skey_base, "adopted": True,
+           "attempts": (child.get("attempt") or 0) + 1}
+    if cancelled:
+        return {"status": "failed", "error": "cancelled by stop", "error_class": "cancelled",
+                "raw": "", "ms": ms, **evd}
+    try:
+        out = lp.read_text(errors="replace")
+    except Exception:
+        out = ""
+    tclass, treason = _typed_error_class(report_path)
+    final_reply = ""
+    try:
+        _rep = json.loads(Path(report_path).read_text())
+        final_reply = str(_rep.get("reply") or "") if isinstance(_rep, dict) else ""
+    except Exception:
+        final_reply = ""
+    if timed_out:
+        _note_turn_tier(run, nid, report_path)
+        try: os.unlink(report_path)
+        except OSError: pass
+        hv = _harvest_death(out, schema)
+        if hv:
+            return {"status": "partial", "error": f"adopted child exceeded its re-armed wall "
+                    "(answer harvested from stdout)", "error_class": "timeout",
+                    "ms": ms, "final": final_reply, **hv, **evd}
+        return {"status": "failed", "error": f"adopted child exceeded its re-armed wall "
+                f"(timeout, cap from original started={child.get('started')})",
+                "error_class": "timeout", "raw": (out or "")[-2000:], "ms": ms,
+                "final": final_reply, **evd}
+    parsed, perr = extract_json(out)
+    errs = validate(parsed, schema) if (parsed is not None and perr is None) else None
+    if errs is not None and not errs:
+        try: os.unlink(report_path)
+        except OSError: pass
+        with meta["_procs_lock"]:   # harvest-ONCE memo, keyed by pid: this exact
+            meta.setdefault("_adopt_result", {})[f"{nid}:{index}:{pid}"] = \
+                {"status": "done", "output": parsed, "ms": ms, **evd}  # child commits exactly once
+        return {"status": "done", "output": parsed, "ms": ms, **evd}
+    _note_turn_tier(run, nid, report_path)   # a death happened; success leaves no trace
+    try: os.unlink(report_path)
+    except OSError: pass
+    if fo_cancel is not None and fo_cancel.is_set() and was_alive:
+        # quorum straggler: WE observed the live orphan die to _cancel_stragglers'
+        # group kill (a child already dead at entry is classified from its capture).
+        return {"status": "failed", "error": "cancelled: quorum already met",
+                "error_class": "cancelled", "raw": (out or "")[-2000:], "ms": ms, **evd}
+    if errs is not None:
+        return {"status": "failed", "error": f"adopted child answer failed schema validation: {errs}",
+                "error_class": "schema", "output": parsed, "raw": (out or "")[-2000:],
+                "ms": ms, "final": final_reply, **evd}
+    hv = _harvest_death(out, schema)   # #4 law applies to adopted deaths too
+    if hv:
+        return {"status": "partial", "error": "adopted child died before exit was observable "
+                "(answer harvested from stdout)", "error_class": tclass or "unknown",
+                "ms": ms, "final": final_reply, **hv, **evd}
+    if tclass == "cap_exhausted":
+        return {"status": "failed", "error": f"adopted child hit its turn budget: {treason}",
+                "error_class": "cap_exhausted", "raw": (out or "")[-2000:], "ms": ms,
+                "final": final_reply, **evd}
+    if not (out or "").strip():
+        return {"status": "failed", "error": "adopted child died with an empty log (no messages)",
+                "error_class": "crashed", "raw": "", "ms": ms, **evd}
+    eclass, marker = _classify_rc_output(out)
+    verdict = _verdict_lines(marker if marker else out)
+    return {"status": "failed", "error": f"adopted child died (rc unobservable — runner was "
+            f"respawned): {verdict}", "error_class": eclass, "raw": (out or "")[-2000:],
+            "ms": ms, "final": final_reply, **evd}
 
 def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering=None, attempt=0, skey=None,
               inputs="", index=None, resume_preamble=""):
@@ -985,6 +1227,55 @@ def run_agent_node(run, meta, byid, node, outputs, steering):
                 tmpl = own if own is not None \
                         else fo.get("goal") or node.get("goal", "")
                 goal = fmt_goal(tmpl, item, i)
+                # fb12da4 (mid-flight-amend collision): an own-goal baked from ANOTHER
+                # item's substituted fields shipped that foreign text to every child
+                # (wave-2 of an amend+kill+respawn all received item[4]'s lane token).
+                # Guard strictly scoped to fields the fan-out template itself declares
+                # via {item.FIELD} — graphs whose items own the payload verbatim (no
+                # {item.*} placeholders in fo['goal'], e.g. template '{item.goal}')
+                # never enter this path.
+                guarded = [f for f in (_tmpl_item_fields(fo.get("goal") or "") if own is not None else [])
+                           if f != "goal"]   # {item.goal} is the verbatim-payload pass-through
+                                             # (waveA3/A4 author pattern) — never guarded
+                if guarded and isinstance(item, dict):
+                    def _fv(it, f):
+                        v = it.get(f)
+                        return "" if v is None else str(v)
+                    # render the template for THIS item: dotted {item.FIELD} first
+                    # (fmt_goal only interpolates bare {FIELD}), then fmt_goal.
+                    dotted = re.sub(
+                        r"\{item\.([A-Za-z0-9_]+)\}",
+                        lambda m: _fv(item, m.group(1)) if _fv(item, m.group(1)) or m.group(1) in item
+                                  else m.group(0),
+                        fo["goal"])
+                    tgoal = fmt_goal(dotted, item, i)
+                    drift = None
+                    for f in guarded:
+                        mine = _fv(item, f)
+                        if not mine or mine in own:
+                            continue
+                        others = {_fv(x, f) for x in items
+                                  if isinstance(x, dict) and x is not item and x.get(f) is not None}
+                        others.discard(mine)
+                        if any(v in own for v in others if v):
+                            drift = f
+                            break
+                    if drift is not None:
+                        # warn-and-prefer-template ONLY (fb12da4 owner ruling): never
+                        # fail-closed — a graph whose item values merely look collided
+                        # still spawns; the loud event is the signal.
+                        log(run, "item.goal_drift", node=nid, index=i, field=drift,
+                            warning=f"item.goal bakes another item's value for template field "
+                                    f"'{drift}' — preferring the template render")
+                        goal = tgoal
+                # authoring hazard, self-diagnosing: a placeholder the template names
+                # that no item field answers (fmt_goal's documented contract leaves
+                # it verbatim — the 00:47:53 amend's dotted {item.lane} rewrite landed
+                # on every wave-2 child as literal text). Loud one-line warning; warn,
+                # never fail.
+                for ph in _dangling_placeholders(goal, item):
+                    log(run, "item.goal_dangling", node=nid, index=i, placeholder=ph,
+                        warning=f"template placeholder {ph} names no item field")
                 if own is not None and node.get("goal"):
                     # sprint101 #12: per-item prompt = node goal + item goal, so the
                     # shared mission travels with every item (no 'unused' placeholder).
@@ -1003,6 +1294,21 @@ def run_agent_node(run, meta, byid, node, outputs, steering):
                     if meta["_stop"].is_set() or fo_cancel.is_set():
                         return {"status": "failed", "error": "cancelled at quorum",
                                 "error_class": "cancelled", "ms": 0}
+                    # 790c6ad ADOPT-NOT-RESPAWN: on a resumed runner the item's
+                    # spawn record may describe a child the dead runner left
+                    # RUNNING. If wfcommon.active_child verifies it (status=running
+                    # + efp match + pid alive + skey-in-cmdline — the PID-reuse
+                    # guard, never relaxed) we attach to the live work instead of
+                    # burning its tokens from zero; else spawn exactly as today.
+                    child = active_child(run, node, byid, i)
+                    if child is not None:
+                        memo_key = f"{nid}:{i}:{child['pid']}"
+                        memo = (meta.get("_adopt_result") or {}).get(memo_key)
+                        if memo is not None:
+                            return dict(memo)   # this pid's answer was already harvested
+                        return _adopt_child(meta, node, byid, i, child,
+                                            fo.get("schema") or node.get("schema"),
+                                            fo_cancel=fo_cancel)
                     sk = skey_for(run, byid, node, i)   # fresh nonce per spawn (retry respawns
                     log(run, "item.started", node=nid, index=i, skey=sk)   # are fresh sessions)
                     return run_child(meta, node, byid, goal, node.get("context", ""),
@@ -1408,7 +1714,8 @@ def main(run_id):
                     log(run, "gate.when_error", node=gate["id"], error=str(e))
                 if not cond:
                     rec = {"gate": "skipped", "when": gate.get("when"), "_def": efp(rs.byid, gate)}
-                    (run / "gates" / f"{gate['id']}.json").write_text(json.dumps(rec))
+                    (run / "gates").mkdir(exist_ok=True)   # 5c37b19: a deleted gates/ degrades
+                    (run / "gates" / f"{gate['id']}.json").write_text(json.dumps(rec))   # to a recreate, not a runner kill
                     save_node(run, gate, rs.byid, {"status": "skipped" if gate.get("on_skip") == "prune" else "done", "output": rec})
                     log(run, "gate.skipped", node=gate["id"], on_skip=gate.get("on_skip", "pass"))
                     continue
@@ -1422,7 +1729,8 @@ def main(run_id):
                 log(run, "gate.when_error", node=gate["id"], error=str(e))
             if not cond:
                 rec = {"gate": "skipped", "when": gate.get("when"), "_def": efp(rs.byid, gate)}
-                (run / "gates" / f"{gate['id']}.json").write_text(json.dumps(rec))
+                (run / "gates").mkdir(exist_ok=True)   # 5c37b19: a deleted gates/ degrades
+                (run / "gates" / f"{gate['id']}.json").write_text(json.dumps(rec))   # to a recreate, not a runner kill
                 save_node(run, gate, rs.byid, {"status": "skipped" if gate.get("on_skip") == "prune" else "done", "output": rec})
                 log(run, "gate.skipped", node=gate["id"], on_skip=gate.get("on_skip", "pass"))
                 continue
@@ -1509,6 +1817,13 @@ def finalize(run, graph, status):
 if __name__ == "__main__":
     if len(sys.argv) < 3 or sys.argv[1] != "run":
         print("usage: wf.py run <run_id>"); sys.exit(2)
+    # 5c37b19 guard 2 (belt-and-braces): a runner whose cwd was deleted mid-life dies
+    # on the FIRST relative-path/cwd-touching call. HERE is durable — the same dir
+    # __init__.py pins as the spawn cwd — so recover there before main() can raise.
+    try:
+        os.getcwd()
+    except FileNotFoundError:
+        os.chdir(str(Path(__file__).resolve().parent))
     _rid = sys.argv[2]
     try:
         main(_rid)
