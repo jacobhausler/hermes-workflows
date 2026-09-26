@@ -1,0 +1,282 @@
+[
+  {
+    "test": "test_authoring_next_cut.py",
+    "exit": 0,
+    "log": "/home/hermes/.hermes/work/wf-11/build/integrate/ci-out-102/test_authoring_next_cut.py.log"
+  },
+  {
+    "test": "test_boolean_schema_0924.py",
+    "exit": 0,
+    "log": "/home/hermes/.hermes/work/wf-11/build/integrate/ci-out-102/test_boolean_schema_0924.py.log"
+  },
+  {
+    "test": "test_card_backend_080.py",
+    "exit": 0,
+    "log": "/home/hermes/.hermes/work/wf-11/build/integrate/ci-out-102/test_card_backend_080.py.log"
+  },
+  {
+    "test": "test_current_attempt_metrics.py",
+    "exit": 0,
+    "log": "/home/hermes/.hermes/work/wf-11/build/integrate/ci-out-102/test_current_attempt_metrics.py.log"
+  },
+  {
+    "test": "test_door.py",
+    "exit": 0,
+    "log": "/home/hermes/.hermes/work/wf-11/build/integrate/ci-out-102/test_door.py.log"
+  },
+  {
+    "test": "test_engine.py",
+    "exit": 0,
+    "log": "/home/hermes/.hermes/work/wf-11/build/integrate/ci-out-102/test_engine.py.log"
+  },
+  {
+    "test": "test_engine_next_cut.py",
+    "exit": 0,
+    "log": "/home/hermes/.hermes/work/wf-11/build/integrate/ci-out-102/test_engine_next_cut.py.log"
+  },
+  {
+    "test": "test_failed_events_77.py",
+    "exit": 0,
+    "log": "/home/hermes/.hermes/work/wf-11/build/integrate/ci-out-102/test_failed_events_77.py.log"
+  },
+  {
+    "test": "test_failures_0923.py",
+    "exit": 0,
+    "log": "/home/hermes/.hermes/work/wf-11/build/integrate/ci-out-102/test_failures_0923.py.log"
+  },
+  {
+    "test": "test_graph_gate.py",
+    "exit": 0,
+    "log": "/home/hermes/.hermes/work/wf-11/build/integrate/ci-out-102/test_graph_gate.py.log"
+  },
+  {
+    "test": "test_inputs_0923.py",
+    "exit": 0,
+    "log": "/home/hermes/.hermes/work/wf-11/build/integrate/ci-out-102/test_inputs_0923.py.log"
+  },
+  {
+    "test": "test_integration_080.py",
+    "exit": 0,
+    "log": "/home/hermes/.hermes/work/wf-11/build/integrate/ci-out-102/test_integration_080.py.log"
+  },
+  {
+    "test": "test_library.py",
+    "exit": 0,
+    "log": "/home/hermes/.hermes/work/wf-11/build/integrate/ci-out-102/test_library.py.log"
+  },
+  {
+    "test": "test_lifecycle_next_cut_0923.py",
+    "exit": 0,
+    "log": "/home/hermes/.hermes/work/wf-11/build/integrate/ci-out-102/test_lifecycle_next_cut_0923.py.log"
+  },
+  {
+    "test": "test_live_truth.py",
+    "exit": 0,
+    "log": "/home/hermes/.hermes/work/wf-11/build/integrate/ci-out-102/test_live_truth.py.log"
+  },
+  {
+    "test": "test_metrics_0923.py",
+    "exit": 0,
+    "log": "/home/hermes/.hermes/work/wf-11/build/integrate/ci-out-102/test_metrics_0923.py.log"
+  },
+  {
+    "test": "test_model_preflight_0924.py",
+    "exit": 0,
+    "log": "/home/hermes/.hermes/work/wf-11/build/integrate/ci-out-102/test_model_preflight_0924.py.log"
+  },
+  {
+    "test": "test_node_facts.py",
+    "exit": 0,
+    "log": "/home/hermes/.hermes/work/wf-11/build/integrate/ci-out-102/test_node_facts.py.log"
+  },
+  {
+    "test": "test_packaging.py",
+    "exit": 0,
+    "log": "/home/hermes/.hermes/work/wf-11/build/integrate/ci-out-102/test_packaging.py.log"
+  },
+  {
+    "test": "test_papercuts_0922.py",
+    "exit": 0,
+    "log": "/home/hermes/.hermes/work/wf-11/build/integrate/ci-out-102/test_papercuts_0922.py.log"
+  },
+  {
+    "test": "test_papercuts_0922b.py",
+    "exit": 0,
+    "log": "/home/hermes/.hermes/work/wf-11/build/integrate/ci-out-102/test_papercuts_0922b.py.log"
+  },
+  {
+    "test": "test_prompt_workdir.py",
+    "exit": 0,
+    "log": "/home/hermes/.hermes/work/wf-11/build/integrate/ci-out-102/test_prompt_workdir.py.log"
+  },
+  {
+    "test": "test_prune_0923.py",
+    "exit": 0,
+    "log": "/home/hermes/.hermes/work/wf-11/build/integrate/ci-out-102/test_prune_0923.py.log"
+  },
+  {
+    "test": "test_review_fixes.py",
+    "exit": 0,
+    "log": "/home/hermes/.hermes/work/wf-11/build/integrate/ci-out-102/test_review_fixes.py.log"
+  },
+  {
+    "test": "test_routing_routes.py",
+    "exit": 0,
+    "log": "/home/hermes/.hermes/work/wf-11/build/integrate/ci-out-102/test_routing_routes.py.log"
+  },
+  {
+    "test": "test_skill_docs.py",
+    "exit": 0,
+    "log": "/home/hermes/.hermes/work/wf-11/build/integrate/ci-out-102/test_skill_docs.py.log"
+  },
+  {
+    "test": "test_sprint101_A-door.py",
+    "exit": 0,
+    "log": "/home/hermes/.hermes/work/wf-11/build/integrate/ci-out-102/test_sprint101_A-door.py.log"
+  },
+  {
+    "test": "test_sprint101_D-surface.py",
+    "exit": 0,
+    "log": "/home/hermes/.hermes/work/wf-11/build/integrate/ci-out-102/test_sprint101_D-surface.py.log"
+  },
+  {
+    "test": "test_sprint101w2_B1-classes.py",
+    "exit": 0,
+    "log": "/home/hermes/.hermes/work/wf-11/build/integrate/ci-out-102/test_sprint101w2_B1-classes.py.log"
+  },
+  {
+    "test": "test_sprint101w2_B2-retry.py",
+    "exit": 0,
+    "log": "/home/hermes/.hermes/work/wf-11/build/integrate/ci-out-102/test_sprint101w2_B2-retry.py.log"
+  },
+  {
+    "test": "test_sprint101w2_C1-defaults.py",
+    "exit": 0,
+    "log": "/home/hermes/.hermes/work/wf-11/build/integrate/ci-out-102/test_sprint101w2_C1-defaults.py.log"
+  },
+  {
+    "test": "test_sprint101w2_C2-prompt.py",
+    "exit": 0,
+    "log": "/home/hermes/.hermes/work/wf-11/build/integrate/ci-out-102/test_sprint101w2_C2-prompt.py.log"
+  },
+  {
+    "test": "test_sprint101w2_C3-fanout-gates.py",
+    "exit": 0,
+    "log": "/home/hermes/.hermes/work/wf-11/build/integrate/ci-out-102/test_sprint101w2_C3-fanout-gates.py.log"
+  },
+  {
+    "test": "test_sprint101w2_D2-steer-liveness.py",
+    "exit": 0,
+    "log": "/home/hermes/.hermes/work/wf-11/build/integrate/ci-out-102/test_sprint101w2_D2-steer-liveness.py.log"
+  },
+  {
+    "test": "test_status_next.py",
+    "exit": 0,
+    "log": "/home/hermes/.hermes/work/wf-11/build/integrate/ci-out-102/test_status_next.py.log"
+  },
+  {
+    "test": "test_steer_live_40.py",
+    "exit": 0,
+    "log": "/home/hermes/.hermes/work/wf-11/build/integrate/ci-out-102/test_steer_live_40.py.log"
+  },
+  {
+    "test": "test_steer_truth_0924.py",
+    "exit": 0,
+    "log": "/home/hermes/.hermes/work/wf-11/build/integrate/ci-out-102/test_steer_truth_0924.py.log"
+  },
+  {
+    "test": "test_tier_report_0924.py",
+    "exit": 0,
+    "log": "/home/hermes/.hermes/work/wf-11/build/integrate/ci-out-102/test_tier_report_0924.py.log"
+  },
+  {
+    "test": "test_tiers.py",
+    "exit": 0,
+    "log": "/home/hermes/.hermes/work/wf-11/build/integrate/ci-out-102/test_tiers.py.log"
+  },
+  {
+    "test": "test_v3_fixes.py",
+    "exit": 0,
+    "log": "/home/hermes/.hermes/work/wf-11/build/integrate/ci-out-102/test_v3_fixes.py.log"
+  },
+  {
+    "test": "test_v4_fixes.py",
+    "exit": 0,
+    "log": "/home/hermes/.hermes/work/wf-11/build/integrate/ci-out-102/test_v4_fixes.py.log"
+  },
+  {
+    "test": "test_v5_fixes.py",
+    "exit": 0,
+    "log": "/home/hermes/.hermes/work/wf-11/build/integrate/ci-out-102/test_v5_fixes.py.log"
+  },
+  {
+    "test": "test_validate_0923.py",
+    "exit": 0,
+    "log": "/home/hermes/.hermes/work/wf-11/build/integrate/ci-out-102/test_validate_0923.py.log"
+  },
+  {
+    "test": "test_wait_payload_76.py",
+    "exit": 0,
+    "log": "/home/hermes/.hermes/work/wf-11/build/integrate/ci-out-102/test_wait_payload_76.py.log"
+  },
+  {
+    "test": "test_waitgate_0923.py",
+    "exit": 0,
+    "log": "/home/hermes/.hermes/work/wf-11/build/integrate/ci-out-102/test_waitgate_0923.py.log"
+  },
+  {
+    "test": "test_canvas_wrap.mjs",
+    "exit": 0,
+    "log": "/home/hermes/.hermes/work/wf-11/build/integrate/ci-out-102/test_canvas_wrap.mjs.log"
+  },
+  {
+    "test": "test_card_frontend_contract.mjs",
+    "exit": 0,
+    "log": "/home/hermes/.hermes/work/wf-11/build/integrate/ci-out-102/test_card_frontend_contract.mjs.log"
+  },
+  {
+    "test": "test_edge_routing.mjs",
+    "exit": 0,
+    "log": "/home/hermes/.hermes/work/wf-11/build/integrate/ci-out-102/test_edge_routing.mjs.log"
+  },
+  {
+    "test": "test_fanout_expand.mjs",
+    "exit": 0,
+    "log": "/home/hermes/.hermes/work/wf-11/build/integrate/ci-out-102/test_fanout_expand.mjs.log"
+  },
+  {
+    "test": "test_fanout_ui.mjs",
+    "exit": 0,
+    "log": "/home/hermes/.hermes/work/wf-11/build/integrate/ci-out-102/test_fanout_ui.mjs.log"
+  },
+  {
+    "test": "test_inline_header.mjs",
+    "exit": 0,
+    "log": "/home/hermes/.hermes/work/wf-11/build/integrate/ci-out-102/test_inline_header.mjs.log"
+  },
+  {
+    "test": "test_live_truth_ui.mjs",
+    "exit": 0,
+    "log": "/home/hermes/.hermes/work/wf-11/build/integrate/ci-out-102/test_live_truth_ui.mjs.log"
+  },
+  {
+    "test": "test_metrics_missing_ui.mjs",
+    "exit": 0,
+    "log": "/home/hermes/.hermes/work/wf-11/build/integrate/ci-out-102/test_metrics_missing_ui.mjs.log"
+  },
+  {
+    "test": "test_node_panel.mjs",
+    "exit": 0,
+    "log": "/home/hermes/.hermes/work/wf-11/build/integrate/ci-out-102/test_node_panel.mjs.log"
+  },
+  {
+    "test": "test_register_surface.mjs",
+    "exit": 0,
+    "log": "/home/hermes/.hermes/work/wf-11/build/integrate/ci-out-102/test_register_surface.mjs.log"
+  },
+  {
+    "test": "test_session_strip.mjs",
+    "exit": 0,
+    "log": "/home/hermes/.hermes/work/wf-11/build/integrate/ci-out-102/test_session_strip.mjs.log"
+  }
+]

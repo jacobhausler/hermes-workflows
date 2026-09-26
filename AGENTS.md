@@ -235,7 +235,7 @@ prints `OK`. CI runs the same five gates ([.github/workflows/ci.yml](.github/wor
 ### 4b′. Navigate with the knowledge graph
 
 The repo ships a [graphify](https://github.com/Graphify-Labs/graphify) knowledge
-graph at `graphify-out/` — 924 nodes / 1840 edges over every function, class, test
+graph at `graphify-out/` — 1001 nodes / 1962 edges over every function, class, test
 and doc heading, built by deterministic tree-sitter parsing (no LLM, no network).
 Query it before you grep or open files one by one:
 
