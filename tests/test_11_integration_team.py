@@ -168,10 +168,13 @@ class TeamIntegration(unittest.TestCase):
     def test_cross_profile_wait_status_dashboard_after_target_deleted(self):
         import shutil
         import uuid
-        # Estate = nearest ancestor with a profiles/ dir (portable across the lane
-        # worktree and the merge tree, whose depths differ).
-        estate = next(p for p in Path(__file__).resolve().parents
-                      if (p / 'profiles').is_dir())
+        # Estate: prefer this test's own sandbox (setUp already made <tmp>/profiles,
+        # portable across the lane worktree and the merge tree, and CI checkouts
+        # have no ancestor profiles/ dir); fall back to the nearest ancestor that
+        # has one.
+        ancestors = [p for p in Path(__file__).resolve().parents
+                     if (p / 'profiles').is_dir()]
+        estate = self.root if (self.root / 'profiles').is_dir() else ancestors[0]
         name = 'wf11-e-' + uuid.uuid4().hex[:12]
         target = estate / 'profiles' / name
         launcher = estate / 'profiles' / (name + '-launcher')

@@ -75,6 +75,14 @@ def capture(root):
         fake = Path(__file__).resolve().parent/'fixtures/11-golden-fake.py'
         env = {**os.environ, 'HERMES_HOME':str(home), 'HERMES_WF_HERMES_BIN':str(fake),
                'GOLDEN_FAKE':str(root/'tests/fake')}
+        # Hermetic capture: wf.py forwards HERMES_WRITE_SAFE_ROOT to children only
+        # when the PARENT already exports it (1.0.17 main), so the frozen baseline
+        # was captured from a Hermes seat that exports it while a GitHub runner
+        # does not -> the spawn env_keys list depended on the machine (CI-red,
+        # workstation-green). Set it deterministically so every capture, on every
+        # machine, carries the key; the key stays under comparison (not excluded).
+        (td/'safe').mkdir()
+        env['HERMES_WRITE_SAFE_ROOT'] = str(td/'safe')
         for key in ('WF_RUNS_ROOT','FAKE_MODE','FAKE_API_CALLS','FAKE_LOG','FAKE_PROMPT_LOG','FAKE_ARGV_LOG'):
             env.pop(key,None)
         paths = [(str(Path(__file__).resolve().parents[1]),'<REPO>'),(str(root),'<REPO>'), (str(td),'<TEMP>')]
