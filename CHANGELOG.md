@@ -1,7 +1,8 @@
 # Changelog
 
-## Unreleased
+## 1.0.17 — 2026-09-28
 
+- Landed via #5 (repo owner) — `release 1.0.17 — catalog sync + F5/F6 replay & run_context fixes`: public tree synced with the PR #4-reviewed catalog fixes (visible `composer.submit` gate answers, launcher-only `hermes_bin`, disclosure docs), the 1.0.16 guarded per-route reasoning validation, and the two review fixes below (F5 replay, F6 brace guard). Review round R8 flipped the `f0f154d5`/`v4_fixes` regression tests to any-rule-match and refreshed `graphify-out`.
 - R10 replay fix (review of #4, F5): an unstamped (pre-1.0.12) node record whose hash matches BOTH historical fingerprint rules now loads as committed (`done`), not `pending`. Two rules agreeing on the same hash prove the definition is unchanged; the old unique-match rule re-spawned every pre-1.0.12 no-budget node (measured: 25 nodes, 8 runs flipped to `interrupted` over 166 real run dirs). Fail-closed is now zero matches — a real definition change and a budget amendment against an old-rule stamp both still invalidate. Old run dirs stop re-running after upgrade.
 - run_context brace guard (review of #4, F6): a `{run.KEY}` value containing `{`/`}` bound into a fan-out goal or `items[].goal` is rejected at the door before any run write. The runner re-renders fan-out goals per item (`fmt_goal`), which would have interpolated the bound value a second time against item fields — contradicting the documented no-interpolation-of-substituted-values contract. Non-fan-out goals are unaffected (rendered once at launch).
 

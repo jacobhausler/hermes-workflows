@@ -1,7 +1,7 @@
 # Graph Report - tree  (2026-09-28)
 
 ## Corpus Check
-- 106 files · ~140,190 words
+- 106 files · ~140,257 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 4 file(s) not represented in the graph (top: (none) 4)
 
@@ -82,7 +82,7 @@
 - Manifest decisions (publish pass, 2026-09-24)
 - Patched core: typed turn-cap deaths (optional)
 - Exception
-- Manual installation — Hermes Workflows 1.0.11
+- Manual installation — Hermes Workflows 1.0.17
 - test_model_law_dad50be0.py
 - test_tier_report_0924.py
 - test_tiers.py
@@ -384,9 +384,9 @@ Nodes (6): Apply (source install only), Patched core: typed turn-cap deaths (opt
 Cohesion: 0.33
 Nodes (5): Exception, EscapeLineOnly, HostileStr, KeyLeak, No status attr — str() alone is the oneshot.py:322 escape line (regex path).
 
-### Community 71 - "Manual installation — Hermes Workflows 1.0.11"
+### Community 71 - "Manual installation — Hermes Workflows 1.0.17"
 Cohesion: 0.33
-Nodes (6): Backend host, Desktop app machine, Manual installation — Hermes Workflows 1.0.11, Removal, Source-tree verification, Verify and unpack on each machine that needs a component
+Nodes (6): Backend host, Desktop app machine, Manual installation — Hermes Workflows 1.0.17, Removal, Source-tree verification, Verify and unpack on each machine that needs a component
 
 ### Community 72 - "test_model_law_dad50be0.py"
 Cohesion: 0.40
