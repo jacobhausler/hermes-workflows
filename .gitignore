@@ -19,3 +19,4 @@ tests/home-*/
 tests/fake-*
 tests/prompt-*.log
 home-*/
+ci-out*/

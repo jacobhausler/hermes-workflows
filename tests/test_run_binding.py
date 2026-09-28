@@ -100,6 +100,65 @@ if "run_id" in r:
     hw.act_stop({"run_id": r["run_id"]})
 else:
     check("brace value in a NON-fan-out goal is allowed (rendered once)", False, r)
+# issue #7: fan-out node's OWN goal is the runner's fallback template
+# (fo.goal or node.goal -> fmt_goal). A brace-bearing bound value substituted
+# there would be re-interpolated per item — reject like the other fan-out fields.
+node_goal_fo = {
+    "name": "brace-node-goal",
+    "nodes": [{
+        "id": "f", "type": "agent", "goal": "mission {run.tok}",
+        "fanout": {"items": [{"item": "one"}, {"item": "two"}]},
+    }],
+}
+before = (len(spawns), set((HOME / "workflows").iterdir()))
+r = run(graph=node_goal_fo, binding={"tok": "x{item}y"})
+check("brace-valued binding into fan-out NODE goal rejects before write",
+      "must not contain braces" in r.get("error", "")
+      and (len(spawns), set((HOME / "workflows").iterdir())) == before, r)
+node_goal_items_from = {
+    "name": "brace-node-iframe",
+    "nodes": [
+        {"id": "gen", "type": "agent", "goal": "make items"},
+        {"id": "f", "type": "agent", "after": ["gen"], "goal": "mission {run.tok}",
+         "fanout": {"items_from": "gen.items"}},
+    ],
+}
+r = run(graph=node_goal_items_from, binding={"tok": "x{item}y"})
+check("brace-valued binding into node goal rejects with items_from too (goal-less items unKnowable at launch)",
+      "must not contain braces" in r.get("error", ""), r)
+node_goal_own = {
+    "name": "brace-node-own",
+    "nodes": [{
+        "id": "f", "type": "agent", "goal": "mission {run.tok}",
+        "fanout": {"items": [{"item": "one", "goal": "own {item}"}]},
+    }],
+}
+r = run(graph=node_goal_own, binding={"tok": "x{item}y"})
+check("brace-valued binding into node goal rejects even when all items own goals",
+      "must not contain braces" in r.get("error", ""), r)
+# Positive child-prompt proof (issue #7): brace-free value -> single
+# interpolation only; the CHILD's prompt file is asserted, not graph.json.
+hw._spawn_runner = actual_spawn
+os.environ["HERMES_WF_HERMES_BIN"] = str(BUILD / "fake")
+live_fo = {
+    "name": "prompt-fan",
+    "nodes": [{
+        "id": "f", "type": "agent", "goal": "MISSION key={run.key} item={item}",
+        "fanout": {"items": [{"item": "one"}, {"item": "two"}]},
+    }],
+}
+r = run(graph=live_fo, binding={"key": "a1"})
+if "run_id" in r:
+    hw.act_wait({"run_id": r["run_id"], "timeout": 60})
+    prompts = sorted((HOME / "workflows" / r["run_id"] / "logs").glob("f.*.prompt.md"))
+    texts = [p.read_text() for p in prompts]
+    check("fan-out child prompt: node-goal template — door renders run.KEY, runner renders {item}, each once",
+          len(texts) == 2 and any("MISSION key=a1 item=one" in t for t in texts)
+          and any("MISSION key=a1 item=two" in t for t in texts)
+          and all(t.count("MISSION key=a1") == 1 and "{run.key}" not in t and "{item}" not in t
+                  for t in texts), texts)
+else:
+    check("fan-out child prompt: node-goal template — door renders run.KEY, runner renders {item}, each once", False, r)
 # Real runner + fake child: inspect the exact prompt file, not only graph.json.
 hw._spawn_runner = actual_spawn
 os.environ["HERMES_WF_HERMES_BIN"] = str(BUILD / "fake")  # operator-side launcher (122099)

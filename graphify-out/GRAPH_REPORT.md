@@ -1,12 +1,12 @@
 # Graph Report - tree  (2026-09-28)
 
 ## Corpus Check
-- 107 files · ~140,917 words
+- 104 files · ~139,934 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 4 file(s) not represented in the graph (top: (none) 4)
 
 ## Summary
-- 1255 nodes · 2505 edges · 81 communities (65 shown, 16 thin omitted)
+- 1255 nodes · 2505 edges · 80 communities (64 shown, 16 thin omitted)
 - Extraction: 94% EXTRACTED · 6% INFERRED · 0% AMBIGUOUS · INFERRED: 145 edges (avg confidence: 0.87)
 - Token cost: 0 input · 0 output
 
@@ -34,9 +34,11 @@
 - test_failures_0923.py
 - CurrentAttemptMetrics
 - runner_alive
+- __init__.py
 - graph_check.py
 - test_canvas_wrap.mjs
 - test_node_click_expand.mjs
+- _resolve_models
 - json
 - CardBackend
 - test_edge_routing.mjs
@@ -47,13 +49,11 @@
 - AGENTS.md
 - 4. Contribute
 - test_orphan_adopt_790c6ad.py
-- _resolve_models
-- _ping_route_once
 - pathlib
 - validate_graph_errors
+- act_run
 - test_metrics_missing_ui.mjs
 - node_facts
-- __init__.py
 - test_deleted_cwd_resume_5c37b19.py
 - act_save
 - Contributing to hermes-workflows
@@ -63,9 +63,9 @@
 - test_sprint101w2_B2-retry.py
 - _stamp_served
 - _SV
-- act_run
 - test_engine.py
 - model_preflight
+- Disclosure verification — clause-by-clause evidence
 - act_amend
 - act_steer
 - test_fp_rule_f0f154d5.py
@@ -82,7 +82,6 @@
 - test_packaging.py
 - test_tier_report_0924.py
 - 3. Operate
-- Disclosure verification — clause-by-clause evidence
 - _bind_run_context
 - manifest.json
 - test_fp_rule_95d70102.py
@@ -120,7 +119,7 @@
 ## Import Cycles
 - None detected.
 
-## Communities (81 total, 16 thin omitted)
+## Communities (80 total, 16 thin omitted)
 
 ### Community 0 - "plugin.js"
 Cohesion: 0.07
@@ -210,57 +209,57 @@ Nodes (6): sqlite3, _fake_state_row(), Fake hermes chat for wf.py engine tests. 
 Cohesion: 0.15
 Nodes (16): act_release(), act_status(), act_stop(), act_wait(), _card(), _output_pointer(), Explicit resume/watch verb. Read-only status/list never spawn; wait may resume…, ONE gate-answer path for tool and UI. Stale answers never block: the answer… (+8 more)
 
-### Community 23 - "graph_check.py"
+### Community 23 - "__init__.py"
+Cohesion: 0.16
+Nodes (15): difflib, _import_call_llm(), _ping_note(), _ping_retry_after(), _ping_route_once(), _ping_status(), hermes-workflows plugin — the `workflow` tool: agent-owned graph runs. The…, Call-time lazy core import (rule 7: stdlib at import time; host imports lazy… (+7 more)
+
+### Community 24 - "graph_check.py"
 Cohesion: 0.17
 Nodes (14): fnmatch, Pattern, re, _ast(), main(), _norm(), Graph drift gate: is the committed graphify-out/graph.json current for this…, sig() (+6 more)
 
-### Community 24 - "test_canvas_wrap.mjs"
+### Community 25 - "test_canvas_wrap.mjs"
 Cohesion: 0.13
 Nodes (13): checkWrap(), cols, { depthMap, columnGroups, bandRows, Edges, CARD_W, MINI }, fan, layout(), many, mini, miniBody (+5 more)
 
-### Community 25 - "test_node_click_expand.mjs"
+### Community 26 - "test_node_click_expand.mjs"
 Cohesion: 0.13
 Nodes (14): box(), def, fanDef, fanItemsFn, headButton(), here, jsx(), { NodeCard: RealNodeCard } (+6 more)
 
-### Community 26 - "json"
+### Community 27 - "_resolve_models"
+Cohesion: 0.17
+Nodes (16): _alias_provider_pair(), _model_policy_error(), model_tiers(), (provider, model) the alias/tier TARGET names — 'provider/model'-prefixed seat…, Resolve tier keys in place and return (error, model_table, routes). Explicit…, Validate effective node routes after defaults and resolution, before graph.json., Compatibility wrapper: resolve models and return the historical (error, table)…, The seat's `model:` block ({default, aliases}) — hermes_cli when importable,… (+8 more)
+
+### Community 28 - "json"
 Cohesion: 0.12
 Nodes (4): json, Door-copy pins for the fan-out quorum blurb (fb 2f9653b1cc98a4e0) and its lane-…, Item #77 (verb-roadmap/artifact-recovery): every node.failed EVENT must carry…, v0.3 regressions — the mega-review sign-off (NO_GO) items, each test-locked: V1…
 
-### Community 27 - "CardBackend"
+### Community 29 - "CardBackend"
 Cohesion: 0.16
 Nodes (3): CardBackend, Context, Core-faithful get_config: plugin-scoped, reserved roots RAISE. The real core…
 
-### Community 28 - "test_edge_routing.mjs"
+### Community 30 - "test_edge_routing.mjs"
 Cohesion: 0.13
 Nodes (12): chain, check(), dead, { Edges, depthMap }, failed, nodes, omitted, page (+4 more)
 
-### Community 30 - "test_session_strip.mjs"
+### Community 32 - "test_session_strip.mjs"
 Cohesion: 0.12
 Nodes (14): empty, here, jsxPath, many, modPath, pm, pmUnknown, reactPath (+6 more)
 
-### Community 32 - "test_node_panel.mjs"
+### Community 34 - "test_node_panel.mjs"
 Cohesion: 0.16
 Nodes (10): activeTabOf(), code, EDGE_TONE, here, jsx(), queries, render(), src (+2 more)
 
-### Community 33 - "AGENTS.md"
+### Community 35 - "AGENTS.md"
 Cohesion: 0.18
 Nodes (6): Node budgets, Contributor checks (not ordinary user setup), File-authored graphs, Gates and branches, Graph grammar and authoring boundaries, Staleness and replay
 
-### Community 34 - "4. Contribute"
+### Community 36 - "4. Contribute"
 Cohesion: 0.14
 Nodes (14): 1. What this is (30 seconds), 2. Install, 2a. Catalog install (stock Hermes), 2b. Remote desktop app, 2c. From a release zip, 2d. Optional: typed turn-cap deaths, 4. Contribute, 4a. Map (+6 more)
 
-### Community 35 - "test_orphan_adopt_790c6ad.py"
+### Community 37 - "test_orphan_adopt_790c6ad.py"
 Cohesion: 0.15
 Nodes (8): datetime, signal, env_for(), put_rec(), 790c6ad — live-orphan adoption on a respawned runner. Forensic shape (waveA3):…, All per-item spawn records with a live pid, once every item is RUNNING., read_children(), start_runner()
-
-### Community 36 - "_resolve_models"
-Cohesion: 0.19
-Nodes (14): _alias_provider_pair(), _model_policy_error(), (provider, model) the alias/tier TARGET names — 'provider/model'-prefixed seat…, Resolve tier keys in place and return (error, model_table, routes). Explicit…, Validate effective node routes after defaults and resolution, before graph.json., Compatibility wrapper: resolve models and return the historical (error, table)…, The seat's `model:` block ({default, aliases}) — hermes_cli when importable,…, Names the seat itself resolves for -m: model aliases + the default model. (+6 more)
-
-### Community 37 - "_ping_route_once"
-Cohesion: 0.14
-Nodes (13): _import_call_llm(), _ping_note(), _ping_retry_after(), _ping_route_once(), _ping_status(), Call-time lazy core import (rule 7: stdlib at import time; host imports lazy…, Best-effort HTTP status of a ping failure: the SDK attribute first, then the…, Server Retry-After, best-effort via core's parser. None when no header — NEVER… (+5 more)
 
 ### Community 38 - "pathlib"
 Cohesion: 0.14
@@ -270,17 +269,17 @@ Nodes (6): pathlib, Serial bounded suite with durable per-case logs and atomic e
 Cohesion: 0.15
 Nodes (12): apply_graph_defaults(), _defaults_errors(), Bake run-level `defaults` + per-node `shape` presets into the agent node defs,…, Canonical reasoning set: ('none',) + hermes_constants.VALID_REASONING_EFFORTS.…, Return a LIST of {node, field, msg} — EVERY defect, not the first. Strict ids:…, gate.wait = {wait_s?, until_argv?, every_s?, timeout_s?}: a machine-answered…, Per-key rules for a graph-level `defaults:` block — the SAME checks a node key…, reasoning_levels() (+4 more)
 
-### Community 40 - "test_metrics_missing_ui.mjs"
+### Community 40 - "act_run"
+Cohesion: 0.21
+Nodes (12): act_library(), act_list(), act_run(), _hermes_bin(), _lib_path(), library_root(), `/wf` — the library front door. `/wf <name> [note]` supplies the note…, Operator-controlled launcher; tool arguments never choose a child executable.… (+4 more)
+
+### Community 41 - "test_metrics_missing_ui.mjs"
 Cohesion: 0.17
 Nodes (7): ref_node_assert, EDGE_TONE, $fanItem, { ItemChips }, src, texts(), walk()
 
-### Community 41 - "node_facts"
+### Community 42 - "node_facts"
 Cohesion: 0.18
 Nodes (11): 3d. Failures, resume, amend, Explorer V2: one node truth, two readers, What you get, Run operations and read model, Small, parent-gated escalation recipe (no new engine feature), Run and handoff, Smallest working graph, Workflow authoring (1.0.17) (+3 more)
-
-### Community 42 - "__init__.py"
-Cohesion: 0.27
-Nodes (11): difflib, 2. Agent-child argv and environment, act_library(), handle(), _lib_path(), library_root(), model_tiers(), hermes-workflows plugin — the `workflow` tool: agent-owned graph runs. The… (+3 more)
 
 ### Community 44 - "act_save"
 Cohesion: 0.18
@@ -310,17 +309,17 @@ Nodes (3): Sprint101 Lane B2-retry contracts (#5 bounded auto-retry, #4 harvest-
 Cohesion: 0.22
 Nodes (9): _attempt_api_calls(), hermes_home(), api_calls for ONE dead attempt via the state.db join. Return an integer only…, Commit actual child seat truth, never the requested alias. No row means unknown., _stamp_served(), child_metrics(), Read model.workflows_forbidden_models on the child seat, including bare CLI…, {skey: {tokens_in, tokens_out, cache_read, reasoning, api_calls, tool_calls,… (+1 more)
 
-### Community 52 - "act_run"
-Cohesion: 0.29
-Nodes (7): act_list(), act_run(), _hermes_bin(), Operator-controlled launcher; tool arguments never choose a child executable.…, Use the tool worker's task-local session, not another turn's process env., runs_root(), _session_env()
-
-### Community 53 - "test_engine.py"
+### Community 52 - "test_engine.py"
 Cohesion: 0.25
 Nodes (3): answer(), Engine test: sequential, fanout, gate hold/release/resume, replay-skip,…, Stamp the gate answer with the CURRENT gate efp, like the door's release does.
 
-### Community 54 - "model_preflight"
+### Community 53 - "model_preflight"
 Cohesion: 0.29
 Nodes (7): 1.0.5 — 2026-09-26 — preflight LIVENESS ping (warn-and-surface), model_preflight(), _nearest_effort(), Prefer the core route API; on older cores use the Codex vocabulary for openai-…, Nearest supported ladder level (weaker first — never an escalation), or None., Pure (no I/O): the FEEDBACK #43 model preflight, run at run/amend submit time…, _route_efforts()
+
+### Community 54 - "Disclosure verification — clause-by-clause evidence"
+Cohesion: 0.29
+Nodes (7): 1. Detached runner, 2. Agent-child argv and environment, 3. Machine gate `wait.until_argv`, 4. State location, 5. Network, cron, credentials — the corrected clause, Disclosure verification — clause-by-clause evidence, handle()
 
 ### Community 55 - "act_amend"
 Cohesion: 0.29
@@ -366,19 +365,15 @@ Nodes (5): check(), main(), Packaging-specific reproducibility, manifest, and im
 Cohesion: 0.40
 Nodes (5): 3. Operate, 3a. The loop, 3b. Minimal graph, 3c. Fan-out, gates, branches, 3e. Reporting a finished run
 
-### Community 71 - "Disclosure verification — clause-by-clause evidence"
-Cohesion: 0.40
-Nodes (5): 1. Detached runner, 3. Machine gate `wait.until_argv`, 4. State location, 5. Network, cron, credentials — the corrected clause, Disclosure verification — clause-by-clause evidence
-
-### Community 72 - "_bind_run_context"
+### Community 71 - "_bind_run_context"
 Cohesion: 0.40
 Nodes (4): _bind_run_context(), agent_ancestor(), render(), Resolve a launch binding on a post-defaults copy, before persistence. Map…
 
-### Community 73 - "manifest.json"
+### Community 72 - "manifest.json"
 Cohesion: 0.50
 Nodes (3): api, tab, hidden
 
-### Community 74 - "test_fp_rule_95d70102.py"
+### Community 73 - "test_fp_rule_95d70102.py"
 Cohesion: 0.67
 Nodes (3): fixture(), put(), 95d7010295d70102: versioned replay integrity across the budget-rule change.
 
@@ -390,7 +385,7 @@ Nodes (3): fixture(), put(), 95d7010295d70102: versioned replay integrity across
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `Disclosure verification — clause-by-clause evidence` connect `Disclosure verification — clause-by-clause evidence` to `plugin.js`, `__init__.py`, `plugin-catalog: add `hermes-workflows` (community, automation)`?**
+- **Why does `Disclosure verification — clause-by-clause evidence` connect `Disclosure verification — clause-by-clause evidence` to `plugin.js`, `plugin-catalog: add `hermes-workflows` (community, automation)`?**
   _High betweenness centrality (0.395) - this node is a cross-community bridge._
 - **Why does `6. Desktop gate answer (maintainer ask #122099, teknium1)` connect `plugin.js` to `Disclosure verification — clause-by-clause evidence`?**
   _High betweenness centrality (0.387) - this node is a cross-community bridge._

@@ -834,10 +834,17 @@ def _bind_run_context(graph, binding):
     nodes = []
     for original in graph["nodes"]:
         n = dict(original)
+        fan = n.get("fanout") if isinstance(n.get("fanout"), dict) else None
         for field in ("goal", "context", "question"):
             if isinstance(n.get(field), str):
-                n[field] = render(n[field])
-        if isinstance(n.get("fanout"), dict):
+                # issue #7: a fan-out node's OWN goal is the runner's fallback
+                # template (wf.py: fo.goal or node.goal -> fmt_goal) whenever
+                # items resolve without their own goals — and with items_from
+                # the door cannot know that at launch. Treat it as fan-out
+                # territory: braces-bearing bound values reject like any
+                # other fan-out binding instead of re-interpolating per child.
+                n[field] = render(n[field], fanout=(field == "goal" and fan is not None))
+        if fan is not None:
             fanout = dict(n["fanout"])
             if isinstance(fanout.get("goal"), str):
                 fanout["goal"] = render(fanout["goal"], fanout=True)
