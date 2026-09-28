@@ -76,13 +76,15 @@ def test():
         print("PASS budget-bearing unstamped era-1 run.done replays as done")
 
         # Different run: no budget means both historical rules produce the SAME hash.
+        # F5 (2026-09-28): two agreeing rules prove the definition is unchanged —
+        # an old-form record must replay as committed, not re-spawn.
         ambiguous = root / "ambiguous"
         plain = {"id": "plain", "type": "echo", "output": "x"}
         _, ids = run(ambiguous, [plain])
         assert writer.efp(ids, plain, rule=1) == writer.efp(ids, plain, rule=2)
-        assert reader.node_rec(ambiguous, plain, ids)[0] == "pending"
-        assert reader.runner_exit_read(ambiguous)["reason"] == "stale"
-        print("PASS ambiguous unstamped hashes fail closed despite run.done")
+        assert reader.node_rec(ambiguous, plain, ids)[0] == "done"
+        assert reader.runner_exit_read(ambiguous)["reason"] == "done"
+        print("PASS both-rule-matching unstamped hashes replay as done")
 
         invalid = root / "invalid"
         _, ids = run(invalid, [nodes[0]])

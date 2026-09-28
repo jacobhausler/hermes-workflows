@@ -73,7 +73,7 @@ gnode = next(n for n in nodes if n["id"] == "g")
 st_b, _ = W.node_rec(r, next(n for n in nodes if n["id"] == "b"), {n["id"]: n for n in nodes})
 check("W2a pure-legacy chain validates as done", st_b == "done", st_b)
 ans = W.gate_answer_valid(r, gnode, {n["id"]: n for n in nodes})
-check("W2b ambiguous unstamped gate answer fails closed even while chain untouched", ans is None, str(ans))
+check("W2b both-rule-matching unstamped gate answer validates (F5, 2026-09-28)", ans is not None and ans["answer"] == "legacy-yes", str(ans))
 # now amend a and resume: a re-runs -> gains efp -> b legacy chain broken -> b pending
 g = json.loads((r / "graph.json").read_text())
 g["nodes"][0]["goal"] = "LIST: go CHANGED"
