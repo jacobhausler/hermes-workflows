@@ -23,12 +23,23 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from wfcommon import (efp, graph_fingerprint, jload, validate_graph, node_rec, gate_answer_valid,
                       when_true, child_metrics, prune_states, dep_satisfied, active_child,
-                      FP_RULE_VERSION, record_efp_valid, seat_forbidden_models)
+                      FP_RULE_VERSION, record_efp_valid, seat_forbidden_models, runs_root,
+                      hermes_root, profile_home)
+
+def _route_home(result):
+    """The target owns the child's session DB; absent routing preserves legacy home."""
+    return result.get("profile_home") or hermes_home()
+
+
+def _profile_evidence(node):
+    name = node.get("profile")
+    return {"profile": name, "profile_home": str(profile_home(name))} if name else {}
+
 
 def _stamp_served(meta, result):
     """Commit actual child seat truth, never the requested alias. No row means unknown."""
     skey = result.get("skey")
-    metric = child_metrics(meta["_run"].name, hermes_home()).get(skey, {}) if skey else {}
+    metric = child_metrics(meta["_run"].name, _route_home(result)).get(skey, {}) if skey else {}
     result["served_model"] = metric.get("model")
     result["served_billing_provider"] = metric.get("billing_provider")
     policy = (jload(meta["_run"] / "graph.json") or {}).get("model_policy") or {}
@@ -329,6 +340,7 @@ def write_spawn_record(run, node, byid, index, spawn_no, argv, lp, pid, skey, st
            "log_path": str(lp), "pid": pid, "started": started or now(),
            "skey": skey, "attempt": spawn_no, "efp": efp(byid, node),
            "fp_rule_version": FP_RULE_VERSION}
+    rec.update(_profile_evidence(node))
     if prompt_path:
         rec["prompt_path"] = str(prompt_path)   # A1: the prompt as sent, durable in logs/
     p = run / "nodes" / f"{_node_file(node, index)}.json"
@@ -535,7 +547,7 @@ def _harvest_cancelled(out, schema, run, nid, index):
             declared_status=(hv.get("harvest") or {}).get("declared_status"))
     return hv
 
-def _tool_progress(run, skey, out):
+def _tool_progress(run, skey, out, home=None):
     """Tool-progress evidence for the #5 bounded retry: True only when the
     dead attempt's state.db row EXPLICITLY carried tool_call_count > 0 — the
     same join the Q4 gate uses; missing db / missing row / null counter is
@@ -545,7 +557,7 @@ def _tool_progress(run, skey, out):
     if not skey:
         return False
     try:
-        m = child_metrics(run.name).get(skey)
+        m = child_metrics(run.name, home).get(skey)
     except Exception:
         return False
     return bool(m) and isinstance(m.get("tool_calls"), int) and m["tool_calls"] > 0
@@ -873,7 +885,8 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
     # reserved location where the artifact can be lost).
     pp = spawn_prompt_path(run, node, index, spawn_no)
     pp.write_text(prompt, encoding="utf-8")
-    cmd = [meta["hermes_bin"], "chat", "--query-file", str(pp), "--oneshot", "-Q", "--source", "workflow"]
+    route = _profile_evidence(node)
+    cmd = [meta["hermes_bin"], "-p", node["profile"], "chat", "--query-file", str(pp), "--oneshot", "-Q", "--source", "workflow"] if route else [meta["hermes_bin"], "chat", "--query-file", str(pp), "--oneshot", "-Q", "--source", "workflow"]
     # Deterministic child→session join (papercut 2026-09-23: no per-node tokens/liveness):
     # `--continue <key> --create-if-missing` makes the child's sessions row carry title=<key>,
     # so the read model can join state.db live counters (tokens, api/tool calls,
@@ -904,7 +917,8 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
                HERMES_WF_STEER_HWM=str(steer_hwm),
                HERMES_WF_STEER_NODE=str(node["id"]),
                HERMES_WF_STEER_SPAWN=str(spawn_no),
-               HERMES_WF_RUN_ID=run.name)
+               HERMES_WF_RUN_ID=run.name,
+               HERMES_WF_RUN_DIR=str(run))   # 1.1 (RATIFY F1): absolute run dir; act_inbox prefers it
     # fb 625a3241: WORK_DIR_NOTE advertises wd as durable; under a safe root it must
     # also be writable. Append the child's OWN dir only; unset/'' = unrestricted in
     # core, so leave it exactly as inherited (setting it would newly restrict).
@@ -912,6 +926,15 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
     sr = os.environ.get("HERMES_WRITE_SAFE_ROOT")
     if sr:
         env["HERMES_WRITE_SAFE_ROOT"] = sr + os.pathsep + wd
+    if route:
+        # Delegation is not isolation. The target's -p resolves against the common
+        # root, never the launcher's named-profile home. Do not forward launcher
+        # secrets (provider keys and unrelated environment variables).
+        keep = {"PATH", "HOME", "LANG", "TERM", "TZ", "TMPDIR",
+                "HERMES_QUIET_TURN_REPORT_FILE", "WF_RUNS_ROOT", "HERMES_WRITE_SAFE_ROOT"}
+        env = {k: v for k, v in env.items()
+               if k in keep or k.startswith("LC_") or k.startswith("HERMES_WF_")}
+        env["HERMES_HOME"] = str(hermes_root())
     t0 = time.time()
     logf = open(lp, "w", encoding="utf-8", errors="replace")
     log_created = time.time()   # the file's own creation stamp: never counts as activity
@@ -925,7 +948,12 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
             if meta["_stop"].is_set():
                 logf.close()
                 return {"status": "failed", "error": "cancelled before spawn",
-                        "error_class": "cancelled", "ms": 0}
+                        "error_class": "cancelled", "ms": 0, **route}
+            if route and not (Path(route["profile_home"]) / "config.yaml").is_file():
+                logf.close()
+                return {"status": "failed", "error": f"profile gone: {node['profile']}",
+                        "error_class": "spawn", "ms": 0, "spawn": spawn_no,
+                        "attempts": 1, **route}
             proc = subprocess.Popen(cmd, stdout=logf, stderr=subprocess.STDOUT,
                                     stdin=subprocess.DEVNULL, env=env, text=True,
                                     cwd=wd,
@@ -935,7 +963,7 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
         try: logf.close()
         except Exception: pass
         return {"status": "failed", "error": f"launcher spawn failed: {e}",
-                "error_class": "spawn", "ms": 0, "spawn": spawn_no, "attempts": 1}
+                "error_class": "spawn", "ms": 0, "spawn": spawn_no, "attempts": 1, **route}
     # Q1 spawn-time record (after Popen succeeded, before awaiting): the live
     # child is visible mid-run with pid / log / argv / prompt path (A1: the
     # prompt as sent is durable in the run dir — no redaction, no unlink).
@@ -947,7 +975,7 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
     except Exception as e:
         log(run, "spawn.record.error", node=node["id"], error=f"{type(e).__name__}: {e}")
     evd = {"log_path": str(lp), "prompt_path": str(pp), "pid": proc.pid,
-           "spawn_cmd": spawn_cmd, "started": started_iso, "spawn": spawn_no}
+           "spawn_cmd": spawn_cmd, "started": started_iso, "spawn": spawn_no, **route}
     timed_out = False
     early_death = False
     extended = False
@@ -1098,14 +1126,14 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
     return {"status": "failed", "error": note, "error_class": eclass, "output": parsed,
             "raw": (out or "")[-2000:], "ms": ms, **sk, **evd}
 
-def _attempt_api_calls(run, skey):
+def _attempt_api_calls(run, skey, home=None):
     """api_calls for ONE dead attempt via the state.db join. Return an integer only
     when a matching row explicitly carried an API counter; None means unavailable
     evidence and is never permission to replay a potentially side-effecting child."""
     if not skey:
         return None
     try:
-        m = child_metrics(run.name).get(skey)
+        m = child_metrics(run.name, home).get(skey)
     except Exception:
         return None
     if not m or m.get("api_calls_known") is not True:
@@ -1128,7 +1156,9 @@ def _transient_retry(meta, r, respawn, ev, ev_kw):
            and len(attempts_log) < 2):
         if meta["_stop"].is_set():
             break
-        if _attempt_api_calls(run, r.get("skey")) != 0:
+        calls = (_attempt_api_calls(run, r.get("skey"), r["profile_home"])
+                 if r.get("profile_home") else _attempt_api_calls(run, r.get("skey")))
+        if calls != 0:
             break                       # positive OR unavailable evidence: replay unsafe
         with meta["_procs_lock"]:
             if meta["_retries_left"] <= 0:
@@ -1180,7 +1210,9 @@ def _bounded_retry(meta, r, respawn, ev, ev_kw):
     eclass = r.get("error_class")
     if eclass not in _BOUNDED_RETRY_CLASSES:
         return r
-    if meta["_stop"].is_set() or not _tool_progress(run, r.get("skey"), r.get("raw")):
+    progress = (_tool_progress(run, r.get("skey"), r.get("raw"), r["profile_home"])
+                if r.get("profile_home") else _tool_progress(run, r.get("skey"), r.get("raw")))
+    if meta["_stop"].is_set() or not progress:
         return r                                   # no positive progress evidence: fail closed
     if meta["_stop"].wait(_BOUNDED_RETRY_BACKOFF) or meta["_stop"].is_set():
         return r
@@ -1409,10 +1441,11 @@ def run_agent_node(run, meta, byid, node, outputs, steering):
                         memo_key = f"{nid}:{i}:{child['pid']}"
                         memo = (meta.get("_adopt_result") or {}).get(memo_key)
                         if memo is not None:
-                            return dict(memo)   # this pid's answer was already harvested
-                        return _adopt_child(meta, node, byid, i, child,
-                                            fo.get("schema") or node.get("schema"),
-                                            fo_cancel=fo_cancel)
+                            return {**memo, **_profile_evidence(node)}   # this pid's answer was already harvested
+                        adopted = _adopt_child(meta, node, byid, i, child,
+                                               fo.get("schema") or node.get("schema"),
+                                               fo_cancel=fo_cancel)
+                        return {**adopted, **_profile_evidence(node)}
                     sk = skey_for(run, byid, node, i)   # fresh nonce per spawn (retry respawns
                     log(run, "item.started", node=nid, index=i, skey=sk)   # are fresh sessions)
                     return run_child(meta, node, byid, goal, node.get("context", ""),
@@ -1550,6 +1583,25 @@ def resolve_ref(outputs, ref, missing=None):
         else: return missing
     return cur
 
+def _unmet_requires(node, outputs):
+    """Inspect committed ancestor outputs only; null and absent are both unmet."""
+    missing = []
+    for ancestor, paths in (node.get("requires") or {}).items():
+        for path in paths:
+            ref = ancestor + "." + path
+            value = resolve_ref(outputs, ref, _MISSING)
+            if value is _MISSING or value is None:
+                missing.append(ref)
+    return missing
+
+
+def _fail_precondition(run, node, byid, missing):
+    save_node(run, node, byid, {"status": "failed", "error_class": "precondition",
+                                "error": "precondition unmet: " + missing[0],
+                                "output": {"missing": missing}})
+    log(run, "node.failed", node=node["id"], reason="precondition",
+        error_class="precondition", error="precondition unmet: " + missing[0], attempts=0)
+
 INPUTS_CAP = 12000
 AUTO_INPUTS_CAP = 8000   # #9/#10 lane: per-parent byte cap for auto-injected parents
 
@@ -1686,7 +1738,7 @@ class Run:
         self.byid = {n["id"]: n for n in self.nodes}
 
 def main(run_id):
-    run = hermes_home() / "workflows" / run_id
+    run = runs_root() / run_id   # 1.1 (RATIFY F1): ONE resolver — WF_RUNS_ROOT or HERMES_HOME/workflows
     meta = jload(run / "run.json", {}) or {}
     if not jload(run / "graph.json", {}):
         emit(f"WORKFLOW_FAILED {run_id} (no graph.json)")
@@ -1811,9 +1863,17 @@ def main(run_id):
         ready = [n for n in rs.nodes if n["type"] == "agent" and states[n["id"]] == "pending"
                  and deps_ok(n) and deps_res(n)]
         if ready:
-            with ThreadPoolExecutor(max_workers=meta.get("concurrency", 4)) as ex:
-                list(ex.map(lambda n: run_agent_node(run, meta, rs.byid, n, outputs,
-                                                     steering.pop(n["id"], None) or []), ready))
+            spawnable = []
+            for n in ready:
+                missing = _unmet_requires(n, outputs) if n.get("requires") else []
+                if missing:
+                    _fail_precondition(run, n, rs.byid, missing)
+                else:
+                    spawnable.append(n)
+            if spawnable:
+                with ThreadPoolExecutor(max_workers=meta.get("concurrency", 4)) as ex:
+                    list(ex.map(lambda n: run_agent_node(run, meta, rs.byid, n, outputs,
+                                                         steering.pop(n["id"], None) or []), spawnable))
             continue  # top of loop: consume markers, recompute states
 
         m = consume_markers()
@@ -1821,8 +1881,12 @@ def main(run_id):
         if m == "reloaded": continue
 
         gate = next((n for n in rs.nodes if n["type"] == "gate" and states[n["id"]] == "pending"
-                     and deps_ok(n)), None)
+                     and deps_ok(n) and (not n.get("requires") or deps_res(n))), None)
         if gate:
+            missing = _unmet_requires(gate, outputs) if gate.get("requires") else []
+            if missing:
+                _fail_precondition(run, gate, rs.byid, missing)
+                continue
             ans = gate_answer_valid(run, gate, rs.byid)
             if ans is not None:
                 save_node(run, gate, rs.byid, {"status": "done", "output": ans})
@@ -1964,7 +2028,7 @@ if __name__ == "__main__":
         raise
     except BaseException as _e:  # main already records its own crashes; this net
         try:                      # catches death OUTSIDE main's try (and re-raises
-            write_runner_exit(hermes_home() / "workflows" / _rid,  # nothing is swallowed
+            write_runner_exit(runs_root() / _rid,  # nothing is swallowed
                               f"crashed: {type(_e).__name__}: {_e}")
         except Exception:
             pass

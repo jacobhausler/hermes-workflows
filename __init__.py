@@ -5,6 +5,7 @@ launch it, read its run-dir via the SHARED read model (wfcommon.run_state), drop
 its input files. No daemon, no control plane, no second opinion on run state.
 """
 import importlib.util, json, os, re, shutil, stat, subprocess, sys, time
+import fcntl, hashlib, uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -36,7 +37,8 @@ def _coerce_graph(graph):
     return graph, None
 
 GRAPH_MAX_BYTES = 1024 * 1024
-GRAPH_KEYS = {"name", "nodes", "description", "defaults", "model_policy"}
+GRAPH_KEYS = {"name", "nodes", "description", "defaults", "model_policy",
+              "provenance"}   # 1.1 (RATIFY F5): opt-in library provenance block, door-written
 
 def _model_names_valid(names):
     return isinstance(names, list) and all(isinstance(n, str) and n.strip() for n in names)
@@ -130,6 +132,14 @@ def _validation_error(graph):
     for key in ("name", "description"):
         if key in graph and (not isinstance(graph[key], str) or not graph[key].strip()):
             errs.append({"node": None, "field": key, "msg": f"{key} must be a non-empty string"})
+    if "provenance" in graph:
+        prov = graph["provenance"]
+        if not isinstance(prov, dict):
+            errs.append({"node": None, "field": "provenance", "msg": "provenance must be an object"})
+        else:
+            for key in sorted(set(prov) - _common.PROVENANCE_KEYS):
+                errs.append({"node": None, "field": f"provenance.{key}",
+                             "msg": "unknown key; allowed: " + json.dumps(sorted(_common.PROVENANCE_KEYS))})
     nodes = graph.get("nodes")
     # The shared validator assumes hashable ids and iterable dependency lists.
     # Normalize only those invalid shapes in a copy, collecting their errors while
@@ -221,6 +231,9 @@ WORKFLOW_PARAMS = {
         "from": {"type": "string", "description": "run: library graph name to replay (instead of graph or graph_path)."},
         "run_context": {"description": "run only: non-empty string seed appended to every first-wave agent (including agents behind gate-only paths), OR non-empty map of identifier keys to non-empty strings replacing only explicit {run.KEY} in node goals/contexts, fan-out goals/item goals and gate questions. Missing keys/malformed bindings reject before any run write. Values are persisted in prompts; do not supply secrets. A seed cannot replace baked literals."}, 
         "description": {"type": "string", "description": "save: one-line purpose shown by library/list."},
+        "team": {"type": "string", "description": "run (optional, <=64 chars): team label stamped into run.json and shown by list; no effect on scheduling."},
+        "lane_key": {"type": "string", "description": "run (optional, <=128 chars): in-flight registry key — a second run with the same key while the incumbent is unfinished is deduped (no spawn; returns the incumbent's run_id); status lane_key=<key> reads the incumbent instead of run_id. Keys are global per runs root; prefix with <team>/ yourself."},
+        "source": {"type": "string", "description": "save (optional, <=200 chars): where this graph came from (repo path, URL, skill) — records opt-in provenance {owner, source, saved_at, source_digest} in the library entry."},
         "graph_path": {"type": "string", "description": "run/save/amend: absolute path to a caller-supplied local regular UTF-8 JSON graph file (max 1 MiB, no final symlink). Choose exactly one of graph, graph_path, or run's from / save's run_id. Validated before any write or spawn."},
         "graph": {
             "type": "object",
@@ -693,8 +706,8 @@ def _seat_model_names():
 # ---------- run-dir plumbing ----------
 
 def runs_root():
-    home = os.environ.get("HERMES_HOME") or (Path.home() / ".hermes")
-    return Path(home) / "workflows"
+    """ONE resolver (wfcommon.runs_root): `WF_RUNS_ROOT` if set, else `$HERMES_HOME/workflows`."""
+    return _common.runs_root()
 
 def run_dir(run_id):
     """Strict: no silent normalization — ids double as directory names."""
@@ -734,10 +747,18 @@ def act_save(args):
         p = _lib_path(args.get("name") or graph.get("name"))
     except ValueError as e:
         return {"error": str(e)}
+    source = args.get("source")
+    if source is not None and (not isinstance(source, str) or not source.strip() or len(source) > 200):
+        return {"error": "source must be a non-empty string of at most 200 characters"}
     p.parent.mkdir(parents=True, exist_ok=True)
     graph = dict(graph, name=p.stem)
     if args.get("description"):
         graph["description"] = args["description"]
+    owner = _common.launcher_profile()
+    if source is not None or owner != "default":
+        graph["provenance"] = {"owner": owner, "source": source,
+                               "saved_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                               "source_digest": _common.source_digest(graph)}
     p.write_text(json.dumps(graph, ensure_ascii=False, indent=2))
     return {"saved": p.stem, "nodes": len(graph["nodes"]),
             "hint": f"re-run any time: workflow run from={p.stem}  |  /wf {p.stem}"}
@@ -749,10 +770,14 @@ def act_library(_args):
         for p in sorted(root.glob("*.json")):
             g = jload(p) or {}
             nodes = g.get("nodes") or []
-            out.append({"name": p.stem, "nodes": len(nodes),
-                        "gates": sum(1 for n in nodes if n.get("type") == "gate"),
-                        "fanouts": sum(1 for n in nodes if n.get("fanout")),
-                        "description": g.get("description")})
+            row = {"name": p.stem, "nodes": len(nodes),
+                   "gates": sum(1 for n in nodes if n.get("type") == "gate"),
+                   "fanouts": sum(1 for n in nodes if n.get("fanout")),
+                   "description": g.get("description")}
+            prov = g.get("provenance")
+            if isinstance(prov, dict):
+                row.update({k: prov.get(k) for k in ("owner", "source", "source_digest")})
+            out.append(row)
     return {"library": out, "hint": "workflow run from=<name> replays one; workflow save graph=... shelves a new one"}
 
 # ---------- actions ----------
@@ -835,7 +860,9 @@ def _bind_run_context(graph, binding):
     for original in graph["nodes"]:
         n = dict(original)
         fan = n.get("fanout") if isinstance(n.get("fanout"), dict) else None
-        for field in ("goal", "context", "question"):
+        # 1.1 (RATIFY F2): `profile` is rendered here, BEFORE profile validation, so a
+        # graph can name its teammate per launch ({"profile": "{run.reviewer}"}).
+        for field in ("goal", "context", "question", "profile"):
             if isinstance(n.get(field), str):
                 # issue #7: a fan-out node's OWN goal is the runner's fallback
                 # template (wf.py: fo.goal or node.goal -> fmt_goal) whenever
@@ -857,10 +884,108 @@ def _bind_run_context(graph, binding):
     return dict(graph, nodes=nodes)
 
 
+def _profile_error(graph):
+    """1.1 (RATIFY F2): node `profile:` validation — AFTER `{run.KEY}` rendering, BEFORE any
+    write/spawn. Launcher identity comes from the door's own HERMES_HOME (never a graph arg).
+    Same error shape as _validation_error."""
+    errs = _common.profile_errors(graph["nodes"], launcher=_common.launcher_profile(),
+                                  profiles_dir=_common.profiles_root())
+    if not errs:
+        return None
+    first = errs[0]
+    return {"error": f"graph invalid: node {first['node']}: {first['msg']}", "errors": errs}
+
+_TEAM_ARG_CAPS = {"team": 64, "lane_key": 128}
+
+def _team_args_error(args):
+    """1.1 (RATIFY F1/F3): `team` (<=64) and `lane_key` (<=128) are optional non-empty strings."""
+    for key, cap in _TEAM_ARG_CAPS.items():
+        if key in args and args[key] is not None:
+            v = args[key]
+            if not isinstance(v, str) or not v.strip() or len(v) > cap:
+                return {"error": f"{key} must be a non-empty string of at most {cap} characters"}
+    return None
+
+def _identity_stamps(args, graph, lib_name=None):
+    """1.1 (RATIFY F1): run.json identity keys, emitted ONLY when derivable — a no-team run
+    under the default profile without WF_RUNS_ROOT adds NOTHING (1.0.15 key set).
+      dispatched_by  launcher profile name (door HERMES_HOME under <root>/profiles/); omitted for default
+      launch_root    the runs root the run was created under; recorded when it is not the
+                     launcher's own default (WF_RUNS_ROOT set) or the launcher is a named profile
+      team/lane_key  run args, verbatim
+      targets[]      distinct node `profile` names (sorted)
+      graph_source   {name, owner, source, source_digest} when a library graph carries provenance
+    """
+    out = {}
+    launcher = _common.launcher_profile()
+    if launcher != "default":
+        out["dispatched_by"] = launcher
+    if launcher != "default" or os.environ.get("WF_RUNS_ROOT"):
+        out["launch_root"] = str(runs_root())
+    for key in ("team", "lane_key"):
+        if args.get(key):
+            out[key] = args[key]
+    targets = sorted({n["profile"] for n in graph.get("nodes", [])
+                      if isinstance(n, dict) and isinstance(n.get("profile"), str) and n["profile"]})
+    if targets:
+        out["targets"] = targets
+    prov = graph.get("provenance")
+    if lib_name and isinstance(prov, dict):
+        out["graph_source"] = {"name": lib_name, "owner": prov.get("owner"), "source": prov.get("source"),
+                               "source_digest": prov.get("source_digest")}
+    return out
+
+def _lane_paths(key):
+    stem = hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
+    root = runs_root() / "lanes"
+    return root / f"{stem}.json", root / f"{stem}.lock"
+
+def _lane_entry(key):
+    entry = jload(_lane_paths(key)[0])
+    if entry is not None and entry.get("lane_key") != key:
+        return None, {"error": "lane_key hash collision"}
+    return entry, None
+
+def _last_event_ts(r):
+    try:
+        with (r / "events.jsonl").open(encoding="utf-8") as stream:
+            last = None
+            for line in stream:
+                try:
+                    last = json.loads(line).get("ts") or last
+                except (ValueError, TypeError):
+                    continue
+            return last
+    except OSError:
+        return None
+
+def _lane_state(key, entry):
+    rid = entry.get("run_id")
+    if not rid:
+        return {"lane_key": key, "run_id": None, "unfinished": False}
+    try:
+        r = run_dir(rid)
+        st = run_state(r)
+    except ValueError:
+        st = None
+        r = runs_root() / "__invalid_lane_run__"
+    state = st["status"] if st else "pending"
+    live = runner_alive(r) if st else False
+    unfinished = state not in ("done", "failed", "stopped")
+    return {"lane_key": key, "run_id": rid, "state": state,
+            "runner_live": live, "unfinished": unfinished,
+            "needs_resume": unfinished and not live, "last_event_ts": _last_event_ts(r)}
+
+def _lane_key_error(key):
+    if not isinstance(key, str) or not key.strip() or len(key) > 128:
+        return {"error": "lane_key must be a non-empty string of at most 128 characters"}
+    return None
+
 def act_run(args):
     graph, bad = _input_graph(args, library=True)
     if bad:
         return bad
+    lib_name = None
     if graph is None and args.get("from"):
         try:
             graph = jload(_lib_path(args["from"]))
@@ -869,9 +994,10 @@ def act_run(args):
         if graph is None:
             return {"error": f"no library graph named {args['from']!r}",
                     "library": [x["name"] for x in act_library({})["library"]]}
+        lib_name = _lib_path(args["from"]).stem
     if graph is None:
         return {"error": "run needs graph, graph_path or from=<library name>"}
-    bad = _validation_error(graph)
+    bad = _validation_error(graph) or _team_args_error(args)
     if bad:
         return bad
     name = args.get("name", graph.get("name", "workflow"))
@@ -889,6 +1015,10 @@ def act_run(args):
             graph = _bind_run_context(graph, args["run_context"])
         except ValueError as e:
             return {"error": str(e)}
+    # 1.1 (RATIFY F2): profile validation runs on the RENDERED graph ({run.KEY} resolved).
+    bad = _profile_error(graph)
+    if bad:
+        return bad
     # dad50be0: policy BEFORE resolution — a seat-forbidden model that isn't a valid
     # route must be reported as forbidden (field=model), not swallowed by the
     # unknown-model rejection inside _resolve_models.
@@ -902,6 +1032,29 @@ def act_run(args):
     # FEEDBACK #152be7f7: warn-and-surface liveness ping (annotates `routes` in place;
     # never blocks — every failure path yields liveness='unknown' and the launch).
     _liveness_notes = _route_liveness_ping(routes)
+    key = args.get("lane_key")
+    if key is not None:
+        path, lock_path = _lane_paths(key)
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        with lock_path.open("a+b") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            entry, collision = _lane_entry(key)
+            if collision:
+                return collision
+            if entry:
+                incumbent = _lane_state(key, entry)
+                if incumbent["unfinished"]:
+                    return {"deduped": True, "run_id": incumbent["run_id"],
+                            "state": incumbent["state"], "runner_live": incumbent["runner_live"],
+                            "needs_resume": incumbent["needs_resume"],
+                            "last_event_ts": incumbent["last_event_ts"],
+                            "hint": f"wait run_id={incumbent['run_id']} resumes it"}
+            return _create_run(args, graph, lib_name, models, routes, _liveness_notes, path)
+    return _create_run(args, graph, lib_name, models, routes, _liveness_notes)
+
+def _create_run(args, graph, lib_name, models, routes, _liveness_notes, lane_path=None):
+    """Under the lane flock: complete run dir, atomic registry entry, then spawn."""
+    name = graph["name"]
     base = time.strftime("%Y%m%d-%H%M%S") + "-" + "".join(
         c for c in name.lower() if c.isalnum() or c in "-_")[:24]
     rid, n = base, 0
@@ -926,7 +1079,17 @@ def act_run(args):
             "owner": {"session_id": _session_env("HERMES_SESSION_ID") or None,
                       "ui_session_id": _session_env("HERMES_UI_SESSION_ID") or None,
                       "platform": _session_env("HERMES_SESSION_PLATFORM") or None}}
+    meta.update(_identity_stamps(args, graph, lib_name))   # 1.1: only derivable keys land
     (r / "run.json").write_text(json.dumps(meta))
+    if lane_path is not None:
+        entry = {"lane_key": args["lane_key"], "run_id": rid,
+                 "claimed_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
+        tmp = lane_path.with_name(f"{lane_path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
+        try:
+            tmp.write_text(json.dumps(entry, ensure_ascii=False))
+            os.replace(tmp, lane_path)
+        finally:
+            tmp.unlink(missing_ok=True)
     _spawn_runner(r)
     return {"run_id": rid, "models": models, "routes": routes, "hint":
             # Copy-exact inducement (papercut #70): the hint IS the paste line —
@@ -958,6 +1121,19 @@ def _output_pointer(rec):
     return {"output_ptr": "nodes (detail=\"full\")", "output_keys": keys, "output_bytes": size}
 
 def act_status(args):
+    if args.get("lane_key") is not None:
+        key = args["lane_key"]
+        bad = _lane_key_error(key)
+        if bad:
+            return bad
+        if args.get("run_id"):
+            return {"error": "choose lane_key or run_id for status, not both"}
+        entry, collision = _lane_entry(key)
+        if collision:
+            return collision
+        if not entry:
+            return {"lane_key": key, "run_id": None, "unfinished": False}
+        return _lane_state(key, entry)
     r = run_dir(args.get("run_id"))
     st = run_state(r)
     if not st:
@@ -1253,7 +1429,10 @@ def act_inbox(args):
     texts, n = _steer_lines(f, c, hwm)
     if n:  # #17: the pull is a fact — log it beside the cursor advance
         try:
-            _steer_event(Path(f).parent.parent, "steer.consumed",
+            # 1.1 (RATIFY F1): the runner bakes HERMES_WF_RUN_DIR (absolute); prefer it over
+            # deriving the run dir from the steer file path (same dir in every legacy spawn).
+            run_dir_env = os.environ.get("HERMES_WF_RUN_DIR", "")
+            _steer_event(Path(run_dir_env) if run_dir_env else Path(f).parent.parent, "steer.consumed",
                          node=os.environ.get("HERMES_WF_STEER_NODE"),
                          spawn=os.environ.get("HERMES_WF_STEER_SPAWN"), pulled=n)
         except OSError:
@@ -1300,7 +1479,7 @@ def act_amend(args):
         return bad
     if new is None:
         return {"error": "amend needs full replacement graph or graph_path"}
-    bad = _validation_error(new)
+    bad = _validation_error(new) or _profile_error(new)
     if bad:
         return bad
     old = jload(r / "graph.json") or {}
@@ -1376,10 +1555,15 @@ def act_list(_args):
         for r in sorted(root.iterdir(), reverse=True):
             st = run_state(r)
             if st:
-                runs.append({"run_id": st["run_id"], "name": st["name"], "status": st["status"],
-                             "gate": (st["held_gate"] or {}).get("id"),
-                             "nodes_done": st["done"], "nodes_skipped": st["skipped"], "nodes_total": st["total"],
-                             "runner_live": runner_alive(r)})
+                row = {"run_id": st["run_id"], "name": st["name"], "status": st["status"],
+                       "gate": (st["held_gate"] or {}).get("id"),
+                       "nodes_done": st["done"], "nodes_skipped": st["skipped"], "nodes_total": st["total"],
+                       "runner_live": runner_alive(r)}
+                meta = jload(r / "run.json", {}) or {}
+                for key in ("lane_key", "team"):
+                    if key in meta:
+                        row[key] = meta[key]
+                runs.append(row)
     return {"runs": runs[:50], **_common.run_summary(runs)}
 
 ACTIONS = {"run": act_run, "status": act_status, "wait": act_wait, "release": act_release,

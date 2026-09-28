@@ -849,6 +849,10 @@ function NodeCard({ runId, def, st, gate, selected, owner, events }) {
                 fc ? jsx('span', { children: fanSummary(fc) }) : null,
                 dur ? jsx('span', { children: dur }) : null,
                 def.optional ? jsx('span', { children: 'opt' }) : null,
+                // F2 desktop (RATIFY): the delegation badge — ONLY when the node
+                // def carries `profile` (read model passes def through verbatim;
+                // a no-team graph never has the key, so the card is byte-identical).
+                def.profile ? jsx('span', { title: `as @${def.profile}`, children: `as @${def.profile}` }) : null,
                 modelTag(def) ? jsx('span', { title: def.model, style: { marginLeft: 'auto', opacity: 0.85 }, children: modelTag(def) }) : null
               ),
               m ? box('mt-1', jsx(Vitals, { m, live: status === 'running', size: 'xs' })) : null
@@ -1523,6 +1527,9 @@ function NodePanel({ detail }) {
       jsx(Dot, { status }),
       box('min-w-0 flex-1 truncate text-sm font-medium', name),
       jsx(Badge, { variant: 'outline', children: statusLabel(status) }),
+      // F2 desktop (RATIFY): delegation badge — ONLY when the def carries
+      // `profile`; a no-team def yields null and the panel is byte-identical.
+      def.profile ? jsx('span', { title: `as @${def.profile}`, className: 'text-[0.6875rem] text-(--ui-text-tertiary)', children: `as @${def.profile}` }) : null,
       jsx('span', { className: 'text-[0.6875rem] text-(--ui-text-tertiary)', children: unk(facts?.error_class ?? shown.error_class) }),
       (facts?.attempts ?? shown.attempts) > 1 ? jsx('span', { className: 'text-[0.6875rem] text-(--ui-text-tertiary)', children: `↻${facts.attempts}` }) : null,
       box('min-w-0 truncate text-[0.6875rem] text-(--ui-text-tertiary)',

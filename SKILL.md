@@ -1,13 +1,13 @@
 ---
 name: workflow
 description: "Workflow fan-out audit and census: run agent graphs"
-version: 1.0.17
+version: 1.1.0
 metadata:
   hermes:
     tags: [workflows, fan-out, audit, census, orchestration]
 ---
 
-# Workflow authoring (1.0.17)
+# Workflow authoring (1.1.0)
 
 Requires Hermes Agent v2026.9.21 or newer (package >=0.21.4). A Desktop gate answer sends a visible resume turn to the run owner's chat via the composer SDK; on older Desktop builds it may only insert draft text for the user to send. If no owner/composer is available, type the resume line in that owner chat. Before disabling the plugin, list runs and stop each live run with `workflow{action:"stop",run_id:<id>}`.
 
@@ -21,10 +21,13 @@ Independent tasks: put them in separate nodes or one `fanout` with `items` (per-
 
 For a decision, a `gate` with `question` and `options` holds; present it to the owner and pass their answer with `release`. A decorative gate gets `hold_timeout` + `default_option` and releases itself; with `hold_timeout` alone it logs `gate.expired` and keeps holding. Machine waits use `gate.wait`. A false `gate.when` prunes the gate and its exclusively dependent arm by default, including machine-wait gates. Explicit `on_skip:"pass"` skips only the gate question and lets descendants run; use it only deliberately. For mutually exclusive arms, use two complementary gate predicates (the default prunes false arms); see [grammar](references/grammar.md). `when` belongs on gates: agent predicates and other unknown fields are rejected before write/spawn. The tested `approve-publish` and `branch-on-verdict` examples demonstrate branching.
 
+`profile` on an agent node runs it AS a named teammate profile (node-level only): DELEGATION, not isolation — the child carries the target's SOUL, memory, `.env` and tools, same UID; the target's owner-written `workflow_team.json` must list the launcher in `accept_from`, and `default` is never a target. `requires:{ancestor:["field",…]}` on an agent or gate fails the node with `error_class:"precondition"` and zero spawns when an ancestor's committed output lacks or nulls a listed path — the run FAILS, it never skips quietly; want skip-on-missing? use the `when` gate + `on_skip:"prune"`. A library save may record opt-in provenance (`save` +`source`): owner/source/digest attribution only, never an access control. Details: [grammar](references/grammar.md).
+
 ## Run and handoff
 
 - `running` requires a verified live runner. `interrupted` means unfinished work without one; inspect surviving outputs before explicitly resuming with `wait`. Fatal recorded runner errors are `failed`, not automatic respawn loops. Held gates are not counted as running. `status` explains current nodes and every `status`/`wait` payload carries `next` — do what `next` says; `wait` again until it is empty. `next` is derived, never a guess. On a failed run, read the failed node's facts (`node_facts`: error_class — closed set; `cancelled` is never a failure; attempts, final words, log path — `partial` is a harvested answer downstream can use; retryable deaths already got one machine re-drive) and committed outputs before `amend` or stop. `amend` submits the WHOLE replacement graph; `dry_run:true` previews invalidation. `stop` is terminal. Details: [operations](references/operations.md).
-- To save a reusable proven graph: `workflow{action:"save", run_id:<id>, name:<name>, description:<trigger>}`. `library` lists it; `run` with `from:<name>` replays it. Do not save one-off graphs by default.
+- To save a reusable proven graph: `workflow{action:"save", run_id:<id>, name:<name>, description:<trigger>}`; add `source:<where it came from>` to record opt-in provenance (owner/source/digest — attribution, not access control). `library` lists it; `run` with `from:<name>` replays it. Do not save one-off graphs by default.
+- A poller or keeper that must not double-dispatch: `run` with `lane_key:<key>` — while an UNFINISHED incumbent holds the key, a second `run` on it is deduped (returns the incumbent, spawns nothing; `needs_resume` means `wait` it, never replace it; `stop` is the explicit abandonment). `status` with `lane_key:<key>` reads the incumbent without spawning anything. Optional `team:<label>` stamps run.json and `list` rows. Keys are global per runs root; prefix `<team>/` yourself. Details: [operations](references/operations.md).
 - Report a finished run by its vanity numbers from the read model's metrics: token in | token out | api calls | tool calls (per node and run total). Don't lead with the dollar figure: it is core's `estimated_cost_usd`, a price-table estimate (subscription routes report `included`, not `actual`), and it freaks humans out when quoted as spend.
 - Put the `card` line alone on its own line in the reply that launches a run and in the one that reports it; the desktop shows every run of this chat above the composer regardless.
 - Use `graph_path` on run/save/amend for a caller-authorized absolute local JSON file instead of embedding a large graph. Choose exactly one graph source. See [grammar](references/grammar.md).

@@ -2,6 +2,7 @@ __pycache__/
 *.pyc
 tests/home*/
 tests/.tmp*/
+tests/.suite-home/
 *.log
 artifacts/
 home-40/

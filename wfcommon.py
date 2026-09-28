@@ -59,6 +59,170 @@ def graph_fingerprint(graph, *, rule=FP_RULE_VERSION):
     except Exception:
         return None
 
+def source_digest(graph):
+    """1.1 (RATIFY F5): sha256 hex over the canonical `nodes` JSON of a graph — the
+    provenance identity of a shelved graph. NOT the effective fingerprint:
+    graph_fingerprint() keeps its name and meaning (per-node efp facts, 16 hex);
+    this is the whole node list, budgets included, full 64-hex digest. None when the
+    graph has no node list."""
+    nodes = (graph or {}).get("nodes") if isinstance(graph, dict) else None
+    if not isinstance(nodes, list):
+        return None
+    try:
+        raw = json.dumps(nodes, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    except (TypeError, ValueError):
+        return None
+    return hashlib.sha256(raw.encode()).hexdigest()
+
+# ---------- runs root + launcher identity (1.1, RATIFY F1/F2) ----------
+# ONE resolver for "where do runs live": the runner, the door and the dashboard used to
+# compute `$HERMES_HOME/workflows` inline in four places. `WF_RUNS_ROOT` (absolute dir)
+# overrides so a team can share one root that survives any profile's deletion; unset or
+# empty = the 1.0.15 default, byte-identical.
+
+def hermes_home():
+    return Path(os.environ.get("HERMES_HOME") or (Path.home() / ".hermes"))
+
+def runs_root():
+    """`WF_RUNS_ROOT` if set (non-empty), else `$HERMES_HOME/workflows`."""
+    override = os.environ.get("WF_RUNS_ROOT", "")
+    if override:
+        return Path(override)
+    return hermes_home() / "workflows"
+
+def effective_runs_root(environ):
+    """The runs root a process RUNS UNDER, from its environment mapping (str->str, e.g. a
+    parsed /proc/<pid>/environ): `WF_RUNS_ROOT` if set, else `HERMES_HOME/workflows`,
+    else None (nothing to compare — legacy `if homes:` guard)."""
+    override = environ.get("WF_RUNS_ROOT", "")
+    if override:
+        return Path(override)
+    home = environ.get("HERMES_HOME", "")
+    if home:
+        return Path(home) / "workflows"
+    return None
+
+def hermes_root(home=None):
+    """The non-secret Hermes ROOT: `HERMES_HOME.parent.parent` when HERMES_HOME is a
+    named profile home (`<root>/profiles/<name>`), else HERMES_HOME itself."""
+    home = Path(home) if home is not None else hermes_home()
+    return home.parent.parent if home.parent.name == "profiles" else home
+
+def launcher_profile(home=None):
+    """Launcher identity, resolved from the door's OWN HERMES_HOME — never from a graph
+    arg: `HERMES_HOME.name` under `<root>/profiles/`, else "default"."""
+    home = Path(home) if home is not None else hermes_home()
+    return home.name if home.parent.name == "profiles" else "default"
+
+def profiles_root(home=None):
+    return hermes_root(home) / "profiles"
+
+def profile_home(name, home=None):
+    return profiles_root(home) / str(name)
+
+_PROFILE_NAME_BAD = re.compile(r"(^[/~.]|[\\/]|\.\.|[\x00-\x1f])")
+
+def profile_errors(nodes, launcher=None, profiles_dir=None):
+    """1.1 (RATIFY F2/B1) door-level validation of agent `profile:` keys, run AFTER the
+    door rendered `{run.KEY}` bindings and BEFORE any run write. Returns [{node,
+    field:'profile', msg}]. Rules: non-empty string (a safe directory name); name !=
+    "default" (default is never a target); `<profiles_dir>/<name>/config.yaml` exists;
+    `<profiles_dir>/<name>/workflow_team.json` exists and its `accept_from` list contains
+    `launcher` ("default" is a legal launcher name). DELEGATION, NOT ISOLATION: consent is
+    TARGET-owned — the target profile lists who may launch it; the launcher identity is
+    resolved from the door's own HERMES_HOME (never a graph arg) via launcher_profile()."""
+    launcher = launcher if launcher is not None else launcher_profile()
+    profiles_dir = Path(profiles_dir) if profiles_dir is not None else profiles_root()
+    errs = []
+    def E(nid, msg):
+        errs.append({"node": nid, "field": "profile", "msg": msg})
+    for n in nodes or []:
+        if not isinstance(n, dict) or "profile" not in n or n.get("type", "agent") != "agent":
+            continue  # non-agent profile keys die on the closed-key grammar
+        nid = n.get("id")
+        prof = n["profile"]
+        if not isinstance(prof, str) or not prof.strip():
+            E(nid, "profile must be a non-empty string (the teammate's profile DIRECTORY name)")
+            continue
+        if _PROFILE_NAME_BAD.search(prof):
+            E(nid, f"profile {prof!r} is not a safe profile directory name "
+                   "(no separators, no '..', no leading dot)")
+            continue
+        if prof == "default":
+            E(nid, "profile 'default' is never a target — 'default' is only a legal launcher name")
+            continue
+        ph = profiles_dir / prof
+        if not (ph / "config.yaml").is_file():
+            E(nid, f"profile {prof!r} does not exist: no config.yaml at {ph / 'config.yaml'}")
+            continue
+        consent = jload(ph / "workflow_team.json")
+        if consent is None:
+            E(nid, f"profile {prof!r} has no consent file: write {ph / 'workflow_team.json'} "
+                   f'with {{"accept_from": ["{launcher}"]}} from the TARGET side '
+                   "(profile: is delegation, not isolation — the target must opt in)")
+            continue
+        accept_from = consent.get("accept_from") if isinstance(consent, dict) else None
+        if not isinstance(accept_from, list):
+            E(nid, f"profile {prof!r}: workflow_team.json needs an 'accept_from' list of "
+                   f"launcher profile names; launcher {launcher!r} is not accepted")
+        elif launcher not in accept_from:
+            E(nid, f"profile {prof!r} does not accept launcher {launcher!r}: its "
+                   f"workflow_team.json accept_from is {json.dumps(accept_from)} "
+                   "(the TARGET profile must list its launcher — delegation, not isolation)")
+    return errs
+
+def requires_errors(nodes, parents=None):
+    """1.1 (RATIFY F4) structural validation of `requires` on agent/gate nodes, called by
+    validate_graph_errors for every typed agent/gate node that carries the key. Returns
+    [{node, field, msg}]. Rules: value is an object `{"<ancestor>": ["field",
+    "dotted.path", ...]}`; every key must be in the node's `after` closure (transitive;
+    `parents` = {id: [direct parent ids]} — built from the nodes' own `after` lists when
+    omitted); every entry of the path list a non-empty string (and the list non-empty).
+    A graph that WANTS skip-on-missing uses the `when` gate + on_skip:prune, not requires."""
+    errs = []
+    def E(nid, field, msg):
+        errs.append({"node": nid, "field": field, "msg": msg})
+    nodes = [n for n in (nodes or []) if isinstance(n, dict)]
+    idset = {n.get("id") for n in nodes if n.get("id")}
+    if parents is None:
+        parents = {n["id"]: [a for a in n.get("after", []) if a in idset]
+                   for n in nodes if n.get("id")}
+    else:
+        # validate_graph_errors passes ALL nodes' ancestry, including echo nodes:
+        # an echo between a producer and consumer is still part of the closure.
+        idset.update(parents)
+    for n in nodes:
+        if "requires" not in n:
+            continue
+        nid = n.get("id")
+        req = n["requires"]
+        if not isinstance(req, dict) or not req:
+            E(nid, "requires", "requires must be a non-empty object "
+                               '{"<ancestor>": ["field", "dotted.path", ...]}')
+            continue
+        closure, stack = set(), list(parents.get(nid) or n.get("after") or [])
+        while stack:
+            a = stack.pop()
+            if a in closure or a not in idset:
+                continue
+            closure.add(a)
+            stack.extend(parents.get(a, []))
+        for anc, paths in req.items():
+            if not isinstance(anc, str) or anc not in closure:
+                E(nid, "requires", f"requires key {anc!r} is not an ancestor in this node's "
+                                   "`after` closure (requires is an input edge: only committed "
+                                   "upstream outputs may be required)")
+                continue
+            if not isinstance(paths, list) or not paths:
+                E(nid, f"requires.{anc}", f"requires[{anc!r}] must be a non-empty list of "
+                                           "field path strings (\"field\" or \"dotted.path\")")
+                continue
+            for i, p in enumerate(paths):
+                if not isinstance(p, str) or not p.strip():
+                    E(nid, f"requires.{anc}", f"requires[{anc!r}][{i}] {p!r} must be a "
+                                               "non-empty field path string")
+    return errs
+
 ID_OK = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 
 # Closed grammar (Q2): an unknown key is a REJECTED key, never a silently ignored one.
@@ -67,10 +231,18 @@ ID_OK = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 # graph it baked itself. `reasoning` is validated per node (Q5).
 AGENT_KEYS = {"id", "type", "after", "goal", "context", "schema", "model", "provider", "toolsets",
               "max_turns", "timeout", "run_budget", "inputs", "fanout", "reasoning",
-              "tier", "shape"}
+              "tier", "shape",
+              # 1.1 (RATIFY F2/F4): OPTIONAL team keys. `profile` = run this node AS a named
+              # teammate profile (consent-gated, node-level only); `requires` = output
+              # preconditions on ancestors ({"<ancestor>": ["field", "dotted.path", ...]}).
+              "profile", "requires"}
 GATE_KEYS = {"id", "type", "after", "question", "options", "context", "when", "wait", "on_skip",
-             "default_option", "hold_timeout"}
+             "default_option", "hold_timeout",
+             "requires"}   # 1.1 (RATIFY F4): gates take output preconditions too
 ECHO_KEYS = {"id", "type", "after", "output"}
+# 1.1 (RATIFY F5): opt-in library provenance block, written by the door's `save` ONLY when
+# `source` is supplied or the saving door runs under a named profile. Top-level graph key.
+PROVENANCE_KEYS = {"owner", "source", "saved_at", "source_digest"}
 FANOUT_KEYS = {"items", "items_from", "goal", "schema", "quorum"}
 DEFAULTS_KEYS = {"schema", "timeout", "max_turns", "reasoning", "provider", "model", "context"}
 # Shape presets (sprint101 #11): max_turns/timeout per rough node shape = the p95 of
@@ -385,6 +557,9 @@ def validate_graph_errors(nodes):
                     if head not in anc:
                         E(nid, "inputs", f"inputs ref {ref!r} head {head!r} is not an existing "
                                          f"node in its `after` ancestry (inputs must descend from it)")
+    # 1.1 (RATIFY F4): output preconditions — structural check, ancestry via `parents`.
+    # Only typed agent/gate nodes reach here (echo's closed key set already rejected it).
+    errs.extend(requires_errors([n for n in nodes if n.get("type") in ("agent", "gate")], parents))
     indeg = {i: 0 for i in idset}
     kids = {i: [] for i in idset}
     for n in nodes:
@@ -426,8 +601,11 @@ def quote_json_parse_error(text, exc):
 
 def runner_alive(r, pid_path=None):
     """A pid is not ownership: verify a live, non-zombie `wf.py run <id>`.
-    /proc gives argv and (when readable) HERMES_HOME; ps supplies macOS/BSD.
-    Unknown identity is NOT evidence of a running workflow."""
+    /proc gives argv and (when readable) the runner's environment; ps supplies macOS/BSD.
+    Unknown identity is NOT evidence of a running workflow.
+    1.1 (RATIFY F1/B3): the environment check compares the runner's EFFECTIVE runs root
+    with this run's parent: `WF_RUNS_ROOT` (when the runner has one) must equal `r.parent`;
+    otherwise the 1.0.15 comparison `HERMES_HOME == r.parent.parent` applies verbatim."""
     r = Path(r)
     try:
         pid = int(Path(pid_path or r / "wf.pid").read_text().strip())
@@ -444,9 +622,20 @@ def runner_alive(r, pid_path=None):
             argv = [a for a in argv if a]
             try:
                 environ = Path(f"/proc/{pid}/environ").read_bytes().split(b"\0")
-                homes = [v[12:].decode(errors="replace") for v in environ if v.startswith(b"HERMES_HOME=")]
-                if homes and Path(homes[0]).resolve() != r.parent.parent.resolve():
-                    return False
+                env = {}
+                for entry in environ:   # first occurrence wins (as the legacy homes[0] did)
+                    k, sep, v = entry.partition(b"=")
+                    if sep and k in (b"HERMES_HOME", b"WF_RUNS_ROOT") and k not in env:
+                        env[k.decode()] = v.decode(errors="replace")
+                if env.get("WF_RUNS_ROOT"):
+                    # the runner runs under an explicit runs root: it must BE this run's parent
+                    if Path(env["WF_RUNS_ROOT"]).resolve() != r.parent.resolve():
+                        return False
+                elif env.get("HERMES_HOME"):
+                    # legacy env: the 1.0.15 comparison, unchanged (effective root is
+                    # HERMES_HOME/workflows, i.e. HERMES_HOME == r.parent.parent)
+                    if Path(env["HERMES_HOME"]).resolve() != r.parent.parent.resolve():
+                        return False
             except OSError:
                 pass
         except OSError:  # macOS/BSD: ps gives state AND full command
@@ -925,6 +1114,53 @@ def run_state(r):
 
 FACT_KEYS = ("status", "error_class", "error", "attempts", "attempts_log", "final",
              "harvest", "output", "ms", "started", "log_path", "prompt_path", "efp", "skey")
+# No-team FACT_KEYS and node_facts shape stay byte-identical. Profile facts are
+# appended only when routed children actually carry them in a spawn/result record.
+
+def precondition_facts(rec):
+    """1.1 (RATIFY F4) fact rendering for a precondition failure: the string
+    'failed (precondition: fix.pr_url)' listing the missing refs, or None when the record
+    is not a precondition failure. The refs come from the runner-committed
+    `output.missing` list; a record missing that list falls back to the text after
+    'precondition unmet: ' in the error. Read model only — the runner owns the commit."""
+    if not isinstance(rec, dict) or rec.get("error_class") != "precondition":
+        return None
+    out = rec.get("output")
+    missing = out.get("missing") if isinstance(out, dict) else None
+    if not (isinstance(missing, list) and missing):
+        tail = str(rec.get("error") or "").split("precondition unmet:", 1)
+        missing = [s.strip() for s in tail[1].split(",")] if len(tail) > 1 else []
+        missing = [m for m in missing if m]
+    if not missing:
+        return None
+    return "failed (precondition: " + ", ".join(str(m) for m in missing) + ")"
+
+def node_child_home(r, nid, index=None):
+    """The state.db HOME a node's children ran under (1.1 RATIFY F2/B7): the record's
+    `profile_home` when the node was profile-routed (deriving `<profiles_root>/<profile>`
+    when only `profile` survived), else None = the caller's hermes_home() — byte-identical
+    for no-team runs. Absent/unreadable record → None (never guess a teammate DB)."""
+    name = str(nid) + (f".{index}" if index is not None else "")
+    rec = jload(Path(r) / "nodes" / f"{name}.json")
+    if not isinstance(rec, dict):
+        return None
+    ph = rec.get("profile_home")
+    if isinstance(ph, str) and ph.strip():
+        return Path(ph)
+    prof = rec.get("profile")
+    if isinstance(prof, str) and prof.strip() and prof != "default":
+        return profile_home(prof)
+    return None
+
+def node_child_metrics(r, nid, index=None):
+    """Profile-aware per-node child_metrics (1.1 RATIFY F2): the SAME fold as
+    child_metrics, read from the node's OWN child DB home (the target profile's state.db
+    for profile-routed nodes — the launcher's DB never holds a teammate's sessions rows).
+    Committed coordination seam for the runner's harvest/retry/metric sites: it is the
+    one place home resolution lives (wf.py must not re-derive it). Unreadable target DB →
+    {} via child_metrics — the api_calls_known:false UNKNOWN path, never zero."""
+    home = node_child_home(r, nid, index)
+    return child_metrics(Path(r).name, home=home)
 
 def node_facts(r, nid, index=None):
     """Record facts for one node (fan-out item via `index`), plus its steer truth.
@@ -936,6 +1172,12 @@ def node_facts(r, nid, index=None):
     facts = {k: (rec[k] if k in rec and rec[k] is not None else "unknown")
              for k in FACT_KEYS}
     facts["steer"] = _steer_state(Path(r), str(nid))
+    if rec.get("profile"):
+        facts["profile"] = rec["profile"]
+        facts["profile_home"] = rec.get("profile_home") or "unknown"
+    pf = precondition_facts(rec)
+    if pf:
+        facts["fact"] = pf
     return facts
 
 def _steer_state(r, nid):
@@ -1048,8 +1290,7 @@ def seat_forbidden_models():
             return (cfg.get("model") or {}).get("workflows_forbidden_models", [])
     except Exception:
         pass
-    import os
-    home = Path(os.environ.get("HERMES_HOME") or (Path.home() / ".hermes"))
+    home = hermes_home()
     try:
         lines = (home / "config.yaml").read_text().splitlines()
     except OSError:
@@ -1091,8 +1332,8 @@ _METRIC_COLS = ("input_tokens", "output_tokens", "cache_read_tokens", "reasoning
 def child_metrics(run_id, home=None):
     """{skey: {tokens_in, tokens_out, cache_read, reasoning, api_calls, tool_calls, cost,
     model, last_activity, last_desc, attempts, ended}} for every child of the run, or {}."""
-    import os, sqlite3
-    home = Path(home or os.environ.get("HERMES_HOME") or (Path.home() / ".hermes"))
+    import sqlite3
+    home = Path(home) if home else hermes_home()
     db = home / "state.db"
     if not db.exists():
         return {}
