@@ -1,5 +1,5 @@
 name: hermes-workflows
-version: 1.0.11
+version: 1.0.16
 description: Agent-owned workflow graphs — nodes, fan-outs, gates, fingerprint-resume, desktop DAG view
 description_long: |
   Adds a `workflow` tool: the spawning agent owns a JSON graph of agent nodes and
@@ -9,6 +9,6 @@ description_long: |
 author: "Jacob Hausler"
 license: MIT
 homepage: https://github.com/jacobhausler/hermes-workflows
-requires_hermes: ">=0.21"  # the stock -Q one-shot contract; the CI-pinned core may lead the fleet image (1.0.4 lesson: a floor above the fleet image silently skips the plugin at boot)
+requires_hermes: ">=0.21.4"  # v2026.9.21: measured stock -Q CLI and quiet turn-report contract
 provides_tools:
   - workflow

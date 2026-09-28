@@ -14,6 +14,7 @@ with it. What remains:
 
 Run: /opt/hermes/.venv/bin/python3 tests/test_sprint101_D-surface.py
 """
+# Ledger 95d7010295d70102: stamped fixtures verify under their own rule; ambiguous unstamped records fail closed.
 import importlib.util, json, os, shutil, sys
 from pathlib import Path
 
@@ -48,7 +49,7 @@ def mk_run(rid, owner="other-session"):
     node = GRAPH["nodes"][0]
     (r / "nodes" / "one.json").write_text(json.dumps(
         {"status": "done", "output": {"ok": True}, "ms": 1,
-         "efp": door._common.efp({node["id"]: node}, node)}))
+         "efp": door._common.efp({node["id"]: node}, node), "fp_rule_version": door._common.FP_RULE_VERSION}))
     (r / "runner_exit.json").write_text(json.dumps({"reason": "done", "exit": 0}))
     return r
 

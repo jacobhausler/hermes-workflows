@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Integrated read-model and parser-valid card dedup checks."""
+# Ledger 95d7010295d70102: stamped fixtures verify under their own rule; ambiguous unstamped records fail closed.
 import importlib.util
 import json
 import os
@@ -46,7 +47,7 @@ class Integrated(unittest.TestCase):
             proc = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(20)', skey])
             try:
                 rec = {'status': 'running', 'pid': proc.pid, 'skey': skey, 'attempt': 0,
-                       'efp': wf.efp({'a': graph['nodes'][0]}, graph['nodes'][0])}
+                       'efp': wf.efp({'a': graph['nodes'][0]}, graph['nodes'][0]), 'fp_rule_version': wf._common.FP_RULE_VERSION}
                 (r / 'nodes/a.json').write_text(json.dumps(rec))
                 st = wf.run_state(r)
                 self.assertEqual(st['nodes']['a']['status'], 'running')

@@ -27,7 +27,7 @@ def answer(r, gid, val):
     import sys; sys.path.insert(0, str(BUILD.parent))
     import wfcommon
     g = {n["id"]: n for n in json.loads((r / "graph.json").read_text())["nodes"]}
-    (r / "gates" / f"{gid}.json").write_text(json.dumps({"answer": val, "_def": wfcommon.efp(g, g[gid])}))
+    (r / "gates" / f"{gid}.json").write_text(json.dumps({"answer": val, "_def": wfcommon.efp(g, g[gid]), "fp_rule_version": wfcommon.FP_RULE_VERSION}))
 
 def wf(run_id):
     p = subprocess.run([sys.executable, str(BUILD.parent / "wf.py"), "run", run_id],

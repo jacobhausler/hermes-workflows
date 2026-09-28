@@ -20,6 +20,7 @@ Q8  whole schema injected into the child's prompt under '## Required answer
 
 Run: cd tests && /opt/hermes/.venv/bin/python3 test_failures_0923.py
 """
+# Ledger 95d7010295d70102: stamped fixtures verify under their own rule; ambiguous unstamped records fail closed.
 import importlib.util, json, os, shutil, sqlite3, subprocess, sys, time
 from pathlib import Path
 
@@ -338,7 +339,7 @@ out = wf("exit-held")
 rec = exits_of(r)
 check("runner_exit held: 'held at <gate>'", rec["reason"] == "held at g" and "WORKFLOW_HELD" in out, json.dumps(rec))
 g = {n["id"]: n for n in json.loads((r / "graph.json").read_text())["nodes"]}
-(r / "gates" / "g.json").write_text(json.dumps({"answer": "yes", "_def": wfcommon.efp(g, g["g"])}))
+(r / "gates" / "g.json").write_text(json.dumps({"answer": "yes", "_def": wfcommon.efp(g, g["g"]), "fp_rule_version": wfcommon.FP_RULE_VERSION}))
 out = wf("exit-held")
 check("respawn clears the stale exit record and re-verdicts",
       exits_of(r)["reason"] == "done" and "WORKFLOW_DONE" in out, json.dumps(exits_of(r)))

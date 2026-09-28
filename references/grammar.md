@@ -1,6 +1,6 @@
 # Graph grammar and authoring boundaries
 
-Workflow 1.0.11. Minimal form: `workflow{action:"run", graph:{"name":"check","nodes":[{"id":"a","type":"agent","goal":"Return a fenced JSON object with key ok=true"}]}}`. The run action's `name` overrides `graph.name`; otherwise the graph name is used, then `workflow`.
+Workflow 1.0.16. Minimal form: `workflow{action:"run", graph:{"name":"check","nodes":[{"id":"a","type":"agent","goal":"Return a fenced JSON object with key ok=true"}]}}`. The run action's `name` overrides `graph.name`; otherwise the graph name is used, then `workflow`.
 
 ## Nodes and data
 
@@ -13,6 +13,10 @@ Graph-level `defaults:{schema, timeout, max_turns, reasoning, provider, model, c
 A gate has `type:"gate"`, `after`, optional `question`/`options`, `when`, `on_skip`, `default_option`, `hold_timeout`. Human gates hold until release; with `hold_timeout` (s) the runner parks at zero tokens and, at expiry, releases with `default_option` (must be one of `options`; event `gate.auto_released`) or, without one, logs `gate.expired` once and keeps holding. `wait:{"wait_s":N}` is a timer; `wait:{"until_argv":["program","arg"],"every_s":60,"timeout_s":3600}` rechecks fixed argv without a shell. A machine timeout is failure, not approval. Gate options are answer DATA; a "no" response alone does not prune work.
 
 Bounded `when` reads `out.<ancestor>.<path>`, with string/number/boolean literals (`true`, `false`, `True`, `False`), comparisons, and/or/not and parentheses. A false predicate defaults to `on_skip:"prune"`: the gate and descendants with only skipped dependencies become terminal-skipped. Explicit `on_skip:"pass"` skips the gate question but lets descendants proceed. A true predicate still holds or waits; a predicate error fails safe rather than skipping. For mutually exclusive arms, use two complementary gates, each with its agent, then a mixed join. See tested `examples/approve-publish.json` and `examples/branch-on-verdict.json`. A missing upstream input fails rather than injecting an empty value. There is no native vote/loop/foreach engine.
+
+## Staleness and replay
+
+Each new commit (including gate answers, spawn identities and runner exits) stamps its fingerprint rule. Readers recompute against the current graph under THAT recorded rule, not necessarily the reader’s default. A definition or ancestor edit invalidates the affected record; an unknown rule fails closed. Unstamped historical records replay when any known rule matches the current graph — two rules agreeing on the same hash prove the definition is unchanged, so an equal-hash pair no longer fails closed (a real definition change matches no rule and still does). A budget-only edit invalidates old-rule commits but not new-rule commits. A pre-upgrade reader already loaded in a long-lived serve process must restart after deployment.
 
 ## File-authored graphs
 

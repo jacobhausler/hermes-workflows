@@ -74,22 +74,23 @@ check(f"--continue {exp_solo}#a0 --create-if-missing" in argv, "child spawned wi
 # --- (3) child_metrics join + fold ---
 db = home / "state.db"
 c = sqlite3.connect(db)
-c.execute("create table sessions (id text primary key, title text, model text, input_tokens int, output_tokens int, "
+c.execute("create table sessions (id text primary key, title text, model text, billing_provider text, input_tokens int, output_tokens int, "
           "cache_read_tokens int, reasoning_tokens int, api_call_count int, tool_call_count int, estimated_cost_usd real, "
           "last_activity_at real, last_activity_description text, ended_at real, started_at real)")
 now = time.time()
-rows = [("s1", exp_solo + "#a0", "qwen38-next", 100, 10, 0, 0, 1, 0, 0.0, now - 30, "", now - 29, now - 40),
-        ("s2", exp_solo + "#a1", "qwen38-next", 120, 20, 0, 0, 2, 1, 0.0, now - 10, "", now - 9, now - 28),   # retry attempt
-        ("s3", exp_fan1 + "#a0", "sol", 500, 50, 400, 0, 3, 4, 0.0123, now - 2, "terminal: ls", None, now - 20),  # live
-        ("s4", "wf:OTHER-run:solo:deadbeef.aaaaaa#a0", "x", 9999, 9, 0, 0, 9, 9, 9.0, now, "", now, now),
-        ("s5", pre_fan1 + "zzzzzz#a0", "sol", 1, 1, 0, 0, 1, 1, 0.0, now - 60, "", now - 55, now - 70)]  # earlier crashed spawn of item 1
-c.executemany("insert into sessions values (?,?,?,?,?,?,?,?,?,?,?,?,?,?)", rows); c.commit(); c.close()
+rows = [("s1", exp_solo + "#a0", "qwen38-next", "provider-a", 100, 10, 0, 0, 1, 0, 0.0, now - 30, "", now - 29, now - 40),
+        ("s2", exp_solo + "#a1", "qwen38-next", "provider-b", 120, 20, 0, 0, 2, 1, 0.0, now - 10, "", now - 9, now - 28),   # retry attempt
+        ("s3", exp_fan1 + "#a0", "sol", "provider-sol", 500, 50, 400, 0, 3, 4, 0.0123, now - 2, "terminal: ls", None, now - 20),  # live
+        ("s4", "wf:OTHER-run:solo:deadbeef.aaaaaa#a0", "x", None, 9999, 9, 0, 0, 9, 9, 9.0, now, "", now, now),
+        ("s5", pre_fan1 + "zzzzzz#a0", "sol", None, 1, 1, 0, 0, 1, 1, 0.0, now - 60, "", now - 55, now - 70)]  # earlier crashed spawn of item 1
+c.executemany("insert into sessions values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", rows); c.commit(); c.close()
 cm = wfcommon.child_metrics(run.name, home)
 check(set(cm) == {exp_solo, exp_fan1, pre_fan1 + "zzzzzz"}, "join scoped to this run's keys, attempts folded under base key, spawns distinct")
 check(cm[exp_solo]["tokens_in"] == 220 and cm[exp_solo]["attempts"] == 2 and cm[exp_solo]["ended"] is not None,
       "solo: two attempts summed, ended")
 check(cm[exp_fan1]["ended"] is None and cm[exp_fan1]["tool_calls"] == 4 and cm[exp_fan1]["last_desc"] == "terminal: ls",
       "fan item 1: live (ended None), tool_calls + last activity surfaced")
+check(cm[exp_solo]["billing_provider"] == "provider-b", "last non-null billing provider wins across attempts")
 check(abs(cm[exp_fan1]["cost"] - 0.0123) < 1e-9 and cm[exp_fan1]["model"] == "sol", "cost + model carried")
 
 # read model folds per node + run

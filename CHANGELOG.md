@@ -1,8 +1,44 @@
 # Changelog
 
+## Unreleased
+
+- R10 replay fix (review of #4, F5): an unstamped (pre-1.0.12) node record whose hash matches BOTH historical fingerprint rules now loads as committed (`done`), not `pending`. Two rules agreeing on the same hash prove the definition is unchanged; the old unique-match rule re-spawned every pre-1.0.12 no-budget node (measured: 25 nodes, 8 runs flipped to `interrupted` over 166 real run dirs). Fail-closed is now zero matches — a real definition change and a budget amendment against an old-rule stamp both still invalidate. Old run dirs stop re-running after upgrade.
+- run_context brace guard (review of #4, F6): a `{run.KEY}` value containing `{`/`}` bound into a fan-out goal or `items[].goal` is rejected at the door before any run write. The runner re-renders fan-out goals per item (`fmt_goal`), which would have interpolated the bound value a second time against item fields — contradicting the documented no-interpolation-of-substituted-values contract. Non-fan-out goals are unaffected (rendered once at launch).
+
+## 1.0.16 — 2026-09-28
+
+- fb b3c98b2a0518a8f0: the 1.0.15 rewrite dropped per-route reasoning validation for non-Codex routes, falling back to global levels and accepting anthropic `ultra`; it also crashed coreless hosts on Codex nodes. Restore `route_supported_efforts` with a guarded `codex_supported_efforts` fallback for older cores and guard every host import.
+- 1.0.15: a served forbidden model now fails the fan-out parent and its `node.failed` event with `forbidden_model` even when quorum otherwise succeeds; per-item evidence remains typed and downstream is blocked. Reasoning validation uses the installed core's Codex effort function for Codex routes; non-Codex routes fall back to global levels (corrected above). Added credential-free A-door validation and historical fingerprint-run regression tests (dad50be002da89d5, f0f154d5dd80220c).
+- Regression pin for f0f154d5dd80220c: budget-bearing, unstamped historical runs report done under the cross-rule reader already shipped in 1.0.12 (7deffc3); an era-A reader reproduces stale/pending. Separate run-shape locks keep both-rule ambiguity, unknown hashes, and genuine budget-bearing amendments fail-closed. Test-only coverage of the earlier fix; no runtime change for this row.
+- 1.0.14: model law enforced. Every node commit (solo and per fan-out item) stamps the ACTUAL served model + billing provider from the child metrics onto nodes/<id>.json (`served_model`, `served_billing_provider`); an absent sessions row stays null (unknown, never forbidden). If the served model hits the forbidden set (graph `model_policy.forbidden_models` ∪ seat `workflows_forbidden_models`), the node/item commits `failed` with `error_class='forbidden_model'` and blocks downstream. Seat-floor submit rejection runs BEFORE model resolution so a seat-forbidden name reports field=model instead of being swallowed as unknown-model (fb dad50be002da89d5).
+- 1.0.12: fingerprint rule provenance on new run, node, spawn, gate, and runner-exit records. Readers verify each stamped record against the current graph using its own known rule; unknown versions and ambiguous unstamped hashes fail closed. Historical no-budget unstamped commits may replay instead of skip; restart old in-memory readers after deployment (95d7010295d70102).
+- 1.0.13: `workflow run from=<name>` accepts optional `run_context`: a non-empty string
+  delivered to every first-wave agent (including gate-first/parallel roots), or a
+  string map that resolves only explicit `{run.KEY}` in node goals, contexts,
+  fan-out goals/item goals, and gate questions. Invalid/missing bindings fail
+  before run creation. Resolution follows defaults, precedes persistence and
+  fingerprinting; the shelved graph is unchanged. `/wf <name> [note]` now sends
+  its note atomically as a string seed rather than a post-launch steer. A seed
+  does not replace baked target literals: reusable graphs must contain explicit
+  `{run.key}`, `{run.branch}`, `{run.argv}` binding points. Bound values persist
+  in prompts and must not contain secrets (fb 4052d57719653b1a).
+
 ## 1.0.11 — 2026-09-27 — false when-gate defaults to prune (decorative-gate footgun closed)
 
+
 - A false `gate.when` with omitted `on_skip` now prunes the gate and exclusively dependent descendants in both human and wait-gate paths; `gate.skipped` reports `prune` to match the saved status. Explicit `pass` still permits the arm, and explicit `prune` is unchanged (fb e4c98f6e550e3a90). This does not change explicit `on_skip:"pass"` in existing graphs, including `library/fb-fix.json` before publish.
+
+- Desktop gate answers now resume the run's owner session through the public
+  composer SDK as a visible turn; on older Desktop builds, the resume text is
+  inserted for the user to send, or the UI asks for manual resume. No app DOM
+  query or private composer event (per maintainer review on
+  NousResearch/hermes-agent#122099, teknium1).
+- The workflow tool no longer accepts `hermes_bin`; only operator plugin settings
+  or `HERMES_WF_HERMES_BIN` may select the child launcher. Tool-arg attempts
+  fail closed (per maintainer review on NousResearch/hermes-agent#122099).
+- Document the detached runner's lifecycle and the stop-before-disable rule;
+  align the documented Hermes floor and catalog metadata.
+
 
 ## 1.0.10 — 2026-09-27 — child work dir is writable under HERMES_WRITE_SAFE_ROOT
 

@@ -14,6 +14,7 @@ HOME = BUILD / "home76"
 if HOME.exists(): shutil.rmtree(HOME)
 HOME.mkdir(parents=True)
 os.environ["HERMES_HOME"] = str(HOME)
+os.environ["HERMES_WF_HERMES_BIN"] = str(BUILD / "fake")
 env = dict(os.environ, HERMES_HOME=str(HOME), FAKE_LOG=str(BUILD / "fake76.log"))
 
 spec = importlib.util.spec_from_file_location("door76", ROOT / "__init__.py")
@@ -29,7 +30,7 @@ graph = {"name": "f76-payload", "nodes": [
     {"id": "a", "type": "agent", "goal": "SLEEP 1 task a"},
     {"id": "b", "type": "agent", "goal": "SLEEP 6 task b", "after": ["a"]},
 ]}
-out = door.act_run({"graph": graph, "hermes_bin": str(BUILD / "fake"),
+out = door.act_run({"graph": graph,
                     "name": "f76-payload"})
 rid = out["run_id"]
 r = HOME / "workflows" / rid

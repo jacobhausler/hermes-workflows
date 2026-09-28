@@ -4,6 +4,7 @@ route, the partial-output read fix, the _steer_state move (door keeps its alias)
 Against a fake-child run dir (records hand-written the way wf.py commits them).
 Stdlib-only + the plugin's own imports; the route core is exercised directly so
 the gate does not depend on a test HTTP client."""
+# Ledger 95d7010295d70102: stamped fixtures verify under their own rule; ambiguous unstamped records fail closed.
 import asyncio, importlib.util, json, os, shutil, sys, tempfile
 from pathlib import Path
 
@@ -56,7 +57,7 @@ byid = {n["id"]: n for n in graph["nodes"]}
 (r / "run.json").write_text(json.dumps({"name": "node-facts", "hermes_bin": "/bin/true"}))
 
 def rec(nid, **kw):
-    (r / "nodes" / f"{nid}.json").write_text(json.dumps(kw))
+    (r / "nodes" / f"{nid}.json").write_text(json.dumps({**kw, "fp_rule_version": wfcommon.FP_RULE_VERSION}))
 
 rec("solo", status="done", output={"result": "fine"}, ms=120, efp=wfcommon.efp(byid, byid["solo"]),
     skey="wf:nf-run:solo:abcd1234.000001", attempts=1, attempts_log=[], final="",

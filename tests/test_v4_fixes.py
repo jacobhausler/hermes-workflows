@@ -51,6 +51,7 @@ except ValueError:
     held = True  # raises -> wf.py call-site catches to HOLD + gate.when_error
 check("W1b runtime never False-skips a broken when", held)
 
+# Ledger 95d7010295d70102: stamped fixtures verify under their own rule; ambiguous unstamped records fail closed.
 # W2: legacy def_hash records must NOT resurrect after an ancestor re-runs.
 # a -> b(legacy stamp) -> g(legacy gate answer). Amend a, run: a re-runs and gains
 # efp; b and the gate answer must go stale (chain no longer all-legacy).
@@ -72,7 +73,7 @@ gnode = next(n for n in nodes if n["id"] == "g")
 st_b, _ = W.node_rec(r, next(n for n in nodes if n["id"] == "b"), {n["id"]: n for n in nodes})
 check("W2a pure-legacy chain validates as done", st_b == "done", st_b)
 ans = W.gate_answer_valid(r, gnode, {n["id"]: n for n in nodes})
-check("W2b legacy gate answer valid while chain untouched", ans is not None, "rejected")
+check("W2b ambiguous unstamped gate answer fails closed even while chain untouched", ans is None, str(ans))
 # now amend a and resume: a re-runs -> gains efp -> b legacy chain broken -> b pending
 g = json.loads((r / "graph.json").read_text())
 g["nodes"][0]["goal"] = "LIST: go CHANGED"

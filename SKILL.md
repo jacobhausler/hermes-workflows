@@ -1,13 +1,15 @@
 ---
 name: workflow
 description: "Workflow fan-out audit and census: run agent graphs"
-version: 1.0.11
+version: 1.0.16
 metadata:
   hermes:
     tags: [workflows, fan-out, audit, census, orchestration]
 ---
 
-# Workflow authoring (1.0.6)
+# Workflow authoring (1.0.11)
+
+Requires Hermes Agent v2026.9.21 or newer (package >=0.21.4). A Desktop gate answer sends a visible resume turn to the run owner's chat via the composer SDK; on older Desktop builds it may only insert draft text for the user to send. If no owner/composer is available, type the resume line in that owner chat. Before disabling the plugin, list runs and stop each live run with `workflow{action:"stop",run_id:<id>}`.
 
 Use the `workflow` tool when a task needs independent lanes, a human gate, or a resumable graph. For one or two independent calls, use ordinary delegation instead. The authoring agent owns the graph and its side effects; the dashboard is a reader, not an executor.
 

@@ -5,6 +5,7 @@ from pathlib import Path
 
 BUILD = Path(os.environ.get("WF_TEST_BUILD") or Path(__file__).parent)
 os.environ["HERMES_HOME"] = str(BUILD / "home")
+os.environ["HERMES_WF_HERMES_BIN"] = str(BUILD / "fake")
 sys.path.insert(0, str(BUILD))          # import 'hermes-workflows' isn't identifier-safe -> load by path
 spec = importlib.util.spec_from_file_location("hw", BUILD.parent / "__init__.py")
 hw = importlib.util.module_from_spec(spec); spec.loader.exec_module(hw)
@@ -25,7 +26,7 @@ G = {"name": "door-test", "nodes": [
     {"id": "synth", "type": "agent", "after": ["g1"], "goal": "combine"},
 ]}
 
-r = call(action="run", graph=G, hermes_bin=str(BUILD / "fake"))
+r = call(action="run", graph=G)
 rid = r.get("run_id"); check("run launches", bool(rid), r)
 st = call(action="wait", run_id=rid, timeout=60)
 check("wait lands on held gate", st.get("status") == "held" and st.get("gate", {}).get("id") == "g1",
@@ -51,7 +52,7 @@ check("amended synth re-ran, run done again", st.get("status") == "done" and
       "v2" in json.dumps(st["nodes"]["synth"]["output"]), json.dumps(st.get("nodes", {}).get("synth")))
 
 # stop
-r3 = call(action="run", graph={"name": "stopme", "nodes": G["nodes"]}, hermes_bin=str(BUILD / "fake"))
+r3 = call(action="run", graph={"name": "stopme", "nodes": G["nodes"]})
 time.sleep(0.4)
 sp = call(action="stop", run_id=r3["run_id"])
 time.sleep(1.5)
@@ -65,7 +66,7 @@ check("list sees runs", any(x["run_id"] == rid for x in ls.get("runs", [])), ls)
 
 # bad graphs rejected
 check("cycle rejected", "cycle" in json.dumps(call(action="run", graph={"name":"x","nodes":[
-    {"id":"a","type":"agent","goal":"g","after":["b"]},{"id":"b","type":"agent","goal":"g","after":["a"]}]}, hermes_bin=str(BUILD / "fake"))))
+    {"id":"a","type":"agent","goal":"g","after":["b"]},{"id":"b","type":"agent","goal":"g","after":["a"]}]})))
 
 # dashboard read-model matches
 spec2 = importlib.util.spec_from_file_location("hwapi", BUILD.parent / "dashboard" / "plugin_api.py")

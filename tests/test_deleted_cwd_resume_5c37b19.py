@@ -27,6 +27,7 @@ to is gone mid-flight.
 
 Run: python3 tests/test_deleted_cwd_resume_5c37b19.py   (exit 0 = green)
 """
+# Ledger 95d7010295d70102: stamped fixtures verify under their own rule; ambiguous unstamped records fail closed.
 import json, os, shutil, subprocess, sys, time, importlib.util
 from pathlib import Path
 
@@ -61,7 +62,7 @@ def mk(run_id, nodes, gates_seed=None, **meta):
     for gid, ans in (gates_seed or {}).items():     # efp-stamped machine answer
         byid = {n["id"]: n for n in nodes}
         (r / "gates" / f"{gid}.json").write_text(
-            json.dumps({"answer": ans, "_def": wfcommon.efp(byid, byid[gid])}))
+            json.dumps({"answer": ans, "_def": wfcommon.efp(byid, byid[gid]), "fp_rule_version": wfcommon.FP_RULE_VERSION}))
     return r
 
 def spawn_wf(run_id, extra_env=None, cwd=None):

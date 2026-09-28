@@ -47,7 +47,7 @@ def events(r):
 
 def answer(r, gid, val):
     g = {n["id"]: n for n in json.loads((r / "graph.json").read_text())["nodes"]}
-    (r / "gates" / f"{gid}.json").write_text(json.dumps({"answer": val, "_def": wfcommon.efp(g, g[gid])}))
+    (r / "gates" / f"{gid}.json").write_text(json.dumps({"answer": val, "_def": wfcommon.efp(g, g[gid]), "fp_rule_version": wfcommon.FP_RULE_VERSION}))
 
 if HOME.exists(): shutil.rmtree(HOME)
 RUNS.mkdir(parents=True)

@@ -1,4 +1,5 @@
 """Runner identity and truthful public read paths; fixture home is isolated here."""
+# Ledger 95d7010295d70102: stamped fixtures verify under their own rule; ambiguous unstamped records fail closed.
 import importlib.util
 import json
 import os
@@ -96,7 +97,7 @@ class LiveTruth(unittest.TestCase):
         node = json.loads((r / 'graph.json').read_text())['nodes'][0]
         byid = {'a': node}
         (r / 'nodes/a.json').write_text(json.dumps({'status': 'running', 'efp': door.efp(byid, node),
-                                                     'pid': self.launch('other').pid, 'skey': 'unused'}))
+                                                     'pid': self.launch('other').pid, 'skey': 'unused', 'fp_rule_version': door._common.FP_RULE_VERSION}))
         (r / 'wf.pid').write_text('99999999')
         st, full = self.paths(r)
         self.assertEqual(st['nodes']['a']['status'], 'pending')
@@ -109,7 +110,7 @@ class LiveTruth(unittest.TestCase):
             r = self.run_dir(name, [node])
             (r / 'wf.pid').write_text('99999999')
             if state in ('done', 'failed'):
-                (r / 'nodes/a.json').write_text(json.dumps({'status': state, 'efp': door.efp({'a': node}, node)}))
+                (r / 'nodes/a.json').write_text(json.dumps({'status': state, 'efp': door.efp({'a': node}, node), 'fp_rule_version': door._common.FP_RULE_VERSION}))
             elif state == 'stopped':
                 (r / 'events.jsonl').write_text('{"event":"run.stopped"}\n')
             self.assertEqual(self.paths(r)[0]['status'], state)
@@ -149,7 +150,7 @@ class LiveTruth(unittest.TestCase):
         graph = json.loads((r / 'graph.json').read_text())
         (r / 'wf.pid').write_text('99999999')
         (r / 'runner_exit.json').write_text(json.dumps({
-            'reason': 'crashed: graph invalid', 'graph_fingerprint': door._common.graph_fingerprint(graph)}))
+            'reason': 'crashed: graph invalid', 'graph_fingerprint': door._common.graph_fingerprint(graph), 'fp_rule_version': door._common.FP_RULE_VERSION}))
         self.assertEqual(self.paths(r)[0]['status'], 'failed')
         with patch.object(door, '_spawn_runner') as spawn:
             self.assertEqual(door.act_wait({'run_id': r.name, 'timeout': 0})['status'], 'failed')

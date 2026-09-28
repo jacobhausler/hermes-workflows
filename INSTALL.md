@@ -1,4 +1,4 @@
-# Manual installation — Hermes Workflows 0.9.0
+# Manual installation — Hermes Workflows 1.0.11
 
 The catalog path (`hermes plugins install hermes-workflows`) is the recommended install; see [README.md](README.md). This file covers installing from a release zip, or by hand from a checkout. Backend and desktop app may be on different machines.
 
@@ -7,13 +7,15 @@ The catalog path (`hermes plugins install hermes-workflows`) is the recommended 
 Place the ZIP and `.zip.sha256` sidecar together. Use `python3` (or an explicit Python 3 interpreter path) and `unzip`; on macOS `shasum -a 256` substitutes for `sha256sum`:
 
     cd "$HOME"
-    if command -v sha256sum >/dev/null; then sha256sum -c hermes-workflows-0.9.0.zip.sha256; else shasum -a 256 -c hermes-workflows-0.9.0.zip.sha256; fi
+    if command -v sha256sum >/dev/null; then sha256sum -c hermes-workflows-1.0.11.zip.sha256; else shasum -a 256 -c hermes-workflows-1.0.11.zip.sha256; fi
     PACKAGE_STAGE="$(mktemp -d "$HOME/hermes-workflows.XXXXXX")"
-    unzip -q "$HOME/hermes-workflows-0.9.0.zip" -d "$PACKAGE_STAGE"
-    PACKAGE_DIR="$PACKAGE_STAGE/hermes-workflows-0.9.0"
+    unzip -q "$HOME/hermes-workflows-1.0.11.zip" -d "$PACKAGE_STAGE"
+    PACKAGE_DIR="$PACKAGE_STAGE/hermes-workflows-1.0.11"
     (cd "$PACKAGE_DIR" && if command -v sha256sum >/dev/null; then sha256sum -c SHA256SUMS; else shasum -a 256 -c SHA256SUMS; fi)
 
 Use `unzip` rather than Python `ZipFile.extractall` when running the tests: the archive stores executable modes, but Python extraction may discard them. Check `tests/fake` is executable. Keep the staging tree until verification completes.
+
+Hermes Agent v2026.9.21 or newer (package version >=0.21.4) is required for the measured stock quiet one-shot and turn-report contract. Older core versions may skip plugin admission.
 
 ## Backend host
 
@@ -57,7 +59,7 @@ Use the active host's Python 3 and Node.js, not a hard-coded installation path. 
 
 ## Removal
 
-Disable the plugin, remove only its source directory and app-level plugin file, then restart the backend and reload desktop plugins. Remove the optional copied skill only if it is the copy you installed. Workflow runs, the library, state.db, logs, existing profile data and archives are preserved, not uninstalled.
+Before disabling, call `workflow {"action":"list"}` and stop every live run with `workflow {"action":"stop","run_id":"<id>"}`. Detached runners can survive session end, gateway restart and plugin disable; disable is not a stop command. Then disable the plugin, remove only its source directory and app-level plugin file, then restart the backend and reload desktop plugins. Remove the optional copied skill only if it is the copy you installed. Workflow runs, the library, state.db, logs, existing profile data and archives are preserved, not uninstalled.
 
     hermes plugins disable hermes-workflows
     printf '%s\n' "$HERMES_HOME/plugins/hermes-workflows" "$HERMES_HOME/desktop-plugins/hermes-workflows" "$HERMES_HOME/skills/workflow"

@@ -11,6 +11,7 @@
     the merged item outputs like `inputs:` does.
 Style: plain asserts, PASS/FAIL lines, exit 0/1 (test_door.py / test_inputs_0923.py).
 """
+# Ledger 95d7010295d70102: stamped fixtures verify under their own rule; ambiguous unstamped records fail closed.
 import importlib.util, json, os, shutil, subprocess, sys
 from pathlib import Path
 
@@ -44,7 +45,7 @@ def run_graph(name, graph, seed=None, env_extra=None):
     for nid, rec in (seed or {}).items():
         byid = {n["id"]: n for n in graph["nodes"]}
         (run / "nodes" / f"{nid}.json").write_text(
-            json.dumps({**rec, "efp": wfcommon.efp(byid, byid[nid])}))
+            json.dumps({**rec, "efp": wfcommon.efp(byid, byid[nid]), "fp_rule_version": wfcommon.FP_RULE_VERSION}))
     plog = home / f"{name}.prompts.log"
     if plog.exists():
         plog.unlink()

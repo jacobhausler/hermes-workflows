@@ -6,6 +6,7 @@ the plugin's own imports. The read-model lock: `next` never contradicts the
 payload it rides in — every amend row names a failed node, the release row names
 the held gate, wait appears only for unfinished states, terminal states are [].
 """
+# Ledger 95d7010295d70102: stamped fixtures verify under their own rule; ambiguous unstamped records fail closed.
 import importlib.util, json, os, shutil, sys, tempfile
 from pathlib import Path
 
@@ -45,6 +46,7 @@ def mk(rid, nodes, records=None, events=None, runner_exit=None):
         d = dict(rec)
         n = byid[nid]
         d.setdefault("efp", wfcommon.efp(byid, n))
+        d.setdefault("fp_rule_version", wfcommon.FP_RULE_VERSION)
         (r / "nodes" / f"{nid}.json").write_text(json.dumps(d))
     if events is not None:
         (r / "events.jsonl").write_text("".join(json.dumps(e) + "\n" for e in events))
@@ -155,7 +157,7 @@ try:
        records={"solo": {"status": "done", "output": {}, "attempts": 1}},
        events=[{"event": "node.done", "node": "solo"}],
        runner_exit={"reason": "crashed: fatal in runner",
-                    "graph_fingerprint": wfcommon.graph_fingerprint({"name": "sn-crash", "nodes": graph_c_nodes})})
+                    "graph_fingerprint": wfcommon.graph_fingerprint({"name": "sn-crash", "nodes": graph_c_nodes}), "fp_rule_version": wfcommon.FP_RULE_VERSION})
     pc = door.act_status({"run_id": "sn-crash"}); payloads["crashed"] = pc
     check(pc["status"] == "failed" and pc["next"] == [{"action": "amend", "node": None, "error_class": "unknown"}],
           "A3: a crashed-runner failure still says amend (never silence)",

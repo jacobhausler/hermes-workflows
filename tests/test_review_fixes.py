@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Regression suite from the mega-review fleet: each test is a mutant that USED to
 survive. Run from the tests dir with plain python3 — sandboxed, no API calls."""
+# Ledger 95d7010295d70102: stamped fixtures verify under their own rule; ambiguous unstamped records fail closed.
 import json, os, shutil, subprocess, sys, time
 from pathlib import Path
 
@@ -13,6 +14,7 @@ import wfcommon
 
 env = dict(os.environ, HERMES_HOME=str(HOME), FAKE_LOG=str(BUILD / "fake.log"))
 FAKE = str(BUILD / "fake")
+os.environ["HERMES_WF_HERMES_BIN"] = FAKE
 ok = True
 
 def check(label, cond, detail=""):
@@ -47,7 +49,7 @@ def answer(r, gid, val="yes", graph=None):
     g = graph or json.loads((r / "graph.json").read_text())
     byid = {n["id"]: n for n in g["nodes"]}
     h = wfcommon.efp(byid, byid[gid])
-    (r / "gates" / f"{gid}.json").write_text(json.dumps({"answer": val, "_def": h}))
+    (r / "gates" / f"{gid}.json").write_text(json.dumps({"answer": val, "_def": h, "fp_rule_version": wfcommon.FP_RULE_VERSION}))
 
 (BUILD / "fake.log").write_text("")
 
@@ -119,7 +121,7 @@ def call(**a):
 # R6: wait must RESPAWN a crashed/idle run (the lie-spinner fix)
 G = {"name": "r6", "nodes": [{"id": "a", "type": "agent", "goal": "SLEEP 3"},
                              {"id": "b", "type": "agent", "after": ["a"], "goal": "after"}]}
-res = call(action="run", graph=G, hermes_bin=FAKE)
+res = call(action="run", graph=G)
 rid = res["run_id"]
 time.sleep(1.2)
 pid = int((RUNS / rid / "wf.pid").read_text())
@@ -130,8 +132,7 @@ check("R6 wait respawns dead mid-wave run and completes", st.get("status") == "d
 
 # R7: stop while held through the DOOR (spawn-to-consume path)
 res = call(action="run", graph={"name": "r7", "nodes": [{"id": "a", "type": "agent", "goal": "LIST: x"},
-                                                        {"id": "g", "type": "gate", "after": ["a"], "question": "q"}]},
-           hermes_bin=FAKE)
+                                                        {"id": "g", "type": "gate", "after": ["a"], "question": "q"}]})
 rid7 = res["run_id"]
 st = call(action="wait", run_id=rid7, timeout=60)
 check("R7 gate held", st.get("status") == "held", json.dumps(st.get("gate")))
@@ -155,8 +156,8 @@ check("R9 stop.request consumed by the respawn it summoned",
 
 # R10: run_id collision cannot clobber (exclusive create)
 base = json.loads((RUNS / rid7 / "graph.json").read_text())
-a1 = call(action="run", graph={"name": "collide", "nodes": base["nodes"]}, hermes_bin=FAKE)["run_id"]
-a2 = call(action="run", graph={"name": "collide", "nodes": base["nodes"]}, hermes_bin=FAKE)["run_id"]
+a1 = call(action="run", graph={"name": "collide", "nodes": base["nodes"]})["run_id"]
+a2 = call(action="run", graph={"name": "collide", "nodes": base["nodes"]})["run_id"]
 check("R10 same-name runs get distinct ids", a1 != a2 and (RUNS / a1 / "nodes").exists() and (RUNS / a2 / "nodes").exists())
 
 # R11: node id path-traversal rejected

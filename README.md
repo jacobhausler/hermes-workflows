@@ -35,6 +35,12 @@ hermes plugins enable hermes-workflows
 ```
 
 Restart the backend (`hermes serve`) so the tool and dashboard routes mount.
+Before disabling or removing the plugin, stop live runs: use `workflow {"action":"list"}`
+to find their run IDs, then `workflow {"action":"stop","run_id":"<id>"}` for each.
+Detached runners can outlive a session, gateway restart, or plugin disable until a
+boundary; disabling alone does not stop them. Desktop gate answers use the SDK to
+send a visible resume turn to the run owner's chat; older Desktop builds insert
+text for you to send, or ask you to type `workflow wait` in that owner chat.
 If Hermes Desktop runs on a **different machine** than the backend, copy
 `desktop/plugin.js` to that machine's `~/.hermes/desktop-plugins/hermes-workflows/plugin.js`
 — the app hot-loads it. Manual/zip install and removal: [INSTALL.md](INSTALL.md).
@@ -72,8 +78,10 @@ lands, the branch collapses and that doc deletes itself.
 
 ## Requirements
 
-- Hermes Agent **≥ v2026.9.21** (the quiet turn-report file the runner reads;
-  measured floor, see [docs/catalog/pr-body.md](docs/catalog/pr-body.md))
+- Hermes Agent **≥ v2026.9.21 (package version 0.21.4)** (measured
+  stock `-Q` CLI and quiet turn-report contract; see
+  [docs/catalog/pr-body.md](docs/catalog/pr-body.md)). Older 0.21.3
+  deployments are below this declared floor and will skip plugin admission.
 - Python 3 (stdlib only — the plugin imports nothing outside Hermes)
 - Node for the desktop half's tests only; the app loads `plugin.js` uncompiled
 

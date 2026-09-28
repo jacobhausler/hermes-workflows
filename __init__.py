@@ -36,7 +36,40 @@ def _coerce_graph(graph):
     return graph, None
 
 GRAPH_MAX_BYTES = 1024 * 1024
-GRAPH_KEYS = {"name", "nodes", "description", "defaults"}
+GRAPH_KEYS = {"name", "nodes", "description", "defaults", "model_policy"}
+
+def _model_names_valid(names):
+    return isinstance(names, list) and all(isinstance(n, str) and n.strip() for n in names)
+
+def _model_policy_error(graph):
+    """Validate effective node routes after defaults and resolution, before graph.json."""
+    policy = graph.get("model_policy") or {}
+    forbidden = set(policy.get("forbidden_models") or []) | set(_seat_model_cfg().get("workflows_forbidden_models") or [])
+    errs = []
+    seat = _seat_model_cfg()
+    tiers = model_tiers()
+    known = set(seat["aliases"]) | ({seat["default"]} - {None}) | set(tiers.values())
+    for node in graph["nodes"]:
+        if node.get("type") in ("gate", "echo"):
+            continue
+        nid, requested = node["id"], node.get("model")
+        if policy.get("require_model") and not requested:
+            errs.append({"node": nid, "field": "model", "msg": "model policy requires an explicit model"})
+        if not forbidden or not requested:
+            continue
+        _p, alias_target = _alias_provider_pair(node.get("tier") or requested, seat, tiers, known)
+        effective = alias_target or requested
+        candidates = {requested, effective, node.get("model")}
+        if "/" in effective:
+            candidates.add(effective.rsplit("/", 1)[-1])
+        if candidates & forbidden:
+            errs.append({"node": nid, "field": "model",
+                         "msg": f"model policy: node {nid} resolves to forbidden model {effective!r}"})
+    if not errs:
+        return None
+    first = errs[0]
+    return {"error": f"graph invalid: node {first['node']}: {first['msg']}", "errors": errs}
+
 
 def _input_graph(args, *, run_id=False, library=False):
     """Choose one explicitly supplied source; never discover files on the caller's behalf."""
@@ -80,6 +113,20 @@ def _validation_error(graph):
         # ONE truth: the same per-key rules a node key gets; apply_graph_defaults
         # bakes this block into the agent defs before graph.json is written.
         errs.extend(_common._defaults_errors(graph["defaults"]))
+    policy = graph.get("model_policy", {})
+    if not isinstance(policy, dict):
+        errs.append({"node": None, "field": "model_policy", "msg": "model_policy must be an object"})
+    else:
+        for key in sorted(set(policy) - {"require_model", "forbidden_models"}):
+            errs.append({"node": None, "field": f"model_policy.{key}", "msg": "unknown policy key"})
+        if "require_model" in policy and not isinstance(policy["require_model"], bool):
+            errs.append({"node": None, "field": "model_policy.require_model", "msg": "require_model must be boolean"})
+        if "forbidden_models" in policy and not _model_names_valid(policy["forbidden_models"]):
+            errs.append({"node": None, "field": "model_policy.forbidden_models",
+                         "msg": "forbidden_models must be a list of non-empty strings"})
+    if not _model_names_valid(_common.seat_forbidden_models()):
+        errs.append({"node": None, "field": "model.workflows_forbidden_models",
+                     "msg": "seat forbidden model floor must be a list of non-empty strings"})
     for key in ("name", "description"):
         if key in graph and (not isinstance(graph[key], str) or not graph[key].strip()):
             errs.append({"node": None, "field": key, "msg": f"{key} must be a non-empty string"})
@@ -115,7 +162,28 @@ def _validation_error(graph):
 HERE = Path(__file__).resolve().parent
 
 def _hermes_bin():
-    """Absolute launcher path — background runners do NOT inherit an interactive PATH."""
+    """Operator-controlled launcher; tool arguments never choose a child executable.
+
+    get_config is already plugin-scoped — it resolves
+    plugins.entries.<id>.settings.<key> with a legacy ``config`` fallback — so one
+    relative read covers every legal place the launcher lives. Asking for a
+    reserved root (``plugins``, ``model``, ``security``, ``settings``) raises
+    ValueError out of core (plugins_state._plugin_relative_segments), which used to
+    kill every workflow launch at the door; reads stay guarded regardless.
+    """
+    def _read(key):
+        if not _CTX:
+            return None
+        try:
+            return _CTX.get_config(key, None)
+        except Exception:
+            return None
+    configured = _read("hermes_bin")
+    if isinstance(configured, str) and configured.strip():
+        return configured.strip()
+    env_bin = os.environ.get("HERMES_WF_HERMES_BIN", "").strip()
+    if env_bin:
+        return env_bin
     w = shutil.which("hermes")
     if w:
         return w
@@ -151,6 +219,7 @@ WORKFLOW_PARAMS = {
         "run_id": {"type": "string", "description": "Run id (required for every action except run/list)."},
         "name": {"type": "string", "description": "run: overrides graph.name (default workflow); save: library name overrides graph.name (lowercase, [-_.]). amend: set graph.name in the replacement graph; omitting it retains the run name."},
         "from": {"type": "string", "description": "run: library graph name to replay (instead of graph or graph_path)."},
+        "run_context": {"description": "run only: non-empty string seed appended to every first-wave agent (including agents behind gate-only paths), OR non-empty map of identifier keys to non-empty strings replacing only explicit {run.KEY} in node goals/contexts, fan-out goals/item goals and gate questions. Missing keys/malformed bindings reject before any run write. Values are persisted in prompts; do not supply secrets. A seed cannot replace baked literals."}, 
         "description": {"type": "string", "description": "save: one-line purpose shown by library/list."},
         "graph_path": {"type": "string", "description": "run/save/amend: absolute path to a caller-supplied local regular UTF-8 JSON graph file (max 1 MiB, no final symlink). Choose exactly one of graph, graph_path, or run's from / save's run_id. Validated before any write or spawn."},
         "graph": {
@@ -164,7 +233,6 @@ WORKFLOW_PARAMS = {
         "dry_run": {"type": "boolean", "description": "amend: true = validate + preview {added, removed, changed, will_rerun, unchanged} ONLY — nothing is written, the runner is not touched. Normal amends echo the same lists."},
         "timeout": {"type": "number", "description": "wait: max seconds to block while a runner is live (default 600, capped 1800). Self-yields ~330s segments under the harness tool deadline with status+note — call wait again until terminal."},
         "detail": {"type": "string", "enum": ["full"], "description": "status/wait: 'full' attaches every committed node output and full spawn argv; the default is compact — mid-run waits carry output pointers (keys+bytes) only, terminal payloads always include outputs."},
-        "hermes_bin": {"type": "string", "description": "run: override the child launcher binary (advanced/testing; default auto-resolved 'hermes')."},
     },
     "required": ["action"],
 }
@@ -205,12 +273,21 @@ _PREFLIGHT_NOT_LIVENESS = ("preflight proves RESOLUTION, not liveness — a lite
 import difflib
 
 def _route_efforts(provider, model):
-    """Reasoning levels the (provider, model) route accepts; the global set when the
-    route is unknown or core is not importable (bare CLI / non-core hosts)."""
-    if provider or model:
+    """Prefer the core route API; on older cores use the Codex vocabulary for
+    openai-codex, otherwise the global set. Guard every host import."""
+    if not (provider or model):
+        return _common.reasoning_levels()
+    try:
+        from agent.reasoning_effort import route_supported_efforts
+        sup = tuple(route_supported_efforts(provider, model))
+        if sup:
+            return sup
+    except Exception:
+        pass
+    if str(provider or '').strip().lower() == 'openai-codex':
         try:
-            from agent.reasoning_effort import route_supported_efforts
-            sup = tuple(route_supported_efforts(provider, model))
+            from agent.reasoning_effort import codex_supported_efforts
+            sup = tuple(codex_supported_efforts(model))
             if sup:
                 return sup
         except Exception:
@@ -574,10 +651,12 @@ def _seat_model_cfg():
             # Keep EMPTY targets in what we return: the FEEDBACK #43 preflight must see an
             # alias that declares itself but resolves to nothing. Resolution consumers
             # derive their known-name sets via _seat_model_names(), which filters there.
-            return {"default": str(mc["default"]) if mc.get("default") else None, "aliases": al}
+            return {"default": str(mc["default"]) if mc.get("default") else None, "aliases": al,
+                    "workflows_forbidden_models": _common.seat_forbidden_models()}
     except Exception:
         pass
-    out = {"default": None, "aliases": {}}
+    out = {"default": None, "aliases": {},
+           "workflows_forbidden_models": _common.seat_forbidden_models()}
     try:
         home = os.environ.get("HERMES_HOME") or (Path.home() / ".hermes")
         section = None; in_aliases = False
@@ -689,6 +768,88 @@ def _session_env(name):
 def _card(rid):
     return f'::workflow{{id="{rid}"}}'
 
+_RUN_REF = re.compile(r"\{run\.([^{}]*)\}")
+_RUN_KEY = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
+
+
+def _bind_run_context(graph, binding):
+    """Resolve a launch binding on a post-defaults copy, before persistence.
+
+    Map substitution is deliberately narrow: no str.format, no interpolation of
+    substituted values, and no changes to fan-out's {item}/{index} grammar.
+    """
+    if isinstance(binding, str):
+        if not binding.strip():
+            raise ValueError("run_context seed must be a non-empty string")
+        byid = {n["id"]: n for n in graph["nodes"]}
+        def agent_ancestor(nid, seen):
+            for parent_id in byid[nid].get("after", []):
+                if parent_id in seen:
+                    continue
+                parent = byid[parent_id]
+                if parent.get("type", "agent") == "agent" or agent_ancestor(parent_id, seen | {parent_id}):
+                    return True
+            return False
+        nodes = []
+        roots = 0
+        for n in graph["nodes"]:
+            n = dict(n)
+            if n.get("type", "agent") == "agent" and not agent_ancestor(n["id"], {n["id"]}):
+                n["context"] = (n.get("context") + "\n\n" if n.get("context") else "") + binding
+                roots += 1
+            nodes.append(n)
+        if not roots:
+            raise ValueError("run_context seed requires at least one first-wave agent")
+        return dict(graph, nodes=nodes)
+    if not isinstance(binding, dict) or not binding:
+        raise ValueError("run_context must be a non-empty string or non-empty map of string bindings")
+    for key, value in binding.items():
+        if not isinstance(key, str) or not _RUN_KEY.fullmatch(key):
+            raise ValueError(f"run_context invalid key {key!r}: expected identifier")
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(f"run_context[{key!r}] must be a non-empty string")
+    def render(text, fanout=False):
+        used = set()
+        def replace(match):
+            key = match.group(1)
+            if not _RUN_KEY.fullmatch(key):
+                raise ValueError(f"run_context malformed reference {match.group(0)!r}")
+            if key not in binding:
+                raise ValueError(f"run_context missing key {key!r} for {match.group(0)}")
+            used.add(key)
+            return binding[key]
+        out = _RUN_REF.sub(replace, text)
+        if fanout:
+            # The runner re-renders fan-out goals per item (wf.fmt_goal): a bound
+            # value containing braces would be interpolated a SECOND time with
+            # item fields, contradicting the no-interpolation-of-substituted-
+            # values contract. Reject before any run write, like every other
+            # malformed binding.
+            for key in used:
+                if "{" in binding[key] or "}" in binding[key]:
+                    raise ValueError(
+                        f"run_context[{key!r}] must not contain braces when bound into a "
+                        "fan-out goal — the runner re-interpolates fan-out goals per item")
+        return out
+    nodes = []
+    for original in graph["nodes"]:
+        n = dict(original)
+        for field in ("goal", "context", "question"):
+            if isinstance(n.get(field), str):
+                n[field] = render(n[field])
+        if isinstance(n.get("fanout"), dict):
+            fanout = dict(n["fanout"])
+            if isinstance(fanout.get("goal"), str):
+                fanout["goal"] = render(fanout["goal"], fanout=True)
+            if isinstance(fanout.get("items"), list):
+                fanout["items"] = [dict(item, goal=render(item["goal"], fanout=True))
+                                   if isinstance(item, dict) and isinstance(item.get("goal"), str)
+                                   else item for item in fanout["items"]]
+            n["fanout"] = fanout
+        nodes.append(n)
+    return dict(graph, nodes=nodes)
+
+
 def act_run(args):
     graph, bad = _input_graph(args, library=True)
     if bad:
@@ -716,6 +877,17 @@ def act_run(args):
         graph = _common.apply_graph_defaults(graph)
     except ValueError as e:
         return {"error": f"graph invalid: defaults/shape: {e}"}
+    if "run_context" in args:
+        try:
+            graph = _bind_run_context(graph, args["run_context"])
+        except ValueError as e:
+            return {"error": str(e)}
+    # dad50be0: policy BEFORE resolution — a seat-forbidden model that isn't a valid
+    # route must be reported as forbidden (field=model), not swallowed by the
+    # unknown-model rejection inside _resolve_models.
+    bad = _model_policy_error(graph)
+    if bad:
+        return bad
     err, models, routes = _resolve_models(graph["nodes"])
     if err:
         return {"error": err}
@@ -738,12 +910,12 @@ def act_run(args):
             n += 1
     (r / "gates").mkdir(exist_ok=True)
     (r / "graph.json").write_text(json.dumps(graph, ensure_ascii=False, indent=2))
-    meta = {"name": graph.get("name", "workflow"), "hermes_bin": args.get("hermes_bin") or _hermes_bin(),
+    meta = {"name": graph.get("name", "workflow"), "hermes_bin": _hermes_bin(),
             "started": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "fp_rule_version": _common.FP_RULE_VERSION,
             # OWNER = the agent session that spawned the run. The desktop uses it to
-            # route a UI gate answer back to THIS chat (host.openSession + hidden turn),
-            # never to whichever chat happens to be open. Env is the only truth the
-            # tool handler has; absent (tests, CLI) => no owner => UI falls back.
+            # send a visible SDK composer turn to THIS chat, never the active chat.
+            # Absent (tests, CLI) => no owner => UI asks for manual resume.
             "owner": {"session_id": _session_env("HERMES_SESSION_ID") or None,
                       "ui_session_id": _session_env("HERMES_UI_SESSION_ID") or None,
                       "platform": _session_env("HERMES_SESSION_PLATFORM") or None}}
@@ -946,9 +1118,10 @@ def _release_core(r, gate_id, answer, ui=False):
     if not gate or gate.get("type") != "gate":
         return {"ok": False, "error": "no such gate node in this run"}
     old = jload(r / "gates" / f"{gate_id}.json")
-    if old is not None and old.get("_def") == efp(byid, gate):
+    if old is not None and _common.gate_answer_valid(r, gate, byid) is not None:
         return {"ok": False, "error": "gate already answered (current graph)"}
     rec = {"answer": answer, "_def": efp(byid, gate),
+           "fp_rule_version": _common.FP_RULE_VERSION,
            "at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
     if ui: rec["_ui"] = True
     (r / "gates").mkdir(exist_ok=True)
@@ -1138,6 +1311,9 @@ def act_amend(args):
     if err:
         return {"error": err}
     assert _models is not None and _routes is not None
+    bad = _model_policy_error(new)
+    if bad:
+        return bad
     # FEEDBACK #152be7f7: the same warn-and-surface ping at the amend submit (annotates
     # `_routes` in place; never blocks — the amend applies regardless of ping outcome).
     _liveness_notes = _route_liveness_ping(_routes)
@@ -1205,6 +1381,8 @@ ACTIONS = {"run": act_run, "status": act_status, "wait": act_wait, "release": ac
 
 def handle(args, **kwargs):
     try:
+        if "hermes_bin" in args:
+            return json.dumps({"error": "hermes_bin is not a workflow tool argument; configure plugins.entries.hermes-workflows.settings.hermes_bin or HERMES_WF_HERMES_BIN"})
         fn = ACTIONS.get(args.get("action"))
         if not fn:
             return json.dumps({"error": f"unknown action {args.get('action')!r}", "actions": sorted(ACTIONS)})
@@ -1214,9 +1392,8 @@ def handle(args, **kwargs):
         return json.dumps({"error": f"{type(e).__name__}: {e}", "trace": traceback.format_exc()[-800:]})
 
 def _wf_command(raw_args):
-    """`/wf` — the library front door. `/wf` lists; `/wf <name> [note]` tells the agent to
-    replay <name> (with the note as steering context). The command output is shown to the
-    human, so it doubles as the instruction the agent will act on next turn."""
+    """`/wf` — the library front door. `/wf <name> [note]` supplies the note
+    atomically as a launch seed, never as post-launch steering."""
     arg = (raw_args or "").strip()
     lib = act_library({})["library"]
     if not arg or arg in ("list", "ls"):
@@ -1237,8 +1414,9 @@ def _wf_command(raw_args):
     g = jload(p) or {}
     return (f"Replay the shelved workflow **{p.stem}** ({len(g.get('nodes') or [])} nodes)"
             + (f" — operator note: {note}" if note else "") + ".\n"
-            f"Agent: call `workflow{{action:\"run\", from:\"{p.stem}\"}}`"
-            + (f", then `workflow{{action:\"steer\", run_id, node:<first pending node>, text:{json.dumps(note)}}}`" if note else "")
+            f"Agent: call `workflow{{action:\"run\", from:\"{p.stem}\""
+            + (f", run_context:{json.dumps(note)}" if note else "")
+            + "}`"
             + ", emit `::workflow{id=\"<run_id>\"}` on its own line, then `wait` and answer gates via clarify.")
 
 def register(ctx):

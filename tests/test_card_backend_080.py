@@ -43,7 +43,7 @@ GRAPH = {"name": "card-backend", "nodes": [{"id": "one", "type": "agent", "goal"
 class CardBackend(unittest.TestCase):
     def setUp(self):
         self.home = tempfile.TemporaryDirectory(dir=ROOT)
-        self.env = patch.dict(os.environ, {"HERMES_HOME": self.home.name, "HERMES_SESSION_ID": "stale-process"})
+        self.env = patch.dict(os.environ, {"HERMES_HOME": self.home.name, "HERMES_SESSION_ID": "stale-process", "HERMES_WF_HERMES_BIN": "offline"})
         self.env.start()
         self.spawn = patch.object(wf, "_spawn_runner")
         self.spawn.start()
@@ -57,7 +57,7 @@ class CardBackend(unittest.TestCase):
         return set_session_vars(platform="desktop", source="desktop", session_id=sid, ui_session_id="tab-" + sid)
 
     def launch(self):
-        return json.loads(wf.handle({"action": "run", "graph": json.loads(json.dumps(GRAPH)), "hermes_bin": "offline"}))
+        return json.loads(wf.handle({"action": "run", "graph": json.loads(json.dumps(GRAPH))}))
 
     def test_tool_context_is_owner_and_payload_carries_card(self):
         tokens = self.bind("session-a")

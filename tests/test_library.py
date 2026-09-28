@@ -12,6 +12,7 @@ import importlib.util
 spec = importlib.util.spec_from_file_location("hw", str(BUILD.parent / "__init__.py"))
 hw = importlib.util.module_from_spec(spec); spec.loader.exec_module(hw)
 FAKE = str(BUILD / "fake")
+os.environ["HERMES_WF_HERMES_BIN"] = FAKE
 ok = True
 def check(label, cond, detail=""):
     global ok
@@ -40,7 +41,7 @@ check("L3 bad name rejected", "invalid library name" in json.dumps(call(action="
 check("L3b run from unknown lists library", "no library graph" in json.dumps(call(action="run", **{"from": "nope"})))
 
 # L4 run from=<name> actually runs (fake launcher) to the gate
-r = call(action="run", **{"from": "lib-demo"}, hermes_bin=FAKE)
+r = call(action="run", **{"from": "lib-demo"})
 rid = r.get("run_id"); check("L4 run from=lib-demo launches", bool(rid), json.dumps(r))
 st = call(action="wait", run_id=rid, timeout=60)
 check("L4b replay reaches the gate", st.get("status") == "held" and (st.get("gate") or {}).get("id") == "g", json.dumps({k: st.get(k) for k in ("status", "gate")}))
@@ -56,7 +57,7 @@ check("L5b library has two", len(call(action="library")["library"]) == 2)
 t = hw._wf_command("")
 check("L6 /wf lists both", "lib-demo" in t and "lib-demo-v2" in t and "/wf <name>" in t, t[:120])
 t = hw._wf_command("lib-demo ship the colors")
-check("L6b /wf <name> note -> replay instruction with from + steer", 'from:"lib-demo"' in t and "steer" in t and "ship the colors" in t, t[:200])
+check("L6b /wf <name> note -> atomic replay binding", 'from:"lib-demo"' in t and 'run_context:"ship the colors"' in t and "steer" not in t, t[:200])
 check("L6c /wf unknown -> lists available", "Available: lib-demo" in hw._wf_command("zzz"))
 check("L6d /wf bad name -> validation msg", "invalid library name" in hw._wf_command("../x"))
 

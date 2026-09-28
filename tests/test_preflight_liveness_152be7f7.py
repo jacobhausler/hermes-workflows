@@ -16,6 +16,7 @@ sys.path.insert(0, str(HERE))
 tmp_dir = tempfile.TemporaryDirectory(prefix=".tmp-liveness-152be7f7-", dir=HERE / "tests")
 atexit.register(tmp_dir.cleanup)
 os.environ["HERMES_HOME"] = tmp_dir.name
+os.environ["HERMES_WF_HERMES_BIN"] = "offline"
 
 # ---- stub the core seam BEFORE the door's ping code can reach it ------------------
 # `agent` is faked in sys.modules so agent.retry_utils resolves here (and a stray
@@ -123,7 +124,7 @@ PASTE = "PASTE this line alone in your reply, then call wait: "
 
 def submit_run(g=None):
     CALLS.clear()
-    out = door.act_run({"graph": g or graph_two_routes(), "hermes_bin": "offline"})
+    out = door.act_run({"graph": g or graph_two_routes()})
     return out
 
 # ---- 1. happy path: alive annotation, pinned call args, ONE ping per distinct route
@@ -247,7 +248,7 @@ rdir = root / "amend-live"
 old_graph = {"name": "amend-live", "nodes": [{"id": "a", "type": "agent", "goal": "old"}]}
 (rdir / "graph.json").write_text(json.dumps(old_graph))
 CALLS.clear()
-am = door.act_amend({"run_id": "amend-live", "hermes_bin": "offline",
+am = door.act_amend({"run_id": "amend-live",
                      "graph": graph_two_routes()})
 check("amend APPLIES despite dead ping (ok, applies, spawned/restart requested)",
       am.get("ok") is True and "applies" in am, am)

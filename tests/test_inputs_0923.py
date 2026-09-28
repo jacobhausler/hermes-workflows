@@ -3,6 +3,7 @@ json block per ref, resolved via resolve_ref against committed outputs, capped 1
 with a truncation marker), an unresolvable ref FAILS the node at spawn with the exact error,
 validate_graph rejects non-list / non-ancestor-head / gate-with-inputs, and inputs are part
 of the def so the efp moves when they change."""
+# Ledger 95d7010295d70102: stamped fixtures verify under their own rule; ambiguous unstamped records fail closed.
 import importlib.util, json, os, shutil, subprocess, sys
 from pathlib import Path
 
@@ -39,7 +40,7 @@ def run_graph(name, graph, seed=None):
     for nid, rec in (seed or {}).items():
         byid = {n["id"]: n for n in graph["nodes"]}
         (run / "nodes" / f"{nid}.json").write_text(
-            json.dumps({**rec, "efp": wfcommon.efp(byid, byid[nid])}))
+            json.dumps({**rec, "efp": wfcommon.efp(byid, byid[nid]), "fp_rule_version": wfcommon.FP_RULE_VERSION}))
     plog = home / f"{name}.prompts.log"
     if plog.exists():
         plog.unlink()

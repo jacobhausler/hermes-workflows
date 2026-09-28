@@ -686,8 +686,9 @@ function StripRow({ run }) {
       run.status === 'held' && run.held_gate
         ? jsx(GateActions, {
             runId: run.id, gate: run.held_gate, owner: run.owner || {},
-            // The focused chat IS the owner here — nudgeOwner's hand-off
-            // lands in this composer. No new DOM coupling.
+            // Gate answers route to the run's OWNER session via the public
+            // composer SDK (visible submit / insert fallback) — never the
+            // focused chat, never app DOM or private events.
           }, 'gate')
         : null
     ]
@@ -746,52 +747,26 @@ export function SessionStrip() {
 
 // -- 2. page /workflows ---------------------------------------------------------
 
-/** Hand the answer to the agent as a hidden user turn in the ACTIVE chat — the
- *  same door ::preview widgets use (`hermes:composer-submit`, display_kind=hidden).
- *  Fail-closed by design: no visible composer ⇒ false, and we say so. The run
- *  stays owned by the agent: the UI never respawns the runner, it only asks. */
-/** Route a gate answer to the run's OWNER session (stamped at spawn by the tool
- *  door: run.json.owner.session_id). host.openSession brings that stored session
- *  to the foreground and awaits hydration; the hidden turn then lands in ITS
- *  composer — not in whichever chat happened to be open. Unknown owner (tests,
- *  CLI spawns, old runs) => fall back to the active composer, and say so. */
-async function nudgeOwner(owner, text) {
+/** Ask the agent to resume in the run's OWNER session, never the active chat.
+ *  The SDK submit is a visible user turn; older apps can only insert a draft
+ *  for the user to send. An absent owner or composer fails closed. */
+export async function nudgeOwner(owner, text) {
   const sid = owner?.session_id
-  if (sid && host.openSession) {
-    try {
-      await host.openSession(sid, { awaitHydration: true, expectHistory: true, intent: 'plugin' })
-      // give the composer a paint to publish its surface id
-      for (let i = 0; i < 20; i++) {
-        if (nudgeAgent(text)) return 'owner'
-        await new Promise(r => setTimeout(r, 100))
-      }
-      return 'owner-open-no-composer'
-    } catch (e) {
-      console.warn('[hermes-workflows] openSession(owner) failed, falling back', e)
-    }
-  }
-  return nudgeAgent(text) ? 'active' : 'none'
-}
-
-function nudgeAgent(text) {
-  // Mirror focus.ts: the composer publishes `data-composer-target` +
-  // `data-composer-surface-id`; the submit handler only honours a VISIBLE one.
-  const visible = el => {
-    if (!el) return false
-    const r = el.getBoundingClientRect()
-    return r.width > 0 && r.height > 0
-  }
-  const candidates = [...document.querySelectorAll('[data-composer-target]')].filter(visible)
-  const el = candidates.find(c => c.dataset.composerTarget === 'main') || candidates[0]
-  const surfaceId = el?.dataset?.composerSurfaceId
-  if (!el || !surfaceId) return false
+  if (!sid) return 'no-owner'
   try {
-    window.dispatchEvent(new CustomEvent('hermes:composer-submit', {
-      detail: { surfaceId, target: el.dataset.composerTarget, text, displayKind: 'hidden' }
-    }))
-    return true
-  } catch {
-    return false
+    if (typeof host.openSession === 'function') {
+      await host.openSession(sid, { awaitHydration: true, expectHistory: true, intent: 'plugin' })
+    }
+    if (typeof host.composer?.submit === 'function') {
+      return await host.composer.submit(sid, text) ? 'submitted' : 'unavailable'
+    }
+    if (typeof host.composer?.insertText === 'function') {
+      return await host.composer.insertText(sid, text) ? 'drafted' : 'unavailable'
+    }
+    return 'no-sdk'
+  } catch (e) {
+    console.warn('[hermes-workflows] owner composer unavailable', e)
+    return 'unavailable'
   }
 }
 
@@ -806,12 +781,13 @@ function GateActions({ runId, gate, owner }) {
         `You own this run — resume it now (workflow wait run_id=${runId}).`
       )
       const msg = {
-        owner: 'Gate answered — owning agent nudged to resume',
-        active: owner?.session_id ? 'Gate answered — owner session unavailable; nudged the active chat instead' : 'Gate answered — run has no recorded owner; nudged the active chat',
-        'owner-open-no-composer': 'Gate answered — opened the owner session but found no composer; tell it to resume',
-        none: 'Gate answered — no chat composer visible; tell the owning agent to resume the run'
+        submitted: 'Gate answered — a visible resume turn was sent to the owner chat',
+        drafted: `Gate answered — resume text inserted in the owner chat; press Enter there to resume run ${runId}`,
+        'no-owner': `Gate answered — this run has no recorded owner; type "workflow wait run_id=${runId}" in the owner chat`,
+        'no-sdk': `Gate answered — this Desktop version cannot send or insert a resume turn; type "workflow wait run_id=${runId}" in the owner chat`,
+        unavailable: `Gate answered — owner composer unavailable; type "workflow wait run_id=${runId}" in the owner chat`
       }[how]
-      host.notify({ kind: how === 'owner' ? 'success' : 'info', message: msg })
+      host.notify({ kind: how === 'submitted' ? 'success' : 'info', message: msg })
     },
     onError: err => host.notify({ kind: 'error', message: `Gate answer failed: ${err?.message || err}` })
   })

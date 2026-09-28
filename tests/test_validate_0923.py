@@ -13,6 +13,7 @@
 (6) run_state/act_status/dashboard surface runner_exit from <run>/runner_exit.json,
     or 'crashed (no exit record)' when wf.pid is dead and the file is absent.
 """
+# Ledger 95d7010295d70102: stamped fixtures verify under their own rule; ambiguous unstamped records fail closed.
 import glob, importlib.util, json, os, shutil, subprocess, sys, time
 from pathlib import Path
 
@@ -23,6 +24,7 @@ if home.exists():
     shutil.rmtree(home)
 home.mkdir()
 os.environ["HERMES_HOME"] = str(home)
+os.environ["HERMES_WF_HERMES_BIN"] = str(HERE / "fake")
 (home / "config.yaml").write_text("model:\n  default: qwen38-next\n")
 sys.path.insert(0, str(BUILD))
 import wfcommon  # noqa: E402
@@ -157,8 +159,7 @@ check("reasoning" in doc and "--reasoning" in doc,
 # --- (5) door: structured errors + JSON-string graphs quoted ---
 call = lambda **a: json.loads(door.handle(a))
 r = call(action="run", graph={"name": "x", "nodes": [{"id": "a", "type": "agent"},
-                                                     {"id": "b", "type": "nope"}]},
-         hermes_bin=str(HERE / "fake"))
+                                                     {"id": "b", "type": "nope"}]})
 check(r.get("error", "").startswith("graph invalid: node a")
       and isinstance(r.get("errors"), list) and len(r["errors"]) == 2
       and all(set(e) == {"node", "field", "msg"} for e in r["errors"]),
@@ -176,7 +177,7 @@ r = call(action="run", graph="[oops")
 check("graph is not valid JSON" in r.get("error", "") and r.get("near", "").startswith("…"),
       "offset-0 parse error still quoted", r)
 N = lambda: {"name": "n", "nodes": [{"id": "a", "type": "agent", "goal": "OK"}]}
-check(call(action="run", graph=N(), hermes_bin=str(HERE / "fake")).get("run_id"),
+check(call(action="run", graph=N()).get("run_id"),
       "string form of a valid graph runs (parse-then-run works)")
 r = call(action="run", graph=42)
 check("must be an object" in r.get("error", ""), "non-dict graph rejected honestly", r)
@@ -328,11 +329,14 @@ check(v.get("runner_exit") == {"reason": "crashed (no exit record)"},
       "dashboard full view surfaces the crash note", v.get("runner_exit"))
 # A current-graph exit record wins over the liveness heuristic.
 exit_record = {"reason": "blocked by failed a", "at": "2099-01-01T00:00:00+00:00", "detail": "x",
-               "graph_fingerprint": wfcommon.graph_fingerprint(json.loads((r / "graph.json").read_text()))}
+               "graph_fingerprint": wfcommon.graph_fingerprint(json.loads((r / "graph.json").read_text())),
+               "fp_rule_version": wfcommon.FP_RULE_VERSION}
 (r / "runner_exit.json").write_text(json.dumps(exit_record))
 st = door.act_status({"run_id": rid})
-check(st.get("runner_exit") == exit_record,
-      "act_status surfaces a graph-bound runner_exit verbatim", st.get("runner_exit"))
+# Ledger 95d7010295d70102: the stamped record verifies under its own rule;
+# the public read model intentionally projects only verdict fields, not provenance.
+check(st.get("runner_exit") == {k: v for k, v in exit_record.items() if k != "fp_rule_version"},
+      "act_status surfaces the validated graph-bound runner_exit projection", st.get("runner_exit"))
 check(plugin_api._view(r, full=True).get("runner_exit", {}).get("reason") == "blocked by failed a",
       "dashboard full view surfaces the exit record")
 # live pid, no record => not a crash
@@ -344,10 +348,11 @@ try:
     check(wfcommon.run_state(r)["runner_exit"] is None,
           "live pid + no record => no crash claim (None)")
     # but if the record exists it is surfaced even while live
-    current_done = {"reason": "done", "graph_fingerprint": exit_record["graph_fingerprint"]}
+    current_done = {"reason": "done", "graph_fingerprint": exit_record["graph_fingerprint"],
+                    "fp_rule_version": wfcommon.FP_RULE_VERSION}
     (r / "runner_exit.json").write_text(json.dumps(current_done))
-    check(wfcommon.run_state(r)["runner_exit"] == current_done,
-          "current graph-bound record beats liveness while pid is alive")
+    check(wfcommon.run_state(r)["runner_exit"] == {k: v for k, v in current_done.items() if k != "fp_rule_version"},
+          "validated graph-bound verdict beats liveness while pid is alive")
     (r / "runner_exit.json").write_text(json.dumps({"reason": "done"}))
     check(wfcommon.run_state(r)["runner_exit"]["reason"] == "stale",
           "unversioned exit cannot claim current completion")

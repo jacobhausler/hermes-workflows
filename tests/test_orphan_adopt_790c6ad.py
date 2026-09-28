@@ -20,6 +20,7 @@ Repro implemented here with a stub hermes_bin (stub_orphan_child.py):
   C) unit: active_child verifies a live record, returns None for a dead pid,
      and None for a live pid whose argv lacks the skey title (imposter).
 """
+# Ledger 95d7010295d70102: stamped fixtures verify under their own rule; ambiguous unstamped records fail closed.
 import json, os, shutil, signal, subprocess, sys, tempfile, threading, time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -213,7 +214,7 @@ def put_rec(pid, skey_, attempt=0):
     rec = {"status": "running", "pid": pid, "skey": skey_, "attempt": attempt,
            "started": datetime.now(timezone.utc).isoformat(timespec="seconds"),
            "log_path": str(ru / "logs" / "u.0.a0.log"),
-           "spawn_cmd": [sys.executable, "chat"], "efp": wfcommon.efp(byid, node_u)}
+           "spawn_cmd": [sys.executable, "chat"], "efp": wfcommon.efp(byid, node_u), "fp_rule_version": wfcommon.FP_RULE_VERSION}
     (ru / "nodes" / "u.0.json").write_text(json.dumps(rec))
 
 put_rec(live.pid, skey)

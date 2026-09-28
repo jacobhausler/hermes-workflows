@@ -16,6 +16,7 @@ RUNS = HOME / "workflows"
 if RUNS.exists(): shutil.rmtree(RUNS)   # hermetic: never trust leftovers
 env = dict(os.environ, HERMES_HOME=str(HOME), FAKE_LOG=str(BUILD / "fake_c1.log"))
 FAKE = str(BUILD / "fake")
+os.environ["HERMES_WF_HERMES_BIN"] = FAKE
 sys.path.insert(0, str(BUILD.parent))
 import wfcommon
 
@@ -65,7 +66,7 @@ G = {"name": "c1-defaults", "defaults": {"max_turns": 40, "timeout": 600,
          {"id": "shaped", "type": "agent", "goal": "LIST: go", "after": ["plain"],
           "shape": "recon", "timeout": 1200},
      ]}
-r = call(action="run", graph=json.loads(json.dumps(G)), hermes_bin=FAKE)
+r = call(action="run", graph=json.loads(json.dumps(G)))
 rid = r.get("run_id")
 check("run with defaults launches", bool(rid), r)
 baked = json.loads((RUNS / rid / "graph.json").read_text())
@@ -95,23 +96,23 @@ check("no double-preamble", once["nodes"][1]["context"].count("HARD RULES") == 1
       once["nodes"][1]["context"])
 
 # ---------- #8/#11 door rejects invalid defaults/shape with field paths ----------
-bad = call(action="run", hermes_bin=FAKE, graph={
+bad = call(action="run", graph={
     "name": "bad-d", "defaults": {"max_turns": 0, "bogus": 1},
     "nodes": [{"id": "a", "type": "agent", "goal": "x"}]})
 fl = [(e.get("field"), e.get("node")) for e in bad.get("errors", [])]
 check("invalid defaults.max_turns rejected at the door", ("defaults.max_turns", None) in fl, bad)
 check("unknown defaults key rejected with field path", ("defaults.bogus", None) in fl, bad)
-bad2 = call(action="run", hermes_bin=FAKE, graph={
+bad2 = call(action="run", graph={
     "name": "bad-s", "nodes": [{"id": "a", "type": "agent", "goal": "x", "shape": "wat"}]})
 fl2 = [(e.get("field"), e.get("node")) for e in bad2.get("errors", [])]
 check("invalid shape rejected at the door with field path", ("shape", "a") in fl2, bad2)
-bad3 = call(action="run", hermes_bin=FAKE, graph={
+bad3 = call(action="run", graph={
     "name": "bad-p", "defaults": "not-an-object",
     "nodes": [{"id": "a", "type": "agent", "goal": "x"}]})
 check("non-object defaults rejected", "defaults" in json.dumps(bad3), bad3)
 
 # amend also bakes before the write (resolved truth on both paths)
-rid2 = call(action="run", hermes_bin=FAKE,
+rid2 = call(action="run",
             graph={"name": "c1-amend", "nodes": [{"id": "a", "type": "agent", "goal": "LIST: go"}]}
             ).get("run_id")
 call(action="wait", run_id=rid2, timeout=60)

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Lifecycle regressions: fresh exits, truthful steering, retry evidence, final items."""
+# Ledger 95d7010295d70102: stamped fixtures verify under their own rule; ambiguous unstamped records fail closed.
 import importlib.util
 import json
 import os
@@ -115,7 +116,7 @@ with tempfile.TemporaryDirectory(prefix="lifecycle-next-", dir=HERE) as td:
         graph = json.loads((r / "graph.json").read_text())
         byid = {n["id"]: n for n in graph["nodes"]}
         if state != "stopped":
-            node_rec = {"status": state, "efp": wfcommon.efp(byid, byid["a"])}
+            node_rec = {"status": state, "efp": wfcommon.efp(byid, byid["a"]), "fp_rule_version": wfcommon.FP_RULE_VERSION}
             (r / "nodes" / "a.json").write_text(json.dumps(node_rec))
         events = [{"event": "run.stopped" if state == "stopped" else "run.done"}]
         (r / "events.jsonl").write_text("\n".join(json.dumps(e) for e in events) + "\n")

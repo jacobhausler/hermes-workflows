@@ -14,17 +14,23 @@ def jload(p, default=None):
         return default
 
 _BUDGET_KEYS = ("max_turns", "timeout", "run_budget", "shape")
+FP_RULE_LEGACY = 1  # before b79fa21: budgets participated in def_hash
+FP_RULE_VERSION = 2  # b79fa21: exclude budgets
+FP_RULES = (FP_RULE_LEGACY, FP_RULE_VERSION)
 
-def def_hash(node):
+def def_hash(node, rule=FP_RULE_VERSION):
     # Budgets are not work: raising a wall or naming a shape must not invalidate a
     # committed node (and apply_graph_defaults baking budgets into an old run's
     # frozen graph at amend must not re-run everything it already finished).
-    node = {k: v for k, v in node.items() if k not in _BUDGET_KEYS}
+    if rule not in FP_RULES:
+        raise ValueError(f"unknown fingerprint rule: {rule!r}")
+    if rule == FP_RULE_VERSION:
+        node = {k: v for k, v in node.items() if k not in _BUDGET_KEYS}
     return hashlib.sha256(json.dumps(node, sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:16]
 
 _EFP_SEP = "\u241f"
 
-def efp(byid, node, _seen=None):
+def efp(byid, node, _seen=None, *, rule=FP_RULE_VERSION):
     """Effective fingerprint: own def + every ancestor's effective fingerprint.
     An amended node (or any ancestor) changes the efp of everything downstream, so
     downstream results are stale and nodes downstream re-run or re-hold — transitively."""
@@ -33,21 +39,21 @@ def efp(byid, node, _seen=None):
     if nid in _seen:
         return "?"  # unreachable for validated (acyclic) graphs
     _seen = _seen | {nid}
-    parts = [def_hash(node)]
+    parts = [def_hash(node, rule)]
     for a in sorted(node.get("after", [])):
         if a in byid:
-            parts.append(efp(byid, byid[a], _seen))
+            parts.append(efp(byid, byid[a], _seen, rule=rule))
     return hashlib.sha256(_EFP_SEP.join(parts).encode()).hexdigest()[:16]
 
 
-def graph_fingerprint(graph):
+def graph_fingerprint(graph, *, rule=FP_RULE_VERSION):
     """Stable signature of the node definitions that a runner verdict describes."""
     nodes = (graph or {}).get("nodes")
     if not isinstance(nodes, list) or any(not isinstance(n, dict) or not n.get("id") for n in nodes):
         return None
     try:
         byid = {n["id"]: n for n in nodes}
-        facts = {str(n["id"]): efp(byid, n) for n in nodes}
+        facts = {str(n["id"]): efp(byid, n, rule=rule) for n in nodes}
         raw = json.dumps(facts, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
         return hashlib.sha256(raw.encode()).hexdigest()[:16]
     except Exception:
@@ -453,14 +459,36 @@ def runner_alive(r, pid_path=None):
     except (OSError, ValueError, IndexError, subprocess.SubprocessError):
         return False
 
+def fingerprint_valid(stored, actual, rule):
+    """A record's own rule is authoritative; an unstamped record matches ANY rule.
+
+    A run-level stamp cannot attest to commits after a mixed-version resume, so
+    only a record's OWN stamp is trusted outright. For unstamped (pre-1.0.12)
+    records, a match under ANY rule proves the definition is unchanged in that
+    rule's view (rule 1 = fully unchanged; rule 2 = unchanged modulo budgets,
+    which def_hash treats as not-work). Fail-closed is ZERO matches: an
+    ambiguity where two rules AGREE on the same stored hash re-spawns 25
+    committed nodes and buys no safety (a real definition change matches none).
+    """
+    if rule is not None:
+        return type(rule) is int and rule in FP_RULES and stored == actual(rule) and stored is not None
+    matches = [v for v in FP_RULES if stored is not None and stored == actual(v)]
+    return len(matches) >= 1
+
+def record_efp_valid(rec, byid, node, field="efp"):
+    return isinstance(rec, dict) and ("fp_rule_version" not in rec or
+                                      (type(rec["fp_rule_version"]) is int and rec["fp_rule_version"] in FP_RULES)) and fingerprint_valid(
+        rec.get(field), lambda rule: efp(byid, node, rule=rule), rec.get("fp_rule_version"))
+
 def runner_exit_read(r, pid_path=None):
     """Graph-bound runner verdict, or a crash when a previous pid lacks identity.
     No pid file means a fresh, not-yet-spawned run, not a crash."""
     rec = jload(Path(r) / "runner_exit.json")
     if isinstance(rec, dict) and rec.get("reason"):
         current_graph = jload(Path(r) / "graph.json")
-        current_fp = graph_fingerprint(current_graph)
-        if rec.get("graph_fingerprint") != current_fp:
+        if ("fp_rule_version" in rec and rec["fp_rule_version"] not in FP_RULES) or not fingerprint_valid(rec.get("graph_fingerprint"),
+                                 lambda rule: graph_fingerprint(current_graph, rule=rule),
+                                 rec.get("fp_rule_version")):
             return {"reason": "stale", "previous_reason": rec.get("reason"), "at": rec.get("at")}
         return {k: v for k, v in rec.items()
                 if k in ("reason", "at", "detail", "graph_fingerprint")}
@@ -478,7 +506,8 @@ def _legacy_chain_unchanged(r, n, byid):
     proof of 'unchanged since this commit': an amended ancestor that re-ran must
     NOT resurrect stale downstream records or gate answers (MF2)."""
     rec = jload(r / "nodes" / f"{n['id']}.json")
-    if not rec or "efp" in rec or rec.get("def_hash") != def_hash(n):
+    if not rec or "efp" in rec or not fingerprint_valid(
+            rec.get("def_hash"), lambda rule: def_hash(n, rule), rec.get("fp_rule_version")):
         return False
     return all(a not in byid or _legacy_chain_unchanged(r, byid[a], byid)
                for a in n.get("after", []))
@@ -495,7 +524,7 @@ def node_rec(r, n, byid):
     if st == "failed" and (rec or {}).get("error_class") == "cancelled":
         return "pending", rec   # stop != failure (#7): a resume re-drives cancelled work
     if st in ("done", "partial", "failed", "skipped"):
-        if rec.get("efp") == efp(byid, n):
+        if record_efp_valid(rec, byid, n):
             return st, rec
         if "efp" not in rec and _legacy_chain_unchanged(r, n, byid):
             return st, rec
@@ -506,13 +535,15 @@ def gate_answer_valid(r, gate, byid):
     ans = jload(r / "gates" / f"{gate['id']}.json")
     if ans is None:
         return None
-    if ans.get("_def") == efp(byid, gate):
+    if record_efp_valid(ans, byid, gate, "_def"):
         return ans
+    if "fp_rule_version" in ans:
+        return None
     gate_rec = jload(r / "nodes" / f"{gate['id']}.json", {}) or {}
     if "efp" not in gate_rec and "efp" not in ans:
-        # legacy answer: same law as node records — the gate def AND its whole
-        # ancestor chain must be proven unchanged legacy commits, not merely done.
-        if ans.get("_def") != def_hash(gate):
+        # Pre-efp answers require a uniquely attributable historical definition
+        # and a chain of equally verified pre-efp ancestor commits.
+        if not fingerprint_valid(ans.get("_def"), lambda rule: def_hash(gate, rule), None):
             return None
         return ans if all(a not in byid or _legacy_chain_unchanged(r, byid[a], byid)
                           for a in gate.get("after", [])) else None
@@ -736,7 +767,7 @@ def _verify_spawn_rec(r, n, byid, rec):
     active_child (runner adoption) so runner and read model can never disagree.
     """
     if not isinstance(rec, dict) or rec.get("status") != "running" \
-            or rec.get("efp") != efp(byid, n):
+            or not record_efp_valid(rec, byid, n):
         return None
     pid, skey = rec.get("pid"), rec.get("skey")
     if not isinstance(pid, int) or pid <= 0 or not isinstance(skey, str) or not skey:
@@ -838,7 +869,7 @@ def run_state(r):
             # machine-answered gate: the runner is polling it — 'running', never 'held'.
             # Its blockage is self-explaining via nodes[id].parked (P4 + jury tweak).
             pk = jload(r / "gates" / f"{gate['id']}.parked.json", {}) or {}
-            if live and pk.get("_def") == efp(byid, gate):
+            if live and record_efp_valid(pk, byid, gate, "_def"):
                 nodes[gate["id"]]["parked"] = {k: v for k, v in pk.items() if k != "_def"}
             elif live:
                 nodes[gate["id"]]["parked"] = {"kind": "timer" if not gate["wait"].get("until_argv") else "check", "attempt": 0}
@@ -1002,6 +1033,53 @@ def amend_preview(r, new_nodes):
     return {"added": added, "removed": removed, "changed": changed,
             "will_rerun": will_rerun, "unchanged": unchanged}
 
+# ---------- seat-level model floor (stdlib-only when core isn't importable) ----------
+
+def seat_forbidden_models():
+    """Read model.workflows_forbidden_models on the child seat, including bare CLI hosts.
+
+    A malformed configured floor is not an empty ban: reject it at the door and
+    fail closed at the runner. Missing config is the only opt-out.
+    """
+    try:
+        from hermes_cli.config import load_config_readonly
+        cfg = load_config_readonly()
+        if cfg:
+            return (cfg.get("model") or {}).get("workflows_forbidden_models", [])
+    except Exception:
+        pass
+    import os
+    home = Path(os.environ.get("HERMES_HOME") or (Path.home() / ".hermes"))
+    try:
+        lines = (home / "config.yaml").read_text().splitlines()
+    except OSError:
+        return []
+    section = key = None
+    values = []
+    for raw in lines:
+        line = raw.split(" #", 1)[0]
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        indent = len(line) - len(line.lstrip())
+        text = line.strip()
+        if indent == 0:
+            section, key = text.partition(":")[0], None
+        elif section == "model" and indent == 2:
+            key, _, scalar = text.partition(":")
+            if key == "workflows_forbidden_models" and scalar.strip():
+                # Simple flow list is supported; malformed scalar remains malformed.
+                try:
+                    import json
+                    return json.loads(scalar.strip())
+                except (ValueError, TypeError):
+                    return scalar.strip()
+        elif section == "model" and key == "workflows_forbidden_models" and indent > 2:
+            if text.startswith("- "):
+                values.append(text[2:].strip().strip("'\""))
+            else:
+                return text  # malformed list, not an empty ban
+    return values
+
 # ---------- live child metrics (state.db join) ----------
 # Children run with `--continue wf:<run>:<node>[:<i>]:<efp8>#a<attempt>`, so each child's
 # sessions row carries that key as its title. One read-only query per view returns every
@@ -1022,8 +1100,10 @@ def child_metrics(run_id, home=None):
     try:
         c = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=0.5)
         try:
+            have_bp = any(r[1] == "billing_provider" for r in c.execute("pragma table_info(sessions)"))
+            bp_sel = "billing_provider, " if have_bp else ""
             rows = c.execute(
-                "select title, model, input_tokens, output_tokens, cache_read_tokens, reasoning_tokens, "
+                f"select title, model, {bp_sel}input_tokens, output_tokens, cache_read_tokens, reasoning_tokens, "
                 "api_call_count, tool_call_count, estimated_cost_usd, last_activity_at, "
                 "last_activity_description, ended_at, started_at from sessions where title like ? "
                 "order by title, started_at, rowid",
@@ -1032,12 +1112,17 @@ def child_metrics(run_id, home=None):
             c.close()
     except Exception:
         return {}
-    for (title, model, ti, to, cr, rs, api, tools, cost, last, desc, ended, started) in rows:
+    for (title, model, *rest) in rows:
+        billing_provider = None
+        if len(rest) == 11:   # legacy schema (no billing_provider column): honest unknown
+            (ti, to, cr, rs, api, tools, cost, last, desc, ended, started) = rest
+        else:
+            (billing_provider, ti, to, cr, rs, api, tools, cost, last, desc, ended, started) = rest
         key = title.split("#a", 1)[0]
         m = out.setdefault(key, {"tokens_in": 0, "tokens_out": 0, "cache_read": 0, "reasoning": 0,
                                  "api_calls": 0, "api_calls_known": True,
                                  "tool_calls": 0, "cost": 0.0, "attempts": 0,
-                                 "model": None, "last_activity": None, "last_desc": None,
+                                 "model": None, "billing_provider": None, "last_activity": None, "last_desc": None,
                                  "ended": None, "started": None, "sessions": {}})
         m["sessions"][title] = {"last_activity": last or started,
                                 "last_desc": desc or None}
@@ -1047,6 +1132,7 @@ def child_metrics(run_id, home=None):
         m["reasoning"] += rs or 0; m["api_calls"] += api or 0; m["tool_calls"] += tools or 0
         m["cost"] += cost or 0.0; m["attempts"] += 1
         m["model"] = model or m["model"]
+        m["billing_provider"] = billing_provider or m["billing_provider"]
         la = last or started
         if la and (m["last_activity"] is None or la > m["last_activity"]):
             m["last_activity"], m["last_desc"] = la, desc or None

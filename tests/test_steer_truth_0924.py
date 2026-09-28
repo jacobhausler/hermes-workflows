@@ -21,7 +21,8 @@ spec = importlib.util.spec_from_file_location("hw68", ROOT / "__init__.py")
 door = importlib.util.module_from_spec(spec); spec.loader.exec_module(door)
 import wfcommon  # same path re-imported; used only for the pure efp() fingerprint
 
-FAKE = str(BUILD / "fake")  # hermes_bin for the created runs: the tests/fake child
+FAKE = str(BUILD / "fake")  # operator-configured launcher for the created runs
+os.environ["HERMES_WF_HERMES_BIN"] = FAKE
 
 ok = True
 def check(label, cond, detail=""):
@@ -38,7 +39,7 @@ def make_run(name, nodes, events=None, node_recs=None):
     """Create the run dir through the door with the runner spawn suppressed, then
     stamp run state by hand (events + efp-stamped node records)."""
     with patch.object(door, "_spawn_runner", lambda *a, **k: None):
-        res = door.act_run({"graph": {"name": name, "nodes": nodes}, "hermes_bin": FAKE})
+        res = door.act_run({"graph": {"name": name, "nodes": nodes}})
     r = HOME68 / "workflows" / res["run_id"]
     assert (r / "graph.json").exists(), res
     if events is not None:

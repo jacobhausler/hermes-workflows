@@ -10,8 +10,8 @@ Run dir: $HERMES_HOME/workflows/<run_id>/
 Lifecycle lines on stdout (for the spawning agent's notify patterns):
   WORKFLOW_HELD <run_id> <gate_id> | WORKFLOW_DONE <run_id> | WORKFLOW_FAILED <run_id> | WORKFLOW_STOPPED <run_id>
 
-Staleness law (wfcommon.efp): every stored result carries the node's effective
-fingerprint (own def + all ancestors' defs). An amend anywhere upstream makes every
+Staleness law (wfcommon.efp): each stored result is verified under its stamped rule
+against the current graph (own def + all ancestors' defs). An amend upstream makes
 downstream result stale — downstream nodes re-run or re-hold; unchanged chains replay.
 """
 import json, os, re, signal, subprocess, sys, threading, time
@@ -22,7 +22,30 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from wfcommon import (efp, graph_fingerprint, jload, validate_graph, node_rec, gate_answer_valid,
-                      when_true, child_metrics, prune_states, dep_satisfied, active_child)
+                      when_true, child_metrics, prune_states, dep_satisfied, active_child,
+                      FP_RULE_VERSION, record_efp_valid, seat_forbidden_models)
+
+def _stamp_served(meta, result):
+    """Commit actual child seat truth, never the requested alias. No row means unknown."""
+    skey = result.get("skey")
+    metric = child_metrics(meta["_run"].name, hermes_home()).get(skey, {}) if skey else {}
+    result["served_model"] = metric.get("model")
+    result["served_billing_provider"] = metric.get("billing_provider")
+    policy = (jload(meta["_run"] / "graph.json") or {}).get("model_policy") or {}
+    seat_floor = seat_forbidden_models()
+    # Invalid seat policy is never silently an empty ban. The submit door rejects it;
+    # a changed config mid-run fails closed here.
+    if not isinstance(seat_floor, list) or not all(isinstance(x, str) for x in seat_floor):
+        result.update(status="failed", error="invalid seat workflows_forbidden_models",
+                      error_class="forbidden_model")
+        return result
+    forbidden = set(policy.get("forbidden_models") or []) | set(seat_floor)
+    served = result["served_model"]
+    if metric and served is not None and (served in forbidden or served.rsplit("/", 1)[-1] in forbidden):
+        result.update(status="failed", error=f"forbidden served model: {served}",
+                      error_class="forbidden_model")
+    return result
+
 
 def hermes_home():
     return Path(os.environ.get("HERMES_HOME") or (Path.home() / ".hermes"))
@@ -61,6 +84,7 @@ def acquire_lock(run):
 def save_node(run, node, byid, rec):
     rec = dict(rec)
     rec["efp"] = efp(byid, node)
+    rec["fp_rule_version"] = FP_RULE_VERSION
     p = run / "nodes" / f"{node['id']}.json"
     p.parent.mkdir(parents=True, exist_ok=True)
     tmp = p.with_name(f"{node['id']}.json.{os.getpid()}.tmp")
@@ -303,7 +327,8 @@ def write_spawn_record(run, node, byid, index, spawn_no, argv, lp, pid, skey, st
     rec = {"status": "running",
            "spawn_cmd": argv,
            "log_path": str(lp), "pid": pid, "started": started or now(),
-           "skey": skey, "attempt": spawn_no, "efp": efp(byid, node)}
+           "skey": skey, "attempt": spawn_no, "efp": efp(byid, node),
+           "fp_rule_version": FP_RULE_VERSION}
     if prompt_path:
         rec["prompt_path"] = str(prompt_path)   # A1: the prompt as sent, durable in logs/
     p = run / "nodes" / f"{_node_file(node, index)}.json"
@@ -1399,6 +1424,7 @@ def run_agent_node(run, meta, byid, node, outputs, steering):
                 except Exception as e:
                     r = {"status": "failed", "error": f"worker crashed: {type(e).__name__}: {e}",
                          "error_class": "crashed", "ms": 0}
+                r = _stamp_served(meta, r)   # dad50be0: per-item seat truth; forbidden served model -> failed
                 with lock:
                     if "attempts" not in r:
                         last_spawn = r.get("spawn")
@@ -1439,6 +1465,23 @@ def run_agent_node(run, meta, byid, node, outputs, steering):
                                             "error_class": "cancelled",
                                             "output": {"items": [], "all_results": results}})
                 log(run, "node.cancelled", node=nid, cancelled=len(cancelled), attempts=0)
+            elif any(r.get("error_class") == "forbidden_model" for r in results):
+                # A known policy violation overrides either quorum outcome. Keep
+                # each child's route evidence; there is no single parent route.
+                fails = [{"index": i, "item": r.get("item"),
+                          "error": (r.get("error") or "")[:300],
+                          "error_class": r.get("error_class"),
+                          "served_model": r.get("served_model"),
+                          "served_billing_provider": r.get("served_billing_provider")}
+                         for i, r in enumerate(results)
+                         if r["status"] not in ("done", "partial")
+                         and r.get("error_class") != "cancelled"]
+                save_node(run, node, byid, {"status": "failed", "error_class": "forbidden_model",
+                                            "error": "forbidden served model in fan-out",
+                                            "failed_detail": fails,
+                                            "output": {"items": merged, "all_results": results}})
+                log(run, "node.failed", node=nid, error="forbidden served model in fan-out",
+                    error_class="forbidden_model", failed_detail=fails, attempts=1)
             elif len(merged) < quorum_req:
                 # partial credit: surviving children's outputs are committed; name each
                 # failure (index + reason) right here so the parent never digs through
@@ -1472,6 +1515,7 @@ def run_agent_node(run, meta, byid, node, outputs, steering):
                                  resume_preamble=resume_preamble)
             r = _transient_retry(meta, spawn(), spawn, "node", {"node": nid})
             r = _bounded_retry(meta, r, spawn, "node", {"node": nid})
+            r = _stamp_served(meta, r)   # dad50be0: seat truth at the commit, never the alias
             save_node(run, node, byid, r)
             if r["status"] in ("done", "partial"):   # #4: a harvested partial IS committed output
                 log(run, "node.finished", node=nid, ms=r.get("ms"),
@@ -1559,11 +1603,11 @@ def park_gate(run, run_id, gate, byid, consume_markers):
     pk_path = run / "gates" / f"{gate['id']}.parked.json"
     (run / "gates").mkdir(exist_ok=True)
     def mirror(**extra):
-        rec = {"_def": efp(byid, gate), "kind": kind, "attempt": attempt, "started": t0,
+        rec = {"_def": efp(byid, gate), "fp_rule_version": FP_RULE_VERSION, "kind": kind, "attempt": attempt, "started": t0,
                "deadline": deadline, "next_at": None, **last, **extra}
         tmp = pk_path.with_suffix(".tmp"); tmp.write_text(json.dumps(rec)); os.replace(tmp, pk_path)
     def answer(rec):
-        rec = {**rec, "_def": efp(byid, gate), "_machine": True,
+        rec = {**rec, "_def": efp(byid, gate), "fp_rule_version": FP_RULE_VERSION, "_machine": True,
                "at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
         p = run / "gates" / f"{gate['id']}.json"
         tmp = p.with_suffix(".tmp"); tmp.write_text(json.dumps(rec)); os.replace(tmp, p)
@@ -1620,7 +1664,7 @@ def write_runner_exit(run, reason, detail=None, graph=None):
     _EXIT_WRITTEN[0] = True
     snapshot = graph if graph is not None else jload(run / "graph.json")
     rec = {"reason": reason, "at": now(),
-           "graph_fingerprint": graph_fingerprint(snapshot)}
+           "graph_fingerprint": graph_fingerprint(snapshot), "fp_rule_version": FP_RULE_VERSION}
     if detail:
         rec["detail"] = str(detail)[:300]
     try:
@@ -1792,7 +1836,7 @@ def main(run_id):
                     cond = True
                     log(run, "gate.when_error", node=gate["id"], error=str(e))
                 if not cond:
-                    rec = {"gate": "skipped", "when": gate.get("when"), "_def": efp(rs.byid, gate)}
+                    rec = {"gate": "skipped", "when": gate.get("when"), "_def": efp(rs.byid, gate), "fp_rule_version": FP_RULE_VERSION}
                     (run / "gates").mkdir(exist_ok=True)   # 5c37b19: a deleted gates/ degrades
                     (run / "gates" / f"{gate['id']}.json").write_text(json.dumps(rec))   # to a recreate, not a runner kill
                     save_node(run, gate, rs.byid, {"status": "skipped" if gate.get("on_skip", "prune") == "prune" else "done", "output": rec})
@@ -1807,7 +1851,7 @@ def main(run_id):
                 cond = True
                 log(run, "gate.when_error", node=gate["id"], error=str(e))
             if not cond:
-                rec = {"gate": "skipped", "when": gate.get("when"), "_def": efp(rs.byid, gate)}
+                rec = {"gate": "skipped", "when": gate.get("when"), "_def": efp(rs.byid, gate), "fp_rule_version": FP_RULE_VERSION}
                 (run / "gates").mkdir(exist_ok=True)   # 5c37b19: a deleted gates/ degrades
                 (run / "gates" / f"{gate['id']}.json").write_text(json.dumps(rec))   # to a recreate, not a runner kill
                 save_node(run, gate, rs.byid, {"status": "skipped" if gate.get("on_skip", "prune") == "prune" else "done", "output": rec})
@@ -1828,8 +1872,8 @@ def main(run_id):
             hf = run / "gates" / f"{gate['id']}.held.json"
             hdef = efp(rs.byid, gate)
             hm = jload(hf, {}) or {}
-            if hm.get("_def") != hdef or not isinstance(hm.get("since"), (int, float)):
-                hm = {"since": time.time(), "_def": hdef}
+            if not record_efp_valid(hm, rs.byid, gate, "_def") or not isinstance(hm.get("since"), (int, float)):
+                hm = {"since": time.time(), "_def": hdef, "fp_rule_version": FP_RULE_VERSION}
                 hf.write_text(json.dumps(hm))
             while True:
                 m = consume_markers()
@@ -1844,7 +1888,7 @@ def main(run_id):
                         gp = run / "gates" / f"{gate['id']}.json"
                         tmpg = gp.with_name(f"{gate['id']}.json.{os.getpid()}.tmp")
                         tmpg.write_text(json.dumps({"answer": dopt, "_def": hdef, "_machine": "auto_release",
-                                                    "at": now()}, ensure_ascii=False))
+                                                    "at": now(), "fp_rule_version": FP_RULE_VERSION}, ensure_ascii=False))
                         os.replace(tmpg, gp)
                         log(run, "gate.auto_released", node=gate["id"], option=dopt, held_s=held_s)
                         break
