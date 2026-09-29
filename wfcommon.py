@@ -106,6 +106,139 @@ def hermes_home():
         return Path(os.environ.get("HERMES_HOME") or (Path.home() / ".hermes"))
 
 
+# ---------- owner settings (#41/#42: tool-bridge first-class) ----------
+# `plugins.entries.hermes-workflows.settings.{runs_root,profile}` are OWNER vocabulary,
+# read at CALL time (no restart) through the same plugin-scoped helper `_hermes_bin`
+# uses (PluginContext.get_config). The door installs that helper via
+# `set_owner_setting_reader`; a process without a plugin ctx (runner, dashboard API,
+# standalone tests) falls back to a side-effect-free raw read of the resolved
+# `<hermes_home>/config.yaml` — the SAME file core's loader resolves for the
+# profile, never core's load_config (which materialises a home skeleton on read).
+# Unset keys = byte-identical to the pre-1.1.2 resolver. The model is never told to
+# set these; a graph/run argument can never substitute for them.
+PLUGIN_ID = "hermes-workflows"
+NO_READER = object()   # a reader answers this when it has no plugin ctx to ask
+_OWNER_SETTING_READER = None
+_RAW_SETTINGS_CACHE = {}  # path -> (mtime_ns, size, settings dict)
+
+def set_owner_setting_reader(fn):
+    """Install the door's plugin-scoped reader: fn(key) -> value | None | NO_READER."""
+    global _OWNER_SETTING_READER
+    _OWNER_SETTING_READER = fn
+
+def _yaml_load(text):
+    """Core's own YAML policy when importable (hermes_yaml: ruamel, YAML 1.1 booleans),
+    else ruamel/pyyaml directly — the config file must parse the way core parses it."""
+    try:
+        from hermes_yaml import safe_load
+        return safe_load(text)
+    except ImportError:
+        pass
+    try:
+        from ruamel.yaml import YAML
+        y = YAML(typ="safe", pure=True)
+        y.version = (1, 1)
+        return y.load(text)
+    except ImportError:
+        import yaml
+        return yaml.safe_load(text)
+
+def _raw_owner_settings():
+    """`plugins.entries.hermes-workflows.settings` from the resolved home's config.yaml,
+    read raw (no core import, no skeleton side effects); {} when absent/unparseable."""
+    p = hermes_home() / "config.yaml"
+    try:
+        st = p.stat()
+        sig = (st.st_mtime_ns, st.st_size)
+    except OSError:
+        return {}
+    hit = _RAW_SETTINGS_CACHE.get(str(p))
+    if hit and hit[0] == sig:
+        return hit[1]
+    settings = {}
+    try:
+        cfg = _yaml_load(p.read_text()) or {}
+        entry = ((cfg.get("plugins") or {}).get("entries") or {}).get(PLUGIN_ID) or {}
+        found = entry.get("settings")
+        if not isinstance(found, dict):   # legacy `config` subtree, as core falls back
+            found = entry.get("config")
+        settings = found if isinstance(found, dict) else {}
+    except Exception:
+        settings = {}
+    _RAW_SETTINGS_CACHE[str(p)] = (sig, settings)
+    return settings
+
+def owner_setting(key):
+    """One owner-settings read: the door's plugin ctx when it has one (its answer is
+    final, unset included), else the raw config file of the resolved home."""
+    if _OWNER_SETTING_READER is not None:
+        try:
+            v = _OWNER_SETTING_READER(key)
+        except Exception:
+            v = NO_READER
+        if v is not NO_READER:
+            return v
+    return _raw_owner_settings().get(key)
+
+def settings_runs_root(home=None):
+    """`settings.runs_root` as a validated absolute Path, or None when unset/empty.
+    FAIL-CLOSED: a malformed value raises ValueError (the door surfaces it as the
+    action's error) — it is never silently ignored, because a silent fallback would
+    re-create exactly the invisible door-vs-tab divergence #42 describes.
+      * expanduser applied; the result MUST be absolute (a relative root would be
+        cwd-dependent: a different root per process = invisible runs).
+      * MUST NOT resolve inside another profile's home under the caller's estate
+        (`<hermes_root>/profiles/<name>/`, the directory core's `-p` names live in)
+        unless that home IS the caller's own resolved home — a typo pinning the shared
+        estate to one profile's private dir would make every other profile's runs
+        vanish into it; the caller's own profile home is the ordinary per-profile
+        default and stays legal. Only the estate's profiles root counts: a path that
+        merely contains a `profiles` segment elsewhere on disk is not a Hermes profile."""
+    raw = owner_setting("runs_root")
+    if raw is None:
+        return None
+    if not isinstance(raw, str):
+        raise ValueError("settings.runs_root must be a string (absolute directory path)")
+    raw = raw.strip()
+    if not raw:
+        return None
+    p = Path(raw).expanduser()
+    if not p.is_absolute():
+        raise ValueError(f"settings.runs_root must be an absolute path, got {raw!r}")
+    own = Path(home) if home is not None else hermes_home()
+    def _res(x):
+        try:
+            return x.resolve()
+        except OSError:
+            return x
+    own_r, p_r = _res(own), _res(p)
+    profiles = _res(profiles_root(own))
+    if len(p_r.parts) > len(profiles.parts) and p_r.parts[:len(profiles.parts)] == profiles.parts:
+        prof_home = Path(*p_r.parts[:len(profiles.parts) + 1])
+        if prof_home != own_r:
+            raise ValueError(
+                f"settings.runs_root {raw!r} resolves inside profile home {prof_home} — "
+                "refused: a runs root inside another profile's private dir pins the estate to "
+                "that profile (only the launcher's own profile home is allowed)")
+    return p_r
+
+def settings_profile():
+    """`settings.profile` validated with the same rules `profile:` node keys use
+    (_PROFILE_NAME_BAD); None when unset/empty; ValueError on an unsafe name."""
+    raw = owner_setting("profile")
+    if raw is None:
+        return None
+    if not isinstance(raw, str):
+        raise ValueError("settings.profile must be a string (a profile directory name)")
+    raw = raw.strip()
+    if not raw:
+        return None
+    if _PROFILE_NAME_BAD.search(raw):
+        raise ValueError(f"settings.profile {raw!r} is not a safe profile directory name "
+                         "(no separators, no '..', no leading dot)")
+    return raw
+
+
 def launch_runs_root():
     """Runs root of the RAW process environment (never the context-resolved home).
 
@@ -130,7 +263,12 @@ def find_run(rid):
 
 
 def runs_root():
-    """`WF_RUNS_ROOT` if set (non-empty), else `$HERMES_HOME/workflows`."""
+    """ONE resolver. Precedence (#42): `settings.runs_root` (owner, validated,
+    fail-closed) > `WF_RUNS_ROOT` env (non-empty) > `<hermes_home>/workflows`
+    (core-resolved home when importable, else `$HERMES_HOME`, else `$HOME/.hermes`)."""
+    configured = settings_runs_root()
+    if configured is not None:
+        return configured
     override = os.environ.get("WF_RUNS_ROOT", "")
     if override:
         return Path(override)
@@ -138,8 +276,17 @@ def runs_root():
 
 def effective_runs_root(environ):
     """The runs root a process RUNS UNDER, from its environment mapping (str->str, e.g. a
-    parsed /proc/<pid>/environ): `WF_RUNS_ROOT` if set, else `HERMES_HOME/workflows`,
-    else None (nothing to compare — legacy `if homes:` guard)."""
+    parsed /proc/<pid>/environ). `settings.runs_root` (this process's owner setting)
+    first — an owner-pinned root applies to every process of the estate, so a sibling
+    runner's env is judged against the same single root runs_root() answers; else
+    `WF_RUNS_ROOT` if set, else `HERMES_HOME/workflows`, else None (nothing to compare —
+    legacy `if homes:` guard)."""
+    try:
+        configured = settings_runs_root()
+    except ValueError:
+        configured = None   # liveness is a read path: a bad setting is the door's error, not ours
+    if configured is not None:
+        return configured
     override = environ.get("WF_RUNS_ROOT", "")
     if override:
         return Path(override)
@@ -155,10 +302,19 @@ def hermes_root(home=None):
     return home.parent.parent if home.parent.name == "profiles" else home
 
 def launcher_profile(home=None):
-    """Launcher identity, resolved from the door's OWN HERMES_HOME — never from a graph
-    arg: `HERMES_HOME.name` under `<root>/profiles/`, else "default"."""
+    """Launcher identity — NEVER from a graph/run arg. Ranked (#41):
+      1. the process's own resolved HERMES_HOME when it is `<root>/profiles/<name>` -> name
+      2. else `settings.profile` (owner-declared fallback for env-blind gateways: the
+         desktop bridge / a gateway that launches the door without a profile home)
+      3. else "default" (byte-identical to the pre-1.1.2 stamp)
+    Env wins whenever present: an owner setting can only fill the identity the process
+    could not carry, never override one it does. An explicit `home=` is an env-shaped
+    caller (tests, runner_alive) and follows the same ranking."""
     home = Path(home) if home is not None else hermes_home()
-    return home.name if home.parent.name == "profiles" else "default"
+    if home.parent.name == "profiles":
+        return home.name
+    configured = settings_profile()
+    return configured if configured else "default"
 
 def profiles_root(home=None):
     return hermes_root(home) / "profiles"
@@ -756,7 +912,17 @@ def _runner_pid_alive(r, pid_path=None):
                     k, sep, v = entry.partition(b"=")
                     if sep and k in (b"HERMES_HOME", b"WF_RUNS_ROOT") and k not in env:
                         env[k.decode()] = v.decode(errors="replace")
-                if env.get("WF_RUNS_ROOT"):
+                # #42: an owner-pinned settings.runs_root is the ONE root every process of
+                # the estate runs under — the runner's env is judged against it. Otherwise
+                # the 1.1 / 1.0.15 comparisons apply VERBATIM.
+                try:
+                    pinned = settings_runs_root()
+                except ValueError:
+                    pinned = None   # liveness is a read path: a bad setting is the door's error
+                if pinned is not None:
+                    if pinned.resolve() != r.parent.resolve():
+                        return False
+                elif env.get("WF_RUNS_ROOT"):
                     # the runner runs under an explicit runs root: it must BE this run's parent
                     if Path(env["WF_RUNS_ROOT"]).resolve() != r.parent.resolve():
                         return False
