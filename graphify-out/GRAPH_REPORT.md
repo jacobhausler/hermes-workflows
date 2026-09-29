@@ -1,7 +1,7 @@
 # Graph Report - tree  (2026-09-29)
 
 ## Corpus Check
-- 123 files · ~162,347 words
+- 122 files · ~162,116 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 4 file(s) not represented in the graph (top: (none) 4)
 
@@ -274,7 +274,7 @@ Nodes (9): Tiny recursive-descent evaluator: or > and > not > comparison > value
 
 ### Community 36 - "test_require_route_25.py"
 Cohesion: 0.14
-Nodes (10): dict, _fake_parse_retry_after(), Mirrors core's parse contract: headers mapping (both casings) or raw value ->…, FRResult, HTTP429, Meta, Exception, #25 (haus-fixer) — fail-closed pinned routes, default ON. fb-fix-9c575645:… (+2 more)
+Nodes (10): dict, _fake_parse_retry_after(), Mirrors core's parse contract: headers mapping (both casings) or raw value ->…, FRResult, HTTP429, Meta, Exception, #25 — fail-closed pinned routes, default ON. fb-fix-9c575645: nodes pinned… (+2 more)
 
 ### Community 37 - "json"
 Cohesion: 0.13

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""#25 (haus-fixer) — fail-closed pinned routes, default ON.
+"""#25 — fail-closed pinned routes, default ON.
 
 fb-fix-9c575645: nodes pinned openai-codex/gpt-6-sol-900k while the submit ping had
 ALREADY reported "ping answered by a different route (fallback ladder)" — and the

@@ -1259,7 +1259,7 @@ def _transient_retry(meta, r, respawn, ev, ev_kw):
             r["error_class"] = "transport_exhausted"
     return r
 
-# ---------- #25: pinned-route hold at commit (haus-fixer fallback-billing ask) ----------
+# ---------- #25: pinned-route hold at commit (field-report fallback-billing ask) ----------
 
 def _seat_alias_map(home):
     """{alias -> target model} for one seat's config, stdlib-only (same YAML-lite
@@ -1296,7 +1296,7 @@ def _seat_alias_map(home):
     return amap
 
 def _route_hold(meta, result, node=None):
-    """#25: commit-time fail-closed hold (haus-fixer: pinned `openai-codex/gpt-6-sol-900k`
+    """#25: commit-time fail-closed hold (field report fb-fix-9c575645: pinned
     billed the seat's fallback qwen38-next for 3 whole nodes while the submit ping had
     ALREADY reported the fallback-ladder surprise). When the door proved this node's
     route alive at submit (`route_verified`, door-baked — absent = never proved = no

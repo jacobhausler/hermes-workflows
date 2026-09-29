@@ -232,7 +232,7 @@ ID_OK = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 AGENT_KEYS = {"id", "type", "after", "goal", "context", "schema", "model", "provider", "toolsets",
               "max_turns", "timeout", "run_budget", "inputs", "fanout", "reasoning",
               "tier", "shape",
-              # #24/#25 (haus-fixer): fail-closed pinned routes. Default TRUE for nodes
+              # #24/#25: fail-closed pinned routes. Default TRUE for nodes
               # that pin an explicit model — a submit ping that AFFIRMATIVELY proves
               # the pinned route dead or answering from the fallback ladder refuses the
               # launch; `false` = explicit opt-in to the ladder. (The door's

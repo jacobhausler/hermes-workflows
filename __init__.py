@@ -662,7 +662,7 @@ def _liveness_hint_suffix(notes):
             + f". Note: {_PREFLIGHT_NOT_LIVENESS} the submit ping is auxiliary and never "
               "blocked this launch; repoint the dead routes before their nodes spawn.")
 
-# ---------- #24/#25: fail-closed route gates at submit (haus-fixer + pf asks) ----------
+# ---------- #24/#25: fail-closed route gates at submit (field-report asks) ----------
 
 def _require_route_effective(node, graph):
     """#25: node key > graph defaults > default True on nodes that pin an explicit
@@ -675,7 +675,7 @@ def _require_route_effective(node, graph):
     return bool(v)
 
 def _route_enforcement(graph, routes, skip=()):
-    """#25 (haus-fixer): a node that pins an explicit route and did NOT opt into the
+    """#25: a node that pins an explicit route and did NOT opt into the
     fallback ladder refuses to launch when the submit ping AFFIRMATIVELY proves the
     pinned route unusable — `dead`, or the fallback-ladder surprise (recorded route !=
     pinned route: the exact condition under which fb-fix-9c575645 silently billed the
@@ -1141,7 +1141,7 @@ def act_run(args):
     _q = _quota_refusal(graph, routes)
     if _q:
         return {"error": _q}
-    # #25 (haus-fixer): fail-closed pinned routes — an affirmatively dead or
+    # #25: fail-closed pinned routes — an affirmatively dead or
     # fallback-ladder-surprised pinned route refuses the launch unless the node
     # opted into the ladder (require_route: false); alive-proved nodes bake
     # route_verified so the runner holds served_model to it at commit.
