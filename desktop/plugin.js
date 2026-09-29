@@ -620,17 +620,14 @@ const $stripFold = atom(null) // focused sid while its terminal fold is expanded
 // {sid, runId} or null. In-memory plugin atom — never persisted, so a reload
 // never resurrects an expanded panel.
 const $railOpen = atom(null)
-// Last $railOpen value SEEN by SessionStrip's render (useValue subscription
-// re-renders on every change, so this is only ever stale for the microseconds
-// between an atom set and the re-render it triggers). The SDK atom is
-// set/useValue only — the click handler may not read the atom (.get() throws
-// there), so render parks the value here for the toggle.
-let railOpenSeen = null
 
 /** Pure pill-toggle (exported so node can test the transition table without a
  *  DOM): null → open {sid, runId}; clicking the OPEN pill (same sid AND same
  *  runId) → null; anything else (other pill, or same runId under a new sid) →
- *  that pill opens fresh. */
+ *  that pill opens fresh. SessionStrip already subscribes to $railOpen via
+ *  useValue and passes `open`/`onToggle` as PROPS (repo precedent
+ *  test_node_click_expand: "no atom .get, toggle from prop") — the handler
+ *  closes over the render's value, so no module-global parking is needed. */
 export function toggleRail(state, sid, runId) {
   return state && state.sid === sid && state.runId === runId ? null : { sid, runId }
 }
@@ -715,30 +712,40 @@ export function railModel(ownedRunsList) {
   }
 }
 
-export function Pill({ run, sid }) {
-  return jsxs('button', {
-    type: 'button',
-    title: `${run.name || run.id} — node strip ${railOpenSeen && railOpenSeen.runId === run.id ? 'below' : 'above'} the rail`,
+export function Pill({ run, sid, open, onToggle }) {
+  // A div, not a <button>: held pills embed GateActions whose option buttons
+  // are SDK Buttons — button-in-button is invalid DOM nesting and every gate
+  // click would bubble into the pill's toggle (review #28 F6). The label span
+  // carries the toggle; GateActions sit beside it, not inside the clickable.
+  return jsxs('div', {
+    role: 'group',
+    title: `${run.name || run.id} — node strip above the rail`,
     // Toggle the mini node-strip (item 4), do NOT navigate: the rail is the
     // glanceable view; the +N overflow and the terminal rows still deep-link.
-    // The SDK atom is set/useValue only — the handler may not .get() the atom,
-    // so it toggles off railOpenSeen (parked by the last render) via the pure
-    // toggleRail table.
-    onClick: e => {
-      e?.stopPropagation?.()
-      $railOpen.set(toggleRail(railOpenSeen, sid, run.id))
-    },
+    // The open state rides as a PROP (no module-global read at render — repo
+    // precedent test_node_click_expand: "no atom .get, toggle from prop").
     style: {
-      display: 'inline-flex', alignItems: 'center', gap: 6, maxWidth: 220,
-      fontSize: '0.6875rem', padding: '2px 8px', borderRadius: 999, cursor: 'pointer',
+      display: 'inline-flex', alignItems: 'center', gap: 6, maxWidth: 260,
+      fontSize: '0.6875rem', padding: '2px 8px', borderRadius: 999,
       background: 'var(--ui-sidebar-surface-background, var(--card))',
-      border: '1px solid var(--ui-stroke-secondary)',
+      border: `1px solid var(--ui-stroke-secondary)${open ? '; box-shadow: inset 0 0 0 1px var(--ui-stroke-secondary)' : ''}`,
     },
     children: [
-      jsx(Dot, { status: run.status }),
-      jsx('span', { style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }, children: run.name || run.id || 'workflow' }),
-      jsx('span', { style: { fontVariantNumeric: 'tabular-nums', opacity: 0.7 }, children: pillProgress(run) }),
-      // Gate-held pills keep GateActions (question + option buttons inline).
+      jsxs('span', {
+        role: 'button',
+        onClick: e => { e?.stopPropagation?.(); onToggle?.() },
+        style: {
+          display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer',
+          overflow: 'hidden', maxWidth: 220,
+        },
+        children: [
+          jsx(Dot, { status: run.status }),
+          jsx('span', { style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }, children: run.name || run.id || 'workflow' }),
+          jsx('span', { style: { fontVariantNumeric: 'tabular-nums', opacity: 0.7 }, children: pillProgress(run) }),
+        ],
+      }, 'label'),
+      // Gate-held pills keep GateActions (question + option buttons inline),
+      // OUTSIDE the toggle span so a gate answer never bubbles into the toggle.
       run.status === 'held' && run.held_gate
         ? jsx(GateActions, { runId: run.id, gate: run.held_gate, owner: run.owner || {} }, 'gate')
         : null,
@@ -749,7 +756,7 @@ export function Pill({ run, sid }) {
 /** One horizontal row of compact pills for the session's live runs, plus the
  *  +N overflow affordance beyond the cap. Renders nothing for an empty set —
  *  never an empty bordered box. */
-export function PillRail({ runs, sid }) {
+export function PillRail({ runs, sid, railOpen, onPill }) {
   const { pills, overflow } = railModel(runs)
   if (!pills.length) return null
   const byId = Object.fromEntries((runs || []).map(r => [r.id, r]))
@@ -759,7 +766,11 @@ export function PillRail({ runs, sid }) {
       flexWrap: 'wrap', padding: '2px 0',
     },
     children: [
-      ...pills.map(p => jsx(Pill, { run: byId[p.id] || { id: p.id, name: p.label, status: p.status }, sid }, p.id)),
+      ...pills.map(p => jsx(Pill, {
+        run: byId[p.id] || { id: p.id, name: p.label, status: p.status }, sid,
+        open: !!(railOpen && railOpen.sid === sid && railOpen.runId === p.id),
+        onToggle: () => onPill?.(p.id),
+      }, p.id)),
       overflow > 0
         ? jsx('button', {
             type: 'button',
@@ -805,7 +816,6 @@ export function SessionStrip() {
   const { data } = useQuery(listQuery())
   const foldOpen = useValue($stripFold)
   const railOpen = useValue($railOpen)
-  railOpenSeen = railOpen
   const owned = ownedRuns(data?.runs || [], runtimeSid || '', storedSid || '')
   const pairKey = runtimeSid || storedSid || ''
   const expanded = railOpen && railOpen.sid === pairKey ? railOpen.runId : null
@@ -840,9 +850,14 @@ export function SessionStrip() {
       // Expanded panel sits ABOVE the pills: the strip stacks bottom-anchored
       // (composer.underside grows upward over the thread).
       expanded ? jsx(RailPanel, { runId: expanded }, expanded) : null,
-      // Live set: one horizontal pill rail (railModel caps at 3 + overflow).
-      // Terminal runs keep their own fold below it, unchanged.
-      jsx(PillRail, { runs: active, sid: pairKey }),
+      // Live set: one horizontal pill rail. Pass the UNCAPPED owned set —
+      // railModel filters TERMINAL and caps at 3 itself, so the +N overflow
+      // stays visible (passing splitRuns' capped `active` pinned overflow to 0
+      // and silently lost the affordance — review #28 F1).
+      jsx(PillRail, {
+        runs: owned, sid: pairKey, railOpen,
+        onPill: id => $railOpen.set(toggleRail(railOpen, pairKey, id)),
+      }),
       terminalTotal
         ? jsxs('button', {
             type: 'button', className: 'text-[0.6875rem] text-(--ui-text-tertiary)',

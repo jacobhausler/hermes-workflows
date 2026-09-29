@@ -216,15 +216,71 @@ const render = n => (typeof n.type === 'function' ? n.type(n.props) : n)
   assert.ok(strip, 'SessionStrip renders for an owned live set')
   const rails = findBy(strip, n => n.type === PillRail)
   assert.equal(rails.length, 1, 'SessionStrip renders exactly one PillRail')
-  assert.deepEqual(rails[0].props.runs.map(r => r.id), ['gate-run', 'r3', 'live-run'],
-    'PillRail gets the active set (held first, started desc, capped)')
+  // Review #28 F1: the strip passes the UNCAPPED owned set — railModel filters
+  // TERMINAL and caps at 3 itself; passing splitRuns' capped `active` pinned
+  // overflow to 0 and silently lost the +N affordance (red-on-old-head below).
+  assert.deepEqual(rails[0].props.runs.map(r => r.id).sort(),
+    ['gate-run', 'live-run', 'r3', 't1'].sort(),
+    'PillRail gets the full owned set (railModel caps; terminal filtered by the model)')
   const railText = textOf(render(rails[0]))
   assert.ok(railText.includes('4/7'), 'strip rail carries progress')
-  assert.ok(!railText.includes('more'), 'at the cap there is no overflow affordance')
+  assert.ok(!railText.includes('more'), 'at the cap (3 live) there is no overflow affordance')
+  // F1 regression probe: 5 live owned runs -> the strip shows '+2 more'
+  {
+    const many = []
+    for (let i = 1; i <= 5; i++) many.push(mk(`m${i}`, 'running', { started: `2026-09-26T05:0${i}:00Z` }))
+    sdkMod.queries.list = { runs: many }
+    const strip5 = SessionStrip()
+    assert.ok(/\+2\s*more/.test(textOf(strip5)),
+      'strip with 5 live runs keeps the +N more → Workflows affordance (F1)')
+  }
   // terminal fold unchanged: the finished line is still the strip's own
   assert.ok(textOf(strip).includes('1 finished'), 'terminal fold unchanged in the strip')
   // and no live rows duplicated outside the rail
   assert.equal(findBy(strip, n => typeof n.type === 'function' && n.type.name === 'PillRail').length, 1)
+}
+
+// -- 7. No Button-in-button (review #28 F6) ---------------------------------------
+// Held pills embed GateActions (SDK Buttons). The pill must not be a <button>
+// (invalid DOM nesting + gate clicks bubble into the toggle): assert no host
+// 'button' ancestor above any GateActions, and the pill itself is a div.
+{
+  sdkMod.atoms.focusedSessionId.set('S1')
+  sdkMod.atoms.focusedStoredSessionId.set('U1')
+  const held = mk('gate-run', 'held', {
+    started: '2026-09-26T03:50:00Z',
+    held_gate: { id: 'go', question: 'Ship?', options: ['ship', 'hold'] },
+  })
+  sdkMod.queries.list = { runs: [held] }
+  const rail = PillRail({ runs: [held], sid: 'S1' })
+  function walk(node, buttonAncestor, hits) {
+    if (!node || typeof node !== 'object') return hits
+    if (typeof node.type === 'function') {
+      if (node.type.name === 'GateActions') {
+        if (buttonAncestor) hits.push('GateActions under a <button>')
+        return hits                       // SDK Button internals are the SDK's business
+      }
+      return walk(node.type(node.props), buttonAncestor, hits)   // render through
+    }
+    const isButtonEl = node.type === 'button'
+    const kids = []
+    const collect = c => { if (Array.isArray(c)) kids.push(...c); else if (c) kids.push(c) }
+    if (node.props) collect(node.props.children)
+    for (const k of kids) walk(k, buttonAncestor || isButtonEl, hits)
+    return hits
+  }
+  const hits = walk(rail, false, [])
+  assert.deepEqual(hits, [], 'no GateActions nested under a raw <button> (F6)')
+  let toggled = 0
+  const pillEl = mod.Pill({ run: held, sid: 'S1', open: false, onToggle: () => { toggled++ } })
+  assert.equal(pillEl?.type, 'div', 'Pill renders a div, not a button (F6)')
+  // gate answer never toggles: the toggle handler lives on the label span only
+  const label = pillEl?.props?.children?.[0]
+  assert.equal(typeof label?.props?.onClick, 'function', 'label span carries the toggle')
+  let stopped = 0
+  label.props.onClick({ stopPropagation: () => { stopped++ } })
+  assert.equal(toggled, 1, 'label click calls onToggle prop (open state rides as prop, F2)')
+  assert.equal(stopped, 1, 'label click stops propagation (gate clicks never bubble, F6)')
 }
 
 console.log('ALL PASS test_pill_rail (railModel ordering/cap/overflow/progress, PillRail row + GateActions, SessionStrip integration)')

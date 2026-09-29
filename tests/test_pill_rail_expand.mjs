@@ -198,9 +198,12 @@ globalThis.__stubDetail = detailFor(other)
 assert.ok(hasMini(SessionStrip()), 'switched rail renders the newly open run’s MiniGraph')
 assert.equal(globalThis.__stubLastRunId, other, 'the panel now queries the switched-to run')
 
-// toggle closed through the rail atom: clicking the open pill sets null.
+// toggle closed: clicking the OPEN pill sets null. Handlers are re-walked from a
+// FRESH render while the rail atom is open — with the open state riding as a
+// PROP (F2), the toggle closes over the render's railOpen; handlers captured
+// from the old closed render would carry railOpen=null and re-open, not close.
 let closedAgain = false
-for (const c of clickables) {
+for (const c of walk(SessionStrip()).filter(n => typeof n.props?.onClick === 'function')) {
   sets.length = 0
   try { c.props.onClick({ stopPropagation: () => {} }) } catch { /* gate stubs */ }
   if (sets.some(s => s.a === railAtom && s.v === null)) { closedAgain = true; break }
