@@ -19,7 +19,7 @@ runner executes it, survives restarts, and hands results back through the same
 | **Typed failures** | Every `node.failed` event carries `error_class` + `attempts` (`timeout`, `cap_exhausted`, `provider_400`, `schema`, `cancelled`, `fatal_quota`, `route_unavailable`, …) — the parent never infers a cause from prose |
 | **Route integrity** | A node that pins an explicit `model` is fail-closed by default (`require_route`): a dead or fallback-surprised pin refuses the launch instead of silently billing another model; an alive-proved pin bakes the door-only `route_verified` and the runner holds the served model to it |
 | **Compact status** | Mid-run `status`/`wait` return output *pointers*; `detail:"full"` opts into everything; terminal payloads are always full |
-| **Desktop DAG view** | Live graph, fan-out stacks, timeline, and a `::workflow{id="…"}` inline card in any reply |
+| **Desktop DAG view** | Live graph, fan-out stacks, timeline, and a `::workflow{id="…"}` inline card in any reply; the live-run strip mounts below the composer dock (`composer.underside`, core ≥ v2026.7.30 — falls back to above-it `composer.top` on older shells) |
 | **Library** | `save` a proven graph, `library` lists it, `run` with `from:` replays it |
 | **Authoring skill** | Bundled `workflow` skill with grammar, operations, and **measured** per-shape budget recipes |
 

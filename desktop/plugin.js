@@ -607,13 +607,30 @@ function MiniGraph({ detail }) {
   })
 }
 
-// -- 1b. composer session strip (composer.top) ----------------------------------
-// The runs of the FOCUSED chat, above its composer. Pure core (ownedRuns,
-// splitRuns, pillModel) so node can test the model without a DOM; the O3
-// pane reuses ownedRuns for its "this chat" tag. Fold state is an in-memory
+// -- 1b. composer session strip (composer.underside, fallback composer.top) -----
+// The runs of the FOCUSED chat at its composer. Pure core (ownedRuns,
+// splitRuns, railModel, pillModel) so node can test the model without a DOM;
+// the O3 pane reuses ownedRuns for its "this chat" tag. Live runs render as one
+// horizontal PillRail row, one pill expanding to a MiniGraph node-strip above
+// the rail; terminal runs keep the fold. Fold/rail state is an in-memory
 // plugin atom — never localStorage.
 
 const $stripFold = atom(null) // focused sid while its terminal fold is expanded
+// Which pill is expanded into the mini node-strip ABOVE the rail (#22 item 4):
+// {sid, runId} or null. In-memory plugin atom — never persisted, so a reload
+// never resurrects an expanded panel.
+const $railOpen = atom(null)
+
+/** Pure pill-toggle (exported so node can test the transition table without a
+ *  DOM): null → open {sid, runId}; clicking the OPEN pill (same sid AND same
+ *  runId) → null; anything else (other pill, or same runId under a new sid) →
+ *  that pill opens fresh. SessionStrip already subscribes to $railOpen via
+ *  useValue and passes `open`/`onToggle` as PROPS (repo precedent
+ *  test_node_click_expand: "no atom .get, toggle from prop") — the handler
+ *  closes over the render's value, so no module-global parking is needed. */
+export function toggleRail(state, sid, runId) {
+  return state && state.sid === sid && state.runId === runId ? null : { sid, runId }
+}
 // Feature-detect the focused-chat atoms: packaged apps older than the SDK
 // checkout may not expose every atom (the Sep-16 build has no runtime-id atom,
 // and `useValue(undefined)` dies as "reading 'get'"). A missing atom degrades
@@ -667,82 +684,216 @@ export function groupRuns(runs) {
   }
 }
 
-function StripRow({ run }) {
-  const start = parseTime(run.started)
-  const end = TERMINAL.has(run.status) ? parseTime(run.updated) : Date.now()
-  const [row1, row2] = inlineHeader(run, start && end > start ? end - start : null)
+// Compact progress for the rail pills: `${nodes_done}/${nodes_total}`, and
+// '?' whenever either count is absent — an absent count is never fabricated
+// as 0/N the way nodesCount() does for terminal rows.
+const pillProgress = r =>
+  (r?.nodes_done != null && r?.nodes_total != null) ? `${r.nodes_done}/${r.nodes_total}` : '?'
+
+/** Rail model over one chat's owned runs: the LIVE set folded into pills —
+ *  held first, then running by started desc, capped at 3 (the same policy as
+ *  splitRuns, which stays for the pane and the terminal fold). Pure, so node
+ *  can test it without a DOM. */
+export function railModel(ownedRunsList) {
+  const live = (ownedRunsList || []).filter(r => !TERMINAL.has(r.status))
+  const held = live.filter(r => r.status === 'held')
+  const rest = live.filter(r => r.status !== 'held')
+    .sort((a, b) => parseTime(b.started) - parseTime(a.started))
+  const active = [...held, ...rest]
+  return {
+    pills: active.slice(0, 3).map(r => ({
+      id: r.id,
+      label: r.name || r.id || 'workflow',
+      status: statusLabel(r.status),
+      progress: pillProgress(r),
+      held: r.status === 'held',
+    })),
+    overflow: Math.max(0, active.length - 3)
+  }
+}
+
+export function Pill({ run, sid, open, onToggle }) {
+  // A div, not a <button>: held pills embed GateActions whose option buttons
+  // are SDK Buttons — button-in-button is invalid DOM nesting and every gate
+  // click would bubble into the pill's toggle (review #28 F6). The label span
+  // carries the toggle; GateActions sit beside it, not inside the clickable.
   return jsxs('div', {
-    className: 'flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[0.6875rem]',
+    role: 'group',
+    title: `${run.name || run.id} — node strip above the rail`,
+    // Toggle the mini node-strip (item 4), do NOT navigate: the rail is the
+    // glanceable view; the +N overflow and the terminal rows still deep-link.
+    // The open state rides as a PROP (no module-global read at render — repo
+    // precedent test_node_click_expand: "no atom .get, toggle from prop").
+    style: {
+      display: 'inline-flex', alignItems: 'center', gap: 6, maxWidth: 260,
+      fontSize: '0.6875rem', padding: '2px 8px', borderRadius: 999,
+      background: 'var(--ui-sidebar-surface-background, var(--card))',
+      // F8 (deep review): the previous value concatenated a box-shadow into the
+      // `border` shorthand — an invalid declaration the browser drops WHOLE, so
+      // the open pill lost its border entirely (inverted signal, not cosmetic).
+      // Ring rides on its own real property.
+      border: '1px solid var(--ui-stroke-secondary)',
+      boxShadow: open ? 'inset 0 0 0 1px var(--ui-stroke-secondary)' : undefined,
+    },
     children: [
-      jsx(Dot, { status: run.status }),
-      ...row1.map((text, i) => jsx('span', {
-        className: i === 0 ? 'font-medium text-(--ui-text-secondary)' : 'text-(--ui-text-tertiary)',
-        children: text
-      }, i)),
-      ...row2.map((text, i) => jsx('span', {
-        className: 'text-(--ui-text-tertiary)', style: { fontSize: 10, fontVariantNumeric: 'tabular-nums' },
-        children: text
-      }, row1.length + i)),
+      jsxs('span', {
+        role: 'button',
+        // F7 (deep review): role=button WITHOUT tabIndex is not focusable — a
+        // pill click left focus in the composer, the rail's onKeyDown never saw
+        // Escape, and the advertised Esc-collapse was dead (the first reader
+        // verified F6 closed but missed the regression F6 itself introduced).
+        // Focusable label + keyboard activation = the a11y contract of role=button.
+        tabIndex: 0,
+        onClick: e => { e?.stopPropagation?.(); onToggle?.() },
+        onKeyDown: e => {
+          if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); onToggle?.() }
+        },
+        style: {
+          display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer',
+          overflow: 'hidden', maxWidth: 220,
+        },
+        children: [
+          jsx(Dot, { status: run.status }),
+          jsx('span', { style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }, children: run.name || run.id || 'workflow' }),
+          jsx('span', { style: { fontVariantNumeric: 'tabular-nums', opacity: 0.7 }, children: pillProgress(run) }),
+        ],
+      }, 'label'),
+      // Gate-held pills keep GateActions (question + option buttons inline),
+      // OUTSIDE the toggle span so a gate answer never bubbles into the toggle.
       run.status === 'held' && run.held_gate
-        ? jsx(GateActions, {
-            runId: run.id, gate: run.held_gate, owner: run.owner || {},
-            // Gate answers route to the run's OWNER session via the public
-            // composer SDK (visible submit / insert fallback) — never the
-            // focused chat, never app DOM or private events.
-          }, 'gate')
-        : null
+        ? jsx(GateActions, { runId: run.id, gate: run.held_gate, owner: run.owner || {} }, 'gate')
+        : null,
+    ]
+  }, run.id)
+}
+
+/** One horizontal row of compact pills for the session's live runs, plus the
+ *  +N overflow affordance beyond the cap. Renders nothing for an empty set —
+ *  never an empty bordered box. */
+export function PillRail({ runs, sid, railOpen, onPill }) {
+  const { pills, overflow } = railModel(runs)
+  if (!pills.length) return null
+  const byId = Object.fromEntries((runs || []).map(r => [r.id, r]))
+  return jsxs('div', {
+    style: {
+      display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 6,
+      flexWrap: 'wrap', padding: '2px 0',
+    },
+    children: [
+      ...pills.map(p => jsx(Pill, {
+        run: byId[p.id] || { id: p.id, name: p.label, status: p.status }, sid,
+        open: !!(railOpen && railOpen.sid === sid && railOpen.runId === p.id),
+        onToggle: () => onPill?.(p.id),
+      }, p.id)),
+      overflow > 0
+        ? jsx('button', {
+            type: 'button',
+            style: { cursor: 'pointer', background: 'none', border: 'none', padding: 0, fontSize: '0.6875rem' },
+            onClick: () => host.navigate('/workflows'),
+            children: `+${overflow} more → Workflows`
+          }, 'overflow')
+        : null,
     ]
   })
+}
+
+/** Mini node-strip ABOVE the pills for the one expanded run (#22 item 4):
+ *  the run's existing MiniGraph fed by runQuery. Its own component so the
+ *  runQuery hook runs only while expanded (rendering a component conditionally
+ *  is legal; hooks behind an early return would not be). */
+function RailPanel({ runId }) {
+  const { data } = useQuery(runQuery(runId))
+  if (!data) return null
+  return jsx('div', {
+    style: {
+      maxWidth: '100%', maxHeight: 160, overflowY: 'auto',
+      border: '1px solid var(--ui-stroke-secondary)', borderRadius: 8,
+      background: 'var(--ui-sidebar-surface-background, var(--card))',
+      padding: '4px 6px'
+    },
+    children: jsx(MiniGraph, { detail: data })
+  }, 'rail-panel')
 }
 
 export function SessionStrip() {
   // KEY PAIRING (measured 2026-09-26 against this desktop): run.json.owner.session_id
   // carries the GATEWAY runtime id (`20260923_143041_27e8d2` — state.db sessions.id),
   // owner.ui_session_id carries the DESKTOP stored id (`3184ce5e`). The SDK names them
-  // inversely to intuition: host.focusedSessionId is $focusedRuntimeId (the runtime id),
-  // host.focusedStoredSessionId is the desktop token. Pair each owner key with its SAME-SHAPE
-  // host key; a swapped pair silently renders nothing, which no unit test can see.
-  const runtimeSid = useValue(focusAtom(host?.focusedSessionId))
-  const storedSid = useValue(focusAtom(host?.focusedStoredSessionId))
+  // inversely to intuition: host.state.focusedSessionId is $focusedRuntimeId (the runtime
+  // id), host.state.focusedStoredSessionId is the desktop token — the SDK exposes both
+  // ONLY under host.state (sdk/index.ts:665-697); reading them at the top level is what
+  // made the strip and the pane's "this chat" pill render nothing forever (#23). Pair
+  // each owner key with its SAME-SHAPE host key; a swapped pair silently renders nothing,
+  // which no unit test can see.
+  const runtimeSid = useValue(focusAtom(host?.state?.focusedSessionId))
+  const storedSid = useValue(focusAtom(host?.state?.focusedStoredSessionId))
   const { data } = useQuery(listQuery())
   const foldOpen = useValue($stripFold)
+  const railOpen = useValue($railOpen)
   const owned = ownedRuns(data?.runs || [], runtimeSid || '', storedSid || '')
   const pairKey = runtimeSid || storedSid || ''
+  const expanded = railOpen && railOpen.sid === pairKey ? railOpen.runId : null
+  const railRef = useRef(null)
+  // Hooks run UNCONDITIONALLY (fixed order across renders); the bodies guard
+  // themselves. Switching focused chat collapses the expanded panel.
+  useEffect(() => { $railOpen.set(null) }, [pairKey])
+  // Click-away collapse (item 4), armed only while a panel is open.
+  // window-level listener (no `document.` — SDK-only law); clicks that land
+  // inside the rail are excluded by the railRef.contains check.
+  useEffect(() => {
+    if (!expanded) return
+    const onDocClick = e => {
+      if (railRef.current && !railRef.current.contains(e.target)) $railOpen.set(null)
+    }
+    window.addEventListener('click', onDocClick)
+    return () => window.removeEventListener('click', onDocClick)
+  }, [expanded])
   if (!pairKey || !owned.length) return null
-  const { active, overflow, terminalFold, terminalTotal } = splitRuns(owned)
+  const { active, terminalFold, terminalTotal } = splitRuns(owned)
   const openRun = id => { $selRun.set(id); host.navigate('/workflows') }
   const folded = foldOpen !== pairKey
-  return box(
-    'flex flex-col gap-0.5 border-b border-(--ui-stroke-secondary) px-3 py-1',
-    ...active.map(r => jsx(StripRow, { run: r }, r.id)),
-    overflow > 0
-      ? jsx('button', {
-          type: 'button', className: 'text-left text-[0.6875rem] text-(--ui-text-tertiary)',
-          style: { cursor: 'pointer', background: 'none', border: 'none', padding: 0 },
-          onClick: () => host.navigate('/workflows'),
-          children: `+${overflow} more → Workflows`
-        })
-      : null,
-    terminalTotal
-      ? jsxs('button', {
-          type: 'button', className: 'text-[0.6875rem] text-(--ui-text-tertiary)',
-          style: { cursor: 'pointer', background: 'none', border: 'none', padding: 0, textAlign: 'left' },
-          onClick: () => $stripFold.set(folded ? pairKey : null),
-          children: [`▸ ${terminalTotal} finished`]
-        })
-      : null,
-    !folded
-      ? box(
-          'flex flex-col gap-0.5 pl-3',
-          ...terminalFold.map(r => jsx('button', {
-            type: 'button', className: 'text-left text-[0.6875rem] text-(--ui-text-tertiary)',
-            style: { cursor: 'pointer', background: 'none', border: 'none', padding: 0 },
-            onClick: () => openRun(r.id),
-            children: `${r.name || r.id} · ${statusLabel(r.status)} · ${ago(r.updated) || 'unknown'}`
-          }, r.id))
-        )
-      : null
-  )
+  return jsxs('div', {
+    ref: railRef,
+    className: 'flex flex-col gap-0.5 border-b border-(--ui-stroke-secondary) px-3 py-1',
+    // Esc collapse (item 4): scoped to the rail via onKeyDown — the ⌘K law
+    // forbids global keydown listeners (test_fanout_expand). The pill label is
+    // tabIndex:0 (F7), so a pill click/Tab moves focus into the strip and
+    // Escape lands on this handler. Nothing else intercepts keys; ⌘K stays
+    // app-owned.
+    onKeyDown: e => { if (e.key === 'Escape' && expanded) $railOpen.set(null) },
+    children: [
+      // Expanded panel sits ABOVE the pills: the strip stacks bottom-anchored
+      // (composer.underside grows upward over the thread).
+      expanded ? jsx(RailPanel, { runId: expanded }, expanded) : null,
+      // Live set: one horizontal pill rail. Pass the UNCAPPED owned set —
+      // railModel filters TERMINAL and caps at 3 itself, so the +N overflow
+      // stays visible (passing splitRuns' capped `active` pinned overflow to 0
+      // and silently lost the affordance — review #28 F1).
+      jsx(PillRail, {
+        runs: owned, sid: pairKey, railOpen,
+        onPill: id => $railOpen.set(toggleRail(railOpen, pairKey, id)),
+      }),
+      terminalTotal
+        ? jsxs('button', {
+            type: 'button', className: 'text-[0.6875rem] text-(--ui-text-tertiary)',
+            style: { cursor: 'pointer', background: 'none', border: 'none', padding: 0, textAlign: 'left' },
+            onClick: () => $stripFold.set(folded ? pairKey : null),
+            children: [`▸ ${terminalTotal} finished`]
+          })
+        : null,
+      !folded
+        ? box(
+            'flex flex-col gap-0.5 pl-3',
+            ...terminalFold.map(r => jsx('button', {
+              type: 'button', className: 'text-left text-[0.6875rem] text-(--ui-text-tertiary)',
+              style: { cursor: 'pointer', background: 'none', border: 'none', padding: 0 },
+              onClick: () => openRun(r.id),
+              children: `${r.name || r.id} · ${statusLabel(r.status)} · ${ago(r.updated) || 'unknown'}`
+            }, r.id))
+          )
+        : null
+    ]
+  })
 }
 
 // -- 2. page /workflows ---------------------------------------------------------
@@ -1629,9 +1780,10 @@ function PaneRow({ run, thisChat }) {
 
 function WorkflowsPane() {
   const { data } = useQuery(listQuery())
-  // Same key pairing as SessionStrip: owner.session_id pairs with the runtime id.
-  const runtimeSid = useValue(focusAtom(host?.focusedSessionId))
-  const storedSid = useValue(focusAtom(host?.focusedStoredSessionId))
+  // Same key pairing as SessionStrip: owner.session_id pairs with the runtime id,
+  // both atoms live under host.state (sdk/index.ts:665-697 — see #23).
+  const runtimeSid = useValue(focusAtom(host?.state?.focusedSessionId))
+  const storedSid = useValue(focusAtom(host?.state?.focusedStoredSessionId))
   const [showAllDone, setShowAllDone] = useState(false)
   const runs = data?.runs || []
   const owned = new Set(ownedRuns(runs, runtimeSid, storedSid).map(r => r.id))
@@ -1706,6 +1858,13 @@ export default {
       render: () => jsx(WorkflowsPane, {})
     })
 
-    ctx.register({ id: 'session-strip', area: COMPOSER_AREAS.top, render: () => jsx(SessionStrip, {}) })
+    // Feature-detected composer slot (issue #22 item 3): `composer.underside` is
+    // the floating strip BELOW the composer dock on core >= v2026.7.30 —
+    // bottom-anchored, grows upward over the thread, and it is NOT inside the
+    // composer-fade div, so it does not dim when the thread scrolls up
+    // (composer/index.tsx:1558-1560). COMPOSER_AREAS is an SDK const map, so the
+    // key EXISTS ONLY on cores that mount the area — missing key ⇒ undefined ⇒
+    // ?? falls back to today's composer.top on older shells. One mount, never both.
+    ctx.register({ id: 'session-strip', area: COMPOSER_AREAS.underside ?? COMPOSER_AREAS.top, render: () => jsx(SessionStrip, {}) })
   }
 }

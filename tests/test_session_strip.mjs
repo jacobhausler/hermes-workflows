@@ -23,13 +23,19 @@ export const Badge = 'Badge', Button = 'Button', cn = (...a) => a.filter(Boolean
 export const Codicon = 'Codicon', EmptyState = 'EmptyState', ScrollArea = 'ScrollArea'
 export const StatusDot = 'StatusDot', PanelListRow = 'PanelListRow', PanelPill = 'PanelPill'
 export const PanelSectionLabel = 'PanelSectionLabel'
-export const host = { focusedStoredSessionId: atom(''), focusedSessionId: atom(''), navigate: () => {} }
+// The SDK exposes the focused-chat atoms ONLY under host.state (sdk/index.ts
+// stubs them there; a top-level stub encoded bug #23 and kept the suite green
+// while the strip never rendered).
+export const host = { state: { focusedStoredSessionId: atom(''), focusedSessionId: atom('') }, navigate: () => {} }
+export const q = { data: undefined }
+export const useValue = a => (a && typeof a.get === 'function' ? a.get() : null)
+export const useQuery = () => ({ data: q.data })
 export const ROUTES_AREA = 'routes', PANES_AREA = 'panes', TRANSCRIPT_DIRECTIVE_AREA = 'transcript.directives'
 export const COMPOSER_AREAS = { top: 'composer.top' }
 export const Tip = 'Tip'
 export const SIDEBAR_NAV_AREA = 'sidebar.nav', STATUSBAR_AREAS = { left: 'statusBar.left', right: 'statusBar.right' }
-export const useMutation = () => ({}), useQuery = () => ({})
-export const useQueryClient = () => ({}), useValue = () => null
+export const useMutation = () => ({})
+export const useQueryClient = () => ({})
 export const ctxRestStub = () => Promise.reject(new Error('no backend in test'))
 `
 const stubReact = `
@@ -108,14 +114,38 @@ assert.ok(!/role:\s*'link'/.test(src.slice(src.indexOf('function DirectiveBody')
   'DirectiveBody must not keep the whole-card role=link navigate (one click cannot both expand and navigate)')
 
 // -- 5. KEY PAIRING lock (measured): owner.session_id is the runtime id, so it
-// pairs with host.focusedSessionId ($focusedRuntimeId, sdk index.ts:668);
-// owner.ui_session_id pairs with host.focusedStoredSessionId. A swapped pair
+// pairs with host.state.focusedSessionId ($focusedRuntimeId, sdk index.ts:668);
+// owner.ui_session_id pairs with host.state.focusedStoredSessionId. A swapped pair
 // renders nothing forever — assert the source wires them same-shape.
 const stripSrc = src.slice(src.indexOf('export function SessionStrip'), src.indexOf('export function SessionStrip') + 1200)
-assert.ok(/const runtimeSid = useValue\(focusAtom\(host\?\.focusedSessionId\)\)/.test(stripSrc),
-  'owner.session_id (runtime shape) must pair with host.focusedSessionId (feature-detected)')
+assert.ok(/const runtimeSid = useValue\(focusAtom\(host\?\.state\?\.focusedSessionId\)\)/.test(stripSrc),
+  'owner.session_id (runtime shape) must pair with host.state.focusedSessionId (feature-detected)')
 assert.ok(/ownedRuns\(data\?\.runs \|\| \[\], runtimeSid \|\| ''\, storedSid \|\| ''\)/.test(stripSrc),
   'ownedRuns args must be (runtime, stored), never (stored, runtime)')
 
+// -- 6. RED ON BASE (bug #23): the SDK exposes the focused-chat atoms ONLY under
+// host.state (sdk/index.ts:665-697). With the stub atoms under host.state and an
+// owning sid in host.state.focusedStoredSessionId, SessionStrip() must render a
+// tree — on base it reads host.focusedSessionId, sees undefined, and returns null
+// forever. And with a focused chat that owns no run it must return null.
+const sdkMod = await import(pathToFileURL(sdkPath).href)
+{
+  const ownedByStored = [
+    { id: 'u1', name: 'u1', status: 'running', owner: { session_id: '', ui_session_id: 'STORED-1' }, started: '2026-09-26T04:00:00Z', updated: '2026-09-26T04:05:00Z' },
+    { id: 'u2', name: 'u2', status: 'done', owner: { session_id: 'OTHER' }, started: '2026-09-26T03:00:00Z', updated: '2026-09-26T03:30:00Z' },
+  ]
+  sdkMod.q.data = { runs: ownedByStored }
+  sdkMod.host.state.focusedStoredSessionId.set('STORED-1')
+  const tree = mod.SessionStrip()
+  assert.ok(tree && typeof tree === 'object',
+    'SessionStrip must render a tree when host.state.focusedStoredSessionId owns a run (was null on base — the atoms are only under host.state)')
+  // null when the focused chat owns nothing
+  sdkMod.host.state.focusedStoredSessionId.set('NOBODY')
+  assert.equal(mod.SessionStrip(), null, 'no owned run -> null (honest absence)')
+  // null when there is no focused chat at all
+  sdkMod.host.state.focusedStoredSessionId.set('')
+  assert.equal(mod.SessionStrip(), null, 'no focused sid -> null')
+}
+
 rmSync(tmp, { recursive: true, force: true })
-console.log('ALL PASS test_session_strip (ownedRuns, splitRuns, pillModel, SessionStrip export, no whole-card link)')
+console.log('ALL PASS test_session_strip (ownedRuns, splitRuns, pillModel, SessionStrip export, no whole-card link, host.state atoms render)')

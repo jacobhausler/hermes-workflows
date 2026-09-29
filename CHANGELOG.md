@@ -15,6 +15,7 @@ Every feature is OPTIONAL: a no-team run (default profile, no `WF_RUNS_ROOT`) is
 
 ## Unreleased
 
+- #31 grammar-dialect-1: `references/dialect.md` maps Anthropic's Claude Code dynamic-workflow JS grammar (agent/parallel/pipeline/phase/args/plain-JS glue/caps/worktrees) to our JSON graph with a filled DEVIATION JUSTIFICATION column per row, and `tests/fixtures/dialect/` (13 `.js` scripts + `.expected.json` verdicts) pins the constrained-subset import contract that #33 implements. Docs + fixtures only; no importer/exporter code.
 - #24 fatal_quota (from @pf-mechanic-2's report): a 429 whose own text carries a
   reset horizon (`resets in ~109h`) is classed `fatal_quota` — the node fails on the
   FIRST attempt (the bounded retry ladder can never beat a multi-day reset; the
@@ -78,6 +79,36 @@ Every feature is OPTIONAL: a no-team run (default profile, no `WF_RUNS_ROOT`) is
   fail-closed, explicit-coverage suppression, mutation-controlled).
 - Runner lane-clean gate (feedback digest 29d, ledger 64c6772b): an agent node may declare `repo: <path>` — the git lane it owns. At commit the runner runs `git status --porcelain --untracked-files=no` on the lane; a done/partial over a lane with uncommitted TRACKED changes commits `failed` `error_class:"incomplete_work"` carrying `lane_dirty` (the porcelain), instead of the dad50be0 false-green where the fix died uncommitted in a capped child and downstream verified a HEAD equal to the mutant. Refusal, never auto-commit (no runner author identity); untracked never dirties; git-unable fails open; default-off keeps every existing graph byte-identical (golden-solo EMPTY). Door description, AGENTS closed set, and grammar.md document the field; `tests/test_lane_gate_64c6772b.py` covers clean/dirty/untracked/fail-open/mutation.
 - Door schema legibility (feedback digest 29d, ledger 0b680871): the registered `graph` param description is built from adjacent short string literals (each < 400 chars) instead of one 3.4k-char line — the runtime string is byte-identical (pinned by `test_validator_caps` ROW 1 + a segment-boundary test); the "schema is truncated" report was core `search_files`' 500-char per-match clamp on that single line, not a core defect. Comment at `tests/test_validator_caps.py` fixed to stop blaming the schema validator.
+
+- Desktop — pill rail for the session's live runs + expansion (#22 rail half; the
+  auto-card half stays backlog): `railModel(ownedRuns)` (exported pure) folds the live
+  set into pills — held first, then running by `started` desc, capped at 3 + overflow
+  (same policy as `splitRuns`, which stays for the pane); `PillRail` renders one
+  horizontal row of compact pills `[Dot][short name][done/total]` and gate-held pills
+  keep `GateActions`; progress is `${nodes_done}/${nodes_total}` and `?` when either
+  count is absent — never fabricated. Clicking a pill expands the run's existing
+  `MiniGraph` (via `runQuery`) in a mini node-strip ABOVE the rail; clicking the open
+  pill, Esc, a click outside the rail, or switching the focused chat collapses it.
+  Open state is the in-memory `$railOpen` atom (`{sid, runId}`, never localStorage);
+  `toggleRail` is the exported pure transition core. Theme via
+  `var(--ui-sidebar-surface-background, var(--card))` + `--ui-stroke-secondary`, inline
+  style only. Tests: `tests/test_pill_rail.mjs`, `tests/test_pill_rail_expand.mjs`.
+- Desktop — the session strip mounts in `composer.underside` when the SDK offers it
+  (#22): `register()` uses `COMPOSER_AREAS.underside ?? COMPOSER_AREAS.top`. On core
+  >= v2026.7.30 the strip is the floating strip BELOW the composer dock —
+  bottom-anchored, grows upward over the thread, and does not dim on scroll-up
+  (composer/index.tsx:1558-1560). `COMPOSER_AREAS` is an SDK const map, so a missing
+  key means the core doesn't mount the area at all; `??` then keeps today's
+  `composer.top` slot on older shells. One mount, never both.
+  `tests/test_register_surface.mjs` loads the module against both stub SDK shapes
+  (area-set assertions per shape) and asserts hook-order safety: `SessionStrip` calls
+  `useValue`/`useQuery` before its null return.
+- fix #23 (desktop): `SessionStrip` and the pane's `this chat` pill read the focused-chat
+  atoms from `host.state.focusedSessionId` / `host.state.focusedStoredSessionId` — the SDK
+  exposes them ONLY under `host.state` (sdk/index.ts:665-697). Reading `host.focusedSessionId`
+  left `focusAtom(undefined)` → null sid → the strip never rendered and `owned` stayed empty.
+  The test stubs previously placed the atoms at the SDK `host` top level — the stub encoded
+  the bug; they now live under `host.state` with a red-on-base render assertion.
 
 ## 1.0.17 — 2026-09-28
 
@@ -233,8 +264,10 @@ verbs, zero new graph keys.
   expand in place. The tool hands you the exact `card` line; paste it alone in the reply
   that launches or reports a run.
 - KEY PAIRING (measured): `owner.session_id` is the runtime id (pairs with
-  `host.focusedSessionId`); `owner.ui_session_id` is the desktop stored id (pairs with
-  `host.focusedStoredSessionId`).
+  `host.state.focusedSessionId`); `owner.ui_session_id` is the desktop stored id (pairs with
+  `host.state.focusedStoredSessionId`). The SDK exposes both atoms only under `host.state`
+  (sdk/index.ts:665-697); reading them at the top level was the #23 render bug, fixed in
+  the follow-up below.
 
 ### Explorer V2: one node truth, two readers
 - `wfcommon.node_facts` is the closed record the panel AND `status` read: `error_class,

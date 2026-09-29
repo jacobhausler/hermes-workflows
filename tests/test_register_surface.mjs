@@ -1,8 +1,16 @@
 // L3 acceptance: the registration surface is exactly {transcript.directives,
-// routes, panes, composer.top}; the pane docks {pane:'sessions', pos:'center',
+// routes, panes, one composer area}; the pane docks {pane:'sessions', pos:'center',
 // enforce:true}; groupRuns puts held/failed/interrupted under NEEDS YOU;
 // SMIL <animate> rides ONLY paths leaving running nodes; the MiniGraph ghost
 // stack is gone (one FanStack — grep 'inset: 4px 0 0 4px' must be 0).
+//
+// The composer slot is FEATURE-DETECTED (issue #22 item 3): register() uses
+// COMPOSER_AREAS.underside ?? COMPOSER_AREAS.top. `composer.underside` is the
+// floating strip BELOW the composer dock (core >= v2026.7.30): bottom-anchored,
+// grows upward over the thread, and is NOT inside the composer-fade div, so it
+// does not dim when the thread scrolls up (composer/index.tsx:1558-1560).
+// Older SDKs keep today's composer.top slot. This file loads the module
+// against BOTH stub shapes and asserts each one's registered area set.
 import assert from 'node:assert/strict'
 import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -14,22 +22,10 @@ const src = readFileSync(join(here, '..', 'desktop', 'plugin.js'), 'utf8')
 
 // -- load the real module against a stub SDK -----------------------------------
 // Stub '@hermes/plugin-sdk', 'react', and 'react/jsx-runtime' (no node_modules
-// in this repo); everything else is the real module.
-const stubSdk = `
-const atom = v => { let x = v; return { get: () => x, set: n => { x = n } } }
-export { atom }
-export const atom0 = atom
-export const Badge = 'Badge', Button = 'Button', cn = (...a) => a.filter(Boolean).join(' ')
-export const Codicon = 'Codicon', EmptyState = 'EmptyState', ScrollArea = 'ScrollArea'
-export const StatusDot = 'StatusDot', PanelListRow = 'PanelListRow', PanelPill = 'PanelPill'
-export const PanelSectionLabel = 'PanelSectionLabel'
-export const host = { focusedStoredSessionId: atom(''), focusedSessionId: atom(''), navigate: () => {} }
-export const ROUTES_AREA = 'routes', PANES_AREA = 'panes', TRANSCRIPT_DIRECTIVE_AREA = 'transcript.directives'
-export const COMPOSER_AREAS = { top: 'composer.top' }
-export const useMutation = () => ({}), useQuery = () => ({})
-export const useQueryClient = () => ({}), useValue = () => null
-export const ctxRestStub = () => Promise.reject(new Error('no backend in test'))
-`
+// in this repo); everything else is the real module. The sdk stub is
+// parameterized on COMPOSER_AREAS so the SAME module can be loaded against an
+// underside-aware core and an older core; the stub also COUNTS useValue/useQuery
+// calls for the hook-order assertion below.
 const stubReact = `
 export const useEffect = () => {}, useId = () => 't-0', useRef = () => ({ current: null }), useState = i => [typeof i === 'function' ? i() : i, () => {}]
 export default { useEffect, useId, useRef, useState }
@@ -39,28 +35,110 @@ export const jsx = (type, props, key) => ({ type, props: props || {}, key })
 export const jsxs = jsx
 export const Fragment = 'Fragment'
 `
+const sdkStub = composerAreas => `
+const atom = v => { let x = v; return { get: () => x, set: n => { x = n } } }
+export { atom }
+export const atom0 = atom
+export const hookCounts = { useValue: 0, useQuery: 0 }
+export const Badge = 'Badge', Button = 'Button', cn = (...a) => a.filter(Boolean).join(' ')
+export const Codicon = 'Codicon', EmptyState = 'EmptyState', ScrollArea = 'ScrollArea'
+export const StatusDot = 'StatusDot', PanelListRow = 'PanelListRow', PanelPill = 'PanelPill'
+export const PanelSectionLabel = 'PanelSectionLabel'
+// The SDK exposes the focused-chat atoms ONLY under host.state (sdk/index.ts);
+// a top-level stub encoded bug #23 and kept the suite green while the strip
+// never rendered.
+export const host = { state: { focusedStoredSessionId: atom(''), focusedSessionId: atom('') }, navigate: () => {} }
+export const q = { data: undefined }
+export const useValue = a => { hookCounts.useValue++; return (a && typeof a.get === 'function' ? a.get() : null) }
+export const useQuery = () => { hookCounts.useQuery++; return { data: q.data } }
+export const ROUTES_AREA = 'routes', PANES_AREA = 'panes', TRANSCRIPT_DIRECTIVE_AREA = 'transcript.directives'
+export const COMPOSER_AREAS = ${JSON.stringify(composerAreas)}
+export const useMutation = () => ({})
+export const useQueryClient = () => ({})
+export const ctxRestStub = () => Promise.reject(new Error('no backend in test'))
+`
+
 const tmp = mkdtempSync(join(tmpdir(), 'wf-reg-'))
-const sdkPath = join(tmp, 'sdk-stub.mjs')
-writeFileSync(sdkPath, stubSdk)
 const reactPath = join(tmp, 'react-stub.mjs')
 writeFileSync(reactPath, stubReact)
 const jsxPath = join(tmp, 'jsx-stub.mjs')
 writeFileSync(jsxPath, stubJsx)
-const modPath = join(tmp, 'plugin-under-test.mjs')
-writeFileSync(modPath, src
-  .replaceAll("'@hermes/plugin-sdk'", JSON.stringify(pathToFileURL(sdkPath).href))
-  .replaceAll("'react'", JSON.stringify(pathToFileURL(reactPath).href))
-  .replaceAll("'react/jsx-runtime'", JSON.stringify(pathToFileURL(jsxPath).href)))
-const mod = await import(pathToFileURL(modPath).href)
 
-// -- 1. registration surface ----------------------------------------------------
-const regs = []
-const ctx = { register: r => regs.push(r), rest: () => Promise.reject(new Error('no backend')) }
-await mod.default.register(ctx)
+// Each load gets its own sdk-stub + plugin-under-test file (distinct URLs ⇒
+// distinct module instances), so one process can test both SDK shapes.
+async function loadPlugin(tag, composerAreas) {
+  const sdkPath = join(tmp, `sdk-stub-${tag}.mjs`)
+  writeFileSync(sdkPath, sdkStub(composerAreas))
+  const modPath = join(tmp, `plugin-under-test-${tag}.mjs`)
+  writeFileSync(modPath, src
+    .replaceAll("'@hermes/plugin-sdk'", JSON.stringify(pathToFileURL(sdkPath).href))
+    .replaceAll("'react'", JSON.stringify(pathToFileURL(reactPath).href))
+    .replaceAll("'react/jsx-runtime'", JSON.stringify(pathToFileURL(jsxPath).href)))
+  const mod = await import(pathToFileURL(modPath).href)
+  const stub = await import(pathToFileURL(sdkPath).href)
+  const regs = []
+  const ctx = { register: r => regs.push(r), rest: () => Promise.reject(new Error('no backend')) }
+  await mod.default.register(ctx)
+  return { mod, stub, regs }
+}
 
+// A: older SDK — COMPOSER_AREAS has no underside → today's slot.
+const A = await loadPlugin('top', { top: 'composer.top' })
+// B: core >= v2026.7.30 — underside offered.
+const B = await loadPlugin('underside', { top: 'composer.top', underside: 'composer.underside' })
+
+const { mod, regs } = A
 const areas = [...new Set(regs.map(r => r.area))].sort()
 assert.deepEqual(areas, ['composer.top', 'panes', 'routes', 'transcript.directives'],
-  `areas registered must be exactly the four, got ${JSON.stringify(areas)}`)
+  `fallback SDK: areas registered must be exactly the four, got ${JSON.stringify(areas)}`)
+
+// -- 1b. the underside-bearing SDK mounts the strip BELOW the composer dock -----
+{
+  const bAreas = [...new Set(B.regs.map(r => r.area))]
+  assert.ok(bAreas.includes('composer.underside'),
+    `core >= v2026.7.30: the strip must register in 'composer.underside' (the floating strip below the composer dock), got ${JSON.stringify(bAreas)}`)
+  assert.ok(!bAreas.includes('composer.top'),
+    `with underside offered the strip must NOT also sit in 'composer.top' (one mount, not two), got ${JSON.stringify(bAreas)}`)
+  assert.deepEqual(bAreas.slice().sort(), ['composer.underside', 'panes', 'routes', 'transcript.directives'],
+    `underside SDK: exactly one composer area — the underside — plus the other three, got ${JSON.stringify(bAreas.slice().sort())}`)
+  const strip = B.regs.find(r => r.id === 'session-strip')
+  assert.equal(strip.area, 'composer.underside', 'the session-strip registration itself moved, not some other registration')
+}
+
+// -- 1c. hook-order safety: SessionStrip returns null for an empty owned set,
+// but ONLY after every hook ran (a conditional hook call after an early return
+// would crash the app on the next render with a different branch).
+{
+  const before = { ...B.stub.hookCounts }
+  const tree = B.mod.SessionStrip()
+  assert.equal(tree, null, 'no focused chat / no owned runs renders nothing')
+  assert.ok(B.stub.hookCounts.useQuery > before.useQuery,
+    'useQuery must be called BEFORE the null return (hooks may never sit behind an early return)')
+  assert.ok(B.stub.hookCounts.useValue > before.useValue,
+    'useValue must be called BEFORE the null return (hooks may never sit behind an early return)')
+}
+
+// -- 1d. RED ON BASE (bug #23): SessionStrip must render when the FOCUSED chat
+// owns a run. The atoms live under host.state (sdk/index.ts:665-697); base read
+// host.focusedSessionId -> undefined -> null forever. Also lock the pane call
+// site to the same keys.
+const sdkMod = A.stub
+{
+  sdkMod.q.data = { runs: [{ id: 'u1', name: 'u1', status: 'running', owner: { session_id: '', ui_session_id: 'STORED-1' }, started: '2026-09-26T04:00:00Z', updated: '2026-09-26T04:05:00Z' }] }
+  sdkMod.host.state.focusedStoredSessionId.set('STORED-1')
+  assert.ok(mod.SessionStrip() && typeof mod.SessionStrip() === 'object',
+    'SessionStrip must render a tree when host.state.focusedStoredSessionId owns a run')
+  sdkMod.host.state.focusedStoredSessionId.set('NOBODY')
+  assert.equal(mod.SessionStrip(), null, 'null when no run is owned by the focused chat')
+  sdkMod.host.state.focusedStoredSessionId.set('')
+}
+{
+  const i = src.indexOf('function WorkflowsPane()')
+  assert.ok(i >= 0, 'WorkflowsPane exists')
+  const paneSrc = src.slice(i, i + 800)
+  assert.match(paneSrc, /host\?\.state\?\.focusedSessionId/, 'pane reads host.state.focusedSessionId')
+  assert.match(paneSrc, /host\?\.state\?\.focusedStoredSessionId/, 'pane reads host.state.focusedStoredSessionId')
+}
 
 // -- 2. the pane docks center into the sessions strip, enforced -----------------
 const pane = regs.find(r => r.area === 'panes')
