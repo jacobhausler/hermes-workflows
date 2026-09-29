@@ -1,7 +1,8 @@
 # Dialect map: Claude Code dynamic workflows (.js) ↔ hermes-workflows graphs (JSON)
 
 Status: research + deviation ledger (issue #31). No importer/exporter code lives here;
-issue #33 implements the contract this document and `tests/fixtures/dialect/` pin.
+`wf_dialect.py` (#33) implements the contract this document and `tests/fixtures/dialect/`
+pin — `tests/test_dialect_js_33.py` asserts every fixture's sidecar verdict against it.
 
 Owner ruling (2026-09-29): hew VERY close to their grammar — two dialects of one
 shape-space. Every deviation needs a GOOD reason; complexity-reduction is an explicitly
@@ -93,7 +94,7 @@ Data-flow rule inside the subset: a template reference `${x.field}` in a NON-fan
 
 ## 4. What this PR does not decide
 
-- Whether the exporter is a door ACTION or a script (`#33`'s call; this doc constrains only the output shape).
+- ~~Whether the exporter is a door ACTION or a script~~ — decided by #33: a standalone module/CLI, `wf_dialect.py` (no door action); usage in [portable](portable.md#the-js-dialect-seam-33-wf_dialectpy).
 - The fan-out count cap default (row 9 follow-up).
 - Importing `if (<comparison>) await agent(...)` as a `when` gate (row 7; refused in this cut, may be relaxed with a test).
 - Importing `pipeline(args.files, …)` as `items_from` over a launcher-filled `echo` (row 5; refused in this cut).
