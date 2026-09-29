@@ -26,7 +26,7 @@ def make_root(td, spec):
     root = Path(td) / "root"
     (root / "tests").mkdir(parents=True)
     for name, rc in spec.items():
-        (root / "tests" / name).write_text(f"import sys\nsys.setrecursionlimit(10000)\nsys.exit({rc})\n")
+        (root / "tests" / name).write_text(f"import sys\nsys.exit({rc})\n")
     return root
 
 
@@ -108,6 +108,28 @@ with tempfile.TemporaryDirectory(prefix="suite-admission-") as td:
         check("without --baseline baseline is null", admn["baseline"] is None)
     else:
         check("admission.json written even without --baseline", False, "missing")
+
+    # review F1: a base red whose TEST FILE IS DELETED is `missing`, not fixed —
+    # `rm` must never launder a base red into a green gate.
+    rm_root = make_root(td / "rm", {"test_green.py": 0})   # test_base_red.py gone
+    rm_out = td / "out-rm"
+    rrm, admr = run_suite(rm_root, rm_out, baseline=ledger_b)
+    check("deleting a base red exits 1 (never launders to green)", rrm.returncode == 1, str(rrm.returncode))
+    if admr:
+        check("deleted base red reports missing", admr["missing"] == ["test_base_red.py"], str(admr.get("missing")))
+        check("deleted base red lands in blocking_base_reds",
+              admr["blocking_base_reds"] == ["test_base_red.py"], str(admr.get("blocking_base_reds")))
+        check("deleted base red is NOT fixed", admr["fixed"] == [], str(admr.get("fixed")))
+        check("green false while a base red is missing", admr["green"] is False)
+    else:
+        check("admission.json written on deleted-red run", False, "missing")
+
+    # review F2: base_reds carries RED identities only; full map rides as base_exits
+    if adm:
+        check("base_reds is red-only; base_exits carries the full baseline map",
+              adm["base_reds"] == {"test_base_red.py": 1}
+              and adm["base_exits"] == {"test_green.py": 0, "test_base_red.py": 1},
+              str({k: adm.get(k) for k in ("base_reds", "base_exits")}))
 
     # unusable baseline is a hard error, never a silent fallback
     bad = td / "bad-ledger.json"
