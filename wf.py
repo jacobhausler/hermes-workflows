@@ -137,9 +137,18 @@ def acquire_lock(run):
     global _LOCK_FD
     lk = run / "runner.lock"
     fd = os.open(lk, os.O_CREAT | os.O_RDWR, 0o644)
-    try:
-        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except OSError:
+    # A1 (91b9a3de review, 09-29): the read-only liveness probe fleet-wide takes
+    # LOCK_EX for ~8µs and releases; an admission landing inside that window is
+    # microsecond collision with a PROBE, not contention with a real runner.
+    # Bounded LOCK_NB retry (3 × 10ms) before declaring WORKFLOW_BUSY — a genuine
+    # holder never releases, so the honest exit still comes after ~30ms.
+    for _ in range(3):
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            break
+        except OSError:
+            time.sleep(0.01)
+    else:
         os.close(fd)
         emit(f"WORKFLOW_BUSY {run.name} (another runner holds the flock)")
         sys.exit(0)
@@ -1834,9 +1843,45 @@ def build_inputs(run, node, outputs):
     refs = node.get("inputs") or []
     blocks = []
     covered = {str(r).split(".")[0] for r in refs}
+    injected = set(covered)
     for pid in node.get("after") or []:
         if pid in outputs and pid not in covered:
             blocks.append(_inputs_block(pid, outputs[pid], AUTO_INPUTS_CAP))
+        injected.add(pid)
+    # 00e46adb: ancestor gate answers flow DOWNSTREAM automatically. A go-gate answer
+    # (often the binding decision — "proceed despite C1, owner override <why>") reaches
+    # only the gate's DIRECT child through the parent loop above; a verify two hops
+    # down graded the deliberate override as "C1 NOT met / authority UNVERIFIED"
+    # because the answer was invisible to it. Law: every transitive ancestor gate whose
+    # answer is COMMITTED (valid efp-stamped record — gate_answer_valid law via the
+    # done commit; a skipped gate is not done and injects nothing) gets its answer
+    # record injected, capped like any auto input. Already-covered ids (explicit
+    # `inputs:` refs, direct parents) are never duplicated. A solo graph with no
+    # released gate gains ZERO bytes here (golden-solo EMPTY holds by construction).
+    graph = jload(run / "graph.json", {}) or {}
+    gbyid = {n["id"]: n for n in graph.get("nodes") or []}
+    seen, stack = set(), list(node.get("after") or [])
+    ancestors = []
+    while stack:
+        a = stack.pop()
+        if a in seen:
+            continue
+        seen.add(a)
+        n = gbyid.get(a)
+        if n is None:
+            continue
+        stack.extend(n.get("after") or [])
+        ancestors.append(a)
+    for a in sorted(ancestors):
+        n = gbyid.get(a)
+        # ANSWERED-only: an `on_skip: pass` gate commits done with {"gate":"skipped",
+        # "when":…} and NO answer key — nothing was decided, so nothing flows. Only
+        # records carrying a real "answer" (human, timer, check, auto_release) inject.
+        if n is None or n.get("type") != "gate" or a in injected or a not in outputs \
+                or not (isinstance(outputs[a], dict) and "answer" in outputs[a]):
+            continue
+        blocks.append(_inputs_block(f"{a} (ancestor gate answer)", outputs[a], AUTO_INPUTS_CAP))
+        injected.add(a)
     for ref in refs:
         val = resolve_ref(outputs, ref, missing=_MISSING)
         if val is _MISSING:

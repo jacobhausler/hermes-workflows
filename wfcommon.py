@@ -700,7 +700,35 @@ def quote_json_parse_error(text, exc):
 
 # ---------- runner identity and exit record (Lane A writes, this side ONLY reads) ----------
 
-def runner_alive(r, pid_path=None):
+def runner_lock_held(r):
+    """91b9a3de: cross-container liveness truth. The runner takes an exclusive
+    blocking flock on <run>/runner.lock for its whole life (wf.py acquire_lock)
+    — and flock is enforced by the KERNEL across every pid namespace that shares
+    the mount, so it holds even when the runner lives in a sibling container (our
+    fleet: shared ~/.hermes volume, separate pid namespaces). os.kill(pid, 0)
+    CANNOT see those pids: the same pid reads as dead here while it is very much
+    alive next door, and a wait-based caller respawns a second runner over live
+    children (the fb-squad false-'interrupted' class). Probe: LOCK_EX|LOCK_NB on
+    the lock file; getting the lock means nobody holds it (the fd closes on return
+    and the kernel releases it). Deliberately NO O_CREAT: a read path (act_list
+    probes every run dir) must never litter empty lock files into historical runs
+    — a missing file is exactly as honest an absence of a holder as an
+    uncontended one. Missing file / unknown errors are honest ABSENCE of a holder
+    (False), never a liveness claim."""
+    try:
+        import fcntl
+        fd = os.open(os.path.join(str(r), "runner.lock"), os.O_RDWR)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return False
+        except OSError:
+            return True
+        finally:
+            os.close(fd)
+    except OSError:
+        return False
+
+def _runner_pid_alive(r, pid_path=None):
     """A pid is not ownership: verify a live, non-zombie `wf.py run <id>`.
     /proc gives argv and (when readable) the runner's environment; ps supplies macOS/BSD.
     Unknown identity is NOT evidence of a running workflow.
@@ -748,6 +776,22 @@ def runner_alive(r, pid_path=None):
             and argv[-2:] == ["run", r.name]
     except (OSError, ValueError, IndexError, subprocess.SubprocessError):
         return False
+
+def runner_alive(r, pid_path=None):
+    """91b9a3de: ONE liveness law, cross-container safe. The runner holds an
+    exclusive flock on <run>/runner.lock for its whole life, and flock is
+    kernel-enforced across every pid namespace sharing the mount — so the probe
+    reads a sibling-container runner (our fleet: shared ~/.hermes volume, separate
+    pid namespaces) as LIVE where os.kill(pid, 0) alone sees a ghost and a
+    next=wait would spawn a second runner over live children. Law: HELD lock =>
+    live, unconditionally (the holder proved itself by taking the lock, whatever
+    its pid namespace). Otherwise fall back to the ORIGINAL pid-identity law
+    verbatim (argv `wf.py run <id>` + effective-root match), so a lock file no
+    one holds, or a foreign/crashed pid, behaves exactly as before. The flock
+    half fails CLOSED: a held probe can only ever ADD liveness, never remove it."""
+    if runner_lock_held(r):
+        return True
+    return _runner_pid_alive(r, pid_path)
 
 def fingerprint_valid(stored, actual, rule):
     """A record's own rule is authoritative; an unstamped record matches ANY rule.
@@ -1201,6 +1245,13 @@ def run_state(r):
         status = "failed"  # a recorded fatal error needs an amend, not a wait/respawn loop
     return {"run_id": r.name, "name": graph.get("name"), "status": status,
             "held_gate": held, "nodes": nodes, "graph": graph,
+            # 91b9a3de companion: publish the ONE liveness read this state was
+            # derived from — a second runner_alive() call a few microseconds
+            # later can flip across a dying runner's kernel-released flock, and
+            # status vs a re-probed alive disagreeing sent act_wait spinning a
+            # respawn it then abandoned (the R6 regression shape). Consumers
+            # that need liveness use THIS field.
+            "runner_live": live,
             "runner_exit": exit_state,
             "started": (jload(r / "run.json", {}) or {}).get("started"),
             "owner": (jload(r / "run.json", {}) or {}).get("owner"),
