@@ -132,9 +132,18 @@ def acquire_lock(run):
     global _LOCK_FD
     lk = run / "runner.lock"
     fd = os.open(lk, os.O_CREAT | os.O_RDWR, 0o644)
-    try:
-        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except OSError:
+    # A1 (91b9a3de review, 09-29): the read-only liveness probe fleet-wide takes
+    # LOCK_EX for ~8µs and releases; an admission landing inside that window is
+    # microsecond collision with a PROBE, not contention with a real runner.
+    # Bounded LOCK_NB retry (3 × 10ms) before declaring WORKFLOW_BUSY — a genuine
+    # holder never releases, so the honest exit still comes after ~30ms.
+    for _ in range(3):
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            break
+        except OSError:
+            time.sleep(0.01)
+    else:
         os.close(fd)
         emit(f"WORKFLOW_BUSY {run.name} (another runner holds the flock)")
         sys.exit(0)

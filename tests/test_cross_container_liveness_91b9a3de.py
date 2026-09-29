@@ -116,6 +116,77 @@ proc.wait(timeout=90); time.sleep(0.2)
 check(live_seen, "live real runner reads live through the predicate")
 check(wfcommon.runner_alive(r5) is False, "after clean exit (kernel released the flock) reads dead")
 
+# --- (6b) A1 (deep-review 09-29): probe-window collision must NOT kill an admitting
+# runner. The read-only probe fleet-wide holds LOCK_EX ~8µs; admission that lands in
+# that window is collision with a PROBE, not a real runner, so acquire_lock retries
+# LOCK_NB (bounded) before the honest WORKFLOW_BUSY exit. Same-process, two fds =
+# two open file descriptions = genuine kernel contention, same as cross-process.
+import threading
+import wf as _wf
+from io import StringIO
+from contextlib import redirect_stdout
+
+def _acquire(r):
+    """Run acquire_lock in-process; return ('busy', emitted) or ('acquired', '')."""
+    buf = StringIO()
+    try:
+        with redirect_stdout(buf):
+            _wf.acquire_lock(r)
+        return ("acquired", "")
+    except SystemExit:
+        return ("busy", buf.getvalue())
+
+r6 = mkrun("xa1-transient", seed_graph=True)
+lk6 = r6 / "runner.lock"
+held_ev = threading.Event()
+release_at = []
+
+def _probe_holder():
+    # O_CREAT here is the HOLDER (a stand-in runner admission), not the read-only
+    # probe — the probe's no-create law is pinned separately below.
+    fd = os.open(str(lk6), os.O_RDWR | os.O_CREAT, 0o644)
+    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    held_ev.set()
+    deadline = time.monotonic() + 0.012   # ~probe width: inside the retry budget
+    while time.monotonic() < deadline:
+        pass
+    os.close(fd)
+
+th = threading.Thread(target=_probe_holder); th.start(); held_ev.wait(5)
+t0 = time.monotonic()
+kind, emitted = _acquire(r6)
+elapsed = time.monotonic() - t0
+th.join()
+check(kind == "acquired", "admission survives a transient probe window (A1: bounded LOCK_NB retry)",
+      f"kind={kind} emitted={emitted!r}")
+check(elapsed >= 0.008, "the retry was actually exercised (first attempt collided)",
+      f"elapsed={elapsed:.3f}s — vacuous pass if ~0")
+try:
+    os.close(_wf._LOCK_FD)
+except Exception:
+    pass
+
+r7 = mkrun("xa1-realholder", seed_graph=True)
+holder7 = hold(r7, 30)
+try:
+    t0 = time.monotonic()
+    kind7, emitted7 = _acquire(r7)
+    elapsed7 = time.monotonic() - t0
+finally:
+    holder7.terminate(); holder7.wait(timeout=10)
+check(kind7 == "busy" and "WORKFLOW_BUSY" in emitted7,
+      "a REAL holder still yields WORKFLOW_BUSY (fix did not gut admission control)",
+      f"kind={kind7} emitted={emitted7!r}")
+check(elapsed7 >= 0.02, "the honest exit is bounded (~retry budget), not instant-loss nor spin",
+      f"elapsed={elapsed7:.3f}s")
+
+# mutation control: without the retry loop the transient row goes red — pinned by
+# source: acquire_lock must retry LOCK_NB inside a bounded loop, not one try.
+wsrc = (BUILD / "wf.py").read_text()
+alock = wsrc[wsrc.index("def acquire_lock"):wsrc.index("os.ftruncate")]
+check(alock.count("LOCK_EX | fcntl.LOCK_NB") == 1 and "for _ in range(" in alock,
+      "admission retry is bounded (a real holder still exits; probes do not)")
+
 # --- (6) MUTATION CONTROL: the law must be the OR, not a stray always-true -------
 src = (BUILD / "wfcommon.py").read_text()
 check(src.count("if runner_lock_held(r):\n        return True") == 1,
