@@ -1,23 +1,13 @@
 # Changelog
 
-## 1.1.0 — 2026-09-28 — bot-team features: optional `profile` / `requires` / `lane_key` / runs-root / provenance
+## 1.1.1 — 2026-09-29 — runner correctness (cross-container liveness, ancestor gate answers), profile-home fix, lane-clean gate, portable files, pill rail
 
-Every feature is OPTIONAL: a no-team run (default profile, no `WF_RUNS_ROOT`) is byte-identical to 1.0.15 — proven by the frozen 1.0.15 suite pass-set plus a golden solo diff (`tests/golden_solo/v1.0.15.json`, EMPTY diff across six fake_hermes graphs) re-run after every lane merge. Stdlib-only backend; desktop imports frozen to `@hermes/plugin-sdk`, `react`, `react/jsx-runtime`. Sprint contract: `wf-team-sprint-1.1/RATIFY.md` (F1–F5; F6 cut, F7 skill-side). Integrator @wf-mechanic; lanes A–F built by qwen children (git author `Hermes Agent`), one writer per file.
+Patch release: every merged PR since v1.1.0, in merge order. Solo default-profile runs stay byte-identical to 1.0.15 (golden-solo EMPTY diff re-run on this tree). Stdlib-only backend; desktop imports frozen to `@hermes/plugin-sdk`, `react`, `react/jsx-runtime`.
 
-- F1 runs root + run identity (scaffold 0e8b1e8, @wf-mechanic): ONE resolver `wfcommon.runs_root()` (`WF_RUNS_ROOT` if set, else `$HERMES_HOME/workflows`) replaces the four inline computations in door, runner, read model and dashboard; `runner_alive` compares the runner's EFFECTIVE root from `/proc` environ (legacy env reduces to the 1.0.15 `HERMES_HOME == r.parent.parent` check verbatim). `run.json` gains `dispatched_by`, `launch_root`, `team`, `lane_key`, `targets[]`, `graph_source` ONLY when derivable; solo default-profile key set == 1.0.15. Children receive `HERMES_WF_RUN_DIR` so `inbox` resolves without guessing the root. `source_digest(graph)` = sha256 over canonical nodes JSON (`graph_fingerprint` untouched).
-- F2 profile-routed agent nodes — lane C read model (e43639c, Hermes Agent / lane C) + lane A runner (4a2f15b, Hermes Agent / lane A): `profile` on an agent node (node-level only, `{run.KEY}` rendered BEFORE validation) runs the child AS a named teammate profile — delegation, not isolation. Validation before any write/spawn: non-empty profile DIRECTORY with `config.yaml`, never `default`, and the TARGET-owned `<profile_home>/workflow_team.json` lists the launcher in `accept_from` (launcher identity from the door's own HERMES_HOME, never a graph arg). Runner spawns with `-p <profile>` under an env whitelist + `HERMES_HOME=<root>`, re-checks the target before Popen (deleted target → typed `error_class:"spawn"` `profile gone: <name>`, never a launcher fallback), records `profile_home` on node records and reads child metrics from the target's state.db. `node_facts` render the routed profile.
-- F4 `requires` output preconditions — lane C validation + lane A schedule-time check: `requires:{"<ancestor>":["field","dotted.path"]}` on agent OR gate nodes; every key must be in the `after` closure, every path a non-empty string. At wave scheduling a missing OR null value commits the node `failed` with `error_class:"precondition"` (`output.missing` lists the paths) with ZERO spawns; the run fails on the existing failed/blocked path. Retry ladders never see it; a resume re-evaluates (supply the field via `amend`). 1.0.x `skipped` semantics untouched.
-- F3 `lane_key` in-flight registry — lane B door (097b717, Hermes Agent / lane B): `run` gains optional `lane_key` (≤128) and `team` (≤64); `status` accepts `lane_key` as an alternative to `run_id` (never spawns). Registry `<runs_root>/lanes/<sha16>.json` written tmp+`os.replace` under a per-key `fcntl.flock`; while an UNFINISHED incumbent holds the key a second `run` is deduped (`{deduped:true, run_id, state, runner_live, needs_resume, last_event_ts, hint}`) — the incumbent is resumed via `wait`, never replaced; terminal `stopped` releases the key. Stored key must EQUAL the supplied key (mismatch → `lane_key hash collision`, never a cross-key dedupe). Entries append-only; keys global per runs root. `list` rows carry `lane_key`/`team` when present.
-- F5 library provenance (opt-in) — lane B door: `save` gains optional `source` (≤200). `{owner, source, saved_at, source_digest}` is written into the library entry ONLY when `source` is supplied or the saving door runs under a named profile; a default-profile save without `source` writes the 1.0.15 bytes exactly. Top-level graph key `provenance` (closed key set). `library` rows show the fields only when present; `run from:<name>` stamps `run.json.graph_source`. Attribution only — nothing reads it to allow or deny.
-- Desktop — lane D (3a4aa70, Hermes Agent / lane D): node card and panel show `as @<profile>` for routed nodes; solo trees render structurally IDENTICAL to the 1.0.15 baseline (`tests/test_11_ui_imports.mjs` snapshot + frozen import baseline).
-- Fixtures — lane E (0a505ba, Hermes Agent / lane E; integrator fixes 4805b0e, 79ae59d): `tests/test_11_integration_*.py`, `tests/fixtures/11-*`, `tests/11-golden-solo.py` capture/compare, `tests/11-keeper.py` 20-cycle keeper harness, claim-crash wrapper, env-leak probe, throwaway consent profile. Counted matrix on the merged tree: liveness 8/8, cross-profile wait 3/3, validation negatives 4/4, env 2/2, spawn-race 1/1, SOUL 3/3, harvest-DB 2/2, keeper cycles 20/20, dedupe 3/3, boundary kills 3/3, concurrent claim 1/1, precondition 5/5, provenance 6/6+1+1.
-- Docs — lane F (5a7e631, Hermes Agent / lane F): SKILL.md team paragraph; `references/grammar.md` (`profile`, `requires`, gate `requires`, top-level `provenance`); `references/operations.md` (lanes/dedupe, runs root + identity + TRUST BOUNDARY: a shared `WF_RUNS_ROOT` is common trust, same UID; team fields are provenance, never an ACL).
-
-## Unreleased
-
-- #32 publish-as-file: top-level `grammar: "wf/1"` accepted (absent = wf/1; unknown value refused listing the supported values), def_hash-neutral like `provenance`; `references/portable.md` convention + `examples/portable-review.workflow.json` walk-in with its digests pinned in the doc (`tests/test_portable_32.py`).
-- #31 grammar-dialect-1: `references/dialect.md` maps Anthropic's Claude Code dynamic-workflow JS grammar (agent/parallel/pipeline/phase/args/plain-JS glue/caps/worktrees) to our JSON graph with a filled DEVIATION JUSTIFICATION column per row, and `tests/fixtures/dialect/` (13 `.js` scripts + `.expected.json` verdicts) pins the constrained-subset import contract that #33 implements. Docs + fixtures only; no importer/exporter code.
-- #24 fatal_quota (from @pf-mechanic-2's report): a 429 whose own text carries a
+- #16 docs(skill) — Hermes Agent (@wf-mechanic): the operator playbook is restored as `references/operator-playbook.md` (17 measured lessons: one-runner-per-worktree, wall-vs-turns sizing, dependency-ordered merges with per-merge suite, stall detection, 420 s host deadline / 330 s wait segments, alias-vs-literal route law, quorum-has-no-default, …); INSTALL.md links the bundled skill by symlink instead of forking a copy (the copy-freeze hazard behind issue #15).
+- #20 test: exercise the crash net for real — contribution by @atbrace (#12, cherry-picked with authorship preserved; landed by Hermes Agent / @wf-mechanic): `tests/test_systemexit_stamp.py` drives a genuine BaseException through the crash net (`concurrency:'abc'` → TypeError inside the executor) and asserts `crashed: TypeError`, closing #11's demand for an anti-false-green test. Code diff byte-identical to the contribution; `graphify-out/` regenerated under the CI-pinned extractor.
+- #21 fix(suite): pass-gate admission (#17) — Hermes Agent (@wf-mechanic): `scripts/suite.py --baseline <prior exits.json>` writes `admission.json` with exact red identities (test name + exit code) split `introduced` / `pre_existing` / `fixed`; exit 0 requires ZERO reds base or fix; a base red is never auto-waived (`blocking_base_reds` needs its own linked fix); a deleted base red reports `missing` and blocks (rm can't launder a red); malformed baseline = hard exit 2. Without `--baseline` the exit contract is byte-compatible. `tests/test_suite_admission_17.py` (21 checks, 8 red against the old suite.py).
+- #26 → #24 fatal_quota — Hermes Agent (@wf-mechanic; from @pf-mechanic-2's report): a 429 whose own text carries a
   reset horizon (`resets in ~109h`) is classed `fatal_quota` — the node fails on the
   FIRST attempt (the bounded retry ladder can never beat a multi-day reset; the
   field case burned 3 spawns in 60s), and the model + horizon land in the seat quota
@@ -27,7 +17,7 @@ Every feature is OPTIONAL: a no-team run (default profile, no `WF_RUNS_ROOT`) is
   (`resets in 30 minutes`) are honored as minutes, not folded into the 6h default;
   a provider-less (seat-default) stamp recovers on any answered ping, an
   explicit-provider stamp only on a same-route alive ping (attribution law).
-- #25 fail-closed pinned routes (field report fb-fix-9c575645): a node that pins an
+- #26 → #25 fail-closed pinned routes — Hermes Agent (@wf-mechanic; field report fb-fix-9c575645): a node that pins an
   explicit model now gets `require_route` default TRUE — if the door's submit ping
   AFFIRMATIVELY proves the pinned route dead, or answered from the fallback ladder
   (recorded route != pinned route), the launch is REFUSED with
@@ -44,44 +34,9 @@ Every feature is OPTIONAL: a no-team run (default profile, no `WF_RUNS_ROOT`) is
   runner seat's. Tests: `test_fatal_quota_24` / `test_require_route_25` (+ runner
   validator + forged-proof + def_hash + un-bake regression rows), golden-solo EMPTY
   diff holds (solo graphs pin no models → no new bytes).
-- 91b9a3de cross-container runner liveness (feedback digest 20260929e, recurrence
-  of baa0088f19452326): our fleet runs runners in a sibling container on the SHARED
-  `~/.hermes` volume with a separate pid namespace, so `os.kill(pid, 0)` in
-  `runner_alive` reads a LIVE runner as dead and `status` reports `interrupted` /
-  `next:[wait]` → the next `wait` spawns a SECOND runner over live children
-  (the fb-squad false-interrupted incident, 20260929-131003). The kernel-enforced
-  flock the runner already holds on `<run>/runner.lock` for its whole life is the
-  ownership proof that survives pid namespaces: `runner_alive` is now
-  `runner_lock_held(r) or _runner_pid_alive(r, pid_path)` — HELD ⇒ live, at every
-  one of the door's call sites at once (status/next, the wait/stop/amend respawn
-  guards, `list`), and the ORIGINAL pid-identity law (argv `wf.py run <id>` +
-  effective-root match) is preserved verbatim as the fallback so a free lock or a
-  foreign/crashed pid reads dead exactly as before. The probe takes the lock
-  non-blocking and closes the fd (kernel releases), deliberately WITHOUT `O_CREAT`
-  so a read sweep never litters historical run dirs. The fan-out ADOPTION path
-  (`_verify_spawn_rec`, the sibling of the same pid-only pattern) is intentionally
-  NOT relaxed: adoption runs inside the spawning runner's own namespace where the
-  pid+skey-in-cmdline proof is verifiable — relaxing it would gut the PID-reuse
-  guard. Tests: `test_cross_container_liveness_91b9a3de` (real peer-process holder,
-  real-runner lifecycle end-to-end, mutation-controlled).
-- 00e46adb ancestor gate answers flow downstream (feedback digest 20260929e,
-  spool 5ff2806f359c16a1): a go-gate's committed answer reached only the gate's
-  DIRECT child (via the auto parent-injection loop), so a fresh verify two hops
-  down graded a deliberate owner override as `C1 NOT met / authority UNVERIFIED`
-  (fb-fix-030744bc). `build_inputs` now walks the node's transitive `after`
-  closure and injects every ANSWERED ancestor gate's committed answer record
-  (`gate_answer_valid` efp law, capped like any auto input, labelled
-  `<id> (ancestor gate answer)`), so no downstream agent has to be told to read
-  it. Fail-closed: a skipped / `on_skip:pass` gate has no `"answer"` key and
-  injects NOTHING; ids already covered by an explicit `inputs:` ref or a
-  direct-parent block are never duplicated. A solo graph with no released gate
-  gains ZERO bytes here (golden-solo EMPTY holds by construction). Tests:
-  `test_gate_answer_flows_00e46adb` (chain verify, no-duplication, skipped-gate
-  fail-closed, explicit-coverage suppression, mutation-controlled).
-- Runner lane-clean gate (feedback digest 29d, ledger 64c6772b): an agent node may declare `repo: <path>` — the git lane it owns. At commit the runner runs `git status --porcelain --untracked-files=no` on the lane; a done/partial over a lane with uncommitted TRACKED changes commits `failed` `error_class:"incomplete_work"` carrying `lane_dirty` (the porcelain), instead of the dad50be0 false-green where the fix died uncommitted in a capped child and downstream verified a HEAD equal to the mutant. Refusal, never auto-commit (no runner author identity); untracked never dirties; git-unable fails open; default-off keeps every existing graph byte-identical (golden-solo EMPTY). Door description, AGENTS closed set, and grammar.md document the field; `tests/test_lane_gate_64c6772b.py` covers clean/dirty/untracked/fail-open/mutation.
-- Door schema legibility (feedback digest 29d, ledger 0b680871): the registered `graph` param description is built from adjacent short string literals (each < 400 chars) instead of one 3.4k-char line — the runtime string is byte-identical (pinned by `test_validator_caps` ROW 1 + a segment-boundary test); the "schema is truncated" report was core `search_files`' 500-char per-match clamp on that single line, not a core defect. Comment at `tests/test_validator_caps.py` fixed to stop blaming the schema validator.
-
-- Desktop — pill rail for the session's live runs + expansion (#22 rail half; the
+- #29 runner lane-clean gate — Hermes Agent (@wf-mechanic; feedback digest 29d, ledger 64c6772b): an agent node may declare `repo: <path>` — the git lane it owns. At commit the runner runs `git status --porcelain --untracked-files=no` on the lane; a done/partial over a lane with uncommitted TRACKED changes commits `failed` `error_class:"incomplete_work"` carrying `lane_dirty` (the porcelain), instead of the dad50be0 false-green where the fix died uncommitted in a capped child and downstream verified a HEAD equal to the mutant. Refusal, never auto-commit (no runner author identity); untracked never dirties; git-unable fails open; default-off keeps every existing graph byte-identical (golden-solo EMPTY). Door description, AGENTS closed set, and grammar.md document the field; `tests/test_lane_gate_64c6772b.py` covers clean/dirty/untracked/fail-open/mutation.
+- #29 door schema legibility — Hermes Agent (@wf-mechanic; feedback digest 29d, ledger 0b680871): the registered `graph` param description is built from adjacent short string literals (each < 400 chars) instead of one 3.4k-char line — the runtime string is byte-identical (pinned by `test_validator_caps` ROW 1 + a segment-boundary test); the "schema is truncated" report was core `search_files`' 500-char per-match clamp on that single line, not a core defect. Comment at `tests/test_validator_caps.py` fixed to stop blaming the schema validator.
+- #28 desktop — pill rail for the session's live runs + expansion — Hermes Agent (@wf-mechanic; #22 rail half; the
   auto-card half stays backlog): `railModel(ownedRuns)` (exported pure) folds the live
   set into pills — held first, then running by `started` desc, capped at 3 + overflow
   (same policy as `splitRuns`, which stays for the pane); `PillRail` renders one
@@ -94,7 +49,7 @@ Every feature is OPTIONAL: a no-team run (default profile, no `WF_RUNS_ROOT`) is
   `toggleRail` is the exported pure transition core. Theme via
   `var(--ui-sidebar-surface-background, var(--card))` + `--ui-stroke-secondary`, inline
   style only. Tests: `tests/test_pill_rail.mjs`, `tests/test_pill_rail_expand.mjs`.
-- Desktop — the session strip mounts in `composer.underside` when the SDK offers it
+- #28 desktop — the session strip mounts in `composer.underside` when the SDK offers it
   (#22): `register()` uses `COMPOSER_AREAS.underside ?? COMPOSER_AREAS.top`. On core
   >= v2026.7.30 the strip is the floating strip BELOW the composer dock —
   bottom-anchored, grows upward over the thread, and does not dim on scroll-up
@@ -104,12 +59,63 @@ Every feature is OPTIONAL: a no-team run (default profile, no `WF_RUNS_ROOT`) is
   `tests/test_register_surface.mjs` loads the module against both stub SDK shapes
   (area-set assertions per shape) and asserts hook-order safety: `SessionStrip` calls
   `useValue`/`useQuery` before its null return.
-- fix #23 (desktop): `SessionStrip` and the pane's `this chat` pill read the focused-chat
+- #28 fix #23 (desktop): `SessionStrip` and the pane's `this chat` pill read the focused-chat
   atoms from `host.state.focusedSessionId` / `host.state.focusedStoredSessionId` — the SDK
   exposes them ONLY under `host.state` (sdk/index.ts:665-697). Reading `host.focusedSessionId`
   left `focusAtom(undefined)` → null sid → the strip never rendered and `owned` stayed empty.
   The test stubs previously placed the atoms at the SDK `host` top level — the stub encoded
   the bug; they now live under `host.state` with a red-on-base render assertion.
+- #14 fix(door): resolve profile home through core; spawn runner with the OWNER's home — @atbrace: on a profile-scoped host `os.environ["HERMES_HOME"]` is the LAUNCH root, while core serves the actual profile through its context-local override (`hermes_constants.set_hermes_home_override`, installed per turn by the gateway's profile runtime scope). Door, runner and children silently used the wrong profile — seat config invisible, custom providers dead (`Unknown provider` on every node), run dirs under the wrong home. The plugin now resolves its home through core's documented contract and stamps the OWNER's home onto the spawned runner. Measured on both host shapes (`gateway run` under a systemd unit pinning the base root; `dashboard --open-profile <profile>`).
+- #34 grammar-dialect-1 (#31) — Hermes Agent (@wf-mechanic; review nits N1–N3 in b661496): `references/dialect.md` maps Anthropic's Claude Code dynamic-workflow JS grammar (agent/parallel/pipeline/phase/args/plain-JS glue/caps/worktrees) to our JSON graph with a filled DEVIATION JUSTIFICATION column per row, and `tests/fixtures/dialect/` (13 `.js` scripts + `.expected.json` verdicts) pins the constrained-subset import contract that #33 implements. Docs + fixtures only; no importer/exporter code.
+- #35 publish-as-file (#32) — Hermes Agent (@wf-mechanic): top-level `grammar: "wf/1"` accepted (absent = wf/1; unknown value refused listing the supported values), def_hash-neutral like `provenance`; `references/portable.md` convention + `examples/portable-review.workflow.json` walk-in with its digests pinned in the doc (`tests/test_portable_32.py`).
+- #30 fix(runner,door): cross-container runner liveness + ancestor gate answers flow downstream — Hermes Agent (@wf-mechanic). Runner correctness pair from feedback digest 20260929e (rows 91b9a3de, 00e46adb); both runner-internal, no desktop change, golden-solo EMPTY by construction. Companion door law (the probe-window admission retry): `run_state` publishes THE ONE liveness read (`runner_live`) and `act_wait` consumes it — two probes microseconds apart flip across a dying runner's kernel-released flock, which is what made `status` and `alive` disagree; the wait loop now re-attempts the respawn exactly for that shape (top said alive, now interrupted; 3 tries, 1 s throttle — the runner's own flock admission makes a double-spawn harmless). Rows:
+  - 91b9a3de cross-container runner liveness (feedback digest 20260929e, recurrence
+    of baa0088f19452326): our fleet runs runners in a sibling container on the SHARED
+    `~/.hermes` volume with a separate pid namespace, so `os.kill(pid, 0)` in
+    `runner_alive` reads a LIVE runner as dead and `status` reports `interrupted` /
+    `next:[wait]` → the next `wait` spawns a SECOND runner over live children
+    (the fb-squad false-interrupted incident, 20260929-131003). The kernel-enforced
+    flock the runner already holds on `<run>/runner.lock` for its whole life is the
+    ownership proof that survives pid namespaces: `runner_alive` is now
+    `runner_lock_held(r) or _runner_pid_alive(r, pid_path)` — HELD ⇒ live, at every
+    one of the door's call sites at once (status/next, the wait/stop/amend respawn
+    guards, `list`), and the ORIGINAL pid-identity law (argv `wf.py run <id>` +
+    effective-root match) is preserved verbatim as the fallback so a free lock or a
+    foreign/crashed pid reads dead exactly as before. The probe takes the lock
+    non-blocking and closes the fd (kernel releases), deliberately WITHOUT `O_CREAT`
+    so a read sweep never litters historical run dirs. The fan-out ADOPTION path
+    (`_verify_spawn_rec`, the sibling of the same pid-only pattern) is intentionally
+    NOT relaxed: adoption runs inside the spawning runner's own namespace where the
+    pid+skey-in-cmdline proof is verifiable — relaxing it would gut the PID-reuse
+    guard. Tests: `test_cross_container_liveness_91b9a3de` (real peer-process holder,
+    real-runner lifecycle end-to-end, mutation-controlled).
+  - 00e46adb ancestor gate answers flow downstream (feedback digest 20260929e,
+    spool 5ff2806f359c16a1): a go-gate's committed answer reached only the gate's
+    DIRECT child (via the auto parent-injection loop), so a fresh verify two hops
+    down graded a deliberate owner override as `C1 NOT met / authority UNVERIFIED`
+    (fb-fix-030744bc). `build_inputs` now walks the node's transitive `after`
+    closure and injects every ANSWERED ancestor gate's committed answer record
+    (`gate_answer_valid` efp law, capped like any auto input, labelled
+    `<id> (ancestor gate answer)`), so no downstream agent has to be told to read
+    it. Fail-closed: a skipped / `on_skip:pass` gate has no `"answer"` key and
+    injects NOTHING; ids already covered by an explicit `inputs:` ref or a
+    direct-parent block are never duplicated. A solo graph with no released gate
+    gains ZERO bytes here (golden-solo EMPTY holds by construction). Tests:
+    `test_gate_answer_flows_00e46adb` (chain verify, no-duplication, skipped-gate
+    fail-closed, explicit-coverage suppression, mutation-controlled).
+
+## 1.1.0 — 2026-09-28 — bot-team features: optional `profile` / `requires` / `lane_key` / runs-root / provenance
+
+Every feature is OPTIONAL: a no-team run (default profile, no `WF_RUNS_ROOT`) is byte-identical to 1.0.15 — proven by the frozen 1.0.15 suite pass-set plus a golden solo diff (`tests/golden_solo/v1.0.15.json`, EMPTY diff across six fake_hermes graphs) re-run after every lane merge. Stdlib-only backend; desktop imports frozen to `@hermes/plugin-sdk`, `react`, `react/jsx-runtime`. Sprint contract: `wf-team-sprint-1.1/RATIFY.md` (F1–F5; F6 cut, F7 skill-side). Integrator @wf-mechanic; lanes A–F built by qwen children (git author `Hermes Agent`), one writer per file.
+
+- F1 runs root + run identity (scaffold 0e8b1e8, @wf-mechanic): ONE resolver `wfcommon.runs_root()` (`WF_RUNS_ROOT` if set, else `$HERMES_HOME/workflows`) replaces the four inline computations in door, runner, read model and dashboard; `runner_alive` compares the runner's EFFECTIVE root from `/proc` environ (legacy env reduces to the 1.0.15 `HERMES_HOME == r.parent.parent` check verbatim). `run.json` gains `dispatched_by`, `launch_root`, `team`, `lane_key`, `targets[]`, `graph_source` ONLY when derivable; solo default-profile key set == 1.0.15. Children receive `HERMES_WF_RUN_DIR` so `inbox` resolves without guessing the root. `source_digest(graph)` = sha256 over canonical nodes JSON (`graph_fingerprint` untouched).
+- F2 profile-routed agent nodes — lane C read model (e43639c, Hermes Agent / lane C) + lane A runner (4a2f15b, Hermes Agent / lane A): `profile` on an agent node (node-level only, `{run.KEY}` rendered BEFORE validation) runs the child AS a named teammate profile — delegation, not isolation. Validation before any write/spawn: non-empty profile DIRECTORY with `config.yaml`, never `default`, and the TARGET-owned `<profile_home>/workflow_team.json` lists the launcher in `accept_from` (launcher identity from the door's own HERMES_HOME, never a graph arg). Runner spawns with `-p <profile>` under an env whitelist + `HERMES_HOME=<root>`, re-checks the target before Popen (deleted target → typed `error_class:"spawn"` `profile gone: <name>`, never a launcher fallback), records `profile_home` on node records and reads child metrics from the target's state.db. `node_facts` render the routed profile.
+- F4 `requires` output preconditions — lane C validation + lane A schedule-time check: `requires:{"<ancestor>":["field","dotted.path"]}` on agent OR gate nodes; every key must be in the `after` closure, every path a non-empty string. At wave scheduling a missing OR null value commits the node `failed` with `error_class:"precondition"` (`output.missing` lists the paths) with ZERO spawns; the run fails on the existing failed/blocked path. Retry ladders never see it; a resume re-evaluates (supply the field via `amend`). 1.0.x `skipped` semantics untouched.
+- F3 `lane_key` in-flight registry — lane B door (097b717, Hermes Agent / lane B): `run` gains optional `lane_key` (≤128) and `team` (≤64); `status` accepts `lane_key` as an alternative to `run_id` (never spawns). Registry `<runs_root>/lanes/<sha16>.json` written tmp+`os.replace` under a per-key `fcntl.flock`; while an UNFINISHED incumbent holds the key a second `run` is deduped (`{deduped:true, run_id, state, runner_live, needs_resume, last_event_ts, hint}`) — the incumbent is resumed via `wait`, never replaced; terminal `stopped` releases the key. Stored key must EQUAL the supplied key (mismatch → `lane_key hash collision`, never a cross-key dedupe). Entries append-only; keys global per runs root. `list` rows carry `lane_key`/`team` when present.
+- F5 library provenance (opt-in) — lane B door: `save` gains optional `source` (≤200). `{owner, source, saved_at, source_digest}` is written into the library entry ONLY when `source` is supplied or the saving door runs under a named profile; a default-profile save without `source` writes the 1.0.15 bytes exactly. Top-level graph key `provenance` (closed key set). `library` rows show the fields only when present; `run from:<name>` stamps `run.json.graph_source`. Attribution only — nothing reads it to allow or deny.
+- Desktop — lane D (3a4aa70, Hermes Agent / lane D): node card and panel show `as @<profile>` for routed nodes; solo trees render structurally IDENTICAL to the 1.0.15 baseline (`tests/test_11_ui_imports.mjs` snapshot + frozen import baseline).
+- Fixtures — lane E (0a505ba, Hermes Agent / lane E; integrator fixes 4805b0e, 79ae59d): `tests/test_11_integration_*.py`, `tests/fixtures/11-*`, `tests/11-golden-solo.py` capture/compare, `tests/11-keeper.py` 20-cycle keeper harness, claim-crash wrapper, env-leak probe, throwaway consent profile. Counted matrix on the merged tree: liveness 8/8, cross-profile wait 3/3, validation negatives 4/4, env 2/2, spawn-race 1/1, SOUL 3/3, harvest-DB 2/2, keeper cycles 20/20, dedupe 3/3, boundary kills 3/3, concurrent claim 1/1, precondition 5/5, provenance 6/6+1+1.
+- Docs — lane F (5a7e631, Hermes Agent / lane F): SKILL.md team paragraph; `references/grammar.md` (`profile`, `requires`, gate `requires`, top-level `provenance`); `references/operations.md` (lanes/dedupe, runs root + identity + TRUST BOUNDARY: a shared `WF_RUNS_ROOT` is common trust, same UID; team fields are provenance, never an ACL).
 
 ## 1.0.17 — 2026-09-28
 
