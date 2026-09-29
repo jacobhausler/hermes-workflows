@@ -35,6 +35,51 @@ def _profile_evidence(node):
     name = node.get("profile")
     return {"profile": name, "profile_home": str(profile_home(name))} if name else {}
 
+def _lane_gate(run, node, r):
+    """fb-digest-29d (64c6772b): a node that declares `repo: <path>` owns a git
+    lane, and a committed done/partial must mean the lane is CLEAN. The dad50be0
+    shape (fix green but UNCOMMITTED at max_turns) produced two false-greens:
+    downstream verify tested a HEAD that still equalled the mutant, because the fix
+    lived only in the dead child's working tree — an author-side 'commit early' law
+    cannot be trusted, so the RUNNER owns the check. Opt-in by declaration ONLY
+    (path absolute or run-dir-relative): default-off keeps every existing graph
+    byte-identical (the golden-solo law) and the scan-free rule keeps a run dir
+    full of unrelated worktrees from ghost-dirtying a done node. The check refuses
+    the hand-off at the commit — never an auto-commit (the runner has no author
+    identity and no right to bank a half-finished message); the node record keeps
+    the porcelain so the operator (or the next spawn after an amend) sees exactly
+    what to bank. The failed record is terminal per node_rec law: fix the lane,
+    then amend/re-run to re-drive. Fails open ONLY where git itself cannot answer
+    (git missing, timeout,
+    unreadable repo). Untracked files do NOT dirty a lane (scratch output is
+    normal); tracked changes are the false-green surface."""
+    if r.get("status") not in ("done", "partial") or node.get("repo") is None:
+        return r
+    rp = Path(str(node["repo"])).expanduser()
+    if not rp.is_absolute():
+        rp = Path(run) / rp
+    dirty = []
+    try:
+        p = subprocess.run(["git", "-C", str(rp), "status", "--porcelain",
+                            "--untracked-files=no"],
+                           capture_output=True, text=True, timeout=10)
+    except Exception:
+        return r                          # git can't answer: fail open, never brick the run
+    if p.returncode != 0:
+        return r
+    dirty = [l for l in p.stdout.splitlines() if l.strip()]
+    if not dirty:
+        return r
+    r = dict(r)
+    r.update(status="failed",
+             error_class="incomplete_work",
+             error=f"lane dirty after commit-time review: {rp} has {len(dirty)} uncommitted "
+                   f"change(s) — an uncommitted fix is invisible to every downstream "
+                   f"node (the dad50be0 false-green shape); commit the work IN THE LANE, "
+                   f"then amend the run (or re-run the graph) to re-drive this node",
+             lane_dirty=dirty[:20])
+    return r
+
 
 def _stamp_served(meta, result, node=None):
     """Commit actual child seat truth, never the requested alias. No row means unknown."""
@@ -1683,12 +1728,18 @@ def run_agent_node(run, meta, byid, node, outputs, steering):
                 log(run, "node.failed", node=nid, error="quorum not met", failed_detail=fails,
                      error_class="quorum", attempts=1)
             else:
-                save_node(run, node, byid, {"status": "done",
-                                            "output": {"items": merged, "failed_items": len(failed),
-                                                       "cancelled_items": len(cancelled) or None,
-                                                       "all_results": results}})
-                log(run, "node.finished", node=nid, done=len(merged), failed=len(failed),
-                    cancelled=len(cancelled))
+                merged_rec = _lane_gate(run, node, {"status": "done",
+                                                    "output": {"items": merged,
+                                                               "failed_items": len(failed),
+                                                               "cancelled_items": len(cancelled) or None,
+                                                               "all_results": results}})
+                save_node(run, node, byid, merged_rec)
+                if merged_rec["status"] == "done":
+                    log(run, "node.finished", node=nid, done=len(merged), failed=len(failed),
+                        cancelled=len(cancelled))
+                else:
+                    log(run, "node.failed", node=nid, error=merged_rec["error"],
+                        error_class="incomplete_work", attempts=1)
         else:
             first = {"done": False}
             def spawn(resume_preamble=""):
@@ -1700,6 +1751,7 @@ def run_agent_node(run, meta, byid, node, outputs, steering):
             r = _transient_retry(meta, spawn(), spawn, "node", {"node": nid})
             r = _bounded_retry(meta, r, spawn, "node", {"node": nid})
             r = _stamp_served(meta, r, node)   # dad50be0: seat truth at the commit, never the alias
+            r = _lane_gate(run, node, r)   # 64c6772b: a declared lane must be clean at commit
             save_node(run, node, byid, r)
             if r["status"] in ("done", "partial"):   # #4: a harvested partial IS committed output
                 log(run, "node.finished", node=nid, ms=r.get("ms"),

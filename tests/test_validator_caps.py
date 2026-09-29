@@ -130,8 +130,34 @@ finally:
     shutil.rmtree(HOME, ignore_errors=True)
 
 # --- (6) ROW 1 pin: registered graph description carries the FULL provider ---
-# sentence verbatim (guards against future in-plugin truncation; the seat's
-# 60-char view is core's _short_desc manifest clip — reported upstream).
+# sentence verbatim (guards against future in-plugin truncation). The 60-char
+# seat view and the ~500-char per-match grep view are core-side clips
+# (_short_desc manifest clip + search_files' match clamp) — they never shorten
+# what the model actually receives; the door registers the full string.
+# digest 29d (0b680871): the description is built from adjacent short literals so a
+# 500-char grep view shows meaningful windows — pin the SHAPE: no source line inside
+# the graph-description block exceeds 520 chars (adjacent literals collapse in the
+# AST, so this reads source). The runtime string itself is pinned verbatim below; a
+# re-merge into one mega-line turns this red.
+_desc_lines = (BUILD / "__init__.py").read_text().splitlines()
+try:
+    # F1 (deep review): anchor INSIDE the `"graph": {` block — a bare
+    # `"description": (` search lands on WORKFLOW_SCHEMA's description (which is
+    # legitimately three short lines) when the graph description is collapsed to
+    # ONE plain literal without parens, making this pin vacuous in exactly the
+    # mutation it advertises. Anchor: find `"graph": {`, then the first
+    # `"description":` after it — and the shape MUST be the opening `(` form.
+    _ig = next(i for i, l in enumerate(_desc_lines) if l.strip() == '"graph": {')
+    _i0 = next(i for i in range(_ig, len(_desc_lines)) if '"description"' in _desc_lines[i])
+    if not _desc_lines[_i0].strip().startswith('"description": ('):
+        _wide = [f"{_i0+1}: graph description is a single literal, not adjacent literals"]
+    else:
+        _i1 = next(i for i in range(_i0, len(_desc_lines)) if _desc_lines[i].strip() == "),")
+        _wide = [f"{i+1}:{len(_desc_lines[i])}" for i in range(_i0 + 1, _i1)
+                 if len(_desc_lines[i]) > 520]
+except StopIteration:
+    _wide = ["description block not found (was it re-merged into one literal?)"]
+check(not _wide, "graph description literals are grep-viewable (<520-char lines)", str(_wide))
 PROVIDER_SENTENCE = ("provider (optional explicit Hermes provider paired with model; "
                      "passed as --provider; when unset it is INHERITED from a "
                      "provider-qualified model alias/tier)")
