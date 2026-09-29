@@ -231,7 +231,7 @@ ID_OK = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 # graph it baked itself. `reasoning` is validated per node (Q5).
 AGENT_KEYS = {"id", "type", "after", "goal", "context", "schema", "model", "provider", "toolsets",
               "max_turns", "timeout", "run_budget", "inputs", "fanout", "reasoning",
-              "tier", "shape",
+              "tier", "shape", "repo",
               # 1.1 (RATIFY F2/F4): OPTIONAL team keys. `profile` = run this node AS a named
               # teammate profile (consent-gated, node-level only); `requires` = output
               # preconditions on ancestors ({"<ancestor>": ["field", "dotted.path", ...]}).
