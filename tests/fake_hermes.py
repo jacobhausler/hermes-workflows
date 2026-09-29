@@ -77,6 +77,11 @@ if _FAKE_MODE == "provider400":    # 400 with inherited CLI advice lines that mu
 if _FAKE_MODE == "unknown":        # dies with prose only — no machine-readable marker
     print("some daemon died unexpectedly, see your provider dashboard")
     sys.exit(7)
+if _FAKE_MODE == "quota":          # #24: subscription-quota 429 with a reset horizon
+    print("Warning: install out of sync")
+    print('Provider said: HTTP 429: {"error": {"message": "ChatGPT or Codex '
+          'Subscription usage limit reached, resets in ~109 hours"}}')
+    sys.exit(1)
 if _FAKE_MODE == "maxturns":       # prose mentions the cap — runner must NOT grep it (stays unknown)
     print("Agent reached its max turns budget and stopped.")
     sys.exit(2)

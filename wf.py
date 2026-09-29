@@ -36,7 +36,7 @@ def _profile_evidence(node):
     return {"profile": name, "profile_home": str(profile_home(name))} if name else {}
 
 
-def _stamp_served(meta, result):
+def _stamp_served(meta, result, node=None):
     """Commit actual child seat truth, never the requested alias. No row means unknown."""
     skey = result.get("skey")
     metric = child_metrics(meta["_run"].name, _route_home(result)).get(skey, {}) if skey else {}
@@ -55,6 +55,11 @@ def _stamp_served(meta, result):
     if metric and served is not None and (served in forbidden or served.rsplit("/", 1)[-1] in forbidden):
         result.update(status="failed", error=f"forbidden served model: {served}",
                       error_class="forbidden_model")
+        return result
+    if node:   # #25: the commit-time pinned-route hold runs only when the caller
+               # has the node def in hand (the committed record NEVER carries it —
+               # the golden-solo gate caught exactly that leak).
+        result = _route_hold(meta, result, node)
     return result
 
 
@@ -384,6 +389,15 @@ _TRANSPORT_EXACT = ("connection error.", "request timed out.",
 _TRANSPORT_TOKENS = _TRANSPORT_EXACT + ("rate limit", "too many requests")
 _TRANSPORT_STATUS = (408, 409, 425, 429, 500, 502, 503, 504)
 _PROVIDER400_TOKENS = ("badrequesterror", "not supported")
+# #24: subscription-quota 429 — a 429 whose marker carries a RESET HORIZON or a
+# quota-exhaustion phrase is not a transient rate limit: the retry ladder (5s,
+# 20s) can never succeed against a multi-hour reset, it just burns spawns
+# (verified pf 09-29: 3 attempts/60s, ~4.5-day horizon fleet-wide). Distinct
+# from a plain 429 ("slow down" = transport, retry once ladder is right for it).
+_QUOTA_PHRASE_TOKENS = ("usage limit", "quota exceeded", "quota exceeded for",
+                        "subscription", "out of credits", "spending limit",
+                        "insufficient_quota")
+_QUOTA_HORIZON_RE = re.compile(r"reset(?:s|ting)?\D{0,10}?(\d+)\s*(hour|hr|h|day|d|min|minute)")
 # sprint101 #3: a dead/renamed model id surfaces as 404 or a model-not-found
 # marker — a distinct class from a generic 400, and never retryable.
 _UNRESOLVED_MODEL_TOKENS = ("model not found", "no such model", "unknown model",
@@ -397,6 +411,7 @@ _CAP_TOKENS = ("tool-call limit", "tool call limit", "turn limit",
 # The CLOSED set every node.failed (record + event) must carry (sprint101 #3).
 ERROR_CLASSES = frozenset(("provider_400", "unresolved_model", "cap_exhausted",
                            "timeout", "transport", "transport_exhausted",
+                           "fatal_quota", "route_unavailable",
                            "incomplete_work", "early_death", "cancelled",
                            "schema", "spawn", "graph_invalid", "inputs",
                            "quorum", "fanout_empty", "crashed", "unknown"))
@@ -449,6 +464,47 @@ def _note_turn_tier(run, node_id, report_path):
         pass
 
 
+def _quota_cache_path():
+    """#24 (b): seat-local memory of models known to be subscription-exhausted."""
+    import os
+    from pathlib import Path
+    override = os.environ.get("WF_QUOTA_CACHE")
+    if override:
+        return Path(override)
+    return (Path(os.environ.get("HERMES_HOME") or (Path.home() / ".hermes"))
+            / "cache" / "workflow-quota-cache.json")
+
+def _quota_note(model, marker):
+    """#24 (b): record model -> reset horizon from a fatal_quota marker.
+    Advisory only: the cache NEVER deletes or blocks on its own; the door pings
+    once before refusing, so a stale stamp can't wedge a run forever."""
+    import os, re, time, json, tempfile
+    m = _QUOTA_HORIZON_RE.search((marker or "").lower())
+    if m and m.group(2).startswith(("h",)):
+        hours = int(m.group(1))
+    elif m and m.group(2).startswith("d"):
+        hours = int(m.group(1)) * 24
+    elif m and m.group(2).startswith("m"):       # min|minute (regex captures them)
+        hours = max(int(m.group(1)) / 60.0, 1.0 / 60)   # short stamp, never zero
+    else:
+        hours = 6
+    p = _quota_cache_path()
+    try:
+        data = json.loads(p.read_text()) if p.exists() else {}
+        if not isinstance(data, dict): data = {}
+    except Exception:
+        data = {}
+    data[str(model or "unknown")] = {"resets_epoch": time.time() + hours * 3600,
+                                     "at": time.time(),
+                                     "marker": (marker or "")[:200]}
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(dir=str(p.parent))
+        with os.fdopen(fd, "w") as f: json.dump(data, f)
+        os.replace(tmp, p)
+    except Exception:
+        pass
+
 def _classify_rc_output(out):
     """(error_class, last-marker line) from the child's MERGED stdout/stderr
     capture. Pin on the LAST line that looks like a machine-readable marker line
@@ -472,6 +528,9 @@ def _classify_rc_output(out):
         return "unresolved_model", marker
     if any(t in low for t in _PROVIDER400_TOKENS) or "error code: 400" in low or "http 400" in low:
         return "provider_400", marker
+    if "429" in low and (any(t in low for t in _QUOTA_PHRASE_TOKENS)
+                         or _QUOTA_HORIZON_RE.search(low)):
+        return "fatal_quota", marker    # #24: horizon outlasts the ladder — never retry
     if any(t in low for t in ("tool-call limit", "tool call limit", "turn limit")):
         return "cap_exhausted", marker
     if any(t in low for t in _TRANSPORT_TOKENS):
@@ -852,6 +911,8 @@ def _adopt_child(meta, node, byid, index, child, schema, fo_cancel=None):
         return {"status": "failed", "error": "adopted child died with an empty log (no messages)",
                 "error_class": "crashed", "raw": "", "ms": ms, **evd}
     eclass, marker = _classify_rc_output(out)
+    if eclass == "fatal_quota":   # #24: adopted death caches the horizon too
+        _quota_note(node.get("model") or node.get("provider") or "seat default", marker)
     verdict = _verdict_lines(marker if marker else out)
     return {"status": "failed", "error": f"adopted child died (rc unobservable — runner was "
             f"respawned): {verdict}", "error_class": eclass, "raw": (out or "")[-2000:],
@@ -1107,6 +1168,18 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
             return {"status": "partial",
                     "error": f"child exited rc={rc} (answer harvested from stdout)",
                     "error_class": eclass, "ms": ms, "final": final_reply, **hv, **sk, **evd}
+        if eclass == "fatal_quota":
+            # #24: name the model + record the horizon (advisory cache); the class
+            # is outside _RETRYABLE_CLASSES/_BOUNDED_RETRY_CLASSES, so the ladder
+            # never fires — this ONE attempt is the node's verdict.
+            _quota_note(node.get("model") or node.get("provider") or "seat default", marker)
+            return {"status": "failed",
+                    "error": f"child exited rc={rc}: subscription quota exhausted for model "
+                             f"'{node.get('model') or 'seat default'}' — reset horizon in the "
+                             f"provider message below; amend the node to a live model instead "
+                             f"of waiting. Marker: {marker}",
+                    "error_class": "fatal_quota", "raw": (out or "")[-2000:], "ms": ms,
+                    "final": final_reply, **sk, **evd}
         verdict = _verdict_lines(marker if marker else out)
         return {"status": "failed", "error": f"child exited rc={rc}: {verdict}",
                 "error_class": eclass, "raw": (out or "")[-2000:], "ms": ms, "final": final_reply, **sk, **evd}
@@ -1191,6 +1264,84 @@ def _transient_retry(meta, r, respawn, ev, ev_kw):
         if r.get("error_class") in _RETRYABLE_CLASSES:
             r["error_class"] = "transport_exhausted"
     return r
+
+# ---------- #25: pinned-route hold at commit (field-report fallback-billing ask) ----------
+
+def _seat_alias_map(home):
+    """{alias -> target model} for one seat's config, stdlib-only (same YAML-lite
+    spirit as wfcommon.seat_forbidden_models: hermes_cli when importable, else a flat
+    scan of `model: aliases:` in config.yaml). Any failure returns {} — absence only
+    skips the alias half of the served-model hold, never fails a node.
+    (A2: hermes_cli's load_config_readonly() takes NO path argument — it can only ever
+    read the RUNNER's seat. For a profile-routed node the target owns the aliases, so
+    a foreign home must go straight to that home's config.yaml, never core.)"""
+    if Path(home) == hermes_home():
+        try:
+            from hermes_cli.config import load_config_readonly
+            cfg = load_config_readonly() or {}
+            amap = ((cfg.get("model") or {}).get("aliases")) or {}
+            if isinstance(amap, dict):
+                return {str(k): str(v) for k, v in amap.items() if v}
+        except Exception:
+            pass
+    try:
+        lines = (Path(home) / "config.yaml").read_text().splitlines()
+    except OSError:
+        return {}
+    amap, in_model, in_alias = {}, False, False
+    for raw in lines:
+        line = raw.split(" #", 1)[0]
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        indent = len(line) - len(line.lstrip())
+        text = line.strip()
+        if indent == 0:
+            in_model, in_alias = text.partition(":")[0] == "model", False
+        elif in_model and indent == 2:
+            in_alias = text.partition(":")[0] == "aliases"
+        elif in_model and in_alias and indent >= 4 and ":" in text:
+            k, _, v = text.partition(":")
+            if v.strip():
+                amap[k.strip()] = v.strip().strip("'\"")
+    return amap
+
+def _route_hold(meta, result, node=None):
+    """#25: commit-time fail-closed hold (field report fb-fix-9c575645: pinned
+    billed the seat's fallback qwen38-next for 3 whole nodes while the submit ping had
+    ALREADY reported the fallback-ladder surprise). When the door proved this node's
+    route alive at submit (`route_verified`, door-baked — absent = never proved = no
+    hold, every legacy run behaves byte-identically), a KNOWN served_model that is
+    neither the verified route, an alias of it, nor the node's own resolved model
+    means the child billed someone else: failed, error_class=route_unavailable.
+    Unknown served (no state.db row) is NOT a mismatch — the runner never invents
+    'known' from absence (R2 law)."""
+    node = node or {}
+    verified = node.get("route_verified")
+    if not verified or result.get("status") not in ("done", "partial"):
+        return result       # never mask a genuine death with the hold
+    served = result.get("served_model")
+    if not served:
+        return result                                    # unknown: never counted
+    v = str(verified).strip().lower()
+    v_model = v.rsplit("/", 1)[-1]
+    candidates = {v, v_model}
+    for k in ("model", "provider"):
+        own = str(node.get(k) or "").strip().lower()
+        if own:
+            candidates |= {own, own.rsplit("/", 1)[-1]}
+    for alias, target in _seat_alias_map(_route_home(result)).items():
+        if alias.lower() in (v, v_model):
+            candidates |= {alias.lower(), str(target).lower(),
+                           str(target).rsplit("/", 1)[-1].lower()}
+    s = str(served).strip().lower()
+    if s in candidates or s.rsplit("/", 1)[-1] in candidates:
+        return result
+    result.update(status="failed", error_class="route_unavailable",
+                  error=f"route_unavailable: node billed {served!r} but the door proved "
+                        f"{verified!r} alive at submit — core answered from another route. "
+                        f"Delete the node record and wait to re-drive, or amend to a route "
+                        f"you accept falling back on (require_route: false).")
+    return result
 
 def _bounded_retry(meta, r, respawn, ev, ev_kw):
     """#5 bounded auto-retry, run ONCE after _transient_retry: a death whose
@@ -1457,7 +1608,7 @@ def run_agent_node(run, meta, byid, node, outputs, steering):
                 except Exception as e:
                     r = {"status": "failed", "error": f"worker crashed: {type(e).__name__}: {e}",
                          "error_class": "crashed", "ms": 0}
-                r = _stamp_served(meta, r)   # dad50be0: per-item seat truth; forbidden served model -> failed
+                r = _stamp_served(meta, r, node)   # dad50be0: per-item seat truth; forbidden served model -> failed
                 with lock:
                     if "attempts" not in r:
                         last_spawn = r.get("spawn")
@@ -1548,7 +1699,7 @@ def run_agent_node(run, meta, byid, node, outputs, steering):
                                  resume_preamble=resume_preamble)
             r = _transient_retry(meta, spawn(), spawn, "node", {"node": nid})
             r = _bounded_retry(meta, r, spawn, "node", {"node": nid})
-            r = _stamp_served(meta, r)   # dad50be0: seat truth at the commit, never the alias
+            r = _stamp_served(meta, r, node)   # dad50be0: seat truth at the commit, never the alias
             save_node(run, node, byid, r)
             if r["status"] in ("done", "partial"):   # #4: a harvested partial IS committed output
                 log(run, "node.finished", node=nid, ms=r.get("ms"),

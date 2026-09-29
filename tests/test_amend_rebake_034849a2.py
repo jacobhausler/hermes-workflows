@@ -144,5 +144,21 @@ out = amend("run-P", author(extra=True))
 check("pending node, author graph: routes (None,'opus')", route(out, "tail") == (None, "opus"), route(out, "tail"))
 check("pending node, author graph: done nodes unchanged", out.get("unchanged") == ["recon", "check", "impl"], out.get("unchanged"))
 
+# F2 (deep review #26): a committed, alive-proved node def re-submitted VERBATIM
+# still un-bakes (keeps the committed literal, re-resolves the tier). The proof
+# annotation must NOT participate in the "def unchanged" comparison — the author's
+# copy arrives without it (popped pre-submit), so requiring equality would disable
+# idempotence for every alive-proved node. Mutation-visible: put route_verified
+# back into _ROUTE_MATCH_KEYS and this row goes red.
+seat("default")
+committed_n = {"id": "x", "type": "agent", "goal": "g", "tier": "manager",
+               "model": "fable", "route_verified": "anthropic/fable"}
+node = copy.deepcopy(committed_n)
+err, _, _ = door._resolve_models([node], committed={"x": committed_n})
+check("F2: alive-proved committed def re-submitted un-bakes to the live shape",
+      err is None and node.get("model") == "fable" and node.get("tier") == "manager"
+      and "provider" not in node,
+      f"{err} {node}")
+
 print(f"\n{'ALL PASS' if not fails else f'{fails} FAIL'}")
 sys.exit(1 if fails else 0)
