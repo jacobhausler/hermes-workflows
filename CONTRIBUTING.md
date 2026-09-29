@@ -31,6 +31,9 @@ maintainer runs on your PR — run it first and your PR merges the same hour CI 
 ```sh
 node --check desktop/plugin.js                    # desktop half parses
 python3 scripts/suite.py . ci-out                 # full serial suite → ci-out/exits.json all 0
+python3 scripts/suite.py . ci-fix --baseline ci-base/exits.json  # optional: → ci-fix/admission.json splits reds
+                                                  # into introduced vs pre-existing (exact name+exit identities);
+                                                  # only a fully-green SHA is green, base reds block, never waive
 hermes plugins validate .                         # → Validation passed.
 python3 scripts/make_public.py /tmp/public-tree   # → 0 scrub hits
 python3 scripts/graph_check.py                    # committed knowledge graph matches the tree → OK
