@@ -28,11 +28,11 @@ Set `HERMES_HOME` to the active backend profile home; the default is `$HOME/.her
     hermes plugins validate "$HERMES_HOME/plugins/hermes-workflows"
     hermes plugins enable hermes-workflows
 
-The bundled skill is registered by the plugin as `hermes-workflows:workflow`; that registration is the skill's single source of truth. For direct CLI discovery outside plugin registration, link the package's skill into the active profile so it tracks every plugin update — do NOT maintain a copied fork (a copy silently freezes at the plugin version it was taken from and trains stale grammar):
+The bundled skill is registered by the plugin as `hermes-workflows:workflow`; that registration is the skill's single source of truth. For direct CLI discovery outside plugin registration, link the INSTALLED plugin directory's skill into the active profile so it tracks every plugin update — do NOT maintain a copied fork (a copy silently freezes at the plugin version it was taken from and trains stale grammar), and do not link the temporary `$PACKAGE_DIR` staging tree (it vanishes when unpacked, leaving a dangling link):
 
     test ! -e "$HERMES_HOME/skills/workflow"
     mkdir -p "$HERMES_HOME/skills"
-    ln -s "$PACKAGE_DIR" "$HERMES_HOME/skills/workflow"
+    ln -s "$HERMES_HOME/plugins/hermes-workflows" "$HERMES_HOME/skills/workflow"
 
 If a symlink is impossible on the host, copy instead — but then re-copy after every plugin update, and treat drift as a bug. If a copied or hand-edited skill already exists where the link would go, stop and reconcile it with the package before linking; never silently discard local edits, upstream them (issue on the plugin repo) so the package can carry them.
 

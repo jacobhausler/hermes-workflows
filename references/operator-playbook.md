@@ -56,8 +56,12 @@ papercuts).
 - Every child gets the same hard-rules preamble in `context`: read-only on
   production, writes only under one named scratch dir, forbidden hosts named,
   honest-unknown valid, invented evidence not, cite exact commands + values.
-- `quorum` is OPTIONAL with no default — unset waits for every item (one flake
-  fails the node); set `quorum:<n` deliberately when partial credit is honest.
+- **Fan-out wait vs commit are separate rules:** unset `quorum` waits for EVERY
+  item (no straggler cancellation), but the node COMMITS at majority
+  (`len(items)//2 + 1`) — one flake in a lane of 3+ still commits with partial
+  credit and survivors in `output.items`. Set `quorum:<n>` explicitly when you
+  want early straggler cancellation or a stricter/looser commit bar; and read
+  `failed_items`/`failed_detail` on a committed node — done does not mean all green.
 
 ## Babysitting (read model, not ps)
 
