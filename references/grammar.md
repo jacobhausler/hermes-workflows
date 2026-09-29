@@ -31,3 +31,5 @@ A graph may carry a top-level `provenance:{owner, source, saved_at, source_diges
 ## File-authored graphs
 
 Use `graph_path` with run/save/amend for a caller-authorized absolute local regular UTF-8 JSON file, at most 1 MiB, no final symlink. Choose exactly one source: inline graph, graph_path, or run's `from` / save's `run_id`. Validation completes before writing or spawning. Save to the library and replay with `from` for repeated use; graph_path is valuable for an unsaved local graph or replacement amendment. Neither feature asserts a universal tool-argument length limit.
+
+A shared file may state its dialect with a top-level `grammar` key (`"wf/1"`; absent = `wf/1` for every pre-#32 file). A value this reader does not support is refused before any write or spawn, with the supported list in the error. Like `provenance`, `grammar` is a top-level annotation — never part of a node, so `def_hash`, `efp`, `graph_fingerprint` and `source_digest` are unchanged by it. The publishing convention (`<name>.workflow.json`, provenance, pinned digests, the no-code note) is [portable](portable.md).

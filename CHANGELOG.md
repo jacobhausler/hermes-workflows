@@ -15,6 +15,7 @@ Every feature is OPTIONAL: a no-team run (default profile, no `WF_RUNS_ROOT`) is
 
 ## Unreleased
 
+- #32 publish-as-file: top-level `grammar: "wf/1"` accepted (absent = wf/1; unknown value refused listing the supported values), def_hash-neutral like `provenance`; `references/portable.md` convention + `examples/portable-review.workflow.json` walk-in with its digests pinned in the doc (`tests/test_portable_32.py`).
 - #31 grammar-dialect-1: `references/dialect.md` maps Anthropic's Claude Code dynamic-workflow JS grammar (agent/parallel/pipeline/phase/args/plain-JS glue/caps/worktrees) to our JSON graph with a filled DEVIATION JUSTIFICATION column per row, and `tests/fixtures/dialect/` (13 `.js` scripts + `.expected.json` verdicts) pins the constrained-subset import contract that #33 implements. Docs + fixtures only; no importer/exporter code.
 - #24 fatal_quota (from @pf-mechanic-2's report): a 429 whose own text carries a
   reset horizon (`resets in ~109h`) is classed `fatal_quota` — the node fails on the

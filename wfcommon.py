@@ -298,6 +298,26 @@ ECHO_KEYS = {"id", "type", "after", "output"}
 # 1.1 (RATIFY F5): opt-in library provenance block, written by the door's `save` ONLY when
 # `source` is supplied or the saving door runs under a named profile. Top-level graph key.
 PROVENANCE_KEYS = {"owner", "source", "saved_at", "source_digest"}
+# #32 (publish-as-file): top-level `grammar` names the dialect a shared file was written
+# in. Absent = "wf/1" (every pre-#32 file is a wf/1 file); unknown = fail-closed with the
+# reader's supported list, so a newer dialect is refused honestly instead of misrun.
+# An ANNOTATION like `provenance`: top-level only, never part of any node, so def_hash /
+# efp / graph_fingerprint / source_digest are untouched (golden-solo bytes unchanged).
+GRAMMAR_DEFAULT = "wf/1"
+GRAMMAR_SUPPORTED = (GRAMMAR_DEFAULT,)
+
+def grammar_errors(graph):
+    """Return [{node:None, field:'grammar', msg}] for a top-level `grammar` value this
+    reader cannot run; [] when absent (back-compat wf/1) or supported."""
+    if not isinstance(graph, dict) or "grammar" not in graph:
+        return []
+    value = graph["grammar"]
+    if not isinstance(value, str) or value not in GRAMMAR_SUPPORTED:
+        return [{"node": None, "field": "grammar",
+                 "msg": f"unsupported grammar {value!r}; this reader supports: "
+                        + json.dumps(list(GRAMMAR_SUPPORTED))
+                        + f" (absent = {GRAMMAR_DEFAULT!r})"}]
+    return []
 FANOUT_KEYS = {"items", "items_from", "goal", "schema", "quorum"}
 DEFAULTS_KEYS = {"schema", "timeout", "max_turns", "reasoning", "provider", "model", "context",
                  "require_route"}   # #25: bool — fail-closed pinned routes (see AGENT_KEYS)
@@ -424,8 +444,14 @@ def reasoning_levels():
 
 def validate_graph_errors(nodes):
     """Return a LIST of {node, field, msg} — EVERY defect, not the first. Strict ids:
-    node ids double as filenames."""
+    node ids double as filenames.
+    #32: accepts a whole graph object too — `{grammar?, nodes:[...]}` — in which case
+    the top-level `grammar` tag is checked first (absent = wf/1; unknown = refused,
+    listing the supported values) and then its `nodes`. A bare node list is unchanged."""
     errs = []
+    if isinstance(nodes, dict):
+        errs.extend(grammar_errors(nodes))
+        nodes = nodes.get("nodes")
     def E(nid, field, msg):
         errs.append({"node": nid, "field": field, "msg": msg})
 
@@ -456,7 +482,7 @@ def validate_graph_errors(nodes):
                 schema_check(nid, f"{field}.items", schema["items"])
 
     if not isinstance(nodes, list) or not nodes:
-        return [{"node": None, "field": "nodes", "msg": "nodes must be a non-empty list"}]
+        return errs + [{"node": None, "field": "nodes", "msg": "nodes must be a non-empty list"}]
     bad_el = [i for i, n in enumerate(nodes) if not isinstance(n, dict)]
     if bad_el:
         return [{"node": None, "field": f"nodes[{bad_el[0]}]",
