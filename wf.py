@@ -1980,9 +1980,12 @@ def main(run_id):
     try:
         reason = loop()
     except SystemExit:
-        # A self-reported exit is a verdict, not a crash. Stamping "crashed:
-        # SystemExit: N" here overwrites the real exit record (e.g. the
-        # no-graph stamp) and poisons the read model with a phantom 'failed'.
+        # Defensive: a self-reported exit is a verdict, not a crash. loop() does
+        # not raise SystemExit today (every self-reported exit happens before this
+        # try — enumerated at L79/L1693/L1947), but the guard keeps the invariant
+        # local instead of a cross-function assumption. (write_runner_exit is
+        # first-writer-wins per process, so a same-process false stamp was never
+        # possible anyway.)
         raise
     except BaseException as e:
         write_runner_exit(run, f"crashed: {type(e).__name__}: {e}", graph=exit_graph[0])
@@ -2020,11 +2023,16 @@ if __name__ == "__main__":
     try:
         main(_rid)
     except SystemExit:
-        # Legit self-reported exits (WORKFLOW_BUSY lock-loser sys.exit(0), no-graph
-        # sys.exit(2)) come through as SystemExit. Recording "crashed: SystemExit: N"
-        # here STAMPS OVER the real exit record (or over a LIVE sibling runner's
-        # absence of one) and poisons the status model with a phantom 'failed'.
-        # The emit line already carries the verdict; the net is for silent deaths only.
+        # The runner's self-reported exits are BaseExceptions: acquire_lock()'s
+        # lock-loser sys.exit(0) after WORKFLOW_BUSY fires BEFORE _EXIT_WRITTEN
+        # is reset (main(), below the lock) — so pre-fix the net recorded
+        # "crashed: SystemExit: 0" INTO A LIVE RUNNER's runner_exit.json and
+        # poisoned the read model with a phantom 'failed' (status/wait render
+        # failed + next:[amend] while children are alive). The emit line already
+        # carries the verdict; the net is for silent deaths only. Other
+        # self-reported exits (no-graph sys.exit(2)) were already protected by
+        # write_runner_exit's first-writer-wins flag; this guard makes ALL of
+        # them structurally exempt. Re-raising keeps every exit code unchanged.
         raise
     except BaseException as _e:  # main already records its own crashes; this net
         try:                      # catches death OUTSIDE main's try (and re-raises

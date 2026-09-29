@@ -12,18 +12,20 @@ runner and all its children are alive — and the operator reflex that invites
 This test mirrors the live repro: hold the run's flock to emulate a working
 runner, launch a second runner against it, and assert the second runner exits
 clean WITHOUT touching the run's exit record. Also asserts the no-graph path
-keeps its own honest stamp (rc=2, 'crashed: no graph.json') and that a real
-crash still stamps.
+keeps its own honest stamp (rc=2; the net's same-process write was already a
+no-op via write_runner_exit's first-writer-wins flag), and that a genuine
+crash still reaches the net and stamps.
 """
-import fcntl, json, os, shutil, subprocess, sys
+import atexit, fcntl, json, os, shutil, subprocess, sys
 from pathlib import Path
 
 BUILD = Path(__file__).resolve().parent.parent
-HOME = BUILD / "home_systemexit"
+HOME = BUILD / "tests" / "home_systemexit"   # under tests/home*/ in .gitignore — never leak untracked
 if HOME.exists():
     shutil.rmtree(HOME)
 RUNS = HOME / "workflows"
 RUNS.mkdir(parents=True)
+atexit.register(shutil.rmtree, HOME, ignore_errors=True)  # cleanup even on mid-test failure
 env = dict(os.environ, HERMES_HOME=str(HOME),
            HERMES_WF_HERMES_BIN=str(BUILD / "tests" / "fake"))
 
@@ -78,21 +80,22 @@ rec = json.loads((r2 / "runner_exit.json").read_text())
 check(rec["reason"] == "crashed: no graph.json",
       "no-graph stamp is the self-reported one, not 'crashed: SystemExit: 2'", rec)
 
-# ---- 3) a real crash STILL stamps (the net still works) ----
+# ---- 3) a REAL crash STILL stamps (the net still works) ----
+# A genuine BaseException must reach the net AFTER the lock is held: an
+# unparseable graph.json is swallowed by jload and exits via the honest
+# no-graph branch, proving nothing about the net (a deleted net stays green).
+# concurrency:"abc" raises TypeError inside ThreadPoolExecutor, past
+# acquire_lock — only the net can record that death. (#11 ask 1, maintainer-
+# verified trigger on the merged tree.)
 r3 = mkrun("crash-run")
-(r3 / "graph.json").write_text(json.dumps(
-    {"name": "crash", "nodes": [{"id": "x", "type": "nonsense"}]}))
 (r3 / "run.json").write_text(json.dumps(
-    {"hermes_bin": str(BUILD / "tests" / "fake")}))
-# invalid graph is caught and stamped before the loop, same contract; verify a
-# genuine BaseException path (unparseable graph.json) reaches the crash net:
-(r3 / "graph.json").write_text("{not json")
+    {"hermes_bin": str(BUILD / "tests" / "fake"), "concurrency": "abc"}))
 p4 = subprocess.run([sys.executable, str(BUILD / "wf.py"), "run", "crash-run"],
                     capture_output=True, text=True, env=env, timeout=60)
-check(p4.returncode != 0, "broken graph.json exits non-zero", str(p4.returncode))
+check(p4.returncode != 0, "genuine crash exits non-zero", str(p4.returncode))
 rec4 = json.loads((r3 / "runner_exit.json").read_text()) if (r3 / "runner_exit.json").exists() else {}
-check(rec4.get("reason", "").startswith("crashed:"),
-      "genuine crash still stamps runner_exit.json", json.dumps(rec4))
+check(rec4.get("reason", "").startswith("crashed: TypeError"),
+      "genuine crash inside loop() still stamps runner_exit.json THROUGH the net", json.dumps(rec4))
 
 shutil.rmtree(HOME, ignore_errors=True)
 print(f"\nALL PASS ({ok})")

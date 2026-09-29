@@ -28,12 +28,13 @@ Set `HERMES_HOME` to the active backend profile home; the default is `$HOME/.her
     hermes plugins validate "$HERMES_HOME/plugins/hermes-workflows"
     hermes plugins enable hermes-workflows
 
-The bundled skill is registered by the plugin as `hermes-workflows:workflow`. For direct CLI discovery outside plugin registration, install a separate copy of the bundled authoring skill in the active profile (do not overwrite an existing skill):
+The bundled skill is registered by the plugin as `hermes-workflows:workflow`; that registration is the skill's single source of truth. For direct CLI discovery outside plugin registration, link the INSTALLED plugin directory's skill into the active profile so it tracks every plugin update — do NOT maintain a copied fork (a copy silently freezes at the plugin version it was taken from and trains stale grammar), and do not link the temporary `$PACKAGE_DIR` staging tree (it vanishes when unpacked, leaving a dangling link):
 
     test ! -e "$HERMES_HOME/skills/workflow"
-    mkdir -p "$HERMES_HOME/skills/workflow"
-    cp "$PACKAGE_DIR/SKILL.md" "$HERMES_HOME/skills/workflow/SKILL.md"
-    cp -R "$PACKAGE_DIR/references" "$HERMES_HOME/skills/workflow/references"
+    mkdir -p "$HERMES_HOME/skills"
+    ln -s "$HERMES_HOME/plugins/hermes-workflows" "$HERMES_HOME/skills/workflow"
+
+If a symlink is impossible on the host, copy instead — but then re-copy after every plugin update, and treat drift as a bug. If a copied or hand-edited skill already exists where the link would go, stop and reconcile it with the package before linking; never silently discard local edits, upstream them (issue on the plugin repo) so the package can carry them.
 
 Enablement and copied source are not proof the running gateway loaded them. Restart the backend after applying the verified plugin, then verify plugin admission, mounted API and tool registration in the new process. Dashboard registration is API-only with a hidden tab.
 
@@ -59,7 +60,7 @@ Use the active host's Python 3 and Node.js, not a hard-coded installation path. 
 
 ## Removal
 
-Before disabling, call `workflow {"action":"list"}` and stop every live run with `workflow {"action":"stop","run_id":"<id>"}`. Detached runners can survive session end, gateway restart and plugin disable; disable is not a stop command. Then disable the plugin, remove only its source directory and app-level plugin file, then restart the backend and reload desktop plugins. Remove the optional copied skill only if it is the copy you installed. Workflow runs, the library, state.db, logs, existing profile data and archives are preserved, not uninstalled.
+Before disabling, call `workflow {"action":"list"}` and stop every live run with `workflow {"action":"stop","run_id":"<id>"}`. Detached runners can survive session end, gateway restart and plugin disable; disable is not a stop command. Then disable the plugin, remove only its source directory and app-level plugin file, then restart the backend and reload desktop plugins. Remove the optional skill link (or copied skill, if this host could not symlink) only if you installed it. Workflow runs, the library, state.db, logs, existing profile data and archives are preserved, not uninstalled.
 
     hermes plugins disable hermes-workflows
     printf '%s\n' "$HERMES_HOME/plugins/hermes-workflows" "$HERMES_HOME/desktop-plugins/hermes-workflows" "$HERMES_HOME/skills/workflow"
