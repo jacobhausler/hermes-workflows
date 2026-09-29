@@ -226,8 +226,17 @@ def _spawn_runner(r):
     Single-runner admission is enforced by the runner's flock (kernel-owned) admission lock, so racing
     door spawns are harmless (the loser exits WORKFLOW_BUSY)."""
     log = open(r / "runner.log", "a")
+    # The contextvar profile scope does NOT cross processes: a runner spawned for a run
+    # under the RESOLVED runs root gets that home stamped explicitly (core's own #18594
+    # guidance for subprocess spawners), so its seat config and child env follow the
+    # OWNER's profile, not the launch root os.environ carries on a multiplex host.
+    # A legacy-location run (pre-fix, under the launch root) keeps the inherited env
+    # verbatim — runner_alive compares it against the run's parent.
+    env = ({**os.environ, "HERMES_HOME": str(_common.hermes_home())}
+           if r.parent == _common.runs_root() else None)
     proc = subprocess.Popen([sys.executable, str(HERE / "wf.py"), "run", r.name],
                             stdout=log, stderr=log, stdin=subprocess.DEVNULL,
+                            env=env,
                             start_new_session=True, cwd=str(HERE))
     (r / "wf.pid").write_text(str(proc.pid))
 
@@ -855,9 +864,9 @@ def _seat_model_cfg():
     out = {"default": None, "aliases": {},
            "workflows_forbidden_models": _common.seat_forbidden_models()}
     try:
-        home = os.environ.get("HERMES_HOME") or (Path.home() / ".hermes")
+        home = _common.hermes_home()
         section = None; in_aliases = False
-        for line in (Path(home) / "config.yaml").read_text().splitlines():
+        for line in (home / "config.yaml").read_text().splitlines():
             if not line.strip() or line.lstrip().startswith("#"):
                 continue
             indent = len(line) - len(line.lstrip())
@@ -894,25 +903,52 @@ def runs_root():
     return _common.runs_root()
 
 def run_dir(run_id):
-    """Strict: no silent normalization — ids double as directory names."""
+    """Strict: no silent normalization — ids double as directory names.
+    Profile-scoped door on a multiplex host: pre-fix runs sit under the launch root —
+    find_run keeps those ids resumable (resolved root wins when both exist)."""
     rid = (run_id or "").strip()
     if not rid or rid != "".join(c for c in rid if c.isalnum() or c in "-_.") \
             or rid.startswith(".") or set(rid) == {"."}:
         raise ValueError(f"invalid run_id {run_id!r}")
-    return runs_root() / rid
+    return _common.find_run(rid)
 
 # ---------- graph library (named, re-runnable graphs) ----------
 
 def library_root():
     return runs_root() / "library"
 
+def _library_roots():
+    """Resolved library root first; legacy launch-root library second (F1 #14).
+    Graphs saved before the profile-home fix live under the launch root on a
+    profile-scoped host and stay readable/replayable; new saves go to the
+    resolved root only."""
+    roots = [library_root()]
+    legacy = _common.launch_runs_root() / "library"
+    if legacy != roots[0]:
+        roots.append(legacy)
+    return roots
+
 LIB_OK = re.compile(r"^[a-z0-9][a-z0-9_.-]{0,63}$")
 
 def _lib_path(name):
+    """WRITE resolver: always the resolved root (current best version lands there)."""
     n = str(name or "").strip().lower()
     if not LIB_OK.match(n):
         raise ValueError(f"invalid library name {name!r} (lowercase alnum, [-_.], <=64)")
     return library_root() / f"{n}.json"
+
+def _lib_read(name):
+    """READ resolver mirroring find_run: resolved first, legacy only for an EXISTING
+    graph absent from the resolved root. Returns the path whether or not it exists
+    (callers keep their own None/not-exists handling on the primary shape)."""
+    p = _lib_path(name)
+    if not p.exists():
+        n = str(name or "").strip().lower()
+        if LIB_OK.match(n):
+            legacy = _common.launch_runs_root() / "library" / f"{n}.json"
+            if legacy != p and legacy.exists():
+                return legacy
+    return p
 
 def act_save(args):
     """Shelve a graph under a name: from an existing run (`run_id`) or an inline `graph`.
@@ -948,10 +984,14 @@ def act_save(args):
             "hint": f"re-run any time: workflow run from={p.stem}  |  /wf {p.stem}"}
 
 def act_library(_args):
-    root = library_root()
-    out = []
-    if root.exists():
+    out, seen = [], set()
+    for root in _library_roots():   # F1 #14: pre-fix graphs under the launch root stay listed
+        if not root.exists():
+            continue
         for p in sorted(root.glob("*.json")):
+            if p.stem in seen:
+                continue
+            seen.add(p.stem)
             g = jload(p) or {}
             nodes = g.get("nodes") or []
             row = {"name": p.stem, "nodes": len(nodes),
@@ -1120,12 +1160,22 @@ def _identity_stamps(args, graph, lib_name=None):
     return out
 
 def _lane_paths(key):
+    """WRITE side: the resolved root (new entries land with their runs)."""
     stem = hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
     root = runs_root() / "lanes"
     return root / f"{stem}.json", root / f"{stem}.lock"
 
 def _lane_entry(key):
+    # F1 #14: a lane entry saved under the launch root before the profile-home fix
+    # stays visible from the scoped door, so an in-flight incumbent is still deduped
+    # (one-time upgrade hazard otherwise: same lane_key admits a second runner while
+    # the old one lives). Writes always go to the resolved root via _lane_paths.
+    stem = hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
     entry = jload(_lane_paths(key)[0])
+    if entry is None:
+        legacy = _common.launch_runs_root() / "lanes" / f"{stem}.json"
+        if legacy != _lane_paths(key)[0]:
+            entry = jload(legacy)
     if entry is not None and entry.get("lane_key") != key:
         return None, {"error": "lane_key hash collision"}
     return entry, None
@@ -1172,7 +1222,7 @@ def act_run(args):
     lib_name = None
     if graph is None and args.get("from"):
         try:
-            graph = jload(_lib_path(args["from"]))
+            graph = jload(_lib_read(args["from"]))   # F1 #14: legacy-root graphs stay replayable
         except ValueError as e:
             return {"error": str(e)}
         if graph is None:
@@ -1753,12 +1803,18 @@ def act_stop(args):
     return {"ok": True, "note": "stop lands at the next boundary; in-flight children are killed"}
 
 def act_list(_args):
-    root = runs_root()
-    runs = []
-    if root.exists():
+    roots = [runs_root()]
+    legacy = _common.launch_runs_root()
+    if legacy != roots[0]:
+        roots.append(legacy)   # pre-fix runs under the launch root stay listed
+    runs, seen = [], set()
+    for root in roots:
+        if not root.exists():
+            continue
         for r in sorted(root.iterdir(), reverse=True):
             st = run_state(r)
-            if st:
+            if st and st["run_id"] not in seen:
+                seen.add(st["run_id"])
                 row = {"run_id": st["run_id"], "name": st["name"], "status": st["status"],
                        "gate": (st["held_gate"] or {}).get("id"),
                        "nodes_done": st["done"], "nodes_skipped": st["skipped"], "nodes_total": st["total"],
@@ -1800,7 +1856,7 @@ def _wf_command(raw_args):
         return f"Workflow library:\n{rows}\n\nRun one: `/wf <name> [note for the run]`"
     name, _, note = arg.partition(" ")
     try:
-        p = _lib_path(name)
+        p = _lib_read(name)   # F1 #14: /wf reaches a pre-fix graph where it was saved
     except ValueError as e:
         return f"{e}"
     if not p.exists():

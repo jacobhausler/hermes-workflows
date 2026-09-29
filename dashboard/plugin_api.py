@@ -43,7 +43,7 @@ def _safe_run(run_id):
     if not rid or rid != "".join(c for c in rid if c.isalnum() or c in "-_.") \
             or rid.startswith("."):
         return None
-    r = _root() / rid
+    r = _workflow_common().find_run(rid)   # legacy-location fallback for pre-fix ids
     return r if r.is_dir() else None
 
 def _events(r, limit=400):
@@ -182,12 +182,23 @@ def _fold_metrics(ms):
     return f
 
 def _list_runs():
-    root = _root()
-    runs = []
-    if root.exists():
+    # F1 #14: merge the legacy launch root the way the door's act_list does — a
+    # pre-fix run opens by URL via _safe_run's find_run fallback and must also
+    # appear in the list. Resolved root wins on id collision.
+    common = _workflow_common()
+    roots = [_root()]
+    legacy = common.launch_runs_root()
+    if legacy != roots[0]:
+        roots.append(legacy)
+    runs, seen = [], set()
+    for root in roots:
+        if not root.exists():
+            continue
         for r in sorted(root.iterdir(), reverse=True):
             v = _view(r)
-            if v: runs.append(v)
+            if v and v["id"] not in seen:
+                seen.add(v["id"])
+                runs.append(v)
     return {"runs": runs[:100], **_workflow_common().run_summary(runs)}
 
 

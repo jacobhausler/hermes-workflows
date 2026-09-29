@@ -88,7 +88,46 @@ def source_digest(graph):
 # empty = the 1.0.15 default, byte-identical.
 
 def hermes_home():
-    return Path(os.environ.get("HERMES_HOME") or (Path.home() / ".hermes"))
+    """Core's resolution when importable, else the raw env (1.0.15 semantics, unchanged).
+
+    ``hermes_constants.get_hermes_home`` is context-local override -> HERMES_HOME env ->
+    platform default. A profile-scoped/embedding host (gateway ``-p`` under a supervisor,
+    multiplexed dashboard ``--open-profile``) keeps ``os.environ["HERMES_HOME"]`` at the
+    LAUNCH root and serves the profile through that override — reading the env alone
+    hands the door, the runner, and every child the BASE profile: seat config invisible,
+    profile-defined providers die 'Unknown provider', and run dirs land under the wrong
+    home. Core's own #18594 warning instructs subprocess spawners to pass HERMES_HOME
+    explicitly; the door honours that by stamping the resolved home into the runner env.
+    """
+    try:
+        from hermes_constants import get_hermes_home
+        return get_hermes_home()
+    except Exception:
+        return Path(os.environ.get("HERMES_HOME") or (Path.home() / ".hermes"))
+
+
+def launch_runs_root():
+    """Runs root of the RAW process environment (never the context-resolved home).
+
+    ONLY for legacy-location lookup: runs created before the profile-home fix live
+    under the launch root on a profile-scoped host and stay resolvable by run_id.
+    New runs never land here. `WF_RUNS_ROOT` still wins (shared team root).
+    """
+    override = os.environ.get("WF_RUNS_ROOT", "")
+    if override:
+        return Path(override)
+    return Path(os.environ.get("HERMES_HOME") or (Path.home() / ".hermes")) / "workflows"
+
+
+def find_run(rid):
+    """Locate a run dir by id: resolved runs_root() first; legacy launch root only
+    for an EXISTING run (pre-fix ids stay resumable, new ids never land there)."""
+    root = runs_root()
+    legacy = launch_runs_root()
+    if legacy != root and (legacy / rid).is_dir() and not (root / rid).exists():
+        return legacy / rid
+    return root / rid
+
 
 def runs_root():
     """`WF_RUNS_ROOT` if set (non-empty), else `$HERMES_HOME/workflows`."""

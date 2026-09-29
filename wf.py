@@ -24,7 +24,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from wfcommon import (efp, graph_fingerprint, jload, validate_graph, node_rec, gate_answer_valid,
                       when_true, child_metrics, prune_states, dep_satisfied, active_child,
                       FP_RULE_VERSION, record_efp_valid, seat_forbidden_models, runs_root,
-                      hermes_root, profile_home)
+                      hermes_root, profile_home, find_run,
+                      hermes_home as _wfcommon_hermes_home)
 
 def _route_home(result):
     """The target owns the child's session DB; absent routing preserves legacy home."""
@@ -109,7 +110,11 @@ def _stamp_served(meta, result, node=None):
 
 
 def hermes_home():
-    return Path(os.environ.get("HERMES_HOME") or (Path.home() / ".hermes"))
+    # Same resolver as the door (wfcommon): on a profile-scoped host the env alone
+    # names the launch root; core's override carries the owner's profile. The door
+    # stamps the resolved home into the runner env, and a hand-driven `wf.py run`
+    # under a scoped core process resolves it here too.
+    return _wfcommon_hermes_home()
 
 def now():
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -1941,7 +1946,7 @@ class Run:
         self.byid = {n["id"]: n for n in self.nodes}
 
 def main(run_id):
-    run = runs_root() / run_id   # 1.1 (RATIFY F1): ONE resolver — WF_RUNS_ROOT or HERMES_HOME/workflows
+    run = find_run(run_id)   # resolved runs_root first; a pre-fix run stays resumable from the launch root
     meta = jload(run / "run.json", {}) or {}
     if not jload(run / "graph.json", {}):
         emit(f"WORKFLOW_FAILED {run_id} (no graph.json)")

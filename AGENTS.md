@@ -315,8 +315,8 @@ The catalog entry pins a full 40-char commit SHA
 
 | What | Where |
 |---|---|
-| Run directories | `$HERMES_HOME/workflows/<run_id>/` — `graph.json`, `run.json`, `events.jsonl`, `nodes/<id>.json`, `logs/<id>.a<n>.log`, `steer/`, `gates/` |
-| Library | `$HERMES_HOME/workflows/library/` |
+| Run directories | `<runs_root>/<run_id>/` (`$WF_RUNS_ROOT`, else `<resolved home>/workflows` — core's `get_hermes_home()`, which on a profile-scoped host is the profile's home, not the launch-root `$HERMES_HOME`) — `graph.json`, `run.json`, `events.jsonl`, `nodes/<id>.json`, `logs/<id>.a<n>.log`, `steer/`, `gates/` |
+| Library | `<runs_root>/library/` |
 | Child turn report | `HERMES_QUIET_TURN_REPORT_FILE` (per spawn, read then unlinked) |
 | Tier stamp | `<run>/turn_report.tier` (`typed` / `untyped`, write-once) |
 | Dashboard API | `/api/plugins/hermes-workflows/runs`, `/runs/{id}`, `POST /runs/{id}/gate` |
