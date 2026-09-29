@@ -23,13 +23,18 @@ dir resolves the way the read model does: `WF_RUNS_ROOT`, else
 profile-routed nodes, else the launcher's).
 
 Default mode (no --out): the triage view — the ordered call list
-(index, tool, target path). With --out: emit `<out>/<relpath>` for each
-touched file (write_file replays the content; patch applies old_string ->
-new_string to the accumulated text — exact first, then whitespace-flexible)
-and write `<out>/lane_recover_report.json` naming every unmatched patch.
+(index, tool, target path; `[REFUSED]` when the live tool answered with an
+error). With --out: emit `<out>/<relpath>` for each touched file (write_file
+replays the content; patch applies old_string -> new_string to the
+accumulated text — exact first, then whitespace-flexible) and write
+`<out>/lane_recover_report.json`: `written`, `applied`, `unmatched` (anchor not
+found / no path / arguments not JSON), `skipped` (the joined role='tool' result
+carried an error — a refused write is not a write — or the anchor is ambiguous
+without replace_all, the same refusal core `patch` makes), `unconfirmed` (no
+result row at all: replayed, flagged).
 
-Exit codes: 0 recovered > 0 (or a non-empty triage list), 2 no session,
-3 no journaled write_file/patch calls.
+Exit codes: 0 recovered > 0 (or a non-empty triage list), 2 no session / no
+db / db locked by a live writer, 3 no journaled write_file/patch calls.
 """
 import argparse
 import json
@@ -147,13 +152,71 @@ def find_session(conn, skey, attempt=None):
     return tuple(rows[0]) if rows else None
 
 
+# Plain-text tool results (non-JSON) that core emits when it REFUSES a write. The
+# JSON form (`{"error": ...}`, what tools/file_tools.py returns) is the primary
+# signal; these phrases catch a result that was flattened to text.
+_REFUSAL_TEXT = re.compile(r"^\s*error\b|\bFound \d+ (?:approximate )?matches\b|"
+                           r"\bCould not find\b|\bold_string not found\b|\bpermission denied\b",
+                           re.IGNORECASE)
+
+
+def result_error(content):
+    """The error text carried by a role='tool' result row, or None when the call
+    succeeded. Core file tools answer with a JSON object whose `error` key is set
+    on refusal (ambiguous anchor, anchor not found, denied path, stale write);
+    a non-JSON body is checked against the known refusal phrases."""
+    if content is None:
+        return None
+    if isinstance(content, (bytes, bytearray)):
+        content = content.decode("utf-8", "replace")
+    if not isinstance(content, str):
+        return None
+    s = content.strip()
+    if not s:
+        return None
+    parsed = None
+    if s[:1] in "{[":
+        try:
+            parsed = json.loads(s)
+        except ValueError:
+            parsed = None
+    if isinstance(parsed, dict):
+        err = parsed.get("error")
+        return str(err) if err else None
+    if parsed is not None:
+        return None
+    if _REFUSAL_TEXT.search(s):
+        return s
+    return None
+
+
+def tool_results(conn, session_id):
+    """{tool_call_id: content} for every role='tool' row of the session — the
+    result side of the journal, joined to the assistant side by tool_call_id.
+    The FIRST result per id wins (a duplicated id keeps its original answer)."""
+    res = {}
+    rows = conn.execute("select id, tool_call_id, content from messages where session_id = ? "
+                        "and role = 'tool' and tool_call_id is not null order by id",
+                        (session_id,)).fetchall()
+    for _mid, cid, content in rows:
+        if cid and cid not in res:
+            res[cid] = content
+    return res
+
+
 def journaled_calls(conn, session_id):
-    """Ordered [{index, tool, args, call_id, msg_id}] of write_file/patch calls.
-    The assistant row's `tool_calls` column is a JSON list of
+    """Ordered [{index, tool, args, call_id, msg_id, error}] of write_file/patch
+    calls. The assistant row's `tool_calls` column is a JSON list of
     {id, type:'function', function:{name, arguments:<JSON string>}}; the tool
-    result row (role='tool') that follows carries `tool_name`. We read the
-    assistant side (it holds the arguments) and keep only REPLAY_TOOLS."""
+    result row (role='tool') that follows carries `tool_call_id` + `tool_name`
+    and the tool's answer. We read the assistant side (it holds the arguments)
+    and JOIN the result row by tool_call_id: a call whose result carries an
+    error is kept in the list (the triage view still shows it) but flagged with
+    `error` so replay SKIPS it — a refused write is not a write. A call with no
+    result row at all (the lane died mid-call) is replayed but `confirmed`
+    is False and the report lists it under `unconfirmed`."""
     out = []
+    results = tool_results(conn, session_id)
     rows = conn.execute("select id, role, tool_calls from messages where session_id = ? "
                         "and tool_calls is not null order by id", (session_id,)).fetchall()
     for mid, role, tc in rows:
@@ -178,8 +241,11 @@ def journaled_calls(conn, session_id):
                     args = {"_unparsed": args}
             if not isinstance(args, dict):
                 args = {}
+            cid = c.get("id") or c.get("call_id")
+            confirmed = cid in results
+            error = result_error(results[cid]) if confirmed else None
             out.append({"index": len(out), "tool": name, "args": args,
-                        "call_id": c.get("id") or c.get("call_id"), "msg_id": mid})
+                        "call_id": cid, "msg_id": mid, "error": error, "confirmed": confirmed})
     return out
 
 
@@ -203,20 +269,31 @@ def _ws_flex(s):
 
 
 def apply_patch(text, old, new, replace_all=False):
-    """(new_text, how) — how in {'exact', 'fuzzy', None}. Exact substring first;
-    then whitespace-flexible; None leaves the text untouched."""
+    """(new_text, how) — how in {'exact', 'fuzzy', 'ambiguous:<n>', None}. Exact
+    substring first; then whitespace-flexible; None leaves the text untouched.
+    An anchor with more than one hit and no replace_all is REFUSED (text
+    untouched, how = 'ambiguous:<n>') — the same rule core `patch` applies
+    (fuzzy_match.py: "Found N matches … use replace_all=True"); never the first."""
     if old is None:
         return text, None
     if old == "":
         return text + new, "exact"           # empty anchor: append (an insert)
-    if old in text:
-        return (text.replace(old, new) if replace_all else text.replace(old, new, 1)), "exact"
+    n = text.count(old)
+    if n:
+        if replace_all:
+            return text.replace(old, new), "exact"
+        if n > 1:
+            return text, f"ambiguous:{n}"
+        return text.replace(old, new, 1), "exact"
     rx = _ws_flex(old)
     if rx is not None:
-        m = rx.search(text)
-        if m:
+        hits = list(rx.finditer(text))
+        if hits:
             if replace_all:
                 return rx.sub(lambda _m: new, text), "fuzzy"
+            if len(hits) > 1:
+                return text, f"ambiguous:{len(hits)}"
+            m = hits[0]
             return text[:m.start()] + new + text[m.end():], "fuzzy"
     return text, None
 
@@ -235,13 +312,29 @@ def replay(calls, out_dir, seed_root=None):
     write in the journal seeds from `seed_root/<rel>` when that exists (the lane's
     committed base), else from the target path itself if readable, else ''."""
     out_dir = Path(out_dir)
-    files, seeded_from, report = {}, {}, {"unmatched": [], "applied": [], "written": []}
+    files, seeded_from = {}, {}
+    report = {"unmatched": [], "applied": [], "written": [], "skipped": [], "unconfirmed": []}
     for c in calls:
         p = target_path(c)
+        if "_unparsed" in c["args"]:
+            # corrupt payload: nothing to replay, distinct from a well-formed pathless call
+            report["unmatched"].append({"index": c["index"], "tool": c["tool"], "path": "",
+                                        "reason": "arguments not JSON",
+                                        "arguments_head": str(c["args"]["_unparsed"])[:200]})
+            continue
+        if c.get("error"):
+            # the live tool REFUSED this call (joined role='tool' row carries the error):
+            # a refused write is not a write — never replay it.
+            report["skipped"].append({"index": c["index"], "tool": c["tool"], "path": p,
+                                      "reason": "tool result carries an error: " + str(c["error"])[:300]})
+            continue
         if not p:
             report["unmatched"].append({"index": c["index"], "tool": c["tool"], "path": "",
                                         "reason": "no path argument"})
             continue
+        if not c.get("confirmed", True):
+            report["unconfirmed"].append({"index": c["index"], "tool": c["tool"], "path": p,
+                                          "reason": "no tool result journaled (lane died mid-call?)"})
         rel = _rel(p)
         if c["tool"] == "write_file":
             files[rel] = str(c["args"].get("content", ""))
@@ -265,6 +358,11 @@ def replay(calls, out_dir, seed_root=None):
             report["unmatched"].append({"index": c["index"], "tool": "patch", "path": p,
                                         "reason": "old_string not found (exact or whitespace-flexible)",
                                         "old_string_head": str(a.get("old_string", ""))[:200]})
+        elif how.startswith("ambiguous:"):
+            n_hits = how.split(":", 1)[1]
+            report["skipped"].append({"index": c["index"], "tool": "patch", "path": p,
+                                      "reason": f"ambiguous ({n_hits} matches)",
+                                      "old_string_head": str(a.get("old_string", ""))[:200]})
         else:
             files[rel] = new_text
             report["applied"].append({"index": c["index"], "path": p, "match": how})
@@ -310,7 +408,10 @@ def main(argv=None):
     if args.db:
         db = Path(args.db)
 
-    conn = open_ro(db)
+    try:
+        conn = open_ro(db)
+    except sqlite3.OperationalError as e:
+        raise Bail(f"state.db not readable right now ({e}) at {db}")
     try:
         sess = find_session(conn, skey, args.attempt)
         if sess is None:
@@ -318,6 +419,10 @@ def main(argv=None):
             return 2
         sid, title = sess
         calls = journaled_calls(conn, sid)
+    except sqlite3.OperationalError as e:
+        # a live writer holding EXCLUSIVE (or a corrupt/odd file): a clean bail, no traceback
+        raise Bail(f"state.db not readable right now ({e}) at {db} — retry when the lane's "
+                   f"writer releases it")
     finally:
         conn.close()
     if not calls:
@@ -327,16 +432,22 @@ def main(argv=None):
     if not args.out:
         print(f"session {title} ({sid}) — {len(calls)} journaled write_file/patch call(s):")
         for c in calls:
-            print(f"{c['index']:4d}  {c['tool']:<10}  {target_path(c)}")
+            flag = "  [REFUSED]" if c.get("error") else ("  [no result]" if not c.get("confirmed", True) else "")
+            print(f"{c['index']:4d}  {c['tool']:<10}  {target_path(c)}{flag}")
         return 0
 
     rep = replay(calls, args.out, args.seed)
     n_files = len(rep["files"])
     print(f"session {title} ({sid}): {len(rep['written'])} write_file, "
-          f"{len(rep['applied'])} patch applied, {len(rep['unmatched'])} unmatched "
+          f"{len(rep['applied'])} patch applied, {len(rep['unmatched'])} unmatched, "
+          f"{len(rep['skipped'])} skipped "
           f"-> {n_files} file(s) under {args.out} (report: {Path(args.out) / REPORT_NAME})")
     for u in rep["unmatched"]:
         print(f"  UNMATCHED #{u['index']} {u['tool']} {u['path']}: {u['reason']}")
+    for u in rep["skipped"]:
+        print(f"  SKIPPED #{u['index']} {u['tool']} {u['path']}: {u['reason']}")
+    for u in rep["unconfirmed"]:
+        print(f"  UNCONFIRMED #{u['index']} {u['tool']} {u['path']}: {u['reason']}")
     return 0 if n_files > 0 else 3
 
 
