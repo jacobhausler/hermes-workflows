@@ -131,8 +131,8 @@ assert.ok(/ownedRuns\(data\?\.runs \|\| \[\], runtimeSid \|\| ''\, storedSid \|\
 const sdkMod = await import(pathToFileURL(sdkPath).href)
 {
   const ownedByStored = [
-    mk('u1', 'running', '', '2026-09-26T04:00:00Z', '2026-09-26T04:05:00Z', { ui_session_id: 'STORED-1' }),
-    mk('u2', 'done', 'OTHER', '2026-09-26T03:00:00Z', '2026-09-26T03:30:00Z'),
+    { id: 'u1', name: 'u1', status: 'running', owner: { session_id: '', ui_session_id: 'STORED-1' }, started: '2026-09-26T04:00:00Z', updated: '2026-09-26T04:05:00Z' },
+    { id: 'u2', name: 'u2', status: 'done', owner: { session_id: 'OTHER' }, started: '2026-09-26T03:00:00Z', updated: '2026-09-26T03:30:00Z' },
   ]
   sdkMod.q.data = { runs: ownedByStored }
   sdkMod.host.state.focusedStoredSessionId.set('STORED-1')

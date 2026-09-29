@@ -699,11 +699,14 @@ export function SessionStrip() {
   // KEY PAIRING (measured 2026-09-26 against this desktop): run.json.owner.session_id
   // carries the GATEWAY runtime id (`20260923_143041_27e8d2` — state.db sessions.id),
   // owner.ui_session_id carries the DESKTOP stored id (`3184ce5e`). The SDK names them
-  // inversely to intuition: host.focusedSessionId is $focusedRuntimeId (the runtime id),
-  // host.focusedStoredSessionId is the desktop token. Pair each owner key with its SAME-SHAPE
-  // host key; a swapped pair silently renders nothing, which no unit test can see.
-  const runtimeSid = useValue(focusAtom(host?.focusedSessionId))
-  const storedSid = useValue(focusAtom(host?.focusedStoredSessionId))
+  // inversely to intuition: host.state.focusedSessionId is $focusedRuntimeId (the runtime
+  // id), host.state.focusedStoredSessionId is the desktop token — the SDK exposes both
+  // ONLY under host.state (sdk/index.ts:665-697); reading them at the top level is what
+  // made the strip and the pane's "this chat" pill render nothing forever (#23). Pair
+  // each owner key with its SAME-SHAPE host key; a swapped pair silently renders nothing,
+  // which no unit test can see.
+  const runtimeSid = useValue(focusAtom(host?.state?.focusedSessionId))
+  const storedSid = useValue(focusAtom(host?.state?.focusedStoredSessionId))
   const { data } = useQuery(listQuery())
   const foldOpen = useValue($stripFold)
   const owned = ownedRuns(data?.runs || [], runtimeSid || '', storedSid || '')
@@ -1629,9 +1632,10 @@ function PaneRow({ run, thisChat }) {
 
 function WorkflowsPane() {
   const { data } = useQuery(listQuery())
-  // Same key pairing as SessionStrip: owner.session_id pairs with the runtime id.
-  const runtimeSid = useValue(focusAtom(host?.focusedSessionId))
-  const storedSid = useValue(focusAtom(host?.focusedStoredSessionId))
+  // Same key pairing as SessionStrip: owner.session_id pairs with the runtime id,
+  // both atoms live under host.state (sdk/index.ts:665-697 — see #23).
+  const runtimeSid = useValue(focusAtom(host?.state?.focusedSessionId))
+  const storedSid = useValue(focusAtom(host?.state?.focusedStoredSessionId))
   const [showAllDone, setShowAllDone] = useState(false)
   const runs = data?.runs || []
   const owned = new Set(ownedRuns(runs, runtimeSid, storedSid).map(r => r.id))

@@ -14,6 +14,14 @@ Every feature is OPTIONAL: a no-team run (default profile, no `WF_RUNS_ROOT`) is
 - Docs — lane F (5a7e631, Hermes Agent / lane F): SKILL.md team paragraph; `references/grammar.md` (`profile`, `requires`, gate `requires`, top-level `provenance`); `references/operations.md` (lanes/dedupe, runs root + identity + TRUST BOUNDARY: a shared `WF_RUNS_ROOT` is common trust, same UID; team fields are provenance, never an ACL).
 
 ## Unreleased
+
+- fix #23 (desktop): `SessionStrip` and the pane's `this chat` pill read the focused-chat
+  atoms from `host.state.focusedSessionId` / `host.state.focusedStoredSessionId` — the SDK
+  exposes them ONLY under `host.state` (sdk/index.ts:665-697). Reading `host.focusedSessionId`
+  left `focusAtom(undefined)` → null sid → the strip never rendered and `owned` stayed empty.
+  The test stubs previously placed the atoms at the SDK `host` top level — the stub encoded
+  the bug; they now live under `host.state` with a red-on-base render assertion.
+
 ## 1.0.17 — 2026-09-28
 
 - Landed via #5 (repo owner) — `release 1.0.17 — catalog sync + F5/F6 replay & run_context fixes`: public tree synced with the PR #4-reviewed catalog fixes (visible `composer.submit` gate answers, launcher-only `hermes_bin`, disclosure docs), the 1.0.16 guarded per-route reasoning validation, and the two review fixes below (F5 replay, F6 brace guard). Review round R8 flipped the `f0f154d5`/`v4_fixes` regression tests to any-rule-match and refreshed `graphify-out`.
@@ -168,8 +176,10 @@ verbs, zero new graph keys.
   expand in place. The tool hands you the exact `card` line; paste it alone in the reply
   that launches or reports a run.
 - KEY PAIRING (measured): `owner.session_id` is the runtime id (pairs with
-  `host.focusedSessionId`); `owner.ui_session_id` is the desktop stored id (pairs with
-  `host.focusedStoredSessionId`).
+  `host.state.focusedSessionId`); `owner.ui_session_id` is the desktop stored id (pairs with
+  `host.state.focusedStoredSessionId`). The SDK exposes both atoms only under `host.state`
+  (sdk/index.ts:665-697); reading them at the top level was the #23 render bug, fixed in
+  the follow-up below.
 
 ### Explorer V2: one node truth, two readers
 - `wfcommon.node_facts` is the closed record the panel AND `status` read: `error_class,
