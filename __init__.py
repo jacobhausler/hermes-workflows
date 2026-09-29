@@ -672,8 +672,8 @@ WORKFLOW_PARAMS = {
     "properties": {
         "action": {
             "type": "string",
-            "enum": ["run", "status", "wait", "release", "steer", "inbox", "amend", "stop", "list", "save", "submit", "library", "doctor_version", "validate"],
-            "description": "run=launch a graph; wait=read state, RESPAWNING an idle runner if work is pending (blocks to the next boundary when one is live); status=read-model of a run; release=answer a held human gate; steer=queue steering text for a node; inbox=(child-side, cooperative) pull late steering lines baked for THIS spawn — call once at a natural seam; amend=replace the graph (invalidates changed nodes + all downstream by fingerprint); stop=request stop; list=all runs; save=shelve a graph in the library under a name (from run_id or inline graph); library=list shelved graphs richly (name, description, tags, provenance, path-relative id). validate=dry-run the door's validation pipeline (defaults fill + defect collection + model/route policy) with no ping and no writes; returns {ok, errors:[{node,field,msg}], resolved_routes}. run from=<name> replays a shelved graph. submit=quarantine a hand-rolled graph for study (requires why_not_library >=80 chars; never joins the library — the quartermaster's human-gated loop decides); inbox kind=submissions lists them newest-first. doctor_version=read-only version truth for THIS install: {live_version, newest_packaged, source_commit, drift} comparing plugin.yaml against the install.json provenance that pack.py stamps at build time \u2014 one read, no network.",
+            "enum": ["run", "status", "wait", "release", "steer", "inbox", "amend", "stop", "list", "save", "submit", "library", "doctor_version", "validate", "release_lock"],
+            "description": "run=launch a graph; wait=read state, RESPAWNING an idle runner if work is pending (blocks to the next boundary when one is live); status=read-model of a run; release=answer a held human gate; steer=queue steering text for a node; inbox=(child-side, cooperative) pull late steering lines baked for THIS spawn — call once at a natural seam; amend=replace the graph (invalidates changed nodes + all downstream by fingerprint); stop=request stop; list=all runs; save=shelve a graph in the library under a name (from run_id or inline graph); library=list shelved graphs richly (name, description, tags, provenance, path-relative id). validate=dry-run the door's validation pipeline (defaults fill + defect collection + model/route policy) with no ping and no writes; returns {ok, errors:[{node,field,msg}], resolved_routes}. run from=<name> replays a shelved graph. submit=quarantine a hand-rolled graph for study (requires why_not_library >=80 chars; never joins the library — the quartermaster's human-gated loop decides); inbox kind=submissions lists them newest-first. doctor_version=read-only version truth for THIS install: {live_version, newest_packaged, source_commit, drift} comparing plugin.yaml against the install.json provenance that pack.py stamps at build time — one read, no network. release_lock=(#44 escape hatch, operator-only) diagnose a wedged runner.lock: refuses unless the runner pid is dead, the run is not held/parked, and two child-probes both acquire; never unlinks; a stranded (kernel-held, no visible holder) lock is reported honestly — recovery is a new lane key.",
         },
         "run_id": {"type": "string", "description": "Run id (required for every action except run/list)."},
         "name": {"type": "string", "description": "run: overrides graph.name (default workflow); save: library name overrides graph.name (lowercase, [-_.]). amend: set graph.name in the replacement graph; omitting it retains the run name."},
@@ -3475,6 +3475,14 @@ def act_stop(args):
         return {"ok": True, "note": "runner spawned to consume the stop marker"}
     return {"ok": True, "note": "stop recorded; the live runner consumes it at its next boundary"}
 
+def act_release_lock(args):
+    """#44 escape hatch passthrough: the verdict lives in wfcommon.release_lock_verdict
+    (shared with `wf.py release-lock`) so the door and the CLI can never disagree."""
+    r = run_dir(args.get("run_id"))
+    if not (r / "graph.json").exists():
+        return {"error": "unknown run_id"}
+    return _common.release_lock_verdict(r)
+
 def act_list(_args):
     roots = [runs_root()]
     legacy = _common.launch_runs_root()
@@ -3550,7 +3558,8 @@ def act_doctor_version(args):
 ACTIONS = {"run": act_run, "status": act_status, "wait": act_wait, "release": act_release,
            "steer": act_steer, "inbox": act_inbox, "amend": act_amend, "stop": act_stop, "list": act_list,
            "save": act_save, "submit": act_submit, "library": act_library,
-           "doctor_version": act_doctor_version, "validate": act_validate}
+           "doctor_version": act_doctor_version, "validate": act_validate,
+           "release_lock": act_release_lock}
 
 def handle(args, **kwargs):
     try:

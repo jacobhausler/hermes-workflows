@@ -551,6 +551,47 @@ Includes all 12 merged PRs after v1.1.1, in merge order. Author handles are veri
   Daemonize POSIX runner admission so caller-tree cleanup sweeps cannot reap the run, and make the admitted runner the sole writer of `wf.pid`. This addresses only the caller-tree portion of #8; enclosing service/cgroup survival, crash visibility and idempotence remain open. Release validation also repairs the claim fixture's teardown race: wait for the killed detached runner to release ownership before deleting its files; keep all claim assertions unchanged.
 - #68 — @atbrace. Validate gate `when` reference heads against the gate's direct/transitive `after` ancestry, matching the existing `inputs` and `fanout.items_from` rules. Sibling, ghost and self references are rejected at submission instead of silently skipping or holding a gate at fire time; valid ancestor references and parse-error reporting remain unchanged.
 
+- #44 stranded `runner.lock` (two runs died in a gateway sweep; the lock stayed held with
+  ZERO visible holders — no `/proc/locks` inode line, empty `/proc/*/fd` scan, runner pid
+  dead — and wait-resume was wedged until a new lane key). Prime suspect: the A1 liveness
+  probe took `LOCK_EX|LOCK_NB` inside the door (gateway) process and a SIGKILL mid-probe
+  left the fd alive in another namespace view. Three parts. (1) CHILD-PROBE law:
+  `wfcommon.lock_probe_child` — every probe a long-lived process makes runs in a
+  short-lived child (`flock -n <lock> true`, python `-I -S` fallback) whose exit is the
+  release; the parent never opens the lock file (close_fds, empty env, bounded timeout, no
+  creation). `runner_lock_held` delegates to it; the admission path (`wf.py acquire_lock`,
+  the real holder) is byte-untouched. `run_state` now threads its ONE liveness read into
+  `runner_exit_read` so a status/list/wait costs exactly one probe (A2 one-read law, was
+  silently two). (2) `wf.py release-lock <run_id>` + door action `release_lock`
+  (`wfcommon.release_lock_verdict`, shared so CLI and door cannot disagree): refuses (exit
+  2, reason) unless the runner pid is dead, the run is not held/parked, and two child-probes
+  100 ms apart both acquire; never unlinks; a contested probe reports the believed holders
+  (`/proc/*/fd` pid+argv, `/proc/locks` by inode); kernel-held with no visible holder is
+  `stranded:true` with the forensic dump and the honest recovery (new lane key). (3)
+  `tests/test_lock_heal_44.py` (39 checks): SIGKILLed holder → probe FREE; probing parent
+  SIGKILLed mid-probe ×5 never strands; live holder → BUSY + refusal with evidence; live pid
+  → refusal; held gate → refusal; killed holder → double-probe free; door status/list = at
+  most ONE child-probe and the door process never flocks; stranded verdict honesty; no
+  lock-file creation. Docs: `references/operations.md` "Flock law" section.
+
+- #37 lane hygiene (digest 20260929f / spool 8edcc9bfc91b9683 — a build lane wiped its
+  uncommitted implementation with a base checkout over its own dirty tree for a RED run,
+  then died on the turn cap; recovery was a hand replay of 17 journaled tool calls). Two
+  parts. (1) A machine lane-hygiene preamble on every build-shape spawn (`shape: "build"`
+  or a declared `repo:` lane; solo, fan-out item, transient retry and bounded resume all
+  pass the one `run_child` seam) — prompt-side only, modeled on `_resume_preamble`, so
+  graph.json, `nodes/*.json`, `run.json` and the def hash are byte-untouched and golden-solo
+  stays EMPTY: the ban on checkout-over-dirty-tree RED runs, commit-tests-first + detached
+  throwaway worktree / named stash for the RED state, WIP-commit-before-the-cap, and the
+  name of the exit. (2) `scripts/lane_recover.py` (stdlib, state.db opened `mode=ro`):
+  `--profile/--skey` or `--run/--node[/--index]` (key read from the node record, db home
+  resolved the way the read model does) lists the journaled write_file/patch calls, and
+  `--out <dir>` replays them (patch: exact, then whitespace-flexible; unmatched patches
+  land in `lane_recover_report.json`); exit 0 recovered, 2 no session, 3 nothing journaled.
+  Tests: `tests/test_lane_hygiene_preamble_8edcc9bf.py`, `tests/test_lane_recover_8edcc9bf.py`
+  (synthetic db, hermetic).
+
+
 ## 1.1.1 — 2026-09-29 — runner correctness (cross-container liveness, ancestor gate answers), profile-home fix, lane-clean gate, portable files, pill rail
 
 Patch release: every merged PR since v1.1.0, in merge order. Solo default-profile runs stay byte-identical to 1.0.15 (golden-solo EMPTY diff re-run on this tree). Stdlib-only backend; desktop imports frozen to `@hermes/plugin-sdk`, `react`, `react/jsx-runtime`.

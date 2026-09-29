@@ -6824,9 +6824,28 @@ def finalize(run, graph, status):
     emit(f"WORKFLOW_{status.upper()} {run.name}")
     notify(run, f"run.{status}", graph={"nodes": nodes})
 
+def release_lock_cli(run_id):
+    """#44 escape hatch: `wf.py release-lock <run_id>`. Prints the verdict JSON
+    (wfcommon.release_lock_verdict — the same law the door's release_lock action
+    passes through). Exit 0 = the lock is free (nothing unlinked, nothing to
+    clean); exit 2 = refused, with the reason and (when contested) the holder
+    forensics. A kernel-held lock with zero visible holders is `stranded:true`:
+    this hatch cannot release it and says so — the only recovery is a fresh run
+    under a new lane key. Never touches the admission path (acquire_lock)."""
+    from wfcommon import release_lock_verdict
+    r = find_run(run_id)
+    if not (r / "graph.json").exists():
+        emit(json.dumps({"ok": False, "run_id": run_id, "reason": f"unknown run_id (no graph at {r})"}))
+        return 2
+    v = release_lock_verdict(r)
+    emit(json.dumps(v, ensure_ascii=False, default=str))
+    return 0 if v.get("ok") else 2
+
 if __name__ == "__main__":
+    if len(sys.argv) == 3 and sys.argv[1] == "release-lock":
+        sys.exit(release_lock_cli(sys.argv[2]))
     if len(sys.argv) < 3 or sys.argv[1] != "run":
-        print("usage: wf.py run <run_id>"); sys.exit(2)
+        print("usage: wf.py run <run_id> | wf.py release-lock <run_id>"); sys.exit(2)
     # 5c37b19 guard 2 (belt-and-braces): a runner whose cwd was deleted mid-life dies
     # on the FIRST relative-path/cwd-touching call. HERE is durable — the same dir
     # __init__.py pins as the spawn cwd — so recover there before main() can raise.

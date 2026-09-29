@@ -4,7 +4,7 @@ Imported by wf.py (runner), __init__.py (tool door), dashboard/plugin_api.py (UI
 Everything that decides "is this result still trustworthy" or "what state is this run
 in" lives here, so the three readers can never disagree.
 """
-import hashlib, json, os, re, shlex, subprocess, sys
+import hashlib, json, os, re, shlex, shutil, subprocess, sys, time
 from collections import namedtuple
 from pathlib import Path
 
@@ -2504,6 +2504,49 @@ def quote_json_parse_error(text, exc):
 
 # ---------- runner identity and exit record (Lane A writes, this side ONLY reads) ----------
 
+_FLOCK_BIN = None   # resolved once: util-linux flock(1) when present, else the python child
+_PROBE_CHILD_SRC = (   # the python fallback: open, LOCK_EX|LOCK_NB, exit — the exit IS the release
+    "import fcntl, os, sys\n"
+    "try:\n    fd = os.open(sys.argv[1], os.O_RDWR)\n"
+    "except OSError:\n    sys.exit(4)\n"
+    "try:\n    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)\n"
+    "except OSError:\n    sys.exit(3)\n"
+    "sys.exit(0)\n")
+
+def lock_probe_child(path, timeout=5.0):
+    """#44 CHILD-PROBE law: every LOCK_EX probe a LONG-LIVED process (the door /
+    gateway) makes against a run's runner.lock happens in a SHORT-LIVED CHILD
+    that opens the file, takes LOCK_EX|LOCK_NB, and exits — the child's death is
+    the release. The parent NEVER holds the probe fd, so no fd can be inherited
+    across a later spawn and no SIGKILL of the parent (a gateway sweep) can
+    strand the lock: the #44 shape (kernel reports held, /proc/locks shows no
+    inode line, /proc/*/fd finds no holder, runner pid dead, wait-resume wedged
+    until a new lane key) was exactly a door-held probe fd outliving the door.
+    Returns 'free' (child acquired), 'busy' (a holder exists), 'missing' (no lock
+    file — never created: a read path must not litter historical runs) or
+    'unknown' (child could not run / timed out). Cheap: one spawn+exit, ~5 ms via
+    util-linux flock(1) (`flock -n`), python `-I -S` fallback elsewhere; bounded
+    timeout; inherits nothing (close_fds, empty environment, /dev/null stdio)."""
+    global _FLOCK_BIN
+    path = str(path)
+    if not os.path.exists(path):   # pre-check: flock(1) would O_CREAT; the python child does not
+        return "missing"
+    if _FLOCK_BIN is None:
+        _FLOCK_BIN = shutil.which("flock") or ""
+    if _FLOCK_BIN:
+        argv = [_FLOCK_BIN, "-n", "-E", "75", path, shutil.which("true") or "/bin/true"]
+        codes = {0: "free", 75: "busy", 66: "missing"}
+    else:
+        argv = [sys.executable, "-I", "-S", "-c", _PROBE_CHILD_SRC, path]
+        codes = {0: "free", 3: "busy", 4: "missing"}
+    try:
+        rc = subprocess.run(argv, close_fds=True, env={}, stdin=subprocess.DEVNULL,
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                            timeout=timeout).returncode
+    except (OSError, subprocess.SubprocessError):
+        return "unknown"
+    return codes.get(rc, "unknown")
+
 def runner_lock_held(r):
     """91b9a3de: cross-container liveness truth. The runner takes an exclusive
     blocking flock on <run>/runner.lock for its whole life (wf.py acquire_lock)
@@ -2513,24 +2556,145 @@ def runner_lock_held(r):
     CANNOT see those pids: the same pid reads as dead here while it is very much
     alive next door, and a wait-based caller respawns a second runner over live
     children (the fb-squad false-'interrupted' class). Probe: LOCK_EX|LOCK_NB on
-    the lock file; getting the lock means nobody holds it (the fd closes on return
-    and the kernel releases it). Deliberately NO O_CREAT: a read path (act_list
-    probes every run dir) must never litter empty lock files into historical runs
-    — a missing file is exactly as honest an absence of a holder as an
-    uncontended one. Missing file / unknown errors are honest ABSENCE of a holder
-    (False), never a liveness claim."""
+    the lock file; getting the lock means nobody holds it. #44: the probe runs in
+    a short-lived CHILD (lock_probe_child) — this process never opens the lock
+    file, so a probe fd can never be inherited across a spawn nor stranded by a
+    SIGKILL of the prober. Deliberately no creation: a read path (act_list probes
+    every run dir) must never litter empty lock files into historical runs — a
+    missing file is exactly as honest an absence of a holder as an uncontended
+    one. Missing file / unknown errors are honest ABSENCE of a holder (False),
+    never a liveness claim."""
+    return lock_probe_child(os.path.join(str(r), "runner.lock")) == "busy"
+
+def _pid_alive_raw(pid):
+    """Any live, non-zombie process with this pid in OUR view (identity NOT checked —
+    the escape hatch refuses on a mere live pid; a foreign process is named as such)."""
     try:
-        import fcntl
-        fd = os.open(os.path.join(str(r), "runner.lock"), os.O_RDWR)
-        try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            return False
-        except OSError:
-            return True
-        finally:
-            os.close(fd)
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
     except OSError:
         return False
+    try:
+        return not Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[0].startswith("Z")
+    except (OSError, IndexError):
+        return True
+
+def lock_forensics(path):
+    """Who is believed to hold <path>: its inode, the /proc/locks lines for that
+    inode, and every visible /proc/<pid>/fd that points at the path. All three
+    empty while the kernel still reports held == the #44 cross-namespace stranded
+    shape (the holder lives in a pid/mount view this process cannot see)."""
+    path = str(path)
+    fx = {"path": path, "inode": None, "proc_locks": [], "fd_holders": []}
+    try:
+        stt = os.stat(path)
+        fx["inode"] = stt.st_ino
+        fx["dev"] = f"{os.major(stt.st_dev):02x}:{os.minor(stt.st_dev):02x}"
+    except OSError as e:
+        fx["stat_error"] = f"{type(e).__name__}: {e}"
+        return fx
+    try:
+        for ln in Path("/proc/locks").read_text().splitlines():
+            if f":{fx['inode']} " in ln or ln.rstrip().endswith(f":{fx['inode']}"):
+                fx["proc_locks"].append(ln.strip())
+    except OSError:
+        fx["proc_locks_unreadable"] = True
+    real = os.path.realpath(path)
+    try:
+        pids = [p for p in os.listdir("/proc") if p.isdigit()]
+    except OSError:
+        pids = []
+    for p in pids:
+        try:
+            for fd in os.listdir(f"/proc/{p}/fd"):
+                try:
+                    tgt = os.readlink(f"/proc/{p}/fd/{fd}")
+                except OSError:
+                    continue
+                if tgt == real or tgt == path or tgt == real + " (deleted)":
+                    try:
+                        argv = Path(f"/proc/{p}/cmdline").read_bytes().decode(errors="replace").replace("\0", " ").strip()
+                    except OSError:
+                        argv = ""
+                    fx["fd_holders"].append({"pid": int(p), "fd": int(fd), "argv": argv[:200]})
+        except OSError:
+            continue
+    return fx
+
+def release_lock_verdict(r):
+    """#44 ESCAPE HATCH (`wf.py release-lock <run_id>` / door action release_lock).
+    Diagnostic + force-clean ONLY when uncontested. Refuses (ok:false) unless
+      (a) the run's recorded runner pid is dead,
+      (b) the run is not held at a gate / parked on a machine wait (a legitimately
+          parked runner contract), AND
+      (c) TWO consecutive child-probes 100 ms apart BOTH acquire.
+    On success nothing is unlinked (never delete a lock file while racing — a
+    free lock needs no cleanup; the report IS the clean). On a contested probe it
+    prints who is believed to hold it (child pid / /proc/locks by inode /
+    /proc/*/fd scan) and refuses. HONESTY CLAUSE: when the kernel reports held but
+    every visible-holder scan is empty and the runner pid is dead — the #44
+    cross-namespace stranded case — this hatch CANNOT resurrect the lock; the
+    verdict says `stranded:true` and names the only recovery (a fresh run under a
+    new lane key). A fake success would send the operator back into wait-resume
+    against a lock the kernel still enforces."""
+    r = Path(r)
+    lk = r / "runner.lock"
+    out = {"ok": False, "run_id": r.name, "lock_path": str(lk)}
+    pid = None
+    try:
+        pid = int((r / "wf.pid").read_text().strip())
+    except (OSError, ValueError):
+        pass
+    out["runner_pid"] = pid
+    if pid and pid > 0 and _pid_alive_raw(pid):
+        ident = "verified runner" if _runner_pid_alive(r) else "a live process that is NOT this run's runner (pid reuse?)"
+        out.update(reason=f"refused: recorded runner pid {pid} is alive ({ident}); the lock belongs to it",
+                   runner_pid_alive=True)
+        return out
+    st = run_state(r)   # ONE liveness read (A2), like every other consumer
+    if st:
+        parked = [k for k, v in st["nodes"].items() if v.get("parked")]
+        if st["status"] == "held":
+            out.update(reason=f"refused: run is held at gate {(st['held_gate'] or {}).get('id')!r} — a parked "
+                              "runner contract; answer with `release` (or `stop`) instead", status=st["status"])
+            return out
+        if parked:
+            out.update(reason=f"refused: run is parked on machine wait(s) {parked} — a live runner contract",
+                       status=st["status"])
+            return out
+        out["status"] = st["status"]
+    probes = [lock_probe_child(lk)]
+    time.sleep(0.1)
+    probes.append(lock_probe_child(lk))
+    out["probes"] = probes
+    if all(p == "missing" for p in probes):
+        out.update(ok=True, lock="missing", reason="no lock file exists: nothing is held; wait-resume is free to spawn")
+        return out
+    if all(p == "free" for p in probes):
+        out.update(ok=True, lock="free",
+                   reason="two consecutive child-probes acquired the lock 100 ms apart: nothing holds it; "
+                          "nothing unlinked (a free lock needs no cleanup) — `wait` may resume this run")
+        return out
+    fx = lock_forensics(lk)
+    fx["runner_pid_alive"] = bool(pid and pid > 0 and _pid_alive_raw(pid))
+    out.update(lock="busy" if "busy" in probes else probes[-1], forensics=fx)
+    if fx["fd_holders"] or fx["proc_locks"]:
+        who = ", ".join(f"pid {h['pid']} fd {h['fd']} ({h['argv'] or '?'})" for h in fx["fd_holders"]) \
+            or "; ".join(fx["proc_locks"])
+        out["reason"] = f"refused: lock is held — believed holder(s): {who}; kill/finish the holder, then retry"
+        return out
+    if "unknown" in probes:
+        out["reason"] = "refused: the child-probe could not run (no flock binary / interpreter, or timeout) — nothing decided"
+        return out
+    out.update(stranded=True,
+               reason="refused: the kernel still reports runner.lock HELD but no visible holder exists "
+                      "(/proc/locks has no line for the inode, no /proc/*/fd points at the path, runner pid dead) "
+                      "— the #44 cross-namespace stranded case. This hatch cannot release a lock owned by a view it "
+                      "cannot see; the only recovery is a fresh run under a NEW lane key.")
+    return out
 
 def _runner_pid_alive(r, pid_path=None):
     """A pid is not ownership: verify a live, non-zombie `wf.py run <id>`.
@@ -2628,9 +2792,11 @@ def record_efp_valid(rec, byid, node, field="efp"):
                                       (type(rec["fp_rule_version"]) is int and rec["fp_rule_version"] in FP_RULES)) and fingerprint_valid(
         rec.get(field), lambda rule: efp(byid, node, rule=rule), rec.get("fp_rule_version"))
 
-def runner_exit_read(r, pid_path=None):
+def runner_exit_read(r, pid_path=None, alive=None):
     """Graph-bound runner verdict, or a crash when a previous pid lacks identity.
-    No pid file means a fresh, not-yet-spawned run, not a crash."""
+    No pid file means a fresh, not-yet-spawned run, not a crash. `alive`: the
+    caller's already-taken liveness read (A2 one-read law, #44: run_state passes
+    its ONE child-probe result so a status costs exactly one probe); None = probe."""
     rec = jload(Path(r) / "runner_exit.json")
     if isinstance(rec, dict) and rec.get("reason"):
         current_graph = jload(Path(r) / "graph.json")
@@ -2643,7 +2809,9 @@ def runner_exit_read(r, pid_path=None):
     path = Path(pid_path) if pid_path is not None else Path(r) / "wf.pid"
     if not path.exists():
         return None
-    return None if runner_alive(r, path) else {"reason": "crashed (no exit record)"}
+    if alive is None:
+        alive = runner_alive(r, path)
+    return None if alive else {"reason": "crashed (no exit record)"}
 
 # est-6226: the ONE external-kill classifier. A runner NEVER SIGTERMs itself
 # (stop rides the cooperative stop.request boundary -> "stopped"), so a
@@ -3316,7 +3484,7 @@ def run_state(r):
     for n in graph["nodes"]:
         if states[n["id"]] == "pending" and not deps_ok(n):
             nodes[n["id"]]["blocked_by"] = blocked_by(n, states, meta)
-    exit_state = runner_exit_read(r)
+    exit_state = runner_exit_read(r, alive=live)   # A2: reuse THE ONE read, no second probe
     # Honest status: the runner's own graph-bound verdict in runner_exit.json
     # OUTRANKS the pid-liveness guess. A fresh runner deletes the record at boot
     # (wf.py), so a present, fingerprint-valid record was written by a runner
