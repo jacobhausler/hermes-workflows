@@ -461,6 +461,27 @@ class _Importer:
     def refuse(self, construct, off, detail=""):
         raise _Refuse(construct, self.line(off), detail)
 
+    def close_of(self, open_at, what, at=None):
+        """_match_close or a named refusal (F2 #36): an unterminated construct is reported as
+        itself — `unterminated <what> / unbalanced brackets at line N` — never as the glue
+        message the `close < 0` branches used to fall into. `node --check` is lenient on
+        ESM-detected .js (measured, Node 26), so this scanner message is what the user sees."""
+        close = _match_close(self.masked, open_at)
+        if close < 0:
+            self.refuse(f"unterminated {what} / unbalanced brackets", open_at if at is None else at)
+        return close
+
+    def unbalanced(self, s, e):
+        """True when masked[s:e] does not close every bracket it opens (an unterminated inner
+        object/array keeps the statement open across lines, so the OUTER close still matches)."""
+        depth = 0
+        for c in self.masked[s:e]:
+            if c in "([{":
+                depth += 1
+            elif c in ")]}":
+                depth -= 1
+        return depth != 0
+
     def new_id(self, base, off):
         cand = re.sub(r"[^A-Za-z0-9_.-]", "_", str(base)) or "node"
         if not cand[0].isalnum():
@@ -517,6 +538,10 @@ class _Importer:
                         else f"non-literal meta ({ex.what})", ex.off)
         if not isinstance(val, dict) or not isinstance(val.get("name"), str) or not val["name"].strip():
             self.refuse("meta without a literal string name", s)
+        if re.search(r"[\\/\s]", val["name"]) or val["name"] in (".", ".."):
+            # portable.md: the graph is saved as <name>.workflow.json — a separator or whitespace
+            # is a path, not a name (their side: `/<name>` command, same constraint)
+            self.refuse("meta.name contains a path separator or whitespace", s)
         if self.masked[j:e].strip():
             self.refuse("non-literal meta (trailing expression)", j)
         for k in val:
@@ -561,8 +586,10 @@ class _Importer:
             if m2:
                 kind = m2.group(1)
                 open_at = rhs_off + m2.end() - 1
-                close = _match_close(self.masked, open_at)
-                if close < 0 or self.masked[close + 1:e].strip():
+                close = self.close_of(open_at, f"{kind}(...)", at=off0)
+                if self.masked[close + 1:e].strip():
+                    if self.unbalanced(off0, e):
+                        self.refuse(f"unterminated {kind}(...) / unbalanced brackets", off0)
                     self.refuse(f"expression after {kind}(...) (glue)", off0)
                 return getattr(self, "c_" + kind)(name, open_at, close, off0)
             m3 = re.match(r"(agent|parallel|pipeline)\s*\(", rhs)
@@ -594,7 +621,7 @@ class _Importer:
 
     def phase_or_log(self, which, off, e):
         open_at = self.masked.find("(", off)
-        close = _match_close(self.masked, open_at)
+        close = self.close_of(open_at, f"{which}(...)", at=off)
         try:
             val, j = _parse_literal(self.src, self.masked, open_at + 1, allow_tpl=True)
         except _NonLiteral as ex:
@@ -650,7 +677,7 @@ class _Importer:
             k = _skip_ws(self.masked, os_)
             if k >= oe or self.src[k] != "{":
                 self.refuse("agent() options are not an object literal", k)
-            ok_close = _match_close(self.masked, k)
+            ok_close = self.close_of(k, "agent() options object")
             if self.masked[ok_close + 1:oe].strip():
                 self.refuse("agent() options followed by an expression", ok_close + 1)
             for bs, be in _split_top(self.masked, k + 1, ok_close):
@@ -682,6 +709,10 @@ class _Importer:
                 self.refuse("agent() schema is not a static object literal", offs.get("schema", k))
             if "model" in opts and not isinstance(opts["model"], str):
                 self.refuse("agent() model is not a string literal", offs.get("model", k))
+            if "label" in opts and not isinstance(opts["label"], (str, _Tpl)):
+                # display-only on their side; a non-string can never seed an id -> warn, keep going
+                self.warnings.append(f"agent() label at line {self.line(offs.get('label', k))} is not a string "
+                                     f"({type(opts['label']).__name__}); ignored (label is display-only)")
             if "phase" in opts:
                 self.dropped.append(f"agent option phase at line {self.line(offs.get('phase', k))} (display-only)")
         return prompt, opts, offs
@@ -728,22 +759,26 @@ class _Importer:
             return ("args", fields[0])
         return ("const", head, fields)
 
-    def render_plain(self, prompt, off, node):
-        """A NON-fan-out goal: refs -> after/inputs (§3 data-flow rule), prose names the input."""
-        if isinstance(prompt, str):
-            return prompt
-        parts = list(prompt.parts)
-        # the exporter's own `## Inputs (wf/1 refs)` tail is pure refs: fold it back, no prose
+    def split_inputs_tail(self, parts):
+        """The exporter's own `## Inputs (wf/1 refs)` tail is pure refs: fold it back to
+        after/inputs with no prose. Returns (body parts, pure ref list). Shared by plain and
+        fan-out item templates (a stage's node-level refs are emitted in the same section)."""
         tail_at = None
         for i, p in enumerate(parts):
             if isinstance(p, str) and _INPUTS_MARK in p:
                 tail_at = i
                 break
-        pure = []
-        if tail_at is not None:
-            pre = parts[tail_at].split(_INPUTS_MARK, 1)[0].rstrip("\n")
-            pure = [p for p in parts[tail_at + 1:] if isinstance(p, _Ref)]
-            parts = parts[:tail_at] + ([pre] if pre else [])
+        if tail_at is None:
+            return parts, []
+        pre = parts[tail_at].split(_INPUTS_MARK, 1)[0].rstrip("\n")
+        pure = [p for p in parts[tail_at + 1:] if isinstance(p, _Ref)]
+        return parts[:tail_at] + ([pre] if pre else []), pure
+
+    def render_plain(self, prompt, off, node):
+        """A NON-fan-out goal: refs -> after/inputs (§3 data-flow rule), prose names the input."""
+        if isinstance(prompt, str):
+            return prompt
+        parts, pure = self.split_inputs_tail(list(prompt.parts))
         out = []
         for p in parts:
             if isinstance(p, str):
@@ -782,11 +817,14 @@ class _Importer:
         return text if prose else ""
 
     def render_item(self, prompt, node, item_param, prev_param, prev_schema, stage_no, item_schema):
-        """A fan-out ITEM goal: item/prev fields -> bare `{field}` (wf.py fmt_goal)."""
+        """A fan-out ITEM goal: item/prev fields -> bare `{field}` (wf.py fmt_goal). An outer
+        agent const ref imports as NODE-LEVEL inputs/after (§3: build_inputs renders one
+        identical section for every item), the prose naming the ref like a plain goal."""
         if isinstance(prompt, str):
             return prompt
+        parts, pure = self.split_inputs_tail(list(prompt.parts))
         out = []
-        for p in prompt.parts:
+        for p in parts:
             if isinstance(p, str):
                 out.append(p)
                 continue
@@ -814,6 +852,8 @@ class _Importer:
                 out.append("{%s}" % fields[0])
                 continue
             out.append(self.plain_ref(p, node, prose=True))
+        for r in pure:   # same order as render_plain: prose refs first, then the exporter's tail
+            self.plain_ref(r, node, prose=False)
         return "".join(out)
 
     # -- const kinds ----------------------------------------------------------
@@ -836,7 +876,7 @@ class _Importer:
         k = _skip_ws(self.masked, open_at + 1)
         if k >= close or self.src[k] != "[":
             self.refuse("parallel() over a computed array (not a static [...] literal)", k)
-        arr_close = _match_close(self.masked, k)
+        arr_close = self.close_of(k, "parallel([...])")
         if self.masked[arr_close + 1:close].strip():
             self.refuse("parallel() with extra arguments", arr_close + 1)
         node = {"id": None, "type": "agent"}
@@ -852,7 +892,7 @@ class _Importer:
                     self.refuse("parallel element is a block-bodied thunk (glue)", es)
                 self.refuse("parallel element is not an agent(...) call or a thunk returning one", es + len(seg) - len(seg.lstrip()))
             a_open = es + m.end() - 1
-            a_close = _match_close(self.masked, a_open)
+            a_close = self.close_of(a_open, "agent(...) inside parallel([...])")
             if self.masked[a_close + 1:ee].strip():
                 self.refuse("parallel element chains an expression after agent(...) (glue)", a_close + 1)
             prompt, opts, offs = self.agent_args(a_open, a_close)
@@ -956,7 +996,7 @@ class _Importer:
                 self.refuse(self.glue_name(body).replace("closure/glue between agents", f"pipeline stage {stage_no} glue")
                             or f"pipeline stage {stage_no} is not a direct agent(...) call", body_off)
             a_open = body_off + m2.end() - 1
-            a_close = _match_close(self.masked, a_open)
+            a_close = self.close_of(a_open, f"agent(...) in pipeline stage {stage_no}")
             if self.masked[a_close + 1:st_e].strip():
                 self.refuse(f"pipeline stage {stage_no} chains an expression after agent(...) (.then / glue)", a_close + 1)
             prompt, opts, offs = self.agent_args(a_open, a_close, params=tuple(x for x in (p1, p2) if x))
@@ -1307,13 +1347,33 @@ class _Exporter:
             opts.append(f"schema: {_js_literal(schema)}")
         return "{ " + ", ".join(opts) + " }"
 
+    def node_context(self, n):
+        """Effective `context` of an agent node = wfcommon.apply_graph_defaults semantics
+        (wfcommon.py:420-422), folded AT EXPORT: defaults.context is prepended unless the node's
+        own context already starts with it (a door-loaded graph arrives normalised; a raw
+        fixture/CLI graph does not — both must export the same bytes). Applies to plain
+        agents AND fan-outs: wf.py passes node.context to every fan-out child (wf.py:1661)."""
+        ctx = str(n.get("context") or "")
+        pre = str(self.defaults.get("context") or "")
+        if pre and not ctx.startswith(pre):
+            ctx = pre + ("\n\n" + ctx if ctx else "")
+        return ctx
+
+    def node_schema(self, n):
+        """Plain-agent schema with the defaults.schema fill of wfcommon.py:411-413."""
+        return n.get("schema") or self.defaults.get("schema")
+
+    def fanout_schema(self, n):
+        """Per-item schema as the runner resolves it: fanout.schema, else the node schema
+        (which wfcommon fills from defaults.schema at load) — wf.py:1662."""
+        return (n.get("fanout") or {}).get("schema") or self.node_schema(n)
+
     def prompt_text(self, n, goal):
         """goal (+context) + the exporter-owned refs section for after/inputs."""
         text = goal
-        ctx = n.get("context")
-        dctx = self.defaults.get("context")
-        if ctx or dctx:   # context (defaults.context first, as the runner prepends it) rides in the prompt
-            text = text + "\n\n" + "\n\n".join(x for x in (dctx, ctx) if x)
+        ctx = self.node_context(n)
+        if ctx:   # context rides in the prompt, after the goal, as run_child composes it
+            text = text + "\n\n" + ctx
         refs = []
         covered = set()
         for r in n.get("inputs") or []:
@@ -1440,7 +1500,7 @@ class _Exporter:
             srcn = self.byid[h]
             if srcn.get("fanout"):
                 src_expr = self.const[h]
-                item_schema = (srcn["fanout"].get("schema") or srcn.get("schema"))
+                item_schema = self.fanout_schema(srcn)
                 self.warnings.append(f"fan-out '{head['id']}' iterates '{fo['items_from']}': their pipeline "
                                      f"result keeps nulls positionally; our output.items omits failed items")
             else:
@@ -1452,7 +1512,6 @@ class _Exporter:
         prev_schema = None
         for i, sid in enumerate(stages):
             n = self.byid[sid]
-            nfo = n["fanout"]
             tmpl = self.uniform_template(n)
             param = "item" if i == 0 else "prev"
             text, idx = self.render_item_template(tmpl, param, item_schema if i == 0 else prev_schema,
@@ -1461,9 +1520,12 @@ class _Exporter:
                 self.lossy.append((sid, "{index}", "fan-out template uses {index}; no per-item index in pipeline()"))
                 stage_lines.append("  // LOSSY: {index} placeholder has no counterpart inside pipeline(); left literal")
             extra = self.prompt_text_refs(n, skip=[stages[i - 1]] if i else [h for h in [str(fo.get("items_from", "")).partition(".")[0]] if h])
+            ctx = self.node_context(n)
+            if ctx:   # F1 (#36): node/defaults context rides in every item prompt, raw (never item-formatted), as wf.py:1661 passes it
+                text += "\n\n" + _run_args(ctx)
             if extra:
                 text += "\n\n" + _INPUTS_MARK + "\n" + extra
-            schema = nfo.get("schema") or n.get("schema")
+            schema = self.fanout_schema(n)
             opts = self.agent_opts(n, sid, extra_schema=schema or {})
             stage_lines.append(f"  ({param}) => agent(`{text}`, {opts}),")
             prev_schema = schema
@@ -1495,7 +1557,8 @@ class _Exporter:
         out = self.lossy_lines(n, _LOSSY_AGENT)
         fo = n["fanout"]
         refs = self.prompt_text_refs(n, skip=[])
-        schema = fo.get("schema") or n.get("schema")
+        schema = self.fanout_schema(n)
+        ctx = self.node_context(n)   # F1 (#36): same fold as prompt_text; wf.py:1661 gives it to every item
         elems = []
         for i, it in enumerate(fo["items"]):
             own = it.get("goal") if isinstance(it, dict) and isinstance(it.get("goal"), str) and it["goal"].strip() else None
@@ -1504,6 +1567,8 @@ class _Exporter:
             if own is not None and n.get("goal"):
                 goal = n["goal"] + "\n\n" + goal
             text = _run_args(goal)
+            if ctx:
+                text += "\n\n" + _run_args(ctx)
             if refs:
                 text += "\n\n" + _INPUTS_MARK + "\n" + refs
             label = it.get("id") if isinstance(it, dict) and isinstance(it.get("id"), str) else f"{n['id']}-{i}"

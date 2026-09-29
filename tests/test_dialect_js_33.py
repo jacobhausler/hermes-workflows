@@ -12,9 +12,12 @@
 (3) export(import(fixture)) round-trips: the emitted .js passes `node --check` (when node
     exists), re-imports, and the re-imported nodes are def-equal to the first import;
 (4) the exporter's golden (`tests/fixtures/dialect/golden-export.workflow.json`, every
-    lossy family + a decorative gate + an echo + a run_context binding) exports to
+    lossy family + a decorative gate + an echo + a run_context binding + a fan-out of each
+    form carrying `context`, with `defaults.context`/`defaults.schema` set) exports to
     byte-pinned output (sha256 below), every dropped key appears as a `// LOSSY:` line AT
-    the node AND in the header summary, and the semantic refusals (quorum, gate without
+    the node AND in the header summary, fan-out `context` rides in every item prompt (#36
+    F1 — the runtime gives it to every child; a raw graph and a wfcommon-normalised one
+    export the same bytes), and the semantic refusals (quorum, gate without
     default_option, pruning `when`, all_results ref) name their node;
 (5) node --check degrades to skip-with-warning when node is absent (PATH emptied).
 Standalone, stdlib only: `python3 tests/test_dialect_js_33.py` -> exit 0 + ALL PASS.
@@ -29,7 +32,7 @@ sys.path.insert(0, str(ROOT))
 import wf_dialect as d   # noqa: E402
 import wfcommon           # noqa: E402
 
-GOLDEN_SHA256 = "5da723b9133037a209811d6a563588ea8a54ed50a926309e6aa72345bdb31205"
+GOLDEN_SHA256 = "8e3a5ad05f247010be8567779e52e4659ed72982494f75e6a10a44e95018591c"
 
 ok = 0
 def check(cond, msg, detail=""):
@@ -159,18 +162,52 @@ check("(item) => agent(`Review module ${item} for dead code" in body, "items_fro
 check("recon.modules," in body, "pipeline iterates the declared array field")
 check("Reply with ONLY a fenced json block." in body and "Keep it under one page." in body,
       "defaults.context and node context ride in the prompt")
+# #36 F1: fan-out context is emitted in every item prompt, for all three fan-out forms
+check("PIPE-CTX: cite file:line for every finding." in body, "items_from fan-out (pipeline form) context rides in the stage prompt")
+check(body.count("PAR-CTX: one probe per item.") == 2, "per-item-goal fan-out (parallel form) context rides in EVERY element prompt")
+check("UNI-CTX: never write files." in body, "uniform static-items fan-out (pipeline form) context rides in the stage prompt")
+check(body.count("Reply with ONLY a fenced json block.") == 6, "defaults.context reaches every agent prompt incl. every fan-out item (recon + 2 probes + smoke + review + digest)", str(body.count("Reply with ONLY a fenced json block.")))
+for ctx_line in ("PIPE-CTX", "PAR-CTX", "UNI-CTX"):
+    check(re.search(rf"Return \{{[^}}]*\}}\.\n\nReply with ONLY a fenced json block\.\n\n{ctx_line}", body),
+          f"{ctx_line}: goal, then defaults.context, then node context (run_child order)")
+check(not any(l["key"] == "context" for l in rep["lossy"]), "fan-out context is emitted, never LOSSY")
+# #36 F1b: defaults.schema fills an unset fan-out schema (wfcommon.py:411-413 semantics) for both forms
+check(body.count("{ label: 'lint', model: 'worker-tier', schema: {\"properties\": {\"note\"") == 1
+      and "label: 'types', model: 'worker-tier', schema: {\"properties\": {\"note\"" in body
+      and "label: 'smoke', model: 'worker-tier', schema: {\"properties\": {\"note\"" in body,
+      "defaults.schema fills unset fan-out item schemas (parallel + pipeline forms)")
+check("label: 'review', model: 'worker-tier', schema: {\"properties\": {\"findings\"" in body, "explicit fanout.schema wins over defaults.schema")
+# fold-at-export == normalise-via-wfcommon: a door-loaded (apply_graph_defaults) graph exports the same bytes
+normalised = wfcommon.apply_graph_defaults(copy.deepcopy(golden))
+check(any(n.get("context", "").startswith("Reply with ONLY") for n in normalised["nodes"] if n.get("fanout")),
+      "wfcommon.apply_graph_defaults prepends defaults.context to fan-out nodes too")
+code = lambda src: [l for l in src.splitlines() if not l.startswith("//")]
+check(code(d.js_export(normalised)) == code(js),
+      "raw graph and wfcommon-normalised graph export identical code lines (context/schema folded once; only "
+      "the LOSSY comments differ, because apply_graph_defaults also bakes shape max_turns/timeout)")
+# the adversary's F1 repro (review comment 5898859366): context now in js, still no LOSSY line
+G = {"name": "ctx", "nodes": [{"id": "a", "type": "agent", "goal": "List. Return {xs}.", "schema": {"type": "object", "properties": {"xs": {"type": "array", "items": {"type": "string"}}}}},
+     {"id": "p", "type": "agent", "after": ["a"], "context": "PIPE-CTX", "fanout": {"items_from": "a.xs", "goal": "Do {item}"}},
+     {"id": "q", "type": "agent", "after": ["a"], "context": "PAR-CTX", "fanout": {"items": [{"id": "i1", "goal": "g1"}, {"id": "i2", "goal": "g2"}]}}]}
+r = d.export_report(G)
+check(r["ok"] and r["lossy"] == [] and "PIPE-CTX" in r["js"] and r["js"].count("PAR-CTX") == 2, "F1 repro: fan-out context emitted for items_from and per-item forms", json.dumps(r)[:300])
+r2 = d.js_import(r["js"], node_check=False)
+check(r2["ok"] and "PIPE-CTX" in r2["graph"]["nodes"][1]["fanout"]["goal"] and "PAR-CTX" in r2["graph"]["nodes"][2]["fanout"]["items"][0]["goal"],
+      "exported fan-out context re-imports (as item goal text, like plain-agent context)", json.dumps(r2)[:300])
 check("model: 'worker-tier'" in body and "model: 'sonnet'" in body, "defaults.model fills unset nodes; explicit pin kept verbatim")
 # semantic refusals name their node
-q = copy.deepcopy(golden); q["nodes"][2]["fanout"]["quorum"] = 2
+def gnode(g, nid):
+    return next(n for n in g["nodes"] if n["id"] == nid)
+q = copy.deepcopy(golden); gnode(q, "review")["fanout"]["quorum"] = 2
 r = d.export_report(q)
 check(not r["ok"] and r["node"] == "review" and "quorum" in r["refuse"], "quorum fan-out refuses export by name", json.dumps(r))
-q = copy.deepcopy(golden); del q["nodes"][3]["default_option"]
+q = copy.deepcopy(golden); del gnode(q, "publish")["default_option"]
 r = d.export_report(q)
 check(not r["ok"] and r["node"] == "publish" and "default_option" in r["refuse"], "human gate without default_option refuses export")
-q = copy.deepcopy(golden); q["nodes"][3]["when"] = "out.recon.modules != 'x'"
+q = copy.deepcopy(golden); gnode(q, "publish")["when"] = "out.recon.modules != 'x'"
 r = d.export_report(q)
 check(not r["ok"] and r["node"] == "publish" and "when" in r["refuse"], "pruning when-gate refuses export")
-q = copy.deepcopy(golden); q["nodes"][4]["inputs"] = ["review.all_results"]
+q = copy.deepcopy(golden); gnode(q, "digest")["inputs"] = ["review.all_results"]
 r = d.export_report(q)
 check(not r["ok"] and r["node"] == "digest" and "all_results" in r["refuse"], "inputs into a fan-out's all_results refuses export")
 try:
@@ -181,7 +218,7 @@ check(raised, "js_export raises DialectRefusal with the node named")
 r = d.export_report({"name": "empty", "nodes": []})
 check(not r["ok"], "empty graph refuses export")
 # LOSSY lines never break their own syntax: a value with a newline stays on one line
-q = copy.deepcopy(golden); q["nodes"][1]["toolsets"] = ["a\nb"]
+q = copy.deepcopy(golden); gnode(q, "recon")["toolsets"] = ["a\nb"]
 js2 = d.js_export(q)
 check(all(l.startswith("//") or "LOSSY" not in l for l in js2.splitlines()) and (not node_present or d.node_check(js2)["status"] == "ok"),
       "LOSSY comment values are single-line and keep the script parseable")
@@ -239,10 +276,38 @@ refuses(M + "const a = await agent('p')\nconst b = await agent(`${a.nope}`)\n", 
 refuses(M + "const a = await agent('p')\nconst b = await pipeline(args.files, f => agent(`${f}`))\n", "args used as an iterable item source", 3)
 refuses("const meta = { name: 'x' }\nconst a = await agent('p')\n", "missing export const meta", 1)
 refuses(M + "const a = await agent('p')\nreturn a\nconst b = await agent('q')\n", "statement after return", 4)
+# #36 F2: an unterminated construct is named as itself, never as "expression after ... (glue)"
+refuses(M + "const a = await agent(`p\nreturn a\n", "unterminated agent(...) / unbalanced brackets", 2)          # unterminated template
+refuses(M + "const a = await agent('p', { schema: { type: 'object' }\nreturn a\n", "unterminated agent(...) / unbalanced brackets", 2)   # unterminated options object
+refuses(M + "const a = await parallel([() => agent('p')\nreturn a\n", "unterminated parallel(...) / unbalanced brackets", 2)
+refuses(M + "const a = await parallel([agent('p') )\nreturn a\n", "unterminated parallel(...) / unbalanced brackets", 2)   # inner [ never closed
+refuses(M + "const a = await pipeline(['x'], f => agent(`${f}`)\nreturn a\n", "unterminated pipeline(...) / unbalanced brackets", 2)
+refuses(M + "const a = await pipeline(['x'], f => agent(`${f}` )\nreturn a\n", "unterminated pipeline(...) / unbalanced brackets", 2)
+refuses(M + "phase('x'\nconst a = await agent('p')\n", "unterminated phase(...) / unbalanced brackets", 2)
+# ...and a genuinely balanced trailing expression still names glue (the message F2 used to leak)
+refuses(M + "const a = await agent('p').then(x => x)\nreturn a\n", "expression after agent(...) (glue)", 2)
+# minors (#36): non-string label warns and is ignored; meta.name that is a path refuses
+r = d.js_import(M + "const a = await agent('p', { label: 5 })\nreturn a\n", node_check=False)
+check(r["ok"] and any("label at line 2 is not a string (int)" in w for w in r["warnings"]), "non-string label -> warning, import proceeds", json.dumps(r)[:200])
+refuses("export const meta = { name: '../x y' }\nconst a = await agent('p')\n", "meta.name contains a path separator or whitespace", 1)
+refuses("export const meta = { name: 'a b' }\nconst a = await agent('p')\n", "meta.name contains a path separator or whitespace", 1)
 # accepted edge: bare whole-const reference to a parallel result imports (auto-injected whole)
 r = d.js_import(M + "const a = await parallel([() => agent('p'), agent('q')])\nconst b = await agent(`Summarise ${a}`)\nreturn b\n", node_check=False)
 check(r["ok"] and r["graph"]["nodes"][1]["after"] == ["a"] and "inputs" not in r["graph"]["nodes"][1]
       and len(r["graph"]["nodes"][0]["fanout"]["items"]) == 2, "bare ${parallelConst} imports as after (whole inject); thunk + bare call mixed", json.dumps(r)[:300])
+# accepted (#36 F3, dialect.md §3 data-flow rule): an outer agent const referenced inside a pipeline
+# stage template imports as NODE-LEVEL inputs + after — build_inputs renders one identical section
+# for every item, so the import is runtime-sound and the stage prose names the ref (no brace token)
+r = d.js_import(M + "const plan = await agent('Propose. Return {target}.', { schema: {type:'object', properties:{target:{type:'string'}}} })\n"
+                "const items = await pipeline(['a','b'], (item) => agent(`Refactor ${item} toward ${plan.target}.`))\nreturn items.filter(Boolean)\n", node_check=False)
+check(r["ok"] and r["graph"]["nodes"][1]["after"] == ["plan"] and r["graph"]["nodes"][1]["inputs"] == ["plan.target"]
+      and r["graph"]["nodes"][1]["fanout"]["items"] == ["a", "b"] and "plan.target" in r["graph"]["nodes"][1]["fanout"]["goal"]
+      and "{plan" not in r["graph"]["nodes"][1]["fanout"]["goal"] and "{item}" in r["graph"]["nodes"][1]["fanout"]["goal"],
+      "outer-const ref inside a pipeline stage imports as node-level inputs+after (identical per item)", json.dumps(r)[:400])
+check(wfcommon.validate_graph_errors(r["graph"]) == [], "stage-captures-outer-const graph validates")
+rep = d.export_report(r["graph"])
+check(rep["ok"] and rep["lossy"] == [] and "${plan.target}" in rep["js"] and d.js_import(rep["js"], node_check=False)["graph"]["nodes"] == r["graph"]["nodes"],
+      "…and round-trips through the exporter as the same nodes", json.dumps(rep)[:300])
 # accepted: static pipeline list
 r = d.js_import(M + "const a = await pipeline(['x', 'y'], f => agent(`Do ${f}`))\nreturn a.filter(Boolean)\n", node_check=False)
 check(r["ok"] and r["graph"]["nodes"][0]["fanout"] == {"items": ["x", "y"], "goal": "Do {item}"}, "pipeline over a literal list -> fanout.items", json.dumps(r)[:300])
