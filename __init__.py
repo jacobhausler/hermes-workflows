@@ -247,8 +247,8 @@ WORKFLOW_PARAMS = {
     "properties": {
         "action": {
             "type": "string",
-            "enum": ["run", "status", "wait", "release", "steer", "inbox", "amend", "stop", "list", "save", "library"],
-            "description": "run=launch a graph; wait=read state, RESPAWNING an idle runner if work is pending (blocks to the next boundary when one is live); status=read-model of a run; release=answer a held human gate; steer=queue steering text for a node; inbox=(child-side, cooperative) pull late steering lines baked for THIS spawn — call once at a natural seam; amend=replace the graph (invalidates changed nodes + all downstream by fingerprint); stop=request stop; list=all runs; save=shelve a graph in the library under a name (from run_id or inline graph); library=list shelved graphs. run from=<name> replays a shelved graph.",
+            "enum": ["run", "status", "wait", "release", "steer", "inbox", "amend", "stop", "list", "save", "library", "release_lock"],
+            "description": "run=launch a graph; wait=read state, RESPAWNING an idle runner if work is pending (blocks to the next boundary when one is live); status=read-model of a run; release=answer a held human gate; steer=queue steering text for a node; inbox=(child-side, cooperative) pull late steering lines baked for THIS spawn — call once at a natural seam; amend=replace the graph (invalidates changed nodes + all downstream by fingerprint); stop=request stop; list=all runs; save=shelve a graph in the library under a name (from run_id or inline graph); library=list shelved graphs. run from=<name> replays a shelved graph; release_lock=(#44 escape hatch, operator-only) diagnose a wedged runner.lock: refuses unless the runner pid is dead, the run is not held/parked, and two child-probes both acquire; never unlinks; a stranded (kernel-held, no visible holder) lock is reported honestly — recovery is a new lane key.",
         },
         "run_id": {"type": "string", "description": "Run id (required for every action except run/list)."},
         "name": {"type": "string", "description": "run: overrides graph.name (default workflow); save: library name overrides graph.name (lowercase, [-_.]). amend: set graph.name in the replacement graph; omitting it retains the run name."},
@@ -1830,6 +1830,14 @@ def act_stop(args):
         return {"ok": True, "note": "was idle — runner spawned just to honour the stop"}
     return {"ok": True, "note": "stop lands at the next boundary; in-flight children are killed"}
 
+def act_release_lock(args):
+    """#44 escape hatch passthrough: the verdict lives in wfcommon.release_lock_verdict
+    (shared with `wf.py release-lock`) so the door and the CLI can never disagree."""
+    r = run_dir(args.get("run_id"))
+    if not (r / "graph.json").exists():
+        return {"error": "unknown run_id"}
+    return _common.release_lock_verdict(r)
+
 def act_list(_args):
     roots = [runs_root()]
     legacy = _common.launch_runs_root()
@@ -1856,7 +1864,7 @@ def act_list(_args):
 
 ACTIONS = {"run": act_run, "status": act_status, "wait": act_wait, "release": act_release,
            "steer": act_steer, "inbox": act_inbox, "amend": act_amend, "stop": act_stop, "list": act_list,
-           "save": act_save, "library": act_library}
+           "save": act_save, "library": act_library, "release_lock": act_release_lock}
 
 def handle(args, **kwargs):
     try:

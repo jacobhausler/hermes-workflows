@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+- #44 stranded `runner.lock` (two runs died in a gateway sweep; the lock stayed held with
+  ZERO visible holders — no `/proc/locks` inode line, empty `/proc/*/fd` scan, runner pid
+  dead — and wait-resume was wedged until a new lane key). Prime suspect: the A1 liveness
+  probe took `LOCK_EX|LOCK_NB` inside the door (gateway) process and a SIGKILL mid-probe
+  left the fd alive in another namespace view. Three parts. (1) CHILD-PROBE law:
+  `wfcommon.lock_probe_child` — every probe a long-lived process makes runs in a
+  short-lived child (`flock -n <lock> true`, python `-I -S` fallback) whose exit is the
+  release; the parent never opens the lock file (close_fds, empty env, bounded timeout, no
+  creation). `runner_lock_held` delegates to it; the admission path (`wf.py acquire_lock`,
+  the real holder) is byte-untouched. `run_state` now threads its ONE liveness read into
+  `runner_exit_read` so a status/list/wait costs exactly one probe (A2 one-read law, was
+  silently two). (2) `wf.py release-lock <run_id>` + door action `release_lock`
+  (`wfcommon.release_lock_verdict`, shared so CLI and door cannot disagree): refuses (exit
+  2, reason) unless the runner pid is dead, the run is not held/parked, and two child-probes
+  100 ms apart both acquire; never unlinks; a contested probe reports the believed holders
+  (`/proc/*/fd` pid+argv, `/proc/locks` by inode); kernel-held with no visible holder is
+  `stranded:true` with the forensic dump and the honest recovery (new lane key). (3)
+  `tests/test_lock_heal_44.py` (39 checks): SIGKILLed holder → probe FREE; probing parent
+  SIGKILLed mid-probe ×5 never strands; live holder → BUSY + refusal with evidence; live pid
+  → refusal; held gate → refusal; killed holder → double-probe free; door status/list = at
+  most ONE child-probe and the door process never flocks; stranded verdict honesty; no
+  lock-file creation. Docs: `references/operations.md` "Flock law" section.
+
 - #37 lane hygiene (digest 20260929f / spool 8edcc9bfc91b9683 — a build lane wiped its
   uncommitted implementation with a base checkout over its own dirty tree for a RED run,
   then died on the turn cap; recovery was a hand replay of 17 journaled tool calls). Two
