@@ -35,8 +35,6 @@ def _profile_evidence(node):
     name = node.get("profile")
     return {"profile": name, "profile_home": str(profile_home(name))} if name else {}
 
-
-<<<<<<< HEAD
 def _lane_gate(run, node, r):
     """fb-digest-29d (64c6772b): a node that declares `repo: <path>` owns a git
     lane, and a committed done/partial must mean the lane is CLEAN. The dad50be0
@@ -83,10 +81,7 @@ def _lane_gate(run, node, r):
     return r
 
 
-def _stamp_served(meta, result):
-=======
 def _stamp_served(meta, result, node=None):
->>>>>>> d02093e25fe022434ade8b96aaffad38005ed485
     """Commit actual child seat truth, never the requested alias. No row means unknown."""
     skey = result.get("skey")
     metric = child_metrics(meta["_run"].name, _route_home(result)).get(skey, {}) if skey else {}
@@ -1755,12 +1750,8 @@ def run_agent_node(run, meta, byid, node, outputs, steering):
                                  resume_preamble=resume_preamble)
             r = _transient_retry(meta, spawn(), spawn, "node", {"node": nid})
             r = _bounded_retry(meta, r, spawn, "node", {"node": nid})
-<<<<<<< HEAD
-            r = _stamp_served(meta, r)   # dad50be0: seat truth at the commit, never the alias
-            r = _lane_gate(run, node, r)   # 64c6772b: a declared lane must be clean at commit
-=======
             r = _stamp_served(meta, r, node)   # dad50be0: seat truth at the commit, never the alias
->>>>>>> d02093e25fe022434ade8b96aaffad38005ed485
+            r = _lane_gate(run, node, r)   # 64c6772b: a declared lane must be clean at commit
             save_node(run, node, byid, r)
             if r["status"] in ("done", "partial"):   # #4: a harvested partial IS committed output
                 log(run, "node.finished", node=nid, ms=r.get("ms"),

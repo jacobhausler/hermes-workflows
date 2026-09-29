@@ -238,10 +238,7 @@ ID_OK = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 # graph it baked itself. `reasoning` is validated per node (Q5).
 AGENT_KEYS = {"id", "type", "after", "goal", "context", "schema", "model", "provider", "toolsets",
               "max_turns", "timeout", "run_budget", "inputs", "fanout", "reasoning",
-<<<<<<< HEAD
               "tier", "shape", "repo",
-=======
-              "tier", "shape",
               # #24/#25: fail-closed pinned routes. Default TRUE for nodes
               # that pin an explicit model — a submit ping that AFFIRMATIVELY proves
               # the pinned route dead or answering from the fallback ladder refuses the
@@ -251,7 +248,6 @@ AGENT_KEYS = {"id", "type", "after", "goal", "context", "schema", "model", "prov
               # graph, but _resolve_models drops any author/pre-submit value — only
               # this submit's ping (or a frozen committed restore) can prove a route.)
               "require_route", "route_verified",
->>>>>>> d02093e25fe022434ade8b96aaffad38005ed485
               # 1.1 (RATIFY F2/F4): OPTIONAL team keys. `profile` = run this node AS a named
               # teammate profile (consent-gated, node-level only); `requires` = output
               # preconditions on ancestors ({"<ancestor>": ["field", "dotted.path", ...]}).
