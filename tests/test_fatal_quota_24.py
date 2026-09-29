@@ -95,6 +95,14 @@ try:
     spec.loader.exec_module(door)
 except SystemExit:
     pass  # module-level guards; handler is what we need
+# TEST-SEATED: the A5 recovery ping must NEVER hit the real core from a test (an
+# answering default seat would "recover" the stamp and the refusal would vanish —
+# exactly the silent fallback-billing class this test exists to forbid). Recovery
+# itself is exercised with stubbed cores in (f).
+_real_ping_route_once = door._ping_route_once
+_real_ping_reachable = door._ping_reachable
+door._ping_route_once = lambda p, m: {"liveness": "unknown"}
+door._ping_reachable = lambda m: False
 graph = {"name": "fq-refuse", "nodes": [{"id": "x", "type": "agent", "goal": "GO", "model": "sol"}]}
 res = door._quota_refusal(graph, cache_path=qc)
 check("door refuses exhausted model before any write", res and "sol" in str(res), str(res))
@@ -183,6 +191,10 @@ check("minute horizon lands ~30min out (not the 6h default)",
       f"{stamp['resets_epoch'] - time.time():.0f}s")
 
 # ---------- (f) A5: provider-less recovery ping clears the stamp ----------
+# (f) exercises the REAL _ping_route_once/_ping_reachable against a stubbed
+# call_llm — undo the test-seating stubs from (c).
+door._ping_route_once = _real_ping_route_once
+door._ping_reachable = _real_ping_reachable
 qc3 = HOME / "quota-cache-restore.json"
 qc3.write_text(json.dumps({"m-recover": {"resets_epoch": time.time() + 3600,
                                           "at": time.time(), "marker": "x"}}))
