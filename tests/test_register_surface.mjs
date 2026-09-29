@@ -23,11 +23,17 @@ export const Badge = 'Badge', Button = 'Button', cn = (...a) => a.filter(Boolean
 export const Codicon = 'Codicon', EmptyState = 'EmptyState', ScrollArea = 'ScrollArea'
 export const StatusDot = 'StatusDot', PanelListRow = 'PanelListRow', PanelPill = 'PanelPill'
 export const PanelSectionLabel = 'PanelSectionLabel'
-export const host = { focusedStoredSessionId: atom(''), focusedSessionId: atom(''), navigate: () => {} }
+// The SDK exposes the focused-chat atoms ONLY under host.state (sdk/index.ts);
+// a top-level stub encoded bug #23 and kept the suite green while the strip
+// never rendered.
+export const host = { state: { focusedStoredSessionId: atom(''), focusedSessionId: atom('') }, navigate: () => {} }
+export const q = { data: undefined }
+export const useValue = a => (a && typeof a.get === 'function' ? a.get() : null)
+export const useQuery = () => ({ data: q.data })
 export const ROUTES_AREA = 'routes', PANES_AREA = 'panes', TRANSCRIPT_DIRECTIVE_AREA = 'transcript.directives'
 export const COMPOSER_AREAS = { top: 'composer.top' }
-export const useMutation = () => ({}), useQuery = () => ({})
-export const useQueryClient = () => ({}), useValue = () => null
+export const useMutation = () => ({})
+export const useQueryClient = () => ({})
 export const ctxRestStub = () => Promise.reject(new Error('no backend in test'))
 `
 const stubReact = `
@@ -61,6 +67,28 @@ await mod.default.register(ctx)
 const areas = [...new Set(regs.map(r => r.area))].sort()
 assert.deepEqual(areas, ['composer.top', 'panes', 'routes', 'transcript.directives'],
   `areas registered must be exactly the four, got ${JSON.stringify(areas)}`)
+
+// -- 1a. RED ON BASE (bug #23): SessionStrip must render when the FOCUSED chat
+// owns a run. The atoms live under host.state (sdk/index.ts:665-697); base read
+// host.focusedSessionId -> undefined -> null forever. Also lock the pane call
+// site to the same keys.
+const sdkMod = await import(pathToFileURL(sdkPath).href)
+{
+  sdkMod.q.data = { runs: [{ id: 'u1', name: 'u1', status: 'running', owner: { session_id: '', ui_session_id: 'STORED-1' }, started: '2026-09-26T04:00:00Z', updated: '2026-09-26T04:05:00Z' }] }
+  sdkMod.host.state.focusedStoredSessionId.set('STORED-1')
+  assert.ok(mod.SessionStrip() && typeof mod.SessionStrip() === 'object',
+    'SessionStrip must render a tree when host.state.focusedStoredSessionId owns a run')
+  sdkMod.host.state.focusedStoredSessionId.set('NOBODY')
+  assert.equal(mod.SessionStrip(), null, 'null when no run is owned by the focused chat')
+  sdkMod.host.state.focusedStoredSessionId.set('')
+}
+{
+  const i = src.indexOf('function WorkflowsPane()')
+  assert.ok(i >= 0, 'WorkflowsPane exists')
+  const paneSrc = src.slice(i, i + 800)
+  assert.match(paneSrc, /host\?\.state\?\.focusedSessionId/, 'pane reads host.state.focusedSessionId')
+  assert.match(paneSrc, /host\?\.state\?\.focusedStoredSessionId/, 'pane reads host.state.focusedStoredSessionId')
+}
 
 // -- 2. the pane docks center into the sessions strip, enforced -----------------
 const pane = regs.find(r => r.area === 'panes')
