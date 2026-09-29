@@ -1,0 +1,57 @@
+{
+  "grammar": "wf/1",
+  "name": "portable-review",
+  "description": "Portable file walk-in: recon -> two-way fan-out review -> summary. No code, no secrets; drop anywhere and run graph_path=<abs path>.",
+  "provenance": {
+    "owner": "hermes-workflows",
+    "source": "hermes-workflows/examples/portable-review.workflow.json"
+  },
+  "nodes": [
+    {
+      "id": "recon",
+      "type": "agent",
+      "goal": "List the two most important files in the current directory. Reply with exactly this JSON shape and nothing else: {\"files\": [\"<path>\", \"<path>\"]}",
+      "schema": {
+        "type": "object",
+        "required": [
+          "files"
+        ]
+      },
+      "max_turns": 6
+    },
+    {
+      "id": "review",
+      "type": "agent",
+      "after": [
+        "recon"
+      ],
+      "fanout": {
+        "items_from": "recon.files",
+        "goal": "Review {item} in one paragraph: what it does and one concrete risk. Reply exactly: {\"file\": \"{item}\", \"finding\": \"<one paragraph>\"}",
+        "schema": {
+          "type": "object",
+          "required": [
+            "file",
+            "finding"
+          ]
+        }
+      },
+      "max_turns": 6
+    },
+    {
+      "id": "summary",
+      "type": "agent",
+      "after": [
+        "review"
+      ],
+      "goal": "Merge the review findings into a three-line summary. Reply exactly: {\"summary\": \"<three lines>\"}",
+      "schema": {
+        "type": "object",
+        "required": [
+          "summary"
+        ]
+      },
+      "max_turns": 4
+    }
+  ]
+}

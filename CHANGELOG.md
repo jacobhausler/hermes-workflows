@@ -15,6 +15,7 @@ Every feature is OPTIONAL: a no-team run (default profile, no `WF_RUNS_ROOT`) is
 
 ## Unreleased
 
+- #32 publish-as-file: top-level `grammar: "wf/1"` accepted (absent = wf/1; unknown value refused listing the supported values), def_hash-neutral like `provenance`; `references/portable.md` convention + `examples/portable-review.workflow.json` walk-in with its digests pinned in the doc (`tests/test_portable_32.py`).
 - #24 fatal_quota (from @pf-mechanic-2's report): a 429 whose own text carries a
   reset horizon (`resets in ~109h`) is classed `fatal_quota` — the node fails on the
   FIRST attempt (the bounded retry ladder can never beat a multi-day reset; the

@@ -38,7 +38,8 @@ def _coerce_graph(graph):
 
 GRAPH_MAX_BYTES = 1024 * 1024
 GRAPH_KEYS = {"name", "nodes", "description", "defaults", "model_policy",
-              "provenance"}   # 1.1 (RATIFY F5): opt-in library provenance block, door-written
+              "provenance",   # 1.1 (RATIFY F5): opt-in library provenance block, door-written
+              "grammar"}      # #32: dialect tag of a shared file ("wf/1"; absent = wf/1)
 
 def _model_names_valid(names):
     return isinstance(names, list) and all(isinstance(n, str) and n.strip() for n in names)
@@ -111,6 +112,9 @@ def _validation_error(graph):
     for key in sorted(set(graph) - GRAPH_KEYS):
         errs.append({"node": None, "field": key,
                      "msg": f"unknown graph key; allowed: {sorted(GRAPH_KEYS)}"})
+    # #32: a file may state its dialect; absent = wf/1, unknown = refused with the
+    # supported list (fail-closed: a newer dialect must never be misrun as wf/1).
+    errs.extend(_common.grammar_errors(graph))
     if "defaults" in graph:
         # ONE truth: the same per-key rules a node key gets; apply_graph_defaults
         # bakes this block into the agent defs before graph.json is written.
