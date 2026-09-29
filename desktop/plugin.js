@@ -1754,6 +1754,13 @@ export default {
       render: () => jsx(WorkflowsPane, {})
     })
 
-    ctx.register({ id: 'session-strip', area: COMPOSER_AREAS.top, render: () => jsx(SessionStrip, {}) })
+    // Feature-detected composer slot (issue #22 item 3): `composer.underside` is
+    // the floating strip BELOW the composer dock on core >= v2026.7.30 —
+    // bottom-anchored, grows upward over the thread, and it is NOT inside the
+    // composer-fade div, so it does not dim when the thread scrolls up
+    // (composer/index.tsx:1558-1560). COMPOSER_AREAS is an SDK const map, so the
+    // key EXISTS ONLY on cores that mount the area — missing key ⇒ undefined ⇒
+    // ?? falls back to today's composer.top on older shells. One mount, never both.
+    ctx.register({ id: 'session-strip', area: COMPOSER_AREAS.underside ?? COMPOSER_AREAS.top, render: () => jsx(SessionStrip, {}) })
   }
 }
