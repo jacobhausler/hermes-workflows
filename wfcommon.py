@@ -490,6 +490,13 @@ def validate_graph_errors(nodes):
             shp = n.get("shape")
             if shp is not None and shp not in SHAPE_PRESETS:
                 E(nid, "shape", f"shape {shp!r} invalid; allowed: {sorted(SHAPE_PRESETS)}")
+            rp = n.get("repo")
+            # deep review #29 F3: a mistyped `repo` must never silently disable the
+            # lane-clean gate it opts into (123/["x"]/{...}/"" all read as no-declaration
+            # downstream and the node commits `done` over a dirty lane, fail-open).
+            if rp is not None and (not isinstance(rp, str) or not rp.strip()
+                                   or rp.strip() != rp):
+                E(nid, "repo", "repo must be a non-empty path string without surrounding whitespace")
             if n.get("model") is not None and not isinstance(n.get("model"), str):
                 E(nid, "model", "model must be a string")
             if "provider" in n:

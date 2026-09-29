@@ -149,5 +149,20 @@ with tempfile.TemporaryDirectory() as td:
     import wfcommon
     check("`repo` is a validated agent key", "repo" in wfcommon.AGENT_KEYS)
 
+    # (h) deep review #29 F3: a mistyped `repo` must FAIL validation — never
+    # silently read as no-declaration and commit done over a dirty lane.
+    import wfcommon as _wc
+    def _v(node_extra):
+        n = {"id": "v", "type": "agent", "goal": "g"}
+        n.update(node_extra)
+        return [e for e in _wc.validate_graph_errors([n]) if e.get("field") == "repo"]
+    check("repo: 123 rejected", bool(_v({"repo": 123})))
+    check('repo: ["x"] rejected', bool(_v({"repo": ["x"]})))
+    check('repo: {"a":1} rejected', bool(_v({"repo": {"a": 1}})))
+    check('repo: "" rejected', bool(_v({"repo": ""})))
+    check('repo: " x " rejected (whitespace)', bool(_v({"repo": " x "})))
+    check("repo: 'work/clone' accepted (no repo error)", not _v({"repo": "work/clone"}))
+
+
 print("FAILURES" if FAILS else "ALL PASS")
 sys.exit(1 if FAILS else 0)
