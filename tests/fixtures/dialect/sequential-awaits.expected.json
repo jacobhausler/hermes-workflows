@@ -25,7 +25,7 @@
           "plan.rationale"
         ],
         "model": "sonnet",
-        "goal": "Implement the refactor of {plan.target}. Rationale: {plan.rationale}. Return {diff}."
+        "goal": "Implement the refactor of the proposed target; the plan's target and rationale are injected below. Return a unified diff."
       },
       {
         "id": "review",
@@ -36,7 +36,7 @@
         "inputs": [
           "patch.diff"
         ],
-        "goal": "Review this diff for correctness only:\n{patch.diff}"
+        "goal": "Review the diff injected below for correctness only."
       }
     ]
   }

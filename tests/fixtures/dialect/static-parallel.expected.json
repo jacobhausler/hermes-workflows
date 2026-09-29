@@ -35,7 +35,7 @@
         "after": [
           "audits"
         ],
-        "goal": "Summarise these three audit results into one prioritised list:\n{audits}"
+        "goal": "Summarise the three audit results injected below into one prioritised list."
       }
     ]
   }

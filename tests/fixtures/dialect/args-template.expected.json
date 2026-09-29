@@ -21,7 +21,7 @@
         "inputs": [
           "survey.findings"
         ],
-        "goal": "Write a one-page report answering \"{run.question}\" from these findings:\n{survey.findings}"
+        "goal": "Write a one-page report answering \"{run.question}\" from the findings injected below."
       }
     ]
   }

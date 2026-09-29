@@ -14,8 +14,9 @@ code.claude.com/docs/en/agent-sdk/typescript.md WorkflowInput/WorkflowOutput [S3
 anthropics/claude-cookbooks `claude_agent_sdk/08_Dynamic_workflows.ipynb` [S5],
 code.claude.com/docs/en/sub-agents.md [S6], claude-directory.md [S7],
 plugins/manifest-reference.md [S8], changelog.md [S9], env-vars.md [S10]. The cited
-fact sheet the rows below quote from (`anthropic-grammar.md`, verbatim quotes + [S<n>]
-tags) is linked from the #31 PR. Items their docs do not state are marked NOT DOCUMENTED
+fact sheet the rows below quote from ships in-repo at
+`references/anthropic-grammar.md` (verbatim quotes + [S<n>]
+tags). Items their docs do not state are marked NOT DOCUMENTED
 below, never inferred.
 
 ## 1. Shape of each side in one screen
@@ -88,7 +89,7 @@ A script is **importable** iff, after `node --check` passes, its body consists O
 
 Anything else — loops, `if`, closures capturing results, any other `.filter`/`.map`/`.then`, `Promise.resolve`, object/array construction from results, `Date.now()`, `Math.random()`, `import`, a non-literal `meta`, an unknown `agent()` option — is **refused** with the construct and line named. The fixture corpus in `tests/fixtures/dialect/` is the executable form of this paragraph; each `.expected.json` is a `{verdict, reason}` that #33's tests assert against. Syntax gate fact: `node --check <file>.js` exits 0 on their shape (ESM `export` + top-level `await` + top-level `return`) as a `.js` file; the same bytes as `.mjs` or on stdin `--input-type=module` fail with `Illegal return statement`, so the importer must check the `.js` path, not a module string.
 
-Data-flow rule inside the subset: a template reference `${x.field}` where `x` is a prior agent const becomes `inputs:["x.field"]` + `after:["x"]` + the `{item}`-style placeholder in the goal; `pipeline(x.files, …)` becomes `fanout.items_from:"x.files"`; `args.key` in a template becomes `{run.key}`.
+Data-flow rule inside the subset: a template reference `${x.field}` in a NON-fan-out goal where `x` is a prior agent const imports as `inputs:["x.field"]` + `after:["x"]`, and the goal NAMES the input in prose ("Implement the refactor of the proposed target; rationale follows.") — there is NO brace interpolation on plain agent goals: only fan-out item goals substitute `{field}` from the item (wf.py `fmt_goal`) and only the door substitutes `{run.KEY}` at launch, so a `{x.field}` token in a normal goal ships literally. `<field>` must be a key the referenced agent's `schema` declares, or use the bare const `x` (auto-injected whole). Any property access on a `pipeline`/`parallel` const (`.length`, `[i]`, `.items`) is a named REFUSE — their result is a positional array, our fan-out commits an object `{items, all_results}`, and `build_inputs` cannot resolve such a ref (the node would fail at spawn; the runtime wins over the grammar). `pipeline(x.files, …)` becomes `fanout.items_from:"x.files"` (per-item `{field}` templates ARE legal there); `args.key` in a template string becomes `{run.key}`.
 
 ## 4. What this PR does not decide
 
