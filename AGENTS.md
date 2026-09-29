@@ -167,10 +167,17 @@ succeed, the rest are cancelled; without it the fan-out waits for every item;
 
 - `node.failed` events carry `error_class` from a closed set — `timeout | cap_exhausted |
   early_death | provider_400 | unresolved_model | transport | transport_exhausted | schema |
-  crashed | spawn | graph_invalid | cancelled | inputs | quorum | fanout_empty | incomplete_work |
-  unknown` —
+  crashed | spawn | graph_invalid | cancelled | inputs | quorum | fanout_empty |
+  fatal_quota | route_unavailable | incomplete_work | unknown` —
   plus `attempts`. Read the class, not the prose. `cancelled` (a `stop`, or a fan-out
   straggler at quorum) is never a failure: the run reads `stopped`, and a `wait` re-drives it.
+  `fatal_quota` (#24): a 429 whose own text carries a reset horizon beyond the run's
+  reach — fails on the FIRST attempt (the retry ladder cannot beat a multi-day reset)
+  and stamps the model into the seat quota cache; the door then refuses a launch on
+  that model until the horizon passes (one recovery ping first).
+  `route_unavailable` (#25): a pinned route the door's ping affirmatively proved dead
+  or answered-from-the-fallback-ladder (submit refusal), or a committed served_model
+  that contradicts the door's alive-proof (commit hold) — never silent fallback billing.
   `incomplete_work` (digest 29d / 64c6772b): a node with `repo: <lane>` committed done/partial while
   the lane still had uncommitted TRACKED changes — the runner refuses the false hand-off and the
   record carries `lane_dirty` porcelain; commit in the lane, then amend/re-run re-drives the node.
