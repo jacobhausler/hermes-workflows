@@ -60,7 +60,7 @@ Use the active host's Python 3 and Node.js, not a hard-coded installation path. 
 
 ## Removal
 
-Before disabling, call `workflow {"action":"list"}` and stop every live run with `workflow {"action":"stop","run_id":"<id>"}`. Detached runners can survive session end, gateway restart and plugin disable; disable is not a stop command. Then disable the plugin, remove only its source directory and app-level plugin file, then restart the backend and reload desktop plugins. Remove the optional copied skill only if it is the copy you installed. Workflow runs, the library, state.db, logs, existing profile data and archives are preserved, not uninstalled.
+Before disabling, call `workflow {"action":"list"}` and stop every live run with `workflow {"action":"stop","run_id":"<id>"}`. Detached runners can survive session end, gateway restart and plugin disable; disable is not a stop command. Then disable the plugin, remove only its source directory and app-level plugin file, then restart the backend and reload desktop plugins. Remove the optional skill link (or copied skill, if this host could not symlink) only if you installed it. Workflow runs, the library, state.db, logs, existing profile data and archives are preserved, not uninstalled.
 
     hermes plugins disable hermes-workflows
     printf '%s\n' "$HERMES_HOME/plugins/hermes-workflows" "$HERMES_HOME/desktop-plugins/hermes-workflows" "$HERMES_HOME/skills/workflow"

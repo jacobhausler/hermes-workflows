@@ -89,9 +89,13 @@ papercuts).
   dict, `json.dumps` + `json_loads` to validate, then emit the compact string
   verbatim (or write it to a file and use `graph_path`). Generated → launches
   first try; hand-pasted → wasted calls on bare `not valid JSON` errors.
-- A literal `model` id that is the TARGET of a seat alias can resolve to a
-  different route than the alias and die HTTP 400 — prefer the alias and always
-  read the `run` response's resolved routing table.
+- **Model routing: pin provider+model when it matters.** A literal id that is a
+  seat alias's TARGET can resolve differently than the alias (HTTP 400/404 from
+  the wrong route), and an alias can preflight its bare name to the provider and
+  die 404 (`opus` → `anthropic/opus` while the alias meant `claude-opus-5-5`).
+  For anything but the seat default, pass explicit `provider` + literal `model`
+  and read the `run` response's resolved route table — and check the child's
+  served-model stamp before trusting execution.
 - Bound reasoning as well as turns on recon nodes: set an explicit effort, make
   recovery consume existing artifacts, narrow unfinished checks; raising the
   timeout alone does not make a child write its conclusions.
