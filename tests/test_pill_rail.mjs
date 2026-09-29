@@ -29,9 +29,9 @@ export const Codicon = 'Codicon', EmptyState = 'EmptyState', ScrollArea = 'Scrol
 export const StatusDot = 'StatusDot', PanelListRow = 'PanelListRow', PanelPill = 'PanelPill'
 export const PanelSectionLabel = 'PanelSectionLabel'
 export const atoms = { focusedSessionId: atom(''), focusedStoredSessionId: atom('') }
+// The SDK exposes the focused-chat atoms ONLY under host.state (sdk/index.ts).
 export const host = {
-  focusedSessionId: atoms.focusedSessionId,
-  focusedStoredSessionId: atoms.focusedStoredSessionId,
+  state: atoms,
   navigate: () => {}, notify: () => {}
 }
 export const ROUTES_AREA = 'routes', PANES_AREA = 'panes', TRANSCRIPT_DIRECTIVE_AREA = 'transcript.directives'
@@ -84,14 +84,16 @@ const textOf = node => {
   if (node == null || typeof node === 'boolean') return ''
   if (typeof node === 'string') return node
   if (Array.isArray(node)) return node.map(textOf).join(' ')
+  if (typeof node.type === 'function') return textOf(node.type(node.props)) // render the component
   return textOf(node.props?.children)
 }
-// walk the raw jsx tree; components are NOT auto-rendered, so pass a predicate
-// and invoke the found component yourself when you need its interior.
+// walk the jsx tree, RENDERING function components on the way down so nested
+// components (Pill inside PillRail, GateActions inside Pill) are visible.
 const findBy = (node, pred, out = []) => {
   if (node == null || typeof node === 'boolean' || typeof node === 'string') return out
   if (Array.isArray(node)) { node.forEach(n => findBy(n, pred, out)); return out }
   if (pred(node)) out.push(node)
+  if (typeof node.type === 'function') { findBy(node.type(node.props), pred, out); return out }
   findBy(node.props?.children, pred, out)
   return out
 }
@@ -146,13 +148,15 @@ const render = n => (typeof n.type === 'function' ? n.type(n.props) : n)
 // -- 4. progress: never fabricated -------------------------------------------------
 {
   const m = railModel([
-    mk('a', 'running', { nodes_done: 4, nodes_total: 7 }),
-    mk('b', 'running'),
-    mk('c', 'running', { nodes_done: 2 }),
+    mk('a', 'running', { started: '2026-09-26T04:02:00Z', nodes_done: 4, nodes_total: 7 }),
+    mk('b', 'running', { started: '2026-09-26T04:01:00Z' }),
+    mk('c', 'running', { started: '2026-09-26T04:00:00Z', nodes_done: 2 }),
+  ])
+  const m2 = railModel([
     mk('d', 'running', { nodes_total: 6 }),
     mk('e', 'running', { nodes_done: null, nodes_total: null }),
   ])
-  const by = Object.fromEntries(m.pills.map(p => [p.id, p]))
+  const by = Object.fromEntries([...m.pills, ...m2.pills].map(p => [p.id, p]))
   assert.equal(by.a.progress, '4/7')
   assert.equal(by.b.progress, '?', 'absent counts render ? — never 0/N')
   assert.equal(by.c.progress, '?', 'nodes_done without nodes_total is not fabricated')
@@ -174,8 +178,10 @@ const render = n => (typeof n.type === 'function' ? n.type(n.props) : n)
   const texts = textOf(tree)
   assert.ok(texts.includes('live-run'), 'pill shows the short name')
   assert.ok(texts.includes('4/7'), 'pill shows done/total')
-  const dots = findBy(tree, n => typeof n.type === 'function' && /Dot$/.test(n.type.name))
-  assert.ok(dots.length >= 2, 'every pill leads with a Dot ([Dot][short name][done/total])')
+  const pills = findBy(tree, n => typeof n.type === 'function' && n.type.name === 'Pill')
+  assert.equal(pills.length, 2, 'one Pill per live run')
+  const dots = pills.flatMap(p => findBy(render(p), n => typeof n.type === 'function' && /Dot$/.test(n.type.name)))
+  assert.equal(dots.length, 2, 'every pill leads with a Dot ([Dot][short name][done/total])')
 
   // the gate-held pill keeps GateActions — and it still renders question + options
   const ga = findBy(tree, n => typeof n.type === 'function' && n.type.name === 'GateActions')
@@ -210,7 +216,7 @@ const render = n => (typeof n.type === 'function' ? n.type(n.props) : n)
   assert.ok(strip, 'SessionStrip renders for an owned live set')
   const rails = findBy(strip, n => n.type === PillRail)
   assert.equal(rails.length, 1, 'SessionStrip renders exactly one PillRail')
-  assert.deepEqual(rails[0].props.runs.map(r => r.id), ['gate-run', 'live-run', 'r3'],
+  assert.deepEqual(rails[0].props.runs.map(r => r.id), ['gate-run', 'r3', 'live-run'],
     'PillRail gets the active set (held first, started desc, capped)')
   const railText = textOf(render(rails[0]))
   assert.ok(railText.includes('4/7'), 'strip rail carries progress')

@@ -609,9 +609,10 @@ function MiniGraph({ detail }) {
 
 // -- 1b. composer session strip (composer.top) ----------------------------------
 // The runs of the FOCUSED chat, above its composer. Pure core (ownedRuns,
-// splitRuns, pillModel) so node can test the model without a DOM; the O3
-// pane reuses ownedRuns for its "this chat" tag. Fold state is an in-memory
-// plugin atom — never localStorage.
+// splitRuns, railModel, pillModel) so node can test the model without a DOM;
+// the O3 pane reuses ownedRuns for its "this chat" tag. Live runs render as one
+// horizontal PillRail row; terminal runs keep the fold. Fold state is an
+// in-memory plugin atom — never localStorage.
 
 const $stripFold = atom(null) // focused sid while its terminal fold is expanded
 // Feature-detect the focused-chat atoms: packaged apps older than the SDK
@@ -667,30 +668,79 @@ export function groupRuns(runs) {
   }
 }
 
-function StripRow({ run }) {
-  const start = parseTime(run.started)
-  const end = TERMINAL.has(run.status) ? parseTime(run.updated) : Date.now()
-  const [row1, row2] = inlineHeader(run, start && end > start ? end - start : null)
-  return jsxs('div', {
-    className: 'flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[0.6875rem]',
+// Compact progress for the rail pills: `${nodes_done}/${nodes_total}`, and
+// '?' whenever either count is absent — an absent count is never fabricated
+// as 0/N the way nodesCount() does for terminal rows.
+const pillProgress = r =>
+  (r?.nodes_done != null && r?.nodes_total != null) ? `${r.nodes_done}/${r.nodes_total}` : '?'
+
+/** Rail model over one chat's owned runs: the LIVE set folded into pills —
+ *  held first, then running by started desc, capped at 3 (the same policy as
+ *  splitRuns, which stays for the pane and the terminal fold). Pure, so node
+ *  can test it without a DOM. */
+export function railModel(ownedRunsList) {
+  const live = (ownedRunsList || []).filter(r => !TERMINAL.has(r.status))
+  const held = live.filter(r => r.status === 'held')
+  const rest = live.filter(r => r.status !== 'held')
+    .sort((a, b) => parseTime(b.started) - parseTime(a.started))
+  const active = [...held, ...rest]
+  return {
+    pills: active.slice(0, 3).map(r => ({
+      id: r.id,
+      label: r.name || r.id || 'workflow',
+      status: statusLabel(r.status),
+      progress: pillProgress(r),
+      held: r.status === 'held',
+    })),
+    overflow: Math.max(0, active.length - 3)
+  }
+}
+
+function Pill({ run }) {
+  return jsxs('button', {
+    type: 'button',
+    title: `${run.name || run.id} — open in Workflows`,
+    onClick: () => { $selRun.set(run.id); host.navigate('/workflows') },
+    style: {
+      display: 'inline-flex', alignItems: 'center', gap: 6, maxWidth: 220,
+      fontSize: '0.6875rem', padding: '2px 8px', borderRadius: 999, cursor: 'pointer',
+      background: 'var(--ui-sidebar-surface-background, var(--card))',
+      border: '1px solid var(--ui-stroke-secondary)',
+    },
     children: [
       jsx(Dot, { status: run.status }),
-      ...row1.map((text, i) => jsx('span', {
-        className: i === 0 ? 'font-medium text-(--ui-text-secondary)' : 'text-(--ui-text-tertiary)',
-        children: text
-      }, i)),
-      ...row2.map((text, i) => jsx('span', {
-        className: 'text-(--ui-text-tertiary)', style: { fontSize: 10, fontVariantNumeric: 'tabular-nums' },
-        children: text
-      }, row1.length + i)),
+      jsx('span', { style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }, children: run.name || run.id || 'workflow' }),
+      jsx('span', { style: { fontVariantNumeric: 'tabular-nums', opacity: 0.7 }, children: pillProgress(run) }),
+      // Gate-held pills keep GateActions (question + option buttons inline).
       run.status === 'held' && run.held_gate
-        ? jsx(GateActions, {
-            runId: run.id, gate: run.held_gate, owner: run.owner || {},
-            // Gate answers route to the run's OWNER session via the public
-            // composer SDK (visible submit / insert fallback) — never the
-            // focused chat, never app DOM or private events.
-          }, 'gate')
-        : null
+        ? jsx(GateActions, { runId: run.id, gate: run.held_gate, owner: run.owner || {} }, 'gate')
+        : null,
+    ]
+  }, run.id)
+}
+
+/** One horizontal row of compact pills for the session's live runs, plus the
+ *  +N overflow affordance beyond the cap. Renders nothing for an empty set —
+ *  never an empty bordered box. */
+export function PillRail({ runs }) {
+  const { pills, overflow } = railModel(runs)
+  if (!pills.length) return null
+  const byId = Object.fromEntries((runs || []).map(r => [r.id, r]))
+  return jsxs('div', {
+    style: {
+      display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 6,
+      flexWrap: 'wrap', padding: '2px 0',
+    },
+    children: [
+      ...pills.map(p => jsx(Pill, { run: byId[p.id] || { id: p.id, name: p.label, status: p.status } }, p.id)),
+      overflow > 0
+        ? jsx('button', {
+            type: 'button',
+            style: { cursor: 'pointer', background: 'none', border: 'none', padding: 0, fontSize: '0.6875rem' },
+            onClick: () => host.navigate('/workflows'),
+            children: `+${overflow} more → Workflows`
+          }, 'overflow')
+        : null,
     ]
   })
 }
@@ -712,20 +762,14 @@ export function SessionStrip() {
   const owned = ownedRuns(data?.runs || [], runtimeSid || '', storedSid || '')
   const pairKey = runtimeSid || storedSid || ''
   if (!pairKey || !owned.length) return null
-  const { active, overflow, terminalFold, terminalTotal } = splitRuns(owned)
+  const { active, terminalFold, terminalTotal } = splitRuns(owned)
   const openRun = id => { $selRun.set(id); host.navigate('/workflows') }
   const folded = foldOpen !== pairKey
   return box(
     'flex flex-col gap-0.5 border-b border-(--ui-stroke-secondary) px-3 py-1',
-    ...active.map(r => jsx(StripRow, { run: r }, r.id)),
-    overflow > 0
-      ? jsx('button', {
-          type: 'button', className: 'text-left text-[0.6875rem] text-(--ui-text-tertiary)',
-          style: { cursor: 'pointer', background: 'none', border: 'none', padding: 0 },
-          onClick: () => host.navigate('/workflows'),
-          children: `+${overflow} more → Workflows`
-        })
-      : null,
+    // Live set: one horizontal pill rail (railModel caps at 3 + overflow).
+    // Terminal runs keep their own fold below it, unchanged.
+    jsx(PillRail, { runs: active }),
     terminalTotal
       ? jsxs('button', {
           type: 'button', className: 'text-[0.6875rem] text-(--ui-text-tertiary)',
