@@ -15,6 +15,29 @@ Every feature is OPTIONAL: a no-team run (default profile, no `WF_RUNS_ROOT`) is
 
 ## Unreleased
 
+- Desktop — pill rail for the session's live runs + expansion (#22 rail half; the
+  auto-card half stays backlog): `railModel(ownedRuns)` (exported pure) folds the live
+  set into pills — held first, then running by `started` desc, capped at 3 + overflow
+  (same policy as `splitRuns`, which stays for the pane); `PillRail` renders one
+  horizontal row of compact pills `[Dot][short name][done/total]` and gate-held pills
+  keep `GateActions`; progress is `${nodes_done}/${nodes_total}` and `?` when either
+  count is absent — never fabricated. Clicking a pill expands the run's existing
+  `MiniGraph` (via `runQuery`) in a mini node-strip ABOVE the rail; clicking the open
+  pill, Esc, a click outside the rail, or switching the focused chat collapses it.
+  Open state is the in-memory `$railOpen` atom (`{sid, runId}`, never localStorage);
+  `toggleRail` is the exported pure transition core. Theme via
+  `var(--ui-sidebar-surface-background, var(--card))` + `--ui-stroke-secondary`, inline
+  style only. Tests: `tests/test_pill_rail.mjs`, `tests/test_pill_rail_expand.mjs`.
+- Desktop — the session strip mounts in `composer.underside` when the SDK offers it
+  (#22): `register()` uses `COMPOSER_AREAS.underside ?? COMPOSER_AREAS.top`. On core
+  >= v2026.7.30 the strip is the floating strip BELOW the composer dock —
+  bottom-anchored, grows upward over the thread, and does not dim on scroll-up
+  (composer/index.tsx:1558-1560). `COMPOSER_AREAS` is an SDK const map, so a missing
+  key means the core doesn't mount the area at all; `??` then keeps today's
+  `composer.top` slot on older shells. One mount, never both.
+  `tests/test_register_surface.mjs` loads the module against both stub SDK shapes
+  (area-set assertions per shape) and asserts hook-order safety: `SessionStrip` calls
+  `useValue`/`useQuery` before its null return.
 - fix #23 (desktop): `SessionStrip` and the pane's `this chat` pill read the focused-chat
   atoms from `host.state.focusedSessionId` / `host.state.focusedStoredSessionId` — the SDK
   exposes them ONLY under `host.state` (sdk/index.ts:665-697). Reading `host.focusedSessionId`

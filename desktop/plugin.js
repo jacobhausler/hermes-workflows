@@ -607,14 +607,33 @@ function MiniGraph({ detail }) {
   })
 }
 
-// -- 1b. composer session strip (composer.top) ----------------------------------
-// The runs of the FOCUSED chat, above its composer. Pure core (ownedRuns,
+// -- 1b. composer session strip (composer.underside, fallback composer.top) -----
+// The runs of the FOCUSED chat at its composer. Pure core (ownedRuns,
 // splitRuns, railModel, pillModel) so node can test the model without a DOM;
 // the O3 pane reuses ownedRuns for its "this chat" tag. Live runs render as one
-// horizontal PillRail row; terminal runs keep the fold. Fold state is an
-// in-memory plugin atom — never localStorage.
+// horizontal PillRail row, one pill expanding to a MiniGraph node-strip above
+// the rail; terminal runs keep the fold. Fold/rail state is an in-memory
+// plugin atom — never localStorage.
 
 const $stripFold = atom(null) // focused sid while its terminal fold is expanded
+// Which pill is expanded into the mini node-strip ABOVE the rail (#22 item 4):
+// {sid, runId} or null. In-memory plugin atom — never persisted, so a reload
+// never resurrects an expanded panel.
+const $railOpen = atom(null)
+// Last $railOpen value SEEN by SessionStrip's render (useValue subscription
+// re-renders on every change, so this is only ever stale for the microseconds
+// between an atom set and the re-render it triggers). The SDK atom is
+// set/useValue only — the click handler may not read the atom (.get() throws
+// there), so render parks the value here for the toggle.
+let railOpenSeen = null
+
+/** Pure pill-toggle (exported so node can test the transition table without a
+ *  DOM): null → open {sid, runId}; clicking the OPEN pill (same sid AND same
+ *  runId) → null; anything else (other pill, or same runId under a new sid) →
+ *  that pill opens fresh. */
+export function toggleRail(state, sid, runId) {
+  return state && state.sid === sid && state.runId === runId ? null : { sid, runId }
+}
 // Feature-detect the focused-chat atoms: packaged apps older than the SDK
 // checkout may not expose every atom (the Sep-16 build has no runtime-id atom,
 // and `useValue(undefined)` dies as "reading 'get'"). A missing atom degrades
@@ -696,11 +715,19 @@ export function railModel(ownedRunsList) {
   }
 }
 
-function Pill({ run }) {
+export function Pill({ run, sid }) {
   return jsxs('button', {
     type: 'button',
-    title: `${run.name || run.id} — open in Workflows`,
-    onClick: () => { $selRun.set(run.id); host.navigate('/workflows') },
+    title: `${run.name || run.id} — node strip ${railOpenSeen && railOpenSeen.runId === run.id ? 'below' : 'above'} the rail`,
+    // Toggle the mini node-strip (item 4), do NOT navigate: the rail is the
+    // glanceable view; the +N overflow and the terminal rows still deep-link.
+    // The SDK atom is set/useValue only — the handler may not .get() the atom,
+    // so it toggles off railOpenSeen (parked by the last render) via the pure
+    // toggleRail table.
+    onClick: e => {
+      e?.stopPropagation?.()
+      $railOpen.set(toggleRail(railOpenSeen, sid, run.id))
+    },
     style: {
       display: 'inline-flex', alignItems: 'center', gap: 6, maxWidth: 220,
       fontSize: '0.6875rem', padding: '2px 8px', borderRadius: 999, cursor: 'pointer',
@@ -722,7 +749,7 @@ function Pill({ run }) {
 /** One horizontal row of compact pills for the session's live runs, plus the
  *  +N overflow affordance beyond the cap. Renders nothing for an empty set —
  *  never an empty bordered box. */
-export function PillRail({ runs }) {
+export function PillRail({ runs, sid }) {
   const { pills, overflow } = railModel(runs)
   if (!pills.length) return null
   const byId = Object.fromEntries((runs || []).map(r => [r.id, r]))
@@ -732,7 +759,7 @@ export function PillRail({ runs }) {
       flexWrap: 'wrap', padding: '2px 0',
     },
     children: [
-      ...pills.map(p => jsx(Pill, { run: byId[p.id] || { id: p.id, name: p.label, status: p.status } }, p.id)),
+      ...pills.map(p => jsx(Pill, { run: byId[p.id] || { id: p.id, name: p.label, status: p.status }, sid }, p.id)),
       overflow > 0
         ? jsx('button', {
             type: 'button',
@@ -743,6 +770,24 @@ export function PillRail({ runs }) {
         : null,
     ]
   })
+}
+
+/** Mini node-strip ABOVE the pills for the one expanded run (#22 item 4):
+ *  the run's existing MiniGraph fed by runQuery. Its own component so the
+ *  runQuery hook runs only while expanded (rendering a component conditionally
+ *  is legal; hooks behind an early return would not be). */
+function RailPanel({ runId }) {
+  const { data } = useQuery(runQuery(runId))
+  if (!data) return null
+  return jsx('div', {
+    style: {
+      maxWidth: '100%', maxHeight: 160, overflowY: 'auto',
+      border: '1px solid var(--ui-stroke-secondary)', borderRadius: 8,
+      background: 'var(--ui-sidebar-surface-background, var(--card))',
+      padding: '4px 6px'
+    },
+    children: jsx(MiniGraph, { detail: data })
+  }, 'rail-panel')
 }
 
 export function SessionStrip() {
@@ -759,37 +804,66 @@ export function SessionStrip() {
   const storedSid = useValue(focusAtom(host?.state?.focusedStoredSessionId))
   const { data } = useQuery(listQuery())
   const foldOpen = useValue($stripFold)
+  const railOpen = useValue($railOpen)
+  railOpenSeen = railOpen
   const owned = ownedRuns(data?.runs || [], runtimeSid || '', storedSid || '')
   const pairKey = runtimeSid || storedSid || ''
+  const expanded = railOpen && railOpen.sid === pairKey ? railOpen.runId : null
+  const railRef = useRef(null)
+  // Hooks run UNCONDITIONALLY (fixed order across renders); the bodies guard
+  // themselves. Switching focused chat collapses the expanded panel.
+  useEffect(() => { $railOpen.set(null) }, [pairKey])
+  // Click-away collapse (item 4), armed only while a panel is open.
+  // window-level listener (no `document.` — SDK-only law); clicks that land
+  // inside the rail are excluded by the railRef.contains check.
+  useEffect(() => {
+    if (!expanded) return
+    const onDocClick = e => {
+      if (railRef.current && !railRef.current.contains(e.target)) $railOpen.set(null)
+    }
+    window.addEventListener('click', onDocClick)
+    return () => window.removeEventListener('click', onDocClick)
+  }, [expanded])
   if (!pairKey || !owned.length) return null
   const { active, terminalFold, terminalTotal } = splitRuns(owned)
   const openRun = id => { $selRun.set(id); host.navigate('/workflows') }
   const folded = foldOpen !== pairKey
-  return box(
-    'flex flex-col gap-0.5 border-b border-(--ui-stroke-secondary) px-3 py-1',
-    // Live set: one horizontal pill rail (railModel caps at 3 + overflow).
-    // Terminal runs keep their own fold below it, unchanged.
-    jsx(PillRail, { runs: active }),
-    terminalTotal
-      ? jsxs('button', {
-          type: 'button', className: 'text-[0.6875rem] text-(--ui-text-tertiary)',
-          style: { cursor: 'pointer', background: 'none', border: 'none', padding: 0, textAlign: 'left' },
-          onClick: () => $stripFold.set(folded ? pairKey : null),
-          children: [`▸ ${terminalTotal} finished`]
-        })
-      : null,
-    !folded
-      ? box(
-          'flex flex-col gap-0.5 pl-3',
-          ...terminalFold.map(r => jsx('button', {
-            type: 'button', className: 'text-left text-[0.6875rem] text-(--ui-text-tertiary)',
-            style: { cursor: 'pointer', background: 'none', border: 'none', padding: 0 },
-            onClick: () => openRun(r.id),
-            children: `${r.name || r.id} · ${statusLabel(r.status)} · ${ago(r.updated) || 'unknown'}`
-          }, r.id))
-        )
-      : null
-  )
+  return jsxs('div', {
+    ref: railRef,
+    className: 'flex flex-col gap-0.5 border-b border-(--ui-stroke-secondary) px-3 py-1',
+    // Esc collapse (item 4): scoped to the rail via onKeyDown — the ⌘K law
+    // forbids global keydown listeners (test_fanout_expand), and a pill click
+    // leaves focus inside the strip, so Escape lands here. Nothing else
+    // intercepts keys; ⌘K keeps bubbling app-owned.
+    onKeyDown: e => { if (e.key === 'Escape' && expanded) $railOpen.set(null) },
+    children: [
+      // Expanded panel sits ABOVE the pills: the strip stacks bottom-anchored
+      // (composer.underside grows upward over the thread).
+      expanded ? jsx(RailPanel, { runId: expanded }, expanded) : null,
+      // Live set: one horizontal pill rail (railModel caps at 3 + overflow).
+      // Terminal runs keep their own fold below it, unchanged.
+      jsx(PillRail, { runs: active, sid: pairKey }),
+      terminalTotal
+        ? jsxs('button', {
+            type: 'button', className: 'text-[0.6875rem] text-(--ui-text-tertiary)',
+            style: { cursor: 'pointer', background: 'none', border: 'none', padding: 0, textAlign: 'left' },
+            onClick: () => $stripFold.set(folded ? pairKey : null),
+            children: [`▸ ${terminalTotal} finished`]
+          })
+        : null,
+      !folded
+        ? box(
+            'flex flex-col gap-0.5 pl-3',
+            ...terminalFold.map(r => jsx('button', {
+              type: 'button', className: 'text-left text-[0.6875rem] text-(--ui-text-tertiary)',
+              style: { cursor: 'pointer', background: 'none', border: 'none', padding: 0 },
+              onClick: () => openRun(r.id),
+              children: `${r.name || r.id} · ${statusLabel(r.status)} · ${ago(r.updated) || 'unknown'}`
+            }, r.id))
+          )
+        : null
+    ]
+  })
 }
 
 // -- 2. page /workflows ---------------------------------------------------------
