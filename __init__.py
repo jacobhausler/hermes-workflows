@@ -1432,8 +1432,12 @@ def act_wait(args):
     st = run_state(r)
     if not st:
         return {"error": "unknown run_id"}
-    if st["status"] in ("running", "pending", "interrupted") and not runner_alive(r):
-        _spawn_runner(r)  # only this explicit wait resumes unfinished work
+    top_alive = None
+    if st["status"] in ("running", "pending", "interrupted"):
+        top_alive = runner_alive(r)
+        if not top_alive:
+            _spawn_runner(r)  # only this explicit wait resumes unfinished work
+            last_spawn, spawn_tries = time.time(), 1
     cap = min(float(args.get("timeout", 600)), 1800)
     # fb-validator-duo (2026-09-26): the clamp stays (harness deadline guard), but a
     # silent cut is a papercut — echo it in the result when it bites.
@@ -1449,15 +1453,38 @@ def act_wait(args):
     # a client-side "timed out after 420.0s" error mid-sleep (papercut 2026-09-22).
     seg = min(cap, 330)
     t0 = time.time()
+    last_spawn, spawn_tries = 0.0, 0
+    def _respawn_throttled():
+        """91b9a3de companion (R6): the flock probe has a sub-second HELD window
+        after a SIGKILL — the kernel releases only once the dying process is torn
+        down — so the top-of-call liveness read can legitimately say alive for a
+        runner that is already dying. When the loop then sees the work orphaned,
+        re-attempt the spawn — but ONLY when the top read said alive (that dying
+        shape; test_live_truth pins one spawn per explicit resume otherwise), at
+        most 3 tries, and at most ~1/s. The runner's own flock admission makes a
+        double-spawn harmless (loser emits WORKFLOW_BUSY and exits — see
+        _spawn_runner's law), so the bound only needs to cap a crash-loop."""
+        nonlocal last_spawn, spawn_tries
+        if spawn_tries >= 3 or time.time() - last_spawn < 1.0:
+            return False
+        last_spawn, spawn_tries = time.time(), spawn_tries + 1
+        _spawn_runner(r)
+        return True
     while True:
         st = run_state(r)
-        alive = runner_alive(r)
+        alive = st.get("runner_live", False)   # THE ONE read (91b9a3de companion) —
+        # a re-probe microseconds later can flip across a dying runner's flock and
+        # leave status/alive disagreeing (the R6 regression shape).
         # Version-skew guard (burned 2026-09-23): a runner spawned fresh from disk may
         # commit statuses this door's read model predates; its own verdict is the truth.
         rx = (st.get("runner_exit") or {}).get("reason")
         if rx == "done" and not alive:
             return _echo(act_status(args))
         if st["status"] not in ("running", "pending") or not alive:
+            if st["status"] == "interrupted" and top_alive \
+                    and _respawn_throttled():
+                time.sleep(0.25)
+                continue
             return _echo(act_status(args))
         if time.time() - t0 > cap:
             return _echo({**act_status(args), "note": f"still running after {cap}s (wait again)"})
