@@ -15,6 +15,7 @@ Every feature is OPTIONAL: a no-team run (default profile, no `WF_RUNS_ROOT`) is
 
 ## Unreleased
 
+- #31 grammar-dialect-1: `references/dialect.md` maps Anthropic's Claude Code dynamic-workflow JS grammar (agent/parallel/pipeline/phase/args/plain-JS glue/caps/worktrees) to our JSON graph with a filled DEVIATION JUSTIFICATION column per row, and `tests/fixtures/dialect/` (12 `.js` scripts + `.expected.json` verdicts) pins the constrained-subset import contract that #33 implements. Docs + fixtures only; no importer/exporter code.
 - #24 fatal_quota (from @pf-mechanic-2's report): a 429 whose own text carries a
   reset horizon (`resets in ~109h`) is classed `fatal_quota` — the node fails on the
   FIRST attempt (the bounded retry ladder can never beat a multi-day reset; the
