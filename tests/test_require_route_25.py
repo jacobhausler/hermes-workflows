@@ -131,6 +131,47 @@ if rid:
     gj = json.loads((Path(os.environ["HERMES_HOME"]) / "workflows" / rid / "graph.json").read_text())
     check("alive proof baked: route_verified=openai/m-1",
           gj["nodes"][0].get("route_verified") == "openai/m-1", gj["nodes"][0])
+    # F1 REGRESSION (deep review, reproduced): the runner re-validates the committed
+    # graph.json with wfcommon.validate_graph — the door bakes route_verified AFTER
+    # its own validation, so the key MUST live in AGENT_KEYS or every alive-proved
+    # run dies at runner start with `unknown key` (zero nodes run).
+    import wfcommon as wc
+    errs = wc.validate_graph(gj["nodes"])
+    check("baked graph.json passes the RUNNER validator (F1)", not errs, str(errs))
+    # F1 (deep review): the validator call alone is not the real path — run the
+    # ACTUAL runner (wf.py main) on the baked graph.json with the fake child, the
+    # way production spawns it. Without route_verified in AGENT_KEYS this dies at
+    # runner start: runner_exit "crashed: graph invalid", zero nodes run.
+    import shutil, subprocess
+    fake = Path(os.environ["HERMES_HOME"]) / "fake-rr25"
+    shutil.copy(HERE / "tests" / "fake_hermes.py", fake)
+    os.chmod(fake, 0o755)
+    rdir = Path(os.environ["HERMES_HOME"]) / "workflows" / rid
+    (rdir / "run.json").write_text(json.dumps(
+        {"hermes_bin": str(fake), "concurrency": 1, "node_timeout": 60}))
+    flog = Path(os.environ["HERMES_HOME"]) / "f1-runner.log"
+    pr = subprocess.run([sys.executable, str(HERE / "wf.py"), "run", str(rdir)],
+                        env=dict(os.environ, HERMES_HOME=os.environ["HERMES_HOME"],
+                                 FAKE_LOG=str(flog)),
+                        capture_output=True, text=True, timeout=120)
+    rec = json.loads((rdir / "nodes" / "a.json").read_text())
+    check("F1 real runner: baked graph launches, node DONE (no 'crashed: graph invalid')",
+          rec.get("status") == "done" and "WORKFLOW_DONE" in pr.stdout,
+          f"status={rec.get('status')} err={rec.get('error')} stdout={pr.stdout[:200]}")
+    # the proof is still not writable BY AN AUTHOR through the door: pre-validation
+    # the door strips it (_resolve_models pops it), so a resubmit can't forge it.
+    forged = pinned_graph()
+    forged["nodes"][0]["route_verified"] = "evil/route"
+    forged["nodes"][0]["require_route"] = False
+    set_ping({"raise_": HTTP429("Error code: 429 - rate limited")})
+    out_f = door.act_run({"graph": forged})
+    if out_f.get("run_id"):
+        gj_f = json.loads((Path(os.environ["HERMES_HOME"]) / "workflows" / out_f["run_id"] / "graph.json").read_text())
+        check("author-forged route_verified is dropped, never trusted",
+              gj_f["nodes"][0].get("route_verified") is None, gj_f["nodes"][0])
+    else:
+        check("author-forged route_verified resubmit still accepted (launches)", False, out_f)
+    set_ping({})
 
 # ---- 9. the runner commit hold: served mismatch fails, match/unknown pass -----------
 import wf as wfmod
@@ -176,6 +217,33 @@ out = door.act_run({"graph": {"name": "g", "nodes": [
     {"id": "g1", "type": "gate", "after": ["a"], "question": "?", "options": ["y"]},
     {"id": "e1", "type": "echo", "after": ["g1"], "output": {}}]}})
 check("gate/echo never route-gated", bool(out.get("run_id")), out)
+
+# ---- 11. (A3) policy keys never participate in def_hash / frozen replay -------------
+# The door bakes route_verified into graph.json AFTER validation, so the runner's
+# efp sees the baked node; and an amend that flips defaults.require_route re-bakes
+# the key into every agent node. Both MUST NOT change def_hash or the replay-skip
+# law would re-run every committed node.
+import wfcommon as wc2
+base = {"id": "a", "type": "agent", "goal": "x", "model": "m-1", "provider": "openai"}
+h0 = wc2.def_hash(base)
+h1 = wc2.def_hash({**base, "route_verified": "openai/m-1"})
+h2 = wc2.def_hash({**base, "require_route": False})
+check("def_hash ignores route_verified (A3)", h0 == h1, f"{h0} vs {h1}")
+check("def_hash ignores require_route (A3)", h0 == h2, f"{h0} vs {h2}")
+check("def_hash still sees real work changes",
+      wc2.def_hash({**base, "goal": "y"}) != h0)
+
+# (F2) an alive-proved, tier-pinned committed node re-submitted VERBATIM still
+# un-bakes (keeps its committed literal, re-resolves the tier) — the proof
+# annotation must not disable the idempotence branch.
+set_ping({})
+out = door.act_run({"graph": {
+    "name": "f2re", "nodes": [
+        {"id": "a", "type": "agent", "goal": "x", "tier": "worker",
+         "model": "qwen38-next", "provider": "openai",
+         "route_verified": "openai/qwen38-next"}]}})
+check("F2: verbatim committed def WITH proof still accepted",
+      "error" not in out, out)
 
 print("ALL PASS" if fails == 0 else f"FAILURES: {fails}")
 sys.exit(0 if fails == 0 else 1)

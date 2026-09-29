@@ -14,6 +14,35 @@ Every feature is OPTIONAL: a no-team run (default profile, no `WF_RUNS_ROOT`) is
 - Docs — lane F (5a7e631, Hermes Agent / lane F): SKILL.md team paragraph; `references/grammar.md` (`profile`, `requires`, gate `requires`, top-level `provenance`); `references/operations.md` (lanes/dedupe, runs root + identity + TRUST BOUNDARY: a shared `WF_RUNS_ROOT` is common trust, same UID; team fields are provenance, never an ACL).
 
 ## Unreleased
+
+- #24 fatal_quota (from @pf-mechanic-2's report): a 429 whose own text carries a
+  reset horizon (`resets in ~109h`) is classed `fatal_quota` — the node fails on the
+  FIRST attempt (the bounded retry ladder can never beat a multi-day reset; the
+  field case burned 3 spawns in 60s), and the model + horizon land in the seat quota
+  cache (`$HERMES_HOME/cache/workflow-quota-cache.json`). The door refuses a launch
+  whose node pins a cache-marked model — one recovery ping first, so a stale stamp
+  can't wedge a model that recovered early. Minute-granularity horizons
+  (`resets in 30 minutes`) are honored as minutes, not folded into the 6h default;
+  a provider-less (seat-default) stamp recovers on any answered ping, an
+  explicit-provider stamp only on a same-route alive ping (attribution law).
+- #25 fail-closed pinned routes (field report fb-fix-9c575645): a node that pins an
+  explicit model now gets `require_route` default TRUE — if the door's submit ping
+  AFFIRMATIVELY proves the pinned route dead, or answered from the fallback ladder
+  (recorded route != pinned route), the launch is REFUSED with
+  `error_class=route_unavailable` instead of silently billing the seat's fallback.
+  `require_route: false` (node or `defaults`) opts into the ladder explicitly;
+  infra-absence (ping impossible) stays unknown = warn-only, never a false block.
+  A ping that PROVES the route alive bakes `route_verified` (door-only proof — the
+  validator carries the key for the runner; `_resolve_models` drops any author or
+  stale value) and the runner's commit hold fails a node whose committed
+  served_model contradicts the proof. Deep-review pass 2 hardened: policy keys
+  (`require_route`/`route_verified`) are fingerprint-ignored like budgets, frozen
+  replay comparisons exclude the proof annotation, quota refusal skips replay-skip
+  nodes on amend, and a profile-routed hold reads the TARGET's aliases, never the
+  runner seat's. Tests: `test_fatal_quota_24` / `test_require_route_25` (+ runner
+  validator + forged-proof + def_hash + un-bake regression rows), golden-solo EMPTY
+  diff holds (solo graphs pin no models → no new bytes).
+
 ## 1.0.17 — 2026-09-28
 
 - Landed via #5 (repo owner) — `release 1.0.17 — catalog sync + F5/F6 replay & run_context fixes`: public tree synced with the PR #4-reviewed catalog fixes (visible `composer.submit` gate answers, launcher-only `hermes_bin`, disclosure docs), the 1.0.16 guarded per-route reasoning validation, and the two review fixes below (F5 replay, F6 brace guard). Review round R8 flipped the `f0f154d5`/`v4_fixes` regression tests to any-rule-match and refreshed `graphify-out`.

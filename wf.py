@@ -480,8 +480,14 @@ def _quota_note(model, marker):
     once before refusing, so a stale stamp can't wedge a run forever."""
     import os, re, time, json, tempfile
     m = _QUOTA_HORIZON_RE.search((marker or "").lower())
-    hours = int(m.group(1)) if m and m.group(2).startswith(("h",)) else (
-        int(m.group(1)) * 24 if m and m.group(2).startswith("d") else 6)
+    if m and m.group(2).startswith(("h",)):
+        hours = int(m.group(1))
+    elif m and m.group(2).startswith("d"):
+        hours = int(m.group(1)) * 24
+    elif m and m.group(2).startswith("m"):       # min|minute (regex captures them)
+        hours = max(int(m.group(1)) / 60.0, 1.0 / 60)   # short stamp, never zero
+    else:
+        hours = 6
     p = _quota_cache_path()
     try:
         data = json.loads(p.read_text()) if p.exists() else {}
@@ -1265,15 +1271,19 @@ def _seat_alias_map(home):
     """{alias -> target model} for one seat's config, stdlib-only (same YAML-lite
     spirit as wfcommon.seat_forbidden_models: hermes_cli when importable, else a flat
     scan of `model: aliases:` in config.yaml). Any failure returns {} — absence only
-    skips the alias half of the served-model hold, never fails a node."""
-    try:
-        from hermes_cli.config import load_config_readonly
-        cfg = load_config_readonly() or {}
-        amap = ((cfg.get("model") or {}).get("aliases")) or {}
-        if isinstance(amap, dict):
-            return {str(k): str(v) for k, v in amap.items() if v}
-    except Exception:
-        pass
+    skips the alias half of the served-model hold, never fails a node.
+    (A2: hermes_cli's load_config_readonly() takes NO path argument — it can only ever
+    read the RUNNER's seat. For a profile-routed node the target owns the aliases, so
+    a foreign home must go straight to that home's config.yaml, never core.)"""
+    if Path(home) == hermes_home():
+        try:
+            from hermes_cli.config import load_config_readonly
+            cfg = load_config_readonly() or {}
+            amap = ((cfg.get("model") or {}).get("aliases")) or {}
+            if isinstance(amap, dict):
+                return {str(k): str(v) for k, v in amap.items() if v}
+        except Exception:
+            pass
     try:
         lines = (Path(home) / "config.yaml").read_text().splitlines()
     except OSError:

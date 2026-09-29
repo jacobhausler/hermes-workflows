@@ -16,7 +16,8 @@ runner executes it, survives restarts, and hands results back through the same
 | **Human + machine gates** | A `gate` holds on a question until `release`; `gate.wait` holds for a timer or an argv probe; `when` predicates branch on upstream output; `on_skip:"prune"` kills the losing arm |
 | **Fingerprint resume** | Every finished node records an effective fingerprint. Crash, restart, or `amend` the graph — only what actually changed re-runs |
 | **Cooperative steer** | `steer` queues text; a running child pulls it at its next seam via the tool's `inbox` action |
-| **Typed failures** | Every `node.failed` event carries `error_class` + `attempts` (`timeout`, `cap_exhausted`, `provider_400`, `schema`, `cancelled`, …) — the parent never infers a cause from prose |
+| **Typed failures** | Every `node.failed` event carries `error_class` + `attempts` (`timeout`, `cap_exhausted`, `provider_400`, `schema`, `cancelled`, `fatal_quota`, `route_unavailable`, …) — the parent never infers a cause from prose |
+| **Route integrity** | A node that pins an explicit `model` is fail-closed by default (`require_route`): a dead or fallback-surprised pin refuses the launch instead of silently billing another model; an alive-proved pin bakes the door-only `route_verified` and the runner holds the served model to it |
 | **Compact status** | Mid-run `status`/`wait` return output *pointers*; `detail:"full"` opts into everything; terminal payloads are always full |
 | **Desktop DAG view** | Live graph, fan-out stacks, timeline, and a `::workflow{id="…"}` inline card in any reply |
 | **Library** | `save` a proven graph, `library` lists it, `run` with `from:` replays it |

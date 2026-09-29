@@ -156,6 +156,17 @@ def _validation_error(graph):
                 errs.append({"node": None, "field": f"nodes[{index}].id",
                              "msg": "node id must be a string"})
                 item["id"] = f"__invalid_id_{index}__"
+            # #25 (F1): `route_verified` is in the runner's closed set (the door bakes
+            # it into graph.json AFTER this check), but an AUTHOR value is never
+            # trusted: the door STRIPS it here — on the node it actually examines —
+            # so act_save (which validates WITHOUT _resolve_models) can never shelve
+            # a forged proof, and a resubmitted committed graph.json re-proves its
+            # proof through this submit's ping instead of replaying a stale one.
+            # A hard deny would break the documented amend flow (callers legitimately
+            # resubmit the current graph.json, proof included, verbatim).
+            if node.get("type") == "agent" and "route_verified" in node:
+                node.pop("route_verified", None)
+                item.pop("route_verified", None)
             deps = node.get("after", [])
             if not isinstance(deps, list) or any(not isinstance(dep, str) for dep in deps):
                 errs.append({"node": nid if isinstance(nid, str) else None,
@@ -237,7 +248,7 @@ WORKFLOW_PARAMS = {
         "graph_path": {"type": "string", "description": "run/save/amend: absolute path to a caller-supplied local regular UTF-8 JSON graph file (max 1 MiB, no final symlink). Choose exactly one of graph, graph_path, or run's from / save's run_id. Validated before any write or spawn."},
         "graph": {
             "type": "object",
-            "description": "For run/amend: {name, nodes:[...], defaults:{schema, timeout, max_turns, reasoning, provider, model, context}} where `defaults` fills agent node keys the author left unset (explicit node keys always win; defaults.context is the shared preamble prepended once to each agent's own context) and where node = {id, type:'agent'|'gate'|'echo', after:[node ids], goal, context, schema (json-schema for child output), model, provider (optional explicit Hermes provider paired with model; passed as --provider; when unset it is INHERITED from a provider-qualified model alias/tier), toolsets, max_turns, timeout (s wall-clock kill, default 900), shape (recon|build|review|publish — fills max_turns/timeout from the measured p95 census presets when the author left them unset; explicit keys win), run_budget (s, child's own budget), reasoning (a hermes reasoning effort: none|minimal|low|medium|high|xhigh|max|ultra — passed to the child as --reasoning; levels are validated PER ROUTE at the door against the resolved (provider, model) route's supported set, with the supported list and nearest level in the error — no silent downgrade), require_route (bool, default TRUE on nodes that pin an explicit model: the door's submit ping affirmatively proving the pinned route dead — or answered from the fallback ladder — refuses the launch instead of silently billing another model; set false to opt into the ladder explicitly; the ping proving a route alive additionally binds the runner's served-model hold), inputs:['<ancestor>' | '<ancestor>.<dotted.path>', ...] (inject a committed upstream output into the prompt as a labelled json block under '## Inputs'; unresolvable ref fails the node at spawn; DIRECT parents from `after` are auto-injected capped at 8KB with a truncation marker — use inputs only to pick a dotted path or a non-parent ancestor; a parent listed in both appears once), fanout:{items | items_from:'<node_id>.<dotted.path>', goal (OPTIONAL template; an item's own `goal` key overrides it — when items carry their own goals the shared node goal prefixes each item prompt, so no placeholder template is ever needed), schema, quorum (OPTIONAL positive int; ONLY when set: once quorum items have committed, the still-running stragglers are cancelled with error_class 'cancelled' and excluded from the failure math; when unset there is NO default — the fan-out waits for every item)}} — agent node. A provider requires a non-empty model; model aliases and literal IDs are preserved (tiers resolve explicitly, and a matching provider/model prefix is removed for the CLI). Run/amend responses include requested/resolved provider/model routes. Gate node: {id, type:'gate', after, question, options, context, when (bounded expr: out.<node>.<dotted.path> with == != > >= < <=, and/or/not, parens; malformed when is rejected at run/amend validation and holds the gate at fire — never a silent skip), wait:{wait_s, until_argv:[fixed argv, no shell], every_s (default 60), timeout_s (default 3600)} (machine-answered gate: parks the run at zero tokens — wait_s alone = timer; until_argv re-runs until exit 0; timeout → gate fails; its last stdout/stderr tail is the gate's output, usable via inputs). A human release pre-empts a park), on_skip:'pass'|'prune' (with when: prune commits the gate `skipped` and every node whose deps are ALL skipped is skipped too — terminal, not a failure; a join with one live dep runs; default pass = the arm still runs)}. Echo node: {id, type:'echo', after, output} — commits its `output` verbatim as the node result with zero tokens and no child spawn; downstream nodes consume it via after/inputs like any done node. Any key outside these closed sets is rejected at run/amend with errors:[{node, field, msg}] for EVERY defect.",
+            "description": "For run/amend: {name, nodes:[...], defaults:{schema, timeout, max_turns, reasoning, provider, model, context, require_route}} where `defaults` fills agent node keys the author left unset (explicit node keys always win; defaults.context is the shared preamble prepended once to each agent's own context) and where node = {id, type:'agent'|'gate'|'echo', after:[node ids], goal, context, schema (json-schema for child output), model, provider (optional explicit Hermes provider paired with model; passed as --provider; when unset it is INHERITED from a provider-qualified model alias/tier), toolsets, max_turns, timeout (s wall-clock kill, default 900), shape (recon|build|review|publish — fills max_turns/timeout from the measured p95 census presets when the author left them unset; explicit keys win), run_budget (s, child's own budget), reasoning (a hermes reasoning effort: none|minimal|low|medium|high|xhigh|max|ultra — passed to the child as --reasoning; levels are validated PER ROUTE at the door against the resolved (provider, model) route's supported set, with the supported list and nearest level in the error — no silent downgrade), require_route (bool, default TRUE on nodes that pin an explicit model: the door's submit ping affirmatively proving the pinned route dead — or answered from the fallback ladder — refuses the launch instead of silently billing another model; set false to opt into the ladder explicitly; the ping proving a route alive additionally binds the runner's served-model hold; the sibling `route_verified` proof annotation is DOOR-BAKED only — never author-writable, an author value is dropped at resolve and re-proved by this submit's ping), inputs:['<ancestor>' | '<ancestor>.<dotted.path>', ...] (inject a committed upstream output into the prompt as a labelled json block under '## Inputs'; unresolvable ref fails the node at spawn; DIRECT parents from `after` are auto-injected capped at 8KB with a truncation marker — use inputs only to pick a dotted path or a non-parent ancestor; a parent listed in both appears once), fanout:{items | items_from:'<node_id>.<dotted.path>', goal (OPTIONAL template; an item's own `goal` key overrides it — when items carry their own goals the shared node goal prefixes each item prompt, so no placeholder template is ever needed), schema, quorum (OPTIONAL positive int; ONLY when set: once quorum items have committed, the still-running stragglers are cancelled with error_class 'cancelled' and excluded from the failure math; when unset there is NO default — the fan-out waits for every item)}} — agent node. A provider requires a non-empty model; model aliases and literal IDs are preserved (tiers resolve explicitly, and a matching provider/model prefix is removed for the CLI). Run/amend responses include requested/resolved provider/model routes. Gate node: {id, type:'gate', after, question, options, context, when (bounded expr: out.<node>.<dotted.path> with == != > >= < <=, and/or/not, parens; malformed when is rejected at run/amend validation and holds the gate at fire — never a silent skip), wait:{wait_s, until_argv:[fixed argv, no shell], every_s (default 60), timeout_s (default 3600)} (machine-answered gate: parks the run at zero tokens — wait_s alone = timer; until_argv re-runs until exit 0; timeout → gate fails; its last stdout/stderr tail is the gate's output, usable via inputs). A human release pre-empts a park), on_skip:'pass'|'prune' (with when: prune commits the gate `skipped` and every node whose deps are ALL skipped is skipped too — terminal, not a failure; a join with one live dep runs; default pass = the arm still runs)}. Echo node: {id, type:'echo', after, output} — commits its `output` verbatim as the node result with zero tokens and no child spawn; downstream nodes consume it via after/inputs like any done node. Any key outside these closed sets is rejected at run/amend with errors:[{node, field, msg}] for EVERY defect.",
         },
         "answer": {"type": "string", "description": "release: the human's answer text (from clarify)."},
         "gate_id": {"type": "string", "description": "release: gate node id."},
@@ -405,6 +416,12 @@ def model_preflight(requests, tiers, seat_raw):
     return None
 
 _ROUTE_KEYS = ("model", "tier", "provider", "route_verified")   # #25: the door's
+# (F2): the "def unchanged → keep the committed bake verbatim" comparisons exclude
+# the proof annotation — the author can never legally write route_verified (it is
+# popped pre-submit / restored from the commit), so requiring equality on it would
+# silently disable the un-bake AND the frozen replay for every alive-proved node.
+# The frozen RESTORE loop still carries it (it should ride like a route key).
+_ROUTE_MATCH_KEYS = ("model", "tier", "provider")
 # alive-proof rides frozen restore + re-bake like a route key: a committed node's
 # proof restores verbatim (replay-skip holds across amends); a re-resolved node's
 # bake is dropped and re-proved by this submit's ping (never trusted from the author).
@@ -451,7 +468,7 @@ def _resolve_models(nodes, committed=None, keep=()) -> tuple[str | None, dict | 
                 else:
                     n[k] = c[k]
         elif (c and c.get("tier") in tiers
-              and all(n.get(k) == c.get(k) for k in _ROUTE_KEYS)):
+              and all(n.get(k) == c.get(k) for k in _ROUTE_MATCH_KEYS)):
             n.pop("provider", None)
             n.pop("tier", None)
             n["model"] = c["tier"]
@@ -612,6 +629,35 @@ def _ping_route_once(provider, model):
                 "note": "ping answered by a different route (fallback ladder) — not counted as alive"}
     return {"liveness": "alive"}
 
+def _ping_reachable(model):
+    """Weak-law recovery probe for a PROVIDER-LESS quota entry (A5): the same-route
+    ALIVE law can never fire without an explicit provider (_same_ping_route needs a
+    recorded provider to match), so the docstring's recovery promise for a
+    seat-default stamp was unreachable — it stayed refused until expiry no matter how
+    healthy the model was. Recovery is weaker than attribution: an answered ping whose
+    RECORDED MODEL is the stamped one (core's own routing, provider-agnostic label
+    match) proves reachability and drops the cache entry. NEVER proves alive/dead
+    (that law stays gated on an explicit provider) and never raises: an exception,
+    an unimportable core, or a fallback-ladder answer (recorded model != stamped) is
+    NOT a recovery — a wrong-route answer proves nothing, same law as #25."""
+    try:
+        call_llm = _import_call_llm()
+    except Exception:
+        return False
+    ri = {}
+    try:
+        call_llm(task=_PING_TASK, model=str(model),
+                 messages=[{"role": "user", "content": "ping"}],
+                 max_tokens=1, timeout=PING_TIMEOUT_S, route_info=ri)
+    except Exception:
+        return False
+    rm = str(ri.get("model") or "").strip().lower()
+    m = re.search(r"\(([^()]+)\)\s*$", rm)      # 'main-agent(openai)' label shape
+    if m:
+        rm = m.group(1)
+    lm = str(model).strip().lower()
+    return bool(rm) and (rm == lm or rm == lm.rsplit("/", 1)[-1])
+
 def _safe_ping_note(exc, status):
     try:
         return _ping_note(exc, status)
@@ -701,21 +747,25 @@ def _route_enforcement(graph, routes, skip=()):
         if liv == "dead":
             bad.append(f"node {nid!r} pins {p}/{m}: route DEAD at submit "
                        f"({ent.get('note') or 'ping failed'}) — repoint it, or opt into "
-                       f"the fallback ladder explicitly with require_route: false")
+                       f"the fallback ladder explicitly with require_route: false ON THAT "
+                       f"NODE (a `defaults` flip opts the whole graph in)")
         elif liv == "unknown" and ent.get("wrong_route"):
             bad.append(f"node {nid!r} pins {p}/{m}: the ping answered from the FALLBACK "
                        f"LADDER (different route) — launching would bill a model you did "
-                       f"not pin. Repoint it, or accept fallback with require_route: false")
+                       f"not pin. Repoint it, or accept fallback with require_route: "
+                       f"false ON THAT NODE (a `defaults` flip opts the whole graph in)")
         elif liv == "alive":
             n["route_verified"] = f"{p}/{m}"
     return ("route_unavailable at submit — " + "; ".join(bad)) if bad else None
 
-def _quota_refusal(graph, routes=None, cache_path=None):
+def _quota_refusal(graph, routes=None, cache_path=None, skip=()):
     """#24 (c): refuse a launch whose node pins a model the seat KNOWS is
     subscription-exhausted (the runner's fatal_quota cache). Advisory by design:
     one recovery ping first — a route that answers pongs is alive again and the
     cache entry drops. A test-seated cache (WF_QUOTA_CACHE override) pings nothing.
-    Returns the error string or None."""
+    `skip` = node ids that replay-skip and never spawn (A1: the amend call passes
+    the frozen set — a DONE node pinning a quota-marked model must not refuse the
+    whole amend when it will not re-run). Returns the error string or None."""
     pth = Path(cache_path) if cache_path else (
         Path(os.environ.get("WF_QUOTA_CACHE")
             or (Path(os.environ.get("HERMES_HOME") or (Path.home() / ".hermes"))
@@ -732,6 +782,8 @@ def _quota_refusal(graph, routes=None, cache_path=None):
         if n.get("type") != "agent" or not n.get("model"):
             continue
         nid = n.get("id")
+        if nid in skip:
+            continue                                        # A1: replay-skip, never spawns
         ent = (routes or {}).get(nid) or {}
         res = ent.get("resolved") or {}
         names = {str(n.get("model")),
@@ -741,8 +793,19 @@ def _quota_refusal(graph, routes=None, cache_path=None):
             if not isinstance(hit, dict) or hit.get("resets_epoch", 0) <= _t.time():
                 continue
             if not offline:
-                ann = _ping_route_once(str(res.get("provider") or ""), key)
-                if ann.get("liveness") == "alive":
+                # A5 (deep review): the same-route law makes _ping_route_once('')
+                # unable to EVER attribute a pong (recorded provider can never match
+                # ''), so the promised recovery ping could never clear a
+                # provider-less entry. Recovery is a WEAKER law than attribution:
+                # an explicit-provider route recovers on liveness=alive; a
+                # provider-less (seat-default) route recovers on a pong whose
+                # RECORDED MODEL is the stamped one (_ping_reachable: reachability,
+                # not alive-attribution; an exception, an unimportable core, or a
+                # fallback-ladder answer never recovers).
+                prov = str(res.get("provider") or "")
+                recovered = (_ping_route_once(prov, key).get("liveness") == "alive"
+                             if prov else _ping_reachable(key))
+                if recovered:
                     cache.pop(key, None)
                     try:
                         pth.write_text(json.dumps(cache))
@@ -1565,14 +1628,14 @@ def _frozen_committed(r, old, new_nodes):
     (d) the committed record is valid at the OLD efp; (e) every `after` ancestor is
     frozen too (fixpoint). Edited, re-running and pending nodes route on the current seat."""
     ob = {n["id"]: n for n in old.get("nodes", []) if isinstance(n, dict) and n.get("id")}
-    drop = set(_common._BUDGET_KEYS) | set(_ROUTE_KEYS)
+    drop = set(_common._BUDGET_KEYS) | set(_ROUTE_KEYS) | set(_common._POLICY_KEYS)
     rest = lambda d: {k: v for k, v in d.items() if k not in drop}
     frozen = set()
     for n in new_nodes:
         c = ob.get(n.get("id"))
         if not c or rest(n) != rest(c):
             continue
-        same = all(n.get(k) == c.get(k) for k in _ROUTE_KEYS) or (
+        same = all(n.get(k) == c.get(k) for k in _ROUTE_MATCH_KEYS) or (
             bool(c.get("tier")) and n.get("model") == c["tier"]
             and n.get("provider") in (None, c.get("provider")))
         if same and _common.node_rec(r, c, ob)[0] in ("done", "partial", "skipped"):
@@ -1621,7 +1684,7 @@ def act_amend(args):
     _liveness_notes = _route_liveness_ping(_routes)
     # #24/#25: the same fail-closed gates at the amend submit. Frozen (replay-skip)
     # nodes keep their committed defs and are never re-gated — they already ran.
-    _q = _quota_refusal(new, _routes)
+    _q = _quota_refusal(new, _routes, skip=_frozen)
     if _q:
         return {"error": _q}
     _r = _route_enforcement(new, _routes, skip=_frozen)

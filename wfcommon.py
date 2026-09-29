@@ -14,6 +14,13 @@ def jload(p, default=None):
         return default
 
 _BUDGET_KEYS = ("max_turns", "timeout", "run_budget", "shape")
+# #24/#25 (A3): route POLICY (require_route) and the door's proof ANNOTATION
+# (route_verified) are not work either — like budgets they must not participate in
+# def_hash: the door bakes route_verified into graph.json after validation, and the
+# runner computes efp on the baked node; an author amend that flips
+# defaults.require_route would otherwise un-freeze every committed node and re-run
+# it. Nodes without these keys hash byte-identically to before (no legacy drift).
+_POLICY_KEYS = ("require_route", "route_verified")
 FP_RULE_LEGACY = 1  # before b79fa21: budgets participated in def_hash
 FP_RULE_VERSION = 2  # b79fa21: exclude budgets
 FP_RULES = (FP_RULE_LEGACY, FP_RULE_VERSION)
@@ -25,7 +32,7 @@ def def_hash(node, rule=FP_RULE_VERSION):
     if rule not in FP_RULES:
         raise ValueError(f"unknown fingerprint rule: {rule!r}")
     if rule == FP_RULE_VERSION:
-        node = {k: v for k, v in node.items() if k not in _BUDGET_KEYS}
+        node = {k: v for k, v in node.items() if k not in _BUDGET_KEYS and k not in _POLICY_KEYS}
     return hashlib.sha256(json.dumps(node, sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:16]
 
 _EFP_SEP = "\u241f"
@@ -240,7 +247,7 @@ AGENT_KEYS = {"id", "type", "after", "goal", "context", "schema", "model", "prov
               # lives in the validator's set so the runner accepts the committed
               # graph, but _resolve_models drops any author/pre-submit value — only
               # this submit's ping (or a frozen committed restore) can prove a route.)
-              "require_route",
+              "require_route", "route_verified",
               # 1.1 (RATIFY F2/F4): OPTIONAL team keys. `profile` = run this node AS a named
               # teammate profile (consent-gated, node-level only); `requires` = output
               # preconditions on ancestors ({"<ancestor>": ["field", "dotted.path", ...]}).

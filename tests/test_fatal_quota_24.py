@@ -101,5 +101,129 @@ check("door refuses exhausted model before any write", res and "sol" in str(res)
 res2 = door._quota_refusal({"name": "n", "nodes": [{"id": "x", "type": "agent", "goal": "GO"}]},
                            cache_path=qc)
 check("door never refuses an unpinned node", res2 is None, str(res2))
+# A1 (deep review): a DONE node replay-skips and never spawns — its quota-marked
+# pin must not refuse the whole submit (the amend path passes the frozen set).
+graph_a1 = {"name": "fq-a1", "nodes": [
+    {"id": "done1", "type": "agent", "goal": "DONE", "model": "sol"},
+    {"id": "live1", "type": "agent", "goal": "GO", "model": "m-live"}]}
+res_a1 = door._quota_refusal(graph_a1, cache_path=qc, skip={"done1"})
+check("A1: frozen done node on a quota-marked model does not refuse the submit",
+      res_a1 is None, str(res_a1))
+res_a1b = door._quota_refusal(graph_a1, cache_path=qc)   # no skip = still refuses
+check("A1 control: unskipped refusal intact", bool(res_a1b) and "sol" in str(res_a1b), str(res_a1b))
+
+# ---------- (d) A2: _seat_alias_map honours a FOREIGN home ----------
+import wf as wfmod2
+fh = HOME / "foreign-seat"
+fh.mkdir(exist_ok=True)
+(fh / "config.yaml").write_text(
+    "model:\n  default: qwen38-next\n  aliases:\n    zeta: anthropic/zeta-1\n")
+amap = wfmod2._seat_alias_map(fh)
+check("A2: a foreign home reads ITS config.yaml (target owns the aliases)",
+      amap.get("zeta") == "anthropic/zeta-1", str(amap))
+# A2 (runner seat must NOT leak into a foreign read): the runner seat's own alias is
+# only visible when home == hermes_home(); a foreign home never sees it. Both read
+# paths (hermes_cli and the YAML-lite fallback) follow HERMES_HOME live, so stamping
+# HOME's config.yaml + env makes HOME the runner seat for this probe.
+(HOME / "config.yaml").write_text(
+    "model:\n  default: qwen38-next\n  aliases:\n    runneronly: openai/runner-1\n"
+    "    sol: openai-codex/gpt-6-sol\n")   # the (c)/(d2) quota model must resolve
+os.environ["HERMES_HOME"] = str(HOME)      # hermes_home() now == HOME
+own = wfmod2._seat_alias_map(HOME)
+foreign = wfmod2._seat_alias_map(fh)
+check("A2: foreign home never inherits the runner seat's aliases",
+      own.get("runneronly") == "openai/runner-1" and "runneronly" not in foreign,
+      f"own={own} foreign={foreign}")
+
+# ---------- (d2) A1 end-to-end through act_amend (the review's repro) ----------
+# DONE node pins the quota-marked model + a NEW downstream node on a live model:
+# the done node replay-skips and never spawns, so the amend must be ACCEPTED.
+# (Before the fix act_amend called _quota_refusal without skip=_frozen -> the whole
+# amend was refused `route_unavailable at submit — done_node pins ...`.)
+os.environ.pop("WF_QUOTA_CACHE", None)     # real cache path under HOME
+qc_src = qc if qc.exists() else None       # the (a)-(c) run stamped 'sol' there
+real_cache = HOME / "cache" / "workflow-quota-cache.json"
+real_cache.parent.mkdir(parents=True, exist_ok=True)
+if qc_src is not None:
+    real_cache.write_text(qc_src.read_text())
+door._ping_route_once = lambda p, m: {"liveness": "unknown"}   # no network
+import wfcommon as _wc
+rid = "amend-a1-probe"
+rd = HOME / "workflows" / rid
+(rd / "nodes").mkdir(parents=True, exist_ok=True)
+done_node = {"id": "done_node", "type": "agent", "goal": "DONE", "model": "sol"}
+old_graph = {"name": "a1", "nodes": [dict(done_node)]}
+(rd / "graph.json").write_text(json.dumps(old_graph))
+(rd / "nodes" / "done_node.json").write_text(json.dumps(
+    {"status": "done", "efp": _wc.efp({done_node["id"]: done_node}, done_node)}))
+new_graph = {"name": "a1", "nodes": [dict(done_node),
+                                      {"id": "fresh", "type": "agent", "goal": "GO",
+                                       "model": "openai/m-live", "after": ["done_node"]}]}
+out_a1 = door.act_amend({"run_id": rid, "graph": new_graph, "dry_run": True})
+check("A1 e2e: amend with DONE node on quota-marked model + live new node is accepted",
+      out_a1.get("error") is None and "route_unavailable" not in json.dumps(out_a1),
+      str(out_a1)[:200])
+# control: the same submit where done_node is NOT frozen (edit its goal -> it reruns)
+# must still refuse — the gate is intact for nodes that actually spawn.
+edited = json.loads(json.dumps(new_graph))
+edited["nodes"][0]["goal"] = "DONE EDITED"
+out_a1c = door.act_amend({"run_id": rid, "graph": edited, "dry_run": True})
+check("A1 e2e control: edited (re-running) done node on quota-marked model still refused",
+      out_a1c.get("error") and "route_unavailable" in str(out_a1c.get("error"))
+      and "sol" in str(out_a1c.get("error")), str(out_a1c)[:200])
+
+# ---------- (e) minute horizons are minutes, not the 6h default ----------
+qc2 = HOME / "quota-cache-min.json"
+if qc2.exists(): qc2.unlink()
+os.environ["WF_QUOTA_CACHE"] = str(qc2)
+wfmod2._quota_note("m-min", "Provider said: HTTP 429: usage limit reached, resets in ~30 minutes")
+stamp = json.loads(qc2.read_text())["m-min"]
+check("minute horizon lands ~30min out (not the 6h default)",
+      20 * 60 < stamp["resets_epoch"] - time.time() < 45 * 60,
+      f"{stamp['resets_epoch'] - time.time():.0f}s")
+
+# ---------- (f) A5: provider-less recovery ping clears the stamp ----------
+qc3 = HOME / "quota-cache-restore.json"
+qc3.write_text(json.dumps({"m-recover": {"resets_epoch": time.time() + 3600,
+                                          "at": time.time(), "marker": "x"}}))
+os.environ.pop("WF_QUOTA_CACHE", None)     # non-offline seat -> the ping path runs
+graph_a5 = {"name": "a5", "nodes": [{"id": "y", "type": "agent", "goal": "GO",
+                                      "model": "m-recover"}]}
+_real_import = door._import_call_llm
+door._import_call_llm = lambda: (_ for _ in ()).throw(ImportError("no core"))
+try:
+    res_ref = door._quota_refusal(graph_a5, cache_path=qc3)      # core unimportable
+    check("A5 control: unimportable core keeps the refusal (missing evidence)",
+          bool(res_ref) and "m-recover" in str(res_ref), str(res_ref))
+finally:
+    door._import_call_llm = _real_import
+# answered ping whose RECORDED MODEL is the stamped one = reachability -> recovery
+class _OK:
+    def __call__(self, task=None, provider=None, model=None, messages=None,
+                 max_tokens=None, timeout=None, route_info=None, **kw):
+        if route_info is not None:
+            route_info.update({"provider": "seat-lane", "model": str(model)})
+        return "pong"
+door._import_call_llm = lambda: _OK()
+try:
+    res_ok = door._quota_refusal(graph_a5, cache_path=qc3)
+    check("A5: provider-less stamp RECOVERS on an answered same-model ping",
+          res_ok is None and "m-recover" not in json.loads(qc3.read_text()),
+          f"{res_ok} cache={qc3.read_text() if qc3.exists() else None}")
+    # fallback-ladder answer (recorded model != stamped) proves nothing -> still refused
+    qc3.write_text(json.dumps({"m-recover": {"resets_epoch": time.time() + 3600,
+                                             "at": time.time(), "marker": "x"}}))
+    class _LADDER(_OK):
+        def __call__(self, *a, route_info=None, **kw):
+            if route_info is not None:
+                route_info.update({"provider": "fallback_chain[0](other)",
+                                   "model": "seat-fallback"})
+            return "pong"
+    door._import_call_llm = lambda: _LADDER()
+    res_bad = door._quota_refusal(graph_a5, cache_path=qc3)
+    check("A5: a fallback-ladder answer never recovers (wrong_route proves nothing)",
+          bool(res_bad) and "m-recover" in str(res_bad), str(res_bad))
+finally:
+    door._import_call_llm = _real_import
 
 print("ALL PASS" if ok else "FAILURES"); sys.exit(0 if ok else 1)
