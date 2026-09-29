@@ -232,6 +232,15 @@ ID_OK = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 AGENT_KEYS = {"id", "type", "after", "goal", "context", "schema", "model", "provider", "toolsets",
               "max_turns", "timeout", "run_budget", "inputs", "fanout", "reasoning",
               "tier", "shape",
+              # #24/#25 (haus-fixer): fail-closed pinned routes. Default TRUE for nodes
+              # that pin an explicit model — a submit ping that AFFIRMATIVELY proves
+              # the pinned route dead or answering from the fallback ladder refuses the
+              # launch; `false` = explicit opt-in to the ladder. (The door's
+              # `route_verified` proof-annotation is door-baked AFTER validation; it
+              # lives in the validator's set so the runner accepts the committed
+              # graph, but _resolve_models drops any author/pre-submit value — only
+              # this submit's ping (or a frozen committed restore) can prove a route.)
+              "require_route",
               # 1.1 (RATIFY F2/F4): OPTIONAL team keys. `profile` = run this node AS a named
               # teammate profile (consent-gated, node-level only); `requires` = output
               # preconditions on ancestors ({"<ancestor>": ["field", "dotted.path", ...]}).
@@ -244,7 +253,8 @@ ECHO_KEYS = {"id", "type", "after", "output"}
 # `source` is supplied or the saving door runs under a named profile. Top-level graph key.
 PROVENANCE_KEYS = {"owner", "source", "saved_at", "source_digest"}
 FANOUT_KEYS = {"items", "items_from", "goal", "schema", "quorum"}
-DEFAULTS_KEYS = {"schema", "timeout", "max_turns", "reasoning", "provider", "model", "context"}
+DEFAULTS_KEYS = {"schema", "timeout", "max_turns", "reasoning", "provider", "model", "context",
+                 "require_route"}   # #25: bool — fail-closed pinned routes (see AGENT_KEYS)
 # Shape presets (sprint101 #11): max_turns/timeout per rough node shape = the p95 of
 # SUCCESSFUL agent nodes per shape, measured 2026-09-25 over the run dirs behind
 # census.json (80 runs, 219 committed-success agent nodes; shape classified from
@@ -285,6 +295,8 @@ def _defaults_errors(d):
         E("defaults.schema", "schema must be an object")
     if d.get("model") is not None and not isinstance(d.get("model"), str):
         E("defaults.model", "model must be a string")
+    if d.get("require_route") is not None and not isinstance(d.get("require_route"), bool):
+        E("defaults.require_route", f"require_route {d['require_route']!r} must be a boolean")
     if "provider" in d:
         p = d.get("provider")
         if not isinstance(p, str) or not p or p.strip() != p:
@@ -333,6 +345,12 @@ def apply_graph_defaults(graph):
             for k in ("schema", "reasoning", "provider", "model"):
                 if n.get(k) is None and defaults.get(k) is not None:
                     n[k] = defaults[k]
+            # #25: `require_route` fills from defaults like any defaults key, but is
+            # NEVER baked when both author and defaults left it unset — the runner
+            # treats absent as the effective default (True on pinned nodes). Baking
+            # it would move solo user-visible bytes on every graph.json.
+            if n.get("require_route") is None and "require_route" in defaults:
+                n["require_route"] = defaults["require_route"]
             pre = defaults.get("context") or ""
             if pre and not str(n.get("context") or "").startswith(pre):
                 n["context"] = pre + ("\n\n" + n["context"] if n.get("context") else "")
@@ -514,6 +532,10 @@ def validate_graph_errors(nodes):
                             schema_check(nid, "fanout.schema", fsc)
             elif not n.get("goal"):
                 E(nid, "goal", "agent node has no goal")
+            if n.get("require_route") is not None and not isinstance(n.get("require_route"), bool):
+                # #25: boolean only — an unknown truthy value must not silently
+                # disable (or enable) the fail-closed route gate.
+                E(nid, "require_route", f"require_route {n['require_route']!r} must be a boolean")
             if n.get("schema") is not None:
                 if not isinstance(n["schema"], dict):
                     E(nid, "schema", "schema must be an object")

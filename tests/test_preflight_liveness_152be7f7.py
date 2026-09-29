@@ -111,11 +111,14 @@ def _raise_import_error():
 
 def graph_two_routes():
     """a+b share openai/m-1 (distinct-route dedupe), c rides openai-codex/m-2,
-    d is seat default (no provider+model to pin), e is a bare alias (provider None)."""
+    d is seat default (no provider+model to pin), e is a bare alias (provider None).
+    #25 moved this fixture to require_route:false on the pinned nodes: this file
+    pins the ping's ANNOTATION matrix (liveness/retry_after/hint), which must hold
+    whatever the verdict does; test_require_route_25.py pins the default-on gate."""
     return {"name": "live", "nodes": [
-        {"id": "a", "type": "agent", "goal": "x", "provider": "openai", "model": "m-1"},
-        {"id": "b", "type": "agent", "goal": "x", "provider": "openai", "model": "m-1"},
-        {"id": "c", "type": "agent", "goal": "x", "provider": "openai-codex", "model": "m-2"},
+        {"id": "a", "type": "agent", "goal": "x", "provider": "openai", "model": "m-1", "require_route": False},
+        {"id": "b", "type": "agent", "goal": "x", "provider": "openai", "model": "m-1", "require_route": False},
+        {"id": "c", "type": "agent", "goal": "x", "provider": "openai-codex", "model": "m-2", "require_route": False},
         {"id": "d", "type": "agent", "goal": "x"},
         {"id": "e", "type": "agent", "goal": "x", "model": "bare"},
     ]}
