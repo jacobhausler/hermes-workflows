@@ -728,12 +728,26 @@ export function Pill({ run, sid, open, onToggle }) {
       display: 'inline-flex', alignItems: 'center', gap: 6, maxWidth: 260,
       fontSize: '0.6875rem', padding: '2px 8px', borderRadius: 999,
       background: 'var(--ui-sidebar-surface-background, var(--card))',
-      border: `1px solid var(--ui-stroke-secondary)${open ? '; box-shadow: inset 0 0 0 1px var(--ui-stroke-secondary)' : ''}`,
+      // F8 (deep review): the previous value concatenated a box-shadow into the
+      // `border` shorthand — an invalid declaration the browser drops WHOLE, so
+      // the open pill lost its border entirely (inverted signal, not cosmetic).
+      // Ring rides on its own real property.
+      border: '1px solid var(--ui-stroke-secondary)',
+      boxShadow: open ? 'inset 0 0 0 1px var(--ui-stroke-secondary)' : undefined,
     },
     children: [
       jsxs('span', {
         role: 'button',
+        // F7 (deep review): role=button WITHOUT tabIndex is not focusable — a
+        // pill click left focus in the composer, the rail's onKeyDown never saw
+        // Escape, and the advertised Esc-collapse was dead (the first reader
+        // verified F6 closed but missed the regression F6 itself introduced).
+        // Focusable label + keyboard activation = the a11y contract of role=button.
+        tabIndex: 0,
         onClick: e => { e?.stopPropagation?.(); onToggle?.() },
+        onKeyDown: e => {
+          if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); onToggle?.() }
+        },
         style: {
           display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer',
           overflow: 'hidden', maxWidth: 220,
@@ -842,9 +856,10 @@ export function SessionStrip() {
     ref: railRef,
     className: 'flex flex-col gap-0.5 border-b border-(--ui-stroke-secondary) px-3 py-1',
     // Esc collapse (item 4): scoped to the rail via onKeyDown — the ⌘K law
-    // forbids global keydown listeners (test_fanout_expand), and a pill click
-    // leaves focus inside the strip, so Escape lands here. Nothing else
-    // intercepts keys; ⌘K keeps bubbling app-owned.
+    // forbids global keydown listeners (test_fanout_expand). The pill label is
+    // tabIndex:0 (F7), so a pill click/Tab moves focus into the strip and
+    // Escape lands on this handler. Nothing else intercepts keys; ⌘K stays
+    // app-owned.
     onKeyDown: e => { if (e.key === 'Escape' && expanded) $railOpen.set(null) },
     children: [
       // Expanded panel sits ABOVE the pills: the strip stacks bottom-anchored

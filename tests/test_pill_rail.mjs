@@ -283,5 +283,31 @@ const render = n => (typeof n.type === 'function' ? n.type(n.props) : n)
   assert.equal(stopped, 1, 'label click stops propagation (gate clicks never bubble, F6)')
 }
 
+// -- 7b. F7/F8 (deep review): focusable label + keyboard toggle + real boxShadow --
+{
+  const heldP = mk('gate-run-7b', 'held', { held_gate: { id: 'g1', question: 'Ship?', options: ['yes', 'no'] } })
+  const pillEl = mod.Pill({ run: heldP, sid: 'S1', open: true, onToggle: () => {} })
+  const label = pillEl?.props?.children?.[0]
+  assert.equal(label?.props?.tabIndex, 0, 'pill label is focusable (F7: Esc-collapse needs focus to land in the strip)')
+  let fired = 0
+  label.props.onKeyDown({ key: 'Enter', preventDefault: () => {}, stopPropagation: () => { fired++ } })
+  assert.ok(fired >= 1, 'Enter on the focused label toggles (role=button keyboard contract, F7)')
+  let fired2 = 0
+  label.props.onKeyDown({ key: ' ', preventDefault: () => {}, stopPropagation: () => { fired2++ } })
+  assert.ok(fired2 >= 1, 'Space toggles too')
+  // Esc-collapse reachability: with the label focusable, keydown from it bubbles
+  // to the rail div's onKeyDown (source-grep cannot see the focus contract —
+  // tabIndex is the mechanism, asserted here).
+  // F8: open pill must NOT concatenate box-shadow into border (invalid decl →
+  // browser drops the WHOLE border). border is a plain stroke; ring rides boxShadow.
+  const openEl = mod.Pill({ run: heldP, sid: 'S1', open: true, onToggle: () => {} })
+  const st = openEl?.props?.style || {}   // the ring lives on the Pill div itself
+  assert.ok(typeof st.border === 'string' && st.border.includes('1px solid') && !st.border.includes('box-shadow'),
+    'border is a clean 1px stroke, never a concatenated box-shadow string (F8)')
+  assert.ok(st.boxShadow && st.boxShadow.includes('inset 0 0 0 1px'), 'open pill gets the inset ring via boxShadow (F8)')
+  const closed = mod.Pill({ run: heldP, sid: 'S1', open: false, onToggle: () => {} })
+  assert.ok(closed?.props?.style?.boxShadow === undefined, 'closed pill has no ring')
+}
+
 console.log('ALL PASS test_pill_rail (railModel ordering/cap/overflow/progress, PillRail row + GateActions, SessionStrip integration)')
 rmSync(tmp, { recursive: true, force: true })

@@ -92,10 +92,15 @@ assert.deepEqual(toggleRail({ sid: 'S1', runId: 'a' }, 'S2', 'a'), { sid: 'S2', 
 // click toggle itself is exercised behaviorally through the rendered pill).
 // Esc is SCOPED (onKeyDown on the rail div): the ratified ⌘K law
 // (test_fanout_expand.mjs) forbids global keydown listeners. A pill click
-// leaves focus on the pill, so Escape bubbles through the rail handler.
-const escIdx = src.indexOf("onKeyDown: e =>")
+// leaves focus on the pill (F7: the label is tabIndex:0 — asserted in
+// test_pill_rail §7b), so Escape bubbles through the rail handler. Anchor on
+// the Escape handler itself (the pill label carries its own onKeyDown since
+// F7, so "first onKeyDown" is no longer the rail's).
+const escIdx = src.indexOf("e.key === 'Escape'")
 assert.ok(escIdx >= 0, 'the rail installs a SCOPED onKeyDown handler for the Esc collapse')
-const escBlock = src.slice(escIdx, escIdx + 300)
+const escBlock = src.slice(escIdx, escIdx + 200)
+assert.ok(src.lastIndexOf('onKeyDown', escIdx) > src.lastIndexOf('\n', Math.max(0, escIdx - 120)),
+  'the Escape check rides on an onKeyDown prop (scoped, not a global listener)')
 assert.match(escBlock, /['"]Escape['"]/, "the keydown handler checks event.key === 'Escape'")
 assert.match(escBlock, /\$railOpen\.set\(null\)/, 'Escape collapses the rail via $railOpen.set(null)')
 assert.doesNotMatch(src, /addEventListener\(['"]keydown/,
