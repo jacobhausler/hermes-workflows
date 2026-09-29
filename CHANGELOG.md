@@ -76,6 +76,8 @@ Every feature is OPTIONAL: a no-team run (default profile, no `WF_RUNS_ROOT`) is
   gains ZERO bytes here (golden-solo EMPTY holds by construction). Tests:
   `test_gate_answer_flows_00e46adb` (chain verify, no-duplication, skipped-gate
   fail-closed, explicit-coverage suppression, mutation-controlled).
+- Runner lane-clean gate (feedback digest 29d, ledger 64c6772b): an agent node may declare `repo: <path>` — the git lane it owns. At commit the runner runs `git status --porcelain --untracked-files=no` on the lane; a done/partial over a lane with uncommitted TRACKED changes commits `failed` `error_class:"incomplete_work"` carrying `lane_dirty` (the porcelain), instead of the dad50be0 false-green where the fix died uncommitted in a capped child and downstream verified a HEAD equal to the mutant. Refusal, never auto-commit (no runner author identity); untracked never dirties; git-unable fails open; default-off keeps every existing graph byte-identical (golden-solo EMPTY). Door description, AGENTS closed set, and grammar.md document the field; `tests/test_lane_gate_64c6772b.py` covers clean/dirty/untracked/fail-open/mutation.
+- Door schema legibility (feedback digest 29d, ledger 0b680871): the registered `graph` param description is built from adjacent short string literals (each < 400 chars) instead of one 3.4k-char line — the runtime string is byte-identical (pinned by `test_validator_caps` ROW 1 + a segment-boundary test); the "schema is truncated" report was core `search_files`' 500-char per-match clamp on that single line, not a core defect. Comment at `tests/test_validator_caps.py` fixed to stop blaming the schema validator.
 
 ## 1.0.17 — 2026-09-28
 
