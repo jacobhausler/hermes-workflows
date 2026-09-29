@@ -430,6 +430,47 @@ _BOUNDED_RETRY_CLASSES = ("transport", "early_death", "cap_exhausted", "timeout"
 _BOUNDED_RETRY_BACKOFF = 5.0
 RESUME_LINE = "Do not redo finished work; continue from the state above."
 
+# #37 lane hygiene (digest 20260929f / spool 8edcc9bfc91b9683): a build lane wiped its
+# uncommitted implementation with a base-checkout over its own dirty tree to produce
+# a RED run, then died on the turn cap; recovery was a hand replay of 17 journaled
+# tool calls. The law is PROMPT-SIDE ONLY, modeled on _resume_preamble: the block is
+# composed at spawn in run_child, lands in the durable logs/*.prompt.md artifact and
+# nowhere else — never in graph.json, nodes/*.json or run.json, so the def hash
+# (graph_fingerprint / efp cover graph.json bytes only) is untouched and every
+# existing graph re-drives byte-identically at the record level. Applies to the
+# build shape: an explicit `shape: "build"` or a declared `repo:` lane; the golden
+# solo graphs declare neither and stay EMPTY (their prompt files are frozen bytes).
+LANE_HYGIENE_LINES = (
+    "## Lane hygiene (machine preamble)",
+    "- NEVER run `git checkout <base> -- <paths>` or `git restore --source=<base> <paths>` "
+    "over a dirty tree to produce a RED run: it overwrites your uncommitted work in place "
+    "and nothing brings it back.",
+    "- RED discipline: commit your tests FIRST (a test-only commit), then produce the RED "
+    "state in a throwaway `git worktree add --detach <tmp> <base>` and run the committed "
+    "tests there; or park the uncommitted work with `git stash push -m <named>` and "
+    "`git stash pop` immediately after the RED run.",
+    "- Turn budget: when turns run low, commit what you have BEFORE the cap (a WIP commit "
+    "is fine) — uncommitted work at the cap is lost work.",
+    "- Your session's tool calls are journaled: worst case `scripts/lane_recover.py` "
+    "(--profile/--skey or --run/--node) replays your write_file/patch calls into a "
+    "restore dir. Name that exit in your final message if you are dying with an unbanked tree.",
+)
+LANE_HYGIENE_TOKEN = LANE_HYGIENE_LINES[0]   # the gate token tests grep for
+
+def _is_build_lane(node):
+    """The build shape: `shape: "build"` declared, or a `repo:` lane declared (the
+    64c6772b lane-gate surface). DEFAULT_SHAPE fills budgets, never this law:
+    an undeclared node keeps its prompt bytes (golden-solo)."""
+    return node.get("shape") == "build" or bool(node.get("repo"))
+
+def _lane_hygiene_preamble(node):
+    """Machine-generated lane-hygiene preamble for build-shape nodes ("" otherwise).
+    Prompt-side only (see LANE_HYGIENE_LINES): composed alongside the resume
+    preamble in run_child so EVERY spawn of a build node — first attempt, transient
+    retry, bounded resume, fan-out item — carries it; def-hash-neutral by
+    construction (nothing here is ever written to graph.json or a node record)."""
+    return "\n".join(LANE_HYGIENE_LINES) if _is_build_lane(node) else ""
+
 # The machine-readable lines the child CLI actually emits (verified against
 # /opt/hermes/hermes_cli/oneshot.py: an escaping provider error reaches the
 # runner's merged stdout ONLY as `real_stderr.write("hermes -z: agent failed:
@@ -981,7 +1022,12 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
               inputs="", index=None, resume_preamble=""):
     run = meta["_run"]
     spawn_no = _next_spawn_no(meta, node, index)
-    prompt = ((resume_preamble + "\n\n" + goal) if resume_preamble else goal) + ("\n\n" + context if context else "")
+    # #37: the machine preambles compose at the ONE spawn seam every path shares
+    # (solo, fan-out item, transient retry, bounded resume): lane hygiene first
+    # (build shape only, "" otherwise), then the resume preamble, then the goal.
+    # Both are prompt-side artifacts (logs/*.prompt.md) — never record bytes.
+    preamble = "\n\n".join(p for p in (_lane_hygiene_preamble(node), resume_preamble) if p)
+    prompt = ((preamble + "\n\n" + goal) if preamble else goal) + ("\n\n" + context if context else "")
     # A4: the runner states each child's durable work dir (replaces the old
     # write-first authoring rule). It lands in the GOAL half, before '## Inputs':
     # the fan-out identity law holds everything from '## Inputs' onward
