@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+- #37 lane hygiene (digest 20260929f / spool 8edcc9bfc91b9683 — a build lane wiped its
+  uncommitted implementation with a base checkout over its own dirty tree for a RED run,
+  then died on the turn cap; recovery was a hand replay of 17 journaled tool calls). Two
+  parts. (1) A machine lane-hygiene preamble on every build-shape spawn (`shape: "build"`
+  or a declared `repo:` lane; solo, fan-out item, transient retry and bounded resume all
+  pass the one `run_child` seam) — prompt-side only, modeled on `_resume_preamble`, so
+  graph.json, `nodes/*.json`, `run.json` and the def hash are byte-untouched and golden-solo
+  stays EMPTY: the ban on checkout-over-dirty-tree RED runs, commit-tests-first + detached
+  throwaway worktree / named stash for the RED state, WIP-commit-before-the-cap, and the
+  name of the exit. (2) `scripts/lane_recover.py` (stdlib, state.db opened `mode=ro`):
+  `--profile/--skey` or `--run/--node[/--index]` (key read from the node record, db home
+  resolved the way the read model does) lists the journaled write_file/patch calls, and
+  `--out <dir>` replays them (patch: exact, then whitespace-flexible; unmatched patches
+  land in `lane_recover_report.json`); exit 0 recovered, 2 no session, 3 nothing journaled.
+  Tests: `tests/test_lane_hygiene_preamble_8edcc9bf.py`, `tests/test_lane_recover_8edcc9bf.py`
+  (synthetic db, hermetic).
+
 ## 1.1.1 — 2026-09-29 — runner correctness (cross-container liveness, ancestor gate answers), profile-home fix, lane-clean gate, portable files, pill rail
 
 Patch release: every merged PR since v1.1.0, in merge order. Solo default-profile runs stay byte-identical to 1.0.15 (golden-solo EMPTY diff re-run on this tree). Stdlib-only backend; desktop imports frozen to `@hermes/plugin-sdk`, `react`, `react/jsx-runtime`.
