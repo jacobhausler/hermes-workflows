@@ -33,4 +33,4 @@ For a decision, a `gate` with `question` and `options` holds; present it to the 
 - Use `graph_path` on run/save/amend for a caller-authorized absolute local JSON file instead of embedding a large graph. Choose exactly one graph source. See [grammar](references/grammar.md).
 - Leave node budgets unset and name a `shape`; see [budgets](references/budgets.md).
 
-The graph vocabulary, boundaries and examples live in [grammar](references/grammar.md); read-model/recovery in [operations](references/operations.md). [Development checks](references/development.md) are for contributors, not ordinary-user prerequisites.
+The graph vocabulary, boundaries and examples live in [grammar](references/grammar.md); read-model/recovery in [operations](references/operations.md). For parallel build lanes, fleet children, and babysitting long runs, use the measured [operator playbook](references/operator-playbook.md) (lane walls/banking, write-first children, cgroup-sized fan-out, staleness via efp). [Development checks](references/development.md) are for contributors, not ordinary-user prerequisites.

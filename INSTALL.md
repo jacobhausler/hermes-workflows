@@ -28,12 +28,13 @@ Set `HERMES_HOME` to the active backend profile home; the default is `$HOME/.her
     hermes plugins validate "$HERMES_HOME/plugins/hermes-workflows"
     hermes plugins enable hermes-workflows
 
-The bundled skill is registered by the plugin as `hermes-workflows:workflow`. For direct CLI discovery outside plugin registration, install a separate copy of the bundled authoring skill in the active profile (do not overwrite an existing skill):
+The bundled skill is registered by the plugin as `hermes-workflows:workflow`; that registration is the skill's single source of truth. For direct CLI discovery outside plugin registration, link the package's skill into the active profile so it tracks every plugin update — do NOT maintain a copied fork (a copy silently freezes at the plugin version it was taken from and trains stale grammar):
 
     test ! -e "$HERMES_HOME/skills/workflow"
-    mkdir -p "$HERMES_HOME/skills/workflow"
-    cp "$PACKAGE_DIR/SKILL.md" "$HERMES_HOME/skills/workflow/SKILL.md"
-    cp -R "$PACKAGE_DIR/references" "$HERMES_HOME/skills/workflow/references"
+    mkdir -p "$HERMES_HOME/skills"
+    ln -s "$PACKAGE_DIR" "$HERMES_HOME/skills/workflow"
+
+If a symlink is impossible on the host, copy instead — but then re-copy after every plugin update, and treat drift as a bug. If a copied or hand-edited skill already exists where the link would go, stop and reconcile it with the package before linking; never silently discard local edits, upstream them (issue on the plugin repo) so the package can carry them.
 
 Enablement and copied source are not proof the running gateway loaded them. Restart the backend after applying the verified plugin, then verify plugin admission, mounted API and tool registration in the new process. Dashboard registration is API-only with a hidden tab.
 
