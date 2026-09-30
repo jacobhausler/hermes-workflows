@@ -288,5 +288,221 @@ print("@@" + json.dumps({"before": before, "after": after}))
 finally:
     shutil.rmtree(TMP, ignore_errors=True)
 
+# ================= round 2: READER-PARITY matrix (F2f / F2h / R1 / R2) =====
+# The door reads owner settings through core's loader (env-expanded, PER-KEY legacy
+# `config` fallback — hermes_cli/plugins.py get_config); the runner (wf.py) and the
+# dashboard (plugin_api._root) have no plugin ctx and read config.yaml raw. Any value
+# core transforms — `${VAR}` / `${env:VAR}`, a key living under legacy `config` next
+# to a `settings` mapping — made the door write runs the runner could not find
+# (adversary hunts 2f/2h). The raw reader must now mirror core's semantics so ALL
+# THREE readers answer the identical value (or the identical error) for every shape,
+# with core importable AND without.
+PARITY_PROBE = r'''
+import importlib.util, json, os, sys, types
+from pathlib import Path
+ROOT = Path(sys.argv[1]); MODE = sys.argv[2]   # 'core-ctx' | 'core-raw' | 'nocore'
+if str(ROOT) not in sys.path: sys.path.insert(0, str(ROOT))
+core_importable = False
+try:
+    import hermes_cli.config  # noqa: F401
+    core_importable = True
+except Exception:
+    pass
+out = {"core_importable": core_importable}
+def snap(fn):
+    try:
+        return {"value": str(fn())}
+    except ValueError as e:
+        return {"error": str(e)}
+spec = importlib.util.spec_from_file_location("tb_parity_door", ROOT / "__init__.py")
+door = importlib.util.module_from_spec(spec); spec.loader.exec_module(door)
+import wf                                                  # the runner's reader
+spec2 = importlib.util.spec_from_file_location("tb_parity_api", ROOT / "dashboard" / "plugin_api.py")
+api = importlib.util.module_from_spec(spec2); spec2.loader.exec_module(api)   # the dashboard's
+if MODE == "core-ctx":
+    from hermes_cli.plugins import PluginContext           # THE real core reader
+    ctx = PluginContext.__new__(PluginContext)
+    ctx.manifest = types.SimpleNamespace(name="hermes-workflows", plugin_id="hermes-workflows",
+                                         key="hermes-workflows")
+    door._CTX = ctx
+else:
+    door._CTX = None
+out["door"] = snap(door.runs_root)
+out["runner"] = snap(wf.runs_root)            # same function find_run() resolves with
+out["dashboard"] = snap(api._root)
+out["door_launcher"] = snap(door._common.launcher_profile)
+out["runner_launcher"] = snap(lambda: sys.modules["wfcommon"].launcher_profile())
+out["dash_launcher"] = snap(lambda: api._workflow_common().launcher_profile())
+print("@@" + json.dumps(out))
+'''
+
+PY_CORE = "/opt/hermes/.venv/bin/python"
+if not Path(PY_CORE).exists():
+    PY_CORE = PY
+
+def parity_probe(home, cfg_text, mode, env=None):
+    """Fresh interpreter; cfg_text is the RAW config.yaml (settings + legacy config)."""
+    home = Path(home); home.mkdir(parents=True, exist_ok=True)
+    (home / "config.yaml").write_text(cfg_text)
+    base = {k: v for k, v in os.environ.items()
+            if k not in ("HERMES_HOME", "WF_RUNS_ROOT", "HERMES_WF_HERMES_BIN",
+                         "TB_PROFILE_GATE", "PYTHONPATH")}
+    base["HERMES_HOME"] = str(home)
+    if mode == "nocore":
+        py = PY                                     # bare interpreter, no PYTHONPATH
+    else:
+        py = PY_CORE
+        base["PYTHONPATH"] = "/opt/hermes"
+    base.update(env or {})
+    p = subprocess.run([py, "-c", PARITY_PROBE, str(ROOT), mode],
+                       capture_output=True, text=True, env=base, timeout=90, cwd=str(home))
+    line = [l for l in p.stdout.splitlines() if l.startswith("@@")]
+    if p.returncode != 0 or not line:
+        raise AssertionError(f"parity probe died ({mode}) rc={p.returncode}\n{p.stdout[-1200:]}\n{p.stderr[-1200:]}")
+    return json.loads(line[0][2:])
+
+def yaml_block(key, mapping, indent):
+    lines = [" " * indent + key + ":"]
+    for k, v in mapping.items():
+        lines.append(" " * (indent + 2) + f"{k}: {json.dumps(v)}")
+    return lines
+
+def parity_cfg(settings=None, legacy=None):
+    lines = ["plugins:", "  entries:", "    hermes-workflows:"]
+    if settings is not None:
+        lines += yaml_block("settings", settings, 6)
+    if legacy is not None:
+        lines += yaml_block("config", legacy, 6)
+    return "\n".join(lines) + "\n"
+
+def parity_case(name, home, cfg_text, env, expect):
+    """All three readers × {core-ctx, core-raw, nocore} answer EXACTLY `expect`
+    (a {key: {"value"|"error": ...}} dict). Cross-reader AND cross-interpreter."""
+    seen = {}
+    for mode in ("core-ctx", "core-raw", "nocore"):
+        got = parity_probe(home, cfg_text, mode, env=env)
+        if mode == "nocore" and got.get("core_importable"):
+            print(f"SKIP {name} [nocore] — core importable without PYTHONPATH on this host")
+            continue
+        for k, v in expect.items():
+            ok = got.get(k) == v
+            check(f"{name} [{mode}] {k}", ok, (got.get(k), v))
+        seen[mode] = got
+    # cross-interpreter agreement on the compared keys (door/runner/dashboard triples)
+    modes = [m for m in seen if m != "nocore" or not seen["nocore"].get("core_importable")]
+    for a in range(len(modes)):
+        for b in range(a + 1, len(modes)):
+            ga, gb = seen[modes[a]], seen[modes[b]]
+            check(f"{name} readers agree across interpreters ({modes[a]} vs {modes[b]})",
+                  all(ga[k] == gb[k] for k in expect),
+                  [(modes[a], {k: ga[k] for k in expect}), (modes[b], {k: gb[k] for k in expect})])
+
+TMP2 = Path(tempfile.mkdtemp(prefix="tb-parity-", dir=str(ROOT / "tests")))
+try:
+    # ---- F2f: ${VAR} / ${env:VAR} expansion — door/runner/dashboard identical ----
+    fake_home = TMP2 / "HOME"; fake_home.mkdir()
+    home_f = TMP2 / "f-home"; (home_f / "workflows").mkdir(parents=True)
+    advx = TMP2 / "advx"; advx.mkdir()
+    parity_case("F2f ${VAR}", home_f,
+                parity_cfg({"runs_root": "${HOME}/wf-runs"}),
+                {"HOME": str(fake_home)},
+                {"door": {"value": str(fake_home / "wf-runs")},
+                 "runner": {"value": str(fake_home / "wf-runs")},
+                 "dashboard": {"value": str(fake_home / "wf-runs")}})
+    parity_case("F2f ${env:VAR}", home_f,
+                parity_cfg({"runs_root": "${env:ADV_X}"}),
+                {"HOME": str(fake_home), "ADV_X": str(advx)},
+                {"door": {"value": str(advx)},
+                 "runner": {"value": str(advx)},
+                 "dashboard": {"value": str(advx)}})
+    # UNRESOLVED ref: every reader refuses with the SAME error (never a door-only view)
+    unresolved_err = {"error": "unresolved"}
+    parity_case("F2f unresolved ${VAR} refuses on ALL readers", home_f,
+                parity_cfg({"runs_root": "${TB_NO_SUCH_VAR_9C41}/x"}),
+                {"HOME": str(fake_home)},
+                {"door": unresolved_err, "runner": unresolved_err, "dashboard": unresolved_err})
+    # profile shape too
+    prof = home_f / "profiles" / "stamped"; (prof).mkdir(parents=True)
+    (prof / "config.yaml").write_text("{}\n")
+    parity_case("F2f ${VAR} settings.profile", TMP2 / "f-home-prof",
+                parity_cfg({"profile": "${env:ADV_PROF}"}),
+                {"HOME": str(fake_home), "HERMES_HOME": str(TMP2 / "f-home-prof"),
+                 "ADV_PROF": "stamped"},
+                {"door_launcher": {"value": "stamped"},
+                 "runner_launcher": {"value": "stamped"},
+                 "dash_launcher": {"value": "stamped"}})
+
+    # ---- F2h: per-key legacy `config` fallback — settings key wins, else config ----
+    legacy_root = TMP2 / "legacy-root"; legacy_root.mkdir()
+    # env-blind launcher (HERMES_HOME is NOT <root>/profiles/<name>)
+    parity_case("F2h mixed settings+config (hunt5h shape)", TMP2 / "h-home",
+                parity_cfg({"hermes_bin": "/bin/true"},
+                           {"runs_root": str(legacy_root), "profile": "legacyprof"}),
+                {"HOME": str(fake_home), "HERMES_HOME": str(TMP2 / "h-home")},
+                {"door": {"value": str(legacy_root)},
+                 "runner": {"value": str(legacy_root)},
+                 "dashboard": {"value": str(legacy_root)},
+                 "door_launcher": {"value": "legacyprof"},
+                 "runner_launcher": {"value": "legacyprof"},
+                 "dash_launcher": {"value": "legacyprof"}})
+    # settings key PRESENT wins over legacy config for THAT key; missing key falls back
+    est = TMP2 / "estate2"
+    (est / "profiles" / "realprof").mkdir(parents=True)
+    (est / "profiles" / "realprof" / "config.yaml").write_text("{}\n")
+    parity_case("F2h per-key: settings.profile wins, config.runs_root fills", est / "seat",
+                parity_cfg({"profile": "realprof"},
+                           {"profile": "ghostlegacy", "runs_root": str(legacy_root)}),
+                {"HOME": str(fake_home)},
+                {"door": {"value": str(legacy_root)},
+                 "runner": {"value": str(legacy_root)},
+                 "dashboard": {"value": str(legacy_root)},
+                 "door_launcher": {"value": "realprof"},
+                 "runner_launcher": {"value": "realprof"},
+                 "dash_launcher": {"value": "realprof"}})
+    parity_case("F2h settings.runs_root wins over config.runs_root", est / "seat2",
+                parity_cfg({"runs_root": str(advx)},
+                           {"runs_root": str(legacy_root)}),
+                {"HOME": str(fake_home)},
+                {"door": {"value": str(advx)},
+                 "runner": {"value": str(advx)},
+                 "dashboard": {"value": str(advx)}})
+
+    # ---- R1: ghost settings.profile fails closed on every reader ----
+    parity_case("R1 ghost settings.profile refuses on ALL readers", TMP2 / "g-home",
+                parity_cfg({"profile": "ghost"}),
+                {"HOME": str(fake_home), "HERMES_HOME": str(TMP2 / "g-home")},
+                {"door_launcher": {"error": "does not exist"},
+                 "runner_launcher": {"error": "does not exist"},
+                 "dash_launcher": {"error": "does not exist"}})
+    # an EXISTING profile passes (control)
+    parity_case("R1 existing settings.profile accepted", TMP2 / "g-home-ok",
+                parity_cfg({"profile": "stamped"}),
+                {"HOME": str(fake_home), "HERMES_HOME": str(TMP2 / "g-home-ok")},
+                {"door_launcher": {"value": "stamped"},
+                 "runner_launcher": {"value": "stamped"},
+                 "dash_launcher": {"value": "stamped"}})
+
+    # ---- R2: runs_root == <estate>/profiles exactly refuses ----
+    est3 = TMP2 / "estate3"
+    (est3 / "profiles" / "A").mkdir(parents=True)
+    (est3 / "profiles" / "A" / "config.yaml").write_text("{}\n")
+    parity_case("R2 runs_root == <estate>/profiles refuses on ALL readers",
+                est3 / "profiles" / "A",
+                parity_cfg({"runs_root": str(est3 / "profiles")}),
+                {"HOME": str(fake_home)},
+                {"door": {"error": "profiles"},
+                 "runner": {"error": "profiles"},
+                 "dashboard": {"error": "profiles"}})
+    # control: a dir UNDER the shared root that is not a profile home stays legal
+    parity_case("R2 estate-level shared dir still legal (control)", est3 / "profiles" / "A",
+                parity_cfg({"runs_root": str(est3 / "shared")}),
+                {"HOME": str(fake_home)},
+                {"door": {"value": str(est3 / "shared")},
+                 "runner": {"value": str(est3 / "shared")},
+                 "dashboard": {"value": str(est3 / "shared")}})
+finally:
+    shutil.rmtree(TMP2, ignore_errors=True)
+
+
 print(("ALL PASS" if not failures else f"FAILED {len(failures)}: {failures}") + " test_tool_bridge_settings_9c41e2b7")
 sys.exit(1 if failures else 0)
