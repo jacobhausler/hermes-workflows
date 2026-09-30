@@ -193,6 +193,10 @@ succeed, the rest are cancelled; without it the fan-out waits for every item;
   `dry_run:true` previews `{added, removed, changed, will_rerun, unchanged}`.
   Amending a `pending` node changes what spawns next; amending a `done` node
   invalidates it.
+- To lint a graph before launching it: `run` with `dry_run:true` runs every
+  pre-launch gate (validate, bind, model resolve, route ping, quota, route
+  enforcement) and returns `{ok, dry_run, models, routes}` writing NOTHING —
+  no run dir, no lane entry, no runner.
 - To resume a lane that died at its wall with work already banked: amend its `goal`
   to a *resume* prompt that names what is already committed and forbids redoing it.
   Cold re-runs of a timed-out research lane time out again.
