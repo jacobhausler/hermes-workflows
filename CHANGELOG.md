@@ -2,6 +2,44 @@
 
 ## Unreleased
 
+- #47 review (C1, FALSE DEAD on unknown probes): `lock_probe_child` returning
+  `unknown` (probe child hung past its timeout, SIGKILLed mid-run, or the fork
+  itself raised `EAGAIN` — the pid-limit-during-a-gateway-sweep shape) used to
+  collapse into "not held": `runner_alive=False`, `status:'interrupted'`,
+  `next:[wait]` while a live pid still held the flock, and `wait` then spawned a
+  second runner (only the admission flock kept it from double-running — the read
+  model lied). TRI-STATE law now: a held probe can only ADD liveness, never
+  remove it, and an unanswered probe is neither side. `runner_alive` returns
+  `None` on unknown (never `False`); `run_state` publishes
+  `runner_live:null + liveness:'probe-timeout'|'probe-failed'` and status
+  `'liveness-unknown'` — never `'interrupted'`; `next` says `observe`, never
+  `wait`; `wait` re-probes briefly and REFUSES to spawn while the probe cannot
+  answer; `release`/`stop`/`amend`/`_lane_state` never treat `None` as proven
+  dead (`needs_resume` fires only on `is False`). An explicit `crashed:` record
+  still outranks unknown (positive evidence wins). Desktop: `liveness-unknown`
+  renders in NEEDS YOU (never silently bucket-less) with a probe-failed fact
+  line. (2, C2, FORK STORM): `act_list` no longer forks one flock child per run
+  (50 runs was 50 `subprocess.run`, 296 ms median idle, worst case 50×5s past
+  the tool deadline). Two-pass fork-cheap read model: pass 1 is probe-free (pid
+  law + file reads); the kernel verdict is taken for at most the displayed-page
+  rows that could read live (`running/pending/interrupted/held/liveness-unknown`
+  with pid-law dead) in ONE batched child — `lock_probe_children(paths)` runs a
+  single `python -I -S` child per chunk (≤ `_PROBE_CHUNK` paths) that flocks
+  every `runner.lock` in argv and prints one `<idx>\t<code>` verdict line; a
+  child that hangs or dies keeps every line it already printed (partial answers
+  are partial truth) and its un-answered paths read UNKNOWN, never free; one
+  stalled path costs ONE timeout for the whole list, not one per path. Rows
+  beyond the per-call budget (`_LIST_PROBE_CANDIDATE_BUDGET`) also read unknown,
+  never free. `status` stays exactly one probe (single-path law, A2). (3, n3)
+  the release-lock hatch under `probes=['unknown','unknown']` with an fd-scan
+  hit now reads "refused: probe failed; open fds on the path: …" — an open fd is
+  an observation, not a kernel-proven holder. `tests/test_lock_heal_44.py` grows
+  to 79 pins: hung probe / kill -9 probe / fork-EAGAIN under a live holder all
+  assert `runner_live` is not `False`, status never `interrupted`, `wait`
+  spawns zero; batch pins: 50 paths == ONE probe child, poisoned path unknowns
+  only its own line, hung batch child = one timeout with partial lines kept;
+  consumer pins: list rows, `_lane_state.needs_resume`, wait-spawn gate,
+  `next`, release/stop under unknown; rail pin in `test_register_surface.mjs`.
 - #44 stranded `runner.lock` (two runs died in a gateway sweep; the lock stayed held with
   ZERO visible holders — no `/proc/locks` inode line, empty `/proc/*/fd` scan, runner pid
   dead — and wait-resume was wedged until a new lane key). Prime suspect: the A1 liveness
@@ -19,7 +57,8 @@
   100 ms apart both acquire; never unlinks; a contested probe reports the believed holders
   (`/proc/*/fd` pid+argv, `/proc/locks` by inode); kernel-held with no visible holder is
   `stranded:true` with the forensic dump and the honest recovery (new lane key). (3)
-  `tests/test_lock_heal_44.py` (39 checks): SIGKILLed holder → probe FREE; probing parent
+  `tests/test_lock_heal_44.py` (39 checks at authoring; now 79 with the #47 C1/C2 pins
+  below): SIGKILLed holder → probe FREE; probing parent
   SIGKILLed mid-probe ×5 never strands; live holder → BUSY + refusal with evidence; live pid
   → refusal; held gate → refusal; killed holder → double-probe free; door status/list = at
   most ONE child-probe and the door process never flocks; stranded verdict honesty; no

@@ -673,12 +673,15 @@ export function splitRuns(runs) {
 /** O3 pane action-first grouping: NEEDS YOU (held + failed + interrupted — the
  *  owner must act on all three), RUNNING (running + pending), DONE (done +
  *  stopped). Within each group, newest `updated` first. Pure, so node can
- *  test it without a DOM. */
+ *  test it without a DOM.
+ *  #47 C1: 'liveness-unknown' (the door could not answer the probe) is NOT dead
+ *  — it goes to NEEDS YOU (the owner must resolve the probe / observe), never
+ *  silently out of every bucket (the run must never vanish from the rail). */
 export function groupRuns(runs) {
   const byUpdated = (a, b) => parseTime(b.updated) - parseTime(a.updated)
   const list = runs || []
   return {
-    needsYou: list.filter(r => ['held', 'failed', 'interrupted'].includes(r.status)).sort(byUpdated),
+    needsYou: list.filter(r => ['held', 'failed', 'interrupted', 'liveness-unknown'].includes(r.status)).sort(byUpdated),
     running: list.filter(r => ['running', 'pending'].includes(r.status)).sort(byUpdated),
     done: list.filter(r => ['done', 'stopped'].includes(r.status)).sort(byUpdated)
   }
@@ -1756,6 +1759,7 @@ function PaneRow({ run, thisChat }) {
   if (run.status === 'held') fact = run.held_gate?.question || `gate · ${run.held_gate?.id || 'unknown'}`
   else if (run.status === 'failed') fact = run.runner_exit?.reason || 'failed'
   else if (run.status === 'interrupted') fact = `interrupted · ${nodesCount(run)}`
+  else if (run.status === 'liveness-unknown') fact = 'liveness probe failed — resolve the probe (observe)'
   else if (run.status === 'running' || run.status === 'pending') {
     const start = parseTime(run.started)
     const elapsed = start ? fmtDur(Date.now() - start) : ''
