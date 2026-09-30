@@ -39,6 +39,27 @@ if "QFLUSH" in q:
 if "QSLEEP" in q:
     try: time.sleep(float(q.split("QSLEEP")[1].split()[0]))
     except Exception: pass
+# ---- #61 process-tree modes (no behavior change without the env) ----
+# FAKE_GC=1: background a same-session grandchild that outlives this child —
+# the detached-suite shape. Its pid is appended to $FAKE_GC_PIDS so the test
+# can prove the runner killed it. start_new_session=False keeps it in the
+# spawn's group so killpg can reach it (the pgid-walk proof).
+if os.environ.get("FAKE_GC"):
+    import subprocess as _sp
+    _gc = _sp.Popen([sys.executable, "-c", "import time; time.sleep(600)"])
+    _gcp = os.environ.get("FAKE_GC_PIDS")
+    if _gcp:
+        with open(_gcp, "a") as _f:
+            _f.write(str(_gc.pid) + "\n")
+if os.environ.get("FAKE_MODE") == "background" and "BGPROGRESS" in q:   # #61: the 06f57ea9 shape —
+    # background the REAL work, print progress chatter, exit 0 with NO fenced
+    # block (suite.a0.log verbatim style: "Suite is running ... Waiting").
+    _t0 = time.time()
+    while time.time() - _t0 < 1.0:    # stay alive so the runner samples the tree
+        time.sleep(0.05)              # while our grandchild is attached
+    print("Suite is running in the isolated worktree at the exact SHA. "
+          "Waiting for the actual exit.")
+    sys.exit(0)
 time.sleep(0.15)
 if "CRASHME" in q:
     print("segfault-ish diagnostic prose, NO json")

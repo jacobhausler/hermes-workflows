@@ -514,7 +514,10 @@ ERROR_CLASSES = frozenset(("provider_400", "unresolved_model", "cap_exhausted",
                            "fatal_quota", "route_unavailable",
                            "incomplete_work", "early_death", "cancelled",
                            "schema", "spawn", "graph_invalid", "inputs",
-                           "quorum", "fanout_empty", "crashed", "unknown"))
+                           "quorum", "fanout_empty", "crashed", "unknown",
+                           # #61: an attempt that exited while its own process group
+                           # still held live backgrounded work — terminal, in BOTH ladders.
+                           "left_live_descendants"))
 _AGENT_FAIL_PREFIX = "hermes -z: agent failed:"
 # turn_failure_copy.py ends every non-retryable failure with a fixed-format trailer
 # `Provider said: <summary>`; api_error_summary.py:49 formats the summary as
@@ -858,6 +861,417 @@ def _kill_adopted(pid):
         try: os.kill(pid, signal.SIGKILL)
         except Exception: pass
 
+# ---------- #61: process-tree accounting (the false-green-suite law) ----------
+# A spawn that BACKGROUNDS the real work (detached pytest) and returns progress
+# chatter must never be judged done, and its retry must never share a workdir
+# with its own still-live descendants (evidence 20260930-070100-fb-fix-3473882e:
+# suite a0 backgrounded, a1 blind-spawned into the same verify worktree).
+# The same /proc read the runner already uses for liveness (_proc_alive) is the
+# only source; nothing here trusts the child's prose.
+
+PROCREE_HOLD_S = 5.0         # drain window before the runner kills the stragglers
+PROCREE_KILL_PROOF_S = 15.0  # budget for proving SIGKILL took effect via /proc
+PROCREE_POLL_S = 0.25        # tree-walk cadence while a spawn is live
+
+def _tree_verdict_error(node_id, spawn_no, pid, live, out):
+    """The exit-judged contract, spelled out in the failure itself (#61): a
+    progress string is not an exit. Names what was measured (live pids), why the
+    exit was not believed (no fenced answer + live tree), and the verdict law
+    (06f57ea9: a suite verdict comes from the run's exit code after the runner
+    sees the tree empty — never from the child's prose)."""
+    tail = (re.sub(r"\s+", " ", (out or "").strip())[-200:]) or "<empty log>"
+    return (f"progress-not-result: node '{node_id}' spawn a{spawn_no} (pid={pid}) exited "
+            f"without a valid fenced json answer while its own process tree was still live "
+            f"(pids {live}) — the real work was backgrounded, so the exit judged nothing and "
+            f"is never believed. The verdict law: a suite/build verdict comes from the run's "
+            f"exit code AFTER its process tree is empty, never from the child's progress "
+            f"prose. Re-run the work in the foreground and return the fenced json verdict; "
+            f"the prior tree was killed and proven dead first (#61). Last words: {tail}")
+
+def _left_live_record(pid, stuck, note, r=None):
+    """The typed fail-closed record: the tree could not be PROVEN dead, so the
+    node fails instead of committing (or re-spawning into) a contaminated tree.
+    Carries the dead attempt's evidence forward (raw tail, log/prompt paths,
+    skey) — a reader must be able to see WHY the tree was not trusted."""
+    r = r or {}
+    rec = {"status": "failed",
+           "error": f"left-live-descendants: the spawn (pid={pid}) still has a live "
+                    f"process tree {stuck} after hold + SIGKILL — {note} Failing closed "
+                    "instead of guessing (#61).",
+           "error_class": "left_live_descendants",
+           "raw": (r.get("raw") or "")[-2000:], "ms": r.get("ms", 0),
+           "tree_descendants": stuck, "tree_proof": "stuck",
+           "attempts": r.get("attempts", 1)}
+    for k in ("log_path", "prompt_path", "pid", "spawn", "skey", "final",
+              "tree_pids", "profile_home"):
+        if r.get(k) is not None:
+            rec[k] = r[k]
+    return rec
+
+def _account_tree(meta, node, index, spawn_no, pid, tree_seen, has_answer):
+    """#61 completeness gate, run at every exit-0 verdict of run_child, done and
+    correction-retry alike: an exit-0 spawn is believed only when its process
+    tree is empty. Returns None when there was nothing to account for
+    (dead-or-empty — a healthy node's record stays byte-identical, solo byte-
+    identity law); ('fail', record) when the tree could not be proven dead
+    (or the table was unreadable — #61b B2 fail-closed);
+    ('partial', extras) when a valid fenced answer rode stdout while the real
+    work outlived the turn; ('failed', extras) — progress-not-result, the
+    06f57ea9 suite-chatter shape — when no valid answer existed. `extras` is
+    the tree evidence once PROVEN dead. The tracked set is persisted per
+    (node, index) across the retry ladder (#61b B1) and re-adopts through each
+    tracked pid's process group — an overlap retry never under-counts."""
+    run = meta["_run"]
+    known = set(tree_seen)
+    known.discard(pid)
+    tracked = _proctree_tracked(meta).setdefault((node["id"], index), set())
+    known |= tracked
+    members = _proc_pids_by_pgid(pid)
+    if members is None:
+        return ("fail", _proc_unreadable_record(pid, node["id"], spawn_no))   # #61b B2
+    known |= {p for p in members if _proc_alive(p)}
+    # #61b B1: a tracked pid that reparented is still findable through its
+    # process group — re-walk each tracked pid's group, not just the spawn's.
+    for tp in list(tracked):
+        extra = _proc_pids_by_pgid(tp)
+        if extra is None:
+            return ("fail", _proc_unreadable_record(pid, node["id"], spawn_no))
+        known |= {p for p in extra if _proc_alive(p)}
+    tracked |= known
+    if not any(_proc_alive(p) for p in known):
+        return None                              # dead-or-empty: verdict untouched
+    proof, stuck = _tree_quiesce(known | {pid}, pid,
+                                 _proctree_hold_s(meta), _proctree_kill_proof_s(meta))
+    if proof == "":
+        return None                              # drained naturally mid-check
+    ev = {"node": node["id"], "spawn": spawn_no, "pid": pid,
+          "index": index, "pids": sorted(known), "proof": proof}
+    if proof != "dead":
+        log(run, ("item." if index is not None else "node.") + "tree_kill", **ev)
+        rec = _left_live_record(pid, stuck,
+                                f"node '{node['id']}' spawn a{spawn_no} cannot be judged.",
+                                {"attempts": 1})
+        rec["ms"] = 0
+        return ("fail", rec)
+    log(run, ("item." if index is not None else "node.") + "tree_kill", **ev)
+    extras = {"tree_descendants": sorted(known), "tree_proof": "dead"}
+    if has_answer:
+        # the harvest law: the answer rode stdout while the real work outlived
+        # the turn — commit it as partial, never a silent done.
+        return ("partial", extras)
+    return ("failed", extras)
+
+def _tree_watch(proc, seen):
+    """Snapshot the spawn's live SUBTREE while it still LIVES: after it dies and
+    is reaped its descendants reparent and vanish from the ppid view — this is
+    the only moment they can be attributed to it (the pgid walk then reaches
+    them after the reap). The walk is RECURSIVE (#61b B1): a double-fork
+    grandchild is found while both generations are attached, not only direct
+    children. Best-effort: a /proc hiccup only loses evidence, never a spawn —
+    the judgment pass re-checks the table and fails closed there."""
+    kids = _proc_children_of(proc.pid)
+    if kids:
+        seen.update(kids)
+
+def _proctree_hold_s(meta):
+    v = meta.get("proctree_hold_s")
+    return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) and v >= 0 \
+        else PROCREE_HOLD_S
+
+def _proctree_kill_proof_s(meta):
+    v = meta.get("proctree_kill_proof_s")
+    return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) and v >= 0 \
+        else PROCREE_KILL_PROOF_S
+
+def _proc_state():
+    """Can the process table be read at all? #61b B2 (fail-closed family of the
+    door's #25/#26 gates): 'ok' when /proc lists; 'none' ONLY when /proc does
+    not exist as a filesystem (macOS/BSD — honest-empty degradation stays);
+    'unknown' when /proc exists but a listing/row read FAILS (denied, EIO,
+    ENOMEM) after one retry — that is NEVER collapsed into 'safe/empty'."""
+    last = None
+    for _ in (0, 1):                                # one retry: transient hiccups
+        try:
+            os.listdir("/proc")
+            return "ok"
+        except FileNotFoundError:
+            return "none"
+        except OSError as e:
+            last = e
+    return "unknown"
+
+def _proc_snapshot():
+    """One pass over /proc: {pid: (ppid, pgid)} for LIVE (non-zombie) pids.
+    Zombie = dead (same identity law as _proc_alive); a row whose pid vanished
+    mid-pass (ENOENT) is skipped (honest absence, never an invented
+    descendant). Returns None — NOT an empty dict — when the table is
+    unreadable (#61b B2: 'unknown' must never masquerade as 'dead-or-empty')."""
+    state = _proc_state()
+    if state == "none":
+        return {}                                   # no procfs: honest empty
+    if state == "unknown":
+        return None                                 # unreadable: fail closed upstream
+    out = {}
+    try:
+        entries = os.listdir("/proc")
+    except FileNotFoundError:
+        return {}
+    except OSError:
+        return None
+    for d in entries:
+        if not d.isdigit():
+            continue
+        pid = int(d)
+        if pid == os.getpid():
+            continue
+        try:
+            stat = Path(f"/proc/{d}/stat").read_text()
+        except FileNotFoundError:
+            continue                                # pid vanished mid-pass: race, not denial
+        except OSError:
+            return None                             # row exists but unreadable: unknown
+        try:
+            rest = stat.rsplit(")", 1)[1].split()   # comm may hold spaces/parens
+            state_, ppid, pgid = rest[0], int(rest[1]), int(rest[2])
+        except (IndexError, ValueError):
+            continue
+        if not state_.startswith("Z"):
+            out[pid] = (ppid, pgid)
+    return out
+
+def _proc_children_of(pid):
+    """The FULL live process SUBTREE under `pid` (not just direct children):
+    a double-fork (+setsid) grandchild that reparents when the intermediary
+    dies must be found while BOTH generations are still attached (#61b B1 —
+    the adversarial walk-probe proved direct-PPid sampling misses it). Only
+    valid while `pid`'s chain still lives (after death+reap descendants
+    reparent and vanish from this view — that is why run_child snapshots
+    DURING the spawn's lifetime and persists the tracked set). Returns None
+    when /proc is unreadable (#61b B2 — the caller fails closed, never 'no
+    children')."""
+    snap = _proc_snapshot()
+    if snap is None:
+        return None
+    kids = {}
+    for p, (ppid, _pg) in snap.items():
+        kids.setdefault(ppid, []).append(p)
+    found, stack = set(), [pid]
+    while stack:
+        cur = stack.pop()
+        for c in kids.get(cur, ()):
+            if c not in found:
+                found.add(c)
+                stack.append(c)                     # cycle-proof (pid can appear once)
+    return sorted(found)
+
+def _proc_pids_by_pgid(pgid):
+    """Live members of process group `pgid`. Membership survives reparenting,
+    so this still finds same-session grandchildren AFTER the spawner died and
+    was reaped — the channel killpg can actually reach, and the re-adoption
+    channel for a tracked pid whose own intermediary is long gone (#61b B1).
+    An already-reaped (empty) group honestly returns [] — the dead-or-empty
+    half of the proof. Returns None when /proc is unreadable (#61b B2)."""
+    snap = _proc_snapshot()
+    if snap is None:
+        return None
+    return sorted(p for p, (_pp, pg) in snap.items() if pg == pgid)
+
+def _proctree_tracked(meta):
+    """#61b B1: the tracked pid set per (node_id, item_index), living in run
+    memory across the whole retry ladder. Every accounting pass merges what
+    it saw into the set and every verdict starts FROM the set — an overlap
+    retry re-adopts prior-generation pids (found again through each tracked
+    pid's process GROUP, whose membership survives reparenting) and can
+    therefore never under-count what an earlier attempt already witnessed."""
+    tr = meta.get("_proctree_tracked")
+    if tr is None:
+        tr = meta["_proctree_tracked"] = {}
+    return tr
+
+def _proc_unreadable_record(pid, node_id, spawn_no, r=None):
+    """#61b B2: the typed fail-closed record for an UNREADABLE process table.
+    A probe that cannot read /proc reports unsafe/unknown — never safe/empty
+    (same family as the door's #25/#26 alive-proof gates): no verdict, and no
+    respawn, is issued over a tree whose death cannot be checked."""
+    r = r or {}
+    rec = {"status": "failed",
+           "error": f"proc-unreadable: /proc exists but could not be read while judging "
+                    f"node '{node_id}' spawn a{spawn_no} (pid={pid}) — process-tree death "
+                    "cannot be PROVEN, so the verdict is unknown and the node fails closed "
+                    "instead of trusting an empty read (#61b B2).",
+           "error_class": "left_live_descendants",
+           "raw": (r.get("raw") or "")[-2000:], "ms": r.get("ms", 0),
+           "tree_descendants": [], "tree_proof": "unknown",
+           "attempts": r.get("attempts", 1)}
+    for k in ("log_path", "prompt_path", "pid", "spawn", "skey", "profile_home"):
+        if r.get(k) is not None:
+            rec[k] = r[k]
+    return rec
+
+def _tree_quiesce(known, pgid, hold_s, proof_s):
+    """Make an attempt's process tree PROVABLY dead: hold briefly for a natural
+    drain, then SIGKILL the spawn's own group (the child is the group leader —
+    start_new_session at spawn) and every known descendant individually
+    (setsid detach escapees sit OUTSIDE the group — the 06f57ea9 shape), then
+    re-walk /proc until every pid is dead. Returns (proof, still_live):
+    ('', []) when there was nothing to account for — the dead-or-empty case the
+    healthy retry path must not touch; ('dead', []) once PROVEN; ('stuck', pids)
+    when the proof budget ran out (fail closed upstream, never blind-respawn) —
+    or whenever the table became unreadable (#61b B2: an unreadable /proc can
+    never produce 'dead', the proof only completes on a readable re-walk)."""
+    def _live():
+        s = {p for p in known if _proc_alive(p)}
+        members = _proc_pids_by_pgid(pgid)
+        if members is None:
+            return None                             # #61b B2: unreadable
+        s |= {p for p in members if _proc_alive(p)}
+        return sorted(s)
+    live = _live()
+    if live is None:
+        return "stuck", sorted(known)               # cannot check death: NOT dead
+    if not live:
+        return "", []
+    deadline = time.time() + hold_s
+    while live and time.time() < deadline:          # give a straggler moment to exit
+        time.sleep(0.1)
+        live = _live()
+        if live is None:
+            return "stuck", sorted(known)
+    if live:
+        try:
+            os.killpg(pgid, signal.SIGKILL)         # dead group raises ESRCH — fine
+        except OSError:
+            pass
+        for p in live:
+            try: os.kill(p, signal.SIGKILL)
+            except OSError: pass
+    deadline = time.time() + proof_s
+    while True:
+        live = _live()
+        if live is None:
+            return "stuck", sorted(known)           # unreadable: never claim dead
+        if not live:
+            return "dead", []
+        if time.time() >= deadline:
+            return "stuck", live
+        time.sleep(0.1)
+
+def _isolate_prior(meta, r, ev, ev_kw):
+    """#61 quarantine law, run INSIDE both retry ladders before any respawn:
+    attempt N+1 must NEVER share a worktree/workdir with still-live descendants
+    of attempt N. Proof = the prior spawn's recorded tree + a fresh pgid walk,
+    held, killed, re-walked to dead. Returns None when safe (dead-or-empty —
+    healthy retries keep their semantics untouched); returns a terminal
+    left_live_descendants record when death cannot be PROVEN — fail closed:
+    no blind re-spawn into a contaminated tree. A tracked pid's process GROUP
+    is re-walked too (#61b B1: membership survives reparenting, so an
+    overlap retry re-adopts escapees instead of under-counting), and an
+    unreadable /proc is unsafe, never empty (#61b B2)."""
+    run = meta["_run"]
+    pid = r.get("pid")
+    if not isinstance(pid, int):
+        return None
+    known = {p for p in (r.get("tree_pids") or []) if isinstance(p, int)}
+    tracked = _proctree_tracked(meta).get((ev_kw.get("node"), ev_kw.get("index")))
+    if tracked:
+        known |= set(tracked)
+    members = _proc_pids_by_pgid(pid)
+    if members is None:
+        return _proc_unreadable_record(pid, ev_kw.get("node"), r.get("spawn"), r)  # #61b B2
+    live = sorted({p for p in known if _proc_alive(p)}
+                  | {p for p in members if _proc_alive(p)})
+    for tp in list(known):                          # #61b B1: group re-walk per tracked pid
+        if tp == pid:
+            continue
+        extra = _proc_pids_by_pgid(tp)
+        if extra is None:
+            return _proc_unreadable_record(pid, ev_kw.get("node"), r.get("spawn"), r)
+        live = sorted(set(live) | {p for p in extra if _proc_alive(p)})
+    if not live:
+        return None
+    if tracked is not None:
+        tracked |= set(live)
+    proof, stuck = _tree_quiesce(known | set(live), pid,
+                                 _proctree_hold_s(meta), _proctree_kill_proof_s(meta))
+    if proof == "":
+        return None                              # drained naturally mid-check
+    kw = dict(ev_kw); kw["pids"] = live; kw["proof"] = proof
+    log(run, f"{ev}.tree_kill", **kw)
+    if proof != "dead":
+        return _left_live_record(pid, stuck,
+                                 "attempt N+1 must never share a workdir with live "
+                                 "attempt-N descendants: failing closed instead of "
+                                 "re-spawning into a contaminated tree. ", r)
+    r["tree_descendants"] = list(live)
+    r["tree_proof"] = "dead"
+    return None
+
+def _final_quiesce(meta, r, ev, ev_kw):
+    """#61 quarantine law at the COMMIT edge: after both retry ladders are
+    spent, the LAST attempt's tree must be proven dead too — an abandoned
+    backgrounded suite keeps corrupting the workdir downstream (the
+    20260930-070100 shape: a1 blind-spawned while a0's detached pytest ran,
+    then a stop left the stragglers free). Dead-or-empty returns r untouched
+    (byte-identity); a provable kill stamps the evidence; an unprovable tree
+    replaces the verdict with the typed fail-closed record — a node may never
+    commit done/partial over a still-running process tree (the false-green
+    suite itself). #61b B4: a QUIET success (done/partial) whose tracked tree
+    was non-empty and is now proven dead NEVER stays a clean `done` — the
+    completeness ERROR is retained together with the answer (status demoted to
+    partial + error_class=left_live_descendants, same verdict as run_child's
+    own exit-judged partial), so an adopted child that outlived its own tree
+    cannot commit clean. An already-failed record keeps its honest class.
+    A cancelled death during `stop` keeps its honest class. An unreadable
+    /proc fails closed typed (#61b B2)."""
+    run = meta["_run"]
+    pid = r.get("pid")
+    if not isinstance(pid, int) or r.get("error_class") == "cancelled":
+        return r
+    known = {p for p in (r.get("tree_pids") or []) if isinstance(p, int)}
+    tracked = _proctree_tracked(meta).get((ev_kw.get("node"), ev_kw.get("index")))
+    if tracked:
+        known |= set(tracked)
+    members = _proc_pids_by_pgid(pid)
+    if members is None:
+        return _proc_unreadable_record(pid, ev_kw.get("node"), r.get("spawn"), r)  # #61b B2
+    live = sorted({p for p in known if _proc_alive(p)}
+                  | {p for p in members if _proc_alive(p)})
+    for tp in list(known):                          # #61b B1: group re-walk per tracked pid
+        if tp == pid:
+            continue
+        extra = _proc_pids_by_pgid(tp)
+        if extra is None:
+            return _proc_unreadable_record(pid, ev_kw.get("node"), r.get("spawn"), r)
+        live = sorted(set(live) | {p for p in extra if _proc_alive(p)})
+    if not live:
+        return r
+    if tracked is not None:
+        tracked |= set(live)
+    proof, stuck = _tree_quiesce(known | set(live), pid,
+                                 _proctree_hold_s(meta), _proctree_kill_proof_s(meta))
+    kw = dict(ev_kw); kw["pids"] = live; kw["proof"] = proof; kw["final"] = True
+    log(run, f"{ev}.tree_kill", **kw)
+    if proof != "dead":
+        return _left_live_record(pid, stuck,
+                                 "the node may not commit over a still-running process "
+                                 "tree (the false-green suite shape). ", r)
+    r = dict(r)
+    r["tree_descendants"] = list(live)
+    r["tree_proof"] = "dead"
+    if r.get("status") == "done" and not r.get("error_class"):
+        # #61b B4: something in this spawn's tree was STILL RUNNING at the
+        # commit instant and had to be killed — a quiet success (the adopted
+        # child shape, or a tree that grew after the exit judgment) is the same
+        # shape as the exit-judged harvest. A clean `done` is never committable
+        # over it: the completeness ERROR rides WITH the answer (partial +
+        # left_live_descendants), identical verdict to run_child's own law.
+        # Dead-or-empty never reaches here — golden/solo byte-identity holds.
+        r["status"] = "partial"
+        r["error"] = ("answer harvested while the spawn's process tree outlived the "
+                      "turn; tree killed and proven dead — never a silent done (#61b B4)")
+        r["error_class"] = "left_live_descendants"
+    return r
+
 def _adopt_child(meta, node, byid, index, child, schema, fo_cancel=None):
     """790c6ad: ADOPT a verified live orphan instead of re-spawning it (the
     respawned-runner token-loss bug: waveA3 re-ran 8 live children from zero
@@ -887,6 +1301,8 @@ def _adopt_child(meta, node, byid, index, child, schema, fo_cancel=None):
     deadline = started_epoch + wall if wall is not None else float("inf")
     timed_out = cancelled = extended = False
     was_alive = False                      # did WE observe it live in this wait?
+    tree_seen = set()                      # #61b B1: recursive watch while it lives
+    tree_next_watch = 0.0
     key = f"{nid}:adopt:{pid}"
     handle = _AdoptedHandle(pid)
     with meta["_procs_lock"]:
@@ -904,6 +1320,9 @@ def _adopt_child(meta, node, byid, index, child, schema, fo_cancel=None):
                 break
             was_alive = True
             now_s = time.time()
+            if now_s >= tree_next_watch:               # #61b B1: attribute while attached
+                _tree_watch(handle, tree_seen)
+                tree_next_watch = now_s + PROCREE_POLL_S
             if now_s >= deadline and not extended and not meta["_stop"].is_set() \
                     and _log_recent(lp, 0):
                 # EXTEND-NOT-KILL (#11), adoption form: a still-writing orphan gets
@@ -924,6 +1343,11 @@ def _adopt_child(meta, node, byid, index, child, schema, fo_cancel=None):
     finally:
         with meta["_procs_lock"]:
             meta["_procs"].pop(key, None)
+        if tree_seen:
+            # #61b B1: persist the adopted spawn's tracked subtree across the
+            # ladder — the commit-edge quiesce re-adopts through these pids.
+            _proctree_tracked(meta).setdefault((nid, index), set()).update(
+                p for p in tree_seen if p != pid)
         # The spawn record's life ends with the adoption: mark it terminal so no
         # later runner re-adopts a finished child (status != "running" fails the
         # verification law). NOT done/failed/partial: node_rec still reads pending.
@@ -970,13 +1394,20 @@ def _adopt_child(meta, node, byid, index, child, schema, fo_cancel=None):
                 "final": final_reply, **evd}
     parsed, perr = extract_json(out)
     errs = validate(parsed, schema) if (parsed is not None and perr is None) else None
+    def _complete(rec):
+        # #61b B4: the completeness verdict is SHARED with the exit-0 parse
+        # path, not left to the commit edge alone: a quiet adopted child whose
+        # tracked tree was non-empty never caches a clean done — the ERROR is
+        # retained together with (or instead of) done, BEFORE the harvest-ONCE
+        # memo freezes the verdict (a memoized done must already be honest).
+        return _final_quiesce(meta, rec, "item", {"node": nid, "index": index})
     if errs is not None and not errs:
         try: os.unlink(report_path)
         except OSError: pass
+        rec = _complete({"status": "done", "output": parsed, "ms": ms, **evd})
         with meta["_procs_lock"]:   # harvest-ONCE memo, keyed by pid: this exact
-            meta.setdefault("_adopt_result", {})[f"{nid}:{index}:{pid}"] = \
-                {"status": "done", "output": parsed, "ms": ms, **evd}  # child commits exactly once
-        return {"status": "done", "output": parsed, "ms": ms, **evd}
+            meta.setdefault("_adopt_result", {})[f"{nid}:{index}:{pid}"] = rec
+        return rec
     _note_turn_tier(run, nid, report_path)   # a death happened; success leaves no trace
     try: os.unlink(report_path)
     except OSError: pass
@@ -1153,6 +1584,12 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
     tclass, treason = None, ""
     timeout_s = node.get("timeout", meta.get("node_timeout", 900))
     final_reply = ""
+    # #61: live tree accounting — children are attributed to this spawn ONLY
+    # while it lives (after death+reap they reparent); the pgid walk reaches the
+    # survivors afterwards. The sample is best-effort evidence for the judgment
+    # and the quarantine below, never trusted for the verdict itself.
+    tree_seen = set()
+    tree_next_watch = 0.0
     try:
         # #18 child liveness (replaces the blind blocking communicate): poll the
         # spawn log — a child that has written NOTHING by silence_deadline never
@@ -1162,6 +1599,9 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
             if rc is not None:
                 break
             now_s = time.time()
+            if now_s >= tree_next_watch:
+                _tree_watch(proc, tree_seen)
+                tree_next_watch = now_s + PROCREE_POLL_S
             if silence_deadline is not None and now_s >= silence_deadline \
                     and not _child_spoke(lp):
                 early_death = True
@@ -1213,6 +1653,21 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
         out = ""
     ms = int((time.time() - t0) * 1000)
     sk = {"skey": skey, "attempts": attempt + 1} if skey else {}
+    # #61: the dead spawn's SURVIVING tree rides its record so a retry ladder
+    # quarantines it BEFORE re-spawning (the pgid walk in _isolate_prior is the
+    # primary reach; this ppid sample adds setsid escapees outside the group —
+    # the 06f57ea9 shape). Emitted only when something was actually alive at
+    # the judgment instant: a healthy spawn's record stays byte-identical
+    # (solo byte-identity law; honest absence, never a stub []).
+    # #61b B1: persist the tracked set across the retry ladder (meta outlives
+    # every attempt): a later judgment or quarantine re-adopts what an earlier
+    # attempt already witnessed, so an overlap retry never under-counts.
+    if tree_seen:
+        _proctree_tracked(meta).setdefault((node["id"], index), set()).update(
+            p for p in tree_seen if p != proc.pid)
+    _tree_live = sorted(p for p in (tree_seen - {proc.pid}) if _proc_alive(p))
+    if _tree_live:
+        evd["tree_pids"] = _tree_live
     if early_death:
         return {"status": "failed",
                 "error": f"early_death: child produced no output within {first_msg_s}s of spawn "
@@ -1289,13 +1744,53 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
         return {"status": "failed", "error": f"child exited rc={rc}: {verdict}",
                 "error_class": eclass, "raw": (out or "")[-2000:], "ms": ms, "final": final_reply, **sk, **evd}
     parsed, perr = extract_json(out)
+    # #61 completeness gate — ABOVE every exit-0 verdict, done and correction-
+    # retry alike: before an exit-0 spawn is believed at all, its own process
+    # group must be empty. A child that backgrounded the real work and printed
+    # chatter has NOT finished (the 06f57ea9 shape: detached pytest + "Suite is
+    # running ... Waiting"), and neither a `done` nor a blind correction retry
+    # may fire while its tree is live. Hold, kill, PROVE dead by /proc re-walk;
+    # an undrainable/unkillable tree fails typed left_live_descendants.
+    # `has_answer` is the FENCED-block law (_harvest_death), not extract_json's
+    # prose coercion — coerced progress chatter is exactly the lie this gate
+    # refuses. Dead-or-empty returns None and every verdict below is the
+    # pre-#61 path, byte-identical.
+    tree_note = _account_tree(meta, node, index, spawn_no, proc.pid,
+                              tree_seen, bool(_harvest_death(out, schema)))
+    if tree_note is not None:
+        kind, extra = tree_note
+        if kind == "fail":
+            return {**extra, "ms": ms, **sk, **evd}
+        if kind == "failed":
+            # progress-not-result: exit-0 with a LIVE tree and no fenced
+            # answer — the exit judged nothing. Never a silent done, never a
+            # blind retry: the typed error carries the verdict law itself.
+            return {"status": "failed",
+                    "error": _tree_verdict_error(node["id"], spawn_no, proc.pid,
+                                                 extra.get("tree_descendants"), out),
+                    "error_class": "left_live_descendants",
+                    "raw": (out or "")[-2000:], "ms": ms,
+                    "final": final_reply, **extra, **sk, **evd}
+        if kind == "partial":
+            # the harvest law: the answer rode stdout while the real work
+            # outlived the turn — commit it as partial, never a silent done.
+            hv = _harvest_death(out, schema)
+            return {"status": "partial",
+                    "error": "answer harvested from stdout while the spawn's process tree "
+                             "outlived the turn; tree killed and proven dead — never a "
+                             "silent done (#61)",
+                    "error_class": "left_live_descendants", "ms": ms,
+                    "final": final_reply, **hv, **extra, **sk, **evd}
+    valid_answer = False
     if parsed is not None and perr is None:
-        errs = validate(parsed, schema)
-        if not errs:
-            return {"status": "done", "output": parsed, "ms": ms, **sk, **evd}
-        note = f"Your previous answer failed schema validation: {errs}"
-    else:
-        note = f"Your previous answer had no parseable json block ({perr})"
+        valid_answer = not validate(parsed, schema)
+    if valid_answer:
+        # healthy: extract_json verdict + an empty tree. Record shape
+        # byte-identical to the pre-#61 runner (solo byte-identity law).
+        return {"status": "done", "output": parsed, "ms": ms, **sk, **evd}
+    note = (f"Your previous answer failed schema validation: {validate(parsed, schema)}"
+            if parsed is not None and perr is None else
+            f"Your previous answer had no parseable json block ({perr})")
     if attempt < 1:
         r = run_child(meta, node, byid, goal, context, schema, attempt_note=note + ". Redo the work and return valid json.", steering=steering, attempt=attempt + 1, skey=skey, inputs=inputs, index=index)
         r["ms"] = r.get("ms", 0) + ms   # wall time of BOTH attempts
@@ -1361,6 +1856,13 @@ def _transient_retry(meta, r, respawn, ev, ev_kw):
             time.sleep(0.1)
         if meta["_stop"].is_set():
             break
+        # #61 quarantine law: attempt N+1 NEVER shares a worktree/workdir with
+        # live attempt-N descendants — killpg the prior tree and PROVE it dead
+        # by /proc re-walk before the next Popen, or fail closed typed.
+        iso = _isolate_prior(meta, r, ev, ev_kw)
+        if iso is not None:
+            iso["attempts_log"] = attempts_log
+            return iso
         r = respawn()
     if attempts_log:
         r["attempts_log"] = attempts_log
@@ -1478,6 +1980,15 @@ def _bounded_retry(meta, r, respawn, ev, ev_kw):
                 error_class=eclass, **ev_kw)
             return r
         meta["_retries_left"] -= 1
+    # #61 quarantine law (same as the transient ladder): the bounded re-drive
+    # is a fresh spawn into the SAME workdir — the prior tree must be proven
+    # dead first, or the node fails typed instead of double-running the work.
+    iso = _isolate_prior(meta, r, ev, ev_kw)
+    if iso is not None:
+        al = list(r.get("attempts_log") or [])
+        al.append({"attempt": len(al), "error_class": "left_live_descendants", "at": now()})
+        iso["attempts_log"] = al
+        return iso
     log(run, ev + ".retry", error_class=eclass,
         reason=f"bounded auto-retry: {eclass} with tool progress — one machine-resume re-drive",
         **ev_kw)
@@ -1710,6 +2221,7 @@ def run_agent_node(run, meta, byid, node, outputs, steering):
                 try:
                     r = _transient_retry(meta, spawn(), spawn, "item", {"node": nid, "index": i})
                     r = _bounded_retry(meta, r, spawn, "item", {"node": nid, "index": i})
+                    r = _final_quiesce(meta, r, "item", {"node": nid, "index": i})   # #61
                 except Exception as e:
                     r = {"status": "failed", "error": f"worker crashed: {type(e).__name__}: {e}",
                          "error_class": "crashed", "ms": 0}
@@ -1810,12 +2322,21 @@ def run_agent_node(run, meta, byid, node, outputs, steering):
                                  resume_preamble=resume_preamble)
             r = _transient_retry(meta, spawn(), spawn, "node", {"node": nid})
             r = _bounded_retry(meta, r, spawn, "node", {"node": nid})
+            r = _final_quiesce(meta, r, "node", {"node": nid})   # #61: never commit over a live tree
             r = _stamp_served(meta, r, node)   # dad50be0: seat truth at the commit, never the alias
             r = _lane_gate(run, node, r)   # 64c6772b: a declared lane must be clean at commit
             save_node(run, node, byid, r)
             if r["status"] in ("done", "partial"):   # #4: a harvested partial IS committed output
-                log(run, "node.finished", node=nid, ms=r.get("ms"),
-                    **({"harvested": True} if r["status"] == "partial" else {}))
+                # #61b B3: when the tracked tree set was non-empty, the solo
+                # partial EVENT carries the class too (item.finished already
+                # does). Dead-or-empty solo events stay byte-identical — the
+                # golden-solo EMPTY-diff gate is the referee for unchanged paths.
+                extra_kv = {"harvested": True} if r["status"] == "partial" else {}
+                if r["status"] == "partial" \
+                        and r.get("error_class") == "left_live_descendants" \
+                        and r.get("tree_descendants"):
+                    extra_kv["error_class"] = r["error_class"]
+                log(run, "node.finished", node=nid, ms=r.get("ms"), **extra_kv)
             else:
                 log(run, "node.failed", node=nid, ms=r.get("ms"), error=r.get("error"),
                     error_class=r.get("error_class", "unknown"),
