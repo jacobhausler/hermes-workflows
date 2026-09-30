@@ -233,6 +233,130 @@ try:
 finally:
     wfcommon.lock_probe_child = _orig
 
+# --- (h) #47 review C1: probe 'unknown' is NEVER free (tri-state liveness) ----------
+# The A1/A2 false-'interrupted' class: holder ALIVE + probe child cannot answer
+# (hang, SIGKILL, fork EAGAIN) -> lock_probe_child 'unknown' -> the pre-fix bool
+# predicate collapsed unknown into dead: runner_alive False, status 'interrupted',
+# runner_live False — exactly the fb-squad shape, violating the docstring law
+# 'a held probe can only ever ADD liveness, never remove it'.
+# CHOSEN SHAPE (documented, reviewer-preferred): TRI-STATE — unknown => runner_live
+# None + liveness 'probe-timeout'|'probe-failed'; fail-closed-means-held could wedge
+# the whole list behind a hung flock binary, so unknown reads as UNKNOWN (never free,
+# never held), status must not claim 'interrupted', and `next`/wait REFUSE to resume.
+rh = mkrun("h44-unknown", pid=999999)
+lk_h = rh / "runner.lock"
+hh = hold(rh)
+_fakebin = home / "bin_44"; _fakebin.mkdir(exist_ok=True)
+_real_path = os.environ["PATH"]; _real_probe_defaults = wfcommon.lock_probe_child.__defaults__
+try:
+    wfcommon.lock_probe_child.__defaults__ = (1.0,)   # bound the hanging probes in this section
+    def _unknown_pins(tag):
+        alive = wfcommon.runner_alive(rh)
+        st = wfcommon.run_state(rh)
+        assert isinstance(st, dict), f"(h/{tag}) run_state returned {st!r}"
+        check(alive is not False, f"(h/{tag}) holder alive + probe broken => runner_alive is NOT False", repr(alive))
+        check(st.get("runner_live") is None, f"(h/{tag}) run_state publishes runner_live None (never False)", repr(st.get("runner_live")))
+        check(st.get("status") != "interrupted", f"(h/{tag}) status must never claim 'interrupted' on a probe failure", st.get("status"))
+        check(st.get("liveness") in ("probe-timeout", "probe-failed"),
+              f"(h/{tag}) run_state names the liveness cause", repr(st.get("liveness")))
+    # (a) probe child hangs: shadow `flock` on PATH with a sleeper (fs-stall shape)
+    (_fakebin / "flock").write_text("#!/bin/sh\nsleep 30\n"); (_fakebin / "flock").chmod(0o755)
+    os.environ["PATH"] = f"{_fakebin}:{_real_path}"; wfcommon._FLOCK_BIN = None
+    check(wfcommon.lock_probe_child(str(lk_h)) == "unknown", "(h/a) hanging probe child -> 'unknown' (bounded)")
+    _unknown_pins("a-hang")
+    # (b) probe child SIGKILLed mid-run (kill -9 $$)
+    (_fakebin / "flock").write_text("#!/bin/sh\nkill -9 $$\n"); (_fakebin / "flock").chmod(0o755)
+    wfcommon._FLOCK_BIN = None
+    check(wfcommon.lock_probe_child(str(lk_h)) == "unknown", "(h/b) SIGKILLed probe child -> 'unknown'")
+    _unknown_pins("b-kill9")
+    # (c) the probe child cannot even fork: subprocess.run raises OSError(EAGAIN)
+    os.environ["PATH"] = _real_path; wfcommon._FLOCK_BIN = None
+    _real_sp_run = wfcommon.subprocess.run
+    def _eagain(argv, *a, **k):
+        if argv and "flock" in str(argv[0]):
+            raise OSError(11, "Resource temporarily unavailable")
+        return _real_sp_run(argv, *a, **k)
+    wfcommon.subprocess.run = _eagain
+    try:
+        check(wfcommon.lock_probe_child(str(lk_h)) == "unknown", "(h/c) probe fork EAGAIN -> 'unknown'")
+        _unknown_pins("c-eagain")
+        # door level under the fork failure: status refuses wait, wait refuses to spawn
+        _spawned = []
+        _real_spawn = hw._spawn_runner
+        hw._spawn_runner = lambda r: _spawned.append(str(r))
+        try:
+            out = json.loads(hw.handle({"action": "status", "run_id": rh.name}))
+            check(out["runner_live"] is None and out["status"] != "interrupted",
+                  "(h/c) door status: runner_live None, status not 'interrupted'",
+                  json.dumps({k: out.get(k) for k in ("status", "runner_live")}))
+            check(out.get("next") != [{"action": "wait"}] and not any(
+                      (row or {}).get("action") == "wait" for row in out.get("next") or []),
+                  "(h/c) `next` must NOT say wait on an unknown liveness", json.dumps(out.get("next")))
+            w = json.loads(hw.handle({"action": "wait", "run_id": rh.name, "timeout": 1}))
+            check(not _spawned and w.get("runner_live") is None,
+                  "(h/c) wait REFUSES to spawn on unknown (unknown is never free)",
+                  json.dumps({"spawned": _spawned, "runner_live": w.get("runner_live")}))
+        finally:
+            hw._spawn_runner = _real_spawn
+    finally:
+        wfcommon.subprocess.run = _real_sp_run
+    # the refusal must not wedge forever: once the probe can run again, truth returns
+    check(wfcommon.runner_alive(rh) is True, "(h) recovered probe reads the live holder again (no permanent wedge)")
+finally:
+    os.environ["PATH"] = _real_path
+    wfcommon.lock_probe_child.__defaults__ = _real_probe_defaults
+    wfcommon._FLOCK_BIN = None
+    hh.kill(); hh.wait()
+
+# --- (i) #47 review C2: the list probe is BATCHED — one child per list call ----------
+ri_runs = [mkrun(f"h44-batch-{i}", pid=999999) for i in range(50)]
+hb_i = hold(ri_runs[7])
+try:
+    verdicts = wfcommon.lock_probe_children([str(r / "runner.lock") for r in ri_runs])
+    check(isinstance(verdicts, dict) and len(verdicts) == 50,
+          "lock_probe_children(paths) -> {path: verdict} for every path", len(verdicts))
+    check(verdicts[str(ri_runs[7] / "runner.lock")] == "busy"
+          and all(verdicts[str(r / "runner.lock")] == "free" for r in ri_runs[:7] + ri_runs[8:]),
+          "the batch reports BUSY for the held lock and FREE for the rest")
+    _batch_spawns = []
+    _real_run_i = wfcommon.subprocess.run
+    def _count_i(argv, *a, **k):
+        _batch_spawns.append(list(argv)); return _real_run_i(argv, *a, **k)
+    wfcommon.subprocess.run = _count_i
+    try:
+        wfcommon.lock_probe_children([str(r / "runner.lock") for r in ri_runs])
+    finally:
+        wfcommon.subprocess.run = _real_run_i
+    check(len(_batch_spawns) <= 1,
+          "N paths == AT MOST ONE probe child (batched; not one fork per run)", f"children={len(_batch_spawns)}")
+    # door act_list: 50 runs == at most ONE probe child for the whole call
+    door_spawns = []
+    _real_run_d = hw._common.subprocess.run
+    def _count_d(argv, *a, **k):
+        door_spawns.append(list(argv)); return _real_run_d(argv, *a, **k)
+    _real_spawn_d = hw._spawn_runner
+    hw._spawn_runner = lambda r: None   # list must never spawn anyway; pin it loudly
+    hw._common.subprocess.run = _count_d
+    try:
+        out = json.loads(hw.handle({"action": "list"}))
+    finally:
+        hw._common.subprocess.run = _real_run_d
+        hw._spawn_runner = _real_spawn_d
+    n_probe_children = sum(1 for a in door_spawns if "flock" in str(a[:1]) or "-S" in a[:4])
+    rows = {row["run_id"]: row for row in out["runs"]}
+    check(len(out["runs"]) == 50 and all(r["run_id"] in rows for r in ri_runs),
+          "the door lists all 50 synthetic runs", len(out["runs"]))
+    check(rows[ri_runs[7].name]["runner_live"] is True
+          and all(rows[r.name]["runner_live"] is False for r in ri_runs if r is not ri_runs[7]),
+          "act_list threads the ONE batch verdict into every row (held=True, rest False)")
+    check(n_probe_children <= 1,
+          "ONE list call == at most ONE probe child spawned (fork-cost pin, #47 C2)",
+          f"probe children={n_probe_children} of {len(door_spawns)} subprocess.run")
+    check(not any("runner.lock" in str(a) and str(a[0]).endswith("flock") for a in door_spawns),
+          "act_list never forks a per-run flock probe child (batch child only)")
+finally:
+    hb_i.kill(); hb_i.wait()
+
 # --- (g) probe hygiene: no lock-file creation, bounded, env-clean --------------------
 rm = mkrun("h44-missing", pid=999999)
 (rm / "runner.lock").unlink()
