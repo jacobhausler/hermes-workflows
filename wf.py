@@ -159,13 +159,14 @@ def acquire_lock(run):
 _READY_FD_ENV = "HERMES_WF_READY_FD"  # #8: inheritable announce pipe fd, door -> runner
 
 def ready_stamp(run):
-    """#8 stamp law: the runner stamps its OWN wf.pid here — after it has won the
-    flock admission — and then announces the same pid on the door's ready pipe.
-    The door stamps only what it observes on that pipe; the double-forked door can
-    observe no pid of its own. The env key is POPPED at entry so the fd number
-    never rides into any child env (spawn envs are dict(os.environ, ...) — the
-    golden env_keys byte law). No fd (direct spawn, resume, in-process tests):
-    stamp only, exactly as before."""
+    """#8 stamp law (sole owner): the ADMITTED runner stamps its OWN wf.pid
+    here — after it has won the flock admission — and then announces the same
+    pid on the door's ready pipe. The door writes wf.pid NEVER; it may return
+    the pid it observed on that pipe, but a post-admission door write races a
+    replacement runner and resurrects dead pids (#8 review findings 3+4). The
+    env key is POPPED at entry so the fd number never rides into any child env
+    (spawn envs are dict(os.environ, ...) — the golden env_keys byte law). No
+    fd (direct spawn, resume, in-process tests): stamp only, as before."""
     fd = os.environ.pop(_READY_FD_ENV, None)   # first reader wins; gone for children
     (run / "wf.pid").write_text(str(os.getpid()))
     if fd is None:

@@ -242,7 +242,9 @@ runner_alive = _common.runner_alive
 
 # #8 (P0): the transient daemonize hop. The door Popen's THIS, it forks the real
 # runner (own session, ready-pipe write end inherited non-cloexec) and exits at
-# once so the runner reparents to the subreaper/init BEFORE handle() returns.
+# once so the runner leaves the caller's process tree BEFORE handle() returns —
+# adopted by the nearest enclosing subreaper, else init (cgroup membership is
+# unchanged; see _spawn_runner's claim boundary).
 _DAEMON_INTERMEDIATE = (
     "import os, sys\n"
     "target, run_id, wd = sys.argv[1], sys.argv[2], int(sys.argv[3])\n"
@@ -285,22 +287,34 @@ def _spawn_runner(r):
     """Spawn the run's runner process — DAEMONIZED out of the caller's tree (#8).
 
     Law (four reaped-runner incidents, 2026-09-29/30): by the time handle()
-    returns the runner must NOT hang in the caller's process tree. Both killers —
-    the gateway-restart sweep and the process_registry completion sweep
-    (_terminate_host_pid: snapshot descendants WHILE the parent lives, SIGTERM
-    parent, per-pid SIGKILL escalation over the snapshot, re-scan) — walk pids,
-    not sessions: start_new_session escapes only group-directed signals, never a
-    per-pid kill of a snapshotted descendant. The double-fork hop reparents the
-    runner to the subreaper/init before the door returns, so no sweep can ever
-    snapshot it; children inherit the escape through the runner.
+    returns the runner must NOT hang in the caller's process tree. Both killers
+    walk pids, not sessions: the gateway-restart process-tree SIGTERM sweep, and
+    the process_registry completion sweep (_terminate_host_pid: snapshot
+    descendants WHILE the parent lives, SIGTERM parent, per-pid SIGKILL
+    escalation over the snapshot, re-scan). start_new_session escapes only
+    group-directed signals, never a per-pid kill of a snapshotted descendant.
+    The double-fork hop reparents the runner out of the caller's tree before the
+    door returns, so no CALLER-TREE sweep can ever snapshot it; children inherit
+    the escape through the runner. Claim boundary (#8 review, finding 1):
+    double-fork/setsid does NOT change cgroup membership — a sweep that kills by
+    cgroup membership (e.g. the unit-cgroup ExecStopPost SIGKILL a gateway
+    restart runs) still reaches caller, runner and children alike. Surviving an
+    enclosing service/cgroup cleanup is external supervision's job (a mitigation
+    outside this diff), not what this hop claims.
 
-    Admission stays the runner-side kernel flock (door races harmless: the loser
-    exits WORKFLOW_BUSY before touching any state). Stamp law: the runner stamps
-    its own wf.pid at admission (wf.py acquire_lock); the door stamps ONLY the
-    pid it OBSERVED on the ready pipe — the Popen'd intermediate's pid is not a
-    pid the door can observe, so it is never stamped. A spawn that never
-    readied is left unstamped; the explicit wait-resume law covers it and the
-    flock makes any retry a harmless loser.
+    Admission stays the runner-side kernel flock (loser exits WORKFLOW_BUSY
+    before touching any state). SOLE-OWNER stamp law (#8 review, findings 3+4):
+    the ADMITTED runner is the ONLY writer of wf.pid — it self-stamps right
+    after it wins the flock (wf.py acquire_lock -> ready_stamp) and announces
+    the same pid on the door's ready pipe. The door NEVER writes wf.pid: an
+    observed pid may be returned to the caller, but a post-admission door write
+    is a second owner racing the runner — the deep review reproduced both
+    failures deterministically (a door parked after observing A let B be
+    admitted, then its late write resurrected dead A; a forced refused-fork
+    fallback stamped the flock-refused dead loser over the live winner). A
+    spawn that never readied is left stamped only by whoever WON the flock; the
+    explicit wait-resume law covers a dead spawn and the flock makes any retry
+    a harmless loser.
 
     Append mode: runner.log keeps crash diagnostics across respawns. The
     contextvar profile scope does NOT cross processes: a runner spawned for a run
@@ -345,8 +359,11 @@ def _spawn_runner(r):
                         pass
     else:                                  # no-fork platform: today's behavior
         pid = _spawn_runner_legacy(argv, env, log)
-    if pid is not None:                    # ONLY an observed pid is stamped
-        (r / "wf.pid").write_text(str(pid))
+    # #8 review (findings 3+4): NO door write of wf.pid — the admitted runner is
+    # its sole owner (self-stamp at admission, wf.py ready_stamp). `pid` here is
+    # only returned to the caller as the observed pid; on the legacy path the
+    # Popen'd child IS the runner and stamps ITSELF once it wins the flock, so
+    # a flock-refused loser never names itself in wf.pid either.
     try:
         log.close()
     except OSError:
@@ -355,7 +372,10 @@ def _spawn_runner(r):
 
 def _spawn_runner_legacy(argv, env, log):
     """Direct spawn for no-fork platforms / refused fork: here the Popen'd child
-    IS the runner, so its pid is observable and may be stamped. Returns its pid."""
+    IS the runner, and like the daemonized path it STAMPS ITSELF (wf.py
+    ready_stamp) only after winning the flock — the door never stamps, so a
+    flock-refused loser never names itself in wf.pid. Returns the observed
+    Popen pid for the caller's information, not as an ownership proof."""
     proc = subprocess.Popen(argv, stdout=log, stderr=log, stdin=subprocess.DEVNULL,
                             env=env, start_new_session=True, cwd=str(HERE))
     return proc.pid

@@ -5,21 +5,33 @@ Four incidents, one mechanism: the door spawns the runner as a CHILD of the call
 (gateway seat / tool process). start_new_session=True only escapes GROUP-directed
 signals; the actual killers walk the tree by pid and SIGKILL per-pid from a
 descendants snapshot taken WHILE the parent is alive:
-  * gateway restart (s6 service stop + cgroup ExecStopPost sweep),
+  * gateway restart (s6 service stop: SIGTERM to the process TREE + group kills),
   * process_registry completion sweep (_terminate_host_pid: snapshot descendants,
     SIGTERM parent, escalate SIGKILL to every snapshot pid, re-scan while the
     parent lives).
 Only an orphan whose ppid chain no longer passes through the caller survives.
-So: daemonize the spawn (double-fork + setsid -> the runner reparents to the
-subreaper/init BEFORE handle() returns), keep the runner-side flock as the
-admission gate (loser WORKFLOW_BUSY), and stamp wf.pid from the runner's OWN
-ready-pipe write — the door must never stamp a pid it cannot observe.
+So: daemonize the spawn (double-fork + setsid -> the runner leaves the caller's
+tree BEFORE handle() returns), keep the runner-side flock as the admission gate
+(loser WORKFLOW_BUSY), and stamp wf.pid from the runner's OWN ready-pipe write —
+the door must never stamp a pid at all (see tests/test_wfpid_owner_8.py).
 
 The sweep here is the incident's OWN semantics (per-pid kills over a live-parent
 descendants snapshot + the service-stop group SIGKILL), reproduced without psutil
-via /proc. T1 runs the caller under a PR_SET_CHILD_SUBREAPER parent so a naive
-"just survive the caller dying" trick stays pinned under the service tree; the
-runner must be OUT of the swept subtree at snapshot time, not merely un-signalled.
+via /proc.
+
+CLAIM BOUNDARY — two properties, deliberately separated (#8 deep review, finding 2):
+  (a) CLAIMED here: escaping the ORDINARY CALLER TREE. T1/T2 prove the runner is
+      out of the caller's descendant subtree at snapshot time and survives the
+      caller-tree sweeps. The test process holds PR_SET_CHILD_SUBREAPER only as a
+      fixture to pin the ADOPTION TARGET (a naive "just survive the caller dying"
+      reparent-under-the-caller trick must fail); it asserts nothing about
+      surviving cleanup OF this enclosing tree.
+  (b) NOT claimed by this diff: surviving an ENCLOSING subreaper/service cleanup.
+      double-fork/setsid never changes cgroup membership — a sweep that kills by
+      service/cgroup membership (unit-cgroup ExecStopPost; an enclosing
+      subreaper's own descendant sweep) still reaches runner and children (the
+      reviewer proved both). External supervision is a mitigation outside this
+      diff, and those #8 parts stay open.
 
 RED pre-fix: the snapshot contains runner+child (ppid chain through the caller)
 and both die; wf.pid ends on a dead loser's pid. GREEN: runner and its child
@@ -45,14 +57,23 @@ sys.path.insert(0, str(BUILD))
 spec = importlib.util.spec_from_file_location("hw8", BUILD / "__init__.py")
 hw = importlib.util.module_from_spec(spec); spec.loader.exec_module(hw)
 
-# This process is the subreaper: T1's orphaned runner must reparent HERE (a live
-# parent inside the service tree), proving survival is escape-from-subtree, not
-# just surviving the caller's death.
+# This process asks to be the test tree's subreaper so T1 can assert the ADOPTION
+# TARGET: the orphaned runner must be adopted HERE (a live parent standing for the
+# service tree), never drift back under the caller. Correct call:
+# PR_SET_CHILD_SUBREAPER = 36 (prctl(1,...) would set PR_SET_PDEATHSIG — a
+# different option; the deep review caught the fixture using it unchecked). We
+# check the return value AND read back PR_GET_CHILD_SUBREAPER = 37.
+_SUBREAPER = False
+_SUBREAPER_RC = _SUBREAPER_READBACK = None
 try:
-    ctypes.CDLL(None).prctl(1, 1, 0, 0, 0)   # PR_SET_CHILD_SUBREAPER
-    _SUBREAPER = True
-except Exception:
-    _SUBREAPER = False
+    _libc = ctypes.CDLL(None)
+    _SUBREAPER_RC = _libc.prctl(36, 1, 0, 0, 0)             # PR_SET_CHILD_SUBREAPER
+    _flag = ctypes.c_int(-1)
+    _SUBREAPER_READBACK = _libc.prctl(37, ctypes.byref(_flag), 0, 0, 0)  # PR_GET_...
+    _SUBREAPER = (_SUBREAPER_RC == 0 and _SUBREAPER_READBACK == 0 and _flag.value == 1)
+except Exception as _e:
+    print(f"NOTE subreaper fixture unavailable: {_e!r}")
+print(f"subreaper fixture: set_rc={_SUBREAPER_RC} get_rc={_SUBREAPER_READBACK} active={_SUBREAPER}")
 
 ok = True
 def check(label, cond, detail=""):
@@ -240,10 +261,15 @@ check("T0 run launches", bool(rid0), r0)
 st0 = settle(rid0, 30)
 check("T0 run completes", st0.get("status") == "done", json.dumps({k: st0.get(k) for k in ("status", "runner_live")}))
 
-# ---- T1 THE INCIDENT: subreaper tree + live-parent descendants sweep ------------
-# caller lives under our subreaper; it spawns the runner via the real door path
-# (handle(run)), child visibly cooking; then the sweep: snapshot while caller
+# ---- T1 PROPERTY (a): ordinary caller-tree escape + live-parent sweep ----------
+# caller lives under our subreaper FIXTURE (adoption-target pin only — see the
+# claim boundary in the module docstring); it spawns the runner via the real door
+# path (handle(run)), child visibly cooking; then the sweep: snapshot while caller
 # alive, SIGTERM->SIGKILL the caller, SIGKILL every snapshot pid, group-SIGKILL.
+# This tests escaping the CALLER TREE — NOT surviving this enclosing fixture's
+# own cleanup (property (b), not claimed by this diff).
+check("T1 fixture: PR_SET_CHILD_SUBREAPER actually took (prctl 36 rc=0, readback 37 -> 1)",
+      _SUBREAPER, f"set_rc={_SUBREAPER_RC} get_rc={_SUBREAPER_READBACK}")
 p1, rid1, ready1 = launch_caller(Caller)
 check("T1 caller launched the run through the door", bool(rid1) and ready1, f"rid={rid1} ready={ready1}")
 if rid1 and ready1:
@@ -268,7 +294,17 @@ if rid1 and ready1:
     except Exception:
         pass
     survived = alive(rpid) and f"{os.sep}wf.py run {rid1}" in cmdline(rpid)
-    check("T1 runner SURVIVES the subreaper group-kill + descendants sweep (#8 law)", survived,
+    # Adoption target read while the survivor is still LIVE (settling later would
+    # race the runner's own natural exit -> unreadable /proc, a flaky -1).
+    ppid_after = ppid_of(rpid) if survived else -1
+    check("T1 adoption target: orphan adopted by the enclosing subreaper fixture, "
+          "never the dead caller (ppid == test process, not caller)",
+          (ppid_after == os.getpid()) if (_SUBREAPER and survived)
+          else (ppid_after not in (p1.pid, -1) if survived else False),
+          f"ppid={ppid_after} want={os.getpid() if _SUBREAPER else 'not caller'}")
+    check("T1 runner SURVIVES the caller-tree sweep incl. the fixture's group-kill "
+          "(property (a): escaped the ordinary caller tree — NOT an enclosing-"
+          "subreaper/service-survival claim)", survived,
           f"runner pid {rpid} dead — reaped by the sweep aimed at {sorted(aimed)[:6]}…")
     st1 = settle(rid1)
     check("T1 run COMMITS after the sweep (children survived with the runner)",
@@ -276,13 +312,11 @@ if rid1 and ready1:
           json.dumps({k: st1.get(k) for k in ("status", "runner_live", "done", "total")}))
     check("T1 summary written by the surviving runner",
           (runs / rid1 / "summary.md").exists())
-    check("T1 runner reparented OUT of the caller's subtree (ppid is not the caller)",
-          ppid_of(rpid) not in (p1.pid,) if survived else False, f"ppid={ppid_of(rpid)}")
     fake_kids = [k for k in read_child_pids(scratch / "fpid-caller.log") if alive(k)]
     for k in fake_kids:
         _kill(k)
 
-# ---- T2 caller run -> exit -> process-tree sweep --------------------------------
+# ---- T2 PROPERTY (a): caller run -> exit -> caller-tree completion sweep -------
 p2, rid2, ready2 = launch_caller(CallerExit)
 check("T2 caller launched and exited", bool(rid2) and ready2, f"rid={rid2} ready={ready2}")
 if rid2 and ready2:
