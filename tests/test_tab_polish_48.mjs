@@ -270,6 +270,31 @@ assert.ok(/rgba?\(/.test(NODE_TONE.failed.borderColor) || /color-mix/.test(NODE_
 }
 
 // =================================================================================
+// 3b. F5 (deep review): readiness-aware dead-dash — the policy takes a
+//     canRun input; a doomed join reads dead on EVERY settled feeding edge,
+//     not only the one leaving the failure.
+// =================================================================================
+{
+  // canRun defaults true — the historical truth table above is unchanged.
+  assert.deepEqual(mod.edgeFlowPolicy('done', 'pending', false, true),
+    { flow: false, shimmer: false, dead: false, dash: null }, 'ready join: done→pending stays calm')
+  // Diamond shape (ok:done, bad:failed, pending join after BOTH): derived
+  // readiness (every after dep satisfied — the read model's dep_satisfied
+  // spelling) is false, blocked_by is non-empty, so the ok→join edge is dead
+  // too, with the same dash the failed→join edge gets.
+  assert.deepEqual(mod.edgeFlowPolicy('done', 'pending', false, false),
+    { flow: false, shimmer: false, dead: true, dash: '3 3' }, 'doomed join: ok→join dead-dashes too (F5)')
+  assert.deepEqual(mod.edgeFlowPolicy('failed', 'pending', false, false),
+    { flow: false, shimmer: false, dead: true, dash: '3 3' }, 'doomed join: bad→join stays dead')
+  assert.deepEqual(mod.edgeFlowPolicy('blocked', 'pending', false, false),
+    { flow: false, shimmer: false, dead: true, dash: '3 3' }, 'doomed join: a blocked settled upstream is dead as well')
+  assert.deepEqual(mod.edgeFlowPolicy('done', 'running', false, false),
+    { flow: false, shimmer: false, dead: false, dash: null }, 'readiness only speaks for pending downstreams')
+  assert.ok(/canRun/.test(decl('edgeFlowPolicy')) && /canRunNow/.test(decl('Edges')),
+    'the ONE policy carries the canRun input and Edges derives it (no second decision)')
+}
+
+// =================================================================================
 // 4. NodeCard polish: glow/gate-nag/breathe from the table; terminals calm
 // =================================================================================
 const cardProps = (def, st, gate, selected = false, hovered = false) =>
@@ -476,5 +501,156 @@ const cardProps = (def, st, gate, selected = false, hovered = false) =>
   assert.ok(/useId\(\)/.test(decl('Edges')), 'marker ids minted per instance via useId()')
 }
 
-console.log('ALL PASS test_tab_polish_48 (NODE_TONE coverage + calm terminals, pill/edge/timeline/pill-graph parity, flow & items_from shimmer, NodeCard glow/gate-nag/breathe/hover/select, hook order, FanStack links, hoisted reduced-motion style, gradient header, banned shapes)')
+// =================================================================================
+// 10. F3/F4/F5 (deep review): rendered-tree probes on a PERTURBED table copy —
+//     monkeypatch NODE_TONE values in a disposable module copy and assert the
+//     rendered output MOVES (a grep for tokens proves nothing; movement does).
+// =================================================================================
+{
+  const jsx = (type, props, key) => ({ type, props: props || {}, key })
+  const jsxs = jsx
+  const grabFn = name => {
+    const i = src.indexOf(`function ${name}(`)
+    assert.ok(i >= 0, `source has function ${name}`)
+    let depth = 0, j = src.indexOf(') {', i) + 2
+    for (; j < src.length; j++) { if (src[j] === '{') depth++; else if (src[j] === '}' && --depth === 0) break }
+    return src.slice(i, j + 1)
+  }
+  const constArrow = needle => {
+    const i = src.indexOf(needle)
+    assert.ok(i >= 0, `source has ${needle}`)
+    let depth = 0, j = src.indexOf('{', i)
+    for (; j < src.length; j++) { if (src[j] === '{') depth++; else if (src[j] === '}' && --depth === 0) break }
+    return src.slice(i, j + 1)
+  }
+  // disposable module copy — the table is perturbed HERE, never on `mod`
+  const canaryPath = join(tmp, 'plugin-canary.mjs')
+  writeFileSync(canaryPath, src
+    .replaceAll("'@hermes/plugin-sdk'", JSON.stringify(pathToFileURL(sdkPath).href))
+    .replaceAll("'react'", JSON.stringify(pathToFileURL(reactPath).href))
+    .replaceAll("'react/jsx-runtime'", JSON.stringify(pathToFileURL(jsxPath).href)))
+  const canary = await import(pathToFileURL(canaryPath).href)
+  const C = canary.NODE_TONE
+  const CANARY = {}
+  for (const k of Object.keys(C)) {
+    CANARY[k] = { color: `var(--canary-${k})`, borderColor: `var(--canary-${k}-b)` }
+    C[k].color = CANARY[k].color
+    C[k].borderColor = CANARY[k].borderColor
+  }
+
+  // F3 · actual Pill: border + open ring follow the perturbed table.
+  const pillEl = canary.Pill({ run: { id: 'p', name: 'p', status: 'held' }, sid: 'S', open: true, onToggle: () => {} })
+  assert.equal(pillEl.props.style.border, `1px solid ${CANARY.held.borderColor}`,
+    'F3: Pill border IS NODE_TONE.held.borderColor — table perturbation moves it (no hardcoded stroke-secondary)')
+  assert.ok(String(pillEl.props.style.boxShadow).includes(CANARY.held.color),
+    'F3: Pill open ring colour comes from the table too')
+
+  // F3 · Dot's running branch consults the table BEFORE its early return.
+  const dot = canary.Dot({ status: 'running' })
+  assert.equal(dot.props.style.background, CANARY.running.color,
+    'F3: Dot(running) colour IS NODE_TONE.running.color at render time (no frozen bg-(--ui-accent) early-return)')
+  assert.ok(/animate-pulse/.test(dot.props.className), 'Dot(running) keeps the pulse')
+
+  // F3 · dead arrowhead follows NODE_TONE.failed like the failed stroke does.
+  const mkEdges = table => new Function('jsx', 'jsxs', 'useId', 'NODE_TONE', 'edgeFlowPolicy',
+    `${grabFn('routeEdge')}\n${grabFn('edgeTone')}\n${grabFn('nodeState')}\n${grabFn('Edges')}; return Edges`)(
+    jsx, jsxs, () => 'probe-0', table, mod.edgeFlowPolicy)
+  const deadEdges = mkEdges(C)({
+    nodes: [{ id: 'a' }, { id: 'b', after: ['a'] }],
+    rects: { a: { x: 0, y: 0, w: 100, h: 40 }, b: { x: 260, y: 0, w: 100, h: 40 } },
+    states: { a: { status: 'failed' }, b: {} }
+  })
+  const deadMarker = findBy(deadEdges, n => n.type === 'marker' && /-dead$/.test(String(n.props?.id)))[0]
+    .props.children
+  assert.equal(deadMarker.props.fill, CANARY.failed.color,
+    'F3: dead arrowhead fill follows NODE_TONE.failed.color (stroke and head move together)')
+
+  // F3 · NodeCard selection ring rides the table (was a stray --ui-accent).
+  const selCard = canary.NodeCard({ runId: 'r', def: { id: 'x', type: 'agent' }, st: { status: 'done' }, gate: null, owner: {}, events: [], selected: true })
+  assert.ok(String(selCard.props.style.boxShadow).includes(CANARY.done.color),
+    'F3: selected NodeCard ring colour is the table value (color-mix of tone.color)')
+
+  // F3 · MiniGraph open fan-out pill border rides the table too.
+  const openPillFn = new Function('jsx', 'jsxs', 'nodeState', 'states', 'gate', 'detail', 'fanOpen', 'Dot', 'MINI', 'NODE_TONE', 'FanStack',
+    `${grabFn('nodeState')}\n${constArrow('const pill = def =>')}\nreturn pill`)(
+    jsx, jsxs, (def, st, g) => (st[def.id] || {}).status || 'pending', { gen: { status: 'running' } }, null, { id: 'r' },
+    { runId: 'r', nodeId: 'gen' }, () => jsx('i', {}), { pillH: 22 }, C, props => props.children)
+  const openLabel = openPillFn({ id: 'gen', type: 'agent', fanout: { items: [1] } })
+  const openBorder = findBy(openLabel, n => n.props?.style?.borderColor)[0]
+  assert.ok(openBorder, 'F3: MiniGraph renders the open fan-out pill')
+  assert.equal(openBorder.props.style.borderColor, CANARY.running.color,
+    'F3: MiniGraph OPEN pill border is NODE_TONE.running.color (was the bare --ui-accent literal)')
+
+  // F4 · the ordinary producer→fan-out shape: after + items_from renders ONE
+  // data-classified edge, and it SHIMMERS while the consumer runs.
+  {
+    const f4nodes = [
+      { id: 'gen', type: 'agent', goal: 'produce items' },
+      { id: 'fan', type: 'agent', after: ['gen'], goal: 'per item',
+        fanout: { items_from: 'gen.items', goal: 'work {item}' } }
+    ]
+    const f4rects = { gen: { x: 0, y: 0, w: 100, h: 40 }, fan: { x: 260, y: 0, w: 100, h: 40 } }
+    const E = mkEdges(C)
+    const both = E({ nodes: f4nodes, rects: f4rects, states: { gen: { status: 'done' }, fan: { status: 'running' } }, dataEdges: [{ from: 'gen', to: 'fan' }] })
+    const paths = both.props.children.filter(n => n.type === 'path')
+    assert.equal(paths.length, 1, 'F4: after+items_from dedupes to ONE edge (no duplicate path)')
+    assert.equal(paths[0].key, 'gen->fan:data', 'F4: the kept edge is the DATA-classified one (dedup ORs the flags, never drops them)')
+    assert.equal(findBy(paths[0], n => n.type === 'animate').length, 1,
+      'F4: producer done -> consumer running renders the <animate> shimmer (the counterexample: base rendered ZERO)')
+    assert.equal(paths[0].props.stroke, CANARY.running.color, 'shimmer stroke rides the perturbed table')
+    assert.match(String(paths[0].props.markerEnd), /-live\)/, 'shimmer edge keeps the live marker')
+    const plain = E({ nodes: f4nodes, rects: f4rects, states: { gen: { status: 'done' }, fan: { status: 'running' } }, dataEdges: [] })
+    const plainPaths = plain.props.children.filter(n => n.type === 'path')
+    assert.equal(plainPaths[0].key, 'gen->fan', 'control: without the items_from link the edge is the plain after-edge')
+    assert.equal(findBy(plainPaths[0], n => n.type === 'animate').length, 0, 'control: a plain done->running edge stays calm (classification is what brings the shimmer)')
+  }
+
+  // F5 · diamond (ok:done, bad:failed, pending join after BOTH): the OK→join
+  // link dead-dashes too — readiness derived with the read-model rule
+  // (dep_satisfied over every `after` dep ⇒ blocked_by non-empty ⇒ canRun false).
+  {
+    const dnodes = [
+      { id: 'ok', type: 'agent', goal: 'ok branch' },
+      { id: 'bad', type: 'agent', goal: 'bad branch' },
+      { id: 'join', type: 'agent', after: ['ok', 'bad'], goal: 'join both' }
+    ]
+    const drects = {
+      ok: { x: 0, y: 0, w: 100, h: 40 }, bad: { x: 0, y: 120, w: 100, h: 40 },
+      join: { x: 260, y: 60, w: 100, h: 40 }
+    }
+    const dg = mkEdges(C)({ nodes: dnodes, rects: drects, states: { ok: { status: 'done' }, bad: { status: 'failed' }, join: {} } })
+    const dpaths = dg.props.children.filter(n => n.type === 'path')
+    const okEdge = dpaths.find(n => n.key === 'ok->join')
+    const badEdge = dpaths.find(n => n.key === 'bad->join')
+    assert.ok(okEdge && badEdge, 'F5: diamond renders both feeding edges')
+    for (const [label, e] of [['ok->join', okEdge], ['bad->join', badEdge]]) {
+      assert.equal(e.props.strokeDasharray, '3 3', `F5: ${label} carries the dead dash`)
+      assert.match(String(e.props.markerEnd), /-dead\)/, `F5: ${label} carries the dead marker`)
+      assert.equal(findBy(e, n => n.type === 'animate').length, 0, `F5: ${label} never animates`)
+    }
+    // control: with no failed sibling the ok->join edge is a calm ready edge
+    const ready = mkEdges(C)({ nodes: dnodes, rects: drects, states: { ok: { status: 'done' }, bad: { status: 'done' }, join: {} } })
+    const readyOk = ready.props.children.filter(n => n.type === 'path').find(n => n.key === 'ok->join')
+    assert.notEqual(readyOk.props.strokeDasharray, '3 3', 'F5 control: a READY join does not dead-dash (readiness, not pessimism)')
+  }
+
+  // F5 · FanStack consumes the EXPORTED policy — deny all flow and a LIVE
+  // three-card stack renders ZERO animations (base rendered two).
+  {
+    const mkStack = policy => new Function('jsx', 'jsxs', 'NODE_TONE', 'edgeFlowPolicy',
+      `${grabFn('FanStack')}; return FanStack`)(jsx, jsxs, C, policy)
+    const denyAll = () => ({ flow: false, shimmer: false, dead: false, dash: null })
+    const starved = mkStack(denyAll)({ count: 3, terminal: 1, children: 'x', live: true })
+    assert.equal(findBy(starved, n => n.type === 'animate').length, 0,
+      'F5: with the shared policy denying flow, FanStack mounts NO animation (no second decision left in the stack)')
+    const normal = mkStack(mod.edgeFlowPolicy)({ count: 3, terminal: 1, children: 'x', live: true })
+    assert.ok(findBy(normal, n => n.type === 'animate').length >= 1, 'live stack under the REAL policy still flows')
+    const df = findBy(mkStack(mod.edgeFlowPolicy)({ count: 3, terminal: null, children: 'x', live: true, dataFlow: true }), n => n.type === 'animate')
+    assert.ok(df.length >= 1, 'dataFlow stack shimmers under the real policy')
+    const dead = mkStack(mod.edgeFlowPolicy)({ count: 3, terminal: 3, children: 'x', live: false })
+    assert.equal(findBy(dead, n => n.type === 'animate').length, 0, 'terminal stack renders none (calm law)')
+  }
+}
+
+console.log('ALL PASS test_tab_polish_48 (NODE_TONE coverage + calm terminals, pill/edge/timeline/pill-graph parity, flow & items_from shimmer + readiness dead-dash, NodeCard glow/gate-nag/breathe/hover/select, hook order, FanStack links, hoisted reduced-motion style, gradient header, banned shapes, F3/F4/F5 rendered-tree perturbation probes)')
 rmSync(tmp, { recursive: true, force: true })

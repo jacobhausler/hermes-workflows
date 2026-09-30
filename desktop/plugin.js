@@ -379,7 +379,15 @@ function bandRows(cols, availW, widthOf, colGap) {
 
 export function Dot({ status }) {
   if (status === 'running') {
-    return jsx('span', { 'aria-hidden': true, className: 'inline-block size-1.5 shrink-0 animate-pulse rounded-full bg-(--ui-accent)' })
+    // #48 F3 (deep review): the running branch consults the ONE table BEFORE
+    // its early return — the accent colour rides an inline style read from
+    // NODE_TONE.running.color at render time, so perturbing the table moves
+    // this dot too (a frozen Tailwind bg-(--ui-accent) class could not).
+    return jsx('span', {
+      'aria-hidden': true,
+      className: 'inline-block size-1.5 shrink-0 animate-pulse rounded-full',
+      style: { background: (NODE_TONE.running || NODE_TONE.pending).color }
+    })
   }
   // #48: the ui tone column of the ONE table is the single source (the old
   // ternary said exactly these words; extracting here makes a fork impossible).
@@ -559,7 +567,7 @@ export function MiniGraph({ detail }) {
       style: {
         position: 'relative', zIndex: 1, display: 'inline-flex', alignItems: 'center', gap: 5,
         height: MINI.pillH, padding: '0 8px', fontSize: 11, lineHeight: 1, whiteSpace: 'nowrap',
-        border: '1px solid', borderColor: isOpen ? 'var(--ui-accent)' : tone, borderRadius: isGate ? 4 : 999,
+        border: '1px solid', borderColor: isOpen ? (NODE_TONE.running || NODE_TONE.pending).color : tone, borderRadius: isGate ? 4 : 999,
         borderStyle: isGate ? 'dashed' : 'solid',
         background: st === 'pending' || st === 'skipped' ? 'transparent' : 'var(--ui-bg-secondary, transparent)',
         color: st === 'pending' || st === 'skipped' ? 'var(--ui-text-tertiary)' : 'var(--ui-text-secondary)',
@@ -717,6 +725,10 @@ export function railModel(ownedRunsList) {
 }
 
 export function Pill({ run, sid, open, onToggle }) {
+  // #48 F3 (deep review): the ACTUAL Pill (not just pillModel) borders itself
+  // from the ONE tone table — border colour and the open ring both read the
+  // run's NODE_TONE entry at render time; a table perturbation moves them.
+  const tone = NODE_TONE[run?.status] || NODE_TONE.pending
   // A div, not a <button>: held pills embed GateActions whose option buttons
   // are SDK Buttons — button-in-button is invalid DOM nesting and every gate
   // click would bubble into the pill's toggle (review #28 F6). The label span
@@ -735,9 +747,11 @@ export function Pill({ run, sid, open, onToggle }) {
       // F8 (deep review): the previous value concatenated a box-shadow into the
       // `border` shorthand — an invalid declaration the browser drops WHOLE, so
       // the open pill lost its border entirely (inverted signal, not cosmetic).
-      // Ring rides on its own real property.
-      border: '1px solid var(--ui-stroke-secondary)',
-      boxShadow: open ? 'inset 0 0 0 1px var(--ui-stroke-secondary)' : undefined,
+      // Ring rides on its own real property. #48 F3: both colours come from the
+      // ONE tone table (border = the state's borderColor; the open ring rides
+      // boxShadow as a centered color-mix of the state's accent).
+      border: `1px solid ${tone.borderColor}`,
+      boxShadow: open ? `inset 0 0 0 1px color-mix(in srgb, ${tone.color} 55%, transparent)` : undefined,
     },
     children: [
       jsxs('span', {
@@ -997,7 +1011,10 @@ export function NodeCard({ runId, def, st, gate, selected, owner, events, hovere
         borderColor: tone.borderColor,
         borderStyle: status === 'pending' || isGate ? 'dashed' : 'solid',
         boxShadow: selected
-          ? [glow, 'inset 0 0 0 1px var(--ui-accent)'].filter(Boolean).join(', ')
+          // #48 F3: the selection ring rides the ONE table (centered color-mix
+          // of the state's accent — hover/selected stay a distinct intensity,
+          // but the colour is modeled centrally, not a stray token).
+          ? [glow, `inset 0 0 0 1px color-mix(in srgb, ${tone.color} 55%, transparent)`].filter(Boolean).join(', ')
           : glow || undefined,
         transform: hovered && !tone.calm ? 'translateY(-1px)' : undefined,
         transition: 'transform 120ms ease, box-shadow 160ms ease, border-color 160ms ease',
@@ -1108,10 +1125,21 @@ export function PolishStyles() {
 
 /** Pure edge-flow decision (exported so node can pin the truth table):
  *  running upstream => march; items_from data edge => shimmer ONLY while the
- *  consumer runs (data arriving is the live moment, calm after); failed =>
- *  dead dashed, never animated; pending => faint dots; everything else calm. */
-export function edgeFlowPolicy(upState, downState, dataFlow = false) {
+ *  consumer runs (data arriving is the live moment, calm after); dead dashed,
+ *  never animated, when the upstream failed OR — F5 (#48 deep review) — the
+ *  downstream can no longer run (`canRun === false`, the canRun-style
+ *  readiness the read model derives from dependencies + blocked_by) and its
+ *  upstream is settled: done | failed | blocked. Pending => faint dots;
+ *  everything else calm. */
+export function edgeFlowPolicy(upState, downState, dataFlow = false, canRun = true) {
   if (upState === 'failed') return { flow: false, shimmer: false, dead: true, dash: '3 3' }
+  // Readiness-aware dead-dash: a join whose deps are no longer all satisfiable
+  // (a failed sibling makes dep_satisfied false / blocked_by non-empty for the
+  // whole fan-in) is dead for EVERY settled edge feeding it — the ok→join link
+  // of a diamond reads dead too, not only the bad→join one.
+  if (downState === 'pending' && canRun === false && (upState === 'done' || upState === 'failed' || upState === 'blocked')) {
+    return { flow: false, shimmer: false, dead: true, dash: '3 3' }
+  }
   if (dataFlow) return downState === 'running'
     ? { flow: false, shimmer: true, dead: false, dash: '6 4' }
     : { flow: false, shimmer: false, dead: false, dash: null }
@@ -1297,18 +1325,32 @@ function Edges({ nodes, rects, states, gate, dataEdges = [] }) {
   // Marker ids are document-global in SVG; several graphs on one page (page
   // canvas + N transcript cards) must not share them or arrowheads cross-wire.
   const mid = `wf-arrow-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`
-  const edges = []
+  const byKey = new Map()
   for (const n of nodes) {
     if (!rects[n.id]) continue
-    for (const a of n.after || []) if (rects[a]) edges.push({ from: a, to: n.id, data: false })
+    for (const a of n.after || []) if (rects[a]) byKey.set(`${a}>${n.id}`, { from: a, to: n.id, data: false })
   }
   // #48: items_from data-flow edges (producer -> fan-out consumer) ride the
   // same rails as dependency edges but shimmer ONLY while the consumer runs.
-  // A producer that is also an `after` ancestor already has its edge — never
-  // draw the same link twice.
-  const seen = new Set(edges.map(e => `${e.from}>${e.to}`))
+  // F4 (deep review): the dedup keeps ONE edge per link and ORs the data
+  // flags — the ordinary producer->fan-out shape (after:['gen'] AND
+  // fanout.items_from:'gen.items') must reach the policy data-classified,
+  // or the shimmer the promise makes is silently dropped by the seen-set.
   for (const e of dataEdges) {
-    if (!seen.has(`${e.from}>${e.to}`) && rects[e.from] && rects[e.to] && e.from !== e.to) edges.push({ from: e.from, to: e.to, data: true })
+    if (!rects[e.from] || !rects[e.to] || e.from === e.to) continue
+    const k = `${e.from}>${e.to}`
+    const cur = byKey.get(k)
+    if (cur) cur.data = cur.data || true
+    else byKey.set(k, { from: e.from, to: e.to, data: true })
+  }
+  const edges = [...byKey.values()]
+  // F5 (#48 deep review): canRun-style readiness derived the way the read
+  // model spells it — every `after` dep must be satisfied (done/skipped/
+  // partial) for a pending node to run; anything else is its blocked_by list.
+  const depSatisfied = st => st === 'done' || st === 'skipped' || st === 'partial'
+  const canRunNow = def => {
+    if (!def) return true
+    return (def.after || []).every(a => depSatisfied(states[a]?.status || 'pending'))
   }
   // Spread ports: N arrows touching one card land at N distinct, edge-sorted
   // points instead of piling every arrowhead on the card's middle pixel.
@@ -1337,8 +1379,11 @@ function Edges({ nodes, rects, states, gate, dataEdges = [] }) {
     const down = nodeState(nodes.find(n => n.id === e.to), states, gate)
     const tone = edgeTone(up, down)
     // #48: the flow/shimmer/dead-dash decision is the ONE exported policy
-    // (edgeFlowPolicy) — this render reads it, it does not re-decide.
-    const policy = edgeFlowPolicy(up, down, e.data)
+    // (edgeFlowPolicy) — this render reads it, it does not re-decide. F5: the
+    // policy gets the readiness input (canRun) derived above, so a join a
+    // failed sibling doomed reads dead on EVERY feeding edge, not just the
+    // one leaving the failure.
+    const policy = edgeFlowPolicy(up, down, e.data, canRunNow(nodes.find(n => n.id === e.to)))
     paths.push(
       jsx('path', {
         d: routeEdge(x1, y1, x2, y2, rects, [e.from, e.to]),
@@ -1364,7 +1409,11 @@ function Edges({ nodes, rects, states, gate, dataEdges = [] }) {
         jsx('marker', { id: `${mid}-live`, viewBox: '0 0 10 10', refX: 10, refY: 5, markerWidth: 8, markerHeight: 8, orient: 'auto', markerUnits: 'userSpaceOnUse',
           children: jsx('path', { d: 'M 0 0 L 10 5 L 0 10 z', fill: 'context-stroke' }) }),
         jsx('marker', { id: `${mid}-dead`, viewBox: '0 0 10 10', refX: 10, refY: 5, markerWidth: 8, markerHeight: 8, orient: 'auto', markerUnits: 'userSpaceOnUse',
-          children: jsx('path', { d: 'M 0 0 L 10 5 L 0 10 z', fill: EDGE_TONE.failed }) })
+          // F3 (deep review): the dead arrowhead follows the ONE table — it
+          // reads NODE_TONE.failed.color at render time like the failed edge
+          // stroke does, so a table perturbation moves stroke and head
+          // together (the old hardcoded EDGE_TONE.failed drifted on its own).
+          children: jsx('path', { d: 'M 0 0 L 10 5 L 0 10 z', fill: (NODE_TONE.failed || NODE_TONE.pending).color }) })
       ] }),
       ...paths
     ]
@@ -1383,14 +1432,22 @@ function Edges({ nodes, rects, states, gate, dataEdges = [] }) {
  *  calm law holds: no `live`, no <animate> child ever mounts. */
 export function FanStack({ children, count, terminal, expanded, onToggleExpand, size = 6, pill = false, tone, live = false, dataFlow = false }) {
   const ghosts = expanded ? 0 : Math.min(Math.max(count - 1, 0), 3)
-  const flowing = live && ghosts > 0
-  const linkTone = dataFlow ? NODE_TONE.running.color : (tone || NODE_TONE.pending.color)
+  // F5 (#48 deep review): ONE flow/dead decision. The stack no longer
+  // re-decides `flowing = live && ghosts > 0` for itself — the flow/shimmer
+  // answer comes from the SAME exported policy the Edges render reads. A live
+  // stack presents as a running edge; a dataFlow stack as a data edge whose
+  // consumer runs; a terminal stack as a done→done calm edge. Geometry (the
+  // ghosts, offsets, badges) stays local here.
+  const policy = edgeFlowPolicy(live ? 'running' : 'done', live ? 'running' : 'done', dataFlow)
+  const flowing = (policy.flow || policy.shimmer) && ghosts > 0
+  const linkTone = dataFlow ? (NODE_TONE.running || NODE_TONE.pending).color : (tone || (NODE_TONE.pending || {}).color)
   return jsxs('div', {
     className: 'relative',
     style: { paddingRight: ghosts * size, paddingBottom: ghosts * size },
     children: [
       // Ghost links: one short dash-marching connector per ghost, corner to
       // corner, only while the stack is live (terminal stacks render none).
+      // The dash itself is the policy's — one decision, two readers.
       flowing
         ? jsxs('svg', {
             'aria-hidden': true,
@@ -1399,7 +1456,7 @@ export function FanStack({ children, count, terminal, expanded, onToggleExpand, 
               const off = (ghosts - i) * size
               return jsx('path', {
                 d: `M 2 2 L ${off + 2} ${off + 2}`, fill: 'none', stroke: linkTone, strokeWidth: 1,
-                strokeDasharray: '4 3', opacity: 0.7,
+                strokeDasharray: policy.dash ?? '4 3', opacity: 0.7,
                 children: jsx('animate', { attributeName: 'stroke-dashoffset', from: 7, to: 0, dur: '0.9s', repeatCount: 'indefinite' })
               }, `link-${i}`)
             })
