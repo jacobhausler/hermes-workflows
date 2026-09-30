@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- #57 door: provenance census counters on the `list` payload (quartermaster digest
+  contract, #52 vocab — field names `provenance.dispatched_by_set` / `provenance.total`
+  are PINNED; renames go through zap's digest-format thread first). One fold over the
+  run.jsons the `act_list` loop ALREADY enumerates (`meta = jload(r/"run.json")` feeds
+  the lane_key/team rows; the stamp read rides the same load — zero extra scans): runs
+  with a `dispatched_by` stamp count toward both counters, an absent key or a null value
+  counts toward `total` only (pre-identity runs, honest degradation on an unreadable
+  run.json). Additive key emitted ONLY when at least one run carries the stamp — the F1
+  emit-only-when-derivable law — so a solo install answers with the exact v1.0.15 key
+  set `{runs, total, counts}` and golden-solo stays EMPTY. The QM digest consumes
+  `provenance_blind_pct = 1 - set/total` without hand-scanning run.jsons.
+  Test: `tests/test_provenance_counters_57.py` (mixed fixture root, both counters,
+  solo key-set, fold-cost spy).
+
 - #37 lane hygiene (digest 20260929f / spool 8edcc9bfc91b9683 — a build lane wiped its
   uncommitted implementation with a base checkout over its own dirty tree for a RED run,
   then died on the turn cap; recovery was a hand replay of 17 journaled tool calls). Two
