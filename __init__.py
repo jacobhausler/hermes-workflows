@@ -272,7 +272,7 @@ WORKFLOW_PARAMS = {
         "run_id": {"type": "string", "description": "Run id (required for every action except run/list)."},
         "name": {"type": "string", "description": "run: overrides graph.name (default workflow); save: library name overrides graph.name (lowercase, [-_.]). amend: set graph.name in the replacement graph; omitting it retains the run name."},
         "from": {"type": "string", "description": "run: library graph name to replay (instead of graph or graph_path)."},
-        "run_context": {"description": "run only: non-empty string seed appended to every first-wave agent (including agents behind gate-only paths), OR non-empty map of identifier keys to non-empty strings replacing only explicit {run.KEY} in node goals/contexts, fan-out goals/item goals and gate questions. Missing keys/malformed bindings reject before any run write. Values are persisted in prompts; do not supply secrets. A seed cannot replace baked literals."}, 
+        "run_context": {"type": ["string", "object"], "description": "run only: non-empty string seed appended to every first-wave agent (including agents behind gate-only paths), OR non-empty map of identifier keys to non-empty strings replacing only explicit {run.KEY} in node goals/contexts, fan-out goals/item goals and gate questions. Missing keys/malformed bindings reject before any run write — as does a seed against a graph with {run.KEY} refs, or a JSON-encoded map passed as a string. Values are persisted in prompts; do not supply secrets. A seed cannot replace baked literals."}, 
         "description": {"type": "string", "description": "save: one-line purpose shown by library/list."},
         "team": {"type": "string", "description": "run (optional, <=64 chars): team label stamped into run.json and shown by list; no effect on scheduling."},
         "lane_key": {"type": "string", "description": "run (optional, <=128 chars): in-flight registry key — a second run with the same key while the incumbent is unfinished is deduped (no spawn; returns the incumbent's run_id); status lane_key=<key> reads the incumbent instead of run_id. Keys are global per runs root; prefix with <team>/ yourself."},
@@ -1050,6 +1050,34 @@ def _bind_run_context(graph, binding):
     if isinstance(binding, str):
         if not binding.strip():
             raise ValueError("run_context seed must be a non-empty string")
+        # Door-transport guard: a JSON object handed over as a STRING is a caller
+        # that meant the map form (tool transports routinely stringify objects).
+        # Seeding it would silently skip substitution — refuse, like every other
+        # malformed binding, before any run write.
+        try:
+            _decoded = json.loads(binding)
+        except ValueError:
+            _decoded = None
+        if isinstance(_decoded, dict):
+            raise ValueError("run_context is a JSON-encoded map passed as a string: pass the map itself "
+                             "(a string is a seed and cannot replace {run.KEY} literals)")
+        def _dangling(node):
+            texts = [node.get(f) for f in ("goal", "context", "question", "profile")]
+            fo = node.get("fanout")
+            if isinstance(fo, dict):
+                texts.append(fo.get("goal"))
+                texts += [i.get("goal") for i in fo.get("items", []) if isinstance(i, dict)]
+            for text in texts:
+                if isinstance(text, str):
+                    m = _RUN_REF.search(text)
+                    if m:
+                        return f"node {node['id']!r} reference {{run.{m.group(1)}}}"
+            return None
+        for node in graph["nodes"]:
+            bad = _dangling(node)
+            if bad:
+                raise ValueError(f"run_context seed cannot bind {bad}: a seed only appends to "
+                                 "context — pass a map so the reference is substituted")
         byid = {n["id"]: n for n in graph["nodes"]}
         def agent_ancestor(nid, seen):
             for parent_id in byid[nid].get("after", []):
