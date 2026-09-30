@@ -22,6 +22,9 @@ ROOT = BUILD.parent if BUILD.name == "tests" else BUILD
 HOME = BUILD / "home_seed_guard"
 shutil.rmtree(HOME, ignore_errors=True)
 os.environ["HERMES_HOME"] = str(HOME)
+# #71 law: the runs root must be pinned beside the home sandbox — a context-local
+# home override outranks HERMES_HOME in get_hermes_home(); WF_RUNS_ROOT is checked first.
+os.environ["WF_RUNS_ROOT"] = str(HOME / "workflows")
 spec = importlib.util.spec_from_file_location("guard_door", str(ROOT / "__init__.py"))
 hw = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(hw)
