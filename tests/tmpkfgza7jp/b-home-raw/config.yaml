@@ -1,0 +1,5 @@
+plugins:
+  entries:
+    hermes-workflows:
+      settings:
+        runs_root: "/home/hermes/.hermes/work/toolbridge-42/tests/tmpkfgza7jp/shared-runs"

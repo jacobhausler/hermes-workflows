@@ -1,0 +1,1 @@
+{"name": "tb", "nodes": [{"id": "a", "type": "echo", "output": "ok", "after": []}]}

@@ -254,6 +254,11 @@ print("@@" + json.dumps({"before": before, "after": after}))
         check(f"(f/{mode}) env-derived identity wins over settings.profile", got["launcher"] == "p1", got["launcher"])
 
     # ---- (g) no env + settings.profile -> consent gate sees the real launcher --
+    # R1 (#46): settings.profile must name an EXISTING profile home -> bridge-seat is
+    # a real seat here, the env-blind-bridge shape the owner actually runs.
+    bridge = estate / "profiles" / "bridge-seat"
+    bridge.mkdir()
+    (bridge / "config.yaml").write_text("{}\n")
     tgt = estate / "profiles" / "target"
     tgt.mkdir()
     (tgt / "config.yaml").write_text("{}\n")
@@ -340,6 +345,27 @@ PY_CORE = "/opt/hermes/.venv/bin/python"
 if not Path(PY_CORE).exists():
     PY_CORE = PY
 
+# The venv python imports core via its .pth no matter what, so the NO-CORE leg runs
+# the same interpreter with a sitecustomize that hard-blocks the core namespaces
+# (hermes_cli / hermes_constants / agent / hermes_yaml): the probe then exercises the
+# raw reader exactly as a host without core would, with ruamel still available.
+BLOCK_HOME = None
+def _blocker_home():
+    global BLOCK_HOME
+    if BLOCK_HOME is None:
+        BLOCK_HOME = Path(tempfile.mkdtemp(prefix="tb-nocore-", dir=str(ROOT / "tests")))
+        (BLOCK_HOME / "sitecustomize.py").write_text(
+            "import sys\n"
+            "_BLOCKED = {'hermes_cli', 'hermes_constants', 'agent', 'hermes_yaml', "
+            "'hermes_platform', 'hermes_bootstrap'}\n"
+            "class _Blocker:\n"
+            "    def find_spec(self, fullname, path=None, target=None):\n"
+            "        if fullname.split('.')[0] in _BLOCKED:\n"
+            "            raise ImportError('%s blocked (nocore test mode)' % fullname)\n"
+            "        return None\n"
+            "sys.meta_path.insert(0, _Blocker())\n")
+    return BLOCK_HOME
+
 def parity_probe(home, cfg_text, mode, env=None):
     """Fresh interpreter; cfg_text is the RAW config.yaml (settings + legacy config)."""
     home = Path(home); home.mkdir(parents=True, exist_ok=True)
@@ -348,10 +374,10 @@ def parity_probe(home, cfg_text, mode, env=None):
             if k not in ("HERMES_HOME", "WF_RUNS_ROOT", "HERMES_WF_HERMES_BIN",
                          "TB_PROFILE_GATE", "PYTHONPATH")}
     base["HERMES_HOME"] = str(home)
+    py = PY_CORE
     if mode == "nocore":
-        py = PY                                     # bare interpreter, no PYTHONPATH
+        base["PYTHONPATH"] = str(_blocker_home())   # sitecustomize blocks core imports
     else:
-        py = PY_CORE
         base["PYTHONPATH"] = "/opt/hermes"
     base.update(env or {})
     p = subprocess.run([py, "-c", PARITY_PROBE, str(ROOT), mode],
@@ -376,8 +402,15 @@ def parity_cfg(settings=None, legacy=None):
     return "\n".join(lines) + "\n"
 
 def parity_case(name, home, cfg_text, env, expect):
-    """All three readers × {core-ctx, core-raw, nocore} answer EXACTLY `expect`
-    (a {key: {"value"|"error": ...}} dict). Cross-reader AND cross-interpreter."""
+    """All three readers × {core-ctx, core-raw, nocore} answer `expect` (a
+    {key: {"value"|"error": ...}} dict). Values compare EXACTLY; an expected "error"
+    is a substring the real message must contain (the refuse wording carries paths —
+    only its reason is stable across readers). Cross-reader AND cross-interpreter."""
+    def match(got_v, want):
+        if "value" in want:
+            return got_v == want
+        return (isinstance(got_v, dict) and "error" in got_v
+                and want["error"] in got_v["error"])
     seen = {}
     for mode in ("core-ctx", "core-raw", "nocore"):
         got = parity_probe(home, cfg_text, mode, env=env)
@@ -385,7 +418,7 @@ def parity_case(name, home, cfg_text, env, expect):
             print(f"SKIP {name} [nocore] — core importable without PYTHONPATH on this host")
             continue
         for k, v in expect.items():
-            ok = got.get(k) == v
+            ok = match(got.get(k), v)
             check(f"{name} [{mode}] {k}", ok, (got.get(k), v))
         seen[mode] = got
     # cross-interpreter agreement on the compared keys (door/runner/dashboard triples)
@@ -393,8 +426,16 @@ def parity_case(name, home, cfg_text, env, expect):
     for a in range(len(modes)):
         for b in range(a + 1, len(modes)):
             ga, gb = seen[modes[a]], seen[modes[b]]
+            def norm(g):   # errors collapse to their expected reason for agreement
+                out = {}
+                for k in expect:
+                    v = g.get(k) or {}
+                    out[k] = {"error": expect[k]["error"]} if "error" in expect[k] and "error" in v \
+                        else v
+                return out
             check(f"{name} readers agree across interpreters ({modes[a]} vs {modes[b]})",
-                  all(ga[k] == gb[k] for k in expect),
+                  all(ga[k] == gb[k] for k in expect) or
+                  all(norm(ga)[k] == norm(gb)[k] for k in expect),
                   [(modes[a], {k: ga[k] for k in expect}), (modes[b], {k: gb[k] for k in expect})])
 
 TMP2 = Path(tempfile.mkdtemp(prefix="tb-parity-", dir=str(ROOT / "tests")))
@@ -421,8 +462,10 @@ try:
                 parity_cfg({"runs_root": "${TB_NO_SUCH_VAR_9C41}/x"}),
                 {"HOME": str(fake_home)},
                 {"door": unresolved_err, "runner": unresolved_err, "dashboard": unresolved_err})
-    # profile shape too
-    prof = home_f / "profiles" / "stamped"; (prof).mkdir(parents=True)
+    # profile shape too — the seat lives under the probe's OWN HERMES_HOME root
+    # (R1 #46: settings.profile must name an existing profile home)
+    prof = TMP2 / "f-home-prof" / "profiles" / "stamped"
+    prof.mkdir(parents=True)
     (prof / "config.yaml").write_text("{}\n")
     parity_case("F2f ${VAR} settings.profile", TMP2 / "f-home-prof",
                 parity_cfg({"profile": "${env:ADV_PROF}"}),
@@ -434,6 +477,9 @@ try:
 
     # ---- F2h: per-key legacy `config` fallback — settings key wins, else config ----
     legacy_root = TMP2 / "legacy-root"; legacy_root.mkdir()
+    # R1 (#46) applies to the legacy subtree too: legacyprof must be a real seat
+    (TMP2 / "h-home" / "profiles" / "legacyprof").mkdir(parents=True)
+    (TMP2 / "h-home" / "profiles" / "legacyprof" / "config.yaml").write_text("{}\n")
     # env-blind launcher (HERMES_HOME is NOT <root>/profiles/<name>)
     parity_case("F2h mixed settings+config (hunt5h shape)", TMP2 / "h-home",
                 parity_cfg({"hermes_bin": "/bin/true"},
@@ -447,8 +493,10 @@ try:
                  "dash_launcher": {"value": "legacyprof"}})
     # settings key PRESENT wins over legacy config for THAT key; missing key falls back
     est = TMP2 / "estate2"
-    (est / "profiles" / "realprof").mkdir(parents=True)
-    (est / "profiles" / "realprof" / "config.yaml").write_text("{}\n")
+    # env-blind seat home (HERMES_HOME=estate2/seat, NOT under profiles/) -> estate root
+    # = the seat home itself, so the R1-checked seat lives at estate2/seat/profiles/realprof
+    (est / "seat" / "profiles" / "realprof").mkdir(parents=True)
+    (est / "seat" / "profiles" / "realprof" / "config.yaml").write_text("{}\n")
     parity_case("F2h per-key: settings.profile wins, config.runs_root fills", est / "seat",
                 parity_cfg({"profile": "realprof"},
                            {"profile": "ghostlegacy", "runs_root": str(legacy_root)}),
@@ -474,8 +522,11 @@ try:
                 {"door_launcher": {"error": "does not exist"},
                  "runner_launcher": {"error": "does not exist"},
                  "dash_launcher": {"error": "does not exist"}})
-    # an EXISTING profile passes (control)
-    parity_case("R1 existing settings.profile accepted", TMP2 / "g-home-ok",
+    # an EXISTING profile passes (control) — under this probe's HERMES_HOME
+    gok = TMP2 / "g-home-ok"
+    (gok / "profiles" / "stamped").mkdir(parents=True)
+    (gok / "profiles" / "stamped" / "config.yaml").write_text("{}\n")
+    parity_case("R1 existing settings.profile accepted", gok,
                 parity_cfg({"profile": "stamped"}),
                 {"HOME": str(fake_home), "HERMES_HOME": str(TMP2 / "g-home-ok")},
                 {"door_launcher": {"value": "stamped"},
