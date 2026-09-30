@@ -15,6 +15,19 @@ Every feature is OPTIONAL: a no-team run (default profile, no `WF_RUNS_ROOT`) is
 
 ## Unreleased
 
+- #8 (P0) runner daemonize: the door spawns the runner through a transient double-fork
+  hop (Popen → fork → setsid → exec; parent exits immediately), so by the time `handle()`
+  returns the runner has reparented to the subreaper/init and no caller-cleanup sweep can
+  reach it — neither the gateway-restart tree SIGKILL nor the process_registry completion
+  sweep (`_terminate_host_pid`: per-pid SIGKILL over a descendants snapshot taken while the
+  parent lives; `start_new_session` escaped only group-directed signals). Admission stays
+  the runner-side kernel flock (loser `WORKFLOW_BUSY`); stamp law moved runner-side: the
+  runner stamps `wf.pid` itself at admission and announces the same pid on the door's
+  ready pipe (`HERMES_WF_READY_FD`, popped from env before any child spawn); the door
+  stamps ONLY the pid it observed on that pipe — never a pid it cannot observe. Loser
+  spawns close the pipe without a line and stamp nothing.
+  (`tests/test_daemonize_8.py`: subreaper + live-parent descendants sweep, caller-exit
+  completion sweep, double-spawn admission race.)
 - #32 publish-as-file: top-level `grammar: "wf/1"` accepted (absent = wf/1; unknown value refused listing the supported values), def_hash-neutral like `provenance`; `references/portable.md` convention + `examples/portable-review.workflow.json` walk-in with its digests pinned in the doc (`tests/test_portable_32.py`).
 - #31 grammar-dialect-1: `references/dialect.md` maps Anthropic's Claude Code dynamic-workflow JS grammar (agent/parallel/pipeline/phase/args/plain-JS glue/caps/worktrees) to our JSON graph with a filled DEVIATION JUSTIFICATION column per row, and `tests/fixtures/dialect/` (13 `.js` scripts + `.expected.json` verdicts) pins the constrained-subset import contract that #33 implements. Docs + fixtures only; no importer/exporter code.
 - #24 fatal_quota (from @pf-mechanic-2's report): a 429 whose own text carries a
