@@ -553,6 +553,8 @@ try:
                  "dashboard": {"value": str(est3 / "shared")}})
 finally:
     shutil.rmtree(TMP2, ignore_errors=True)
+    if BLOCK_HOME is not None:      # the blocker dir is per-run, never left behind
+        shutil.rmtree(BLOCK_HOME, ignore_errors=True)
 
 
 print(("ALL PASS" if not failures else f"FAILED {len(failures)}: {failures}") + " test_tool_bridge_settings_9c41e2b7")
