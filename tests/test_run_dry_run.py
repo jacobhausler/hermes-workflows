@@ -11,6 +11,9 @@ HERE = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(HERE))
 tmp_dir = tempfile.TemporaryDirectory(prefix=".tmp-rundry-", dir=HERE / "tests")
 os.environ["HERMES_HOME"] = str(tmp_dir.name)
+# #71: HERMES_HOME alone loses to the context-local home override — without the
+# runs-root pin the normal-run launches land TWO dirs on the estate shelf.
+os.environ["WF_RUNS_ROOT"] = str(Path(tmp_dir.name) / "workflows")
 os.environ["HERMES_WF_HERMES_BIN"] = str(HERE / "tests" / "fake")   # the suite's fake hermes
 os.environ["WF_QUOTA_CACHE"] = str(Path(tmp_dir.name) / "quota-cache.json")  # test-seated: pings nothing
 ALIASES = ("  aliases:\n    fable: anthropic/claude-fable-5.1\n    opus: anthropic/claude-opus-5-5\n"
