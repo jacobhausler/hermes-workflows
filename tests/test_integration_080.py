@@ -22,7 +22,10 @@ class Integrated(unittest.TestCase):
         sys.path.insert(0, str(ROOT))
         import wf as engine
         with tempfile.TemporaryDirectory(dir=ROOT) as home:
-            with patch.dict(os.environ, {'HERMES_HOME': home}), patch.object(wf, '_spawn_runner'):
+            # #71: HERMES_HOME alone loses to the context-local home override —
+            # without the runs-root pin the run lands on the estate shelf and
+            # drain_inbox at the sandboxed path sees nothing (the leak shape).
+            with patch.dict(os.environ, {'HERMES_HOME': home, 'WF_RUNS_ROOT': str(Path(home) / 'workflows')}), patch.object(wf, '_spawn_runner'):
                 result = wf.act_run({'graph': {'name': 'steering', 'nodes': [
                     {'id': 'a', 'type': 'agent', 'goal': 'offline'}]}})
                 rid = result['run_id']; run = Path(home) / 'workflows' / rid

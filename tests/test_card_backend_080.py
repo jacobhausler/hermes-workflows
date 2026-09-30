@@ -43,7 +43,9 @@ GRAPH = {"name": "card-backend", "nodes": [{"id": "one", "type": "agent", "goal"
 class CardBackend(unittest.TestCase):
     def setUp(self):
         self.home = tempfile.TemporaryDirectory(dir=ROOT)
-        self.env = patch.dict(os.environ, {"HERMES_HOME": self.home.name, "HERMES_SESSION_ID": "stale-process", "HERMES_WF_HERMES_BIN": "offline"})
+        # #71: HERMES_HOME alone loses to the context-local home override — pin
+        # the runs root too or these launches land on the shared estate shelf.
+        self.env = patch.dict(os.environ, {"HERMES_HOME": self.home.name, "WF_RUNS_ROOT": str(Path(self.home.name) / "workflows"), "HERMES_SESSION_ID": "stale-process", "HERMES_WF_HERMES_BIN": "offline"})
         self.env.start()
         self.spawn = patch.object(wf, "_spawn_runner")
         self.spawn.start()

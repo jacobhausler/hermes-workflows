@@ -87,7 +87,7 @@ with tempfile.TemporaryDirectory(prefix="shelf71-") as td:
 
 # ---- S3: static audit — in-process door writers must pin WF_RUNS_ROOT ----
 import re
-pattern = re.compile(r"(hw|door|plugin|mod|m|d)\.(handle|act_save|act_run|act_delete|act_amend)\(")
+pattern = re.compile(r"\b(\w+)\.(handle|act_save|act_run|act_delete|act_amend)\(")
 leakers = []
 for p in sorted(HERE.glob("*.py")):
     if p.name == Path(__file__).name or p.name == "fake_hermes.py":

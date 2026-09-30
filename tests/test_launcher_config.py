@@ -7,6 +7,9 @@ import tempfile
 from pathlib import Path
 
 os.environ['HERMES_HOME'] = tempfile.mkdtemp(prefix='wf-launcher-test-')
+# #71: HERMES_HOME alone loses to the context-local home override — pin the runs
+# root beside it so even a guard-refused handle() can never touch estate shelf.
+os.environ['WF_RUNS_ROOT'] = str(Path(os.environ['HERMES_HOME']) / 'workflows')
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location('wf_door_launcher_test', ROOT / '__init__.py')
 wf = importlib.util.module_from_spec(spec)
