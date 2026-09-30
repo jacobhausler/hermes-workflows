@@ -247,14 +247,18 @@ WORKFLOW_PARAMS = {
     "properties": {
         "action": {
             "type": "string",
-            "enum": ["run", "status", "wait", "release", "steer", "inbox", "amend", "stop", "list", "save", "library"],
-            "description": "run=launch a graph; wait=read state, RESPAWNING an idle runner if work is pending (blocks to the next boundary when one is live); status=read-model of a run; release=answer a held human gate; steer=queue steering text for a node; inbox=(child-side, cooperative) pull late steering lines baked for THIS spawn — call once at a natural seam; amend=replace the graph (invalidates changed nodes + all downstream by fingerprint); stop=request stop; list=all runs; save=shelve a graph in the library under a name (from run_id or inline graph); library=list shelved graphs. run from=<name> replays a shelved graph.",
+            "enum": ["run", "status", "wait", "release", "steer", "inbox", "amend", "stop", "list", "save", "submit", "library"],
+            "description": "run=launch a graph; wait=read state, RESPAWNING an idle runner if work is pending (blocks to the next boundary when one is live); status=read-model of a run; release=answer a held human gate; steer=queue steering text for a node; inbox=(child-side, cooperative) pull late steering lines baked for THIS spawn — call once at a natural seam; amend=replace the graph (invalidates changed nodes + all downstream by fingerprint); stop=request stop; list=all runs; save=shelve a graph in the library under a name (from run_id or inline graph); library=list shelved graphs richly (name, description, tags, provenance, path-relative id). run from=<name> replays a shelved graph. submit=quarantine a hand-rolled graph for study (requires why_not_library >=80 chars; never joins the library — the quartermaster's human-gated loop decides); inbox kind=submissions lists them newest-first.",
         },
         "run_id": {"type": "string", "description": "Run id (required for every action except run/list)."},
         "name": {"type": "string", "description": "run: overrides graph.name (default workflow); save: library name overrides graph.name (lowercase, [-_.]). amend: set graph.name in the replacement graph; omitting it retains the run name."},
         "from": {"type": "string", "description": "run: library graph name to replay (instead of graph or graph_path)."},
         "run_context": {"description": "run only: non-empty string seed appended to every first-wave agent (including agents behind gate-only paths), OR non-empty map of identifier keys to non-empty strings replacing only explicit {run.KEY} in node goals/contexts, fan-out goals/item goals and gate questions. Missing keys/malformed bindings reject before any run write. Values are persisted in prompts; do not supply secrets. A seed cannot replace baked literals."}, 
         "description": {"type": "string", "description": "save: one-line purpose shown by library/list."},
+        "tags": {"type": "array", "items": {"type": "string"}, "description": "save (optional): 1-10 short discovery tags (lowercase alnum, [-_.], <=32 chars each), validated like the library name; stored in the entry's meta envelope next to the description."},
+        "why_not_library": {"type": "string", "description": "submit (REQUIRED, >=80 chars): why no library graph covered this task — name the entries you checked and the shape you needed. The receipt is what makes hand-rolling honest."},
+        "lane": {"type": "string", "description": "submit (optional, <=128 chars): lane label carried beside the submission for the quartermaster's triage; no scheduling effect."},
+        "kind": {"type": "string", "enum": ["submissions"], "description": "inbox (optional): 'submissions' = list workflow submit study items newest-first (read-only; promotion is a human decision). Omit inside a child spawn to pull baked steering as before."},
         "team": {"type": "string", "description": "run (optional, <=64 chars): team label stamped into run.json and shown by list; no effect on scheduling."},
         "lane_key": {"type": "string", "description": "run (optional, <=128 chars): in-flight registry key — a second run with the same key while the incumbent is unfinished is deduped (no spawn; returns the incumbent's run_id); status lane_key=<key> reads the incumbent instead of run_id. Keys are global per runs root; prefix with <team>/ yourself."},
         "source": {"type": "string", "description": "save (optional, <=200 chars): where this graph came from (repo path, URL, skill) — records opt-in provenance {owner, source, saved_at, source_digest} in the library entry."},
@@ -929,10 +933,29 @@ def _library_roots():
     return roots
 
 LIB_OK = re.compile(r"^[a-z0-9][a-z0-9_.-]{0,63}$")
+_GENERAL_PREFIX = "general/"
+TAG_OK = re.compile(r"^[a-z0-9][a-z0-9_.-]{0,31}$")
+TAGS_MAX = 10
+DESC_MAX = 200
+
+def _tags_error(tags):
+    """#50: `tags` is a list of 1..TAGS_MAX short tokens, each under the library-name
+    grammar. Fail-closed: anything else is an error, never a silent drop."""
+    if not isinstance(tags, list) or not 1 <= len(tags) <= TAGS_MAX:
+        return {"error": f"tags must be a list of 1-{TAGS_MAX} short tokens"}
+    for t in tags:
+        if not isinstance(t, str) or not TAG_OK.match(t):
+            return {"error": f"invalid tag {t!r} (lowercase alnum, [-_.], <=32 chars)"}
+    return None
 
 def _lib_path(name):
-    """WRITE resolver: always the resolved root (current best version lands there)."""
+    """WRITE resolver: always the resolved root (current best version lands there).
+    #50: `general/<name>` addresses the curated public subset directory (#51)."""
     n = str(name or "").strip().lower()
+    if n.startswith(_GENERAL_PREFIX):
+        rest = n[len(_GENERAL_PREFIX):]
+        if LIB_OK.match(rest):
+            return library_root() / _GENERAL_PREFIX / f"{rest}.json"
     if not LIB_OK.match(n):
         raise ValueError(f"invalid library name {name!r} (lowercase alnum, [-_.], <=64)")
     return library_root() / f"{n}.json"
@@ -950,9 +973,18 @@ def _lib_read(name):
                 return legacy
     return p
 
+def _lib_rel_name(p):
+    """#50: the replayable name for a library path — `general/<stem>` inside the
+    curated public subdir, plain `<stem>` everywhere else (what `_lib_path` and
+    `library` both answer to)."""
+    return (str(p.relative_to(library_root()))[:-5] if p.parent == library_root() / _GENERAL_PREFIX
+            else p.stem)
+
 def act_save(args):
     """Shelve a graph under a name: from an existing run (`run_id`) or an inline `graph`.
-    Overwrites — a library entry is the CURRENT best version of that graph."""
+    Overwrites — a library entry is the CURRENT best version of that graph.
+    #50: `description` (<=200) and `tags` (1-10 short tokens) ride in the entry's
+    `meta` envelope; a save carrying NEITHER keeps writing the pre-#50 BARE bytes."""
     graph, bad = _input_graph(args, run_id=True)
     if bad:
         return bad
@@ -970,39 +1002,99 @@ def act_save(args):
     source = args.get("source")
     if source is not None and (not isinstance(source, str) or not source.strip() or len(source) > 200):
         return {"error": "source must be a non-empty string of at most 200 characters"}
+    desc = args.get("description")
+    if desc is not None and (not isinstance(desc, str) or not desc.strip() or len(desc) > DESC_MAX):
+        return {"error": f"description must be a non-empty string of at most {DESC_MAX} characters"}
+    tags = args.get("tags")
+    if tags is not None:
+        bad = _tags_error(tags)
+        if bad:
+            return bad
     p.parent.mkdir(parents=True, exist_ok=True)
     graph = dict(graph, name=p.stem)
-    if args.get("description"):
-        graph["description"] = args["description"]
     owner = _common.launcher_profile()
     if source is not None or owner != "default":
         graph["provenance"] = {"owner": owner, "source": source,
                                "saved_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
                                "source_digest": _common.source_digest(graph)}
-    p.write_text(json.dumps(graph, ensure_ascii=False, indent=2))
-    return {"saved": p.stem, "nodes": len(graph["nodes"]),
-            "hint": f"re-run any time: workflow run from={p.stem}  |  /wf {p.stem}"}
+    if desc is not None or tags is not None:
+        # #50 envelope: meta carries discovery fields the wf/1 grammar has no key
+        # for; the inner graph stays validator-clean. The normalizer loads either.
+        meta = {}
+        if desc is not None:
+            meta["description"] = desc
+        if tags is not None:
+            meta["tags"] = tags
+        data = {"meta": meta, "graph": graph}
+    else:
+        # bare form (pre-#50 bytes, and what the solo golden freezes): the
+        # description rides top-level like 1.1 always wrote it — there is none here.
+        data = graph
+    p.write_text(json.dumps(data, ensure_ascii=False, indent=2))
+    saved = _lib_rel_name(p)   # #50: a general/<name> save must echo the replayable name
+    return {"saved": saved, "nodes": len(graph["nodes"]),
+            "hint": f"re-run any time: workflow run from={saved}  |  /wf {saved}"}
 
-def act_library(_args):
-    out, seen = [], set()
-    for root in _library_roots():   # F1 #14: pre-fix graphs under the launch root stay listed
+def _library_rows():
+    """#50: THE discovery read for the library — rich rows + honest skips. One walk
+    shared by the `library` action and the run from=<unknown> fuzzy nudge, so the
+    two can never disagree about what the library holds. Shapes: the 1.1 BARE graph
+    (R10: still loads and lists verbatim) or the #50 ENVELOPE {meta, graph}; a file
+    neither can be (bad JSON, unexpected shape) is LISTED in `skipped`, never a
+    crash. `general/` entries carry the prefix in their name/id (#51's public set).
+    F1 #14: a graph under the legacy launch root stays listed/replayable."""
+    rows, skipped, seen = [], [], set()
+    for root in _library_roots():
         if not root.exists():
             continue
-        for p in sorted(root.glob("*.json")):
-            if p.stem in seen:
+        files = ([(_GENERAL_PREFIX + p.stem, p) for p in sorted((root / _GENERAL_PREFIX).glob("*.json"))]
+                 if (root / _GENERAL_PREFIX).is_dir() else [])
+        files += [(p.stem, p) for p in sorted(root.glob("*.json"))]
+        for name, p in files:
+            if name in seen:
                 continue
-            seen.add(p.stem)
-            g = jload(p) or {}
-            nodes = g.get("nodes") or []
-            row = {"name": p.stem, "nodes": len(nodes),
+            seen.add(name)
+            try:
+                data = json.loads(p.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                skipped.append(str(p.relative_to(root)))
+                continue
+            entry = _common.library_entry(data)
+            if entry is None:
+                skipped.append(str(p.relative_to(root)))
+                continue
+            graph = entry["graph"]
+            nodes = graph["nodes"]
+            row = {"name": name,
+                   "nodes": len(nodes),
                    "gates": sum(1 for n in nodes if n.get("type") == "gate"),
                    "fanouts": sum(1 for n in nodes if n.get("fanout")),
-                   "description": g.get("description")}
-            prov = g.get("provenance")
+                   "description": entry["description"]}
+            # 149c437 emit-only-when-derivable law: a BARE (pre-#50) entry keeps the
+            # exact 1.1 row key-set — solo golden stays byte-identical. The #50
+            # discovery keys land on ENVELOPE entries (and general/ paths), which is
+            # exactly where they were saved from.
+            if entry["envelope"] or name.startswith(_GENERAL_PREFIX):
+                row["id"] = str(p.relative_to(root))
+                row["tags"] = entry["tags"]
+            prov = graph.get("provenance")
             if isinstance(prov, dict):
                 row.update({k: prov.get(k) for k in ("owner", "source", "source_digest")})
-            out.append(row)
-    return {"library": out, "hint": "workflow run from=<name> replays one; workflow save graph=... shelves a new one"}
+            rows.append(row)
+    return rows, skipped
+
+def act_library(_args):
+    rows, skipped = _library_rows()
+    # The 1.1 hint stays verbatim for the bare/empty library (golden-solo byte law);
+    # the submit nudge rides along once the library carries #50 discovery entries —
+    # the moment the reader is in the discovery-first world.
+    hinted = "workflow run from=<name> replays one; workflow save graph=... shelves a new one"
+    if any(("id" in r) for r in rows):
+        hinted += "; a hand-rolled graph the library doesn't cover: workflow submit with why_not_library"
+    out = {"library": rows, "hint": hinted}
+    if skipped:
+        out["skipped"] = skipped
+    return out
 
 # ---------- actions ----------
 
@@ -1215,6 +1307,161 @@ def _lane_key_error(key):
         return {"error": "lane_key must be a non-empty string of at most 128 characters"}
     return None
 
+WHY_MIN = 80  # #50: the why-not-library receipt floor (charcount)
+
+def _submit_dir():
+    return runs_root() / "inbox"
+
+def _slug(name):
+    return "".join(c for c in str(name or "").lower() if c.isalnum() or c in "-_")[:24] or "graph"
+
+def act_submit(args):
+    """#50 (epic #49): submit a hand-rolled graph for STUDY — the quarantine inbox
+    under runs_root()/inbox, never the library. The why-not-library receipt is
+    REQUIRED (>=WHY_MIN chars): the nudge that makes 'why didn't the library cover
+    it?' part of the cost of hand-rolling. The graph is validated by the SAME
+    `_validation_error` act_run uses — no second validator. A second submit with
+    the identical graph digest from the same submitted_by is a DEDUPE HINT, not a
+    bounce: the existing id is reported. Nothing here auto-joins the library —
+    promotion/decision is the quartermaster's human-gated loop; door stores only.
+    Consent shape mirrors save: this is a model-reachable write to runs_root; the
+    launcher-consent bounce belongs to run, where profile gates are enforced."""
+    graph, bad = _input_graph(args)
+    if bad:
+        return bad
+    if graph is None:
+        return {"error": "submit needs graph or graph_path"}
+    why = args.get("why_not_library")
+    if not isinstance(why, str) or not why.strip():
+        return {"error": "submit requires why_not_library: what the library lacks "
+                         f"(>= {WHY_MIN} chars) — run `workflow library` first"}
+    if len(why.strip()) < WHY_MIN:
+        return {"error": f"why_not_library too short: {len(why.strip())} chars, "
+                         f"needs >= {WHY_MIN} — name the library entries you checked "
+                         "and what shape you needed"}
+    lane = args.get("lane")
+    if lane is not None and (not isinstance(lane, str) or not lane.strip() or len(lane) > 128):
+        return {"error": "lane must be a non-empty string of at most 128 characters"}
+    bad = _validation_error(graph)
+    if bad:
+        return bad
+    digest = _common.source_digest(graph)
+    submitted_by = _common.launcher_profile()
+    d = _submit_dir()
+    d.mkdir(parents=True, exist_ok=True)
+    # Dedupe BEFORE any write: same node-set digest + same submitter = the same
+    # study item restated. Report the existing id; never a second copy, never a bounce.
+    for existing in sorted(d.glob("*.json"), reverse=True):
+        e = jload(existing)
+        if not isinstance(e, dict):
+            continue
+        if e.get("submitted_by") == submitted_by \
+                and _common.source_digest(e.get("graph")) == digest:
+            return {"deduped": True, "existing": existing.stem,
+                    "hint": f"already in the study inbox: workflow inbox (id {existing.stem})"}
+    ts = datetime.now(timezone.utc)
+    rid = ts.strftime("%Y%m%d-%H%M%S") + "-" + _slug(graph.get("name"))
+    n, path = 0, None
+    while True:  # collision-resistant exclusive create (same law as _create_run)
+        cand = d / f"{rid if n == 0 else rid + '-' + str(n)}.json"
+        try:
+            fd = os.open(cand, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+            path = cand
+            break
+        except FileExistsError:
+            n += 1
+    entry = {"submitted_at": ts.isoformat(timespec="seconds"),
+             "submitted_by": submitted_by,
+             "why_not_library": why,
+             "lane": lane,
+             "graph": graph}
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        json.dump(entry, f, ensure_ascii=False, indent=2)
+    return {"ok": True, "submitted": path.stem, "digest": digest,
+            "hint": "quarantined for study (quartermaster's loop decides promotion); "
+                    "this submit did NOT join the library"}
+
+def act_inbox(args):
+    """Two inbox halves, one action name, never in conflict (a child's steer env and a
+    maintainer's query never coexist in one invocation):
+
+    CHILD-SIDE (B1, feedback #13/#40, unchanged): with baked steer env, the child pulls
+    its late steering lines — see _steer_lines; a stranger without the env simply has
+    nothing to pull.
+
+    MAINTAINER-SIDE (#50, read-only): list `workflow submit` study items newest-first
+    for the quartermaster / maintainer's human-gated consume loop — explicit with
+    `kind:"submissions"`, or as the fallback for any caller that is not a live child
+    pull. LIST ONLY: nothing here promotes, deletes, or joins the library — door
+    stores, a human decides. (A door inherited by a descendant process that never
+    had its steer file written is not a live pull — no file, no child branch.)"""
+    kind = args.get("kind")
+    f, c = os.environ.get("HERMES_WF_STEER_FILE"), os.environ.get("HERMES_WF_STEER_CURSOR")
+    if kind is None and f and c and Path(f).is_file() and Path(c).is_file():
+        try:
+            hwm = int(os.environ.get("HERMES_WF_STEER_HWM", "0"))
+        except ValueError:
+            hwm = 0
+        texts, n = _steer_lines(f, c, hwm)
+        if n:  # #17: the pull is a fact — log it beside the cursor advance
+            try:
+                # 1.1 (RATIFY F1): the runner bakes HERMES_WF_RUN_DIR (absolute); prefer it over
+                # deriving the run dir from the steer file path (same dir in every legacy spawn).
+                run_dir_env = os.environ.get("HERMES_WF_RUN_DIR", "")
+                _steer_event(Path(run_dir_env) if run_dir_env else Path(f).parent.parent, "steer.consumed",
+                             node=os.environ.get("HERMES_WF_STEER_NODE"),
+                             spawn=os.environ.get("HERMES_WF_STEER_SPAWN"), pulled=n)
+            except OSError:
+                pass
+        return {"ok": True, "steering": texts, "pulled": n,
+                "node": os.environ.get("HERMES_WF_STEER_NODE"),
+                "spawn": os.environ.get("HERMES_WF_STEER_SPAWN")}
+    if kind not in (None, "submissions"):
+        return {"ok": False, "error": f"unknown inbox kind {kind!r} (omit, or 'submissions')"}
+    d = _submit_dir()
+    rows = []
+    if d.is_dir():
+        for p in sorted(d.glob("*.json")):
+            e = jload(p)
+            if not isinstance(e, dict) or "graph" not in e:
+                continue  # a half-written/foreign file lists as nothing, never a crash
+            graph = e.get("graph") if isinstance(e.get("graph"), dict) else {}
+            rows.append({"id": p.stem,
+                         "submitted_at": e.get("submitted_at"),
+                         "submitted_by": e.get("submitted_by"),
+                         "lane": e.get("lane"),
+                         "why_not_library": e.get("why_not_library"),
+                         "nodes": len(graph.get("nodes") or [])})
+    rows.sort(key=lambda r: (str(r.get("submitted_at") or ""), str(r.get("id") or "")),
+              reverse=True)  # newest-first; ids break same-second ties
+    if kind is None and not rows:
+        return {"ok": False,
+                "error": "not a workflow child spawn (no baked steer env) and the study "
+                         "inbox is empty: workflow submit quarantines hand-rolled graphs here"}
+    return {"ok": True, "inbox": rows, "total": len(rows),
+            "hint": "list only — promotion to the library is the quartermaster's "
+                    "human-gated loop; consume off-box, door never auto-joins"}
+
+def _from_unknown_error(name):
+    """#50: the nudge IS the error text. `run from=<unknown>` names up to 3 closest
+    library entries (difflib over ALL listed names, general/ included — the same
+    walk `library` answers with, so the two never disagree) and points a genuinely
+    uncovered hand-rolled graph at `workflow submit` with the why-not-library
+    receipt. Fail-open on the fuzz itself: a nameless library still nudges toward
+    submit; the list is a courtesy, the contract is the error."""
+    rows, _skipped = _library_rows()
+    names = [r["name"] for r in rows]
+    closest = difflib.get_close_matches(str(name or ""), names, n=3)
+    err = (f"no library graph named {name!r}"
+           + (f"; closest: {', '.join(closest)}" if closest else
+              ("; the library is empty" if not names else "")))
+    out = {"error": err + ". hand-rolled? workflow submit with why_not_library "
+                          "(the graph is quarantined for study, never auto-saved)",
+           "closest": closest}
+    if names:
+        out["hint"] = "workflow library lists every entry with description+tags"
+    return out
+
 def act_run(args):
     graph, bad = _input_graph(args, library=True)
     if bad:
@@ -1222,13 +1469,18 @@ def act_run(args):
     lib_name = None
     if graph is None and args.get("from"):
         try:
-            graph = jload(_lib_read(args["from"]))   # F1 #14: legacy-root graphs stay replayable
+            raw = jload(_lib_read(args["from"]))   # F1 #14: legacy-root graphs stay replayable
         except ValueError as e:
             return {"error": str(e)}
+        # #50: a library file is either the 1.1 BARE graph (passes through verbatim,
+        # R10) or the {meta, graph} ENVELOPE — the normalizer unwraps it. A missing,
+        # unreadable, or shapeless file lands in the nudge below (#50: the nudge IS
+        # the error text), so a typo never reads as a silently broken entry.
+        entry = _common.library_entry(raw) if isinstance(raw, dict) else None
+        graph = entry["graph"] if entry else None
         if graph is None:
-            return {"error": f"no library graph named {args['from']!r}",
-                    "library": [x["name"] for x in act_library({})["library"]]}
-        lib_name = _lib_path(args["from"]).stem
+            return _from_unknown_error(args["from"])
+        lib_name = _lib_rel_name(_lib_path(args["from"]))   # #50: general/ names keep their prefix
     if graph is None:
         return {"error": "run needs graph, graph_path or from=<library name>"}
     bad = _validation_error(graph) or _team_args_error(args)
@@ -1684,37 +1936,6 @@ def _steer_lines(path, cursor, hwm):
     os.replace(tmp, cursor)
     return out, len(todo)
 
-def act_inbox(args):
-    """B1 (feedback #13/#40): the child's own pull of late steering. Runs IN THE
-    CHILD (env baked at spawn by wf.run_child): it never guesses — the file it
-    can see is exactly what its spawn baked (HWM), and the cursor makes delivery
-    exactly-once per spawn. A child that never calls this gets the same lines
-    via the runner's next-spawn prompt injection: nothing is lost, only delayed.
-    No run_id needed: the env is the authority (anti-spoof: a stranger session
-    without the env simply has nothing to pull)."""
-    f, c = os.environ.get("HERMES_WF_STEER_FILE"), os.environ.get("HERMES_WF_STEER_CURSOR")
-    if not f or not c:
-        return {"ok": False,
-                "error": "not a workflow child spawn (no baked steer env): the inbox tool is for workflow children"}
-    try:
-        hwm = int(os.environ.get("HERMES_WF_STEER_HWM", "0"))
-    except ValueError:
-        hwm = 0
-    texts, n = _steer_lines(f, c, hwm)
-    if n:  # #17: the pull is a fact — log it beside the cursor advance
-        try:
-            # 1.1 (RATIFY F1): the runner bakes HERMES_WF_RUN_DIR (absolute); prefer it over
-            # deriving the run dir from the steer file path (same dir in every legacy spawn).
-            run_dir_env = os.environ.get("HERMES_WF_RUN_DIR", "")
-            _steer_event(Path(run_dir_env) if run_dir_env else Path(f).parent.parent, "steer.consumed",
-                         node=os.environ.get("HERMES_WF_STEER_NODE"),
-                         spawn=os.environ.get("HERMES_WF_STEER_SPAWN"), pulled=n)
-        except OSError:
-            pass
-    return {"ok": True, "steering": texts, "pulled": n,
-            "node": os.environ.get("HERMES_WF_STEER_NODE"),
-            "spawn": os.environ.get("HERMES_WF_STEER_SPAWN")}
-
 def _frozen_committed(r, old, new_nodes):
     """fb 034849a23af94418: ids whose committed bake an amend keeps verbatim — ONLY nodes
     that will replay-skip. All of: (a) a committed def with that id; (b) the def minus
@@ -1868,7 +2089,7 @@ def act_list(_args):
 
 ACTIONS = {"run": act_run, "status": act_status, "wait": act_wait, "release": act_release,
            "steer": act_steer, "inbox": act_inbox, "amend": act_amend, "stop": act_stop, "list": act_list,
-           "save": act_save, "library": act_library}
+           "save": act_save, "submit": act_submit, "library": act_library}
 
 def handle(args, **kwargs):
     try:
@@ -1903,9 +2124,14 @@ def _wf_command(raw_args):
         names = ", ".join(x["name"] for x in lib) or "(empty)"
         return f"No library graph named `{name}`. Available: {names}"
     g = jload(p) or {}
-    return (f"Replay the shelved workflow **{p.stem}** ({len(g.get('nodes') or [])} nodes)"
+    # #50: a library file is bare graph or {meta, graph} envelope; the normalizer
+    # unwraps either, and the replayable name carries general/ when it applies.
+    entry = _common.library_entry(g if isinstance(g, dict) else None)
+    g = entry["graph"] if entry else {}
+    replay_name = _lib_rel_name(p) if p.parent != library_root() else p.stem
+    return (f"Replay the shelved workflow **{replay_name}** ({len(g.get('nodes') or [])} nodes)"
             + (f" — operator note: {note}" if note else "") + ".\n"
-            f"Agent: call `workflow{{action:\"run\", from:\"{p.stem}\""
+            f"Agent: call `workflow{{action:\"run\", from:\"{replay_name}\""
             + (f", run_context:{json.dumps(note)}" if note else "")
             + "}`"
             + ", emit `::workflow{id=\"<run_id>\"}` on its own line, then `wait` and answer gates via clarify.")

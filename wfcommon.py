@@ -298,6 +298,37 @@ ECHO_KEYS = {"id", "type", "after", "output"}
 # 1.1 (RATIFY F5): opt-in library provenance block, written by the door's `save` ONLY when
 # `source` is supplied or the saving door runs under a named profile. Top-level graph key.
 PROVENANCE_KEYS = {"owner", "source", "saved_at", "source_digest"}
+
+# ---------- library entry normalizer (#50, R10 migration law) ----------
+# A library file is either the 1.1 BARE form (the graph object itself — the bytes
+# every pre-#50 `save` wrote, which must keep loading and listing verbatim) or the
+# #50 ENVELOPE {"meta": {description?, tags?}, "graph": {...}}. Anything else is an
+# UNKNOWN shape: the door skips it with a listed warning, never crashes the list.
+# Returns {meta, graph, description, tags, envelope} or None (unknown shape).
+def library_entry(data):
+    if not isinstance(data, dict):
+        return None
+    if isinstance(data.get("graph"), dict):
+        if isinstance(data.get("nodes"), list):
+            return None  # ambiguous: both envelope and bare markers
+        meta = data.get("meta")
+        meta = meta if isinstance(meta, dict) else {}
+        graph = data["graph"]
+        envelope = True
+    elif isinstance(data.get("nodes"), list):
+        meta, graph, envelope = {}, data, False
+    else:
+        return None
+    if not graph.get("nodes") or not isinstance(graph.get("nodes"), list):
+        return None
+    description = meta.get("description")
+    if not isinstance(description, str) or not description.strip():
+        description = graph.get("description")
+    tags = meta.get("tags")
+    tags = [t for t in tags if isinstance(t, str) and t.strip()] \
+        if isinstance(tags, list) else []
+    return {"meta": meta, "graph": graph, "description": description,
+            "tags": tags, "envelope": envelope}
 # #32 (publish-as-file): top-level `grammar` names the dialect a shared file was written
 # in. Absent = "wf/1" (every pre-#32 file is a wf/1 file); unknown = fail-closed with the
 # reader's supported list, so a newer dialect is refused honestly instead of misrun.
