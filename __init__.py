@@ -2947,7 +2947,7 @@ def act_status(args):
     # Cumulative spend is independent of heartbeat. Only a verified spawn's exact
     # session title can supply current activity; historical unended rows are not live.
     try:
-        cm = _common.child_metrics(st["run_id"])
+        cm = _common.run_child_metrics(r)
     except Exception:
         cm = {}
     if cm or any(v.get("active_spawn") for v in st["nodes"].values()):

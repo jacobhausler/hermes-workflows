@@ -3201,6 +3201,58 @@ def node_child_metrics(r, nid, index=None):
     home = node_child_home(r, nid, index)
     return child_metrics(Path(r).name, home=home)
 
+
+def run_child_metrics(r):
+    """fb 904f5101496be8c1: the run-wide fold the STATUS/WAIT views use — per node
+    record through its OWN child DB home (node_child_home), NOT a single query against
+    the caller's state.db. A profile-routed node's sessions rows live in the TARGET
+    profile's DB; folding only the launcher home returned {} for those nodes and the
+    view rendered api_calls/tool_calls 0 + idle_s null for demonstrably-live children
+    (false-stall). Solo runs are byte-identical: records with no profile keys all take
+    the None home = child_metrics(default). Rows fold per skey; distinct homes can
+    never collide because a title embeds the run id and the item index."""
+    r = Path(r)
+    nodes = r / "nodes"
+    out = {}
+    seen_skeys = set()
+    try:
+        names = sorted(p.name for p in nodes.glob("*.json"))
+    except OSError:
+        names = []
+    iterated = set()                      # each distinct home folded exactly once
+    for name in names:
+        stem = name[:-5]
+        nid, _, index = stem.partition(".")
+        home = node_child_home(r, nid, index or None)
+        if home is None:
+            continue                      # solo path: folded once, below, from default home
+        mkey = str(home)
+        if mkey in iterated:
+            continue
+        iterated.add(mkey)
+        for k, v in child_metrics(Path(r).name, home=home).items():
+            prev = out.get(k)
+            if prev is None:
+                out[k] = v
+            else:                         # the SAME skey in a genuinely different home:
+                seen_skeys.add(k)         # merge additively, never drop counters.
+                for kk in ("tokens_in", "tokens_out", "cache_read", "reasoning",
+                           "api_calls", "tool_calls", "attempts"):
+                    prev[kk] += v.get(kk) or 0
+                prev["cost"] += v.get("cost") or 0.0
+                for kk in ("model", "billing_provider", "last_activity", "last_desc"):
+                    prev[kk] = prev.get(kk) or v.get(kk)
+                prev["api_calls_known"] = prev.get("api_calls_known", True) and v.get("api_calls_known", True)
+                prev["sessions"].update(v.get("sessions") or {})
+    # Any node record without a profile home (and the whole-run case where NONE exist)
+    # folds from the caller's home — but at most once.
+    unowned = [p.name[:-5] for p in (nodes.glob("*.json") if nodes.is_dir() else [])
+               if (lambda s: node_child_home(r, s.partition(".")[0], s.partition(".")[2] or None))(p.name[:-5]) is None]
+    if unowned or not seen_skeys:
+        for k, v in child_metrics(Path(r).name).items():
+            out.setdefault(k, v)
+    return out
+
 def node_facts(r, nid, index=None):
     """Record facts for one node (fan-out item via `index`), plus its steer truth.
     None when the node has no record at all (never fabricate a record)."""
