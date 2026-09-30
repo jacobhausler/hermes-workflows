@@ -56,11 +56,15 @@ const realModelTag = new Function(`${constGrab('modelTag')}; return modelTag`)()
 const { NodeCard: RealNodeCard } = new Function(
   'jsx', 'jsxs', 'box', 'cn', 'Dot', 'Codicon', 'Vitals', 'GateActions', 'useTick',
   'fanItems', 'fanCounts', 'fanSummary', 'modelTag', 'statusLabel', 'fmtDur',
-  '$selNode', 'CARD_W',
+  '$selNode', 'CARD_W', 'NODE_TONE',
   `${grab('NodeCard')}\nreturn { NodeCard }`
 )(jsx, jsxs, box, (...a) => a.filter(Boolean).join(' '), 'Dot', 'Codicon', 'Vitals', 'GateActions', () => {},
    fanItemsFn.fanItems, fanItemsFn.fanCounts, realFanSummary, realModelTag, s => s || 'unknown',
-   ms => (ms ? `${Math.round(ms / 1000)}s` : ''), $selNode, 168)
+   ms => (ms ? `${Math.round(ms / 1000)}s` : ''), $selNode, 168,
+   Object.fromEntries(['pending', 'running', 'held', 'done', 'failed', 'stopped', 'skipped'].map(s =>
+     [s, { color: s, borderColor: s, shadow: s === 'running' ? 'glow' : null, shadowHover: null,
+           pulseMs: s === 'running' ? 900 : null, calm: s === 'done' || s === 'failed' || s === 'stopped',
+           ui: 'muted', gate: null, breathe: null }])))
 
 const def = { id: 'plain', after: [] }
 const headButton = props => {
