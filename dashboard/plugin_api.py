@@ -35,7 +35,8 @@ except ImportError:
     router = None
 
 def _root():
-    """ONE resolver (wfcommon.runs_root): `WF_RUNS_ROOT` if set, else `$HERMES_HOME/workflows`."""
+    """ONE resolver (wfcommon.runs_root): `settings.runs_root` (owner, #42) > `WF_RUNS_ROOT`
+    > `<hermes_home>/workflows`. Read at call time — no restart."""
     return _workflow_common().runs_root()
 
 def _safe_run(run_id):
