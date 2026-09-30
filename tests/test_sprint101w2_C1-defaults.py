@@ -46,7 +46,11 @@ def wf(run_id):
     return p.stdout.strip()
 
 # ---- door (loaded by path, like test_door.py) ----
+# #71: HERMES_HOME alone does NOT sandbox the shelf — the context-local home
+# override outranks the env in lane processes; WF_RUNS_ROOT is checked first and
+# pins runs/library wherever the door resolves. Without it, saves pollute prod.
 os.environ["HERMES_HOME"] = str(HOME)
+os.environ["WF_RUNS_ROOT"] = str(HOME / "workflows")
 _spec = importlib.util.spec_from_file_location("hw_c1", BUILD.parent / "__init__.py")
 hw = importlib.util.module_from_spec(_spec); _spec.loader.exec_module(hw)
 def call(**a):

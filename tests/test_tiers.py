@@ -11,7 +11,11 @@ sys.path.insert(0, str(HERE))
 tmp_dir = tempfile.TemporaryDirectory(prefix=".tmp-tiers-", dir=HERE / "tests")
 atexit.register(tmp_dir.cleanup)
 tmp = tmp_dir.name
+# #71: HERMES_HOME alone does NOT sandbox the shelf — the context-local home
+# override outranks the env in lane processes; WF_RUNS_ROOT is checked first and
+# pins runs/library wherever the door resolves. Without it, saves pollute prod.
 os.environ["HERMES_HOME"] = tmp
+os.environ["WF_RUNS_ROOT"] = str(Path(tmp) / "workflows")
 (Path(tmp) / "config.yaml").write_text("model:\n  default: seat-default\n  aliases:\n    fable: anthropic/x\n")
 door = importlib.import_module("__init__")
 

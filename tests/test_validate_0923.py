@@ -23,7 +23,11 @@ home = HERE / "home11"
 if home.exists():
     shutil.rmtree(home)
 home.mkdir()
+# #71: HERMES_HOME alone does NOT sandbox the shelf — the context-local home
+# override outranks the env in lane processes; WF_RUNS_ROOT is checked first and
+# pins runs/library wherever the door resolves. Without it, saves pollute prod.
 os.environ["HERMES_HOME"] = str(home)
+os.environ["WF_RUNS_ROOT"] = str(home / "workflows")
 os.environ["HERMES_WF_HERMES_BIN"] = str(HERE / "fake")
 (home / "config.yaml").write_text("model:\n  default: qwen38-next\n")
 sys.path.insert(0, str(BUILD))

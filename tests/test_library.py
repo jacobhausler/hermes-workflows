@@ -7,6 +7,11 @@ from pathlib import Path
 BUILD = Path(os.environ.get("WF_TEST_BUILD") or Path(__file__).parent)
 HOME = BUILD / "home6"
 os.environ["HERMES_HOME"] = str(HOME)
+# #71: HERMES_HOME alone does NOT sandbox the shelf — a lane process carries the
+# context-local home override which outranks the env, so runs_root()/library_root()
+# resolve to the SHARED estate shelf. WF_RUNS_ROOT is checked first and wins over
+# everything; set it or these saves pollute production (shelf-is-live law).
+os.environ["WF_RUNS_ROOT"] = str(HOME / "workflows")
 shutil.rmtree(HOME, ignore_errors=True)
 import importlib.util
 spec = importlib.util.spec_from_file_location("hw", str(BUILD.parent / "__init__.py"))

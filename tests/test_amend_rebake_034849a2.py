@@ -12,6 +12,7 @@ tmp_dir = tempfile.TemporaryDirectory(prefix=".tmp-rebake-", dir=HERE / "tests")
 atexit.register(tmp_dir.cleanup)
 home = Path(tmp_dir.name)
 os.environ["HERMES_HOME"] = str(home)
+os.environ["WF_RUNS_ROOT"] = str(home / "workflows")  # #71 shelf pin
 ALIASES = ("  aliases:\n    fable: anthropic/claude-fable-5.1\n    opus: anthropic/claude-opus-5-5\n"
            "    sol: openai-codex/gpt-6-sol\n")
 SEAT_DEFAULT = "model:\n  default: qwen38-next\n" + ALIASES      # default-profile seat

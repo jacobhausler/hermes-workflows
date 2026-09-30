@@ -4,7 +4,11 @@ import importlib.util, json, os, sys, time
 from pathlib import Path
 
 BUILD = Path(os.environ.get("WF_TEST_BUILD") or Path(__file__).parent)
+# #71: HERMES_HOME alone does NOT sandbox the shelf — the context-local home
+# override outranks the env in lane processes; WF_RUNS_ROOT is checked first and
+# pins runs/library wherever the door resolves. Without it, saves pollute prod.
 os.environ["HERMES_HOME"] = str(BUILD / "home")
+os.environ["WF_RUNS_ROOT"] = str(BUILD / "home" / "workflows")
 os.environ["HERMES_WF_HERMES_BIN"] = str(BUILD / "fake")
 sys.path.insert(0, str(BUILD))          # import 'hermes-workflows' isn't identifier-safe -> load by path
 spec = importlib.util.spec_from_file_location("hw", BUILD.parent / "__init__.py")
