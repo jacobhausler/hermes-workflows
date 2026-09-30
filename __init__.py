@@ -1080,10 +1080,13 @@ def _library_rows():
     shared by the `library` action and the run from=<unknown> fuzzy nudge, so the
     two can never disagree about what the library holds. Shapes: the 1.1 BARE graph
     (R10: still loads and lists verbatim) or the #50 ENVELOPE {meta, graph}; a file
-    neither can be (bad JSON, unexpected shape) is LISTED in `skipped`, never a
-    crash. `general/` entries carry the prefix in their name/id (#51's public set).
-    F1 #14: a graph under the legacy launch root stays listed/replayable."""
-    rows, skipped, seen = [], [], set()
+    neither can be (bad JSON, unexpected shape) is QUARANTINED — F-2 (#62) law:
+    fail-closed on the entry (named in `skipped`, with a typed refusal reason in
+    `quarantined`, never replayable), fail-open on the library as a whole (the walk,
+    the rows, and the nudge never crash). `general/` entries carry the prefix in
+    their name/id (#51's public set). F1 #14: a graph under the legacy launch root
+    stays listed/replayable."""
+    rows, skipped, quarantined, seen = [], [], [], set()
     for root in _library_roots():
         if not root.exists():
             continue
@@ -1094,14 +1097,16 @@ def _library_rows():
             if name in seen:
                 continue
             seen.add(name)
+            rel = str(p.relative_to(root))
             try:
                 data = json.loads(p.read_text(encoding="utf-8"))
             except (OSError, ValueError):
-                skipped.append(str(p.relative_to(root)))
-                continue
+                data = None
             entry = _common.library_entry(data)
-            if entry is None:
-                skipped.append(str(p.relative_to(root)))
+            if "graph" not in entry:
+                skipped.append(rel)
+                quarantined.append({"id": rel, "name": name,
+                                    "reason": entry.get("invalid", "invalid: unreadable")})
                 continue
             graph = entry["graph"]
             nodes = graph["nodes"]
@@ -1121,10 +1126,10 @@ def _library_rows():
             if isinstance(prov, dict):
                 row.update({k: prov.get(k) for k in ("owner", "source", "source_digest")})
             rows.append(row)
-    return rows, skipped
+    return rows, skipped, quarantined
 
 def act_library(_args):
-    rows, skipped = _library_rows()
+    rows, skipped, quarantined = _library_rows()
     # The 1.1 hint stays verbatim for the bare/empty library (golden-solo byte law);
     # the submit nudge rides along once the library carries #50 discovery entries —
     # the moment the reader is in the discovery-first world.
@@ -1134,6 +1139,8 @@ def act_library(_args):
     out = {"library": rows, "hint": hinted}
     if skipped:
         out["skipped"] = skipped
+    if quarantined:   # F-2 (#62): every refused entry is named WITH its typed reason;
+        out["quarantined"] = quarantined   # a clean library never grows this key (golden bytes)
     return out
 
 # ---------- actions ----------
@@ -1521,7 +1528,7 @@ def _from_unknown_error(name):
     uncovered hand-rolled graph at `workflow submit` with the why-not-library
     receipt. Fail-open on the fuzz itself: a nameless library still nudges toward
     submit; the list is a courtesy, the contract is the error."""
-    rows, _skipped = _library_rows()
+    rows, _skipped, _quarantined = _library_rows()
     names = [r["name"] for r in rows]
     closest = difflib.get_close_matches(str(name or ""), names, n=3)
     err = (f"no library graph named {name!r}"
@@ -1547,9 +1554,12 @@ def act_run(args):
         # #50: a library file is either the 1.1 BARE graph (passes through verbatim,
         # R10) or the {meta, graph} ENVELOPE — the normalizer unwraps it. A missing,
         # unreadable, or shapeless file lands in the nudge below (#50: the nudge IS
-        # the error text), so a typo never reads as a silently broken entry.
-        entry = _common.library_entry(raw) if isinstance(raw, dict) else None
-        graph = entry["graph"] if entry else None
+        # the error text), so a typo never reads as a silently broken entry. F-2
+        # (#62): an UNKNOWN shape is quarantined — it lands in the same nudge, and
+        # the walk underneath never raises, so a broken sibling file cannot take a
+        # good replay or a typo hint down with it.
+        entry = _common.library_entry(raw)
+        graph = entry.get("graph")
         if graph is None:
             return _from_unknown_error(args["from"])
         lib_name = _lib_rel_name(_lib_path(args["from"]))   # #50: general/ names keep their prefix
@@ -2190,13 +2200,19 @@ def _wf_command(raw_args):
     """`/wf` — the library front door. `/wf <name> [note]` supplies the note
     atomically as a launch seed, never as post-launch steering."""
     arg = (raw_args or "").strip()
-    lib = act_library({})["library"]
+    out = act_library({})
+    lib = out["library"]
+    quarantined = out.get("quarantined") or []
     if not arg or arg in ("list", "ls"):
-        if not lib:
+        if not lib and not quarantined:
             return ("Workflow library is empty. Shelve one: `workflow save run_id=<run> name=<name>` "
                     "or ask the agent to save a graph it just ran.")
         rows = "\n".join(f"- **{x['name']}** — {x['nodes']} nodes, {x['gates']} gate(s), {x['fanouts']} fan-out(s)"
                           + (f": {x['description']}" if x.get('description') else "") for x in lib)
+        # F-2 (#62): a quarantined entry lists with WHY it was refused — visible,
+        # never fatal; a clean library never grows these lines (golden bytes).
+        rows += ("\n" + "\n".join(f"- **{q['name']}** — refused: {q['reason']}"
+                                  for q in quarantined)) if quarantined else ""
         return f"Workflow library:\n{rows}\n\nRun one: `/wf <name> [note for the run]`"
     name, _, note = arg.partition(" ")
     try:
@@ -2206,11 +2222,15 @@ def _wf_command(raw_args):
     if not p.exists():
         names = ", ".join(x["name"] for x in lib) or "(empty)"
         return f"No library graph named `{name}`. Available: {names}"
-    g = jload(p) or {}
     # #50: a library file is bare graph or {meta, graph} envelope; the normalizer
     # unwraps either, and the replayable name carries general/ when it applies.
-    entry = _common.library_entry(g if isinstance(g, dict) else None)
-    g = entry["graph"] if entry else {}
+    # F-2 (#62): an unknown shape is QUARANTINED — the operator sees the typed
+    # refusal instead of a crash or a deceptive 0-node replay instruction.
+    entry = _common.library_entry(jload(p))
+    if "graph" not in entry:
+        return (f"Library graph `{name}` is refused: {entry.get('invalid', 'invalid: unreadable')}. "
+                "Fix or remove the file; the rest of the library stays usable.")
+    g = entry["graph"]
     replay_name = _lib_rel_name(p) if p.parent != library_root() else p.stem
     return (f"Replay the shelved workflow **{replay_name}** ({len(g.get('nodes') or [])} nodes)"
             + (f" — operator note: {note}" if note else "") + ".\n"

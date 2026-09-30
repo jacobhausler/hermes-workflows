@@ -566,14 +566,18 @@ PROVENANCE_KEYS = {"owner", "source", "saved_at", "source_digest"}
 # A library file is either the 1.1 BARE form (the graph object itself — the bytes
 # every pre-#50 `save` wrote, which must keep loading and listing verbatim) or the
 # #50 ENVELOPE {"meta": {description?, tags?}, "graph": {...}}. Anything else is an
-# UNKNOWN shape: the door skips it with a listed warning, never crashes the list.
-# Returns {meta, graph, description, tags, envelope} or None (unknown shape).
+# UNKNOWN shape: the door QUARANTINES the entry — listed with a typed refusal reason,
+# never a crash, never replayable (F-2 #62: one corrupt file must not take discovery,
+# the typo nudge, or /wf down with it). Returns {meta, graph, description, tags,
+# envelope} for a usable entry, or {"invalid": "invalid: <why>"} for a refused one —
+# always a dict, callers key on the "invalid" marker / the presence of "graph".
 def library_entry(data):
     if not isinstance(data, dict):
-        return None
+        return {"invalid": "invalid: not a JSON object"}
     if isinstance(data.get("graph"), dict):
         if isinstance(data.get("nodes"), list):
-            return None  # ambiguous: both envelope and bare markers
+            return {"invalid": "invalid: ambiguous file — carries both envelope"
+                               " (graph:) and bare (nodes:) markers"}
         meta = data.get("meta")
         meta = meta if isinstance(meta, dict) else {}
         graph = data["graph"]
@@ -581,9 +585,13 @@ def library_entry(data):
     elif isinstance(data.get("nodes"), list):
         meta, graph, envelope = {}, data, False
     else:
-        return None
+        return {"invalid": "invalid: neither a bare graph (no nodes[] list)"
+                           " nor a {meta, graph} envelope"}
     if not graph.get("nodes") or not isinstance(graph.get("nodes"), list):
-        return None
+        return {"invalid": "invalid: graph has no non-empty nodes[] list"}
+    for i, n in enumerate(graph["nodes"]):
+        if not isinstance(n, dict):
+            return {"invalid": f"invalid: nodes[{i}] is not an object"}
     description = meta.get("description")
     if not isinstance(description, str) or not description.strip():
         description = graph.get("description")

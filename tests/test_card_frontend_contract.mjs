@@ -144,8 +144,12 @@ try {
 
   const timelineStart = plugin.indexOf('const timelineTone =')
   const timelineEnd = plugin.indexOf('\n\n// Tier name', timelineStart)
-  const timelineTone = new Function('EDGE_TONE', `${plugin.slice(timelineStart, timelineEnd)}; return timelineTone`)(
-    { held: 'held', failed: 'failed', done: 'done', skipped: 'skipped', running: 'running' }
+  // #48: timelineTone reads the ONE tone table; derive NODE_TONE from the
+  // same stub palette (same shim pattern as test_canvas_wrap).
+  const timelineTone = new Function('EDGE_TONE', 'NODE_TONE', `${plugin.slice(timelineStart, timelineEnd)}; return timelineTone`)(
+    { held: 'held', failed: 'failed', done: 'done', skipped: 'skipped', running: 'running' },
+    Object.fromEntries(['pending', 'running', 'held', 'done', 'failed', 'stopped', 'skipped'].map(s =>
+      [s, { color: s, borderColor: s, shadow: null, shadowHover: null, pulseMs: null, calm: s === 'done' || s === 'failed' || s === 'stopped', ui: 'muted', gate: null, breathe: null }]))
   )
   assert.equal(timelineTone({ kind: 'node', status: 'skipped' }), 'skipped')
   assert.equal(timelineTone({ kind: 'gate', status: 'skipped' }), 'skipped')

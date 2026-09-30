@@ -108,6 +108,41 @@ class DoorLib50(unittest.TestCase):
         # a broken shape must also never crash run from=
         self.assertIn("no library graph", door.act_run({"from": "broken"}).get("error", ""))
 
+    def test_quarantine_fixture_pair_good_beside_broken(self):
+        # F-2 (#62) fixture — EXACT pair: valid good.json beside the malformed
+        # broken.json. Law: fail-closed on the entry, fail-open on the library.
+        GOOD = {"name": "good", "nodes": [{"id": "e", "type": "echo", "output": 1}]}
+        BROKEN = {"meta": {"description": "junk"}, "graph": {"nodes": ["oops"]}}
+        root = door.library_root(); root.mkdir(parents=True, exist_ok=True)
+        (root / "good.json").write_text(json.dumps(GOOD))
+        (root / "broken.json").write_text(json.dumps(BROKEN))
+        out = self.lib()                                       # no exception
+        names = {x["name"] for x in out["library"]}
+        self.assertIn("good", names)                            # good still usable
+        self.assertNotIn("broken", names)
+        q = {x["name"]: x["reason"] for x in out["quarantined"]}
+        self.assertIn("broken", q)                              # bad is named...
+        self.assertEqual(q["broken"], "invalid: nodes[0] is not an object")  # ...with its typed reason
+        self.assertIn("broken.json", out["skipped"])
+        r = door.act_run({"from": "good"})                      # replay works beside it
+        self.assertIn("run_id", r)
+        r = door.act_run({"from": "broken"})                    # bad entry: nudge, never crash
+        self.assertIn("no library graph", r.get("error", ""))
+        self.assertNotIn("run_id", r)
+        typo = door.act_run({"from": "good-typo"})              # typo hint still works
+        self.assertIn("good", typo.get("closest", []))
+        t = door._wf_command("")                                # /wf lists both rows
+        self.assertIn("good", t)
+        self.assertIn("broken", t)
+        self.assertIn("invalid: nodes[0] is not an object", t)
+        t = door._wf_command("broken")                          # /wf bad named, refusal shown
+        self.assertIn("refused: invalid: nodes[0] is not an object", t)
+        (root / "broken.json").unlink()                        # removal fully restores
+        out = self.lib()
+        self.assertEqual({x["name"] for x in out["library"]}, {"good"})
+        self.assertNotIn("quarantined", out)
+        self.assertNotIn("skipped", out)
+
     def test_tag_validation_fail_closed(self):
         bad = door.act_save({"graph": G, "name": "t1", "tags": ["ok"] * 11})
         self.assertIn("tags", bad.get("error", ""))
