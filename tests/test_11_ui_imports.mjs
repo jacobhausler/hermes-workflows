@@ -102,6 +102,13 @@ const dropNulls = v => Array.isArray(v)
 const strip = t => JSON.stringify(dropNulls(t))
 
 const EDGE_TONE = { done: 'D', running: 'R', held: 'H', failed: 'F', skipped: 'S', pending: 'P' }
+// #48: NodeCard reads the ONE tone table; derive NODE_TONE from the same stub
+// palette (same shim pattern as test_node_click_expand).
+const NODE_TONE = Object.fromEntries(Object.entries(EDGE_TONE).map(([k, v]) => [k, {
+  color: v, borderColor: v, shadow: null, shadowHover: null, pulseMs: null,
+  calm: true, ui: 'muted', gate: null, breathe: null,
+}]))
+NODE_TONE.waiting = NODE_TONE.pending
 const sharedConsts = [
   constGrab('EDGE_TONE'), constGrab('FACT_TONE'), constGrab('UNKNOWN'), constGrab('TAIL_BYTES'),
   constGrab('defaultTabFor'), constGrab('unk'), constGrab('factText'), constGrab('logBase'), constGrab('attemptNo'),
@@ -115,7 +122,7 @@ function makeNodeCard(srcCode) {
   return new Function(
     'useTick', 'box', 'label', 'Dot', 'Codicon', 'Vitals', 'GateActions', 'cn',
     'statusLabel', 'fmtDur', 'modelTag', 'fanItems', 'fanCounts', 'fanSummary',
-    'CARD_W', 'Fragment', 'jsx', 'jsxs',
+    'CARD_W', 'Fragment', 'jsx', 'jsxs', 'NODE_TONE',
     srcCode + '; return NodeCard'
   )(
     () => {},
@@ -129,7 +136,7 @@ function makeNodeCard(srcCode) {
     (def, st, events) => null, // fanItems: no fanout under test
     rows => ({ total: 0, terminal: 0, skipped: 0, stopped: 0, running: 0, failed: 0 }),
     c => '',
-    168, 'Fragment', jsx, jsxs
+    168, 'Fragment', jsx, jsxs, NODE_TONE
   )
 }
 

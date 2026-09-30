@@ -377,13 +377,21 @@ function bandRows(cols, availW, widthOf, colGap) {
   return bands
 }
 
-function Dot({ status }) {
+export function Dot({ status }) {
   if (status === 'running') {
-    return jsx('span', { 'aria-hidden': true, className: 'inline-block size-1.5 shrink-0 animate-pulse rounded-full bg-(--ui-accent)' })
+    // #48 F3 (deep review): the running branch consults the ONE table BEFORE
+    // its early return — the accent colour rides an inline style read from
+    // NODE_TONE.running.color at render time, so perturbing the table moves
+    // this dot too (a frozen Tailwind bg-(--ui-accent) class could not).
+    return jsx('span', {
+      'aria-hidden': true,
+      className: 'inline-block size-1.5 shrink-0 animate-pulse rounded-full',
+      style: { background: (NODE_TONE.running || NODE_TONE.pending).color }
+    })
   }
-  return jsx(StatusDot, {
-    tone: status === 'held' ? 'warn' : status === 'done' ? 'good' : status === 'failed' ? 'bad' : 'muted'
-  })
+  // #48: the ui tone column of the ONE table is the single source (the old
+  // ternary said exactly these words; extracting here makes a fork impossible).
+  return jsx(StatusDot, { tone: (NODE_TONE[status] || NODE_TONE.pending).ui })
 }
 
 // -- 1. transcript directive: ::workflow{id="runid"} ---------------------------
@@ -424,7 +432,9 @@ export function pillModel(run) {
   const bits = [run?.name || run?.id || 'workflow', statusLabel(run?.status), nodesCount(run)]
   const elapsed = start && end > start ? end - start : null
   if (elapsed != null) bits.push(fmtDur(elapsed))
-  return { collapsedLine: bits.join(' · '), expanded: false }
+  // #48: the pill speaks the ONE tone table — its tone entry IS NODE_TONE's
+  // (parity is a law; a forked palette is the bug class).
+  return { collapsedLine: bits.join(' · '), expanded: false, tone: NODE_TONE[run?.status] || NODE_TONE.pending }
 }
 
 function DirectiveBody({ id }) {
@@ -524,7 +534,7 @@ function FanStrip({ runId, def, rows, picked }) {
 // column is placed by bandRows, so it shares the page's no-clip no-scroll law.
 const CARD_W = 168
 const MINI = { pillW: 84, pillH: 20, colGap: 34, rowGap: 6, pad: 4 }
-function MiniGraph({ detail }) {
+export function MiniGraph({ detail }) {
   const ref = useRef(null)
   const nodes = detail.graph?.nodes || []
   const states = detail.nodes || {}
@@ -536,7 +546,9 @@ function MiniGraph({ detail }) {
   const pill = def => {
     const st = nodeState(def, states, gate)
     const isGate = def.type === 'gate'
-    const tone = st === 'done' ? EDGE_TONE.done : st === 'running' ? EDGE_TONE.running : st === 'held' ? EDGE_TONE.held : st === 'failed' ? EDGE_TONE.failed : st === 'skipped' ? EDGE_TONE.skipped : EDGE_TONE.pending
+    // #48: the pill border reads the ONE tone table (the old ternary spelled
+    // exactly these EDGE_TONE picks; NODE_TONE's colour column IS EDGE_TONE).
+    const tone = (NODE_TONE[st] || NODE_TONE.pending).color
     const fo = def.fanout
     const nstate = states[def.id] || null
     const out = nstate?.output
@@ -555,7 +567,7 @@ function MiniGraph({ detail }) {
       style: {
         position: 'relative', zIndex: 1, display: 'inline-flex', alignItems: 'center', gap: 5,
         height: MINI.pillH, padding: '0 8px', fontSize: 11, lineHeight: 1, whiteSpace: 'nowrap',
-        border: `1px solid ${isOpen ? 'var(--ui-accent)' : tone}`, borderRadius: isGate ? 4 : 999,
+        border: '1px solid', borderColor: isOpen ? (NODE_TONE.running || NODE_TONE.pending).color : tone, borderRadius: isGate ? 4 : 999,
         borderStyle: isGate ? 'dashed' : 'solid',
         background: st === 'pending' || st === 'skipped' ? 'transparent' : 'var(--ui-bg-secondary, transparent)',
         color: st === 'pending' || st === 'skipped' ? 'var(--ui-text-tertiary)' : 'var(--ui-text-secondary)',
@@ -713,6 +725,10 @@ export function railModel(ownedRunsList) {
 }
 
 export function Pill({ run, sid, open, onToggle }) {
+  // #48 F3 (deep review): the ACTUAL Pill (not just pillModel) borders itself
+  // from the ONE tone table — border colour and the open ring both read the
+  // run's NODE_TONE entry at render time; a table perturbation moves them.
+  const tone = NODE_TONE[run?.status] || NODE_TONE.pending
   // A div, not a <button>: held pills embed GateActions whose option buttons
   // are SDK Buttons — button-in-button is invalid DOM nesting and every gate
   // click would bubble into the pill's toggle (review #28 F6). The label span
@@ -731,9 +747,11 @@ export function Pill({ run, sid, open, onToggle }) {
       // F8 (deep review): the previous value concatenated a box-shadow into the
       // `border` shorthand — an invalid declaration the browser drops WHOLE, so
       // the open pill lost its border entirely (inverted signal, not cosmetic).
-      // Ring rides on its own real property.
-      border: '1px solid var(--ui-stroke-secondary)',
-      boxShadow: open ? 'inset 0 0 0 1px var(--ui-stroke-secondary)' : undefined,
+      // Ring rides on its own real property. #48 F3: both colours come from the
+      // ONE tone table (border = the state's borderColor; the open ring rides
+      // boxShadow as a centered color-mix of the state's accent).
+      border: `1px solid ${tone.borderColor}`,
+      boxShadow: open ? `inset 0 0 0 1px color-mix(in srgb, ${tone.color} 55%, transparent)` : undefined,
     },
     children: [
       jsxs('span', {
@@ -838,8 +856,8 @@ export function SessionStrip() {
   // themselves. Switching focused chat collapses the expanded panel.
   useEffect(() => { $railOpen.set(null) }, [pairKey])
   // Click-away collapse (item 4), armed only while a panel is open.
-  // window-level listener (no `document.` — SDK-only law); clicks that land
-  // inside the rail are excluded by the railRef.contains check.
+  // window-level listener (no DOM-node listeners — SDK-only law); clicks that
+  // land inside the rail are excluded by the railRef.contains check.
   useEffect(() => {
     if (!expanded) return
     const onDocClick = e => {
@@ -958,7 +976,7 @@ function GateActions({ runId, gate, owner }) {
   ] })
 }
 
-function NodeCard({ runId, def, st, gate, selected, owner, events }) {
+export function NodeCard({ runId, def, st, gate, selected, owner, events, hovered = false }) {
   const isGate = def.type === 'gate'
   const liveGate = gate && gate.id === def.id ? gate : null
   // A live held gate outranks the read model's raw 'pending' node status.
@@ -968,14 +986,40 @@ function NodeCard({ runId, def, st, gate, selected, owner, events }) {
   const fc = rows && rows.length ? fanCounts(rows) : null
   const dur = st?.ms ? fmtDur(st.ms) : ''
   const m = st?.metrics || null
+  // #48: every visual decision reads the ONE tone table. Running glows (soft
+  // accent shadow + the live-dot pulse from Dot); held-at-gate nags with a
+  // slow border pulse; waiting breathes on the dashed outline; terminal
+  // states are calm and FLAT (no shadow, no animation — the calm law), with
+  // failed keeping a loud static red tint on its border.
+  const tone = NODE_TONE[status] || NODE_TONE.pending
+  const animation = tone.calm || status === 'running'
+    ? undefined
+    : status === 'held' && tone.gate
+      ? `${tone.gate.name} ${tone.pulseMs}ms ease-in-out infinite`
+      : tone.breathe
+        ? `${tone.breathe.name} ${tone.pulseMs}ms ease-in-out infinite`
+        : undefined
+  const glow = hovered ? (tone.shadowHover || tone.shadow) : tone.shadow
   return jsxs(
     'div',
     {
-      className: cn(
-        'shrink-0 rounded-md border bg-transparent transition-colors',
-        (isGate && liveGate) || status === 'running' || selected ? 'border-(--ui-accent)' : 'border-(--ui-stroke-secondary)'
-      ),
-      style: { width: CARD_W, background: 'var(--ui-sidebar-surface-background, var(--card))', opacity: status === 'pending' ? 0.6 : 1 },
+      className: 'shrink-0 rounded-md border bg-transparent',
+      style: {
+        width: CARD_W,
+        background: 'var(--ui-sidebar-surface-background, var(--card))',
+        opacity: status === 'pending' ? 0.7 : 1,
+        borderColor: tone.borderColor,
+        borderStyle: status === 'pending' || isGate ? 'dashed' : 'solid',
+        boxShadow: selected
+          // #48 F3: the selection ring rides the ONE table (centered color-mix
+          // of the state's accent — hover/selected stay a distinct intensity,
+          // but the colour is modeled centrally, not a stray token).
+          ? [glow, `inset 0 0 0 1px color-mix(in srgb, ${tone.color} 55%, transparent)`].filter(Boolean).join(', ')
+          : glow || undefined,
+        transform: hovered && !tone.calm ? 'translateY(-1px)' : undefined,
+        transition: 'transform 120ms ease, box-shadow 160ms ease, border-color 160ms ease',
+        animation
+      },
       children: [
         jsxs(
           'button',
@@ -1034,21 +1078,113 @@ const EDGE_TONE = {
   skipped: 'var(--ui-text-tertiary)'
 }
 
-function edgeTone(upState, downState) {
-  if (upState === 'failed') return EDGE_TONE.failed
-  if (upState === 'held') return EDGE_TONE.held
-  if (upState === 'done') return downState === 'pending' ? EDGE_TONE.held : EDGE_TONE.done
-  if (upState === 'skipped') return EDGE_TONE.skipped
-  if (upState === 'running') return EDGE_TONE.running
-  return EDGE_TONE.pending
+// ONE tone vocabulary for every reader (issue #48): the rail pill (pillModel),
+// the canvas NodeCard, the mini-DAG pill, the edges and the timeline all read
+// this table — colours come from EDGE_TONE (the single literal palette), so a
+// forked palette is impossible by construction. state x intensity ->
+// {color, borderColor, shadow, pulseMs, calm, ui, gate, breathe}.
+// Laws: running/held glow (shadow) and carry a pulse period; EVERY terminal
+// state (done/failed/stopped/skipped) is calm: pulseMs null && shadow null —
+// terminal states stop every animation. failed stays LOUD through its static
+// red borderColor tint, not a glow.
+const GATE_PULSE = {
+  name: 'wf-gate-nag', durMs: 1600,
+  keyframes: '@keyframes wf-gate-nag {\n  0%, 100% { border-color: var(--ui-warning, var(--ui-accent)); }\n  50% { border-color: color-mix(in srgb, var(--ui-warning, var(--ui-accent)) 30%, transparent); }\n}'
+}
+const BREATHE = {
+  name: 'wf-breathe', durMs: 2600,
+  keyframes: '@keyframes wf-breathe {\n  0%, 100% { opacity: 1; }\n  50% { opacity: 0.45; }\n}'
 }
 
-const timelineTone = sp => sp.status === 'pending' ? EDGE_TONE.pending
-  : sp.status === 'skipped' || sp.status === 'stopped' ? EDGE_TONE.skipped
-  : sp.kind === 'gate' && sp.status === 'held' ? EDGE_TONE.held
-    : sp.status === 'failed' ? EDGE_TONE.failed
-      : sp.status === 'done' ? EDGE_TONE.done
-        : EDGE_TONE.running
+export const NODE_TONE = {
+  pending: { color: EDGE_TONE.pending, borderColor: EDGE_TONE.pending, shadow: null, pulseMs: BREATHE.durMs, calm: false, ui: 'muted', gate: null, breathe: BREATHE },
+  running: { color: EDGE_TONE.running, borderColor: EDGE_TONE.running, shadow: '0 0 10px 0 color-mix(in srgb, var(--ui-accent) 30%, transparent)', shadowHover: '0 2px 14px 1px color-mix(in srgb, var(--ui-accent) 45%, transparent)', pulseMs: 900, calm: false, ui: 'accent', gate: GATE_PULSE, breathe: BREATHE },
+  held: { color: EDGE_TONE.held, borderColor: EDGE_TONE.held, shadow: '0 0 10px 0 color-mix(in srgb, var(--ui-warning, var(--ui-accent)) 26%, transparent)', pulseMs: GATE_PULSE.durMs, calm: false, ui: 'warn', gate: GATE_PULSE, breathe: null },
+  done: { color: EDGE_TONE.done, borderColor: EDGE_TONE.done, shadow: null, pulseMs: null, calm: true, ui: 'good', gate: null, breathe: null },
+  failed: { color: EDGE_TONE.failed, borderColor: 'color-mix(in srgb, var(--ui-danger, var(--ui-text-tertiary)) 70%, transparent)', shadow: null, pulseMs: null, calm: true, ui: 'bad', gate: null, breathe: null },
+  stopped: { color: EDGE_TONE.skipped, borderColor: EDGE_TONE.skipped, shadow: null, pulseMs: null, calm: true, ui: 'muted', gate: null, breathe: null },
+  skipped: { color: EDGE_TONE.skipped, borderColor: EDGE_TONE.skipped, shadow: null, pulseMs: null, calm: true, ui: 'muted', gate: null, breathe: null }
+}
+// The ask vocabulary says 'waiting', the read model says 'pending' — the SAME
+// entry, not a twin: one table, one voice.
+NODE_TONE.waiting = NODE_TONE.pending
+
+// Hoisted animation CSS (#48): ONE <style>, injected once by PolishStyles,
+// deduped by React 19 via the stable href — BUMP THE NUMBER per CSS edit.
+// Pulse keyframes sit behind prefers-reduced-motion: no-preference so the
+// animations simply never resolve for users who ask for calm.
+export const STYLE_HREF = 'hermes-workflows.3.css'
+const POLISH_CSS =
+  `@media (prefers-reduced-motion: no-preference) {\n${GATE_PULSE.keyframes}\n${BREATHE.keyframes}\n}`
+
+// The single hoisted style injector (the ONLY style-element call in the file).
+// Styles only plugin-owned @keyframes — never global page chrome.
+export function PolishStyles() {
+  return jsx('style', { 'data-plugin': ID, href: STYLE_HREF, children: POLISH_CSS })
+}
+
+/** Pure edge-flow decision (exported so node can pin the truth table):
+ *  running upstream => march; items_from data edge => shimmer ONLY while the
+ *  consumer runs (data arriving is the live moment, calm after); dead dashed,
+ *  never animated, when the upstream failed OR — F5 (#48 deep review) — the
+ *  downstream can no longer run (`canRun === false`, the canRun-style
+ *  readiness the read model derives from dependencies + blocked_by) and its
+ *  upstream is settled: done | failed | blocked. Pending => faint dots;
+ *  everything else calm. */
+export function edgeFlowPolicy(upState, downState, dataFlow = false, canRun = true) {
+  if (upState === 'failed') return { flow: false, shimmer: false, dead: true, dash: '3 3' }
+  // Readiness-aware dead-dash: a join whose deps are no longer all satisfiable
+  // (a failed sibling makes dep_satisfied false / blocked_by non-empty for the
+  // whole fan-in) is dead for EVERY settled edge feeding it — the ok→join link
+  // of a diamond reads dead too, not only the bad→join one.
+  if (downState === 'pending' && canRun === false && (upState === 'done' || upState === 'failed' || upState === 'blocked')) {
+    return { flow: false, shimmer: false, dead: true, dash: '3 3' }
+  }
+  if (dataFlow) return downState === 'running'
+    ? { flow: false, shimmer: true, dead: false, dash: '6 4' }
+    : { flow: false, shimmer: false, dead: false, dash: null }
+  if (upState === 'running') return { flow: true, shimmer: false, dead: false, dash: '6 4' }
+  if (upState === 'pending') return { flow: false, shimmer: false, dead: false, dash: '2 4' }
+  return { flow: false, shimmer: false, dead: false, dash: null }
+}
+
+/** Pure run-header model for the tab strip (#48): the accent + gradient read
+ *  alive while the run lives and calm-but-keyed once terminal. */
+export function runHeaderModel(run) {
+  const status = (run && run.status) || 'pending'
+  const t = NODE_TONE[status] || NODE_TONE.pending
+  const calm = TERMINAL.has(status)
+  const start = parseTime(run?.started)
+  const end = calm ? (parseTime(run?.updated) || Date.now()) : Date.now()
+  const elapsed = start && end > start ? end - start : 0
+  const accent = t.color
+  return {
+    status, accent, calm, elapsed, elapsedLabel: fmtDur(elapsed),
+    gradient: calm
+      ? `linear-gradient(90deg, ${accent} 0%, transparent 72%)`
+      : `linear-gradient(90deg, ${accent} 0%, color-mix(in srgb, ${accent} 45%, transparent) 45%, transparent 100%)`
+  }
+}
+
+function edgeTone(upState, downState) {
+  // #48: reads the ONE tone table (colours are EDGE_TONE's by construction —
+  // NODE_TONE extracts them). Same decision tree as before, no new palette.
+  if (upState === 'failed') return NODE_TONE.failed.color
+  if (upState === 'held') return NODE_TONE.held.color
+  if (upState === 'done') return downState === 'pending' ? NODE_TONE.held.color : NODE_TONE.done.color
+  if (upState === 'skipped') return NODE_TONE.skipped.color
+  if (upState === 'running') return NODE_TONE.running.color
+  return NODE_TONE.pending.color
+}
+
+// #48: the timeline reads the ONE tone table's colour column too — the same
+// decision tree as before, no parallel palette.
+const timelineTone = sp => sp.status === 'pending' ? NODE_TONE.pending.color
+  : sp.status === 'skipped' || sp.status === 'stopped' ? NODE_TONE.skipped.color
+  : sp.kind === 'gate' && sp.status === 'held' ? NODE_TONE.held.color
+    : sp.status === 'failed' ? NODE_TONE.failed.color
+      : sp.status === 'done' ? NODE_TONE.done.color
+        : NODE_TONE.running.color
 
 // Tier name if the owner's vocabulary was used, else the model id's last segment.
 const modelTag = def => def.tier || (def.model ? String(def.model).split('/').pop() : '')
@@ -1185,14 +1321,36 @@ function routeEdge(x1, y1, x2, y2, rects, skip) {
   return `M ${x1} ${y1} C ${x1 + cx * 0.6} ${c1y}, ${x2 - cx * 0.6} ${c2y}, ${x2} ${y2}`
 }
 
-function Edges({ nodes, rects, states, gate }) {
+function Edges({ nodes, rects, states, gate, dataEdges = [] }) {
   // Marker ids are document-global in SVG; several graphs on one page (page
   // canvas + N transcript cards) must not share them or arrowheads cross-wire.
   const mid = `wf-arrow-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`
-  const edges = []
+  const byKey = new Map()
   for (const n of nodes) {
     if (!rects[n.id]) continue
-    for (const a of n.after || []) if (rects[a]) edges.push({ from: a, to: n.id })
+    for (const a of n.after || []) if (rects[a]) byKey.set(`${a}>${n.id}`, { from: a, to: n.id, data: false })
+  }
+  // #48: items_from data-flow edges (producer -> fan-out consumer) ride the
+  // same rails as dependency edges but shimmer ONLY while the consumer runs.
+  // F4 (deep review): the dedup keeps ONE edge per link and ORs the data
+  // flags — the ordinary producer->fan-out shape (after:['gen'] AND
+  // fanout.items_from:'gen.items') must reach the policy data-classified,
+  // or the shimmer the promise makes is silently dropped by the seen-set.
+  for (const e of dataEdges) {
+    if (!rects[e.from] || !rects[e.to] || e.from === e.to) continue
+    const k = `${e.from}>${e.to}`
+    const cur = byKey.get(k)
+    if (cur) cur.data = cur.data || true
+    else byKey.set(k, { from: e.from, to: e.to, data: true })
+  }
+  const edges = [...byKey.values()]
+  // F5 (#48 deep review): canRun-style readiness derived the way the read
+  // model spells it — every `after` dep must be satisfied (done/skipped/
+  // partial) for a pending node to run; anything else is its blocked_by list.
+  const depSatisfied = st => st === 'done' || st === 'skipped' || st === 'partial'
+  const canRunNow = def => {
+    if (!def) return true
+    return (def.after || []).every(a => depSatisfied(states[a]?.status || 'pending'))
   }
   // Spread ports: N arrows touching one card land at N distinct, edge-sorted
   // points instead of piling every arrowhead on the card's middle pixel.
@@ -1220,22 +1378,26 @@ function Edges({ nodes, rects, states, gate }) {
     const up = states[e.from]?.status || 'pending'
     const down = nodeState(nodes.find(n => n.id === e.to), states, gate)
     const tone = edgeTone(up, down)
-    const dead = up === 'failed'
-    // SMIL candy: edges leaving a RUNNING node flow (dash march via inline
-    // <animate>, no CSS keyframes — purged-Tailwind-safe). Terminal states
-    // stop the animation: no <animate> child leaves a non-running node.
-    const flow = up === 'running'
+    // #48: the flow/shimmer/dead-dash decision is the ONE exported policy
+    // (edgeFlowPolicy) — this render reads it, it does not re-decide. F5: the
+    // policy gets the readiness input (canRun) derived above, so a join a
+    // failed sibling doomed reads dead on EVERY feeding edge, not just the
+    // one leaving the failure.
+    const policy = edgeFlowPolicy(up, down, e.data, canRunNow(nodes.find(n => n.id === e.to)))
     paths.push(
       jsx('path', {
         d: routeEdge(x1, y1, x2, y2, rects, [e.from, e.to]),
-        fill: 'none', stroke: tone, strokeWidth: 1.5,
-        strokeDasharray: dead ? '3 3' : flow ? '6 4' : up === 'pending' ? '2 4' : undefined,
-        markerEnd: `url(#${mid}-${dead ? 'dead' : 'live'})`,
-        opacity: up === 'pending' ? 0.55 : 0.95,
-        children: flow
+        fill: 'none', stroke: policy.shimmer ? NODE_TONE.running.color : tone, strokeWidth: 1.5,
+        strokeDasharray: policy.dash ?? undefined,
+        markerEnd: `url(#${mid}-${policy.dead ? 'dead' : 'live'})`,
+        opacity: up === 'pending' && !e.data ? 0.55 : 0.95,
+        // SMIL candy: flowing while live (inline <animate>, no Tailwind
+        // animate-*); terminal states never get an <animate> child — the calm
+        // law is enforced inside edgeFlowPolicy (flow/shimmer false once calm).
+        children: policy.flow || policy.shimmer
           ? jsx('animate', { attributeName: 'stroke-dashoffset', from: 10, to: 0, dur: '0.9s', repeatCount: 'indefinite' })
           : undefined
-      }, `${e.from}->${e.to}`)
+      }, `${e.from}->${e.to}${e.data ? ':data' : ''}`)
     )
   }
   if (!paths.length) return null
@@ -1247,7 +1409,11 @@ function Edges({ nodes, rects, states, gate }) {
         jsx('marker', { id: `${mid}-live`, viewBox: '0 0 10 10', refX: 10, refY: 5, markerWidth: 8, markerHeight: 8, orient: 'auto', markerUnits: 'userSpaceOnUse',
           children: jsx('path', { d: 'M 0 0 L 10 5 L 0 10 z', fill: 'context-stroke' }) }),
         jsx('marker', { id: `${mid}-dead`, viewBox: '0 0 10 10', refX: 10, refY: 5, markerWidth: 8, markerHeight: 8, orient: 'auto', markerUnits: 'userSpaceOnUse',
-          children: jsx('path', { d: 'M 0 0 L 10 5 L 0 10 z', fill: EDGE_TONE.failed }) })
+          // F3 (deep review): the dead arrowhead follows the ONE table — it
+          // reads NODE_TONE.failed.color at render time like the failed edge
+          // stroke does, so a table perturbation moves stroke and head
+          // together (the old hardcoded EDGE_TONE.failed drifted on its own).
+          children: jsx('path', { d: 'M 0 0 L 10 5 L 0 10 z', fill: (NODE_TONE.failed || NODE_TONE.pending).color }) })
       ] }),
       ...paths
     ]
@@ -1259,13 +1425,43 @@ function Edges({ nodes, rects, states, gate }) {
  *  rounded-md, badge); MiniGraph's pills reuse it with size 2 and the pill
  *  outline tone (pill:true, badge:false — the pill carries its own ×N count).
  *  Expanded (page canvas): the badge becomes a chevron toggle that collapses the
- *  stack back, and the per-item cards render as its sibling (see GraphView). */
-function FanStack({ children, count, terminal, expanded, onToggleExpand, size = 6, pill = false, tone }) {
+ *  stack back, and the per-item cards render as its sibling (see GraphView).
+ *  #48: while `live` (node or an item still running) the ghost links FLOW — a
+ *  dash-marching connector (SMIL <animate>, the same pattern as the edges)
+ *  stitches each ghost to the front card; a dataFlow stack shimmers too. The
+ *  calm law holds: no `live`, no <animate> child ever mounts. */
+export function FanStack({ children, count, terminal, expanded, onToggleExpand, size = 6, pill = false, tone, live = false, dataFlow = false }) {
   const ghosts = expanded ? 0 : Math.min(Math.max(count - 1, 0), 3)
+  // F5 (#48 deep review): ONE flow/dead decision. The stack no longer
+  // re-decides `flowing = live && ghosts > 0` for itself — the flow/shimmer
+  // answer comes from the SAME exported policy the Edges render reads. A live
+  // stack presents as a running edge; a dataFlow stack as a data edge whose
+  // consumer runs; a terminal stack as a done→done calm edge. Geometry (the
+  // ghosts, offsets, badges) stays local here.
+  const policy = edgeFlowPolicy(live ? 'running' : 'done', live ? 'running' : 'done', dataFlow)
+  const flowing = (policy.flow || policy.shimmer) && ghosts > 0
+  const linkTone = dataFlow ? (NODE_TONE.running || NODE_TONE.pending).color : (tone || (NODE_TONE.pending || {}).color)
   return jsxs('div', {
     className: 'relative',
     style: { paddingRight: ghosts * size, paddingBottom: ghosts * size },
     children: [
+      // Ghost links: one short dash-marching connector per ghost, corner to
+      // corner, only while the stack is live (terminal stacks render none).
+      // The dash itself is the policy's — one decision, two readers.
+      flowing
+        ? jsxs('svg', {
+            'aria-hidden': true,
+            className: 'pointer-events-none absolute inset-0 h-full w-full overflow-visible',
+            children: Array.from({ length: ghosts }, (_, i) => {
+              const off = (ghosts - i) * size
+              return jsx('path', {
+                d: `M 2 2 L ${off + 2} ${off + 2}`, fill: 'none', stroke: linkTone, strokeWidth: 1,
+                strokeDasharray: policy.dash ?? '4 3', opacity: 0.7,
+                children: jsx('animate', { attributeName: 'stroke-dashoffset', from: 7, to: 0, dur: '0.9s', repeatCount: 'indefinite' })
+              }, `link-${i}`)
+            })
+          }, 'links')
+        : null,
       ...Array.from({ length: ghosts }, (_, i) =>
         jsx('div', {
           'aria-hidden': true,
@@ -1340,7 +1536,7 @@ function ItemCard({ runId, def, row, picked, nodeSelected, ms }) {
   }, row.index)
 }
 
-function GraphView({ detail }) {
+export function GraphView({ detail }) {
   const sel = useValue($selNode)
   const fanPicked = useValue($fanItem)
   const expanded = useValue($fanExpanded)
@@ -1354,10 +1550,17 @@ function GraphView({ detail }) {
   const rects = useCardRects(canvasRef, [detail.id, stateKey, nodes.length])
   const picked = fanPicked && fanPicked.runId === detail.id && fanPicked.nodeId === expanded?.nodeId ? fanPicked.index : undefined
   const canvasW = useCanvasWidth(canvasRef, [detail.id, nodes.length])
+  // #48: hover lift rides a single hover atom for the canvas (one hook, fixed
+  // order, above the empty-graph early return); entering a card lifts it.
+  const [hoverId, setHoverId] = useState(null)
   if (!nodes.length) {
     return jsx(EmptyState, { title: 'No graph yet', description: 'The run has not published a graph.' })
   }
   const cols = columnGroups(nodes, depthMap(nodes))
+  // #48: items_from data-flow edges (producer card -> fan-out consumer card).
+  const dataEdges = nodes.filter(n => n.fanout?.items_from)
+    .map(n => ({ from: String(n.fanout.items_from).split('.')[0], to: n.id }))
+    .filter(e => nodes.some(p => p.id === e.from))
   const fanMeta = def => {
     if (!def.fanout) return null
     const rows = fanItems(def, states[def.id], detail.events) || []
@@ -1383,18 +1586,28 @@ function GraphView({ detail }) {
       className: 'relative flex shrink-0 flex-col items-start',
       style: { zIndex: 1, gap: 28 },
       children: defs.flatMap(def => {
+        const st = states[def.id]
         const card = jsx('div', {
           'data-node': def.id,
+          onMouseEnter: () => setHoverId(def.id),
+          onMouseLeave: () => setHoverId(h => (h === def.id ? null : h)),
           children: jsx(NodeCard, {
-            runId: detail.id, def, st: states[def.id], gate: detail.gate, owner: detail.owner, events: detail.events,
+            runId: detail.id, def, st, gate: detail.gate, owner: detail.owner, events: detail.events,
+            hovered: hoverId === def.id,
             selected: sel?.runId === detail.id && sel?.nodeId === def.id
           })
         }, def.id)
         const fm = fanMeta(def)
         if (!fm) return [card]
         const exp = isExpanded(def)
+        // #48: the stack's ghost links flow while the node or any item is
+        // live; an items_from (data-flow) stack shimmers while the consumer
+        // itself runs. Terminal stacks draw nothing — the calm law.
+        const nodeLive = st?.status === 'running'
         const stack = jsx(FanStack, {
           count: fm.count, terminal: fm.terminal, expanded: exp, children: card,
+          live: nodeLive || (fm.rows || []).some(r => r.status === 'running'),
+          dataFlow: !!def.fanout?.items_from && nodeLive,
           onToggleExpand: () => {
             $fanExpanded.set(exp ? null : { runId: detail.id, nodeId: def.id })
             if (exp) $fanItem.set(null)
@@ -1421,7 +1634,7 @@ function GraphView({ detail }) {
     className: 'relative flex items-start flex-col',
     style: { gap: 112, padding: '20px 48px 48px' },
     children: [
-      jsx(Edges, { nodes, rects, states, gate: detail.gate }),
+      jsx(Edges, { nodes, rects, states, gate: detail.gate, dataEdges }),
       ...bands.map((row, bi) =>
         jsx('div', {
           className: 'flex w-full shrink-0 items-start',
@@ -1698,7 +1911,7 @@ function NodePanel({ detail }) {
 // L3 calls the panel under the old name; one alias keeps its region unchanged.
 const Drawer = NodePanel
 
-function WorkflowsPage() {
+export function WorkflowsPage() {
   const list = useQuery(listQuery())
   const selId = useValue($selRun)
   const runs = list.data?.runs || []
@@ -1712,13 +1925,27 @@ function WorkflowsPage() {
       !active
         ? jsx(EmptyState, { title: 'Nothing to watch', description: 'No workflow runs reported yet.' })
         : d
-          ? jsxs(Fragment, {
+          ? (function () {
+              const hdr = runHeaderModel(d)
+              return jsxs(Fragment, {
               children: [
+                // #48: run header strip — one hoisted <style> mounts here so
+                // the canvas keyframes exist exactly once per document, then
+                // a state-keyed accent GRADIENT bar (runHeaderModel, same
+                // tone table as everything else) over the run name / state /
+                // elapsed: the tab reads ALIVE while the run lives and CALM
+                // once terminal, like RailPanel's measured bar.
+                jsx(PolishStyles, {}),
+                jsx('span', {
+                  'aria-hidden': true,
+                  style: { display: 'block', height: 2, background: hdr.gradient }
+                }, 'run-accent'),
                 box(
                   'flex items-center gap-2 border-b border-(--ui-stroke-secondary) px-4 py-2',
                   jsx(Dot, { status: d.status }),
                   box('text-sm font-medium', d.name || d.id),
                   box('text-xs text-(--ui-text-tertiary)', statusLabel(d.status)),
+                  hdr.elapsed ? jsx('span', { className: 'text-xs text-(--ui-text-tertiary)', children: hdr.elapsedLabel }) : null,
                   d.metrics ? jsx(Vitals, { m: d.metrics, live: false, size: 'xs', cost: true }) : null,
                   d.metrics?.live ? jsx('span', { className: 'text-(--ui-text-tertiary)', style: { fontSize: 10 }, children: `${d.metrics?.live} live` }) : null,
                   d.held_gate ? jsx(Badge, { variant: 'outline', children: 'gate held' }) : null
@@ -1727,6 +1954,7 @@ function WorkflowsPage() {
                 jsx(Drawer, { detail: d })
               ]
             })
+          }())
           : jsx(EmptyState, {
               title: detail.error ? 'Backend unreachable' : 'Loading…',
               description: detail.error ? String(detail.error?.message || detail.error) : undefined
