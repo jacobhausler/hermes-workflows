@@ -299,7 +299,7 @@ WORKFLOW_PARAMS = {
         "gate_id": {"type": "string", "description": "release: gate node id."},
         "node": {"type": "string", "description": "steer: target node id (pending node picks it up at spawn; a LIVE child pulls it at its next seam via its own inbox call — the prompt is never rewritten)."},
         "text": {"type": "string", "description": "steer: the steering message."},
-        "dry_run": {"type": "boolean", "description": "amend: true = validate + preview {added, removed, changed, will_rerun, unchanged} ONLY — nothing is written, the runner is not touched. Normal amends echo the same lists."},
+        "dry_run": {"type": "boolean", "description": "amend: true = validate + preview {added, removed, changed, will_rerun, unchanged} ONLY — nothing is written, the runner is not touched. Normal amends echo the same lists. run: true = the same pre-launch gates (validate, bind, profile, policy, model resolve, route ping, quota, route enforcement) return {ok, dry_run, models, routes} and NOTHING is written — no run dir, no lane entry, no spawned runner."},
         "timeout": {"type": "number", "description": "wait: max seconds to block while a runner is live (default 600, capped 1800). Self-yields ~330s segments under the harness tool deadline with status+note — call wait again until terminal."},
         "detail": {"type": "string", "enum": ["full"], "description": "status/wait: 'full' attaches every committed node output and full spawn argv; the default is compact — mid-run waits carry output pointers (keys+bytes) only, terminal payloads always include outputs."},
     },
@@ -1330,6 +1330,14 @@ def act_run(args):
     _r = _route_enforcement(graph, routes)
     if _r:
         return {"error": _r, "routes": routes}
+    # run dry_run — the amend dry_run shape on the launch path: every gate above
+    # (validate, bind, profile, policy, model resolve, quota, route enforcement) has
+    # run; return their verdict WITHOUT touching the lane registry, creating a run
+    # dir, or spawning a runner.
+    if args.get("dry_run"):
+        return {"ok": True, "dry_run": True, "models": models, "routes": routes,
+                "hint": "nothing written — re-run without dry_run to launch"
+                        + _liveness_hint_suffix(_liveness_notes)}
     key = args.get("lane_key")
     if key is not None:
         path, lock_path = _lane_paths(key)
