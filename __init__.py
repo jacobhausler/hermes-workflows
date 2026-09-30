@@ -186,6 +186,32 @@ def _validation_error(graph):
 
 HERE = Path(__file__).resolve().parent
 
+def _owner_setting_read(key):
+    """THE owner-settings read (#41/#42 share it with hermes_bin): plugin-scoped
+    ``_CTX.get_config`` -> ``plugins.entries.hermes-workflows.settings.<key>`` (legacy
+    ``config`` fallback inside core). None without a ctx or on any core rejection.
+    Installed into wfcommon so runs_root()/launcher_profile() read the SAME source at
+    CALL time — no restart; a process without a door ctx (runner, dashboard, tests)
+    falls back there to the resolved home's config.yaml, read raw."""
+    if not _CTX:
+        return _common.NO_READER
+    try:
+        return _CTX.get_config(key, None)
+    except Exception:
+        return None
+
+_common.set_owner_setting_reader(_owner_setting_read)
+
+def _owner_settings_error():
+    """FAIL-CLOSED at the door (#42): a malformed `settings.runs_root` / `settings.profile`
+    is an error on EVERY action, never a silent fallback to another root/identity."""
+    try:
+        _common.settings_runs_root()
+        _common.settings_profile()
+    except ValueError as e:
+        return {"error": f"owner settings invalid: {e} (fix plugins.entries.hermes-workflows.settings)"}
+    return None
+
 def _hermes_bin():
     """Operator-controlled launcher; tool arguments never choose a child executable.
 
@@ -196,14 +222,7 @@ def _hermes_bin():
     ValueError out of core (plugins_state._plugin_relative_segments), which used to
     kill every workflow launch at the door; reads stay guarded regardless.
     """
-    def _read(key):
-        if not _CTX:
-            return None
-        try:
-            return _CTX.get_config(key, None)
-        except Exception:
-            return None
-    configured = _read("hermes_bin")
+    configured = _common.owner_setting("hermes_bin")
     if isinstance(configured, str) and configured.strip():
         return configured.strip()
     env_bin = os.environ.get("HERMES_WF_HERMES_BIN", "").strip()
@@ -899,7 +918,8 @@ def _seat_model_names():
 # ---------- run-dir plumbing ----------
 
 def runs_root():
-    """ONE resolver (wfcommon.runs_root): `WF_RUNS_ROOT` if set, else `$HERMES_HOME/workflows`."""
+    """ONE resolver (wfcommon.runs_root): `settings.runs_root` (owner, #42) > `WF_RUNS_ROOT`
+    > `<hermes_home>/workflows`. Read at call time — no restart."""
     return _common.runs_root()
 
 def run_dir(run_id):
@@ -1110,7 +1130,8 @@ def _bind_run_context(graph, binding):
 
 def _profile_error(graph):
     """1.1 (RATIFY F2): node `profile:` validation — AFTER `{run.KEY}` rendering, BEFORE any
-    write/spawn. Launcher identity comes from the door's own HERMES_HOME (never a graph arg).
+    write/spawn. Launcher identity comes from the door's own HERMES_HOME, else the owner's
+    `settings.profile` (#41, env-blind gateways) — never a graph arg.
     Same error shape as _validation_error."""
     errs = _common.profile_errors(graph["nodes"], launcher=_common.launcher_profile(),
                                   profiles_dir=_common.profiles_root())
@@ -1133,9 +1154,11 @@ def _team_args_error(args):
 def _identity_stamps(args, graph, lib_name=None):
     """1.1 (RATIFY F1): run.json identity keys, emitted ONLY when derivable — a no-team run
     under the default profile without WF_RUNS_ROOT adds NOTHING (1.0.15 key set).
-      dispatched_by  launcher profile name (door HERMES_HOME under <root>/profiles/); omitted for default
+      dispatched_by  launcher profile name (door HERMES_HOME under <root>/profiles/, else the
+                     owner's settings.profile — #41); omitted for default
       launch_root    the runs root the run was created under; recorded when it is not the
-                     launcher's own default (WF_RUNS_ROOT set) or the launcher is a named profile
+                     launcher's own default (WF_RUNS_ROOT or settings.runs_root set — #42)
+                     or the launcher is a named profile
       team/lane_key  run args, verbatim
       targets[]      distinct node `profile` names (sorted)
       graph_source   {name, owner, source, source_digest} when a library graph carries provenance
@@ -1144,7 +1167,8 @@ def _identity_stamps(args, graph, lib_name=None):
     launcher = _common.launcher_profile()
     if launcher != "default":
         out["dispatched_by"] = launcher
-    if launcher != "default" or os.environ.get("WF_RUNS_ROOT"):
+    if launcher != "default" or os.environ.get("WF_RUNS_ROOT") \
+            or _common.settings_runs_root() is not None:
         out["launch_root"] = str(runs_root())
     for key in ("team", "lane_key"):
         if args.get(key):
@@ -1877,6 +1901,9 @@ def handle(args, **kwargs):
         fn = ACTIONS.get(args.get("action"))
         if not fn:
             return json.dumps({"error": f"unknown action {args.get('action')!r}", "actions": sorted(ACTIONS)})
+        bad = _owner_settings_error()   # #42: malformed owner settings fail-closed, never fall back
+        if bad:
+            return json.dumps(bad)
         return json.dumps(fn(args), ensure_ascii=False, default=str)
     except Exception as e:
         import traceback
