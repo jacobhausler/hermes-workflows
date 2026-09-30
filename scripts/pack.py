@@ -43,9 +43,11 @@ INCLUDE_FILES = (
     "tests/fixtures/mac-source.txt",
     "tests/test_fanout_ui.mjs",
     "wf.py",
+    "wf_dialect.py",
     "wfcommon.py",
 )
-INCLUDE_PATTERNS = ("tests/test_*.py", "tests/test_*.mjs", "references/*.md")
+INCLUDE_PATTERNS = ("tests/test_*.py", "tests/test_*.mjs", "references/*.md",
+                    "tests/fixtures/dialect/*")   # #33: the corpus test_dialect_js_33 asserts against
 EXECUTABLE_FILES = {"scripts/pack.py", "tests/fake"}
 
 

@@ -196,6 +196,17 @@ succeed, the rest are cancelled; without it the fan-out waits for every item;
 - To resume a lane that died at its wall with work already banked: amend its `goal`
   to a *resume* prompt that names what is already committed and forbids redoing it.
   Cold re-runs of a timed-out research lane time out again.
+- Lane hygiene (#37, digest 20260929f): every build-shape spawn (`shape: "build"` or a
+  declared `repo:` lane) is prefixed with a machine preamble — prompt-side only, like the
+  resume preamble, so it never touches graph.json, node records or the def hash. It bans
+  producing a RED run by checking a base ref out over a dirty tree (that overwrites
+  uncommitted work in place), prescribes commit-tests-first + a throwaway detached
+  worktree (or a named stash) for the RED state, and orders a WIP commit before the turn
+  cap. A lane that still dies unbanked is not lost: its tool calls are journaled in the
+  profile's state.db, and `python3 scripts/lane_recover.py --run <id> --node <node>
+  [--out <dir>]` (or `--profile <name> --skey <key>`) replays the write_file/patch calls
+  into a restore dir — triage list by default, files + an unmatched-patch report with
+  `--out`; exit 2 no session, 3 nothing journaled. The db is opened read-only.
 - Steering: `steer` queues text; a running child pulls it via `inbox` at its next
   seam. It does not interrupt a child mid-turn.
 
@@ -246,8 +257,9 @@ prints `OK`. CI runs the same five gates ([.github/workflows/ci.yml](.github/wor
 ### 4b′. Navigate with the knowledge graph
 
 The repo ships a [graphify](https://github.com/Graphify-Labs/graphify) knowledge
-graph at `graphify-out/` — 1001 nodes / 1962 edges over every function, class, test
-and doc heading, built by deterministic tree-sitter parsing (no LLM, no network).
+graph at `graphify-out/` — ~1600 nodes / ~3200 edges over every function, class, test
+and doc heading, built by deterministic tree-sitter parsing (no LLM, no network); one edge
+per `(source, target, relation)` (`count` marks a collapsed multi-edge; policy in `scripts/graph_check.py`).
 Query it before you grep or open files one by one:
 
 ```sh
