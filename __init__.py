@@ -1836,6 +1836,7 @@ def act_list(_args):
     if legacy != roots[0]:
         roots.append(legacy)   # pre-fix runs under the launch root stay listed
     runs, seen = [], set()
+    dispatched_by_set = 0
     for root in roots:
         if not root.exists():
             continue
@@ -1848,11 +1849,22 @@ def act_list(_args):
                        "nodes_done": st["done"], "nodes_skipped": st["skipped"], "nodes_total": st["total"],
                        "runner_live": st.get("runner_live", False)}  # A2 one-read law
                 meta = jload(r / "run.json", {}) or {}
+                # #57 census fold (QM digest, #52 pinned vocab — no renames): one field read
+                # on the run.json this loop ALREADY loads (zero extra scans). Absent key or
+                # null = pre-identity run: counts toward total only.
+                if meta.get("dispatched_by"):
+                    dispatched_by_set += 1
                 for key in ("lane_key", "team"):
                     if key in meta:
                         row[key] = meta[key]
                 runs.append(row)
-    return {"runs": runs[:50], **_common.run_summary(runs)}
+    out = {"runs": runs[:50], **_common.run_summary(runs)}
+    # Emitted ONLY when derivable (the F1 identity law): a solo root where no run carries
+    # dispatched_by keeps the v1.0.15 key set {runs, total, counts} exactly (golden-solo
+    # EMPTY). A root with stamped runs gets provenance:{dispatched_by_set,total}.
+    if dispatched_by_set:
+        out["provenance"] = {"dispatched_by_set": dispatched_by_set, "total": len(runs)}
+    return out
 
 ACTIONS = {"run": act_run, "status": act_status, "wait": act_wait, "release": act_release,
            "steer": act_steer, "inbox": act_inbox, "amend": act_amend, "stop": act_stop, "list": act_list,
