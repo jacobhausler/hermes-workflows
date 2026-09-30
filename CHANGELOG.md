@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+- #59 validator: string-typed keys are TYPE-checked at submit, never discovered at the
+  wall (fb-fix ledger 97e90c2205f17fb0 — run `20260930-051209-fb-fix-436f89c3-rem`
+  authored an agent `context` as a LIST; it passed the truthy-only checks and died at
+  FIRST spawn in `run_child`'s prompt concat, `node crashed: TypeError: can only
+  concatenate str`, `error_class:'crashed'`, burning an already-answered gate release).
+  `validate_graph_errors` now rejects, with named-node `{node, field, msg}` errors
+  mirroring the fan-out item-goal law: agent `goal` — a PRESENT non-str (`[]`, `{}`,
+  `0`, `False`, `null` included; truthiness-independent, ra-59 review finding 1) — and
+  plain-agent whitespace-only str; agent AND gate `context` and gate `question` —
+  present-key-must-be-str, so explicit null is rejected like a list/dict (string-when-
+  present contract, ra-59 review finding 2; absent and `''` stay legal optional keys);
+  `fanout.goal` template present-non-str (same first-spawn crash class — `fmt_goal`
+  re.sub + node-goal concat); and echo `output` non-JSON-serialisable (the door's own
+  `graph.json`/node commit write is where a set or custom object used to explode;
+  dict/list/str/num/bool/null stay the documented verbatim-commit shapes — the echo
+  JSON-verbatim contract is RETAINED, per the ra-59 compatibility clarification).
+  Absent/`''` goals keep the exact legacy "agent node has no goal" message. NO coercion
+  at resolve — strict-at-submit is the engine law (closed grammar: an un-validatable
+  graph must never be accepted). Additive validation: well-typed graphs validate
+  identically, golden-solo stays EMPTY, zero run-dir writes and zero spawns on a
+  rejected submit.
+  Test: `tests/test_string_type_validation_59.py` (issue repro, every key × good/bad
+  shape incl. falsy/null rows and the review's exact case set, legacy-message pin,
+  door-level zero-writes/zero-spawns rows per rejected case, valid-graph zero-errors
+  control).
 - door: `run_context` transport guards in `_bind_run_context` (string branch). Two silent
   routes to a launched run full of unsubstituted `{run.KEY}` refs, both now rejecting
   before any run write, same fail-closed style as the #7 brace guard: (1) a JSON object

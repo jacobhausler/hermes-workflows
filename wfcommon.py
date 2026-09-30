@@ -814,7 +814,47 @@ def validate_graph_errors(nodes):
             hto = n.get("hold_timeout")
             if hto is not None and (not isinstance(hto, (int, float)) or isinstance(hto, bool) or hto <= 0):
                 E(nid, "hold_timeout", "hold_timeout must be a positive number of seconds")
+            # #59 (fb-fix ledger 97e90c2205f17fb0): string-typed gate keys are
+            # TYPE-checked at submit, never discovered at the wall — a dict/list
+            # question reached the held-card and desktop as a React child crash, and
+            # a non-str context reached the event line and downstream concat. The
+            # optional keys stay OPTIONAL (absent or '' legal) but a key that is
+            # PRESENT must be a str — explicit null is a present non-str, rejected
+            # like the rest (ra-59 review finding 2: string-when-present contract).
+            if "question" in n and not isinstance(n["question"], str):
+                E(nid, "question", f"question {n['question']!r} must be a string")
+            if "context" in n and not isinstance(n["context"], str):
+                E(nid, "context", f"context {n['context']!r} must be a string")
         if n["type"] == "agent":
+            # #59 (fb-fix ledger 97e90c2205f17fb0): the string-typed agent keys
+            # are TYPE-checked at submit — a list/dict `context` or non-str `goal`
+            # passed the truthy-only check and died at FIRST spawn in run_child's
+            # prompt concat ('TypeError: can only concatenate str', error_class
+            # 'crashed', burned gate release). Mirror the fanout item-goal law
+            # (:592): named-node errors, no coercion at resolve (closed-grammar law,
+            # :274). PRESENT non-str (incl. [], {}, 0, False, None) is rejected
+            # independently of truthiness — the ra-59 review found the first cut
+            # still let falsy goals through to a created run dir. ABSENT goal keeps
+            # the exact legacy 'agent node has no goal' message below; a present
+            # str that is empty/whitespace keeps that legacy message too (absent-
+            # equivalent), preserving test_validate_0923's pin.
+            if "goal" in n:
+                g = n["goal"]
+                if not isinstance(g, str):
+                    E(nid, "goal", f"goal {g!r} must be a non-empty string")
+                elif n.get("fanout") is None and not g.strip():
+                    # empty/whitespace-only str on a PLAIN agent is an absent goal:
+                    # '' keeps the exact legacy message (test_validate_0923 pin);
+                    # whitespace-only is the same non-empty law. A fan-out node's
+                    # own goal may legally stay empty when fo.goal or every item
+                    # carries the real text (spawn: `fo.get("goal") or n.goal`).
+                    E(nid, "goal", "agent node has no goal" if not g
+                                   else f"goal {g!r} must be a non-empty string")
+            ctx = n.get("context")
+            if "context" in n and not isinstance(ctx, str):
+                # explicit null is a present non-str: the string-when-present
+                # contract admits only absent or str (review finding 2)
+                E(nid, "context", f"context {ctx!r} must be a string")
             shp = n.get("shape")
             if shp is not None and shp not in SHAPE_PRESETS:
                 E(nid, "shape", f"shape {shp!r} invalid; allowed: {sorted(SHAPE_PRESETS)}")
@@ -853,9 +893,21 @@ def validate_graph_errors(nodes):
                     for i, it in enumerate(items):
                         if isinstance(it, dict) and "goal" in it and not (isinstance(it["goal"], str) and it["goal"].strip()):
                             E(nid, f"fanout.items[{i}].goal", f"fanout.items[{i}].goal must be a non-empty string (it overrides fanout.goal)")
+                    # #59: the goal TEMPLATE is rendered by fmt_goal (re.sub over the
+                    # text) and prefixed onto the node goal per item — a truthy
+                    # non-str here is the same first-spawn TypeError class as the
+                    # item-goal law directly above; mirror that style (R8 sibling).
+                    # A PRESENT key must be a str regardless of truthiness; '' /
+                    # absent remain the documented "fall back to the node goal"
+                    # shape (run_child: `fo.get("goal") or node.get("goal")`).
+                    if "goal" in fo and not isinstance(fo["goal"], str):
+                        E(nid, "fanout.goal", f"fanout.goal {fo['goal']!r} must be a "
+                                              "non-empty string (the item goal template)")
                     if items and not (fo.get("goal") or n.get("goal")) \
                             and not all(isinstance(it, dict) and isinstance(it.get("goal"), str) for it in items):
                         E(nid, "fanout.goal", "fanout needs a goal template or a goal on every item")
+                    # (moved above: the template type check sits with the other
+                    # fanout checks; this block only reports the missing-goal law)
                     q = fo.get("quorum")
                     if q is not None and (not isinstance(q, int) or isinstance(q, bool) or q < 1):
                         E(nid, "fanout.quorum", "fanout.quorum must be a positive int")
@@ -872,7 +924,11 @@ def validate_graph_errors(nodes):
                             E(nid, "fanout.schema", "fanout.schema must be an object")
                         else:
                             schema_check(nid, "fanout.schema", fsc)
-            elif not n.get("goal"):
+            elif "goal" not in n:
+                # #59: present-but-bad goals are reported by the typed check above
+                # (one named error per defect); this legacy branch owns only the
+                # ABSENT goal on a non-fan-out agent, message pinned by
+                # test_validate_0923 / test_string_type_validation_59.
                 E(nid, "goal", "agent node has no goal")
             if n.get("require_route") is not None and not isinstance(n.get("require_route"), bool):
                 # #25: boolean only — an unknown truthy value must not silently
@@ -883,6 +939,20 @@ def validate_graph_errors(nodes):
                     E(nid, "schema", "schema must be an object")
                 else:
                     schema_check(nid, "schema", n["schema"])
+        if n["type"] == "echo":
+            # #59: echo commits `output` VERBATIM (the documented contract). The
+            # shapes downstream consumes are JSON values (fixtures and examples
+            # author dicts/lists — a str-only law would kill the feature), so the
+            # submit law is JSON-typed: anything json.dumps cannot encode (a set,
+            # a custom object) crashes the door's own graph.json write or the
+            # runner's node commit as an unclassified crash — refuse it here,
+            # named-node, like every other defect.
+            o = n.get("output")
+            try:
+                json.dumps(o)
+            except (TypeError, ValueError):
+                E(nid, "output", f"echo output {o!r} must be a JSON-serialisable "
+                                 f"value ({type(o).__name__} cannot be committed verbatim)")
         osk = n.get("on_skip")
         if osk is not None and n.get("type") == "gate":   # non-gate: closed-key check already rejected it
             if osk not in ("pass", "prune"):
