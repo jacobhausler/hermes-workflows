@@ -206,6 +206,32 @@ def _validation_error(graph):
 
 HERE = Path(__file__).resolve().parent
 
+def _owner_setting_read(key):
+    """THE owner-settings read (#41/#42 share it with hermes_bin): plugin-scoped
+    ``_CTX.get_config`` -> ``plugins.entries.hermes-workflows.settings.<key>`` (legacy
+    ``config`` fallback inside core). None without a ctx or on any core rejection.
+    Installed into wfcommon so runs_root()/launcher_profile() read the SAME source at
+    CALL time — no restart; a process without a door ctx (runner, dashboard, tests)
+    falls back there to the resolved home's config.yaml, read raw."""
+    if not _CTX:
+        return _common.NO_READER
+    try:
+        return _CTX.get_config(key, None)
+    except Exception:
+        return None
+
+_common.set_owner_setting_reader(_owner_setting_read)
+
+def _owner_settings_error():
+    """FAIL-CLOSED at the door (#42): a malformed `settings.runs_root` / `settings.profile`
+    is an error on EVERY action, never a silent fallback to another root/identity."""
+    try:
+        _common.settings_runs_root()
+        _common.settings_profile()
+    except ValueError as e:
+        return {"error": f"owner settings invalid: {e} (fix plugins.entries.hermes-workflows.settings)"}
+    return None
+
 def _hermes_bin():
     """Operator-controlled launcher; tool arguments never choose a child executable.
 
@@ -216,14 +242,7 @@ def _hermes_bin():
     ValueError out of core (plugins_state._plugin_relative_segments), which used to
     kill every workflow launch at the door; reads stay guarded regardless.
     """
-    def _read(key):
-        if not _CTX:
-            return None
-        try:
-            return _CTX.get_config(key, None)
-        except Exception:
-            return None
-    configured = _read("hermes_bin")
+    configured = _common.owner_setting("hermes_bin")
     if isinstance(configured, str) and configured.strip():
         return configured.strip()
     env_bin = os.environ.get("HERMES_WF_HERMES_BIN", "").strip()
@@ -273,7 +292,7 @@ WORKFLOW_PARAMS = {
         "run_id": {"type": "string", "description": "Run id (required for every action except run/list)."},
         "name": {"type": "string", "description": "run: overrides graph.name (default workflow); save: library name overrides graph.name (lowercase, [-_.]). amend: set graph.name in the replacement graph; omitting it retains the run name."},
         "from": {"type": "string", "description": "run: library graph name to replay (instead of graph or graph_path)."},
-        "run_context": {"description": "run only: non-empty string seed appended to every first-wave agent (including agents behind gate-only paths), OR non-empty map of identifier keys to non-empty strings replacing only explicit {run.KEY} in node goals/contexts, fan-out goals/item goals and gate questions. Missing keys/malformed bindings reject before any run write. Values are persisted in prompts; do not supply secrets. A seed cannot replace baked literals."}, 
+        "run_context": {"type": ["string", "object"], "description": "run only: non-empty string seed appended to every first-wave agent (including agents behind gate-only paths), OR non-empty map of identifier keys to non-empty strings replacing only explicit {run.KEY} in node goals/contexts, fan-out goals/item goals and gate questions. Missing keys/malformed bindings reject before any run write — as does a seed against a graph with {run.KEY} refs, or a JSON-encoded map passed as a string. Values are persisted in prompts; do not supply secrets. A seed cannot replace baked literals."}, 
         "description": {"type": "string", "description": "save: one-line purpose shown by library/list."},
         "tags": {"type": "array", "items": {"type": "string"}, "description": "save (optional): 1-10 short discovery tags (lowercase alnum, [-_.], <=32 chars each), validated like the library name; stored in the entry's meta envelope next to the description."},
         "why_not_library": {"type": "string", "description": "submit (REQUIRED, >=80 chars): why no library graph covered this task — name the entries you checked and the shape you needed. The receipt is what makes hand-rolling honest."},
@@ -923,7 +942,8 @@ def _seat_model_names():
 # ---------- run-dir plumbing ----------
 
 def runs_root():
-    """ONE resolver (wfcommon.runs_root): `WF_RUNS_ROOT` if set, else `$HERMES_HOME/workflows`."""
+    """ONE resolver (wfcommon.runs_root): `settings.runs_root` (owner, #42) > `WF_RUNS_ROOT`
+    > `<hermes_home>/workflows`. Read at call time — no restart."""
     return _common.runs_root()
 
 def run_dir(run_id):
@@ -1142,6 +1162,34 @@ def _bind_run_context(graph, binding):
     if isinstance(binding, str):
         if not binding.strip():
             raise ValueError("run_context seed must be a non-empty string")
+        # Door-transport guard: a JSON object handed over as a STRING is a caller
+        # that meant the map form (tool transports routinely stringify objects).
+        # Seeding it would silently skip substitution — refuse, like every other
+        # malformed binding, before any run write.
+        try:
+            _decoded = json.loads(binding)
+        except ValueError:
+            _decoded = None
+        if isinstance(_decoded, dict):
+            raise ValueError("run_context is a JSON-encoded map passed as a string: pass the map itself "
+                             "(a string is a seed and cannot replace {run.KEY} literals)")
+        def _dangling(node):
+            texts = [node.get(f) for f in ("goal", "context", "question", "profile")]
+            fo = node.get("fanout")
+            if isinstance(fo, dict):
+                texts.append(fo.get("goal"))
+                texts += [i.get("goal") for i in fo.get("items", []) if isinstance(i, dict)]
+            for text in texts:
+                if isinstance(text, str):
+                    m = _RUN_REF.search(text)
+                    if m:
+                        return f"node {node['id']!r} reference {{run.{m.group(1)}}}"
+            return None
+        for node in graph["nodes"]:
+            bad = _dangling(node)
+            if bad:
+                raise ValueError(f"run_context seed cannot bind {bad}: a seed only appends to "
+                                 "context — pass a map so the reference is substituted")
         byid = {n["id"]: n for n in graph["nodes"]}
         def agent_ancestor(nid, seen):
             for parent_id in byid[nid].get("after", []):
@@ -1222,7 +1270,8 @@ def _bind_run_context(graph, binding):
 
 def _profile_error(graph):
     """1.1 (RATIFY F2): node `profile:` validation — AFTER `{run.KEY}` rendering, BEFORE any
-    write/spawn. Launcher identity comes from the door's own HERMES_HOME (never a graph arg).
+    write/spawn. Launcher identity comes from the door's own HERMES_HOME, else the owner's
+    `settings.profile` (#41, env-blind gateways) — never a graph arg.
     Same error shape as _validation_error."""
     errs = _common.profile_errors(graph["nodes"], launcher=_common.launcher_profile(),
                                   profiles_dir=_common.profiles_root())
@@ -1245,9 +1294,11 @@ def _team_args_error(args):
 def _identity_stamps(args, graph, lib_name=None):
     """1.1 (RATIFY F1): run.json identity keys, emitted ONLY when derivable — a no-team run
     under the default profile without WF_RUNS_ROOT adds NOTHING (1.0.15 key set).
-      dispatched_by  launcher profile name (door HERMES_HOME under <root>/profiles/); omitted for default
+      dispatched_by  launcher profile name (door HERMES_HOME under <root>/profiles/, else the
+                     owner's settings.profile — #41); omitted for default
       launch_root    the runs root the run was created under; recorded when it is not the
-                     launcher's own default (WF_RUNS_ROOT set) or the launcher is a named profile
+                     launcher's own default (WF_RUNS_ROOT or settings.runs_root set — #42)
+                     or the launcher is a named profile
       team/lane_key  run args, verbatim
       targets[]      distinct node `profile` names (sorted)
       graph_source   {name, owner, source, source_digest} when a library graph carries provenance
@@ -1256,7 +1307,8 @@ def _identity_stamps(args, graph, lib_name=None):
     launcher = _common.launcher_profile()
     if launcher != "default":
         out["dispatched_by"] = launcher
-    if launcher != "default" or os.environ.get("WF_RUNS_ROOT"):
+    if launcher != "default" or os.environ.get("WF_RUNS_ROOT") \
+            or _common.settings_runs_root() is not None:
         out["launch_root"] = str(runs_root())
     for key in ("team", "lane_key"):
         if args.get(key):
@@ -2118,6 +2170,9 @@ def handle(args, **kwargs):
         fn = ACTIONS.get(args.get("action"))
         if not fn:
             return json.dumps({"error": f"unknown action {args.get('action')!r}", "actions": sorted(ACTIONS)})
+        bad = _owner_settings_error()   # #42: malformed owner settings fail-closed, never fall back
+        if bad:
+            return json.dumps(bad)
         return json.dumps(fn(args), ensure_ascii=False, default=str)
     except Exception as e:
         import traceback
