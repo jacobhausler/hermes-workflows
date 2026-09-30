@@ -311,7 +311,9 @@ Author-run receipt: [receipts/exchange-run/author-run.json](receipts/exchange-ru
 - A child silent for 120 s after spawn is killed as `early_death`; a child still writing its
   log when the wall fires gets one 50 % extension (`node.extended`), then dies.
 - A run with unfinished work and no live runner is `interrupted`. Inspect committed
-  outputs, then `wait` to resume — finished nodes replay-skip by fingerprint.
+  outputs, then `wait` to resume — finished nodes replay-skip by fingerprint. If the liveness probe itself cannot answer the run reads `liveness-unknown` (`runner_live:
+  null`): never treated as dead, nothing spawns on it — `next` says `observe` until the
+  probe works again.
 - **Partial-rescue law (#134):** the sole recovery state of a run is the committed
   `nodes/*.json` done-set parsed against the CURRENT `graph.json` — validity is
   the `efp` each record carries recomputed against the live defs, so editing the

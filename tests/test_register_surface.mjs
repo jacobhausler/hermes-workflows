@@ -169,6 +169,12 @@ const g = mod.paneModel(runs, {})
 assert.deepEqual(g.running.map(r => r.id), ['r1'], 'RUNNING is runner-backed only; pending husk excluded')
 assert.deepEqual(g.rest.map(r => r.id), ['s1', 'd1', 'i1', 'f1', 'h1'],
   'The Rest = held+done+failed+stopped+interrupted together, updated desc — held is not a section')
+// #47 C1 (tri-state law): 'liveness-unknown' (probe could not answer) is NOT dead —
+// it renders in The Rest (never vanishes from the rail), never counts RUNNING.
+const g2 = mod.paneModel([mk('u1', 'liveness-unknown', 8), mk('r2', 'running', 9), mk('d2', 'done', 10)], {})
+assert.deepEqual(g2.running.map(r => r.id), ['r2'], 'liveness-unknown is never RUNNING')
+assert.deepEqual(g2.rest.map(r => r.id), ['d2', 'u1'],
+  'liveness-unknown renders in The Rest (updated desc) — never silently bucket-less')
 
 // -- 4. SMIL candy: <animate> ONLY on paths leaving running nodes ----------------
 const grab = name => {

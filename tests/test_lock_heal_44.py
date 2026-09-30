@@ -302,6 +302,22 @@ try:
         wfcommon.subprocess.run = _real_sp_run
     # the refusal must not wedge forever: once the probe can run again, truth returns
     check(wfcommon.runner_alive(rh) is True, "(h) recovered probe reads the live holder again (no permanent wedge)")
+    # (n3) hatch under probes=['unknown','unknown'] with a VISIBLE open fd: the
+    # kernel never said busy — an fd-scan hit is an observation, not a proven
+    # holder. The reason must say "probe failed; open fds on the path", never
+    # "lock is held — believed holder(s)" (reviewer round-2 n3).
+    _real_lpc_n3 = wfcommon.lock_probe_child
+    wfcommon.lock_probe_child = lambda path, *a, **k: "unknown"
+    try:
+        v_n3 = wfcommon.release_lock_verdict(rh)
+        check(v_n3["ok"] is False and v_n3["probes"] == ["unknown", "unknown"],
+              "(n3) hatch under unknown probes REFUSES", {k: v_n3.get(k) for k in ("ok", "probes")})
+        check("probe failed; open fds on the path" in v_n3["reason"]
+              and "lock is held" not in v_n3["reason"],
+              "(n3) unknown + fd-scan hit words as PROBE FAILED + observation, never a proven holder",
+              v_n3["reason"])
+    finally:
+        wfcommon.lock_probe_child = _real_lpc_n3
 finally:
     os.environ["PATH"] = _real_path
     wfcommon.lock_probe_child.__defaults__ = _real_probe_defaults
@@ -309,6 +325,12 @@ finally:
     hh.kill(); hh.wait()
 
 # --- (i) #47 review C2: the list probe is BATCHED — one child per list call ----------
+# The synthetic list must BE the page: act_list pages the newest 50, so earlier
+# sections' fixture runs are cleared from the root first (a page cap is a door
+# law; it must not silently decide what this pin sees — the 50==50 check stays).
+for _d in runs.iterdir():
+    if _d.is_dir():
+        shutil.rmtree(_d, ignore_errors=True)
 ri_runs = [mkrun(f"h44-batch-{i}", pid=999999) for i in range(50)]
 hb_i = hold(ri_runs[7])
 try:
@@ -344,7 +366,7 @@ try:
         hw._spawn_runner = _real_spawn_d
     n_probe_children = sum(1 for a in door_spawns if "flock" in str(a[:1]) or "-S" in a[:4])
     rows = {row["run_id"]: row for row in out["runs"]}
-    check(len(out["runs"]) == 50 and all(r["run_id"] in rows for r in ri_runs),
+    check(len(out["runs"]) == 50 and all(r.name in rows for r in ri_runs),
           "the door lists all 50 synthetic runs", len(out["runs"]))
     check(rows[ri_runs[7].name]["runner_live"] is True
           and all(rows[r.name]["runner_live"] is False for r in ri_runs if r is not ri_runs[7]),
@@ -354,6 +376,111 @@ try:
           f"probe children={n_probe_children} of {len(door_spawns)} subprocess.run")
     check(not any("runner.lock" in str(a) and str(a[0]).endswith("flock") for a in door_spawns),
           "act_list never forks a per-run flock probe child (batch child only)")
+
+    # --- b1: batch PARTIAL FAILURE — a poisoned path (dir at runner.lock) must   ---
+    # ---     unknown ONLY its own line; the other 49 verdicts are retained.      ---
+    rpoison = mkrun("h44-poison", pid=999999)
+    (rpoison / "runner.lock").unlink(); (rpoison / "runner.lock").mkdir()
+    v2 = wfcommon.lock_probe_children([str(r / "runner.lock") for r in ri_runs]
+                                       + [str(rpoison / "runner.lock")])
+    check(v2[str(rpoison / "runner.lock")] == "unknown",
+          "b1: a path whose open fails (dir at runner.lock) reads UNKNOWN, never free", v2[str(rpoison / "runner.lock")])
+    check(v2[str(ri_runs[7] / "runner.lock")] == "busy"
+          and all(v2[str(r / "runner.lock")] == "free" for r in ri_runs[:7] + ri_runs[8:]),
+          "b1: the poisoned line does not erase its siblings' verdicts (49 retained)")
+    shutil.rmtree(rpoison / "runner.lock"); (rpoison / "runner.lock").write_text("")
+    # --- b2: a HUNG batch child costs ONE timeout for the whole list, and every  ---
+    # ---     un-answered path is UNKNOWN — never false-free (C1 x C2 compound).  ---
+    class _TE(Exception):
+        pass
+    _real_te = subprocess.TimeoutExpired
+    def _hang_batch(argv, *a, **k):
+        if argv and str(argv[0]) == sys.executable and any("fcntl" in str(x) for x in argv):
+            # child hangs AFTER answering the first two paths (pipe carries the partial truth)
+            raise _real_te(argv, 2.0, output=b"0\t0\n1\t3\n")
+        return _real_run_d(argv, *a, **k)
+    wfcommon.subprocess.run = _hang_batch
+    try:
+        t0b = time.monotonic()
+        v3 = wfcommon.lock_probe_children([str(r / "runner.lock") for r in ri_runs], timeout=2.0)
+        wallb = time.monotonic() - t0b
+    finally:
+        wfcommon.subprocess.run = _real_run_d
+    check(wallb < 8.0, "b2: one hung batch child = ONE timeout for the whole batch (no 50x5s)", f"wall={wallb:.2f}s")
+    check(sum(1 for x in v3.values() if x == "unknown") == 48
+          and v3[str(ri_runs[0] / "runner.lock")] == "free"
+          and v3[str(ri_runs[1] / "runner.lock")] == "busy",
+          "b2: partial lines kept; un-answered paths UNKNOWN, never free",
+          {r.name: v3[str(r / "runner.lock")] for r in ri_runs[:3]})
+
+    # --- NEW-c consumer pins: door rows and the lane read model must carry the    ---
+    # ---     None tri-state — never collapse it to False (the false-dead class).  ---
+    #     Field shape: a machine at its pid limit during a gateway sweep — every    ---
+    #     probe fork raises EAGAIN. act_list rows and _lane_state must publish      ---
+    #     runner_live None, status liveness-unknown, needs_resume False.            ---
+    rnull = mkrun("h44-nullrow", pid=999999)
+    hn = hold(rnull)          # live holder, pid-invisible (999999) — A1 shape
+    rh2 = mkrun("h44-relunk", pid=999999, held_gate=True)   # held gate for the release pin
+    rh3 = mkrun("h44-stopunk", pid=999999)                   # unfinished run for the stop pin
+    def _no_fork(argv, *a, **k):
+        raise OSError(11, "Resource temporarily unavailable")
+    _real_sp = subprocess.run
+    wfcommon.subprocess.run = _no_fork     # shared module object: the door sees it too
+    try:
+        out2 = json.loads(hw.handle({"action": "list"}))
+        rows2 = {row["run_id"]: row for row in out2["runs"]}
+        check(rows2[rnull.name]["runner_live"] is None,
+              "NEW-c: act_list publishes runner_live None (never False) when probes cannot fork",
+              repr(rows2[rnull.name]["runner_live"]))
+        check(rows2[rnull.name]["status"] == "liveness-unknown",
+              "NEW-c: act_list never renders a probe-failed row as interrupted/dead",
+              rows2[rnull.name]["status"])
+        ls = hw._lane_state("pin-44", {"run_id": rnull.name})
+        check(ls["needs_resume"] is False and ls["runner_live"] is None,
+              "NEW-c: _lane_state needs_resume NEVER fires on unknown (run dedup must not send wait-spawn)",
+              json.dumps(ls))
+        # wait under the fork failure: bounded re-probe, honest return, ZERO spawns
+        spawned_unk = []
+        _real_spawn_u = hw._spawn_runner
+        hw._spawn_runner = lambda r: spawned_unk.append(str(r))
+        try:
+            w = json.loads(hw.handle({"action": "wait", "run_id": rnull.name, "timeout": 1}))
+        finally:
+            hw._spawn_runner = _real_spawn_u
+        check(not spawned_unk and w.get("runner_live") is None and w.get("status") == "liveness-unknown",
+              "NEW-c: wait refuses to spawn on unknown and returns the honest tri-state status",
+              json.dumps({"spawned": spawned_unk, "live": w.get("runner_live"), "status": w.get("status")}))
+        check(not any((row or {}).get("action") == "wait" for row in w.get("next") or []),
+              "NEW-c: `next` on a probe-failed run is observe, never wait", json.dumps(w.get("next")))
+        # release under unknown: answer lands, but NO auto-resume spawn (unknown never free)
+        spawned_rel = []
+        hw._spawn_runner = lambda r: spawned_rel.append(str(r))
+        try:
+            rel = json.loads(hw.handle({"action": "release", "run_id": rh2.name,
+                                        "gate_id": "g", "answer": "yes"}))
+        finally:
+            hw._spawn_runner = _real_spawn_u
+        check(rel.get("ok") is True and not spawned_rel,
+              "NEW-c: release answers under unknown but NEVER auto-resumes a spawn",
+              json.dumps({"ok": rel.get("ok"), "spawned": spawned_rel}))
+        # stop under unknown: marker written, no spawn honouring it
+        spawned_stop = []
+        hw._spawn_runner = lambda r: spawned_stop.append(str(r))
+        try:
+            stopo = json.loads(hw.handle({"action": "stop", "run_id": rh3.name}))
+        finally:
+            hw._spawn_runner = _real_spawn_u
+        check(stopo.get("ok") is True and not spawned_stop and (rh3 / "stop.request").exists(),
+              "NEW-c: stop under unknown leaves the marker, never spawns",
+              json.dumps({"ok": stopo.get("ok"), "spawned": spawned_stop}))
+        # the refusal must not wedge: forks back => truth returns (holder still alive)
+        wfcommon.subprocess.run = _real_sp
+        check(wfcommon.runner_alive(rnull) is True,
+              "NEW-c: once forks work again the held run reads live (no wedge)")
+    finally:
+        wfcommon.subprocess.run = _real_sp
+        hn.kill(); hn.wait()
+    shutil.rmtree(rpoison, ignore_errors=True)
 finally:
     hb_i.kill(); hb_i.wait()
 

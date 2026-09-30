@@ -2419,6 +2419,7 @@ function PaneRow({ run, thisChat }) {
   if (run.status === 'held') fact = run.held_gate?.question || `gate · ${run.held_gate?.id || 'unknown'}`
   else if (run.status === 'failed') fact = run.runner_exit?.reason || 'failed'
   else if (run.status === 'interrupted') fact = `interrupted · ${nodesCount(run)}`
+  else if (run.status === 'liveness-unknown') fact = 'liveness probe failed — resolve the probe (observe)'
   else if (run.status === 'running') {
     const start = parseTime(run.started)
     const elapsed = start ? fmtDur(Date.now() - start) : ''

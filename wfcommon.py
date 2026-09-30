@@ -433,7 +433,10 @@ def find_run(rid):
     root = runs_root()
     legacy = launch_runs_root()
     for cand in iter_run_dirs([root, legacy] if legacy != root else [root]):
-        if cand.name == rid and run_state(cand):
+        # _SKIP_PROBE: resolution only needs the VIEW (a readable graph), which
+        # never depends on liveness; the full probe here would double-fork the
+        # status path and break the A2 one-read law (pinned test_lock_heal_44 (e)).
+        if cand.name == rid and run_state(cand, verdict=_SKIP_PROBE):
             return cand
     if legacy != root and (legacy / rid).is_dir() and not (root / rid).exists():
         return legacy / rid
@@ -2513,6 +2516,18 @@ _PROBE_CHILD_SRC = (   # the python fallback: open, LOCK_EX|LOCK_NB, exit — th
     "except OSError:\n    sys.exit(3)\n"
     "sys.exit(0)\n")
 
+# A1/A2 law pins the literal predicate below (`runner_lock_held(r)` + the early
+# `return True`), so the probe VERDICT stays bool and the #47 C1 tri-state rides
+# as a side ledger: the single-path probe records why it could not answer, and
+# the liveness helpers read that cause for the path they just probed.
+_PROBE_CAUSE = {}   # str(path) -> 'probe-timeout'|'probe-failed' (cleared by the next answering probe)
+_LIVENESS_UNKNOWN = object()   # sentinel: THE ONE liveness read came back unknown (#47 C1)
+
+def _probe_cause(r):
+    """Why the LAST probe of <run>/runner.lock could not answer ('' = it answered).
+    The ledger is per-path: an answering probe clears it, a failing one stamps it."""
+    return _PROBE_CAUSE.get(str(Path(r) / "runner.lock"), "")
+
 def lock_probe_child(path, timeout=5.0):
     """#44 CHILD-PROBE law: every LOCK_EX probe a LONG-LIVED process (the door /
     gateway) makes against a run's runner.lock happens in a SHORT-LIVED CHILD
@@ -2524,12 +2539,16 @@ def lock_probe_child(path, timeout=5.0):
     until a new lane key) was exactly a door-held probe fd outliving the door.
     Returns 'free' (child acquired), 'busy' (a holder exists), 'missing' (no lock
     file — never created: a read path must not litter historical runs) or
-    'unknown' (child could not run / timed out). Cheap: one spawn+exit, ~5 ms via
-    util-linux flock(1) (`flock -n`), python `-I -S` fallback elsewhere; bounded
-    timeout; inherits nothing (close_fds, empty environment, /dev/null stdio)."""
+    'unknown' (child could not run / timed out). #47 review C1: 'unknown' is
+    NEVER free — only 'free' and 'missing' license a dead verdict; the liveness
+    helpers turn it into None (runner_live:null + liveness cause), never False.
+    Cheap: one spawn+exit, ~5 ms via util-linux flock(1) (`flock -n`), python
+    `-I -S` fallback elsewhere; bounded timeout; inherits nothing (close_fds,
+    empty environment, /dev/null stdio)."""
     global _FLOCK_BIN
     path = str(path)
     if not os.path.exists(path):   # pre-check: flock(1) would O_CREAT; the python child does not
+        _PROBE_CAUSE.pop(path, None)
         return "missing"
     if _FLOCK_BIN is None:
         _FLOCK_BIN = shutil.which("flock") or ""
@@ -2543,15 +2562,116 @@ def lock_probe_child(path, timeout=5.0):
         rc = subprocess.run(argv, close_fds=True, env={}, stdin=subprocess.DEVNULL,
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                             timeout=timeout).returncode
-    except (OSError, subprocess.SubprocessError):
+    except subprocess.TimeoutExpired:
+        _PROBE_CAUSE[path] = "probe-timeout"
         return "unknown"
-    return codes.get(rc, "unknown")
+    except OSError:                # fork/exec impossible (pid limit, EAGAIN, ENOMEM)
+        _PROBE_CAUSE[path] = "probe-failed"
+        return "unknown"
+    except subprocess.SubprocessError:
+        _PROBE_CAUSE[path] = "probe-failed"
+        return "unknown"
+    verdict = codes.get(rc, "unknown")
+    if verdict == "unknown":
+        _PROBE_CAUSE[path] = "probe-failed"
+    else:
+        _PROBE_CAUSE.pop(path, None)
+    return verdict
+
+# #47 review C2: ONE probe child per BATCH. The per-run probe was one fork per
+# listed run (50 runs == 50 flock children, ~300 ms idle and seconds on a loaded
+# host — worst case past the door's tool deadline). The batched child takes every
+# lock path in argv, probes each LOCK_EX|LOCK_NB, and prints one verdict line per
+# path; the single-path lock_probe_child above stays the shape for status/wait/
+# hatch (one run, one probe).
+_PROBE_BATCH_SRC = (   # one child, N paths: '<i>\t<code>' per path (0 free, 3 busy, 4 missing)
+    "import fcntl, os, sys\n"
+    "for i, p in enumerate(sys.argv[1:]):\n"
+    "    code = 4\n"
+    "    try:\n"
+    "        fd = os.open(p, os.O_RDWR)\n"
+    "    except OSError:\n"
+    "        fd = None\n"
+    "    if fd is not None:\n"
+    "        try:\n"
+    "            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)\n"
+    "            code = 0\n"
+    "        except OSError:\n"
+    "            code = 3\n"
+    "        os.close(fd)\n"
+    "    print('%d\\t%d' % (i, code), flush=True)\n")
+_BATCH_CODES = {0: "free", 3: "busy"}          # no line at all for a path == 'missing'
+_PROBE_CHUNK = 64        # hard fork budget: one batch child per chunk of paths
+_LIST_PROBE_CANDIDATE_BUDGET = 64   # act_list: candidate paths probed per call (<= _PROBE_CHUNK == ONE child)
+_SKIP_PROBE = object()   # run_state(verdict=_SKIP_PROBE): pid law only, zero forks
+
+def _probe_batch_run(argv, timeout):
+    """Run one batch child; returns the {idx: code} its verdict lines PROVED.
+    A hang / fork failure / SIGKILL mid-batch keeps every line the child printed
+    before it died (subprocess.run collects the pipe on kill): partial answers
+    are partial truth, unanswered paths belong to nobody (b1, b2)."""
+    lines = []
+    try:
+        cp = subprocess.run(argv, close_fds=True, env={}, stdin=subprocess.DEVNULL,
+                            capture_output=True, text=True, timeout=timeout)
+        lines = cp.stdout.splitlines() if cp.stdout else []
+    except subprocess.TimeoutExpired as e:
+        got = e.stdout if e.stdout is not None else e.output
+        if got:
+            lines = got.splitlines() if isinstance(got, str) else got.decode(errors="replace").splitlines()
+    except Exception:              # fork failure (EAGAIN), exec failure: nothing answered
+        lines = []
+    seen = {}
+    for ln in lines:
+        head, sep, code = ln.partition("\t")
+        try:
+            idx, rc = int(head), int(code)
+        except ValueError:
+            continue
+        if rc in _BATCH_CODES:
+            seen[idx] = rc
+    return seen
+
+def _probe_batch_verdicts(paths, timeout):
+    """ONE child, N paths, every path reported (b1: a poisoned path — a directory
+    where runner.lock should be, EACCES — must not erase its siblings' verdicts).
+    Paths whose stat says missing get 'missing' WITHOUT consulting the child: the
+    child's os.open cannot tell an absent path from an unreadable one, so absence
+    is proven in the parent and the child only distinguishes free from busy; an
+    open that fails at a path that stat-said exists is UNKNOWN, never free."""
+    todo = [p for p in paths if os.path.exists(p)]
+    seen = {}
+    if todo:
+        seen = _probe_batch_run([sys.executable, "-I", "-S", "-c", _PROBE_BATCH_SRC] + todo,
+                                timeout)
+    out = {}
+    for i, p in enumerate(todo):
+        out[p] = _BATCH_CODES.get(seen.get(i, -1), "unknown")
+    for p in map(str, paths):
+        out.setdefault(p, "missing")
+    return out
+
+def lock_probe_children(paths, timeout=2.0):
+    """Batched child-probe (act_list's ONE-probe law, #47 C2): paths are probed by
+    SHORT-LIVED children — at most one per _PROBE_CHUNK paths, a HARD fork budget
+    per call — never by this process and never one child per run. Each child
+    opens every path, takes LOCK_EX|LOCK_NB, prints one '<idx>\t<code>' verdict
+    line, and moves on; its death releases everything it took. Returns
+    {path: 'free'|'busy'|'missing'|'unknown'}; a child that could not run or
+    answer leaves its paths 'unknown' — C1: an unanswered probe is NEVER free.
+    `timeout` bounds the WHOLE child, so one stalled probe costs one timeout for
+    the batch, not one per path (b2's 50x5s blow-up is structurally gone)."""
+    paths = [str(p) for p in paths]
+    out = {}
+    for i in range(0, len(paths), _PROBE_CHUNK):
+        out.update(_probe_batch_verdicts(paths[i:i + _PROBE_CHUNK], timeout))
+    return out
 
 def runner_lock_held(r):
     """91b9a3de: cross-container liveness truth. The runner takes an exclusive
     blocking flock on <run>/runner.lock for its whole life (wf.py acquire_lock)
-    — and flock is enforced by the KERNEL across every pid namespace that shares
-    the mount, so it holds even when the runner lives in a sibling container (our
+    — and flock is enforced by the KERNEL across every pid namespace sharing the
+    mount, so it holds even when the runner lives in a sibling container (our
     fleet: shared ~/.hermes volume, separate pid namespaces). os.kill(pid, 0)
     CANNOT see those pids: the same pid reads as dead here while it is very much
     alive next door, and a wait-based caller respawns a second runner over live
@@ -2562,9 +2682,14 @@ def runner_lock_held(r):
     SIGKILL of the prober. Deliberately no creation: a read path (act_list probes
     every run dir) must never litter empty lock files into historical runs — a
     missing file is exactly as honest an absence of a holder as an uncontended
-    one. Missing file / unknown errors are honest ABSENCE of a holder (False),
-    never a liveness claim."""
-    return lock_probe_child(os.path.join(str(r), "runner.lock")) == "busy"
+    one. #47 review C1: the VERDICT here stays bool for the pinned predicate
+    (True = BUSY, a holder exists); 'unknown' (the probe itself could not
+    answer: timeout, SIGKILL, fork EAGAIN) is NEVER free — it leaves a cause in
+    _PROBE_CAUSE, and runner_alive/run_state read it to publish runner_live
+    None + liveness:'probe-timeout'|'probe-failed'; status/wait refuse to
+    resume on unknown."""
+    verdict = lock_probe_child(os.path.join(str(r), "runner.lock"))
+    return verdict == "busy"
 
 def _pid_alive_raw(pid):
     """Any live, non-zombie process with this pid in OUR view (identity NOT checked —
@@ -2681,6 +2806,13 @@ def release_lock_verdict(r):
     fx = lock_forensics(lk)
     fx["runner_pid_alive"] = bool(pid and pid > 0 and _pid_alive_raw(pid))
     out.update(lock="busy" if "busy" in probes else probes[-1], forensics=fx)
+    if "unknown" in probes and (fx["fd_holders"] or fx["proc_locks"]):
+        # #47 n3: the probe never proved contention — an open fd on the path is
+        # an OBSERVATION, not a proven holder; say exactly that.
+        who = ", ".join(f"pid {h['pid']} fd {h['fd']} ({h['argv'] or '?'})" for h in fx["fd_holders"]) \
+            or "; ".join(fx["proc_locks"])
+        out["reason"] = f"refused: probe failed; open fds on the path: {who}; resolve the probe failure (or the holder), then retry"
+        return out
     if fx["fd_holders"] or fx["proc_locks"]:
         who = ", ".join(f"pid {h['pid']} fd {h['fd']} ({h['argv'] or '?'})" for h in fx["fd_holders"]) \
             or "; ".join(fx["proc_locks"])
@@ -2756,19 +2888,28 @@ def _runner_pid_alive(r, pid_path=None):
         return False
 
 def runner_alive(r, pid_path=None):
-    """91b9a3de: ONE liveness law, cross-container safe. The runner holds an
-    exclusive flock on <run>/runner.lock for its whole life, and flock is
-    kernel-enforced across every pid namespace sharing the mount — so the probe
-    reads a sibling-container runner (our fleet: shared ~/.hermes volume, separate
-    pid namespaces) as LIVE where os.kill(pid, 0) alone sees a ghost and a
-    next=wait would spawn a second runner over live children. Law: HELD lock =>
-    live, unconditionally (the holder proved itself by taking the lock, whatever
-    its pid namespace). Otherwise fall back to the ORIGINAL pid-identity law
-    verbatim (argv `wf.py run <id>` + effective-root match), so a lock file no
-    one holds, or a foreign/crashed pid, behaves exactly as before. The flock
-    half fails CLOSED: a held probe can only ever ADD liveness, never remove it."""
+    """91b9a3de: ONE liveness law, cross-container safe, TRI-STATE (#47 review
+    C1). The runner holds an exclusive flock on <run>/runner.lock for its whole
+    life, and flock is kernel-enforced across every pid namespace sharing the
+    mount — so the probe reads a sibling-container runner (our fleet: shared
+    ~/.hermes volume, separate pid namespaces) as LIVE where os.kill(pid, 0)
+    alone sees a ghost and a next=wait would spawn a second runner over live
+    children. Law: HELD lock => live, unconditionally (the holder proved itself
+    by taking the lock, whatever its pid namespace); a held probe can only ever
+    ADD liveness, never remove it — and 'unknown' (the probe itself could not
+    answer: hang, SIGKILL, fork EAGAIN) is NEVER read as free: it returns None,
+    which status surfaces as runner_live:null + liveness:cause and wait refuses
+    to spawn on. Only an honest ABSENCE (free / missing) falls back to the
+    ORIGINAL pid-identity law verbatim (argv `wf.py run <id>` + effective-root
+    match), so a lock file no one holds, or a foreign/crashed pid, behaves
+    exactly as before. Fail-open on unknown (would report dead) is the
+    fb-squad false-'interrupted' class and is pinned out by test_lock_heal_44
+    (h); fail-CLOSED (unknown => held) could wedge the whole list behind one
+    hung flock binary, so unknown reads as UNKNOWN, never as either side."""
     if runner_lock_held(r):
         return True
+    if _probe_cause(r):            # 'unknown': the probe could not answer — NEVER free
+        return None
     return _runner_pid_alive(r, pid_path)
 
 def fingerprint_valid(stored, actual, rule):
@@ -2796,7 +2937,10 @@ def runner_exit_read(r, pid_path=None, alive=None):
     """Graph-bound runner verdict, or a crash when a previous pid lacks identity.
     No pid file means a fresh, not-yet-spawned run, not a crash. `alive`: the
     caller's already-taken liveness read (A2 one-read law, #44: run_state passes
-    its ONE child-probe result so a status costs exactly one probe); None = probe."""
+    its ONE child-probe result so a status costs exactly one probe); None = probe.
+    #47 C1: pass _LIVENESS_UNKNOWN when THE ONE read came back unknown (the probe
+    could not answer) — a crashed verdict is then NOT claimed: absence of evidence
+    is not evidence of a crash."""
     rec = jload(Path(r) / "runner_exit.json")
     if isinstance(rec, dict) and rec.get("reason"):
         current_graph = jload(Path(r) / "graph.json")
@@ -2808,6 +2952,8 @@ def runner_exit_read(r, pid_path=None, alive=None):
                 if k in ("reason", "at", "detail", "graph_fingerprint")}
     path = Path(pid_path) if pid_path is not None else Path(r) / "wf.pid"
     if not path.exists():
+        return None
+    if alive is _LIVENESS_UNKNOWN:
         return None
     if alive is None:
         alive = runner_alive(r, path)
@@ -3394,16 +3540,42 @@ def active_child(r, n, byid, index=None):
     return _verify_spawn_rec(r, n, byid, jload(r / "nodes" / f"{fname}.json"))
 
 
-def run_state(r):
+def _live_from_verdict(r, verdict):
+    """#47 C1: apply the tri-state law to a BATCH verdict (act_list's ONE probe
+    child) exactly as runner_alive applies it to a single-path probe: BUSY =>
+    live unconditionally; unknown => None (never free); free/missing => the
+    pid-identity law (in-process /proc reads, no fork)."""
+    if verdict == "busy":
+        return True
+    if verdict == "unknown":
+        return None
+    return _runner_pid_alive(r)
+
+def run_state(r, verdict=None):
     """Derived truth of a run dir: status, per-node status, held gate meta.
-    status: pending|running|interrupted|held|done|failed|stopped.
+    status: pending|running|interrupted|liveness-unknown|held|done|failed|stopped.
     'interrupted' has unfinished work but NO verified runner; only wait/release/amend
-    explicitly resume it. A later amend demotes a stopped run to interrupted."""
+    explicitly resume it. A later amend demotes a stopped run to interrupted.
+    #47 C1 (TRI-STATE): when the child-probe could not answer, status is
+    'liveness-unknown' — NEVER 'interrupted' (the false-dead class) — with
+    runner_live: None + liveness: 'probe-timeout'|'probe-failed'; callers must
+    not resume on it. `verdict`: act_list's batched probe result for this run's
+    runner.lock (one child for the whole list, #47 C2); None = probe here."""
     graph = jload(r / "graph.json")
     if not graph or not graph.get("nodes"):
         return None
     byid = {n["id"]: n for n in graph["nodes"]}
-    live = runner_alive(r)
+    if verdict is None:
+        live = runner_alive(r)
+    elif verdict is _SKIP_PROBE:
+        live = _runner_pid_alive(r)          # cheap pass: kernel verdict NOT claimed
+    else:
+        live = _live_from_verdict(r, verdict)
+    liveness = ""
+    if live is None:
+        # the ONE liveness read could not answer: name WHY, per probe shape.
+        liveness = _probe_cause(r) or ("probe-batched-unknown" if verdict is not None
+                                       else "probe-failed")
     outputs, states, nodes, recs = {}, {}, {}, {}
     for n in graph["nodes"]:
         st, rec = node_rec(r, n, byid)
@@ -3432,7 +3604,7 @@ def run_state(r):
                 continue
     except FileNotFoundError:
         pass
-    status = "running" if live else "interrupted"
+    status = "interrupted" if live is False else ("running" if live else "liveness-unknown")
     held = None
     if (last or {}).get("event") == "run.stopped":
         status = "stopped"
@@ -3469,7 +3641,7 @@ def run_state(r):
                 status = "held"
             else:
                 held = None
-        elif not (r / "events.jsonl").exists() and not (r / "wf.pid").exists():
+        elif not (r / "events.jsonl").exists() and not (r / "wf.pid").exists() and live is not None:
             status = "pending"
     # P1: nearest unfinished ancestors with their state, derived here, never stored.
     meta = {}
@@ -3484,7 +3656,7 @@ def run_state(r):
     for n in graph["nodes"]:
         if states[n["id"]] == "pending" and not deps_ok(n):
             nodes[n["id"]]["blocked_by"] = blocked_by(n, states, meta)
-    exit_state = runner_exit_read(r, alive=live)   # A2: reuse THE ONE read, no second probe
+    exit_state = runner_exit_read(r, alive=_LIVENESS_UNKNOWN if live is None else live)   # A2: reuse THE ONE read, no second probe
     # Honest status: the runner's own graph-bound verdict in runner_exit.json
     # OUTRANKS the pid-liveness guess. A fresh runner deletes the record at boot
     # (wf.py), so a present, fingerprint-valid record was written by a runner
@@ -3497,7 +3669,10 @@ def run_state(r):
         status = "stopped"
     elif verdict.startswith("blocked by failed"):
         status = "failed"
-    if status == "interrupted" and verdict.startswith("crashed:"):
+    if status in ("interrupted", "liveness-unknown") \
+            and str((exit_state or {}).get("reason", "")).startswith("crashed:"):
+        # an EXPLICIT fatal record is positive evidence — it outranks even an
+        # unknown probe; needs an amend, not a wait/respawn loop
         status = "failed"  # a recorded fatal error needs an amend, not a wait/respawn loop
     return {"run_id": r.name, "name": graph.get("name"), "status": status,
             "held_gate": held, "nodes": nodes, "graph": graph,
@@ -3506,8 +3681,11 @@ def run_state(r):
             # later can flip across a dying runner's kernel-released flock, and
             # status vs a re-probed alive disagreeing sent act_wait spinning a
             # respawn it then abandoned (the R6 regression shape). Consumers
-            # that need liveness use THIS field.
+            # consumers that need liveness use THIS field. #47 C1: None = the
+            # probe could not answer — never False for that case; `liveness`
+            # names why ('probe-timeout'|'probe-failed', '' when it answered).
             "runner_live": live,
+            "liveness": liveness,
             "runner_exit": exit_state,
             "started": (jload(r / "run.json", {}) or {}).get("started"),
             "owner": (jload(r / "run.json", {}) or {}).get("owner"),

@@ -2448,11 +2448,14 @@ def _lane_state(key, entry):
         st = None
         r = runs_root() / "__invalid_lane_run__"
     state = st["status"] if st else "pending"
-    live = st.get("runner_live", False) if st else False   # A2 one-read law
+    live = st.get("runner_live") if st else False   # A2 one-read law
+    # #47 C1: None (the probe could not answer) is NOT dead — needs_resume must
+    # not fire on it or the `run` dedup hint sends the caller to wait, and wait
+    # is exactly the spawn unknown must never authorize.
     unfinished = state not in ("done", "failed", "stopped")
     return {"lane_key": key, "run_id": rid, "state": state,
             "runner_live": live, "unfinished": unfinished,
-            "needs_resume": unfinished and not live, "last_event_ts": _last_event_ts(r)}
+            "needs_resume": unfinished and live is False, "last_event_ts": _last_event_ts(r)}
 
 def _lane_key_error(key):
     if not isinstance(key, str) or not key.strip() or len(key) > 128:
@@ -2903,9 +2906,10 @@ def act_status(args):
     if not st:
         return {"error": f"no run at {r}"}
     full = str(args.get("detail") or "").lower() == "full"
-    alive = st.get("runner_live", False)   # A2 (91b9a3de one-read law): THE ONE read
+    alive = st.get("runner_live")   # A2 (91b9a3de one-read law): THE ONE read
     # that run_state derived from — a fresh probe here can flip across a dying
-    # runner's flock and make status vs runner_live disagree.
+    # runner's flock and make status vs runner_live disagree. #47 C1: this is
+    # TRI-STATE — None means the child-probe could not answer (never False).
     out = {"run_id": st["run_id"], "name": st["name"], "status": st["status"],
            "runner_live": alive, "nodes": {k: {kk: v[kk] for kk in ("type", "status", "fanout")}
                                            for k, v in st["nodes"].items()},
@@ -3066,6 +3070,12 @@ def act_status(args):
                        "options": hg.get("options") or []}]
     elif s in ("running", "pending", "interrupted"):
         out["next"] = [{"action": "wait"}]
+    elif s == "liveness-unknown":
+        # #47 C1: the ONE liveness read could not answer ('probe-timeout'/'probe-failed').
+        # `wait` would be a spawn over a possibly-live runner — unknown never
+        # authorizes one. Observe (re-probe) instead; the holder is named when forensics see it.
+        out["next"] = [{"action": "observe",
+                       "reason": f"liveness probe could not answer ({st.get('liveness') or 'probe-failed'})"}]
     elif s == "failed":
         rows = [{"action": "amend", "node": nid, "error_class":
                  (out["nodes"][nid].get("node_facts")
@@ -3109,14 +3119,9 @@ def act_wait(args):
         return {"error": "unknown run_id"}
     if resolved_via:   # #58: read convenience only — never spawn a runner from a foreign root
         return _wait_foreign(args, r, st, resolved_via)
-    top_alive = None
-    if st["status"] in ("running", "pending", "interrupted"):
-        top_alive = bool(st.get("runner_live"))   # A2 one-read law: THE ONE read
-        if not top_alive:
-            _respawn_runner(r)  # only this explicit wait resumes unfinished work
-    cap = min(float(args.get("timeout", 600)), 1800)
     # fb-validator-duo (2026-09-26): the clamp stays (harness deadline guard), but a
     # silent cut is a papercut — echo it in the result when it bites.
+    cap = min(float(args.get("timeout", 600)), 1800)
     raw_timeout = args.get("timeout", 600)
     clamp_note = (f"timeout clamped to 1800s (requested {raw_timeout})"
                   if float(raw_timeout) > 1800 else None)
@@ -3124,6 +3129,29 @@ def act_wait(args):
         if clamp_note and isinstance(out, dict) and "error" not in out:
             out["timeout_note"] = clamp_note
         return out
+    top_alive = None
+    if st["status"] in ("running", "pending", "interrupted"):
+        top_alive = st.get("runner_live") is True   # A2 one-read law: THE ONE read
+        if top_alive is False:
+            _respawn_runner(r)  # only this explicit wait resumes unfinished work
+        elif top_alive is None:
+            # #47 C1: the probe could not answer — NEVER spawn on unknown (only
+            # an honest absence, free/missing, licenses a resume). Re-probe briefly;
+            # if the probe still cannot answer, return the honest status instead
+            # of a spawn — the admission flock is a backstop, not a plan.
+            t_unk = time.time()
+            while time.time() - t_unk < 3.0:
+                st = run_state(r)
+                if st["status"] != "liveness-unknown" and st.get("runner_live") is not None:
+                    break
+                time.sleep(0.15)
+            if st["status"] == "liveness-unknown" and st.get("runner_live") is None:
+                return _echo(act_status(args))
+            if st["status"] not in ("running", "pending", "interrupted"):
+                return _echo(act_status(args))
+            top_alive = st.get("runner_live") is True
+            if top_alive is False:
+                _respawn_runner(r)
     # The harness kills any tool call at its own concurrent-batch deadline (default
     # 420s). Yield at 330s with a clean "wait again" so the parent is never left with
     # a client-side "timed out after 420.0s" error mid-sleep (papercut 2026-09-22).
@@ -3148,9 +3176,11 @@ def act_wait(args):
         return True
     while True:
         st = run_state(r)
-        alive = st.get("runner_live", False)   # THE ONE read (91b9a3de companion) —
+        alive = st.get("runner_live")   # THE ONE read (91b9a3de companion) —
         # a re-probe microseconds later can flip across a dying runner's flock and
-        # leave status/alive disagreeing (the R6 regression shape).
+        # leave status/alive disagreeing (the R6 regression shape). #47 C1 tri-state:
+        # None (probe could not answer) reads NOT-alive here, which only ever
+        # returns the honest status below — it never reaches a spawn.
         # Version-skew guard (burned 2026-09-23): a runner spawned fresh from disk may
         # commit statuses this door's read model predates; its own verdict is the truth.
         rx = (st.get("runner_exit") or {}).get("reason")
@@ -3222,9 +3252,16 @@ def act_release(args):
     res = _release_core(r, gate_id, args.get("answer", ""))
     if not res.get("ok"):
         return res
-    mode = _resume_after_action(
-        r, consumed=lambda: (((run_state(r) or {}).get("nodes", {}).get(gate_id) or {})
-                              .get("status") in ("done", "skipped")))
+    if runner_alive(r) is not False:
+        mode = "live" if runner_alive(r) is True else "unknown-probe"
+        if mode == "unknown-probe":
+            # #47 C1: probe could not answer — NEVER spawn on unknown; the live
+            # runner (if any) commits the answer at its boundary.
+            res["liveness_note"] = "liveness probe could not answer — no respawn issued"
+    else:
+        mode = _resume_after_action(
+            r, consumed=lambda: (((run_state(r) or {}).get("nodes", {}).get(gate_id) or {})
+                                  .get("status") in ("done", "skipped")))
     if mode == "respawned":
         res["auto_resumed"] = True
         hint = "runner respawned; the next transition wakes the owner automatically"
@@ -3274,7 +3311,10 @@ def act_steer(args):
                     f"into the next spawn of {node['id']}")
     elif run_status == "held":
         delivery = f"queued; baked into the next spawn of {node['id']} when the held gate releases"
-    elif runner_alive(r):
+    elif runner_alive(r) is not False:
+        # #47 C1: True = verified live; None = probe could not answer — both read
+        # "there may be a runner" here (delivery wording only, never a spawn), so
+        # steering never claims a resume the probe did not prove dead.
         delivery = (f"queued; baked into the next spawn of {node['id']} — a running "
                     f"child's prompt is never rewritten")
     else:
@@ -3453,12 +3493,22 @@ def act_amend(args):
     with open(r / "events.jsonl", "a") as f:
         f.write(json.dumps({"ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
                             "event": "graph.amended"}) + "\n")
-    (r / "restart.request").write_text("1")
-    mode = _resume_after_action(r, consumed=lambda: not (r / "restart.request").exists())
-    if mode == "respawned":
-        applies = "runner respawned; efp replay-skip re-runs changed nodes and everything downstream"
+    _ra = runner_alive(r)
+    if _ra is True:
+        (r / "restart.request").write_text("1")
+        applies = "live runner hot-reloads at its next wave boundary; call wait (it will resume as needed)"
+    elif _ra is None:
+        # #47 C1: the probe could not answer — do NOT respawn (unknown is never
+        # free) and do NOT claim a hot-reload the probe could not verify either
+        # way. The amended graph is committed; wait resumes it once liveness is provable.
+        applies = ("amended; liveness could not be probed (probe failed) — no respawn "
+                   "issued; call wait, which refuses to spawn until liveness is proven")
     else:
-        applies = "live runner hot-reloads at its next wave boundary; the next transition wakes the owner automatically"
+        (r / "restart.request").write_text("1")
+        mode = _resume_after_action(r, consumed=lambda: not (r / "restart.request").exists())
+        applies = ("runner respawned; efp replay-skip re-runs changed nodes and everything downstream"
+                   if mode == "respawned" else
+                   "live runner hot-reloads at its next wave boundary; the next transition wakes the owner automatically")
     return {"ok": True, "models": _models, "routes": _routes, "applies": applies,
             "hint": "continuation is automatic; do not wait or poll" + _liveness_hint_suffix(_liveness_notes), **preview}
 
@@ -3470,10 +3520,18 @@ def act_stop(args):
     if st and st["status"] in ("done", "failed", "stopped"):
         return {"ok": True, "already": st["status"]}
     (r / "stop.request").write_text(datetime.now(timezone.utc).isoformat(timespec="seconds"))
-    mode = _resume_after_action(r, consumed=lambda: not (r / "stop.request").exists())
-    if mode == "respawned":
-        return {"ok": True, "note": "runner spawned to consume the stop marker"}
-    return {"ok": True, "note": "stop recorded; the live runner consumes it at its next boundary"}
+    _ra = runner_alive(r)
+    if _ra is None:
+        # #47 C1: the probe could not answer — never spawn on unknown (the runner
+        # may be alive right now; the admission flock is the backstop, not the plan).
+        # The marker is on disk: whoever proves liveness next consumes it.
+        return {"ok": True, "note": "stop requested; liveness probe could not answer — "
+                                    "marker left for the runner (or a proven-dead resume); call wait"}
+    if _ra is False:
+        mode = _resume_after_action(r, consumed=lambda: not (r / "stop.request").exists())
+        if mode == "respawned":
+            return {"ok": True, "note": "was idle — runner spawned just to honour the stop"}
+    return {"ok": True, "note": "stop lands at the next boundary; in-flight children are killed"}
 
 def act_release_lock(args):
     """#44 escape hatch passthrough: the verdict lives in wfcommon.release_lock_verdict
@@ -3488,30 +3546,60 @@ def act_list(_args):
     legacy = _common.launch_runs_root()
     if legacy != roots[0]:
         roots.append(legacy)   # pre-fix runs under the launch root stay listed
-    runs, seen = [], set()
+    # #47 review C2 (fork-cheap law): ONE batched probe child per list call, never
+    # one flock child per run (the 50-run list was 50 forks, ~300 ms idle, worst
+    # case 50 x timeout = past the tool deadline). Pass 1 is fork-free (pid law +
+    # file reads); only runs that could display live/interrupted and whose pid law
+    # says dead NEED the kernel verdict — they are probed in ONE child. A candidate
+    # beyond the hard budget reads UNKNOWN, never free (C1: absence of a probe is
+    # not evidence of death).
+    entries = []          # (run_dir, run_state-with-cheap-pass) in listing order
+    seen = set()
     dispatched_by_set = 0
     # est-2ek.1.762 census hygiene: enumerate through wfcommon.iter_run_dirs —
     # unique by RUN-DIR NAME across every scanned root (symlinked/profile
     # roots multiply hits), never raw per-root iterdir.
-    scanned = _common.iter_run_dirs(roots, reverse=True)
-    for r in scanned:
-        st = run_state(r)
+    for r in _common.iter_run_dirs(roots, reverse=True):
+        st = _common.run_state(r, verdict=_common._SKIP_PROBE)
         if st and st["run_id"] not in seen:
             seen.add(st["run_id"])
-            row = {"run_id": st["run_id"], "name": st["name"], "status": st["status"],
-                   "gate": (st["held_gate"] or {}).get("id"),
-                   "nodes_done": st["done"], "nodes_skipped": st["skipped"], "nodes_total": st["total"],
-                   "runner_live": st.get("runner_live", False)}  # A2 one-read law
-            meta = jload(r / "run.json", {}) or {}
-            # #57 census fold (QM digest, #52 pinned vocab — no renames): one field read
-            # on the run.json this loop ALREADY loads (zero extra scans). Absent key or
-            # null = pre-identity run: counts toward total only.
-            if meta.get("dispatched_by"):
-                dispatched_by_set += 1
-            for key in ("lane_key", "team"):
-                if key in meta:
-                    row[key] = meta[key]
-            runs.append(row)
+            entries.append((r, st))
+    candidates = [r for r, st in entries[:50]
+                  if st["status"] in ("running", "pending", "interrupted", "held", "liveness-unknown")
+                  and st.get("runner_live") is False]   # kernel verdict could still flip this row
+    # (held included: a sibling-container parked runner is pid-invisible but the
+    # flock proves it — exactly the A1 shape; only the RENDERED page (runs[:50])
+    # is probed — fork-cheap law: probe at most what would display live-ish.)
+    budget = _common._LIST_PROBE_CANDIDATE_BUDGET
+    verdicts = {}
+    if candidates:
+        # ONE batch child for the whole call (chunked at _PROBE_CHUNK = one child
+        # per 64 candidates, budget below that): never one fork per run.
+        verdicts = _common.lock_probe_children(
+            [str(r / "runner.lock") for r in candidates[:budget]])
+    runs, cand_i = [], 0
+    for pos, (r, st) in enumerate(entries):
+        if pos < 50 and st["status"] in ("running", "pending", "interrupted", "held", "liveness-unknown") \
+                and st.get("runner_live") is False:
+            if cand_i < budget:
+                st = _common.run_state(r, verdict=verdicts.get(str(r / "runner.lock"), "unknown"))
+            else:
+                st = _common.run_state(r, verdict="unknown")   # over budget: UNKNOWN, never free
+            cand_i += 1
+        row = {"run_id": st["run_id"], "name": st["name"], "status": st["status"],
+               "gate": (st["held_gate"] or {}).get("id"),
+               "nodes_done": st["done"], "nodes_skipped": st["skipped"], "nodes_total": st["total"],
+               "runner_live": st.get("runner_live")}  # A2 one-read law; #47 C1: tri-state (None ok)
+        meta = jload(r / "run.json", {}) or {}
+        # #57 census fold (QM digest, #52 pinned vocab — no renames): one field read
+        # on the run.json this loop ALREADY loads (zero extra scans). Absent key or
+        # null = pre-identity run: counts toward total only.
+        if meta.get("dispatched_by"):
+            dispatched_by_set += 1
+        for key in ("lane_key", "team"):
+            if key in meta:
+                row[key] = meta[key]
+        runs.append(row)
     out = {"runs": runs[:50], **_common.run_summary(runs)}
     # est-2ek.1.280: an EMPTY scan is the silent case the multi-profile papercut
     # burned 10h on (profile-scoped tool writes profiles/<p>/workflows while the
