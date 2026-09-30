@@ -18,11 +18,15 @@ No other clause needed correction.
 > of the originating session and gateway; disabling the plugin does not stop an
 > already-running process."
 
-- Verified: the door spawns `subprocess.Popen([sys.executable, wf.py, "run",
-  <run_id>], stdin=DEVNULL, start_new_session=True)` with the log file as
-  stdout/stderr — `__init__.py:144-150` (`_spawn_runner`). No plugin-disable
-  kill hook exists (`register()` registers only skill/tool/command —
-  `__init__.py:1255-1267`; `plugin.yaml` provides only `workflow`).
+- Verified (#8): the door spawns the runner DAEMONIZED through a transient
+  double-fork hop — `Popen([sys.executable, "-c", <hop>, wf.py, "run", <run_id>,
+  <ready_fd>], stdin=DEVNULL, start_new_session=True)`; the hop forks the real
+  `wf.py run` in its own session (`setsid`) and exits at once, so the runner
+  reparents to the subreaper/init before the tool call returns (`_spawn_runner`,
+  `_DAEMON_INTERMEDIATE`). The runner stamps its own `wf.pid` at flock admission
+  and announces it on the door's ready pipe; the door stamps only that observed
+  pid. No plugin-disable kill hook exists (`register()` registers only
+  skill/tool/command; `plugin.yaml` provides only `workflow`).
 - A run ends at a graph boundary (`held`/`done`/`failed`/`stopped`) or on
   `workflow stop`: the door writes `stop.request` (`__init__.py:1185-1192`),
   the runner's stop watcher consumes it and kills child process groups
