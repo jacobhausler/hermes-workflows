@@ -49,17 +49,23 @@ const { columnGroups: columnGroupsFn, bandRows: bandRowsFn } = new Function(
 // GraphView composes FanStack/ItemCard/NodeCard/Edges — instantiate all together.
 const { GraphView } = new Function(
   'jsx', 'jsxs', 'box', 'cn', 'Dot', 'Vitals', 'statusLabel', 'fmtDur', 'EDGE_TONE',
-  'useValue', 'useRef', 'useCardRects', 'Edges', 'EmptyState', 'NodeCard',
+  'useValue', 'useRef', 'useState', 'useCardRects', 'Edges', 'EmptyState', 'NodeCard',
   'fanItems', 'fanCounts', 'depthMap', '$selNode', '$fanItem', '$fanExpanded',
-  'useCanvasWidth', 'columnGroups', 'bandRows', 'CARD_W',
+  'useCanvasWidth', 'columnGroups', 'bandRows', 'CARD_W', 'NODE_TONE', 'edgeFlowPolicy',
   `${['depthMap', 'columnGroups', 'bandRows', 'FanStack', 'ItemCard', 'GraphView'].map(grab).join('\n')}\nreturn { GraphView }`
 )(jsx, jsxs, box, cn, 'Dot', 'Vitals', s => s || 'unknown', ms => (ms ? `${Math.round(ms / 1000)}s` : ''), EDGE_TONE,
-   useValue, () => ({ current: null }), () => ({}), 'Edges', 'EmptyState',
+   useValue, () => ({ current: null }), () => [null, () => {}], () => ({}), 'Edges', 'EmptyState',
    props => jsx('div', { 'data-node-stub': props.def.id }),
    fanItemsFn.fanItems, fanItemsFn.fanCounts,
    nodes => new Map(nodes.map(n => [n.id, (n.after || []).length ? 1 : 0])),
    $selNode, $fanItem, $fanExpanded,
-   () => 4000, columnGroupsFn, bandRowsFn, 168)
+   () => 4000, columnGroupsFn, bandRowsFn, 168,
+   // #48: FanStack reads the ONE tone table; derive NODE_TONE from the same
+   // stub palette (same shim pattern as test_canvas_wrap).
+   Object.fromEntries(Object.entries(EDGE_TONE).map(([k, v]) => [k, { color: v, borderColor: v, shadow: null, shadowHover: null, pulseMs: null, calm: true, ui: 'muted', gate: null, breathe: null }])),
+   // F5 (#48 deep review): FanStack now consumes the ONE exported flow policy —
+   // thread the REAL one from the source, not a second decision.
+   new Function(`${grab('edgeFlowPolicy')}\nreturn edgeFlowPolicy`)())
 
 const def = { id: 'f', after: ['prep'], fanout: { goal: 'g {index}', items: [{ id: 'a' }, { id: 'b' }, { id: 'c' }] } }
 const nodes = [{ id: 'prep' }, def]

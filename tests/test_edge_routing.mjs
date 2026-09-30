@@ -13,7 +13,7 @@ const grab = name => {
 let instance = 0
 const jsx = (type, props, key) => ({ type, props, key })
 const { Edges, depthMap } = new Function('jsx', 'jsxs', 'useId',
-  `const EDGE_TONE = { done:'teal', pending:'gray', failed:'red', running:'blue', held:'orange', skipped:'gray' };\n${['depthMap','graphLinks','edgePath','routeEdge','edgeTone','nodeState','Edges'].map(grab).join('\n')}\nreturn { Edges, depthMap }`)(jsx, jsx, () => `test-${++instance}`)
+  `const EDGE_TONE = { done:'teal', pending:'gray', failed:'red', running:'blue', held:'orange', skipped:'gray' };\nconst NODE_TONE = Object.fromEntries(Object.entries(EDGE_TONE).map(([k,v]) => [k, { color:v, borderColor:v, shadow:null, shadowHover:null, pulseMs:null, calm:true, ui:'muted', gate:null, breathe:null }]));\nNODE_TONE.waiting = NODE_TONE.pending;\n${['edgeFlowPolicy','depthMap','graphLinks','edgePath','routeEdge','edgeTone','nodeState','Edges'].map(grab).join('\n')}\nreturn { Edges, depthMap }`)(jsx, jsx, () => `test-${++instance}`)
 const nodes = [
   {id:'hub-a'}, {id:'hub-b'}, {id:'mac'},
   {id:'coverage', after:['hub-a']},
