@@ -37,6 +37,17 @@ def _coerce_graph(graph):
     return graph, None
 
 GRAPH_MAX_BYTES = 1024 * 1024
+
+def _inline_graph_size_error(graph):
+    """#62 F-1: the INLINE branch must cap exactly like the graph_path branch —
+    the SAME GRAPH_MAX_BYTES, measured on the serialized bytes, checked BEFORE any
+    write. One shared helper wired into _input_graph's inline branch, so submit,
+    save, run and amend all refuse an oversized graph (parity law; no second
+    validator, no new config). Error wording mirrors the graph_path branch."""
+    payload = json.dumps(graph, ensure_ascii=False)
+    if len(payload.encode("utf-8")) > GRAPH_MAX_BYTES:
+        return {"error": f"graph exceeds {GRAPH_MAX_BYTES} bytes"}
+    return None
 GRAPH_KEYS = {"name", "nodes", "description", "defaults", "model_policy",
               "provenance",   # 1.1 (RATIFY F5): opt-in library provenance block, door-written
               "grammar"}      # #32: dialect tag of a shared file ("wf/1"; absent = wf/1)
@@ -103,7 +114,16 @@ def _input_graph(args, *, run_id=False, library=False):
             return None, {"error": f"graph_path cannot be read as UTF-8 JSON: {e}"}
         return _coerce_graph(graph)
     if args.get("graph") is not None:
-        return _coerce_graph(args["graph"])
+        graph, bad = _coerce_graph(args["graph"])
+        if bad:
+            return None, bad
+        # #62 F-1: cap the INLINE branch exactly like the graph_path branch above,
+        # before any caller reaches a write (act_submit/act_save/act_run/act_amend
+        # all source through here).
+        bad = _inline_graph_size_error(graph)
+        if bad:
+            return None, bad
+        return graph, None
     return None, None
 
 def _validation_error(graph):

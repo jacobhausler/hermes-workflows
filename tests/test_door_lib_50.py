@@ -270,6 +270,71 @@ class DoorLib50(unittest.TestCase):
         bad = door.act_inbox({"kind": "junk"})
         self.assertIn("unknown inbox kind", bad.get("error", ""))
 
+    # ---------------- (5) F-1 (#62 review): inline graph size cap ----------------
+    # The graph_path branch enforces GRAPH_MAX_BYTES on the file's bytes; the INLINE
+    # branch must enforce the same cap on the serialized graph, BEFORE any write
+    # (adversary repro at c12269f: an ~11MB inline graph wrote a 12,309,225-byte
+    # inbox file — 11.7x over the cap). Parity law: submit, save (and run/amend,
+    # same shared _input_graph helper) all refuse; the refusing call writes NOTHING.
+
+    def _sized_graph(self, name, target_bytes):
+        """A validator-clean echo graph whose COMPACT serialization is exactly
+        target_bytes (ASCII padding is byte-for-byte in the dump, so the size is
+        computed, never guessed)."""
+        g = {"name": name, "nodes": [{"id": "e", "type": "echo", "output": {"pad": ""}}]}
+        base = len(json.dumps(g, ensure_ascii=False).encode("utf-8"))
+        g["nodes"][0]["output"]["pad"] = "p" * max(0, target_bytes - base)
+        return g
+
+    def assertCapError(self, res):
+        err = res.get("error", "")
+        self.assertIn("exceeds", err, res)
+        self.assertIn(str(door.GRAPH_MAX_BYTES), err, res)
+        self.assertNotIn("ok", res)
+        self.assertNotIn("saved", res)
+        self.assertNotIn("run_id", res)
+
+    def test_f1_oversized_inline_graph_submit_caps_and_writes_nothing(self):
+        # seed the inbox with one legitimate entry so the no-write proof is a diff
+        # against a non-empty listing, not a vacuous "dir still empty".
+        s0 = door.act_submit({"graph": G, "why_not_library": WHY})
+        self.assertTrue(s0.get("ok"), s0)
+        before = sorted(os.listdir(self.submit_dir()))
+        big = self._sized_graph("f1-big", door.GRAPH_MAX_BYTES + 4096)
+        self.assertCapError(door.act_submit({"graph": big, "why_not_library": WHY}))
+        self.assertEqual(sorted(os.listdir(self.submit_dir())), before)  # no-write proof
+
+    def test_f1_oversized_inline_graph_save_caps_and_writes_nothing(self):
+        s0 = door.act_save({"graph": G, "name": "seed"})
+        self.assertIn("saved", s0)
+        before = sorted(os.listdir(door.library_root()))
+        big = self._sized_graph("f1-huge", door.GRAPH_MAX_BYTES + 4096)
+        self.assertCapError(door.act_save({"graph": big, "name": "f1-huge"}))
+        self.assertEqual(sorted(os.listdir(door.library_root())), before)  # no-write proof
+        self.assertFalse((door.library_root() / "f1-huge.json").exists())
+
+    def test_f1_oversized_inline_graph_run_caps_and_creates_no_run_dir(self):
+        # parity law: the SAME helper guards every inline entry point, run included —
+        # no run directory may appear for a refused launch.
+        root = self.root
+        (root / "inbox").mkdir(parents=True, exist_ok=True)
+        before = sorted(os.listdir(root))
+        big = self._sized_graph("f1-run-big", door.GRAPH_MAX_BYTES + 4096)
+        self.assertCapError(door.act_run({"graph": big}))
+        self.assertEqual(sorted(os.listdir(root)), before)  # no-run-dir proof
+        self.assertEqual(self.spawns, [])
+
+    def test_f1_just_under_cap_inline_graph_succeeds(self):
+        # the cap must cap, not strangle: a graph whose serialized size sits just
+        # under GRAPH_MAX_BYTES still submits AND saves.
+        near = self._sized_graph("f1-near", door.GRAPH_MAX_BYTES - 1024)
+        s = door.act_submit({"graph": near, "why_not_library": WHY})
+        self.assertTrue(s.get("ok"), s)
+        self.assertTrue((self.submit_dir() / f"{s['submitted']}.json").is_file())
+        v = door.act_save({"graph": near, "name": "f1-near"})
+        self.assertIn("saved", v)
+        self.assertTrue((door.library_root() / "f1-near.json").is_file())
+
     # ---------------- (4) smart-defaults audit doc ----------------
 
     def test_smart_defaults_doc_section(self):
