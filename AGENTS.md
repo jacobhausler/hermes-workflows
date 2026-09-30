@@ -188,7 +188,10 @@ succeed, the rest are cancelled; without it the fan-out waits for every item;
 - A child silent for 120 s after spawn is killed as `early_death`; a child still writing its
   log when the wall fires gets one 50 % extension (`node.extended`), then dies.
 - A run with unfinished work and no live runner is `interrupted`. Inspect committed
-  outputs, then `wait` to resume — finished nodes replay-skip by fingerprint.
+  outputs, then `wait` to resume — finished nodes replay-skip by fingerprint. If the
+  liveness probe itself cannot answer the run reads `liveness-unknown` (`runner_live:
+  null`): never treated as dead, nothing spawns on it — `next` says `observe` until the
+  probe works again.
 - To change the graph mid-flight: `amend` with the **whole** replacement graph.
   `dry_run:true` previews `{added, removed, changed, will_rerun, unchanged}`.
   Amending a `pending` node changes what spawns next; amending a `done` node
@@ -225,7 +228,7 @@ subscription routes.
 
 | Path | Owns |
 |---|---|
-| `__init__.py` | The tool door: schema, action dispatch (`run/status/wait/release/steer/inbox/amend/stop/list/save/library`), model-tier resolution, preflight, compact/full payload shaping |
+| `__init__.py` | The tool door: schema, action dispatch (`run/status/wait/release/steer/inbox/amend/stop/list/save/library/release_lock`), model-tier resolution, preflight, compact/full payload shaping |
 | `wf.py` | The background runner: scheduling, child spawn (`-Q` contract), retry gate, typed error classification, steer baking, tier stamping |
 | `wfcommon.py` | The read model: run state, fingerprints (`efp`), node records, metrics join, liveness. Read-only over a run directory |
 | `dashboard/plugin_api.py` | Dashboard routes (API-only; the manifest hides the tab) |

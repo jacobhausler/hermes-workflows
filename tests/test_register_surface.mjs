@@ -166,6 +166,13 @@ assert.deepEqual(g.needsYou.map(r => r.id), ['i1', 'f1', 'h1'],
   'held+failed+interrupted under NEEDS YOU, updated desc')
 assert.deepEqual(g.running.map(r => r.id), ['p1', 'r1'], 'running+pending under RUNNING')
 assert.deepEqual(g.done.map(r => r.id), ['s1', 'd1'], 'done+stopped under DONE')
+// #47 C1: a probe-failed run ('liveness-unknown') is NOT dead — it must render
+// NEEDS REVIEW (NEEDS YOU bucket), never fall out of every bucket (vanishing run).
+const g2 = mod.groupRuns([mk('u1', 'liveness-unknown', 8), mk('r2', 'running', 9), mk('d2', 'done', 10)])
+assert.deepEqual(g2.needsYou.map(r => r.id), ['u1'],
+  'liveness-unknown lands in NEEDS YOU (never silently bucket-less)')
+assert.deepEqual([...g2.running, ...g2.done].map(r => r.id), ['r2', 'd2'],
+  'liveness-unknown is never counted RUNNING or DONE')
 
 // -- 4. SMIL candy: <animate> ONLY on paths leaving running nodes ----------------
 const grab = name => {
