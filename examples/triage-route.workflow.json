@@ -1,7 +1,7 @@
 {
   "grammar": "wf/1",
   "name": "triage-route",
-  "description": "Triage a work queue with one classifier node and the complementary two-gate branch pair: gates with negated `when` predicates and on_skip=prune route the run down exactly one arm (human escalation OR batch handling) and the dead arm's descendants never spawn. run_context seeds (ALL required): 'work_queue' = where the open items live (a file path, a command, or a URL your tools can read); 'action_target' = where routine actions are APPLIED (the ledger/ticket/file/CLI the rule's actions mutate — often the same place as work_queue, say so explicitly); 'decision_rule' = the owner's standing rule the classifier applies verbatim; 'owner_notify' = how a human is reached (a command, channel name, or file to write). ADAPTER CONTRACT for work_queue: the intake node must be able to enumerate open items from it with whatever read-only tools the receiver has; nothing here mutates your tracker — every write/escalate step is a node you can point at your real system. Seeds are plain text: a seed value containing { or } breaks fan-out re-rendering and the launch refuses.",
+  "description": "Triage a work queue with one classifier node and the complementary two-gate branch pair: gates with negated `when` predicates and on_skip=prune route the run down exactly one arm (human escalation OR batch handling) and the dead arm's descendants never spawn. run_context seeds (ALL required): 'work_queue' = where the open items live (a file path, a command, or a URL your tools can read); 'action_target' = where routine actions are APPLIED (the ledger/ticket/file/CLI the rule's actions mutate — often the same place as work_queue, say so explicitly); 'decision_rule' = the owner's standing rule the classifier applies verbatim; 'owner_notify' = how a human is reached (a command, channel name, or file to write). PRUNE LAW (safety-bearing, earned in a two-estate clean-run): an arm node is skipped only when ALL its `after` deps are skipped — adding the classifier to an arm node's `after` 'for convenience' resurrects the dead arm and runs BOTH arms (the batch fan-out executed while the human still held the urgent gate). Therefore each arm hangs ONLY on its route-* gate and pulls the classifier payload via an explicit `inputs:` ref. The fan-out's items_from head must sit in its own `after`, so batch-prep (arm-scoped, hangs only on route-batch, pulls classify via `inputs:`) forwards the routine set — never point an arm node's `after` at the classifier itself. ROUTE SEMANTICS: the pair selects ONE arm per run — when urgent wins, routine items are NOT executed this lap (they stay in your queue; the report lists them for the owner to re-route next lap). RELEASE LAW: 'act' must name what is authorized; a bare 'act' executes nothing (proven: handle-urgent refuses and surfaces it). ADAPTER CONTRACT for work_queue: the intake node must be able to enumerate open items from it with whatever read-only tools the receiver has; nothing here mutates your tracker — every write/escalate step is a node you can point at your real system. Seeds are plain text: a seed value containing { or } breaks fan-out re-rendering and the launch refuses.",
   "provenance": {
     "owner": "austin-exec",
     "source": "hermes-workflows/examples/triage-route.workflow.json"
@@ -121,6 +121,39 @@
       }
     },
     {
+      "id": "batch-prep",
+      "type": "agent",
+      "after": [
+        "route-batch"
+      ],
+      "inputs": [
+        "classify"
+      ],
+      "max_turns": 4,
+      "shape": "recon",
+      "goal": "Hand the routine set to the batch lanes. From the classify payload (## Inputs): if has_urgent is true, reply {\"routine\": [], \"skipped\": \"urgent arm active — belt on the prune law\"} and do nothing else.\nOtherwise re-emit the routine array VERBATIM (no re-classifying, no additions): {\"routine\": [<each {id, action} exactly as classify wrote it>], \"count\": <int>}\nThis node exists because the fan-out grammar requires its items_from head in the lane's own `after` — and an `after` edge to classify would resurrect this arm while the human holds the urgent gate (prune law: all deps must be skipped; a live classifier dep keeps the arm alive).",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "routine": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "count": {
+            "type": "integer"
+          },
+          "skipped": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "routine"
+        ]
+      }
+    },
+    {
       "id": "escalate",
       "type": "gate",
       "after": [
@@ -132,7 +165,7 @@
         "hold",
         "dismiss"
       ],
-      "context": "Urgent set and evidence are in the classify output above (## Inputs). Owner-escalation channel: {run.owner_notify}. Escalation means surfacing the item to a human, not silently acting on it."
+      "context": "Urgent set and evidence are in the classify output above (## Inputs). Owner-escalation channel: {run.owner_notify}. Escalation means surfacing the item to a human, not silently acting on it. Release law: 'act' must state WHAT is authorized (e.g. 'act: refund pw-101 up to $50') — a bare 'act' with no authorization is treated as not-approved by the executor."
     },
     {
       "id": "handle-urgent",
@@ -142,7 +175,7 @@
       ],
       "max_turns": 8,
       "shape": "build",
-      "goal": "The human answered the escalation gate with an option and reason (see ## Inputs from 'escalate'). If the released option is NOT 'act', do nothing to the items: reply {\"acted\": [], \"skipped\": \"not approved: <option>\"} and stop.\nIf it IS 'act': execute exactly what the human's release reason authorized for the urgent items (in the classify payload), nothing more. Record per item what was done and the evidence.\nReply with ONLY fenced json {\"acted\": [{\"id\": \"<id>\", \"action\": \"<what was done>\", \"evidence\": \"<command/output>\"}], \"skipped\": \"<reason or empty>\"}",
+      "goal": "The human answered the escalation gate with an option and reason (see ## Inputs from 'escalate'). If the released option is NOT 'act', do nothing to the items: reply {\"acted\": [], \"skipped\": \"not approved: <option>\"} and stop.\nIf it IS 'act': execute exactly and only what the human's release reason AUTHORIZED (named in the release text) for the urgent items (in the classify payload above / gate context). If the release says bare 'act' with no concrete authorization, execute nothing: reply {\"acted\": [], \"skipped\": \"'act' carried no authorization — owner must name what to do\"} and surface it. Record per item what was done and the evidence.\nReply with ONLY fenced json {\"acted\": [{\"id\": \"<id>\", \"action\": \"<what was done>\", \"evidence\": \"<command/output>\"}], \"skipped\": \"<reason or empty>\"}",
       "schema": {
         "type": "object",
         "properties": {
@@ -159,20 +192,18 @@
         "required": [
           "acted"
         ]
-      }
+      },
+      "inputs": [
+        "classify"
+      ]
     },
     {
       "id": "batch-run",
       "type": "agent",
       "after": [
-        "route-batch",
-        "classify"
+        "batch-prep"
       ],
       "max_turns": 10,
-      "fanout": {
-        "items_from": "classify.routine",
-        "goal": "Execute the rule's prescribed action for this routine item: {item}\nApply it at the action target: {run.action_target}\nWork only this item. If the action target does not exist or the item cannot be located in it, do NOT invent a target or write anywhere else: report action_taken as 'not applied: <why>' with your probe evidence.\nReply with ONLY fenced json {\"id\": \"<item id>\", \"action_taken\": \"<what was done, or 'not applied: <why>'>\", \"evidence\": \"<command/output establishing it>\"}"
-      },
       "schema": {
         "type": "object",
         "properties": {
@@ -190,6 +221,12 @@
           "id",
           "action_taken"
         ]
+      },
+      "shape": "build",
+      "goal": "Execute the rule's prescribed action for EACH routine item in the classify payload (## Inputs).\nApply actions at the action target: {run.action_target}\nIf the urgent arm is visible in inputs (has_urgent=true), do nothing and reply {\"items\": [], \"skipped\": \"urgent arm active\"} — belt-and-braces on the prune law.\nWork items one by one; an item whose target row cannot be located gets action_taken 'not applied: <why>' — never invent a target or write anywhere else.\nReply with ONLY fenced json {\"items\": [{\"id\": \"<item id>\", \"action_taken\": \"<what was done, or 'not applied: <why>'>\", \"evidence\": \"<command/output establishing it>\"}], \"count\": <int>}",
+      "fanout": {
+        "items_from": "batch-prep.routine",
+        "goal": "Execute the rule's prescribed action for this routine item: {item}\nApply it at the action target: {run.action_target}\nWork only this item. If the item's target row cannot be located in the action target, do NOT invent a target or write anywhere else: report action_taken as 'not applied: <why>' with your probe evidence.\nReply with ONLY fenced json {\"id\": \"<item id>\", \"action_taken\": \"<what was done, or 'not applied: <why>'>\", \"evidence\": \"<command/output establishing it>\"}"
       }
     },
     {

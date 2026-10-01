@@ -1,19 +1,26 @@
 {
   "template": "triage-route",
   "receipt_kind": "author-run",
+  "revision": "v3 (prune-law fix after haus-exec clean-run FAIL)",
   "author_estate": "austin-exec (homelab profile, devbox)",
   "graph_file": "examples/triage-route.workflow.json",
-  "graph_sha256": "734d71d30d62f23291eaac2515754b4454cd3804ea62b47e471b4204e67e2363",
-  "source_digest": "e33162f9b627b6a8e448b4e93e0798e7bc197455b6b36ec979d0a94ee17524e7",
-  "run_id": "20261001-000557-author-run-triage-route-",
-  "runs_root": "~/.hermes/profiles/homelab/workflows",
-  "runner_exit": {
-    "reason": "done",
-    "at": "2026-10-01T00:06:55+00:00",
-    "graph_fingerprint": "ef1f58647723ec7b"
-  },
-  "outcome": "batch arm: 8 nodes terminal \u2014 intake done, classify done (has_urgent=false), route-urgent gate SKIPPED with prune, escalate+handle-urgent pruned, route-batch done, batch-run fan-out 3/3 done with per-item evidence, report done. The complementary-branch idiom fired exactly once on the live arm.",
-  "branch_coverage_honesty": "the URGENT arm (escalate human gate + handle-urgent reading the gate answer as data) was NOT exercised by this run \u2014 the fixture had no urgent items and the prune branch was the one deliberately exercised. First real urgent use walks the other arm.",
-  "lap_history": "v1 run 20261001-000209 surfaced a real template gap (no 'action_target' seed for where routine actions apply \u2014 lanes refused to invent a write target, correctly); fixed in-file by adding the seed before this receipt. v2 verified all 3 fan-out items applied against the target with grep evidence.",
-  "notes": "Substitution proof: zero {run.*} in spawned prompts (graph materialized via door _bind_run_context pre-launch)."
+  "graph_sha256": "291d4e8d6ed7d0bbbfbca71a37a0788372a4cc767b23e5d2282cf8dfcdef2d6f",
+  "source_digest": "52559c3cfb6ff966f4c282e8d956287e0f81f523d19b64f20ef52411d451ed31",
+  "runs": [
+    {
+      "run_id": "20261001-012845-urgent-arm-lap",
+      "arm": "urgent",
+      "runner_exit": "done 2026-10-01T01:30:11Z",
+      "proof": "has_urgent=true: route-batch SKIPPED prune; batch-prep AND batch-run node.skipped 'all deps pruned' - haus failure scenario REVERSED, zero batch lanes spawned, action-target ledger never created (ls urgent-ledger.md -> No such file). escalate gate held; bare 'act' release -> handle-urgent replied skipped: act carried no authorization. report lane=urgent."
+    },
+    {
+      "run_id": "20261001-013031-batch-regression-lap",
+      "arm": "batch",
+      "runner_exit": "done 2026-10-01T01:32:10Z",
+      "proof": "post-fix regression: route-urgent/escalate/handle-urgent skipped, batch-prep forwarded routine verbatim, fan-out 2/2 done with per-item evidence, report lane=batch."
+    }
+  ],
+  "root_cause": "LAW A: fanout.items_from head must be in the fan-out node's own after (validator). LAW B: prune_states skips a node only when ALL after deps are skipped. v2 satisfied A by adding classify to batch-run.after, so B never pruned the arm while classify stayed done (haus lap mutated a ledger mid human-gate-hold). v3: arm-scoped batch-prep hangs only on route-batch (prunes cleanly), pulls classify via inputs ref, re-emits routine verbatim as the fan-out head; escalate arm symmetric. Prune law + route semantics + release law stated in description.",
+  "lap_history": "v1 found the action_target gap; v2 passed the batch arm, FAILED haus's urgent arm; v3 walks BOTH arms live on this estate.",
+  "notes": "Engine collision filed as a sys bead (upstream fix candidate). The in-template mitigation is portable regardless of which upstream fix lands."
 }

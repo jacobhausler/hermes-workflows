@@ -171,7 +171,10 @@ validates but is not smoke-run (real lanes need your stack).
 queue-triage TEMPLATE (intake -> classifier -> complementary `when` gate pair
 with `on_skip: prune`, routing exactly one arm: human escalation with the gate
 answer consumed as data, or a rule-driven batch fan-out). The classifier emits a
-`has_urgent` boolean because the gate grammar cannot see array length.
+`has_urgent` boolean because the gate grammar cannot see array length, and each arm
+hangs ONLY on its route gate (prune law: a node skips when ALL its `after` deps
+skip — a shared classifier dep resurrects the dead arm); the fan-out head is an
+arm-scoped `batch-prep` forwarding the routine set, not the classifier itself.
 Author-run receipt:
 [receipts/triage-route/author-run.json](receipts/triage-route/author-run.json).
 
