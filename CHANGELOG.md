@@ -1,5 +1,30 @@
 # Changelog
 
+## Unreleased
+
+- #87 runner/validator (ledger e68544a37be37657, live repro fb-fix-2dd8de73): a
+  harvest-on-death `partial` no longer silently satisfies a plain after-edge.
+  A child that dies mid-work (cap/rc≠0 with a valid fenced answer) still commits
+  `partial` with its harvest (#4 law untouched), but releasing `verify`/`suite`
+  onto the incomplete candidate was the false-green class. Now: `dep_satisfied`
+  is STRICT for after-edges (partial satisfies only via the per-node opt-in
+  `after_partial: true`, agent/gate keys, bool only, echo rejected by name);
+  a pending agent/gate with a plain partial ancestor FAILS TYPED at the wave
+  boundary — `error_class:"precondition"`, `error: blocked_by_partial_ancestor:
+  <nid>`, ZERO spawns, never a hang (`deps_res` keeps partial RESOLVED so the
+  verdict always lands); `requires` gains provenance — a ref resolving from an
+  ancestor whose committed record carries `harvest` is UNMET
+  (`precondition unmet: <ancestor>.harvested`) without the opt-in, satisfied
+  with it. PRESERVED deliberately (#4): a node's OWN fanout partial-credit
+  merge still commits done; a LEAF partial still closes the run green with its
+  harvested output in the summary; golden-solo bytes unchanged. Read model
+  (`blocked_by`, `run_state.deps_ok`) mirrors the runner law.
+  Test: `tests/test_partial_block_87.py` (C1–C7: typed block + spawn-control,
+  opt-in release, leaf green, fanout merge regression guard, requires
+  provenance, validator grammar, gate same-law). Law-tightening update:
+  `tests/test_sprint101w2_B2-retry.py` #4a/#4-read-model rows encoded
+  partial-satisfies-downstream for an after-edge; they now pin the opt-in
+  (same ledger row e68544a37be37657).
 ## 1.1.2 — 2026-10-01
 
 Includes all 12 merged PRs after v1.1.1, in merge order. Author handles are verified from the merged PR records.
