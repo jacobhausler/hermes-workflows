@@ -78,6 +78,10 @@
       "max_turns": 8,
       "timeout": 600,
       "inputs": ["catalog.coverage_lanes", "probe_coverage.all_results"],
+      "schema": {
+        "type": "object",
+        "required": ["covered", "coverage_gaps", "verdict"]
+      },
       "goal": "You are the coverage synth: NO quorum was set on probe_coverage, so nothing was cancelled - but a barrier still loses items to honest failure, and silent loss is the crime. Under ## Inputs you have catalog.coverage_lanes (the MASTER SOURCE CATALOG - the full set of lanes declared for THIS barrier shape; the race shape has its own roster and is not yours to judge) and probe_coverage.all_results (every dispatched item WITH its status). For EACH declared lane decide answered vs gap: a lane counts as answered ONLY if some item in all_results has status done or partial AND its output.lane equals that lane name AND its output.obs is a real observation - an obs that announces the lane is offline, answers nothing, or otherwise self-declares non-answer (e.g. starts with 'LANE OFFLINE') is a gap, not an answer, whatever the item's status field says. A lane missing from all_results entirely is a gap. Never infer a lane answered because the NODE itself committed. Reply with ONLY fenced json {\"covered\": [<answered lane names>], \"coverage_gaps\": [<declared lane names with no committed answer>], \"verdict\": \"<one line: if coverage_gaps is non-empty it MUST start with 'COVERAGE GAP' and name every gapped lane; else 'all N declared lanes answered'>\"} and nothing else. Do not explore or verify beyond ## Inputs - judge only what is given, then answer once."
     },
     {
@@ -87,7 +91,12 @@
       "after_partial": true,
       "max_turns": 8,
       "timeout": 600,
-      "goal": "Report the folded contrast HONESTLY from the committed evidence under ## Inputs. From probe_race.all_results: list every dispatched lane and its terminal status - done lanes vs lanes cancelled at the quorum moment (quote each cancelled item's recorded cancel evidence); the node committed on quorum 2/3, so the race answer is an INCOMPLETE SET and must be stated as one - never claim the full roster was answered. From reconcile: copy its covered/coverage_gaps/verdict verbatim - the coverage shape pays latency to prove completeness, and a dead lane must read as a loud named gap, never as a quiet shrink of the roster. Reply with ONLY fenced json {\"quorum_shape\": {\"dispatched\": [\"host-kernel\", \"utc-clock\", \"sleep-marshal\"], \"done\": [<lane names>], \"cancelled_at_quorum\": [<lane names>]}, \"coverage_shape\": {\"covered\": [<lane names>], \"coverage_gaps\": [<lane names>], \"verdict\": \"<reconcile verdict verbatim>\"}, \"honest_statement\": \"<one paragraph stating BOTH incomplete sets exactly: which race lanes never answered and why (quorum cancel), and which coverage lanes are gaps and why (dead lane)>\"} and nothing else. Do not explore or verify beyond ## Inputs - report only what is given, then answer once."
+      "inputs": ["probe_race.all_results", "reconcile"],
+      "schema": {
+        "type": "object",
+        "required": ["quorum_shape", "coverage_shape", "honest_statement"]
+      },
+      "goal": "Report the folded contrast HONESTLY from the committed evidence under ## Inputs. From probe_race.all_results: first read the roster that was ACTUALLY dispatched from the all_results items (do not assume it); list every lane and its terminal status - done lanes vs lanes cancelled at the quorum moment (quote each cancelled item's recorded cancel evidence); the node committed on quorum 2/3, so the race answer is an INCOMPLETE SET and must be stated as one - never claim the full roster was answered. From reconcile: copy its covered/coverage_gaps/verdict verbatim - the coverage shape pays latency to prove completeness, and a dead lane must read as a loud named gap, never as a quiet shrink of the roster. Reply with ONLY fenced json {\"quorum_shape\": {\"dispatched\": [<lanes actually present in all_results>], \"done\": [<lane names>], \"cancelled_at_quorum\": [<lane names>]}, \"coverage_shape\": {\"covered\": [<lane names>], \"coverage_gaps\": [<lane names>], \"verdict\": \"<reconcile verdict verbatim>\"}, \"honest_statement\": \"<one paragraph stating BOTH incomplete sets exactly: which race lanes never answered and why (quorum cancel), and which coverage lanes are gaps and why (dead lane)>\"} and nothing else. Do not explore or verify beyond ## Inputs - report only what is given, then answer once."
     }
   ]
 }
