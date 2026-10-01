@@ -69,6 +69,8 @@ def native_engine(tmp):
     spec = importlib.util.spec_from_file_location('watch94door', ROOT / '__init__.py')
     door = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(door)
+    import wf_test_isolation as _iso71
+    _iso71.install(door)
     fake = tmp / 'fake_hermes.py'
     fake.write_text('''#!/usr/bin/env python3
 import json, os, pathlib, re, sys
