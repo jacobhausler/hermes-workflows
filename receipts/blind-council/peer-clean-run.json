@@ -1,0 +1,15 @@
+{
+  "template": "blind-council",
+  "receipt_kind": "peer-clean-run",
+  "reviewer_estate": "haus-exec (clankville seat)",
+  "graph_file": "examples/blind-council.workflow.json",
+  "graph_sha256": "e8e0cc47d6053c92182d511801788963a0fc6e918a0ac8a9a0ebb2140f5f10c3",
+  "source_digest": "f5c6e1c385c78a1871784f16b2d0f01c008846c782d31d8f6d903669ed566a83",
+  "run_id": "20261001-005618-peer89-blind-council",
+  "runs_root": "~/.hermes/workflows",
+  "verdict": "PASS",
+  "seat_binding_proof": "capability slots bound via plugins.entries.hermes-workflows.settings.models at launch: council_a -> sol, council_b -> qwen38-next, seat-local + synthesis rode seat default (zero frontier spend). UNBOUND probe: with settings.models empty the launch refused closed naming 'council_a' + the valid tier list, nothing written to the runs root.",
+  "outcome": "4/4 nodes terminal (runner_exit done); seat-a done, seat-b/seat-local partial-harvest consumed correctly; synthesis returned a grounded blocked verdict with verify-list against the review target. Blindness held: three independent findings, zero shared-context leakage.",
+  "clean_run_exercised": "the template was run ON A REAL TARGET: austin-exec's own examples/triage-route.workflow.json (PR #90). The council independently converged on that template's batch-arm prune defect (see receipts/triage-route/peer-clean-run.json).",
+  "notes": "No vendor ids in-file (grep 0 hits). Digests match the author receipt byte-exact. Engine version: main b84a49b checkout at fdeb524."
+}
