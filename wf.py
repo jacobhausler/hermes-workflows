@@ -16,6 +16,7 @@ downstream result stale — downstream nodes re-run or re-hold; unchanged chains
 """
 import json, os, re, signal, subprocess, sys, threading, time
 import fcntl
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
@@ -61,9 +62,11 @@ def _lane_gate(run, node, r):
         rp = Path(run) / rp
     dirty = []
     try:
-        p = subprocess.run(["git", "-C", str(rp), "status", "--porcelain",
-                            "--untracked-files=no"],
-                           capture_output=True, text=True, timeout=10)
+        # #61c: the runner's OWN probe goes through _aux_run so its pid is
+        # registered in _aux_pids while live — the orphan pool must never
+        # mistake a git garnish for an adopted escapee.
+        p = _aux_run(["git", "-C", str(rp), "status", "--porcelain",
+                      "--untracked-files=no"], timeout=10)
     except Exception:
         return r                          # git can't answer: fail open, never brick the run
     if p.returncode != 0:
@@ -745,8 +748,8 @@ def _resume_preamble(r):
                       # optional; the preamble (error_class, death tail, RESUME_LINE) is not.
     if cwd is not None and (cwd / ".git").exists():
         try:
-            gs = subprocess.run(["git", "status", "--short"], cwd=str(cwd), capture_output=True,
-                                text=True, timeout=10).stdout.strip()
+            gs = _aux_run(["git", "status", "--short"], cwd=str(cwd),
+                          timeout=10).stdout.strip()
             lines.append(f"git status --short of the child cwd ({cwd}):")
             lines.append(gs if gs else "(clean)")
         except Exception:
@@ -872,6 +875,7 @@ def _kill_adopted(pid):
 PROCREE_HOLD_S = 5.0         # drain window before the runner kills the stragglers
 PROCREE_KILL_PROOF_S = 15.0  # budget for proving SIGKILL took effect via /proc
 PROCREE_POLL_S = 0.25        # tree-walk cadence while a spawn is live
+PROCREE_TERM_GRACE_S = 1.0   # SIGTERM grace inside a quarantine before SIGKILL (#61c B3)
 
 def _tree_verdict_error(node_id, spawn_no, pid, live, out):
     """The exit-judged contract, spelled out in the failure itself (#61): a
@@ -937,6 +941,14 @@ def _account_tree(meta, node, index, spawn_no, pid, tree_seen, has_answer):
         if extra is None:
             return ("fail", _proc_unreadable_record(pid, node["id"], spawn_no))
         known |= {p for p in extra if _proc_alive(p)}
+    # #61c: the survivor registry — the ONLY channel that sees a FAST
+    # double-fork+setsid escapee (reparents to PPid=1 before the first watch
+    # sample, outside the pgid). A registered live pid is a descendant until
+    # /proc says otherwise; unreadable registry fails closed (#61b B2 family).
+    reg = _sidecar_live_registered(run, list(_spawn_tokens(meta, node, index)))
+    if reg is None:
+        return ("fail", _proc_unreadable_record(pid, node["id"], spawn_no))
+    known |= reg
     tracked |= known
     if not any(_proc_alive(p) for p in known):
         return None                              # dead-or-empty: verdict untouched
@@ -1024,12 +1036,20 @@ def _proc_snapshot():
         pid = int(d)
         if pid == os.getpid():
             continue
-        try:
-            stat = Path(f"/proc/{d}/stat").read_text()
-        except FileNotFoundError:
-            continue                                # pid vanished mid-pass: race, not denial
-        except OSError:
-            return None                             # row exists but unreadable: unknown
+        stat = None
+        for _attempt in (0, 1):                     # #61b B2: an unreadable
+            try:                                    # table is UNKNOWN — but a
+                stat = Path(f"/proc/{d}/stat").read_text()   # row that vanishes
+                break                               # mid-pass is honest absence,
+            except (FileNotFoundError, ProcessLookupError):  # never a fake verdict,
+                stat = None                         # and EAGAIN/EIO/EACCES get
+                break                               # one retry before fail-closed
+            except OSError:
+                if _attempt:
+                    return None                     # still unreadable: unknown
+                time.sleep(0.02)
+        if stat is None:
+            continue
         try:
             rest = stat.rsplit(")", 1)[1].split()   # comm may hold spaces/parens
             state_, ppid, pgid = rest[0], int(rest[1]), int(rest[2])
@@ -1088,6 +1108,381 @@ def _proctree_tracked(meta):
         tr = meta["_proctree_tracked"] = {}
     return tr
 
+# ---------- #61c: closing the fast double-fork blind spot (B2/B3) ----------
+# The poll-watch (0.25 s cadence) and the pgid walk share one hole: a child
+# that double-forks + setsid and exits BEFORE the runner's first poll sample
+# leaves a grandchild whose PPid is 1 and whose PGID belongs to a dead
+# intermediary — neither channel can attribute it. That is reviewer B2 (clean
+# done, zero tree_* keys, 5/5) and the reason the ladder respawned over prior
+# generations that nothing had ever counted (reviewer B3). Two channels close
+# it; both read ONLY /proc and the process environment — nothing a child says
+# is ever trusted:
+#  (a) subreaper adoption (PRIMARY, needs no child cooperation):
+#      PR_SET_CHILD_SUBREAPER on the runner makes every orphan in its subtree
+#      reparent to the RUNNER instead of init, so when the intermediary dies
+#      the escapee sits at PPid=<runner> until it dies — enumerable at
+#      judgment time with no race window at all;
+#  (b) the survivor registry (defense in depth + runner-restart ledger): the
+#      spawn seam pins (registry path, unique spawn token) into the child env;
+#      a detached descendant that follows the contract registers itself against
+#      the token at background time, fsync'd, before its long work. The token
+#      is inherited across double-fork+setsid, so a survivor still says which
+#      spawn it belongs to after PPid stops telling the truth.
+# Attribution of an adopted orphan uses the SAME token: /proc/PID/environ is
+# readable to a same-UID probe, and a foreign-UID probe that cannot read it
+# honestly loses only the token half (the registered rows still cover it).
+# The registry is not a trust surface: registered pids are judged ONLY by
+# /proc (_proc_alive), a stranger pid that outlived its honest owner just adds
+# one idempotent kill, and an unreadable table/registry stays fail-closed
+# (#61b B2 family). Where prctl is unavailable (macOS/BSD) the registry keeps
+# the duty; where neither channel applies the pre-#61 paths stay byte-identical.
+
+PR_SET_CHILD_SUBREAPER = 36
+SIDECAR_NAME = ".proctree_sidecar.jsonl"
+SIDECAR_ENV_PATH = "HERMES_WF_PROCTREE_SIDECAR"   # registry file, spawn-provided
+SIDECAR_ENV_SPAWN = "HERMES_WF_PROCTREE_SPAWN"    # unique spawn token, per Popen
+
+def _set_subreaper():
+    """Best-effort: make this process the subreaper of its subtree (orphaned
+    double-fork descendants reparent HERE, not to init). True when prctl
+    accepted it; False (never an error) when the syscall is unavailable — the
+    registry channel keeps its duty."""
+    try:
+        import ctypes
+        libc = ctypes.CDLL(None)
+        return libc.prctl(PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) == 0
+    except Exception:
+        return False
+
+_aux_lock = threading.Lock()
+_aux_pids = set()          # pids the RUNNER itself launched (git garnish, gate
+                          # checks): never escapees, never sweep targets.
+
+def _aux_run(cmd, timeout=None, **kw):
+    """subprocess.run-shaped helper for the runner's OWN auxiliary probes,
+    registered in _aux_pids while live so the orphan pool can tell a runner-
+    launched helper apart from an adopted escapee. Timeout semantics match
+    subprocess.run: the child is killed on timeout (communicate alone would
+    leave it live) and its output is still collected, so callers see the
+    same (returncode, stdout, stderr) triple."""
+    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                         text=True, **kw)
+    with _aux_lock:
+        _aux_pids.add(p.pid)
+    try:
+        try:
+            out, err = p.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            p.kill()                               # subprocess.run equivalence
+            out, err = p.communicate()
+        class _R:
+            returncode, stdout, stderr = p.returncode, out, err
+        return _R()
+    finally:
+        with _aux_lock:
+            _aux_pids.discard(p.pid)
+        for h in (p.stdout, p.stderr):
+            try: h.close()
+            except Exception: pass
+
+def _proc_envv(pid):
+    """/proc/PID/environ as a dict; {} when unreadable (absence loses only the
+    token half for that pid; liveness NEVER comes from here)."""
+    try:
+        raw = Path(f"/proc/{pid}/environ").read_bytes()
+    except OSError:
+        return {}
+    out = {}
+    for kv in raw.split(b"\0"):
+        if not kv:
+            continue
+        k, sep, v = kv.partition(b"=")
+        if sep:
+            out[k.decode("utf-8", "replace")] = v.decode("utf-8", "replace")
+    return out
+
+def _registered_child_pids(meta):
+    """Every pid the runner itself launched or attached: the _procs registry
+    (Popen handles and _AdoptedHandle stand-ins expose .pid)."""
+    mine = set()
+    with meta["_procs_lock"]:
+        for h in meta["_procs"].values():
+            pid = getattr(h, "pid", None)
+            if isinstance(pid, int):
+                mine.add(pid)
+    return mine
+
+def _runner_orphans(meta):
+    """Live pids whose PPid is THIS runner that the runner did not launch:
+    subreaper-adopted escapees — orphaned backgrounded work, the false-green
+    shape. Returns None when the table is UNREADABLE (#61b B2: unsafe, never
+    'clean')."""
+    snap = _proc_snapshot()
+    if snap is None:
+        return None
+    me = os.getpid()
+    with _aux_lock:
+        aux = set(_aux_pids)
+    mine = _registered_child_pids(meta)
+    return {pid for pid, (ppid, _pg) in snap.items()
+            if ppid == me and pid not in mine and pid not in aux}
+
+def _subtree_of(pid):
+    """Live descendants of `pid` (recursive ppid walk over a fresh snapshot);
+    None when unreadable (#61b B2)."""
+    snap = _proc_snapshot()
+    if snap is None:
+        return None
+    kids = {}
+    for p, (ppid, _pg) in snap.items():
+        kids.setdefault(ppid, []).append(p)
+    found, stack = set(), [pid]
+    while stack:
+        cur = stack.pop()
+        for c in kids.get(cur, ()):
+            if c not in found:
+                found.add(c)
+                stack.append(c)
+    return found
+
+def _reap_zombie(pid):
+    """best-effort waitpid for a runner-adopted orphan that died (zombie
+    hygiene; _proc_alive already counts Z as dead — this keeps the pool tidy)."""
+    try:
+        os.waitpid(pid, os.WNOHANG)
+    except (ChildProcessError, OSError):
+        pass
+
+def _wait_pids_dead(pids, proof_s):
+    """#61c: /proc-verify every pid is dead within the budget. (True, []) when
+    PROVEN dead; (False, still_live) on timeout — never True on an unreadable
+    read (#61b B2 law)."""
+    pids = sorted({p for p in pids if isinstance(p, int)})
+    if not pids:
+        return True, []
+    deadline = time.time() + proof_s
+    while True:
+        live = sorted(p for p in pids if _proc_alive(p))
+        if not live:
+            return True, []
+        if time.time() >= deadline:
+            return False, live
+        time.sleep(0.05)
+
+def _kill_pool(pids, hold_s, proof_s):
+    """SIGTERM (grace) -> SIGKILL fallback -> /proc re-walk for a scattered set
+    of pids, killed INDIVIDUALLY (their groups are unknown/foreign — killpg on
+    a stranger's group is forbidden). Returns (proof, still_live) on the same
+    contract as _tree_quiesce ('' dead-or-empty, 'dead' proven, 'stuck')."""
+    pids = sorted({p for p in pids if isinstance(p, int)})
+    if not pids:
+        return "", []
+    for p in pids:
+        try: os.kill(p, signal.SIGTERM)
+        except OSError: pass
+    gdead = time.time() + max(0.0, hold_s)
+    live = [p for p in pids if _proc_alive(p)]
+    while live and time.time() < gdead:
+        time.sleep(0.05)
+        live = [p for p in pids if _proc_alive(p)]
+    if live:
+        for p in live:
+            try: os.kill(p, signal.SIGKILL)
+            except OSError: pass
+    dead, still = _wait_pids_dead(pids, proof_s)
+    for p in pids:
+        _reap_zombie(p)
+    return ("dead", []) if dead else ("stuck", still)
+
+def _sweep_orphans(meta, reason):
+    """Kill+reap every runner-adopted orphan, /proc-proven, cascading: killing
+    an intermediary reparents ITS children to the subreaper, so re-enumerate
+    until the pool drains or the proof budget ends. The stop / runner-exit
+    seam: an orphan adopted under this runner dies with this runner, never
+    into the next generation."""
+    run = meta["_run"]
+    killed = []
+    first = _runner_orphans(meta)
+    if first is None or not first:
+        return []
+    for p in sorted(first):
+        try: os.kill(p, signal.SIGTERM)
+        except OSError: pass
+    gdead = time.time() + PROCREE_TERM_GRACE_S
+    while True:
+        live = _runner_orphans(meta)
+        if live is None or not live or time.time() >= gdead:
+            break
+        time.sleep(0.05)
+    hard = time.time() + _proctree_kill_proof_s(meta)
+    while True:
+        live = _runner_orphans(meta)
+        if live is None or not live:
+            break
+        for p in sorted(live):
+            if p not in killed:
+                killed.append(p)
+                try: os.kill(p, signal.SIGKILL)
+                except OSError: pass
+        for p in killed:
+            _reap_zombie(p)
+        if time.time() >= hard:
+            break
+        time.sleep(0.05)
+    remaining = _runner_orphans(meta) or set()
+    if killed:
+        log(run, "runner.orphan_sweep", pids=sorted(killed), reason=reason,
+            proof="dead" if not remaining else "stuck", stuck=sorted(remaining))
+    return killed
+
+def _sidecar_path(run):
+    return Path(run) / SIDECAR_NAME
+
+def _sidecar_read(run):
+    """[(pid, token)] for every registration row. A torn line (a writer
+    mid-append) is skipped — a row that never fully landed means the registrant
+    died before completing its duty; the /proc re-check at each probe decides.
+    A file that exists but cannot be READ raises OSError — the caller fails
+    closed (#61b B2 family), never reports 'no rows'."""
+    p = _sidecar_path(run)
+    if not p.exists():
+        return []
+    rows = []
+    for line in p.read_text(errors="replace").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rec = json.loads(line)
+            pid, tok = rec.get("pid"), rec.get("token")
+            if isinstance(pid, int) and pid > 0 and isinstance(tok, str) and tok:
+                rows.append((pid, tok))
+        except Exception:
+            continue
+    return rows
+
+def _sidecar_live_registered(run, tokens, meta=None):
+    """Everything the #61c channels ATTRIBUTE to the spawns carrying one of
+    `tokens` that /proc still shows ALIVE. Three channels, all judged by
+    /proc — the registry file alone is never trusted for liveness (a stale
+    line can only ever add one idempotent kill to a stranger pid, never a
+    resurrection of a dead one):
+      (1) registry rows whose token matches — the runner is the only writer
+          of the child-contract rows it honors, and a token is minted at the
+          spawn seam, so a rogue process cannot attribute anything to itself;
+      (2) subreaper-adopted orphans (PPid == this runner, not a registered
+          child, not an aux probe) whose inherited environment still carries
+          one of the tokens — the cooperation-FREE half: a fast
+          double-fork+setsid escapee lands HERE even if it never wrote a row
+          (reviewer B2: PPid=1/dead-PGID is invisible to watch AND pgid walk);
+      (3) the live subtree of every token-matched registered leader — one
+          registration SEEDS a whole detached family, not only its leader.
+    Attribution stays strictly token-keyed: rows/adoptees under a FOREIGN
+    token (another node/item) are never returned, so no kill crosses spawns.
+    Returns None when a required read is UNREADABLE — the caller fails closed
+    (unsafe, never 'clean'); returns set() when the registry is absent and
+    nothing was adopted (the healthy-spawn fast path, zero side effects)."""
+    wanted = {t for t in tokens if isinstance(t, str) and t}
+    try:
+        rows = _sidecar_read(run)
+    except OSError:
+        return None
+    known = {pid for pid, tok in rows if tok in wanted}
+    if wanted:
+        snap = _proc_snapshot()
+        if snap is None:
+            return None                              # #61b B2: unreadable
+        me = os.getpid()
+        mine = _registered_child_pids(meta) if meta is not None else set()
+        with _aux_lock:
+            aux = set(_aux_pids)
+        for pid, (ppid, _pg) in snap.items():
+            if ppid == me and pid not in mine and pid not in aux:
+                if _proc_envv(pid).get(SIDECAR_ENV_SPAWN) in wanted:
+                    known.add(pid)
+    for seed in list(known):                     # seeded families (token-matched only)
+        sub = _subtree_of(seed)
+        if sub is None:
+            return None                            # unreadable: fail closed
+        known |= sub
+    known.discard(os.getpid())
+    return {p for p in known if _proc_alive(p)}
+
+def _survivors(meta, tokens):
+    """#61c attribution join for this (node,index)'s token set — the same
+    three /proc-judged channels as _sidecar_live_registered (see there):
+    token-matched registry rows, subreaper-adopted token carriers, and the
+    live subtrees they seed. None = unreadable, fail closed upstream."""
+    return _sidecar_live_registered(meta["_run"], tokens, meta)
+
+def _spawn_tokens(meta, node, index):
+    """Every spawn token this (node,index) has ever launched, remembered across
+    the whole retry ladder: the spawn seam records each Popen's token and every
+    probe re-derives its attribution key set from it (a pid can be recycled; a
+    token cannot)."""
+    key = f"{node['id']}:{index}"
+    toks = meta.get("_spawn_tokens")
+    if toks is None:
+        toks = meta["_spawn_tokens"] = {}
+    return toks.setdefault(key, [])
+
+def _register_survivor(sidecar_path, token, pid):
+    """Append one fsync'd registry row — the documented CHILD-side contract,
+    called by a backgrounding descendant (the fake child here, and any real
+    child that opts in) BEFORE its long work. The runner never DEPENDS on it:
+    the subreaper channel is cooperation-free; this row is what lets a
+    survivor still be attributed after its runner dies."""
+    try:
+        with open(sidecar_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps({"pid": pid, "token": token}) + "\n")
+            f.flush()
+            os.fsync(f.fileno())
+        return True
+    except OSError:
+        return False
+
+def _register_self_if_detached():
+    """Child-side helper implementing the registration contract: a detached
+    descendant (double-fork + setsid: it forks AFTER import and execs nothing)
+    registers THIS pid against the inherited spawn token when its PPid no
+    longer carries that token (orphaned / setsid family). Bounded, never fatal.
+    Opportunistic by design — #61c never depends on child discipline."""
+    try:
+        path = os.environ.get(SIDECAR_ENV_PATH)
+        token = os.environ.get(SIDECAR_ENV_SPAWN)
+        if not path or not token:
+            return
+        try:
+            stat = Path(f"/proc/{os.getpid()}/stat").read_text()
+            my_ppid = int(stat.rsplit(")", 1)[1].split()[1])
+        except (OSError, IndexError, ValueError):
+            return
+        if my_ppid and _proc_envv(my_ppid).get(SIDECAR_ENV_SPAWN) == token:
+            return                               # still attached to our spawner
+        _register_survivor(path, token, os.getpid())
+    except Exception:
+        pass
+
+def _boot_sweep(meta):
+    """#61c: before a (re)spawned runner launches anything, reap the survivors
+    the runner it replaced left on the registry — the adoption-verification
+    twin of the old blind respawn. A registered survivor has no verified parent
+    and no reason to live; live ADOPTED children register nothing (only their
+    detached descendants do) and stay reachable through the adoption channel,
+    which verifies identity first. Fail-closed on unreadable: no sweep claim,
+    the per-node guards still fail closed at judgment."""
+    run = meta["_run"]
+    try:
+        rows = _sidecar_read(run)
+    except OSError:
+        return None                              # unreadable: per-node guards fail closed
+    pids = sorted({p for p, _ in rows})
+    if not pids:
+        return []
+    proof, stuck = _kill_pool(pids, PROCREE_TERM_GRACE_S, _proctree_kill_proof_s(meta))
+    log(run, "runner.boot_sweep", pids=pids, proof=proof, stuck=stuck)
+    return pids
+
 def _proc_unreadable_record(pid, node_id, spawn_no, r=None):
     """#61b B2: the typed fail-closed record for an UNREADABLE process table.
     A probe that cannot read /proc reports unsafe/unknown — never safe/empty
@@ -1108,12 +1503,14 @@ def _proc_unreadable_record(pid, node_id, spawn_no, r=None):
             rec[k] = r[k]
     return rec
 
-def _tree_quiesce(known, pgid, hold_s, proof_s):
+def _tree_quiesce(known, pgid, hold_s, proof_s, term_grace_s=None):
     """Make an attempt's process tree PROVABLY dead: hold briefly for a natural
-    drain, then SIGKILL the spawn's own group (the child is the group leader —
-    start_new_session at spawn) and every known descendant individually
-    (setsid detach escapees sit OUTSIDE the group — the 06f57ea9 shape), then
-    re-walk /proc until every pid is dead. Returns (proof, still_live):
+    drain, then SIGTERM the spawn's own group and every known pid (a polite
+    exit first — the B3 quarantine law), grant a grace window, SIGKILL anything
+    still alive, and re-walk /proc until every pid is dead. The killpg targets
+    the spawn's group (the child is the group leader — start_new_session at
+    spawn); known pids are killed INDIVIDUALLY because setsid detach escapees
+    sit OUTSIDE the group (the 06f57ea9 shape). Returns (proof, still_live):
     ('', []) when there was nothing to account for — the dead-or-empty case the
     healthy retry path must not touch; ('dead', []) once PROVEN; ('stuck', pids)
     when the proof budget ran out (fail closed upstream, never blind-respawn) —
@@ -1138,6 +1535,21 @@ def _tree_quiesce(known, pgid, hold_s, proof_s):
         if live is None:
             return "stuck", sorted(known)
     if live:
+        # SIGTERM first (B3 quarantine law): a polite exit gets a chance to
+        # flush; the SIGKILL below is the fallback, not the opener. ESRCH fine.
+        for p in live:
+            try: os.kill(p, signal.SIGTERM)
+            except OSError: pass
+        try: os.killpg(pgid, signal.SIGTERM)
+        except OSError: pass
+        grace = PROCREE_TERM_GRACE_S if term_grace_s is None else float(term_grace_s)
+        gdeadline = time.time() + grace
+        while live and time.time() < gdeadline:     # grace: let SIGTERM land
+            time.sleep(0.05)
+            live = _live()
+            if live is None:
+                return "stuck", sorted(known)
+    if live:
         try:
             os.killpg(pgid, signal.SIGKILL)         # dead group raises ESRCH — fine
         except OSError:
@@ -1159,14 +1571,19 @@ def _tree_quiesce(known, pgid, hold_s, proof_s):
 def _isolate_prior(meta, r, ev, ev_kw):
     """#61 quarantine law, run INSIDE both retry ladders before any respawn:
     attempt N+1 must NEVER share a worktree/workdir with still-live descendants
-    of attempt N. Proof = the prior spawn's recorded tree + a fresh pgid walk,
-    held, killed, re-walked to dead. Returns None when safe (dead-or-empty —
-    healthy retries keep their semantics untouched); returns a terminal
-    left_live_descendants record when death cannot be PROVEN — fail closed:
-    no blind re-spawn into a contaminated tree. A tracked pid's process GROUP
-    is re-walked too (#61b B1: membership survives reparenting, so an
-    overlap retry re-adopts escapees instead of under-counting), and an
-    unreadable /proc is unsafe, never empty (#61b B2)."""
+    of ANY prior generation. Proof = the prior spawn's recorded tree + the
+    tracked set + a fresh pgid walk + the #61c survivor registry, held, SIGTERM
+    (grace), SIGKILL, re-walked to dead — and the reap is RECORDED
+    (`respawn_reap`: pids, proof, prior_alive==[] verified). Returns None when
+    safe (dead-or-empty — healthy retries keep their semantics untouched);
+    returns a terminal left_live_descendants record when death cannot be
+    PROVEN — fail closed: no blind re-spawn into a contaminated tree. A tracked
+    pid's process GROUP is re-walked too (#61b B1: membership survives
+    reparenting, so an overlap retry re-adopts escapees instead of
+    under-counting), and an unreadable /proc is unsafe, never empty (#61b B2).
+    The registry (#61c) is what closes reviewer B3: generations the poll watch
+    never sampled (fast double-fork+setsid, PPid=1) are still listed and reaped
+    HERE, so no attempt may start while an earlier generation lives."""
     run = meta["_run"]
     pid = r.get("pid")
     if not isinstance(pid, int):
@@ -1187,6 +1604,14 @@ def _isolate_prior(meta, r, ev, ev_kw):
         if extra is None:
             return _proc_unreadable_record(pid, ev_kw.get("node"), r.get("spawn"), r)
         live = sorted(set(live) | {p for p in extra if _proc_alive(p)})
+    # #61c: prior GENERATIONS — every spawn this (node,index) ever launched is
+    # an attribution key into the survivor registry; their registered children
+    # join the quarantine even when no /proc channel ever saw them.
+    tokens = list(_spawn_tokens(meta, {"id": ev_kw.get("node")}, ev_kw.get("index")))
+    reg = _survivors(meta, tokens)
+    if reg is None:
+        return _proc_unreadable_record(pid, ev_kw.get("node"), r.get("spawn"), r)  # #61b B2 family
+    live = sorted(set(live) | reg)
     if not live:
         return None
     if tracked is not None:
@@ -1202,6 +1627,17 @@ def _isolate_prior(meta, r, ev, ev_kw):
                                  "attempt N+1 must never share a workdir with live "
                                  "attempt-N descendants: failing closed instead of "
                                  "re-spawning into a contaminated tree. ", r)
+    # the reap is RECORDED at the quarantine instant: what died, with what
+    # proof, and the verified empty slate the next attempt starts from.
+    rk = dict(ev_kw)
+    rk["pids"] = live
+    rk["proof"] = proof
+    rk["prior_alive"] = [p for p in live if _proc_alive(p)]   # must be [] — proven below
+    if rk["prior_alive"]:
+        return _left_live_record(pid, rk["prior_alive"],
+                                 "the quarantine reported dead yet /proc still lists live "
+                                 "prior-generation pids. ", r)
+    log(run, f"{ev}.respawn_reap", **rk)
     r["tree_descendants"] = list(live)
     r["tree_proof"] = "dead"
     return None
@@ -1222,7 +1658,14 @@ def _final_quiesce(meta, r, ev, ev_kw):
     own exit-judged partial), so an adopted child that outlived its own tree
     cannot commit clean. An already-failed record keeps its honest class.
     A cancelled death during `stop` keeps its honest class. An unreadable
-    /proc fails closed typed (#61b B2)."""
+    /proc fails closed typed (#61b B2). The third attribution channel is the
+    #61c survivor registry: registered survivors of every
+    spawn this (node,index) launched join the known set at the COMMIT instant,
+    so a clean `done` can never ride a commit while a registered pid still
+    lives — the tree proof (kill+reap, tree_proof=dead) rides the SAME commit
+    as the node completion, or the node does not commit clean (reviewer B2:
+    done with live descendants is a FAIL, and mechanically can no longer
+    happen)."""
     run = meta["_run"]
     pid = r.get("pid")
     if not isinstance(pid, int) or r.get("error_class") == "cancelled":
@@ -1243,6 +1686,12 @@ def _final_quiesce(meta, r, ev, ev_kw):
         if extra is None:
             return _proc_unreadable_record(pid, ev_kw.get("node"), r.get("spawn"), r)
         live = sorted(set(live) | {p for p in extra if _proc_alive(p)})
+    # #61c: registered survivors of ANY generation this (node,index) spawned.
+    tokens = list(_spawn_tokens(meta, {"id": ev_kw.get("node")}, ev_kw.get("index")))
+    reg = _survivors(meta, tokens)
+    if reg is None:
+        return _proc_unreadable_record(pid, ev_kw.get("node"), r.get("spawn"), r)  # #61b B2 family
+    live = sorted(set(live) | reg)
     if not live:
         return r
     if tracked is not None:
@@ -1453,6 +1902,14 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
               inputs="", index=None, resume_preamble=""):
     run = meta["_run"]
     spawn_no = _next_spawn_no(meta, node, index)
+    # #61c: the survivor-registry token for THIS spawn — unique per Popen (a
+    # pid can be recycled, a token cannot). A detached descendant registers
+    # itself against it (child-side helper reads these env pins, inherited
+    # across double-fork + setsid); every probe and the spawn guard below
+    # attribute registered pids through it. The token list is this
+    # (node,index)'s registry attribution key set across the whole ladder.
+    tokens = _spawn_tokens(meta, node, index)
+    token = f"{node['id']}:{index}:{spawn_no}:{uuid.uuid4().hex[:8]}"
     # #37: the machine preambles compose at the ONE spawn seam every path shares
     # (solo, fan-out item, transient retry, bounded resume): lane hygiene first
     # (build shape only, "" otherwise), then the resume preamble, then the goal.
@@ -1515,7 +1972,13 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
                HERMES_WF_STEER_NODE=str(node["id"]),
                HERMES_WF_STEER_SPAWN=str(spawn_no),
                HERMES_WF_RUN_ID=run.name,
-               HERMES_WF_RUN_DIR=str(run))   # 1.1 (RATIFY F1): absolute run dir; act_inbox prefers it
+               HERMES_WF_RUN_DIR=str(run),   # 1.1 (RATIFY F1): absolute run dir; act_inbox prefers it,
+               # #61c: survivor-registry pins (#61b B3/B2). SPREAD, not kwargs:
+               # kwargs spell the constant NAMES literally into the child env
+               # (SIDECAR_ENV_PATH=…) and the token-keyed adoption channel
+               # (which reads HERMES_WF_PROCTREE_*) would read nothing.
+               **{SIDECAR_ENV_PATH: str(_sidecar_path(run)),
+                  SIDECAR_ENV_SPAWN: token})
     # fb 625a3241: WORK_DIR_NOTE advertises wd as durable; under a safe root it must
     # also be writable. Append the child's OWN dir only; unset/'' = unrestricted in
     # core, so leave it exactly as inherited (setting it would newly restrict).
@@ -1551,6 +2014,43 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
                 return {"status": "failed", "error": f"profile gone: {node['profile']}",
                         "error_class": "spawn", "ms": 0, "spawn": spawn_no,
                         "attempts": 1, **route}
+            # #61c spawn guard: attempt N+1 may NOT start while ANY earlier
+            # generation of this (node,index) still has a live registered
+            # survivor — quarantine-reap them (SIGTERM grace -> SIGKILL ->
+            # /proc proof) and RECORD the reap before this Popen; an
+            # unprovable slate fails closed typed, never a blind spawn
+            # (reviewer B3: prior_alive must be [] at every attempt start).
+            pre = _sidecar_live_registered(run, tokens)
+            if pre is None:
+                logf.close()
+                return {**_proc_unreadable_record(0, node["id"], spawn_no),
+                        "ms": 0, "spawn": spawn_no, "attempts": 1, **route}
+            if pre:
+                for tp in sorted(pre):
+                    try: os.kill(tp, signal.SIGTERM)
+                    except OSError: pass
+                gdead = time.time() + PROCREE_TERM_GRACE_S
+                while any(_proc_alive(p) for p in pre) and time.time() < gdead:
+                    time.sleep(0.05)
+                for tp in sorted(pre):
+                    try: os.kill(tp, signal.SIGKILL)
+                    except OSError: pass
+                pdead, stuck = _wait_pids_dead(pre, _proctree_kill_proof_s(meta))
+                if not pdead:
+                    logf.close()
+                    rec = _left_live_record(0, stuck,
+                        "a respawn of this node may not start while prior-generation "
+                        "survivors of an earlier attempt are still live: ", {})
+                    rec["ms"] = 0
+                    rec["spawn"] = spawn_no
+                    log(run, ("item." if index is not None else "node.") + "tree_kill",
+                        node=node["id"], index=index, pids=sorted(pre), proof="stuck")
+                    return rec
+                log(run, ("item." if index is not None else "node.") + "respawn_reap",
+                    node=node["id"], index=index, pids=sorted(pre), proof="dead",
+                    prior_alive=[], spawn=spawn_no)
+            tokens.append(token)     # registered BEFORE Popen — a spawn that
+                                     # dies mid-launch still owns its survivors
             proc = subprocess.Popen(cmd, stdout=logf, stderr=subprocess.STDOUT,
                                     stdin=subprocess.DEVNULL, env=env, text=True,
                                     cwd=wd,
@@ -2508,8 +3008,7 @@ def park_gate(run, run_id, gate, byid, consume_markers):
                 return "released"
             attempt += 1
             try:
-                cp = subprocess.run(w["until_argv"], capture_output=True, text=True,
-                                    timeout=min(every, 300), cwd=str(run))
+                cp = _aux_run(w["until_argv"], timeout=min(every, 300), cwd=str(run))
                 last = {"last_exit": cp.returncode, "stdout_tail": cp.stdout[-400:], "stderr_tail": cp.stderr[-400:]}
             except subprocess.TimeoutExpired:
                 last = {"last_exit": None, "stdout_tail": "", "stderr_tail": f"check timed out after {min(every, 300)}s"}
@@ -2573,6 +3072,18 @@ def main(run_id):
     (run / "nodes").mkdir(exist_ok=True)
     (run / "gates").mkdir(exist_ok=True)
     acquire_lock(run)
+    # #61c: become the subreaper of this subtree FIRST — every orphan a child
+    # leaves behind (double-fork+setsid, PPid would otherwise go to 1) then
+    # reparents HERE, where _runner_orphans/_survivors can enumerate and kill
+    # it. Best-effort: False on macOS/BSD, where the registry channel keeps
+    # its duty and the pre-#61 paths stay byte-identical.
+    meta["_subreaper"] = _set_subreaper()
+    # #61c: before THIS runner spawns anything, reap every survivor a dead
+    # runner left registered — an interrupted run's stragglers must never
+    # outlive their runner into the next generation (reviewer B3: prior-
+    # generation pids alive at attempt 2/3).
+    meta["_run"] = run
+    _boot_sweep(meta)
     try: (run / "runner_exit.json").unlink()   # fresh verdict per runner process
     except OSError: pass
     _EXIT_WRITTEN[0] = False
@@ -2608,6 +3119,13 @@ def main(run_id):
                         except Exception:
                             try: p.kill()
                             except Exception: pass
+                # #61c: outside the lock (the sweep takes it via
+                # _registered_child_pids): killpg can't reach setsid escapees —
+                # the subreaper's orphan pool is the only net, and a stop that
+                # leaves escapees alive is not a stop. Daemon thread: blocking
+                # here to prove death is exactly the job.
+                try: _sweep_orphans(meta, "stop")
+                except Exception: pass
                 return
             time.sleep(2)
 
@@ -2643,6 +3161,13 @@ def main(run_id):
                     except Exception:
                         try: p.kill()
                         except Exception: pass
+            # #61c: the killpg sweep only reaches groups the runner launched.
+            # A double-fork+setsid escapee sits OUTSIDE every group we know —
+            # under the subreaper it is OURS (PPid=runner), so the orphan pool
+            # is the only net. An adopted orphan dies at stop, never into the
+            # next generation.
+            try: _sweep_orphans(meta, "stop")
+            except Exception: pass      # never mask the stop verdict
             try: (run / "stop.request").unlink()
             except OSError: pass
             log(run, "run.stopped")
@@ -2810,6 +3335,13 @@ def main(run_id):
     except BaseException as e:
         write_runner_exit(run, f"crashed: {type(e).__name__}: {e}", graph=exit_graph[0])
         raise
+    finally:
+        # #61c last-resort net (all three exits + crash): a runner-adopted
+        # orphan dies with its runner — done, blocked, stuck, crashed — never
+        # into the next generation, where the next boot sweep would pay for
+        # it. /proc-proven; the sweep logs runner.orphan_sweep when it kills.
+        try: _sweep_orphans(meta, "runner_exit")
+        except Exception: pass
     if reason is not None:
         write_runner_exit(run, reason, graph=exit_graph[0])
     return reason
