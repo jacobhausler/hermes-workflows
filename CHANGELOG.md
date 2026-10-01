@@ -2,21 +2,30 @@
 
 ## 1.1.2 — 2026-10-01
 
-Includes all 11 merged PRs after the previous release, in merge order. Contributor identities were verified from each merged PR; the repository author's GitHub login is redacted because it conflicts with the release-text scrub rule. No substitute handle is invented.
+Includes all 12 merged PRs after v1.1.1, in merge order. Author handles are verified from the merged PR records.
 
-- #39 — GitHub author: [login redacted]. Add build-lane hygiene prompts that forbid testing a base revision over a dirty worktree, plus read-only journal replay with `scripts/lane_recover.py` to recover unfinished lane edits.
-- #36 — GitHub author: [login redacted]. Add the standalone `wf_dialect.py` JavaScript workflow exporter and constrained-subset importer; unsupported constructs are refused by name and lossy exports disclose dropped semantics.
-- #45 — GitHub author: [login redacted]. Make the knowledge graph canonical: one node per ID and one edge per source/target/relation, deterministic clean regeneration, and idempotent repair instead of duplicate accumulation.
-- #60 — GitHub author: [login redacted]. Add `list` provenance counters by folding the run records already being read; unstamped installations retain the prior payload shape.
-- #46 — GitHub author: [login redacted]. Resolve owner-configured `runs_root` consistently across the tool, runner and dashboard, and support a validated owner-configured profile fallback when the launch environment has no profile identity.
+- #39 — @jacobhausler.
+  Add build-lane hygiene prompts that forbid testing a base revision over a dirty worktree, plus read-only journal replay with `scripts/lane_recover.py` to recover unfinished lane edits.
+- #36 — @jacobhausler.
+  Add the standalone `wf_dialect.py` JavaScript workflow exporter and constrained-subset importer; unsupported constructs are refused by name and lossy exports disclose dropped semantics.
+- #45 — @jacobhausler.
+  Make the knowledge graph canonical: one node per ID and one edge per source/target/relation, deterministic clean regeneration, and idempotent repair instead of duplicate accumulation.
+- #60 — @jacobhausler.
+  Add `list` provenance counters by folding the run records already being read; unstamped installations retain the prior payload shape.
+- #46 — @jacobhausler.
+  Resolve owner-configured `runs_root` consistently across the tool, runner and dashboard, and support a validated owner-configured profile fallback when the launch environment has no profile identity.
 - #69 — @atbrace (agent: pennyroyal). Reject JSON-encoded `run_context` maps and seed strings that would leave `{run.KEY}` placeholders unbound, before creating a run or spawning a runner.
-- #67 — GitHub author: [login redacted]. Validate string-typed goals, contexts, gate questions and fan-out goal templates at submission, including falsy and explicit-null values; reject non-JSON echo output without coercing valid values.
+- #67 — @jacobhausler.
+  Validate string-typed goals, contexts, gate questions and fan-out goal templates at submission, including falsy and explicit-null values; reject non-JSON echo output without coercing valid values.
 - #72 — @atbrace (agent: pennyroyal). Honor `run` with `dry_run:true` as a write-free static graph preflight returning resolved models and routes; it does not ping providers, inspect quota or prove route liveness.
-- #65 — GitHub author: [login redacted]. Polish desktop node tones, edge flow and run headers through shared presentation models, with terminal animations stopped and per-instance SVG markers isolated.
+- #65 — @jacobhausler.
+  Polish desktop node tones, edge flow and run headers through shared presentation models, with terminal animations stopped and per-instance SVG markers isolated.
 - #86 — @atbrace. Add a validated incident-response lifecycle template combining verdict branches, a machine recovery probe and human escalation; infrastructure-specific lanes require adaptation and are not smoke-run.
-- #64 — Hermes Agent; GitHub author: [login redacted]. Daemonize POSIX runner admission so caller-tree cleanup sweeps cannot reap the run, and make the admitted runner the sole writer of `wf.pid`. This addresses only the caller-tree portion of #8; enclosing service/cgroup survival, crash visibility and idempotence remain open.
+- #64 — Hermes Agent; @jacobhausler.
+  Daemonize POSIX runner admission so caller-tree cleanup sweeps cannot reap the run, and make the admitted runner the sole writer of `wf.pid`. This addresses only the caller-tree portion of #8; enclosing service/cgroup survival, crash visibility and idempotence remain open.
+- #68 — @atbrace. Validate gate `when` reference heads against the gate's direct/transitive `after` ancestry, matching the existing `inputs` and `fanout.items_from` rules. Sibling, ghost and self references are rejected at submission instead of silently skipping or holding a gate at fire time; valid ancestor references and parse-error reporting remain unchanged.
 
-## 2026-09-29 — previous patch release — runner correctness (cross-container liveness, ancestor gate answers), profile-home fix, lane-clean gate, portable files, pill rail
+## 1.1.1 — 2026-09-29 — runner correctness (cross-container liveness, ancestor gate answers), profile-home fix, lane-clean gate, portable files, pill rail
 
 Patch release: every merged PR since v1.1.0, in merge order. Solo default-profile runs stay byte-identical to 1.0.15 (golden-solo EMPTY diff re-run on this tree). Stdlib-only backend; desktop imports frozen to `@hermes/plugin-sdk`, `react`, `react/jsx-runtime`.
 
