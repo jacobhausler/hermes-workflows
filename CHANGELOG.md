@@ -50,9 +50,9 @@ and rides #80. The later CI-only workflow_dispatch commit (#99) changes no plugi
   clean parked/held exits write nothing.
   Test: `tests/test_silent_death_reaper_8.py`.
 
-## Previous release — 2026-10-01
+## 1.1.2 — 2026-10-01
 
-Includes all 12 merged PRs before this release, in merge order. Author handles are verified from the merged PR records.
+Includes all 12 merged PRs after v1.1.1, in merge order. Author handles are verified from the merged PR records.
 
 - #39 — @jacobhausler.
   Add build-lane hygiene prompts that forbid testing a base revision over a dirty worktree, plus read-only journal replay with `scripts/lane_recover.py` to recover unfinished lane edits.
