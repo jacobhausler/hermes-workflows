@@ -16,9 +16,15 @@
     {
       "id": "watch",
       "type": "gate",
-      "after": ["bootstrap"],
+      "after": [
+        "bootstrap"
+      ],
       "wait": {
-        "until_argv": ["/usr/bin/python3", "-c", "import pathlib,subprocess,sys; S=pathlib.Path('/tmp/machine-watch-example'); C=S/'check_cmd.txt'\ntry: cmd=C.read_text().strip()\nexcept OSError: sys.exit(2)\nrc=subprocess.run(cmd,shell=True).returncode\nS.joinpath('last_probe.json').write_text(str(rc))\nsys.exit(0 if rc==0 else 1)"],
+        "until_argv": [
+          "/usr/bin/python3",
+          "-c",
+          "import pathlib, subprocess, sys\nS=pathlib.Path('/tmp/machine-watch-example')\nC=S/'check_cmd.txt'\nB=S/'probe_broken'\nL=S/'last_probe.json'\ndef broken(why):\n    B.write_text(why+'\\n')\n    print('machine-watch probe broken: '+why, file=sys.stderr)\n    sys.exit(2)\ntry:\n    cmd=C.read_text().strip()\nexcept OSError as e:\n    broken('missing or unreadable handoff: '+str(e))\nif not cmd:\n    broken('empty check command')\ntry:\n    rc=subprocess.run(cmd, shell=True).returncode\nexcept OSError as e:\n    broken('adapter could not run: '+str(e))\nL.write_text(str(rc))\nif rc==0:\n    B.unlink(missing_ok=True)\n    sys.exit(0)\nif rc!=1:\n    broken('adapter exit '+str(rc))\nsys.exit(1)"
+        ],
         "every_s": 3,
         "timeout_s": 300
       }
@@ -26,7 +32,9 @@
     {
       "id": "report",
       "type": "agent",
-      "after": ["watch"],
+      "after": [
+        "watch"
+      ],
       "max_turns": 4,
       "goal": "The machine gate 'watch' released when the polled check exited 0 (its committed answer in ## Inputs carries attempt + waited_s + last_exit). Read /tmp/machine-watch-example/last_probe.json. For the watch named in the bootstrap payload, reply with ONLY fenced json {\"released\": true, \"attempts\": <int from the gate answer>, \"waited_s\": <int from the gate answer>, \"report\": \"<one line: watch_name cleared after N polls, last probe exit E>\"}"
     }
