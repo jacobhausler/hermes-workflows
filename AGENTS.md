@@ -187,7 +187,10 @@ validates but is not smoke-run (real lanes need your stack).
   the lane still had uncommitted TRACKED changes — the runner refuses the false hand-off and the
   record carries `lane_dirty` porcelain; commit in the lane, then amend/re-run re-drives the node.
 - A child that dies after printing a valid fenced answer (rc≠0, wall, cap) is committed as
-  `status: partial` with the death cause kept as `error_class`; downstream runs on it.
+  `status: partial` with the death cause kept as `error_class`; the harvest stays readable, but a
+  plain after-edge does NOT release onto it — the descendant fails typed `blocked_by_partial_ancestor`
+  unless it opts in with `after_partial: true` (leaf close-out and the node's own fanout partial-credit
+  merge are unaffected).
 - `transport | early_death | cap_exhausted | timeout` deaths with tool progress get ONE
   automatic re-drive with a machine resume preamble (`node.retry`); permfails never retry.
 - A child silent for 120 s after spawn is killed as `early_death`; a child still writing its
