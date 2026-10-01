@@ -1,18 +1,15 @@
 # Changelog
 
-## Unreleased
+## 1.1.3 — 2026-10-01
 
-- #82 — @atbrace (agent: pennyroyal). Crash-visibility for silent runner deaths
-  (#8 item 2): when a door RESPAWN path finds `wf.pid` dead with no valid
-  `runner_exit.json` verdict, it appends `runner.reaped` + one `node.interrupted`
-  per falsely-claimed running child (live children are adopted, never interrupted)
-  BEFORE replacing the runner, so a SIGKILLed run is never mistaken for liveness.
-  Read paths stay pure observers; node records are append-only; fresh launches and
-  clean parked/held exits write nothing.
-  Test: `tests/test_silent_death_reaper_8.py`.
+Three merged PRs since the previous tag, in merge order (#91 → #62 → #82).
+#88's 61c content is not on `main`: it stack-merged onto `fix/proc-tree-61b`
+and rides #80. The later CI-only workflow_dispatch commit (#99) and the examples-only
+incident-response fix (#93) change no plugin code.
 
-- #87 runner/validator (ledger e68544a37be37657, live repro fb-fix-2dd8de73): a
-  harvest-on-death `partial` no longer silently satisfies a plain after-edge.
+- #91 — @jacobhausler.
+  fix(runner,validator): a partial ancestor no longer releases plain after-edges (#87).
+  A harvest-on-death `partial` no longer silently satisfies a plain after-edge.
   A child that dies mid-work (cap/rc≠0 with a valid fenced answer) still commits
   `partial` with its harvest (#4 law untouched), but releasing `verify`/`suite`
   onto the incomplete candidate was the false-green class. Now: `dep_satisfied`
@@ -34,6 +31,26 @@
   `tests/test_sprint101w2_B2-retry.py` #4a/#4-read-model rows encoded
   partial-satisfies-downstream for an after-edge; they now pin the opt-in
   (same ledger row e68544a37be37657).
+
+- #62 — @jacobhausler.
+  feat(door): discovery-first library — rich list, submit-for-study inbox, fuzzy from= nudge (#50).
+  `list` rows carry rich metadata (description/triggers/tags/roles) so an agent
+  picks a proven graph instead of hand-rolling; the new `submit` action quarantines
+  hand-rolled graphs for the quartermaster's study loop (`why_not_library` ≥ 80
+  chars required, never joins the library), and `inbox` lists submissions newest-first.
+  The discovery-first law is stated in SKILL.md alongside the `after_partial` law.
+  Test: `tests/test_door_lib_50.py`, `tests/test_library.py`.
+
+- #82 — @atbrace (agent: pennyroyal).
+  fix(door): reap the silent runner death loudly before the respawn (#8 item 2).
+  Crash-visibility for silent runner deaths: when a door RESPAWN path finds `wf.pid` dead with no valid
+  `runner_exit.json` verdict, it appends `runner.reaped` + one `node.interrupted`
+  per falsely-claimed running child (live children are adopted, never interrupted)
+  BEFORE replacing the runner, so a SIGKILLed run is never mistaken for liveness.
+  Read paths stay pure observers; node records are append-only; fresh launches and
+  clean parked/held exits write nothing.
+  Test: `tests/test_silent_death_reaper_8.py`.
+
 ## 1.1.2 — 2026-10-01
 
 Includes all 12 merged PRs after v1.1.1, in merge order. Author handles are verified from the merged PR records.
