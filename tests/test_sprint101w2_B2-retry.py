@@ -102,9 +102,14 @@ check("#5 node.retry event logged with reason",
 check("#5 attempts counter reflects the re-drive", rec.get("attempts", 0) >= 2, str(rec.get("attempts")))
 
 # ---- #4a: child dies rc!=0 AFTER a valid fenced answer -> partial, downstream runs ----
+# e68544a37be37657 (law-tightening): the after-edge release law is now FAIL-CLOSED —
+# a plain after-edge is NOT satisfied by a harvest-on-death partial. The harvest still
+# flows when the descendant OPTS IN with after_partial:true, which is what #4's
+# downstream-runs-off-the-partial law now pins. The block itself is locked by
+# tests/test_partial_block_87.py.
 r = mk("b2-harvest", [{"id": "a", "type": "agent", "goal": "DIETEST b2-harvest", "schema": SCHEMA},
                       {"id": "b", "type": "agent", "goal": "DOWNSTREAM of a", "after": ["a"],
-                       "schema": SCHEMA}])
+                       "after_partial": True, "schema": SCHEMA}])
 out = wf("b2-harvest", {"FAKE_MODE": "die_after_json"})
 rec = rec_of(r, "a")
 check("#4 rc!=0 death with valid fenced answer commits partial",
@@ -133,11 +138,12 @@ check("#4 declared terminal status honored verbatim",
 check("#4 harvested partial not retried: no node.retry for it",
       not any(e.get("event") == "node.retry" for e in events(RUNS / "b2-harvest")))
 
-# ---- read-model: wfcommon agrees partial satisfies ----
+# ---- read-model: wfcommon agrees the opt-in satisfies on partial ----
 st = wfcommon.run_state(RUNS / "b2-harvest")
-check("#4 read model: partial node counts done + run done",
+check("#4 read model: partial node counts done + run done; opt-in satisfies, plain edge strict",
       st and st["nodes"]["a"]["status"] == "partial" and st["status"] == "done"
-      and wfcommon.dep_satisfied({"a": "partial"}, "a"))
+      and wfcommon.dep_satisfied({"a": "partial"}, "a", allow_partial=True)
+      and not wfcommon.dep_satisfied({"a": "partial"}, "a"))
 
 print("ALL PASS" if ok else "SOME FAILED")
 sys.exit(0 if ok else 1)

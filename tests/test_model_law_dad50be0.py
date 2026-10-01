@@ -13,6 +13,7 @@ sys.path.insert(0, str(ROOT))
 spec = importlib.util.spec_from_file_location("model_law_door", ROOT / "__init__.py")
 door = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(door)
+import wf_test_isolation as _iso71_door15; _iso71_door15.install(door)  # #71 r5: pin settings.runs_root alongside WF_RUNS_ROOT
 FAKE = str(ROOT / "tests" / "fake")
 
 
@@ -35,7 +36,7 @@ def graph(policy=None, fanout=False):
 with tempfile.TemporaryDirectory(prefix="model-law-") as td:
     home = Path(td)
     (home / "config.yaml").write_text("model:\n  default: safe\n  aliases:\n    opus: anthropic/forbidden-target\n  workflows_forbidden_models:\n    - banned-seat\n")
-    with patch.dict(os.environ, HERMES_HOME=td), patch.object(door, "_spawn_runner"):
+    with patch.dict(os.environ, HERMES_HOME=td, WF_RUNS_ROOT=str(Path(td) / "workflows")), patch.object(door, "_spawn_runner"):  # #71 shelf pin
         # This import is deliberately blocked: the stdlib YAML fallback must read lists.
         with patch.dict(sys.modules, {"hermes_cli.config": None}):
             check(door._seat_model_cfg().get("workflows_forbidden_models") == ["banned-seat"],
@@ -85,7 +86,7 @@ with tempfile.TemporaryDirectory(prefix="model-law-") as td:
         (run / "run.json").write_text(json.dumps({"name": "case", "hermes_bin": launcher,
                                                 "node_timeout": 20, "started": "2099-01-01T00:00:00+00:00"}))
         argv = home / (run.name + ".argv")
-        env = {**os.environ, "HERMES_HOME": td, "FAKE_LOG": str(home / "fake.log"),
+        env = {**os.environ, "HERMES_HOME": td, "WF_RUNS_ROOT": str(home / "workflows"), "FAKE_LOG": str(home / "fake.log"),  # #71 shelf pin
                "FAKE_ARGV_LOG": str(argv)}
         if row:
             env["FAKE_API_CALLS"] = "1"

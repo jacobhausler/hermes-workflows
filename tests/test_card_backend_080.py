@@ -19,6 +19,7 @@ sys.path.insert(0, "/opt/hermes")
 spec = importlib.util.spec_from_file_location("workflow_card_backend", ROOT / "__init__.py")
 wf = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(wf)
+import wf_test_isolation as _iso71_wf21; _iso71_wf21.install(wf)  # #71 r5: pin settings.runs_root alongside WF_RUNS_ROOT
 # Load the host's real stdlib-only ContextVars module without importing the
 # unrelated gateway configuration/dependency stack (minimal macOS test Python).
 gateway_spec = importlib.util.find_spec('gateway')
@@ -43,7 +44,9 @@ GRAPH = {"name": "card-backend", "nodes": [{"id": "one", "type": "agent", "goal"
 class CardBackend(unittest.TestCase):
     def setUp(self):
         self.home = tempfile.TemporaryDirectory(dir=ROOT)
-        self.env = patch.dict(os.environ, {"HERMES_HOME": self.home.name, "HERMES_SESSION_ID": "stale-process", "HERMES_WF_HERMES_BIN": "offline"})
+        # #71: HERMES_HOME alone loses to the context-local home override — pin
+        # the runs root too or these launches land on the shared estate shelf.
+        self.env = patch.dict(os.environ, {"HERMES_HOME": self.home.name, "WF_RUNS_ROOT": str(Path(self.home.name) / "workflows"), "HERMES_SESSION_ID": "stale-process", "HERMES_WF_HERMES_BIN": "offline"})
         self.env.start()
         self.spawn = patch.object(wf, "_spawn_runner")
         self.spawn.start()

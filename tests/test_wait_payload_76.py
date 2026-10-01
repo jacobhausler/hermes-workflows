@@ -13,12 +13,17 @@ sys.path.insert(0, str(ROOT))
 HOME = BUILD / "home76"
 if HOME.exists(): shutil.rmtree(HOME)
 HOME.mkdir(parents=True)
+# #71: HERMES_HOME alone does NOT sandbox the shelf — the context-local home
+# override outranks the env in lane processes; WF_RUNS_ROOT is checked first and
+# pins runs/library wherever the door resolves. Without it, saves pollute prod.
 os.environ["HERMES_HOME"] = str(HOME)
+os.environ["WF_RUNS_ROOT"] = str(HOME / "workflows")
 os.environ["HERMES_WF_HERMES_BIN"] = str(BUILD / "fake")
 env = dict(os.environ, HERMES_HOME=str(HOME), FAKE_LOG=str(BUILD / "fake76.log"))
 
 spec = importlib.util.spec_from_file_location("door76", ROOT / "__init__.py")
 door = importlib.util.module_from_spec(spec); spec.loader.exec_module(door)
+import wf_test_isolation as _iso71; _iso71.install(door)  # #71 r5: pin settings.runs_root alongside WF_RUNS_ROOT
 
 fails = 0
 def check(label, cond, detail=""):

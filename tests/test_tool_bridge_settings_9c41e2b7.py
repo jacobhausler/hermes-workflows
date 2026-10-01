@@ -84,6 +84,14 @@ if os.environ.get("TB_PROFILE_GATE"):
     out["gate"] = common.profile_errors(nodes, launcher=common.launcher_profile(),
                                         profiles_dir=common.profiles_root())
 out["schema_props"] = sorted(door.WORKFLOW_PARAMS["properties"])
+# Only this separate writer leg is pinned; the resolver-precedence probes above
+# intentionally use the untouched door and must continue to prove settings > env.
+if os.environ.get("TB_PIN_WRITER"):
+    iso_spec = importlib.util.spec_from_file_location("wf_test_isolation", ROOT / "tests" / "wf_test_isolation.py")
+    iso = importlib.util.module_from_spec(iso_spec); iso_spec.loader.exec_module(iso)
+    iso.install(door)
+    graph = {"name": "tb-pin", "nodes": [{"id": "n", "type": "agent", "goal": "go"}]}
+    out["pinned_save"] = json.loads(door.handle({"action": "save", "name": "tb-pin", "graph": graph}))
 print("@@" + json.dumps(out, default=str))
 '''
 
@@ -214,6 +222,16 @@ print("@@" + json.dumps({"before": before, "after": after}))
     home_c2 = TMP / "c-home-tail"; home_c2.mkdir()
     got = probe(home_c2, {}, mode="ctx", env={"WF_RUNS_ROOT": str(envroot)})
     check("(c) no setting: WF_RUNS_ROOT > HERMES_HOME/workflows (unchanged)", got["runs_root"] == str(envroot), got["runs_root"])
+    # A distinct writer child installs the resolver-level test pin. Unlike the
+    # unpinned (c) controls, its save must not touch settings.runs_root.
+    writer_home = TMP / "c-home-writer"; writer_home.mkdir()
+    writer_scratch = TMP / "c-writer-scratch"; writer_scratch.mkdir()
+    got = probe(writer_home, {"runs_root": str(shared)}, mode="raw",
+                env={"WF_RUNS_ROOT": str(writer_scratch), "TB_PIN_WRITER": "1"})
+    check("(c) pinned writer uses scratch despite owner setting",
+          got["pinned_save"].get("saved") == "tb-pin"
+          and (writer_scratch / "library" / "tb-pin.json").exists()
+          and not (shared / "library" / "tb-pin.json").exists(), got["pinned_save"])
 
     # ---- (d) relative runs_root -> fail-closed -----------------------------
     for mode in ("ctx", "raw"):

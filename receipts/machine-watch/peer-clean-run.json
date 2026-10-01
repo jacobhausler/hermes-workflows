@@ -1,0 +1,36 @@
+{
+  "template": "machine-watch",
+  "receipt_kind": "peer-clean-run",
+  "reviewer_estate": "independent peer execution seat",
+  "graph_file": "examples/machine-watch.workflow.json",
+  "graph_sha256": "66ac78e53a7e6a722ae373b40505e4f40a129ee43d9c372cfb2d07b0250cfef7",
+  "source_digest": "abbe5bd49fe9aec2ac729ddc26ba8f81608a1a31b512dcab4e27a5199ca49173",
+  "runs": [
+    {
+      "run_id": "20261001-022017-peer94-machine-watch",
+      "path": "release on exit 0",
+      "outcome": "bootstrap wrote check_cmd verbatim; gate parked at ZERO TOKENS (events.jsonl: exactly one node.started — bootstrap — while parked; last_probe.json mirrored attempts); released on flip-in flag at attempt 15; report: 'watch cleared after 15 polls, last probe exit 0'; run.done."
+    },
+    {
+      "run_id": "20261001-022305-peer94-timeout-probe",
+      "path": "timeout fails loudly",
+      "outcome": "check pointed at a never-existing flag (timeout shortened to 20s as a lap-policy copy): gate.wait_timeout attempt 5, run.blocked failed=[watch], runner_exit 'blocked by failed watch' — loud, no silent pass, no tokens burned in the interim."
+    },
+    {
+      "run_id": "20261001-022430-peer94-dedup",
+      "path": "lane_key double-fire dedup",
+      "outcome": "second act_run with identical lane_key 'austin-cr/peer94-dedup-test' returned {deduped: true, run_id: incumbent, state: running} — NO second spawn, incumbent id echoed back. Released on flag flip and finished run.done."
+    }
+  ],
+  "notes": "Strict mode respected. Scratch-root single-instance caveat is honestly stated in-file. Digests pinned to tested head 28edf63. The 'edit the file to retarget without touching the graph' idiom verified: timeout lap edited only check_cmd content path, node fingerprint unchanged (same until_argv def_hash across runs). Historic peer laps did not cover broken-probe identity, empty retarget, declared inputs, or completed-transition idempotency; corrective tests and code were added later.",
+  "tested_revision": "28edf6353ff61ed124efcede6da6238ed8282562",
+  "tested_graph_sha256": "251df837a7c0297863d7a141b2f7ad4170d9453bfeebf46da951b1e4275c2c01",
+  "tested_source_digest": "e71836981444f80f7d64d7ee3fdad9b5417c2f6c01a6503e429fa261059f3a19",
+  "restamped_revision": "105e65a22b6c55bdc5ad984627d5c646d903601b",
+  "revision_note": "Historic laps exercised the tested_revision bytes; current graph digests identify the shipped fixed template, not a claim that these laps were rerun on it. New regressions exercise the corrected bytes.",
+  "admission_note": "Historic limited-path PASS was superseded by review changes at the original head; this receipt is provenance, not a new unconditional acceptance.",
+  "historic_verdict": "PASS — every LAUNCH LAW claim exercised live, zero findings",
+  "source_comment_id": 5923503231,
+  "source_branch": "atbrace:core10/machine-watch-peerreceipt-austin",
+  "source_commit": "4a4798631281ee62fb498cc2991c24d304988a39"
+}

@@ -162,6 +162,15 @@ succeed, the rest are cancelled; without it the fan-out waits for every item;
 `wait:{"until_argv":[…],"every_s":60,"timeout_s":3600}`. Tested examples:
 [examples/approve-publish.json](examples/approve-publish.json),
 [examples/branch-on-verdict.json](examples/branch-on-verdict.json).
+[examples/machine-watch.workflow.json](examples/machine-watch.workflow.json) is a
+scheduled-watcher TEMPLATE (zero-token machine-gate poll, releases on exit 0;
+launch with `lane_key` so cron double-fire dedupes; timeout fails loudly for
+the next deduped dispatch). Validate + smoke-run tested.
+[examples/incident-response.json](examples/incident-response.json) is a full
+lifecycle TEMPLATE (alert-triggered incident: verdict-branch gate pair, machine
+recovery probe with human escalation, merge-gated close) meant to be adapted —
+its `run_context` seeds and the sweep-adapter contract are the swap points; it
+validates but is not smoke-run (real lanes need your stack).
 
 ### 3d. Failures, resume, amend
 
@@ -196,7 +205,10 @@ succeed, the rest are cancelled; without it the fan-out waits for every item;
   the lane still had uncommitted TRACKED changes — the runner refuses the false hand-off and the
   record carries `lane_dirty` porcelain; commit in the lane, then amend/re-run re-drives the node.
 - A child that dies after printing a valid fenced answer (rc≠0, wall, cap) is committed as
-  `status: partial` with the death cause kept as `error_class`; downstream runs on it.
+  `status: partial` with the death cause kept as `error_class`; the harvest stays readable, but a
+  plain after-edge does NOT release onto it — the descendant fails typed `blocked_by_partial_ancestor`
+  unless it opts in with `after_partial: true` (leaf close-out and the node's own fanout partial-credit
+  merge are unaffected).
 - `transport | early_death | cap_exhausted | timeout` deaths with tool progress get ONE
   automatic re-drive with a machine resume preamble (`node.retry`); permfails never retry.
 - A child silent for 120 s after spawn is killed as `early_death`; a child still writing its
@@ -207,10 +219,10 @@ succeed, the rest are cancelled; without it the fan-out waits for every item;
   `dry_run:true` previews `{added, removed, changed, will_rerun, unchanged}`.
   Amending a `pending` node changes what spawns next; amending a `done` node
   invalidates it.
-- To lint a graph before launching it: `run` with `dry_run:true` runs every
-  pre-launch gate (validate, bind, model resolve, route ping, quota, route
-  enforcement) and returns `{ok, dry_run, models, routes}` writing NOTHING —
-  no run dir, no lane entry, no runner.
+- To lint a graph before launching it: `run` with `dry_run:true` performs static
+  validation, binding, profile/model-policy checks and model resolution, then
+  returns `{ok, dry_run, models, routes}` writing NOTHING — no run dir, no lane
+  entry, no runner. It does not ping providers, inspect quota or enforce live routes.
 - To resume a lane that died at its wall with work already banked: amend its `goal`
   to a *resume* prompt that names what is already committed and forbids redoing it.
   Cold re-runs of a timed-out research lane time out again.

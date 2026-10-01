@@ -38,6 +38,7 @@ import wfcommon  # noqa: E402
 spec = importlib.util.spec_from_file_location("wf_door_59", ROOT / "__init__.py")
 door = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(door)
+import wf_test_isolation as _iso71; _iso71.install(door)  # #71 r5: pin settings.runs_root alongside WF_RUNS_ROOT
 
 ok = 0
 def check(cond, name):

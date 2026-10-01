@@ -25,8 +25,10 @@ let instance = 0
 const jsx = (type, props, key) => ({ type, props, key })
 const { depthMap, columnGroups, bandRows, Edges, CARD_W, MINI } = new Function(
   'jsx', 'jsxs', 'useId',
-  [constGrab('EDGE_TONE'), constGrab('CARD_W'), constGrab('MINI'),
-    grab('depthMap'), grab('columnGroups'), grab('bandRows'),
+  [constGrab('EDGE_TONE'),
+    `const NODE_TONE = Object.fromEntries(Object.entries(EDGE_TONE).map(([k,v]) => [k, { color:v, borderColor:v, shadow:null, shadowHover:null, pulseMs:null, calm:true, ui:'muted', gate:null, breathe:null }]));\nNODE_TONE.waiting = NODE_TONE.pending;`,
+    constGrab('CARD_W'), constGrab('MINI'),
+    grab('edgeFlowPolicy'), grab('depthMap'), grab('columnGroups'), grab('bandRows'),
     grab('edgeTone'), grab('nodeState'), grab('routeEdge'), grab('Edges')].join('\n')
   + '; return { depthMap, columnGroups, bandRows, Edges, CARD_W, MINI }'
 )(jsx, jsx, () => `t-${++instance}`)

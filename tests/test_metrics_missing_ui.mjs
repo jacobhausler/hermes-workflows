@@ -60,10 +60,11 @@ const { ItemChips } = new Function('jsx', 'jsxs', '$fanItem', 'Dot', 'EDGE_TONE'
 {
   const { columnGroups: cgM, bandRows: brM } = new Function(
     `${grab('columnGroups')}\n${grab('bandRows')}; return { columnGroups, bandRows }`)()
-  const { MiniGraph } = new Function('jsx', 'jsxs', 'useRef', 'useValue', '$fanOpen', 'Dot', 'EDGE_TONE', 'nodeState',
+  const { MiniGraph } = new Function('jsx', 'jsxs', 'useRef', 'useValue', '$fanOpen', 'Dot', 'EDGE_TONE', 'NODE_TONE', 'nodeState',
     'depthMap', 'useCardRects', 'Edges', 'MINI', 'useCanvasWidth', 'columnGroups', 'bandRows',
     `${grab('MiniGraph')}; return { MiniGraph }`)(
     jsx, jsxs, () => null, () => null, {}, 'Dot', EDGE_TONE,
+    Object.fromEntries(Object.entries(EDGE_TONE).map(([k, v]) => [k, { color: v, borderColor: v, shadow: null, shadowHover: null, pulseMs: null, calm: true, ui: 'muted', gate: null, breathe: null }])),
     (def, states) => states[def.id]?.status || 'pending',
     nodes => new Map(nodes.map(n => [n.id, 0])), () => ({}), 'Edges',
     { pillH: 20, pillW: 84, colGap: 34, rowGap: 6, pad: 4 },
@@ -104,13 +105,21 @@ const { ItemChips } = new Function('jsx', 'jsxs', '$fanItem', 'Dot', 'EDGE_TONE'
 // -- WorkflowsPage run header: detail WITHOUT a metrics row at all ------------
 {
   const detail = { id: 'r1', status: 'running', graph: { nodes: [{ id: 'a' }] }, nodes: { a: { status: 'running' } } }
+  // #48: the run header renders through runHeaderModel (the ONE tone table);
+  // build the real one with the same NODE_TONE shim pattern as test_canvas_wrap.
+  const EDGE_TONE_H = { done: 'D', failed: 'F', running: 'R', held: 'H', skipped: 'S', pending: 'P' }
+  const NODE_TONE_H = Object.fromEntries(Object.entries(EDGE_TONE_H).map(([k, v]) => [k, { color: v, borderColor: v, shadow: null, shadowHover: null, pulseMs: null, calm: true, ui: 'muted', gate: null, breathe: null }]))
+  const runHeaderModel = new Function('NODE_TONE', 'TERMINAL', 'parseTime', 'fmtDur',
+    `${grab('runHeaderModel')}; return runHeaderModel`)(
+    NODE_TONE_H, new Set(['done', 'failed', 'stopped']),
+    v => (typeof v === 'number' ? v : v ? Date.parse(v) || null : null), ms => `${Math.round(ms / 1000)}s`)
   const { WorkflowsPage } = new Function('useQuery', 'useValue', '$selRun', 'listQuery', 'runQuery', 'box', 'Dot', 'statusLabel',
-    'Vitals', 'Badge', 'GraphView', 'Drawer', 'Timeline', 'EmptyState', 'ScrollArea', 'RunRow', 'Fragment', 'jsx', 'jsxs',
+    'Vitals', 'Badge', 'GraphView', 'Drawer', 'Timeline', 'EmptyState', 'ScrollArea', 'RunRow', 'Fragment', 'jsx', 'jsxs', 'runHeaderModel', 'PolishStyles',
     `${grab('WorkflowsPage')}; return { WorkflowsPage }`)(
     q => (q.queryKey?.[2] === 'run' ? { data: detail } : { data: { runs: [{ id: 'r1', status: 'running' }] } }),
     () => null, { get() { return null }, set() {} }, () => ({ queryKey: ['x', 'runs'] }), id => ({ queryKey: ['x', 'run', id] }),
     (t, ...k) => jsx('div', { children: k }), 'Dot', s => s, 'Vitals', 'Badge', 'GraphView', 'Drawer', 'Timeline',
-    'EmptyState', 'ScrollArea', 'RunRow', 'Fragment', jsx, jsxs)
+    'EmptyState', 'ScrollArea', 'RunRow', 'Fragment', jsx, jsxs, runHeaderModel, 'PolishStyles')
   const nodes = walk(WorkflowsPage())
   assert.ok(!nodes.some(n => n.type === 'Vitals'), 'header shows no Vitals when run.metrics is absent')
   assert.ok(!texts(nodes).some(t => / live$/.test(t)), 'header shows no live count when metrics absent')

@@ -16,6 +16,7 @@ sys.path.insert(0, str(ROOT))
 spec = importlib.util.spec_from_file_location('lane_e_claim_door', ROOT/'__init__.py')
 door = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(door)
+import wf_test_isolation as _iso71_door18; _iso71_door18.install(door)  # #71 r5: pin settings.runs_root alongside WF_RUNS_ROOT
 
 class Claim(unittest.TestCase):
     def setUp(self):
@@ -29,6 +30,19 @@ class Claim(unittest.TestCase):
         self.graph = {'name':'claim-fixture','nodes':[{'id':'a','type':'agent','goal':'SLEEP 2'}]}
         self.graph_file = self.home/'graph.json'
         self.graph_file.write_text(json.dumps(self.graph))
+
+    def terminate_runner(self, run):
+        try:
+            pid = int((run/'wf.pid').read_text())
+            os.kill(pid, 9)
+        except (FileNotFoundError, ProcessLookupError):
+            return
+        # SIGKILL is asynchronous: don't delete a detached runner's files until
+        # it has released its ownership lock and can no longer recreate them.
+        deadline = time.monotonic() + 8
+        while door._common.runner_alive(run) and time.monotonic() < deadline:
+            time.sleep(0.01)
+        self.assertFalse(door._common.runner_alive(run), 'fixture runner did not exit')
 
     def claim(self):
         with patch.dict(os.environ,self.env,clear=True):
@@ -57,10 +71,7 @@ class Claim(unittest.TestCase):
                 for r in self.runs.iterdir():
                     if r.is_dir():
                         if r.name != 'lanes':
-                            try:
-                                pid = int((r/'wf.pid').read_text())
-                                os.kill(pid,9)
-                            except (FileNotFoundError,ProcessLookupError): pass
+                            self.terminate_runner(r)
                         shutil.rmtree(r)
 
     def test_two_claiming_processes_one_incumbent(self):
@@ -69,6 +80,10 @@ class Claim(unittest.TestCase):
 from pathlib import Path
 spec=importlib.util.spec_from_file_location('door',Path(sys.argv[1])/'__init__.py')
 m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
+# The -c child has no tests/ on sys.path: load the test-only pin by explicit path.
+iso_spec=importlib.util.spec_from_file_location('wf_test_isolation',Path(sys.argv[1])/'tests'/'wf_test_isolation.py')
+iso=importlib.util.module_from_spec(iso_spec);iso_spec.loader.exec_module(iso)
+iso.install(m)
 print(json.dumps(m.act_run({'graph':json.loads(Path(sys.argv[2]).read_text()),'lane_key':'claim/fixture'})))
 """
         p = [subprocess.Popen([sys.executable,'-c',script,str(ROOT),str(self.graph_file)],env=self.env,
@@ -82,8 +97,6 @@ print(json.dumps(m.act_run({'graph':json.loads(Path(sys.argv[2]).read_text()),'l
         self.assertEqual(sum(bool(x.get('deduped')) for x in answers),1,answers)
         runs = [r for r in self.runs.iterdir() if (r/'graph.json').exists()]
         self.assertEqual(len(runs),1,runs)
-        try:
-            pid=int((runs[0]/'wf.pid').read_text());os.kill(pid,9)
-        except (FileNotFoundError,ProcessLookupError):pass
+        self.terminate_runner(runs[0])
 
 if __name__ == '__main__': unittest.main()
