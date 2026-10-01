@@ -201,13 +201,25 @@ names = [e.get("event") for e in evs]
 # per-spawn marker: _steer_bake logs steer.baked exactly once per Popen.
 # The quarantine proof: EVERY non-final tree_kill is IMMEDIATELY followed by
 # the spawn marker it gates — the prior tree is dead before the next Popen.
+# #61c: the quarantine may first stamp node.respawn_reap (pids, proof=dead,
+# prior_alive==[] verified) — the recorded reap is the stronger form of the
+# same gate, so the admitted run after a kill is [respawn_reap ->] steer.baked.
 kills = [i for i, e in enumerate(evs)
          if e.get("event") == "node.tree_kill" and not e.get("final")]
 spawns = [i for i, e in enumerate(evs) if e.get("event") == "steer.baked"]
+reaps = [i for i, e in enumerate(evs) if e.get("event") == "node.respawn_reap"]
+def _gated(k):
+    nxt = evs[k + 1].get("event") if k + 1 < len(evs) else None
+    if nxt == "steer.baked":
+        return True
+    return (nxt == "node.respawn_reap"
+            and k + 2 < len(evs) and evs[k + 2].get("event") == "steer.baked"
+            and evs[k + 1].get("proof") == "dead" and evs[k + 1].get("prior_alive") == [])
 check("R-B tree_kill proves the prior tree dead before the next spawn",
       len(kills) == len(spawns) - 1 == 2
-      and all(evs[k + 1].get("event") == "steer.baked" for k in kills)
-      and all(evs[k].get("proof") == "dead" and evs[k].get("pids") for k in kills),
+      and all(_gated(k) for k in kills)
+      and all(evs[k].get("proof") == "dead" and evs[k].get("pids") for k in kills)
+      and all(i in [k + 1 for k in kills] for i in reaps),   # every reap is a quarantine stamp
       f"names={names}")
 gcs = gc_pids()
 check("R-B every prior descendant dead at run end", gcs and not any(alive(p) for p in gcs),
