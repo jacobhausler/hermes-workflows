@@ -8,7 +8,11 @@ from pathlib import Path
 BUILD = Path(os.environ.get("WF_TEST_BUILD") or Path(__file__).parent)
 HOME = BUILD / "home"
 RUNS = HOME / "workflows"
+# #71: HERMES_HOME alone does NOT sandbox the shelf — the context-local home
+# override outranks the env in lane processes; WF_RUNS_ROOT is checked first and
+# pins runs/library wherever the door resolves. Without it, saves pollute prod.
 os.environ["HERMES_HOME"] = str(HOME)
+os.environ["WF_RUNS_ROOT"] = str(HOME / "workflows")
 sys.path.insert(0, str(BUILD.parent))
 import wfcommon
 
@@ -41,6 +45,7 @@ def wf(run_id):
 import importlib.util
 _spec = importlib.util.spec_from_file_location("hw", BUILD.parent / "__init__.py")
 hw = importlib.util.module_from_spec(_spec); _spec.loader.exec_module(hw)
+import wf_test_isolation as _iso71; _iso71.install(hw)  # #71 r5: pin settings.runs_root alongside WF_RUNS_ROOT
 
 def call(**a):
     return json.loads(hw.handle(a))
@@ -115,6 +120,7 @@ check("R5 stop honored at held run", out.startswith("WORKFLOW_STOPPED r5"), out)
 import importlib.util
 spec = importlib.util.spec_from_file_location("hw", str(BUILD.parent / "__init__.py"))
 hw = importlib.util.module_from_spec(spec); spec.loader.exec_module(hw)
+import wf_test_isolation as _iso71; _iso71.install(hw)  # #71 r5: pin settings.runs_root alongside WF_RUNS_ROOT
 def call(**a):
     return json.loads(hw.handle(a))
 

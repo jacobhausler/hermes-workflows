@@ -10,10 +10,15 @@ from pathlib import Path
 BUILD = Path(__file__).parent
 HOME = BUILD / "home_run_binding"
 shutil.rmtree(HOME, ignore_errors=True)
+# #71: HERMES_HOME alone does NOT sandbox the shelf — the context-local home
+# override outranks the env in lane processes; WF_RUNS_ROOT is checked first and
+# pins runs/library wherever the door resolves. Without it, saves pollute prod.
 os.environ["HERMES_HOME"] = str(HOME)
+os.environ["WF_RUNS_ROOT"] = str(HOME / "workflows")
 spec = importlib.util.spec_from_file_location("binding_door", str(BUILD.parent / "__init__.py"))
 hw = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(hw)
+import wf_test_isolation as _iso71; _iso71.install(hw)  # #71 r5: pin settings.runs_root alongside WF_RUNS_ROOT
 spawns = []
 actual_spawn = hw._spawn_runner
 hw._spawn_runner = lambda r: spawns.append(r)

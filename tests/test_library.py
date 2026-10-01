@@ -7,10 +7,21 @@ from pathlib import Path
 BUILD = Path(os.environ.get("WF_TEST_BUILD") or Path(__file__).parent)
 HOME = BUILD / "home6"
 os.environ["HERMES_HOME"] = str(HOME)
+# #71 (r5-corrected): HERMES_HOME alone does NOT sandbox the shelf — a lane process
+# carries the context-local home override which outranks the env, so runs_root()/
+# library_root() resolve to the SHARED estate shelf. And WF_RUNS_ROOT only outranks
+# the home-derived DEFAULT — it does NOT outrank an owner-configured
+# plugins.entries.hermes-workflows.settings.runs_root, which wins first (resolver
+# precedence #42, owner design). That is why these tests pin BOTH: the env var AND,
+# via wf_test_isolation.install below, the plugin's settings.runs_root to the
+# identical scratch root. Set only one and these saves pollute production
+# (shelf-is-live law).
+os.environ["WF_RUNS_ROOT"] = str(HOME / "workflows")
 shutil.rmtree(HOME, ignore_errors=True)
 import importlib.util
 spec = importlib.util.spec_from_file_location("hw", str(BUILD.parent / "__init__.py"))
 hw = importlib.util.module_from_spec(spec); spec.loader.exec_module(hw)
+import wf_test_isolation as _iso71; _iso71.install(hw)  # #71 r5: pin settings.runs_root alongside WF_RUNS_ROOT
 FAKE = str(BUILD / "fake")
 os.environ["HERMES_WF_HERMES_BIN"] = FAKE
 ok = True
