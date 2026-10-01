@@ -1,8 +1,10 @@
 # Hermes Workflows
 
+![Version](https://img.shields.io/badge/version-1.1.2-blue)
+
 **Agent-owned workflow graphs for [Hermes Agent](https://github.com/NousResearch/hermes-agent).**
 Your agent authors a JSON graph of agent nodes, fan-outs and gates; a background
-runner executes it, survives restarts, and hands results back through the same
+runner executes it outside the caller process tree and hands results back through the same
 `workflow` tool it launched from. Hermes Desktop draws the live DAG.
 
 ![A nine-node review fleet: four parallel recon lanes, a synthesis node, two adversarial critics, a human gate, and a final sign-off — with the per-node timeline on the right](assets/dag-review.png)
@@ -94,8 +96,7 @@ Changes are gated by the serial suite (`python3 scripts/suite.py . ci-out`) and
 `hermes plugins validate .` — both run in [CI](.github/workflows/ci.yml).
 
 The repo ships a [graphify](https://github.com/Graphify-Labs/graphify) knowledge
-graph (`graphify-out/`, 1001 nodes / 1962 edges, deterministic AST — no LLM in the
-build). `graphify query "<question>"` returns a scoped subgraph instead of a grep
+graph (`graphify-out/`, deterministic AST — no LLM in the build). `graphify query "<question>"` returns a scoped subgraph instead of a grep
 dump; `graphify-out/GRAPH_REPORT.md` is the architecture overview. CI fails if the
 committed graph drifts from the tree.
 
