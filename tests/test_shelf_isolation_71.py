@@ -34,6 +34,8 @@ import hermes_constants as hc  # noqa: E402
 spec = importlib.util.spec_from_file_location("hw71", str(BUILD / "__init__.py"))
 door = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(door)
+import wf_test_isolation as _iso71
+_iso71.install(door)
 
 G = {"name": "shelf-pollution-probe", "nodes": [{"id": "a", "type": "agent", "goal": "go"}]}
 
@@ -140,6 +142,64 @@ with tempfile.TemporaryDirectory(prefix="shelf71b-") as td2:
         check("S4d resolved runs_root == env pin despite settings.runs_root",
               str(d_pin.runs_root()) == str(scratch.resolve())
               or str(d_pin.runs_root()) == str(scratch), str(d_pin.runs_root()))
+    finally:
+        hc.reset_hermes_home_override(token)
+        for k, v in saved_env.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+# ---- S5: execute the golden fixture's REAL save, not a token-presence audit. ----
+# Its patch.dict(clear=True) must not lift the env pin at the actual save;
+# otherwise the inherited core-home override's owner setting wins. Stop only
+# AFTER the save so the regression is quick and never launches a runner.
+with tempfile.TemporaryDirectory(prefix="shelf71-golden-") as td3:
+    sb = Path(td3)
+    canary = sb / "owner-canary"
+    canary.mkdir()
+    sentinel = canary / "sentinel.txt"
+    sentinel.write_bytes(b"owner canary: unchanged\n")
+    estate = sb / "estate"
+    profile = estate / "profiles" / "golden"
+    profile.mkdir(parents=True)
+    (estate / "config.yaml").write_text("")
+    (estate / ".env").write_text("")
+    (profile / "config.yaml").write_text(
+        "plugins:\n  entries:\n   hermes-workflows:\n    settings:\n"
+        f'     runs_root: "{canary}"\n')
+    baseline = {p.relative_to(canary).as_posix(): p.read_bytes()
+                for p in canary.rglob("*") if p.is_file()}
+    golden_spec = importlib.util.spec_from_file_location("shelf71_golden", HERE / "11-golden-solo.py")
+    golden = importlib.util.module_from_spec(golden_spec)
+    golden_spec.loader.exec_module(golden)
+    golden.SCENARIOS = {"legacy-ra-sample": golden.SCENARIOS["legacy-ra-sample"]}
+
+    class SavedGolden(Exception):
+        pass
+
+    observed = {}
+    def after_golden_save(scratch_runs):
+        observed["scratch_save"] = (scratch_runs / "library" / "ra-review-golden.json").exists()
+        observed["canary_files"] = {p.relative_to(canary).as_posix(): p.read_bytes()
+                                    for p in canary.rglob("*") if p.is_file()}
+        raise SavedGolden
+
+    saved_env = {k: os.environ.get(k) for k in ("WF_RUNS_ROOT", "HERMES_HOME")}
+    token = hc.set_hermes_home_override(profile)
+    try:
+        os.environ["WF_RUNS_ROOT"] = str(sb / "harness-pin")
+        os.environ["HERMES_HOME"] = str(sb / "decoy-home")
+        try:
+            golden.capture(BUILD, after_save=after_golden_save)
+        except SavedGolden:
+            pass
+        check("S5a actual golden save callback ran", bool(observed))
+        check("S5b golden save landed in its scratch runs root", observed.get("scratch_save"),
+              str(observed))
+        check("S5c owner canary gained no files and sentinel survived",
+              observed.get("canary_files") == baseline,
+              f"added: {sorted(set(observed.get('canary_files', {})) - set(baseline))}")
     finally:
         hc.reset_hermes_home_override(token)
         for k, v in saved_env.items():
