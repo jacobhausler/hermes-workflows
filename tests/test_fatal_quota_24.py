@@ -95,6 +95,7 @@ try:
     spec.loader.exec_module(door)
 except SystemExit:
     pass  # module-level guards; handler is what we need
+import wf_test_isolation as _iso71; _iso71.install(door)  # #71 r5: pin settings.runs_root alongside WF_RUNS_ROOT
 # TEST-SEATED: the A5 recovery ping must NEVER hit the real core from a test (an
 # answering default seat would "recover" the stamp and the refusal would vanish —
 # exactly the silent fallback-billing class this test exists to forbid). Recovery

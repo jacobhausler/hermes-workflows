@@ -10,6 +10,7 @@ spec = importlib.util.spec_from_file_location("authoring_door", BUILD / "__init_
 assert spec is not None and spec.loader is not None
 door = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(door)
+import wf_test_isolation as _iso71; _iso71.install(door)  # #71 r5: pin settings.runs_root alongside WF_RUNS_ROOT
 NODE = {"id": "task", "type": "agent", "goal": "Do work"}
 
 

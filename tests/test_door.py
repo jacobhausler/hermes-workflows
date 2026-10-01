@@ -13,6 +13,7 @@ os.environ["HERMES_WF_HERMES_BIN"] = str(BUILD / "fake")
 sys.path.insert(0, str(BUILD))          # import 'hermes-workflows' isn't identifier-safe -> load by path
 spec = importlib.util.spec_from_file_location("hw", BUILD.parent / "__init__.py")
 hw = importlib.util.module_from_spec(spec); spec.loader.exec_module(hw)
+import wf_test_isolation as _iso71; _iso71.install(hw)  # #71 r5: pin settings.runs_root alongside WF_RUNS_ROOT
 
 ok = True
 def check(label, cond, detail=""):

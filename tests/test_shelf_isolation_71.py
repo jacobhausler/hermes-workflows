@@ -85,7 +85,74 @@ with tempfile.TemporaryDirectory(prefix="shelf71-") as td:
             else:
                 os.environ[k] = v
 
-# ---- S3: static audit — in-process door writers must pin WF_RUNS_ROOT ----
+# ---- S4 (r5): the owner-root escape is machine law. With the estate config
+# carrying plugins.entries.hermes-workflows.settings.runs_root (which the resolver
+# checks BEFORE WF_RUNS_ROOT — owner design, unchanged), a door that pins only the
+# env var writes straight into the owner's canary while exiting 0. A properly
+# pinned door (wf_test_isolation.install → settings.runs_root resolves to the SAME
+# scratch root, context-locally) must leave the canary byte-for-byte EMPTY.
+with tempfile.TemporaryDirectory(prefix="shelf71b-") as td2:
+    sb = Path(td2)
+    canary = sb / "canary"                      # what the owner configured
+    scratch = sb / "scratch"                    # what the test pins
+    canary.mkdir(); scratch.mkdir()
+    estate = sb / "estate"; prof = estate / "profiles" / "s4"
+    prof.mkdir(parents=True)
+    (estate / "config.yaml").write_text("")     # estate-home markers
+    (estate / ".env").write_text("")
+    (prof / "config.yaml").write_text(
+        "plugins:\n  entries:\n   hermes-workflows:\n    settings:\n"
+        f"     runs_root: \"{canary}\"\n")
+
+    def fresh_door(tag):
+        s = importlib.util.spec_from_file_location(f"hw71_{tag}", str(BUILD / "__init__.py"))
+        m = importlib.util.module_from_spec(s)
+        s.loader.exec_module(m)
+        return m
+
+    saved_env = {k: os.environ.get(k) for k in ("WF_RUNS_ROOT", "HERMES_HOME")}
+    token = hc.set_hermes_home_override(prof)   # what a lane process carries
+    try:
+        os.environ["WF_RUNS_ROOT"] = str(scratch)
+        os.environ["HERMES_HOME"] = str(sb / "home")
+        # (a) positive control: the unpinned door IS escaped — env pin loses to the
+        # owner setting (r5 counter-probe baked in as a tripwire; if this ever
+        # FAILS, the resolver precedence changed and this whole section must be
+        # re-derived, not quietly deleted).
+        d_un = fresh_door("unpinned")
+        r = json.loads(d_un.handle({"action": "save", "graph": G, "name": "s4-leak"}))
+        check("S4a control: unpinned door leaks into the settings canary",
+              (canary / "library" / "s4-leak.json").exists()
+              and not (scratch / "library" / "s4-leak.json").exists(),
+              json.dumps(r))
+        # (b) machine law: the pinned door — ZERO files in the owner canary.
+        d_pin = fresh_door("pinned")
+        import wf_test_isolation as _iso71
+        _iso71.install(d_pin)
+        r = json.loads(d_pin.handle({"action": "save", "graph": G, "name": "s4-pinned"}))
+        check("S4b pinned save lands in the scratch root",
+              r.get("saved") == "s4-pinned"
+              and (scratch / "library" / "s4-pinned.json").exists(), json.dumps(r))
+        leaked = sorted(p.relative_to(canary).as_posix() for p in canary.rglob("*") if p.is_file())
+        check("S4c owner canary STAYS EMPTY under the pinned mechanism",
+              leaked == ["library/s4-leak.json"], f"canary: {leaked}")
+        # (c) the pinned door's own resolution proves the pin, not just the files
+        check("S4d resolved runs_root == env pin despite settings.runs_root",
+              str(d_pin.runs_root()) == str(scratch.resolve())
+              or str(d_pin.runs_root()) == str(scratch), str(d_pin.runs_root()))
+    finally:
+        hc.reset_hermes_home_override(token)
+        for k, v in saved_env.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+# ---- S3: static audit — in-process door writers must pin BOTH doors ----
+# WF_RUNS_ROOT alone is not a sandbox: the plugin's settings.runs_root (raw-read
+# from the estate profile's config.yaml when the door carries no ctx) outranks it
+# — so every writer must also neutralize/pin the settings path via
+# wf_test_isolation.install beside the env pin.
 import re
 pattern = re.compile(r"\b(\w+)\.(handle|act_save|act_run|act_delete|act_amend)\(")
 leakers = []
@@ -93,9 +160,9 @@ for p in sorted(HERE.glob("*.py")):
     if p.name == Path(__file__).name or p.name == "fake_hermes.py":
         continue
     t = p.read_text(encoding="utf-8", errors="replace")
-    if pattern.search(t) and "WF_RUNS_ROOT" not in t:
+    if pattern.search(t) and ("WF_RUNS_ROOT" not in t or "wf_test_isolation" not in t):
         leakers.append(p.name)
-check("S3 every in-process door writer pins WF_RUNS_ROOT", not leakers, f"leakers: {leakers}")
+check("S3 every in-process door writer pins WF_RUNS_ROOT + settings.runs_root", not leakers, f"leakers: {leakers}")
 
 print("ALL PASS" if ok else "FAILURES PRESENT")
 sys.exit(0 if ok else 1)

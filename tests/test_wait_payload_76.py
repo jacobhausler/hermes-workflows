@@ -23,6 +23,7 @@ env = dict(os.environ, HERMES_HOME=str(HOME), FAKE_LOG=str(BUILD / "fake76.log")
 
 spec = importlib.util.spec_from_file_location("door76", ROOT / "__init__.py")
 door = importlib.util.module_from_spec(spec); spec.loader.exec_module(door)
+import wf_test_isolation as _iso71; _iso71.install(door)  # #71 r5: pin settings.runs_root alongside WF_RUNS_ROOT
 
 fails = 0
 def check(label, cond, detail=""):

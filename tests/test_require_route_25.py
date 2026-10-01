@@ -36,6 +36,7 @@ sys.modules["agent"] = _fake_agent
 sys.modules["agent.retry_utils"] = _fake_ru
 
 door = importlib.import_module("__init__")
+import wf_test_isolation as _iso71; _iso71.install(door)  # #71 r5: pin settings.runs_root alongside WF_RUNS_ROOT
 door._CTX = None
 door._seat_model_cfg = lambda: {"default": "seat-default", "aliases": {}}
 door._seat_aliases = lambda: []

@@ -45,6 +45,7 @@ def wf(run_id):
 import importlib.util
 _spec = importlib.util.spec_from_file_location("hw", BUILD.parent / "__init__.py")
 hw = importlib.util.module_from_spec(_spec); _spec.loader.exec_module(hw)
+import wf_test_isolation as _iso71; _iso71.install(hw)  # #71 r5: pin settings.runs_root alongside WF_RUNS_ROOT
 
 def call(**a):
     return json.loads(hw.handle(a))
@@ -119,6 +120,7 @@ check("R5 stop honored at held run", out.startswith("WORKFLOW_STOPPED r5"), out)
 import importlib.util
 spec = importlib.util.spec_from_file_location("hw", str(BUILD.parent / "__init__.py"))
 hw = importlib.util.module_from_spec(spec); spec.loader.exec_module(hw)
+import wf_test_isolation as _iso71; _iso71.install(hw)  # #71 r5: pin settings.runs_root alongside WF_RUNS_ROOT
 def call(**a):
     return json.loads(hw.handle(a))
 

@@ -15,6 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location('integrated_workflow', ROOT / '__init__.py')
 wf = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(wf)
+import wf_test_isolation as _iso71_wf17; _iso71_wf17.install(wf)  # #71 r5: pin settings.runs_root alongside WF_RUNS_ROOT
 
 class Integrated(unittest.TestCase):
     def test_steer_roundtrip(self):

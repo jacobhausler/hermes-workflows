@@ -21,6 +21,7 @@ ALIASES = ("  aliases:\n    fable: anthropic/claude-fable-5.1\n    opus: anthrop
 (Path(tmp_dir.name) / "config.yaml").write_text("model:\n  default: qwen38-next\n" + ALIASES)
 spec = importlib.util.spec_from_file_location("door_rd", HERE / "__init__.py")
 door = importlib.util.module_from_spec(spec); spec.loader.exec_module(door)
+import wf_test_isolation as _iso71; _iso71.install(door)  # #71 r5: pin settings.runs_root alongside WF_RUNS_ROOT
 door._ping_route_once = lambda p, m: {"liveness": "unknown"}   # no network
 
 class Ctx:

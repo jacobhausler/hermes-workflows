@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location('wf_door_launcher_test', ROOT / '__init__.py')
 wf = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(wf)
+import wf_test_isolation as _iso71; _iso71.install(wf)  # #71 r5: pin settings.runs_root alongside WF_RUNS_ROOT
 
 graph = {'name': 'probe', 'nodes': [{'id': 'a', 'type': 'echo', 'output': 'ok'}]}
 result = json.loads(wf.handle({'action': 'run', 'graph': graph, 'hermes_bin': '/bin/false'}))

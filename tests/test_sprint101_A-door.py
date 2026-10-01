@@ -21,6 +21,7 @@ tmp = tmp_dir.name
 os.environ["HERMES_HOME"] = tmp
 os.environ["WF_RUNS_ROOT"] = str(Path(tmp) / "workflows")
 door = importlib.import_module("__init__")
+import wf_test_isolation as _iso71; _iso71.install(door)  # #71 r5: pin settings.runs_root alongside WF_RUNS_ROOT
 import wfcommon
 
 fails = 0

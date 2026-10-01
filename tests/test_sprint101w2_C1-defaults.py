@@ -53,6 +53,7 @@ os.environ["HERMES_HOME"] = str(HOME)
 os.environ["WF_RUNS_ROOT"] = str(HOME / "workflows")
 _spec = importlib.util.spec_from_file_location("hw_c1", BUILD.parent / "__init__.py")
 hw = importlib.util.module_from_spec(_spec); _spec.loader.exec_module(hw)
+import wf_test_isolation as _iso71; _iso71.install(hw)  # #71 r5: pin settings.runs_root alongside WF_RUNS_ROOT
 def call(**a):
     return json.loads(hw.handle(a))
 

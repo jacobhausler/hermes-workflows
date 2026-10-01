@@ -18,6 +18,7 @@ os.environ["HERMES_HOME"] = tmp
 os.environ["WF_RUNS_ROOT"] = str(Path(tmp) / "workflows")
 (Path(tmp) / "config.yaml").write_text("model:\n  default: seat-default\n  aliases:\n    fable: anthropic/x\n")
 door = importlib.import_module("__init__")
+import wf_test_isolation as _iso71; _iso71.install(door)  # #71 r5: pin settings.runs_root alongside WF_RUNS_ROOT
 
 fails = 0
 def check(label, cond, detail=""):

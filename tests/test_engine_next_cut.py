@@ -62,6 +62,7 @@ class EngineNextCut(unittest.TestCase):
         spec = importlib.util.spec_from_file_location("engine_next_door", ROOT / "__init__.py")
         door = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(door)
+        import wf_test_isolation as _iso71; _iso71.install(door)  # #71 r5: pin settings.runs_root alongside WF_RUNS_ROOT
         original = os.environ.get("HERMES_HOME")
         original_runs = os.environ.get("WF_RUNS_ROOT")
         os.environ["HERMES_HOME"] = str(self.home)

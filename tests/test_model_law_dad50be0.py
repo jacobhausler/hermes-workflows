@@ -13,6 +13,7 @@ sys.path.insert(0, str(ROOT))
 spec = importlib.util.spec_from_file_location("model_law_door", ROOT / "__init__.py")
 door = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(door)
+import wf_test_isolation as _iso71_door15; _iso71_door15.install(door)  # #71 r5: pin settings.runs_root alongside WF_RUNS_ROOT
 FAKE = str(ROOT / "tests" / "fake")
 
 

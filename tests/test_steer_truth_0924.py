@@ -23,6 +23,7 @@ os.environ["WF_RUNS_ROOT"] = str(BUILD / "home-68" / "workflows")
 sys.path.insert(0, str(ROOT))
 spec = importlib.util.spec_from_file_location("hw68", ROOT / "__init__.py")
 door = importlib.util.module_from_spec(spec); spec.loader.exec_module(door)
+import wf_test_isolation as _iso71; _iso71.install(door)  # #71 r5: pin settings.runs_root alongside WF_RUNS_ROOT
 import wfcommon  # same path re-imported; used only for the pure efp() fingerprint
 
 FAKE = str(BUILD / "fake")  # operator-configured launcher for the created runs

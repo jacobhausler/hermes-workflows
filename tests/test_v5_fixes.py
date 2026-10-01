@@ -90,6 +90,7 @@ except Exception as e:
 # door: status + list must not raise
 spec = ilu.spec_from_file_location("hw", str(BUILD.parent / "__init__.py"))
 hw = ilu.module_from_spec(spec); spec.loader.exec_module(hw)
+import wf_test_isolation as _iso71; _iso71.install(hw)  # #71 r5: pin settings.runs_root alongside WF_RUNS_ROOT
 try:
     s = json.loads(hw.handle({"action": "status", "run_id": "s1b"}))
     l = json.loads(hw.handle({"action": "list"}))

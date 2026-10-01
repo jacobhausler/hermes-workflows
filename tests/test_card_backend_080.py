@@ -19,6 +19,7 @@ sys.path.insert(0, "/opt/hermes")
 spec = importlib.util.spec_from_file_location("workflow_card_backend", ROOT / "__init__.py")
 wf = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(wf)
+import wf_test_isolation as _iso71_wf21; _iso71_wf21.install(wf)  # #71 r5: pin settings.runs_root alongside WF_RUNS_ROOT
 # Load the host's real stdlib-only ContextVars module without importing the
 # unrelated gateway configuration/dependency stack (minimal macOS test Python).
 gateway_spec = importlib.util.find_spec('gateway')

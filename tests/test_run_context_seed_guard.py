@@ -28,6 +28,7 @@ os.environ["WF_RUNS_ROOT"] = str(HOME / "workflows")
 spec = importlib.util.spec_from_file_location("guard_door", str(ROOT / "__init__.py"))
 hw = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(hw)
+import wf_test_isolation as _iso71; _iso71.install(hw)  # #71 r5: pin settings.runs_root alongside WF_RUNS_ROOT
 spawns = []
 hw._spawn_runner = lambda r: spawns.append(r)   # door-side only, mirrors test_run_binding
 failures = []
