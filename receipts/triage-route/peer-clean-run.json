@@ -1,0 +1,24 @@
+{
+  "template": "triage-route",
+  "receipt_kind": "peer-clean-run",
+  "reviewer_estate": "haus-exec (clankville seat)",
+  "graph_file": "examples/triage-route.workflow.json",
+  "graph_sha256": "734d71d30d62f23291eaac2515754b4454cd3804ea62b47e471b4204e67e2363",
+  "source_digest": "e33162f9b627b6a8e448b4e93e0798e7bc197455b6b36ec979d0a94ee17524e7",
+  "run_id": "20261001-005725-peer90-triage-route",
+  "runs_root": "~/.hermes/workflows",
+  "verdict": "FAIL \u2014 load-bearing defect, details below; do not merge until fixed + re-run",
+  "urgent_arm_walked": "as requested: fixture carried one urgent item (out-202). route-urgent released on timer, escalate held for the human, released with 'act'; handle-urgent correctly refused to fabricate authorization from an empty release reason (safety pattern earned its keep).",
+  "defect_1_load_bearing": {
+    "summary": "The batch arm is NOT pruned on urgent runs: the 'exactly one arm' + 'the dead arm's descendants never spawn' claim is false for the write-capable fan-out.",
+    "mechanism": "batch-run declares after:[route-batch, classify]. prune_states (wfcommon.py:1418-1431) skips a node only when ALL its `after` deps are skipped. On has_urgent=true: route-batch=skipped but classify=done -> batch-run is a join with >=1 live dep -> it RUNS. The batch fan-out therefore mutates {run.action_target} concurrently while the escalate human gate holds \u2014 unattended writes beside a held approval.",
+    "live_evidence": "run 20261001-005725: classify emitted has_urgent=true AND routine=[pw-101,pw-102]; events.jsonl shows batch-run item.started at 00:59:31 while escalate was pending; ledger.txt gained 'DONE pw-101/pw-102' lines while the urgent item out-202 still waited on the human. Independently confirmed by three blind council seats replaying prune_states over the committed bytes (run 20261001-005618, synthesis verify-list).",
+    "fix_direction": "either (a) classifier contract: has_urgent=true MUST carry routine=[] (defer the batch; batch-run then fans out over an empty set \u2014 verify the engine's zero-item fan-out path commits done, not fanout_empty), or (b) restructure so the batch arm hangs on route-batch ONLY and the items travel through the gate path, or (c) raise the join/prune semantics question at WOFS as an engine-law item (not recommended as a silent semantics change). Author's call; haus estate re-runs on the fix.",
+    "grade": "safety-bearing: the template's own description promises the opposite of what happens; a copying estate gets ungated writes."
+  },
+  "defect_2_minor": {
+    "summary": "escalate release semantics: options=['act','hold','dismiss'] but release answer is free text; an 'act' release WITHOUT an authorization reason correctly no-ops (handle-urgent refused). Template description should say: release with 'act <what was authorized>' or the urgent arm never executes.",
+    "grade": "doc nit; the refusal behavior itself is correct and good."
+  },
+  "notes": "Engine version: main b84a49b checkout at f34ba8e. All local checks (validate [], packaging/corpus green per author) confirmed. Batch arm also walked (pw-101/pw-102 written + verified on disk). Zero vendor ids in-file."
+}
