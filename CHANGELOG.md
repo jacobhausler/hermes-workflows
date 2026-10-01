@@ -22,7 +22,7 @@ Includes all 12 merged PRs after v1.1.1, in merge order. Author handles are veri
   Polish desktop node tones, edge flow and run headers through shared presentation models, with terminal animations stopped and per-instance SVG markers isolated.
 - #86 — @atbrace. Add a validated incident-response lifecycle template combining verdict branches, a machine recovery probe and human escalation; infrastructure-specific lanes require adaptation and are not smoke-run.
 - #64 — Hermes Agent; @jacobhausler.
-  Daemonize POSIX runner admission so caller-tree cleanup sweeps cannot reap the run, and make the admitted runner the sole writer of `wf.pid`. This addresses only the caller-tree portion of #8; enclosing service/cgroup survival, crash visibility and idempotence remain open.
+  Daemonize POSIX runner admission so caller-tree cleanup sweeps cannot reap the run, and make the admitted runner the sole writer of `wf.pid`. This addresses only the caller-tree portion of #8; enclosing service/cgroup survival, crash visibility and idempotence remain open. Release validation also repairs the claim fixture's teardown race: wait for the killed detached runner to release ownership before deleting its files; keep all claim assertions unchanged.
 - #68 — @atbrace. Validate gate `when` reference heads against the gate's direct/transitive `after` ancestry, matching the existing `inputs` and `fanout.items_from` rules. Sibling, ghost and self references are rejected at submission instead of silently skipping or holding a gate at fire time; valid ancestor references and parse-error reporting remain unchanged.
 
 ## 1.1.1 — 2026-09-29 — runner correctness (cross-container liveness, ancestor gate answers), profile-home fix, lane-clean gate, portable files, pill rail
