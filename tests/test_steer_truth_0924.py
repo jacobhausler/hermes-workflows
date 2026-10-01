@@ -15,10 +15,15 @@ from unittest.mock import patch
 
 BUILD = Path(os.environ.get("WF_TEST_BUILD") or Path(__file__).parent)
 ROOT = BUILD.parent
+# #71: HERMES_HOME alone does NOT sandbox the shelf — the context-local home
+# override outranks the env in lane processes; WF_RUNS_ROOT is checked first and
+# pins runs/library wherever the door resolves. Without it, saves pollute prod.
 os.environ["HERMES_HOME"] = str(BUILD / "home-68")
+os.environ["WF_RUNS_ROOT"] = str(BUILD / "home-68" / "workflows")
 sys.path.insert(0, str(ROOT))
 spec = importlib.util.spec_from_file_location("hw68", ROOT / "__init__.py")
 door = importlib.util.module_from_spec(spec); spec.loader.exec_module(door)
+import wf_test_isolation as _iso71; _iso71.install(door)  # #71 r5: pin settings.runs_root alongside WF_RUNS_ROOT
 import wfcommon  # same path re-imported; used only for the pure efp() fingerprint
 
 FAKE = str(BUILD / "fake")  # operator-configured launcher for the created runs

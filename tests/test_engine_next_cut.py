@@ -19,6 +19,9 @@ class EngineNextCut(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.home = Path(self.tmp.name)
         self.env = {**os.environ, "HERMES_HOME": str(self.home),
+                    # #71: pin the shelf too — HERMES_HOME alone can lose to the
+                    # context-local home override; WF_RUNS_ROOT is checked first.
+                    "WF_RUNS_ROOT": str(self.home / "workflows"),
                     "FAKE_LOG": str(self.home / "fake.log")}
 
     def example(self, name):
@@ -59,8 +62,11 @@ class EngineNextCut(unittest.TestCase):
         spec = importlib.util.spec_from_file_location("engine_next_door", ROOT / "__init__.py")
         door = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(door)
+        import wf_test_isolation as _iso71; _iso71.install(door)  # #71 r5: pin settings.runs_root alongside WF_RUNS_ROOT
         original = os.environ.get("HERMES_HOME")
+        original_runs = os.environ.get("WF_RUNS_ROOT")
         os.environ["HERMES_HOME"] = str(self.home)
+        os.environ["WF_RUNS_ROOT"] = str(self.home / "workflows")  # #71 shelf pin
         try:
             res = door.act_run({"graph": {"name": "reject", "nodes": [
                 {"id": "a", "type": "agent", "goal": "JSON:{}", "when": "true"}]}})
@@ -69,6 +75,10 @@ class EngineNextCut(unittest.TestCase):
                 os.environ.pop("HERMES_HOME", None)
             else:
                 os.environ["HERMES_HOME"] = original
+            if original_runs is None:
+                os.environ.pop("WF_RUNS_ROOT", None)
+            else:
+                os.environ["WF_RUNS_ROOT"] = original_runs
         self.assertIn("only gate nodes take when", res["error"])
         self.assertFalse((self.home / "workflows").exists())
 

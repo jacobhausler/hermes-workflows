@@ -44,6 +44,7 @@ os.environ["HERMES_WF_HERMES_BIN"] = str(BUILD / "tests" / "fake")
 sys.path.insert(0, str(BUILD))
 spec = importlib.util.spec_from_file_location("hwpo", BUILD / "__init__.py")
 hw = importlib.util.module_from_spec(spec); spec.loader.exec_module(hw)
+import wf_test_isolation as _iso71; _iso71.install(hw)  # #71 r5: pin settings.runs_root alongside WF_RUNS_ROOT
 runs = Path(os.environ["WF_RUNS_ROOT"])
 
 ok = True

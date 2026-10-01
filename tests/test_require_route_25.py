@@ -22,7 +22,11 @@ HERE = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(HERE))
 tmp_dir = tempfile.TemporaryDirectory(prefix=".tmp-reqroute25-", dir=HERE / "tests")
 atexit.register(tmp_dir.cleanup)
+# #71: HERMES_HOME alone does NOT sandbox the shelf — the context-local home
+# override outranks the env in lane processes; WF_RUNS_ROOT is checked first and
+# pins runs/library wherever the door resolves. Without it, saves pollute prod.
 os.environ["HERMES_HOME"] = tmp_dir.name
+os.environ["WF_RUNS_ROOT"] = str(Path(tmp_dir.name) / "workflows")
 os.environ["HERMES_WF_HERMES_BIN"] = "offline"
 
 _fake_agent = types.ModuleType("agent"); _fake_agent.__path__ = []
@@ -32,6 +36,7 @@ sys.modules["agent"] = _fake_agent
 sys.modules["agent.retry_utils"] = _fake_ru
 
 door = importlib.import_module("__init__")
+import wf_test_isolation as _iso71; _iso71.install(door)  # #71 r5: pin settings.runs_root alongside WF_RUNS_ROOT
 door._CTX = None
 door._seat_model_cfg = lambda: {"default": "seat-default", "aliases": {}}
 door._seat_aliases = lambda: []

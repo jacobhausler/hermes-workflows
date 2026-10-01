@@ -49,13 +49,15 @@ if scratch.exists():
     shutil.rmtree(scratch)
 home = scratch / "home"; home.mkdir(parents=True)
 runs = home / "workflows"
-for k in ("WF_RUNS_ROOT",):
-    os.environ.pop(k, None)
+os.environ["WF_RUNS_ROOT"] = str(runs)   # #71: pin the env door to the SAME scratch
+                                          # root HERMES_HOME derives (the pop was a
+                                          # cleanliness step; equal values, pinned)
 os.environ["HERMES_HOME"] = str(home)
 os.environ["HERMES_WF_HERMES_BIN"] = str(BUILD / "tests" / "fake")
 sys.path.insert(0, str(BUILD))
 spec = importlib.util.spec_from_file_location("hw8", BUILD / "__init__.py")
 hw = importlib.util.module_from_spec(spec); spec.loader.exec_module(hw)
+import wf_test_isolation as _iso71; _iso71.install(hw)  # #71 r5: pin settings.runs_root alongside WF_RUNS_ROOT
 
 # This process asks to be the test tree's subreaper so T1 can assert the ADOPTION
 # TARGET: the orphaned runner must be adopted HERE (a live parent standing for the
