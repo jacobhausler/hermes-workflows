@@ -87,5 +87,44 @@ def call_llm(*, task, provider, model, messages, max_tokens, timeout, route_info
     check("unpinned never proves/holds/refuses", bool(solo.get("run_id"))
           and "route_verified" not in saved.get("nodes", [{}])[0]
           and "route_verified" not in original["nodes"][0], solo)
+
+    # The runner receives EXACTLY the node definition baked before spawn. Core's
+    # sessions table is a per-session summary; a --continue can leave the final
+    # model correct after a mid-turn fallback. Core's session_model_usage table
+    # records every main-loop model (task='') separately, so test that evidence.
+    import sqlite3
+    import wf
+    rid = answer["run_id"]
+    run = home / "runs" / rid
+    baked = json.loads((run / "graph.json").read_text())["nodes"][0]
+    check("runner node is committed definition, not re-resolved copy",
+          baked == observed[0]["nodes"][0] and baked.get("route_verified") == "openai/m-1", baked)
+    title = f"wf:{rid}:a:abc12345#a1"
+    db = sqlite3.connect(home / "state.db")
+    db.execute("create table sessions (id text, title text, model text, billing_provider text, "
+               "input_tokens int, output_tokens int, cache_read_tokens int, reasoning_tokens int, "
+               "api_call_count int, tool_call_count int, estimated_cost_usd real, "
+               "last_activity_at real, last_activity_description text, ended_at real, started_at real)")
+    db.execute("insert into sessions (id,title,model,billing_provider,api_call_count,started_at) "
+               "values (?,?,?,?,?,?)", ("child1", title, "m-1", "openai", 2, 1.0))
+    db.execute("create table session_model_usage (session_id text, model text, "
+               "billing_provider text, task text, api_call_count int)")
+    db.executemany("insert into session_model_usage values (?,?,?,?,?)", [
+        ("child1", "qwen-fallback", "other", "", 1),
+        ("child1", "m-1", "openai", "", 1),
+        ("child1", "aux-model", "other", "aux-task", 1)])
+    db.commit(); db.close()
+    import wfcommon
+    cm = wfcommon.child_metrics(rid, home).get(title.split("#a", 1)[0], {})
+    check("session summary ends on pinned model", cm.get("model") == "m-1", cm)
+    wf.seat_forbidden_models = lambda: []
+    result = wf._stamp_served({"_run": run}, {"skey": title.split("#a", 1)[0],
+                               "status": "done"}, baked)
+    check("mid-turn fallback bills off-route => route_unavailable", result.get("status") == "failed"
+          and result.get("error_class") == "route_unavailable", result)
+    legacy = wf._stamp_served({"_run": run}, {"skey": title.split("#a", 1)[0],
+                               "status": "done"}, saved["nodes"][0])
+    check("no pin/proof: legacy hold remains disabled", legacy.get("status") == "done"
+          and "route_unavailable" not in str(legacy), legacy)
 print("ALL PASS" if not failures else f"FAILURES: {failures}")
 sys.exit(bool(failures))
