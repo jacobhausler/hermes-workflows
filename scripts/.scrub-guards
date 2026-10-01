@@ -13,3 +13,5 @@ plugin.yaml
 regex:NousResearch/hermes-agent
 scripts/.scrub-guards
 regex:"author": "(Jacob Hausler|jacobhausler)"
+# Public PR-author credit only; anchored line excludes the change description.
+regex:^- #[0-9]+ — (Hermes Agent; )?@jacobhausler\.$

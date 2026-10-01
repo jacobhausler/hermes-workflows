@@ -30,6 +30,19 @@ class Claim(unittest.TestCase):
         self.graph_file = self.home/'graph.json'
         self.graph_file.write_text(json.dumps(self.graph))
 
+    def terminate_runner(self, run):
+        try:
+            pid = int((run/'wf.pid').read_text())
+            os.kill(pid, 9)
+        except (FileNotFoundError, ProcessLookupError):
+            return
+        # SIGKILL is asynchronous: don't delete a detached runner's files until
+        # it has released its ownership lock and can no longer recreate them.
+        deadline = time.monotonic() + 8
+        while door._common.runner_alive(run) and time.monotonic() < deadline:
+            time.sleep(0.01)
+        self.assertFalse(door._common.runner_alive(run), 'fixture runner did not exit')
+
     def claim(self):
         with patch.dict(os.environ,self.env,clear=True):
             return door.act_run({'graph':self.graph,'lane_key':'claim/fixture'})
@@ -57,10 +70,7 @@ class Claim(unittest.TestCase):
                 for r in self.runs.iterdir():
                     if r.is_dir():
                         if r.name != 'lanes':
-                            try:
-                                pid = int((r/'wf.pid').read_text())
-                                os.kill(pid,9)
-                            except (FileNotFoundError,ProcessLookupError): pass
+                            self.terminate_runner(r)
                         shutil.rmtree(r)
 
     def test_two_claiming_processes_one_incumbent(self):
@@ -82,8 +92,6 @@ print(json.dumps(m.act_run({'graph':json.loads(Path(sys.argv[2]).read_text()),'l
         self.assertEqual(sum(bool(x.get('deduped')) for x in answers),1,answers)
         runs = [r for r in self.runs.iterdir() if (r/'graph.json').exists()]
         self.assertEqual(len(runs),1,runs)
-        try:
-            pid=int((runs[0]/'wf.pid').read_text());os.kill(pid,9)
-        except (FileNotFoundError,ProcessLookupError):pass
+        self.terminate_runner(runs[0])
 
 if __name__ == '__main__': unittest.main()
