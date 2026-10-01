@@ -4,7 +4,8 @@
 
 Three merged PRs since the previous tag, in merge order (#91 → #62 → #82).
 #88's 61c content is not on `main`: it stack-merged onto `fix/proc-tree-61b`
-and rides #80. The later CI-only workflow_dispatch commit (#99) changes no plugin code.
+and rides #80. The later CI-only workflow_dispatch commit (#99) and the examples-only
+incident-response fix (#93) change no plugin code.
 
 - #91 — @jacobhausler.
   fix(runner,validator): a partial ancestor no longer releases plain after-edges (#87).
