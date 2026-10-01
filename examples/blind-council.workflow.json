@@ -3,7 +3,7 @@
   "name": "blind-council",
   "description": "Independent review seats with no shared context, merged by a synthesis seat that must state dissent. run_context seeds (ALL required): 'artifact' = a path or URL pointing at the thing under review; 'question' = the single decision the council must answer; 'focus' = the angle to weigh (pass 'none' to disable). Seat capability slots: seat-a and seat-b pin model names 'council_a' and 'council_b' - CAPABILITY CLASSES, not vendor ids. Bind them in your own config (plugins.entries.hermes-workflows.settings.models: {council_a: <your frontier model>, council_b: <your fast model>}); an unbound class fails the launch closed with the valid list, never a silent downgrade. The third seat is deliberately unpinned (seat default route) so a council is always completable at zero frontier spend. Consensus != verification: synthesis carries a verify-list even when unanimous. Blindness contract lives in defaults.context.",
   "provenance": {
-    "owner": "austin-exec",
+    "owner": "peer-estate",
     "source": "hermes-workflows/examples/blind-council.workflow.json"
   },
   "defaults": {
@@ -131,7 +131,7 @@
       "max_turns": 8,
       "shape": "review",
       "context": "You merge council verdicts; you are not a rubber stamp. Consensus is not verification: a unanimous 'ready' still gets a verify-list. Dissent is load-bearing — every blocked verdict and every risk raised by ANY seat is either resolved with evidence or carried into open_items. Never average verdicts; a single grounded 'blocked' outranks two ungrounded 'ready's.",
-      "goal": "Merge the three seat payloads (in ## Inputs; one per item) for the artifact {run.artifact}, question: {run.question}\nProduce: (1) a final verdict (blocked if any seat's blocked verdict survives your evidence check); (2) the deduplicated risk ledger, each line attributed to the seat that raised it and marked resolved/carried; (3) the minimal_fix set for carried items; (4) the verify-list: the exact commands or probes the owner must run before acting on this verdict — consensus never removes this list; (5) seat_divergence: where seats disagreed and which evidence decided it.\nReply with ONLY fenced json {\"verdict\": \"ready|blocked\", \"risks\": [\"<attributed, marked resolved|carried>\"], \"minimal_fix\": \"<for carried items>\", \"verify_list\": [\"<exact command/probe>\", ...], \"seat_divergence\": \"<one paragraph>\"}",
+      "goal": "Merge the three seat payloads (in ## Inputs; one per item) for the artifact {run.artifact}, question: {run.question}\nProduce: (1) a final verdict (blocked if any seat's blocked verdict survives your evidence check); (2) the deduplicated risk ledger, each line attributed to the seat that raised it and marked resolved/carried; (3) the minimal_fix set for carried items; (4) the verify-list: the exact commands or probes the owner must run before acting on this verdict — at least one is mandatory, even when all three seats agree 'ready'; consensus never removes this list; (5) seat_divergence: where seats disagreed and which evidence decided it.\nReply with ONLY fenced json {\"verdict\": \"ready|blocked\", \"risks\": [\"<attributed, marked resolved|carried>\"], \"minimal_fix\": \"<for carried items>\", \"verify_list\": [\"<exact command/probe>\", ...], \"seat_divergence\": \"<one paragraph>\"}",
       "schema": {
         "type": "object",
         "properties": {
