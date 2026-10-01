@@ -102,10 +102,30 @@ def _stamp_served(meta, result, node=None):
         result.update(status="failed", error=f"forbidden served model: {served}",
                       error_class="forbidden_model")
         return result
-    if node:   # #25: the commit-time pinned-route hold runs only when the caller
-               # has the node def in hand (the committed record NEVER carries it —
-               # the golden-solo gate caught exactly that leak).
+    if node:   # #25: the committed node def, never stored in a child record.
         result = _route_hold(meta, result, node)
+        if node.get("route_verified") and result.get("status") in ("done", "partial") and skey:
+            # sessions.model is only the FINAL route. Core's per-call usage table
+            # preserves every main-loop model even when a later --continue switches
+            # back to the pin. Auxiliary tasks are not this node's served route.
+            import sqlite3
+            try:
+                db = Path(_route_home(result)) / "state.db"
+                with sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=0.5) as c:
+                    rows = c.execute(
+                        "select distinct u.model from session_model_usage u "
+                        "join sessions s on s.id=u.session_id "
+                        "where (s.title=? or substr(s.title,1,?)=?) "
+                        "and u.task='' and u.api_call_count>0",
+                        (skey, len(skey) + 2, skey + "#a")).fetchall()
+            except (sqlite3.Error, OSError):
+                rows = []                 # older core / offline DB: existing law
+            for (observed,) in rows:
+                probe = _route_hold(meta, dict(result, served_model=observed), node)
+                if probe.get("error_class") == "route_unavailable":
+                    result.update(status="failed", error_class="route_unavailable",
+                                  error=probe["error"])
+                    break
     return result
 
 
