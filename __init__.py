@@ -900,12 +900,88 @@ def _same_ping_route(ri, provider, model):
     lp, lm = str(provider).strip().lower(), str(model).strip().lower()
     return bool(rp) and rp == lp and (rm == lm or rm == lm.rsplit("/", 1)[-1])
 
+_PING_SUBPROCESS = '''import json, sys
+try:
+    from agent.auxiliary_client import call_llm
+    ri = {}
+    try:
+        call_llm(task="wf-preflight-ping", provider=sys.argv[1], model=sys.argv[2],
+                 messages=[{"role": "user", "content": "ping"}], max_tokens=1,
+                 timeout=float(sys.argv[3]), route_info=ri)
+        verdict = {"route": ri, "ok": True}
+    except Exception as e:
+        import re
+        status = getattr(e, "status_code", None)
+        if not isinstance(status, int):
+            m = re.search(r"Error code:\\s*(\\d{3})", str(e))
+            status = int(m.group(1)) if m else None
+        verdict = {"route": ri, "ok": False, "status": status,
+                   "note": str(e)[:160], "kind": type(e).__name__}
+    print(json.dumps(verdict))
+except Exception:
+    print(json.dumps({"unavailable": True}))
+'''
+
+def _ping_subprocess(provider, model):
+    """Core-less cron door: use the operator's child launcher's venv Python.
+    Missing binary, unrecognised wrapper, failed import, or timeout = unknown.
+    Never run an author-supplied executable; hermes_bin is operator-controlled.
+    """
+    unknown = {"liveness": "unknown", "note":
+               "core auxiliary client not importable (ModuleNotFoundError) — ping skipped"}
+    try:
+        launcher = Path(shutil.which(_hermes_bin()) or _hermes_bin())
+        candidates = [launcher.parent / "python", launcher.parent / "python3"]
+        # A shell shim may exec the actual venv launcher; follow only absolute
+        # hermes paths in that operator-controlled shim, never arbitrary shell.
+        if launcher.is_file() and launcher.stat().st_size < 16384:
+            for path in re.findall(r"/[A-Za-z0-9_./+~-]+/hermes\b", launcher.read_text(errors="replace")):
+                candidates.extend((Path(path).parent / "python", Path(path).parent / "python3"))
+        python = next((p for p in candidates if p.is_file() and os.access(p, os.X_OK)), None)
+        if python is None:
+            return unknown
+        env = os.environ.copy()
+        # A venv alone may not have the source checkout on sys.path. The core
+        # launcher sets PYTHONPATH to its repo root; mirror that for this -c call.
+        repo = python.parent.parent.parent
+        env["PYTHONPATH"] = str(repo) + os.pathsep + env.get("PYTHONPATH", "")
+        p = subprocess.run([str(python), "-c", _PING_SUBPROCESS, provider, model,
+                            str(PING_TIMEOUT_S)], env=env, capture_output=True,
+                           text=True, timeout=PING_TIMEOUT_S + 2)
+        if p.returncode or not p.stdout.strip():
+            return unknown
+        verdict = json.loads(p.stdout.strip().splitlines()[-1])
+        if not isinstance(verdict, dict) or verdict.get("unavailable"):
+            return unknown
+        ri = verdict.get("route")
+        if not isinstance(ri, dict):
+            return unknown
+        if verdict.get("ok"):
+            if _same_ping_route(ri, provider, model):
+                return {"liveness": "alive"}
+            return {"liveness": "unknown", "wrong_route": True,
+                    "note": "ping answered by a different route (fallback ladder) — not counted as alive"}
+        status = verdict.get("status")
+        if status in _PING_DEAD_STATUSES and _same_ping_route(ri, provider, model):
+            note = _PING_KEYISH.sub("[redacted]", str(verdict.get("note") or "")[:_PING_NOTE_MAX])
+            return {"liveness": "dead", "retry_after_s": None,
+                    "note": f"HTTP {status}: {note}"}
+        if status in _PING_DEAD_STATUSES:
+            return {"liveness": "unknown",
+                    "note": f"dead-status on an unattributed route {ri.get('provider')!r} — not counted"}
+        return {"liveness": "unknown", "note":
+                _PING_KEYISH.sub("[redacted]", str(verdict.get("note") or "")[:_PING_NOTE_MAX])}
+    except Exception:
+        return unknown
+
 def _ping_route_once(provider, model):
     """One auxiliary ping on the pinned (provider, model) route — explicit provider AND
     model, ONE call, no ladder of ours; core's own recovery is only trusted when the
     recorded route is the pinned one. NEVER raises: returns the annotation dict."""
     try:
         call_llm = _import_call_llm()
+    except ModuleNotFoundError:
+        return _ping_subprocess(provider, model)
     except Exception as e:
         return {"liveness": "unknown",
                 "note": f"core auxiliary client not importable ({type(e).__name__}) — ping skipped"}
