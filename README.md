@@ -1,8 +1,10 @@
 # Hermes Workflows
 
+![Version](https://img.shields.io/badge/version-1.1.2-blue)
+
 **Agent-owned workflow graphs for [Hermes Agent](https://github.com/NousResearch/hermes-agent).**
 Your agent authors a JSON graph of agent nodes, fan-outs and gates; a background
-runner executes it, survives restarts, and hands results back through the same
+runner executes it outside the caller process tree and hands results back through the same
 `workflow` tool it launched from. Hermes Desktop draws the live DAG.
 
 ![A nine-node review fleet: four parallel recon lanes, a synthesis node, two adversarial critics, a human gate, and a final sign-off — with the per-node timeline on the right](assets/dag-review.png)
@@ -20,7 +22,7 @@ runner executes it, survives restarts, and hands results back through the same
 | **Route integrity** | A node that pins an explicit `model` is fail-closed by default (`require_route`): a dead or fallback-surprised pin refuses the launch instead of silently billing another model; an alive-proved pin bakes the door-only `route_verified` and the runner holds the served model to it |
 | **Compact status** | Mid-run `status`/`wait` return output *pointers*; `detail:"full"` opts into everything; terminal payloads are always full |
 | **Desktop DAG view** | Live graph, fan-out stacks, timeline, and a `::workflow{id="…"}` inline card in any reply; the live-run strip mounts below the composer dock (`composer.underside`, core ≥ v2026.7.30 — falls back to above-it `composer.top` on older shells) |
-| **Library** | `save` a proven graph, `library` lists it, `run` with `from:` replays it |
+| **Library** | `save` a proven graph (description + tags), `library` lists it richly, `run` with `from:` replays it; a hand-rolled graph the library missed goes to `submit` with a `why_not_library` receipt — quarantined for study, never auto-saved; `inbox` lists them |
 | **Authoring skill** | Bundled `workflow` skill with grammar, operations, and **measured** per-shape budget recipes |
 
 <table><tr>
@@ -94,8 +96,7 @@ Changes are gated by the serial suite (`python3 scripts/suite.py . ci-out`) and
 `hermes plugins validate .` — both run in [CI](.github/workflows/ci.yml).
 
 The repo ships a [graphify](https://github.com/Graphify-Labs/graphify) knowledge
-graph (`graphify-out/`, 1001 nodes / 1962 edges, deterministic AST — no LLM in the
-build). `graphify query "<question>"` returns a scoped subgraph instead of a grep
+graph (`graphify-out/`, deterministic AST — no LLM in the build). `graphify query "<question>"` returns a scoped subgraph instead of a grep
 dump; `graphify-out/GRAPH_REPORT.md` is the architecture overview. CI fails if the
 committed graph drifts from the tree.
 

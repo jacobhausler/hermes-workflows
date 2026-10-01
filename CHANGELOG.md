@@ -2,99 +2,62 @@
 
 ## Unreleased
 
-- #8 (P0, partial: caller-tree escape) runner daemonize: the door spawns the
-  runner through a transient double-fork hop (Popen → fork → setsid → exec;
-  parent exits immediately), so by the time `handle()` returns the runner has
-  left the caller's process tree and no CALLER-TREE cleanup sweep can reach it —
-  neither the gateway-restart process-tree SIGTERM sweep nor the
-  process_registry completion sweep (`_terminate_host_pid`: per-pid SIGKILL
-  over a descendants snapshot taken while the parent lives; `start_new_session`
-  escaped only group-directed signals). Claim boundary: double-fork/setsid does
-  NOT change cgroup membership — a sweep that kills by service/cgroup membership
-  (unit cgroup ExecStopPost) still reaches caller, runner and children alike;
-  surviving an enclosing service/cgroup cleanup stays open (external
-  supervision is a mitigation outside this diff). Admission stays the
-  runner-side kernel flock (loser `WORKFLOW_BUSY`); sole-owner stamp law: the
-  admitted runner is the ONLY writer of `wf.pid` (self-stamp at admission,
-  `wf.py ready_stamp`, and announces the same pid on the door's ready pipe
-  `HERMES_WF_READY_FD`, popped from env before any child spawn); the door never
-  writes `wf.pid` — it may only return the pid it observed on the pipe (a
-  post-admission door write resurrects dead pids over a replacement runner; a
-  refused-fork fallback would stamp a flock-refused dead loser). Loser spawns
-  close the pipe without a line and stamp nothing.
-  (`tests/test_daemonize_8.py`: caller-tree escape under a verified
-  PR_SET_CHILD_SUBREAPER adoption fixture, caller-exit completion sweep,
-  double-spawn admission race; `tests/test_wfpid_owner_8.py`: sole-owner stamp
-  law on both reviewer schedules.)
-- #59 validator: string-typed keys are TYPE-checked at submit, never discovered at the
-  wall (fb-fix ledger 97e90c2205f17fb0 — run `20260930-051209-fb-fix-436f89c3-rem`
-  authored an agent `context` as a LIST; it passed the truthy-only checks and died at
-  FIRST spawn in `run_child`'s prompt concat, `node crashed: TypeError: can only
-  concatenate str`, `error_class:'crashed'`, burning an already-answered gate release).
-  `validate_graph_errors` now rejects, with named-node `{node, field, msg}` errors
-  mirroring the fan-out item-goal law: agent `goal` — a PRESENT non-str (`[]`, `{}`,
-  `0`, `False`, `null` included; truthiness-independent, ra-59 review finding 1) — and
-  plain-agent whitespace-only str; agent AND gate `context` and gate `question` —
-  present-key-must-be-str, so explicit null is rejected like a list/dict (string-when-
-  present contract, ra-59 review finding 2; absent and `''` stay legal optional keys);
-  `fanout.goal` template present-non-str (same first-spawn crash class — `fmt_goal`
-  re.sub + node-goal concat); and echo `output` non-JSON-serialisable (the door's own
-  `graph.json`/node commit write is where a set or custom object used to explode;
-  dict/list/str/num/bool/null stay the documented verbatim-commit shapes — the echo
-  JSON-verbatim contract is RETAINED, per the ra-59 compatibility clarification).
-  Absent/`''` goals keep the exact legacy "agent node has no goal" message. NO coercion
-  at resolve — strict-at-submit is the engine law (closed grammar: an un-validatable
-  graph must never be accepted). Additive validation: well-typed graphs validate
-  identically, golden-solo stays EMPTY, zero run-dir writes and zero spawns on a
-  rejected submit.
-  Test: `tests/test_string_type_validation_59.py` (issue repro, every key × good/bad
-  shape incl. falsy/null rows and the review's exact case set, legacy-message pin,
-  door-level zero-writes/zero-spawns rows per rejected case, valid-graph zero-errors
-  control).
-- door: `run_context` transport guards in `_bind_run_context` (string branch). Two silent
-  routes to a launched run full of unsubstituted `{run.KEY}` refs, both now rejecting
-  before any run write, same fail-closed style as the #7 brace guard: (1) a JSON object
-  handed over as a STRING (a caller that meant the map form — tool transports routinely
-  stringify objects) was routed to SEED mode and bound nothing; it now raises and names
-  the mistake. (2) a seed string against a graph holding `{run.KEY}` refs appended to
-  context and launched anyway, leaving the refs literal in the persisted graph; it now
-  raises naming the offending node id and key. The map branch is untouched; prose and
-  `k=v` seeds behave exactly as before. The `run_context` schema entry declares
-  `["string","object"]` and states both rejections.
-  Test: `tests/test_run_context_seed_guard.py` (encoded-map rejects atomically — no run
-  written, no spawn; seed-with-refs rejects naming node+key; dict binding still
-  substitutes; prose seeds still launch).
+- #82 — @atbrace (agent: pennyroyal). Crash-visibility for silent runner deaths
+  (#8 item 2): when a door RESPAWN path finds `wf.pid` dead with no valid
+  `runner_exit.json` verdict, it appends `runner.reaped` + one `node.interrupted`
+  per falsely-claimed running child (live children are adopted, never interrupted)
+  BEFORE replacing the runner, so a SIGKILLed run is never mistaken for liveness.
+  Read paths stay pure observers; node records are append-only; fresh launches and
+  clean parked/held exits write nothing.
+  Test: `tests/test_silent_death_reaper_8.py`.
 
-- #57 door: provenance census counters on the `list` payload (quartermaster digest
-  contract, #52 vocab — field names `provenance.dispatched_by_set` / `provenance.total`
-  are PINNED; renames go through zap's digest-format thread first). One fold over the
-  run.jsons the `act_list` loop ALREADY enumerates (`meta = jload(r/"run.json")` feeds
-  the lane_key/team rows; the stamp read rides the same load — zero extra scans): runs
-  with a `dispatched_by` stamp count toward both counters, an absent key or a null value
-  counts toward `total` only (pre-identity runs, honest degradation on an unreadable
-  run.json). Additive key emitted ONLY when at least one run carries the stamp — the F1
-  emit-only-when-derivable law — so a solo install answers with the exact v1.0.15 key
-  set `{runs, total, counts}` and golden-solo stays EMPTY. The QM digest consumes
-  `provenance_blind_pct = 1 - set/total` without hand-scanning run.jsons.
-  Test: `tests/test_provenance_counters_57.py` (mixed fixture root, both counters,
-  solo key-set, fold-cost spy).
+- #87 runner/validator (ledger e68544a37be37657, live repro fb-fix-2dd8de73): a
+  harvest-on-death `partial` no longer silently satisfies a plain after-edge.
+  A child that dies mid-work (cap/rc≠0 with a valid fenced answer) still commits
+  `partial` with its harvest (#4 law untouched), but releasing `verify`/`suite`
+  onto the incomplete candidate was the false-green class. Now: `dep_satisfied`
+  is STRICT for after-edges (partial satisfies only via the per-node opt-in
+  `after_partial: true`, agent/gate keys, bool only, echo rejected by name);
+  a pending agent/gate with a plain partial ancestor FAILS TYPED at the wave
+  boundary — `error_class:"precondition"`, `error: blocked_by_partial_ancestor:
+  <nid>`, ZERO spawns, never a hang (`deps_res` keeps partial RESOLVED so the
+  verdict always lands); `requires` gains provenance — a ref resolving from an
+  ancestor whose committed record carries `harvest` is UNMET
+  (`precondition unmet: <ancestor>.harvested`) without the opt-in, satisfied
+  with it. PRESERVED deliberately (#4): a node's OWN fanout partial-credit
+  merge still commits done; a LEAF partial still closes the run green with its
+  harvested output in the summary; golden-solo bytes unchanged. Read model
+  (`blocked_by`, `run_state.deps_ok`) mirrors the runner law.
+  Test: `tests/test_partial_block_87.py` (C1–C7: typed block + spawn-control,
+  opt-in release, leaf green, fanout merge regression guard, requires
+  provenance, validator grammar, gate same-law). Law-tightening update:
+  `tests/test_sprint101w2_B2-retry.py` #4a/#4-read-model rows encoded
+  partial-satisfies-downstream for an after-edge; they now pin the opt-in
+  (same ledger row e68544a37be37657).
+## 1.1.2 — 2026-10-01
 
-- #37 lane hygiene (digest 20260929f / spool 8edcc9bfc91b9683 — a build lane wiped its
-  uncommitted implementation with a base checkout over its own dirty tree for a RED run,
-  then died on the turn cap; recovery was a hand replay of 17 journaled tool calls). Two
-  parts. (1) A machine lane-hygiene preamble on every build-shape spawn (`shape: "build"`
-  or a declared `repo:` lane; solo, fan-out item, transient retry and bounded resume all
-  pass the one `run_child` seam) — prompt-side only, modeled on `_resume_preamble`, so
-  graph.json, `nodes/*.json`, `run.json` and the def hash are byte-untouched and golden-solo
-  stays EMPTY: the ban on checkout-over-dirty-tree RED runs, commit-tests-first + detached
-  throwaway worktree / named stash for the RED state, WIP-commit-before-the-cap, and the
-  name of the exit. (2) `scripts/lane_recover.py` (stdlib, state.db opened `mode=ro`):
-  `--profile/--skey` or `--run/--node[/--index]` (key read from the node record, db home
-  resolved the way the read model does) lists the journaled write_file/patch calls, and
-  `--out <dir>` replays them (patch: exact, then whitespace-flexible; unmatched patches
-  land in `lane_recover_report.json`); exit 0 recovered, 2 no session, 3 nothing journaled.
-  Tests: `tests/test_lane_hygiene_preamble_8edcc9bf.py`, `tests/test_lane_recover_8edcc9bf.py`
-  (synthetic db, hermetic).
+Includes all 12 merged PRs after v1.1.1, in merge order. Author handles are verified from the merged PR records.
+
+- #39 — @jacobhausler.
+  Add build-lane hygiene prompts that forbid testing a base revision over a dirty worktree, plus read-only journal replay with `scripts/lane_recover.py` to recover unfinished lane edits.
+- #36 — @jacobhausler.
+  Add the standalone `wf_dialect.py` JavaScript workflow exporter and constrained-subset importer; unsupported constructs are refused by name and lossy exports disclose dropped semantics.
+- #45 — @jacobhausler.
+  Make the knowledge graph canonical: one node per ID and one edge per source/target/relation, deterministic clean regeneration, and idempotent repair instead of duplicate accumulation.
+- #60 — @jacobhausler.
+  Add `list` provenance counters by folding the run records already being read; unstamped installations retain the prior payload shape.
+- #46 — @jacobhausler.
+  Resolve owner-configured `runs_root` consistently across the tool, runner and dashboard, and support a validated owner-configured profile fallback when the launch environment has no profile identity.
+- #69 — @atbrace (agent: pennyroyal). Reject JSON-encoded `run_context` maps and seed strings that would leave `{run.KEY}` placeholders unbound, before creating a run or spawning a runner.
+- #67 — @jacobhausler.
+  Validate string-typed goals, contexts, gate questions and fan-out goal templates at submission, including falsy and explicit-null values; reject non-JSON echo output without coercing valid values.
+- #72 — @atbrace (agent: pennyroyal). Honor `run` with `dry_run:true` as a write-free static graph preflight returning resolved models and routes; it does not ping providers, inspect quota or prove route liveness.
+- #65 — @jacobhausler.
+  Polish desktop node tones, edge flow and run headers through shared presentation models, with terminal animations stopped and per-instance SVG markers isolated.
+- #86 — @atbrace. Add a validated incident-response lifecycle template combining verdict branches, a machine recovery probe and human escalation; infrastructure-specific lanes require adaptation and are not smoke-run.
+- #64 — Hermes Agent; @jacobhausler.
+  Daemonize POSIX runner admission so caller-tree cleanup sweeps cannot reap the run, and make the admitted runner the sole writer of `wf.pid`. This addresses only the caller-tree portion of #8; enclosing service/cgroup survival, crash visibility and idempotence remain open. Release validation also repairs the claim fixture's teardown race: wait for the killed detached runner to release ownership before deleting its files; keep all claim assertions unchanged.
+- #68 — @atbrace. Validate gate `when` reference heads against the gate's direct/transitive `after` ancestry, matching the existing `inputs` and `fanout.items_from` rules. Sibling, ghost and self references are rejected at submission instead of silently skipping or holding a gate at fire time; valid ancestor references and parse-error reporting remain unchanged.
 
 ## 1.1.1 — 2026-09-29 — runner correctness (cross-container liveness, ancestor gate answers), profile-home fix, lane-clean gate, portable files, pill rail
 
@@ -309,7 +272,7 @@ Every feature is OPTIONAL: a no-team run (default profile, no `WF_RUNS_ROOT`) is
 ## 1.0.5 — 2026-09-26 — preflight LIVENESS ping (warn-and-surface)
 
 - A graph pinned to a live-but-quota-dead seat used to launch happily and die hours
-  later at the FIRST child spawn (`transport_exhausted` after the fixed 5s/20s retry
+  later at the FIRST child spawn (terminal transport failure after the fixed 5s/20s retry
   ladder); `model_preflight` proves resolution, not liveness, and the provider's
   `Retry-After` header never survived to the door. Now: one `wf-preflight-ping`
   auxiliary request (max_tokens=1, ~10s timeout, explicit provider+model, one
@@ -414,12 +377,13 @@ of all graphs. Every item below is a fix for something the census counted.
 - Full-graph submit validation: unknown keys per node type, `when` syntax, gate vocabulary.
 
 ### Deaths become outcomes
-- `error_class` on every `node.failed` from a closed set (`cap_exhausted` replaces
-  `max_turns`, `schema` replaces `no_json`; new `early_death`, `unresolved_model`,
-  `transport_exhausted`, `incomplete_work`, `graph_invalid`).
+- `error_class` on every `node.failed` from a closed set: typed turn-cap deaths
+  replace the old `max_turns` classification, `schema` replaces `no_json`; new
+  `early_death`, `unresolved_model`, terminal transport failures, `incomplete_work`
+  and `graph_invalid` classifications. Exact error-class names: [operations](references/operations.md).
 - Harvest-on-death: a child that dies after printing a valid fenced answer is committed as
   `status: partial`; downstream runs on it; the death cause stays as `error_class`.
-- Bounded auto-retry: `transport | early_death | cap_exhausted | timeout` with tool progress
+- Bounded auto-retry: transport, early-death, turn-cap and timeout failures with tool progress
   get exactly one re-drive with a machine resume preamble (`node.retry`); permfails never.
 - Stop ≠ failure: `cancelled` is excluded from quorum and failure math; a stopped run reads
   `stopped` and `wait` re-drives the cancelled work.
