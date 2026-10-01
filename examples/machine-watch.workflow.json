@@ -36,7 +36,10 @@
         "watch"
       ],
       "max_turns": 4,
-      "goal": "The machine gate 'watch' released when the polled check exited 0 (its committed answer in ## Inputs carries attempt + waited_s + last_exit). Read /tmp/machine-watch-example/last_probe.json. For the watch named in the bootstrap payload, reply with ONLY fenced json {\"released\": true, \"attempts\": <int from the gate answer>, \"waited_s\": <int from the gate answer>, \"report\": \"<one line: watch_name cleared after N polls, last probe exit E>\"}"
+      "goal": "The machine gate 'watch' released when the polled check exited 0 (its committed answer in ## Inputs carries attempt + waited_s + last_exit). Read /tmp/machine-watch-example/last_probe.json. For the watch named in the bootstrap payload, reply with ONLY fenced json {\"released\": true, \"attempts\": <int from the gate answer>, \"waited_s\": <int from the gate answer>, \"report\": \"<one line: watch_name cleared after N polls, last probe exit E>\"}",
+      "inputs": [
+        "bootstrap"
+      ]
     }
   ]
 }
