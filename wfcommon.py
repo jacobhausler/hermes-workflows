@@ -967,10 +967,32 @@ def validate_graph_errors(nodes):
                 for e in wait_spec_ok(w):
                     field = "wait" if e["field"] is None else f"wait.{e['field']}"
                     E(nid, field, f"gate node wait: {e['msg']}")
+        anc = set()
+        if (n.get("when") is not None and n["type"] == "gate") or n.get("inputs") is not None:
+            stack = list(n.get("after", []))
+            while stack:
+                a = stack.pop()
+                if a in anc or a not in idset:
+                    continue
+                anc.add(a)
+                stack.extend(parents[a])
         if n.get("when") is not None and n["type"] == "gate":
             err = when_expr_ok(n["when"])
             if err:
-                E(nid, "when", err)
+                E(nid, "when", err)   # parse-only (syntax mode is total): NO head check on a broken expr
+            else:
+                # `when` reads out.<ancestor>.<path> (references/grammar.md). Parse-only
+                # when_expr_ok cannot see heads (sentinel operands), so a non-ancestor
+                # head — sibling, typo, ghost — would validate clean and resolve to
+                # None at fire time: False ⇒ silent skip (default on_skip:prune = dead
+                # branch), True ⇒ holds, depending on unrelated commit order. Validate
+                # the ref heads against the SAME ancestry closure `inputs` uses below.
+                for tok in _tok_when(n["when"]):
+                    if tok.startswith("out."):
+                        head = tok.split(".")[1]
+                        if head not in anc:
+                            E(nid, "when", f"when ref {tok!r} head {head!r} is not an existing "
+                                           f"node in its `after` ancestry (when must descend from it)")
         ins = n.get("inputs")
         if ins is not None:
             if n["type"] == "gate":
@@ -978,14 +1000,6 @@ def validate_graph_errors(nodes):
             elif not isinstance(ins, list) or not all(isinstance(x, str) and x.strip() for x in ins):
                 E(nid, "inputs", "inputs must be a list of non-empty ref strings")
             else:
-                anc = set()
-                stack = list(n.get("after", []))
-                while stack:
-                    a = stack.pop()
-                    if a in anc or a not in idset:
-                        continue
-                    anc.add(a)
-                    stack.extend(parents[a])
                 for ref in ins:
                     head = ref.split(".")[0]
                     if head not in anc:
