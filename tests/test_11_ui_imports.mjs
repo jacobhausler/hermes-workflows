@@ -229,9 +229,9 @@ const baseDef = extra => ({ id: 'a', type: 'agent', goal: 'do work', model: 'm',
   $selNodeHolder.v = selNode
   panelTab = null
   const cur = makeNodePanel(nodePanelSrc)
-  const t = cur({ detail: detailFor(baseDef({ profile: 'haus-fixer' }), baseShown) })
+  const t = cur({ detail: detailFor(baseDef({ profile: 'incident-operator' }), baseShown) })
   const s = texts(t).join('|')
-  assert.ok(s.includes('as @haus-fixer'), 'NodePanel shows `as @<profile>` when def.profile set')
+  assert.ok(s.includes('as @incident-operator'), 'NodePanel shows `as @<profile>` when def.profile set')
 }
 
 // ---- 5. F4: the precondition error string rides the EXISTING error paths -----

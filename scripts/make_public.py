@@ -26,7 +26,7 @@ EXCLUDE_DIRS = {".git", "__pycache__"}
 EXCLUDE_PATTERNS = ["docs/PUBLISH-SCRUB.md",
                     "*/__pycache__/*", "__pycache__/*",
                     "tests/home*", "*.log", "*/.git", "*/.git/*"]
-AUDIT_SUFFIXES = {".py", ".js", ".md", ".json", ".yaml"}
+AUDIT_SUFFIXES = {".py", ".js", ".mjs", ".md", ".json", ".yaml"}
 
 
 def excluded(rel: str) -> bool:
