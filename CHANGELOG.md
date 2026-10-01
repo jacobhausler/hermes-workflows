@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+- #8 (P0, partial: caller-tree escape) runner daemonize: the door spawns the
+  runner through a transient double-fork hop (Popen → fork → setsid → exec;
+  parent exits immediately), so by the time `handle()` returns the runner has
+  left the caller's process tree and no CALLER-TREE cleanup sweep can reach it —
+  neither the gateway-restart process-tree SIGTERM sweep nor the
+  process_registry completion sweep (`_terminate_host_pid`: per-pid SIGKILL
+  over a descendants snapshot taken while the parent lives; `start_new_session`
+  escaped only group-directed signals). Claim boundary: double-fork/setsid does
+  NOT change cgroup membership — a sweep that kills by service/cgroup membership
+  (unit cgroup ExecStopPost) still reaches caller, runner and children alike;
+  surviving an enclosing service/cgroup cleanup stays open (external
+  supervision is a mitigation outside this diff). Admission stays the
+  runner-side kernel flock (loser `WORKFLOW_BUSY`); sole-owner stamp law: the
+  admitted runner is the ONLY writer of `wf.pid` (self-stamp at admission,
+  `wf.py ready_stamp`, and announces the same pid on the door's ready pipe
+  `HERMES_WF_READY_FD`, popped from env before any child spawn); the door never
+  writes `wf.pid` — it may only return the pid it observed on the pipe (a
+  post-admission door write resurrects dead pids over a replacement runner; a
+  refused-fork fallback would stamp a flock-refused dead loser). Loser spawns
+  close the pipe without a line and stamp nothing.
+  (`tests/test_daemonize_8.py`: caller-tree escape under a verified
+  PR_SET_CHILD_SUBREAPER adoption fixture, caller-exit completion sweep,
+  double-spawn admission race; `tests/test_wfpid_owner_8.py`: sole-owner stamp
+  law on both reviewer schedules.)
 - #59 validator: string-typed keys are TYPE-checked at submit, never discovered at the
   wall (fb-fix ledger 97e90c2205f17fb0 — run `20260930-051209-fb-fix-436f89c3-rem`
   authored an agent `context` as a LIST; it passed the truthy-only checks and died at

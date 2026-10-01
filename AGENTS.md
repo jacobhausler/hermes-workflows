@@ -162,6 +162,11 @@ succeed, the rest are cancelled; without it the fan-out waits for every item;
 `wait:{"until_argv":[…],"every_s":60,"timeout_s":3600}`. Tested examples:
 [examples/approve-publish.json](examples/approve-publish.json),
 [examples/branch-on-verdict.json](examples/branch-on-verdict.json).
+[examples/incident-response.json](examples/incident-response.json) is a full
+lifecycle TEMPLATE (alert-triggered incident: verdict-branch gate pair, machine
+recovery probe with human escalation, merge-gated close) meant to be adapted —
+its `run_context` seeds and the sweep-adapter contract are the swap points; it
+validates but is not smoke-run (real lanes need your stack).
 
 ### 3d. Failures, resume, amend
 
