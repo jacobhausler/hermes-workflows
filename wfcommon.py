@@ -114,7 +114,7 @@ def hermes_home():
 # standalone tests) falls back to a side-effect-free raw read of the resolved
 # `<hermes_home>/config.yaml` — the SAME file core's loader resolves for the
 # profile, never core's load_config (which materialises a home skeleton on read).
-# Unset keys = byte-identical to the pre-1.1.2 resolver. The model is never told to
+# Unset keys = byte-identical to the resolver before owner settings shipped. The model is never told to
 # set these; a graph/run argument can never substitute for them.
 PLUGIN_ID = "hermes-workflows"
 NO_READER = object()   # a reader answers this when it has no plugin ctx to ask
@@ -413,7 +413,7 @@ def launcher_profile(home=None):
       1. the process's own resolved HERMES_HOME when it is `<root>/profiles/<name>` -> name
       2. else `settings.profile` (owner-declared fallback for env-blind gateways: the
          desktop bridge / a gateway that launches the door without a profile home)
-      3. else "default" (byte-identical to the pre-1.1.2 stamp)
+      3. else "default" (byte-identical to the stamp before owner settings shipped)
     Env wins whenever present: an owner setting can only fill the identity the process
     could not carry, never override one it does. An explicit `home=` is an env-shaped
     caller (tests, runner_alive) and follows the same ranking."""
