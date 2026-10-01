@@ -26,7 +26,7 @@
   "tested_revision": "28edf6353ff61ed124efcede6da6238ed8282562",
   "tested_graph_sha256": "251df837a7c0297863d7a141b2f7ad4170d9453bfeebf46da951b1e4275c2c01",
   "tested_source_digest": "e71836981444f80f7d64d7ee3fdad9b5417c2f6c01a6503e429fa261059f3a19",
-  "restamped_revision": "fix/pr94-checkpointed (post-review example and executable tests)",
+  "restamped_revision": "105e65a22b6c55bdc5ad984627d5c646d903601b",
   "revision_note": "Historic laps exercised the tested_revision bytes; current graph digests identify the shipped fixed template, not a claim that these laps were rerun on it. New regressions exercise the corrected bytes.",
   "admission_note": "Historic limited-path PASS was superseded by review changes at the original head; this receipt is provenance, not a new unconditional acceptance.",
   "historic_verdict": "PASS — every LAUNCH LAW claim exercised live, zero findings",
