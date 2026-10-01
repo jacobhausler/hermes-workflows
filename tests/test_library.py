@@ -61,5 +61,38 @@ check("L6b /wf <name> note -> atomic replay binding", 'from:"lib-demo"' in t and
 check("L6c /wf unknown -> lists available", "Available: lib-demo" in hw._wf_command("zzz"))
 check("L6d /wf bad name -> validation msg", "invalid library name" in hw._wf_command("../x"))
 
+# L7 F-2 (#62) quarantine fixture — EXACT pair: valid good.json beside the
+# malformed broken.json. Fail-closed on the entry (typed refusal), fail-open on
+# the library (nothing crashes, the good entry stays fully usable).
+import json as _json
+good = {"name": "good", "nodes": [{"id": "e", "type": "echo", "output": 1}]}
+broken = {"meta": {"description": "junk"}, "graph": {"nodes": ["oops"]}}
+for stem, doc in (("good", good), ("broken", broken)):
+    (Path(HOME) / "workflows" / "library" / (stem + ".json")).write_text(_json.dumps(doc))
+out = call(action="library")
+check("L7 library lists good beside broken, no crash",
+      "good" in {x["name"] for x in out["library"]}
+      and "broken" not in {x["name"] for x in out["library"]}, _json.dumps(out))
+check("L7b broken is named with its typed refusal reason",
+      any(q["name"] == "broken" and q["reason"] == "invalid: nodes[0] is not an object"
+          for q in out.get("quarantined", [])), _json.dumps(out.get("quarantined")))
+check("L7c run from=good works while broken sits there",
+      bool(call(action="run", **{"from": "good"}).get("run_id")))
+check("L7d run from=broken nudges, never crashes",
+      "no library graph" in call(action="run", **{"from": "broken"}).get("error", ""))
+check("L7e typo hint still works beside broken",
+      "good" in call(action="run", **{"from": "good-typo"}).get("closest", []))
+t = hw._wf_command("")
+check("L7f /wf lists both rows; bad shows WHY it was refused",
+      "good" in t and "broken" in t and "invalid: nodes[0] is not an object" in t, t[:200])
+t = hw._wf_command("broken")
+check("L7g /wf <bad> shows the refusal, not a crash",
+      "refused: invalid: nodes[0] is not an object" in t, t[:160])
+(Path(HOME) / "workflows" / "library" / "broken.json").unlink()
+out = call(action="library")
+check("L7h removing broken fully restores (no skip rows at all)",
+      {x["name"] for x in out["library"]} >= {"good", "lib-demo", "lib-demo-v2"}
+      and "skipped" not in out and "quarantined" not in out, _json.dumps(out)[:200])
+
 call(action="stop", run_id=rid)
 print("ALL PASS" if ok else "FAILURES PRESENT"); sys.exit(0 if ok else 1)

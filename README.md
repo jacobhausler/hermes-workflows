@@ -22,7 +22,7 @@ runner executes it outside the caller process tree and hands results back throug
 | **Route integrity** | A node that pins an explicit `model` is fail-closed by default (`require_route`): a dead or fallback-surprised pin refuses the launch instead of silently billing another model; an alive-proved pin bakes the door-only `route_verified` and the runner holds the served model to it |
 | **Compact status** | Mid-run `status`/`wait` return output *pointers*; `detail:"full"` opts into everything; terminal payloads are always full |
 | **Desktop DAG view** | Live graph, fan-out stacks, timeline, and a `::workflow{id="…"}` inline card in any reply; the live-run strip mounts below the composer dock (`composer.underside`, core ≥ v2026.7.30 — falls back to above-it `composer.top` on older shells) |
-| **Library** | `save` a proven graph, `library` lists it, `run` with `from:` replays it |
+| **Library** | `save` a proven graph (description + tags), `library` lists it richly, `run` with `from:` replays it; a hand-rolled graph the library missed goes to `submit` with a `why_not_library` receipt — quarantined for study, never auto-saved; `inbox` lists them |
 | **Authoring skill** | Bundled `workflow` skill with grammar, operations, and **measured** per-shape budget recipes |
 
 <table><tr>

@@ -19,6 +19,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 env:
   HERMES_PIN: d337b736aa1e8ebecfab043842d13e4a2d2f48a3   # v2026.9.21

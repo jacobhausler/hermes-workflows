@@ -553,14 +553,58 @@ AGENT_KEYS = {"id", "type", "after", "goal", "context", "schema", "model", "prov
               # 1.1 (RATIFY F2/F4): OPTIONAL team keys. `profile` = run this node AS a named
               # teammate profile (consent-gated, node-level only); `requires` = output
               # preconditions on ancestors ({"<ancestor>": ["field", "dotted.path", ...]}).
-              "profile", "requires"}
+              # e68544a37be37657: `after_partial` (bool) opts this node INTO consuming a
+              # harvest-on-death `partial` ancestor — a plain after-edge blocks on one
+              # (typed fail at the wave boundary, never a silent release, never a spawn).
+              "profile", "requires", "after_partial"}
 GATE_KEYS = {"id", "type", "after", "question", "options", "context", "when", "wait", "on_skip",
              "default_option", "hold_timeout",
-             "requires"}   # 1.1 (RATIFY F4): gates take output preconditions too
+             # 1.1 (RATIFY F4): gates take output preconditions too; gates obey the same
+             # after_partial law as agents (e68544a37be37657).
+             "requires", "after_partial"}
 ECHO_KEYS = {"id", "type", "after", "output"}
 # 1.1 (RATIFY F5): opt-in library provenance block, written by the door's `save` ONLY when
 # `source` is supplied or the saving door runs under a named profile. Top-level graph key.
 PROVENANCE_KEYS = {"owner", "source", "saved_at", "source_digest"}
+
+# ---------- library entry normalizer (#50, R10 migration law) ----------
+# A library file is either the 1.1 BARE form (the graph object itself — the bytes
+# every pre-#50 `save` wrote, which must keep loading and listing verbatim) or the
+# #50 ENVELOPE {"meta": {description?, tags?}, "graph": {...}}. Anything else is an
+# UNKNOWN shape: the door QUARANTINES the entry — listed with a typed refusal reason,
+# never a crash, never replayable (F-2 #62: one corrupt file must not take discovery,
+# the typo nudge, or /wf down with it). Returns {meta, graph, description, tags,
+# envelope} for a usable entry, or {"invalid": "invalid: <why>"} for a refused one —
+# always a dict, callers key on the "invalid" marker / the presence of "graph".
+def library_entry(data):
+    if not isinstance(data, dict):
+        return {"invalid": "invalid: not a JSON object"}
+    if isinstance(data.get("graph"), dict):
+        if isinstance(data.get("nodes"), list):
+            return {"invalid": "invalid: ambiguous file — carries both envelope"
+                               " (graph:) and bare (nodes:) markers"}
+        meta = data.get("meta")
+        meta = meta if isinstance(meta, dict) else {}
+        graph = data["graph"]
+        envelope = True
+    elif isinstance(data.get("nodes"), list):
+        meta, graph, envelope = {}, data, False
+    else:
+        return {"invalid": "invalid: neither a bare graph (no nodes[] list)"
+                           " nor a {meta, graph} envelope"}
+    if not graph.get("nodes") or not isinstance(graph.get("nodes"), list):
+        return {"invalid": "invalid: graph has no non-empty nodes[] list"}
+    for i, n in enumerate(graph["nodes"]):
+        if not isinstance(n, dict):
+            return {"invalid": f"invalid: nodes[{i}] is not an object"}
+    description = meta.get("description")
+    if not isinstance(description, str) or not description.strip():
+        description = graph.get("description")
+    tags = meta.get("tags")
+    tags = [t for t in tags if isinstance(t, str) and t.strip()] \
+        if isinstance(tags, list) else []
+    return {"meta": meta, "graph": graph, "description": description,
+            "tags": tags, "envelope": envelope}
 # #32 (publish-as-file): top-level `grammar` names the dialect a shared file was written
 # in. Absent = "wf/1" (every pre-#32 file is a wf/1 file); unknown = fail-closed with the
 # reader's supported list, so a newer dialect is refused honestly instead of misrun.
@@ -779,10 +823,23 @@ def validate_graph_errors(nodes):
             if n["type"] == "agent" and k == "when":
                 E(nid, "when", "only gate nodes take when; use a gate with on_skip:prune to branch")
                 continue
+            if k == "after_partial":
+                continue  # the dedicated block below names the key (echo-meaningless / bool)
             E(nid, k, "unknown key; allowed: " + json.dumps(sorted(_type_keys)))
         for a in n.get("after", []):
             if a not in idset:
                 E(nid, "after", f"references unknown 'after': {a}")
+        if "after_partial" in n:
+            # e68544a37be37657: agent/gate-only key; bool only — an unvalidated
+            # truthy is never enough to open a harvest edge. Echo rejects it
+            # explicitly (its closed set also flags it unknown) so the error
+            # NAMES the key, per the issue's validation contract.
+            if n["type"] == "echo":
+                E(nid, "after_partial", "after_partial is meaningless on echo "
+                                        "nodes (agent/gate only)")
+            elif not isinstance(n["after_partial"], bool):
+                E(nid, "after_partial", "after_partial must be a boolean "
+                                        "(true = this node consumes a partial ancestor's harvest)")
         for k, hi in (("timeout", 86400), ("max_turns", 200), ("run_budget", 86400)):
             v = n.get(k)
             if v is not None and (not isinstance(v, (int, float)) or isinstance(v, bool) or v <= 0 or v > hi):
@@ -1411,11 +1468,17 @@ def blocked_by(n, states, nodes_meta=None):
     out = []
     for a in n.get("after", []):
         st = states.get(a)
-        if st in ("done", "skipped", "partial"):   # #4: partial satisfies — not an unfinished ancestor
+        if st == "partial" and n.get("after_partial"):   # the opt-in consumes the harvest
+            continue                                     # e68544a37be37657
+        if st in ("done", "skipped"):
             continue
         m = (nodes_meta or {}).get(a) or {}
         if st == "failed":
             word = "failed"
+        elif st == "partial":
+            # #4 + e68544a37be37657: a harvest does NOT satisfy a plain after-edge —
+            # it is an unfinished ancestor until the descendant opts in.
+            word = "partial (harvested; needs after_partial)"
         elif m.get("held"):
             word = "held at gate"
         elif m.get("parked"):
@@ -1444,9 +1507,17 @@ def prune_states(nodes, states):
                 states[n["id"]] = "skipped"; derived.add(n["id"]); changed = True
     return derived
 
-def dep_satisfied(states, a):
-    # #4: a harvested `partial` satisfies downstream exactly like done.
-    return states.get(a) in ("done", "skipped", "partial")
+def dep_satisfied(states, a, allow_partial=False):
+    """After-edge release law. #4 (harvest-on-death) keeps a `partial` ancestor's
+    OUTPUT committed and consumable, but e68544a37be37657 ends the equivalence
+    with `done` for RELEASE: a plain after-edge is NOT satisfied by a `partial`
+    (the child died mid-work — releasing verify/suite onto an incomplete
+    candidate is the false-green class). A descendant that genuinely wants the
+    harvest opts in per-node with `after_partial: true` (agent/gate key)."""
+    st = states.get(a)
+    if st == "partial":
+        return bool(allow_partial)
+    return st in ("done", "skipped")
 
 def _verify_spawn_rec(r, n, byid, rec):
     """ONE verification law for a spawn record (790c6ad): status=running + efp
@@ -1535,7 +1606,9 @@ def run_state(r):
             nodes[n["id"]]["active_spawn"] = active[0]
             nodes[n["id"]]["active_spawns"] = active
     def deps_ok(n):
-        return all(dep_satisfied(states, a) for a in n.get("after", []))
+        # e68544a37be37657: mirror the runner law — a plain after-edge is not
+        # satisfied by a `partial`; the after_partial opt-in consumes the harvest.
+        return all(dep_satisfied(states, a, allow_partial=bool(n.get("after_partial"))) for a in n.get("after", []))
     last = None
     try:
         for line in (r / "events.jsonl").read_text().splitlines()[-20:]:
