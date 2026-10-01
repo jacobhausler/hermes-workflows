@@ -18,11 +18,23 @@ No other clause needed correction.
 > of the originating session and gateway; disabling the plugin does not stop an
 > already-running process."
 
-- Verified: the door spawns `subprocess.Popen([sys.executable, wf.py, "run",
-  <run_id>], stdin=DEVNULL, start_new_session=True)` with the log file as
-  stdout/stderr — `__init__.py:144-150` (`_spawn_runner`). No plugin-disable
-  kill hook exists (`register()` registers only skill/tool/command —
-  `__init__.py:1255-1267`; `plugin.yaml` provides only `workflow`).
+- Verified (#8, caller-tree escape): the door spawns the runner DAEMONIZED
+  through a transient double-fork hop — `Popen([sys.executable, "-c", <hop>,
+  wf.py, "run", <run_id>, <ready_fd>], stdin=DEVNULL, start_new_session=True)`;
+  the hop forks the real `wf.py run` in its own session (`setsid`) and exits at
+  once, so the runner leaves the caller's process tree before the tool call
+  returns (`_spawn_runner`, `_DAEMON_INTERMEDIATE`). The admitted runner stamps
+  its own `wf.pid` at flock admission (`wf.py ready_stamp`) and announces it on
+  the door's ready pipe; the door never writes `wf.pid` (it may return the
+  observed pid). No plugin-disable kill hook exists (`register()` registers only
+  skill/tool/command; `plugin.yaml` provides only `workflow`).
+- Claim boundary (verified limitation): double-fork + `setsid` changes parenting
+  and session, NOT cgroup membership. A cleanup that kills by process-tree
+  membership (the process_registry completion sweep; a service's process-tree
+  SIGTERM) no longer reaches the runner; a cleanup that kills by unit-cgroup
+  membership (e.g. an ExecStopPost SIGKILL over the gateway unit's cgroup on
+  restart) still reaches caller, runner and children alike. Surviving an
+  enclosing service/cgroup cleanup is out of scope for this claim.
 - A run ends at a graph boundary (`held`/`done`/`failed`/`stopped`) or on
   `workflow stop`: the door writes `stop.request` (`__init__.py:1185-1192`),
   the runner's stop watcher consumes it and kills child process groups

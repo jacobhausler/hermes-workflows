@@ -2,9 +2,10 @@
 
 The engine (wf.py) is a separate process per run; this module is the door:
 launch it, read its run-dir via the SHARED read model (wfcommon.run_state), drop
-its input files. No daemon, no control plane, no second opinion on run state.
+its input files. No standing daemon or control plane, no second opinion on run
+state (one runner process per run, detached out of the caller's tree at spawn #8).
 """
-import importlib.util, json, os, re, shutil, stat, subprocess, sys, time
+import importlib.util, json, os, re, select, shutil, stat, subprocess, sys, time
 import fcntl, hashlib, uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -239,25 +240,145 @@ def _hermes_bin():
 
 runner_alive = _common.runner_alive
 
+# #8 (P0): the transient daemonize hop. The door Popen's THIS, it forks the real
+# runner (own session, ready-pipe write end inherited non-cloexec) and exits at
+# once so the runner leaves the caller's process tree BEFORE handle() returns —
+# adopted by the nearest enclosing subreaper, else init (cgroup membership is
+# unchanged; see _spawn_runner's claim boundary).
+_DAEMON_INTERMEDIATE = (
+    "import os, sys\n"
+    "target, run_id, wd = sys.argv[1], sys.argv[2], int(sys.argv[3])\n"
+    "try:\n"
+    "    pid = os.fork()\n"
+    "except OSError:\n"
+    "    os._exit(3)  # fork refused: the door falls back to a direct spawn\n"
+    "if pid == 0:\n"
+    "    os.setsid()\n"
+    "    os.execve(sys.executable, [sys.executable, target, 'run', run_id],\n"
+    "              dict(os.environ, HERMES_WF_READY_FD=str(wd)))\n"
+    "os._exit(0)  # transient parent: exit NOW so the runner reparents immediately\n")
+
+_READY_WAIT_S = 5.0
+
+def _ready_pid(rd):
+    """One newline-terminated pid off the ready pipe, <= _READY_WAIT_S. None on
+    EOF or timeout: a WORKFLOW_BUSY loser closes the write end without a line."""
+    buf = b""
+    deadline = time.monotonic() + _READY_WAIT_S
+    while True:
+        left = deadline - time.monotonic()
+        if left <= 0:
+            return None
+        try:
+            r, _, _ = select.select([rd], [], [], left)
+            if not r:
+                return None
+            chunk = os.read(rd, 64)
+        except (OSError, ValueError):
+            return None
+        if not chunk:                      # EOF — no pid was ever written
+            return None
+        buf += chunk
+        if b"\n" in buf:
+            tok = buf.split(b"\n", 1)[0].strip()
+            return int(tok) if tok.isdigit() else None
+
 def _spawn_runner(r):
-    """Append mode: runner.log keeps crash diagnostics across respawns.
-    Stamp wf.pid ourselves — the door never races the runner's own pid write.
-    Single-runner admission is enforced by the runner's flock (kernel-owned) admission lock, so racing
-    door spawns are harmless (the loser exits WORKFLOW_BUSY)."""
+    """Spawn the run's runner process — DAEMONIZED out of the caller's tree (#8).
+
+    Law (four reaped-runner incidents, 2026-09-29/30): by the time handle()
+    returns the runner must NOT hang in the caller's process tree. Both killers
+    walk pids, not sessions: the gateway-restart process-tree SIGTERM sweep, and
+    the process_registry completion sweep (_terminate_host_pid: snapshot
+    descendants WHILE the parent lives, SIGTERM parent, per-pid SIGKILL
+    escalation over the snapshot, re-scan). start_new_session escapes only
+    group-directed signals, never a per-pid kill of a snapshotted descendant.
+    The double-fork hop reparents the runner out of the caller's tree before the
+    door returns, so no CALLER-TREE sweep can ever snapshot it; children inherit
+    the escape through the runner. Claim boundary (#8 review, finding 1):
+    double-fork/setsid does NOT change cgroup membership — a sweep that kills by
+    cgroup membership (e.g. the unit-cgroup ExecStopPost SIGKILL a gateway
+    restart runs) still reaches caller, runner and children alike. Surviving an
+    enclosing service/cgroup cleanup is external supervision's job (a mitigation
+    outside this diff), not what this hop claims.
+
+    Admission stays the runner-side kernel flock (loser exits WORKFLOW_BUSY
+    before touching any state). SOLE-OWNER stamp law (#8 review, findings 3+4):
+    the ADMITTED runner is the ONLY writer of wf.pid — it self-stamps right
+    after it wins the flock (wf.py acquire_lock -> ready_stamp) and announces
+    the same pid on the door's ready pipe. The door NEVER writes wf.pid: an
+    observed pid may be returned to the caller, but a post-admission door write
+    is a second owner racing the runner — the deep review reproduced both
+    failures deterministically (a door parked after observing A let B be
+    admitted, then its late write resurrected dead A; a forced refused-fork
+    fallback stamped the flock-refused dead loser over the live winner). A
+    spawn that never readied is left stamped only by whoever WON the flock; the
+    explicit wait-resume law covers a dead spawn and the flock makes any retry
+    a harmless loser.
+
+    Append mode: runner.log keeps crash diagnostics across respawns. The
+    contextvar profile scope does NOT cross processes: a runner spawned for a run
+    under the RESOLVED runs root gets that home stamped explicitly (core's own #18594
+    guidance for subprocess spawners), so its seat config and child env follow the
+    OWNER's profile, not the launch root os.environ carries on a multiplex host.
+    A legacy-location run (pre-fix, under the launch root) keeps the inherited env
+    verbatim — runner_alive compares it against the run's parent.
+    """
     log = open(r / "runner.log", "a")
-    # The contextvar profile scope does NOT cross processes: a runner spawned for a run
-    # under the RESOLVED runs root gets that home stamped explicitly (core's own #18594
-    # guidance for subprocess spawners), so its seat config and child env follow the
-    # OWNER's profile, not the launch root os.environ carries on a multiplex host.
-    # A legacy-location run (pre-fix, under the launch root) keeps the inherited env
-    # verbatim — runner_alive compares it against the run's parent.
     env = ({**os.environ, "HERMES_HOME": str(_common.hermes_home())}
            if r.parent == _common.runs_root() else None)
-    proc = subprocess.Popen([sys.executable, str(HERE / "wf.py"), "run", r.name],
-                            stdout=log, stderr=log, stdin=subprocess.DEVNULL,
-                            env=env,
-                            start_new_session=True, cwd=str(HERE))
-    (r / "wf.pid").write_text(str(proc.pid))
+    argv = [sys.executable, str(HERE / "wf.py"), "run", r.name]
+    pid = None
+    if hasattr(os, "fork"):                # POSIX: daemonize through a transient hop
+        rd = wd = None
+        try:
+            rd, wd = os.pipe()
+            proc = subprocess.Popen(
+                [sys.executable, "-c", _DAEMON_INTERMEDIATE,
+                 str(HERE / "wf.py"), r.name, str(wd)],
+                stdout=log, stderr=log, stdin=subprocess.DEVNULL,
+                env=env, pass_fds=(wd,), start_new_session=True, cwd=str(HERE))
+            os.close(wd); wd = None        # the transient parent must not hold the write end
+            pid = _ready_pid(rd)
+            try:
+                rc = proc.wait(timeout=5)
+            except Exception:
+                rc = 0                     # hung transient: trust the ready line
+            if pid is None and rc not in (0, None):
+                pid = _spawn_runner_legacy(argv, env, log)   # fork refused pre-fork: direct spawn
+        except Exception:
+            pid = _spawn_runner_legacy(argv, env, log)   # daemonize path died pre-exec
+                                                       # (no runner alive): direct spawn;
+                                                       # the flock makes a race harmless
+        finally:
+            for fd in (rd, wd):
+                if fd is not None:
+                    try:
+                        os.close(fd)
+                    except OSError:
+                        pass
+    else:                                  # no-fork platform: today's behavior
+        pid = _spawn_runner_legacy(argv, env, log)
+    # #8 review (findings 3+4): NO door write of wf.pid — the admitted runner is
+    # its sole owner (self-stamp at admission, wf.py ready_stamp). `pid` here is
+    # only returned to the caller as the observed pid; on the legacy path the
+    # Popen'd child IS the runner and stamps ITSELF once it wins the flock, so
+    # a flock-refused loser never names itself in wf.pid either.
+    try:
+        log.close()
+    except OSError:
+        pass
+    return pid
+
+def _spawn_runner_legacy(argv, env, log):
+    """Direct spawn for no-fork platforms / refused fork: here the Popen'd child
+    IS the runner, and like the daemonized path it STAMPS ITSELF (wf.py
+    ready_stamp) only after winning the flock — the door never stamps, so a
+    flock-refused loser never names itself in wf.pid. Returns the observed
+    Popen pid for the caller's information, not as an ownership proof."""
+    proc = subprocess.Popen(argv, stdout=log, stderr=log, stdin=subprocess.DEVNULL,
+                            env=env, start_new_session=True, cwd=str(HERE))
+    return proc.pid
 
 # ---------- tool schema ----------
 

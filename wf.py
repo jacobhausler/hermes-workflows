@@ -156,6 +156,35 @@ def acquire_lock(run):
     os.write(fd, str(os.getpid()).encode())
     _LOCK_FD = fd  # never closed; exit releases
 
+_READY_FD_ENV = "HERMES_WF_READY_FD"  # #8: inheritable announce pipe fd, door -> runner
+
+def ready_stamp(run):
+    """#8 stamp law (sole owner): the ADMITTED runner stamps its OWN wf.pid
+    here — after it has won the flock admission — and then announces the same
+    pid on the door's ready pipe. The door writes wf.pid NEVER; it may return
+    the pid it observed on that pipe, but a post-admission door write races a
+    replacement runner and resurrects dead pids (#8 review findings 3+4). The
+    env key is POPPED at entry so the fd number never rides into any child env
+    (spawn envs are dict(os.environ, ...) — the golden env_keys byte law). No
+    fd (direct spawn, resume, in-process tests): stamp only, as before."""
+    fd = os.environ.pop(_READY_FD_ENV, None)   # first reader wins; gone for children
+    (run / "wf.pid").write_text(str(os.getpid()))
+    if fd is None:
+        return
+    try:
+        n = int(fd)
+    except (TypeError, ValueError):
+        return
+    try:
+        os.write(n, (str(os.getpid()) + "\n").encode())
+    except OSError:
+        pass                                   # door already gone: loser path, honest silence
+    finally:
+        try:
+            os.close(n)
+        except OSError:
+            pass
+
 def save_node(run, node, byid, rec):
     rec = dict(rec)
     rec["efp"] = efp(byid, node)
@@ -2055,7 +2084,7 @@ def main(run_id):
     try: (run / "runner_exit.json").unlink()   # fresh verdict per runner process
     except OSError: pass
     _EXIT_WRITTEN[0] = False
-    (run / "wf.pid").write_text(str(os.getpid()))
+    ready_stamp(run)   # #8: own-pid stamp + ready-pipe announce (door observes, never guesses)
     meta["_procs"] = {}
     meta["_procs_lock"] = threading.Lock()
     meta["_stop"] = threading.Event()
