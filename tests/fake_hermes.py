@@ -163,6 +163,20 @@ if _FAKE_MODE == "early":          # writes stdout, then keeps cooking (mid-run 
 if _FAKE_MODE == "bad_schema":     # valid json fence that fails the node's schema
     print("```json\n" + json.dumps({"wrong": True}) + "\n```")
     sys.exit(0)
+# ---- #107 enum-enforcement modes (prompt-scoped; the retry seam is visible
+# because the runner's attempt_note lands in the retry's prompt text) ----
+if _FAKE_MODE == "enum_out_then_in":  # first answer out-of-set, retry answers in-set
+    if "failed schema validation" in q:
+        print("```json\n" + json.dumps({"verdict": "ship"}) + "\n```")
+    else:
+        print("```json\n" + json.dumps({"verdict": "shipp"}) + "\n```")
+    sys.exit(0)
+if _FAKE_MODE == "enum_always_bad":   # persistent out-of-set answer
+    print("```json\n" + json.dumps({"verdict": "passedd"}) + "\n```")
+    sys.exit(0)
+if _FAKE_MODE == "enum_always_good":  # in-set on the first attempt
+    print("```json\n" + json.dumps({"verdict": "hold"}) + "\n```")
+    sys.exit(0)
 if _FAKE_MODE == "noisy":          # sprint101 C2 #9: prose around objects, no clean fence
     print("I finished the task. Early draft: {\"ok\": false, \"attempt\": 1}")
     print("```json\n{this fence is broken,,\n```")
