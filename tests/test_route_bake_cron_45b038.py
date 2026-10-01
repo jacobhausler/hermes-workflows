@@ -73,6 +73,14 @@ def call_llm(*, task, provider, model, messages, max_tokens, timeout, route_info
     calls = [json.loads(line) for line in lines]
     check("one explicit provider+model call", len(calls) == 1 and calls[0]["provider"] == "openai"
           and calls[0]["model"] == "m-1" and calls[0]["max_tokens"] == 1, calls)
+    shim = home / "shim" / "hermes"
+    shim.parent.mkdir()
+    shim.write_text(f'#!/bin/sh\nexec "{launcher}" "$@"\n')
+    shim.chmod(0o755)
+    os.environ["HERMES_WF_HERMES_BIN"] = str(shim)
+    via_shim = door.act_run({"graph": graph})
+    check("cron shell launcher resolves its actual venv Python", via_shim.get("routes", {}).get("a", {}).get("liveness") == "alive", via_shim)
+    os.environ["HERMES_WF_HERMES_BIN"] = str(launcher)
     os.environ["WF_FAKE_ROUTE"] = json.dumps({"provider": "other", "model": "fallback"})
     wrong = door.act_run({"graph": graph})
     check("different recorded route refused", "FALLBACK LADDER" in wrong.get("error", ""), wrong)
@@ -84,9 +92,9 @@ def call_llm(*, task, provider, model, messages, max_tokens, timeout, route_info
     original = dict(unpinned)
     solo = door.act_run({"graph": unpinned})
     saved = json.loads((home / "runs" / solo["run_id"] / "graph.json").read_text()) if solo.get("run_id") else {}
-    check("unpinned never proves/holds/refuses", bool(solo.get("run_id"))
-          and "route_verified" not in saved.get("nodes", [{}])[0]
-          and "route_verified" not in original["nodes"][0], solo)
+    check("unpinned graph remains byte-identical to legacy defaults bake",
+          saved == door._common.apply_graph_defaults(unpinned)
+          and "route_verified" not in saved.get("nodes", [{}])[0], saved)
 
     # The runner receives EXACTLY the node definition baked before spawn. Core's
     # sessions table is a per-session summary; a --continue can leave the final
@@ -118,6 +126,16 @@ def call_llm(*, task, provider, model, messages, max_tokens, timeout, route_info
     cm = wfcommon.child_metrics(rid, home).get(title.split("#a", 1)[0], {})
     check("session summary ends on pinned model", cm.get("model") == "m-1", cm)
     wf.seat_forbidden_models = lambda: []
+    db = sqlite3.connect(home / "state.db")
+    db.execute("update sessions set model='qwen-fallback' where id='child1'")
+    db.commit(); db.close()
+    wrong_final = wf._stamp_served({"_run": run}, {"skey": title.split("#a", 1)[0],
+                                    "status": "done"}, baked)
+    check("committed child_metrics off-route model fails the node", wrong_final.get("status") == "failed"
+          and wrong_final.get("error_class") == "route_unavailable", wrong_final)
+    db = sqlite3.connect(home / "state.db")
+    db.execute("update sessions set model='m-1' where id='child1'")
+    db.commit(); db.close()
     result = wf._stamp_served({"_run": run}, {"skey": title.split("#a", 1)[0],
                                "status": "done"}, baked)
     check("mid-turn fallback bills off-route => route_unavailable", result.get("status") == "failed"
