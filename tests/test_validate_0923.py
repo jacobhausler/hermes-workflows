@@ -108,8 +108,9 @@ check(Vs([{"id": "a", "type": "agent", "goal": "g"},
 # Validate the portable examples actually shipped in the source archive. The
 # two host-specific historical drafts are intentionally excluded from packaging
 # and retain unsupported schema types; they are not compatibility fixtures.
-graphs = [BUILD / "examples" / f"{name}.json" for name in
-          ("approve-publish", "branch-on-verdict", "incident-response", "smoke")]
+graphs = [BUILD / "examples" / name for name in
+          ("approve-publish.json", "blind-council.workflow.json",
+           "branch-on-verdict.json", "incident-response.json", "smoke.json")]
 bad_graphs = []
 for f in graphs:
     try:
