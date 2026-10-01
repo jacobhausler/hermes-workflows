@@ -23,7 +23,7 @@
         "until_argv": [
           "/usr/bin/python3",
           "-c",
-          "import pathlib, subprocess, sys\nS=pathlib.Path('/tmp/machine-watch-example')\nC=S/'check_cmd.txt'\nB=S/'probe_broken'\nL=S/'last_probe.json'\ndef broken(why):\n    B.write_text(why+'\\n')\n    print('machine-watch probe broken: '+why, file=sys.stderr)\n    sys.exit(2)\ntry:\n    cmd=C.read_text().strip()\nexcept OSError as e:\n    broken('missing or unreadable handoff: '+str(e))\nif not cmd:\n    broken('empty check command')\ntry:\n    rc=subprocess.run(cmd, shell=True).returncode\nexcept OSError as e:\n    broken('adapter could not run: '+str(e))\nL.write_text(str(rc))\nif rc==0:\n    B.unlink(missing_ok=True)\n    sys.exit(0)\nif rc!=1:\n    broken('adapter exit '+str(rc))\nsys.exit(1)"
+          "import pathlib, subprocess, sys\nS=pathlib.Path('/tmp/machine-watch-example')\nC=S/'check_cmd.txt'\nB=S/'probe_broken'\nL=S/'last_probe.json'\nA=S/'transition.claim'\ndef broken(why):\n    B.write_text(why+'\\n')\n    print('machine-watch probe broken: '+why, file=sys.stderr)\n    sys.exit(2)\ntry:\n    cmd=C.read_text().strip()\nexcept OSError as e:\n    broken('missing or unreadable handoff: '+str(e))\nif not cmd:\n    broken('empty check command')\ntry:\n    rc=subprocess.run(cmd, shell=True).returncode\nexcept OSError as e:\n    broken('adapter could not run: '+str(e))\nL.write_text(str(rc))\nif rc==0:\n    B.unlink(missing_ok=True)\n    if A.exists():\n        print('machine-watch: transition already claimed; waiting for unhealthy re-arm', file=sys.stderr)\n        sys.exit(1)\n    A.write_text('healthy claimed\\n')\n    sys.exit(0)\nif rc!=1:\n    broken('adapter exit '+str(rc))\nA.unlink(missing_ok=True)\nsys.exit(1)"
         ],
         "every_s": 3,
         "timeout_s": 300
@@ -36,7 +36,7 @@
         "watch"
       ],
       "max_turns": 4,
-      "goal": "The machine gate 'watch' released when the polled check exited 0 (its committed answer in ## Inputs carries attempt + waited_s + last_exit). Read /tmp/machine-watch-example/last_probe.json. For the watch named in the bootstrap payload, reply with ONLY fenced json {\"released\": true, \"attempts\": <int from the gate answer>, \"waited_s\": <int from the gate answer>, \"report\": \"<one line: watch_name cleared after N polls, last probe exit E>\"}",
+      "goal": "The machine gate 'watch' released when the polled check exited 0 (its committed answer in ## Inputs carries attempt + waited_s + last_exit). Read /tmp/machine-watch-example/last_probe.json. For the watch named in the bootstrap payload, reply with ONLY fenced json {\"released\": true, \"attempts\": <int from the gate answer>, \"waited_s\": <int from the gate answer>, \"report\": \"<one line: watch_name cleared after N polls, last probe exit E>\"}\nDeliver the transition to the receiver at most once. The gate wrote /tmp/machine-watch-example/transition.claim before releasing, so a repeated completed dispatch with unchanged health parks without starting another report. After the receiver actually accepts the report, write /tmp/machine-watch-example/delivered.transition with watch_name and last probe exit 0 as the delivery acknowledgement. If delivery fails, reply released:false and do not acknowledge; leave the claim in place to prevent an uncertain duplicate. An operator may clear an undelivered claim ONLY after establishing no delivery occurred. A real exit-1 poll re-arms the claim; exit-2 never re-arms.",
       "inputs": [
         "bootstrap"
       ]
