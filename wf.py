@@ -1875,10 +1875,17 @@ def resolve_ref(outputs, ref, missing=None):
         else: return missing
     return cur
 
-def _unmet_requires(node, outputs):
-    """Inspect committed ancestor outputs only; null and absent are both unmet."""
+def _unmet_requires(node, outputs, provenance=None):
+    """Inspect committed ancestor outputs only; null and absent are both unmet.
+    e68544a37be37657: without the `after_partial` opt-in (provenance False/None),
+    a ref resolving from an ancestor whose record carries harvest provenance is
+    unmet too — a half-dead child's harvested field is not a precondition, and a
+    key must not pass unexamined simply because the dead child named it."""
     missing = []
     for ancestor, paths in (node.get("requires") or {}).items():
+        harvested = provenance.get(ancestor) if provenance else None
+        if harvested and not node.get("after_partial"):
+            missing.append(f"{ancestor}.harvested")
         for path in paths:
             ref = ancestor + "." + path
             value = resolve_ref(outputs, ref, _MISSING)
@@ -1887,12 +1894,23 @@ def _unmet_requires(node, outputs):
     return missing
 
 
-def _fail_precondition(run, node, byid, missing):
+def _unmet_partial(node, states):
+    """e68544a37be37657: plain after-edges block on a harvest-on-death partial.
+    Returns the blocking ancestor ids ([]) — the opt-in (`after_partial: true`)
+    consumes the harvest instead. A TYPED verdict at the wave boundary: the
+    descendant never spawns and never hangs (fb-fix-2dd8de73: a dead impl's
+    `partial` released verify+suite onto an uncommitted candidate)."""
+    if node.get("after_partial"):
+        return []
+    return [a for a in node.get("after", []) if states.get(a) == "partial"]
+
+
+def _fail_precondition(run, node, byid, missing, why="precondition unmet: "):
     save_node(run, node, byid, {"status": "failed", "error_class": "precondition",
-                                "error": "precondition unmet: " + missing[0],
+                                "error": why + missing[0],
                                 "output": {"missing": missing}})
     log(run, "node.failed", node=node["id"], reason="precondition",
-        error_class="precondition", error="precondition unmet: " + missing[0], attempts=0)
+        error_class="precondition", error=why + missing[0], attempts=0)
 
 INPUTS_CAP = 12000
 AUTO_INPUTS_CAP = 8000   # #9/#10 lane: per-parent byte cap for auto-injected parents
@@ -2167,17 +2185,33 @@ def main(run_id):
         for nid, texts in drain_inbox(run, consumed).items():
             steering.setdefault(nid, []).extend(texts)
 
-        states, outputs = {}, {}
+        states, outputs, prov = {}, {}, {}
         for n in rs.nodes:
             st, rec = node_rec(run, n, rs.byid)
             states[n["id"]] = st
             if st in ("done", "partial"): outputs[n["id"]] = (rec or {}).get("output")  # #4: partial output IS output
+            prov[n["id"]] = bool((rec or {}).get("harvest"))                            # e68544a37be37657
         # prune propagation: derived skips become efp-stamped facts (replay-skip law)
         for nid in prune_states(rs.nodes, states):
             save_node(run, rs.byid[nid], rs.byid, {"status": "skipped", "output": {"skipped": "all deps pruned"}})
             log(run, "node.skipped", node=nid, reason="all deps pruned")
-        def deps_ok(n):  return all(dep_satisfied(states, a) for a in n.get("after", []))
+        def deps_ok(n):  return all(dep_satisfied(states, a, allow_partial=bool(n.get("after_partial"))) for a in n.get("after", []))
         def deps_res(n): return all(states.get(a) in ("done", "partial", "failed", "skipped") for a in n.get("after", []))  # #4: partial resolves
+
+        # e68544a37be37657: harvest-on-death partials block plain after-edges —
+        # every wave-releasable node gets its typed verdict BEFORE anything
+        # spawns: blocked ones FAIL TYPED (never hang, never spawn, no silent
+        # release of verify/suite onto an incomplete candidate). An explicit
+        # pass, never folded into deps_ok: the gate pick and the terminal
+        # `blocked` list both read deps_ok and must keep seeing the truth.
+        for n in rs.nodes:
+            if states[n["id"]] != "pending":
+                continue
+            blocked_by = _unmet_partial(n, states)
+            if blocked_by:
+                _fail_precondition(run, n, rs.byid, blocked_by,
+                                   why="blocked_by_partial_ancestor: ")
+                states[n["id"]] = "failed"   # the wave's own view sees the verdict now
 
         # #13 echo nodes: an agent whose result is `output` verbatim — commit at the
         # wave boundary, no spawn, no metrics row. Replay-skip by fingerprint comes
@@ -2193,7 +2227,7 @@ def main(run_id):
         if ready:
             spawnable = []
             for n in ready:
-                missing = _unmet_requires(n, outputs) if n.get("requires") else []
+                missing = _unmet_requires(n, outputs, prov) if n.get("requires") else []
                 if missing:
                     _fail_precondition(run, n, rs.byid, missing)
                 else:
@@ -2211,7 +2245,7 @@ def main(run_id):
         gate = next((n for n in rs.nodes if n["type"] == "gate" and states[n["id"]] == "pending"
                      and deps_ok(n) and (not n.get("requires") or deps_res(n))), None)
         if gate:
-            missing = _unmet_requires(gate, outputs) if gate.get("requires") else []
+            missing = _unmet_requires(gate, outputs, prov) if gate.get("requires") else []
             if missing:
                 _fail_precondition(run, gate, rs.byid, missing)
                 continue
