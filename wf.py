@@ -24,7 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from wfcommon import (efp, graph_fingerprint, jload, validate_graph, node_rec, gate_answer_valid,
                       when_true, child_metrics, prune_states, dep_satisfied, active_child,
                       FP_RULE_VERSION, record_efp_valid, seat_forbidden_models, runs_root,
-                      hermes_root, profile_home, find_run,
+                      hermes_root, profile_home, find_run, blocked_legibility,
                       hermes_home as _wfcommon_hermes_home)
 
 def _route_home(result):
@@ -2327,7 +2327,9 @@ def main(run_id):
         failed = [n for n in rs.nodes if states[n["id"]] == "failed"]
         if failed:
             blocked = [n["id"] for n in rs.nodes if states[n["id"]] == "pending" and not deps_ok(n)]
-            log(run, "run.blocked", failed=[n["id"] for n in failed], blocked=blocked)
+            unconverged, blockers = blocked_legibility(rs.nodes, states, blocked)
+            log(run, "run.blocked", failed=[n["id"] for n in failed], blocked=blocked,
+                unconverged=unconverged, blocked_by=blockers)
             emit(f"WORKFLOW_FAILED {run_id} ({','.join(n['id'] for n in failed)})")
             return "blocked by failed " + ",".join(n["id"] for n in failed)
         if all(states[n["id"]] in ("done", "partial", "skipped") for n in rs.nodes):   # #4: a harvested partial closes the run
