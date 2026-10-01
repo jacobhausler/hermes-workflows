@@ -10,6 +10,7 @@ spec = importlib.util.spec_from_file_location("authoring_door", BUILD / "__init_
 assert spec is not None and spec.loader is not None
 door = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(door)
+import wf_test_isolation as _iso71; _iso71.install(door)  # #71 r5: pin settings.runs_root alongside WF_RUNS_ROOT
 NODE = {"id": "task", "type": "agent", "goal": "Do work"}
 
 
@@ -28,7 +29,13 @@ def check(condition, detail):
 
 with tempfile.TemporaryDirectory(prefix="authoring-", dir=BUILD) as tmp:
     original_home = os.environ.get("HERMES_HOME")
+    original_runs = os.environ.get("WF_RUNS_ROOT")
     os.environ["HERMES_HOME"] = tmp
+    # #71: HERMES_HOME alone loses to the context-local home override in lane
+    # processes — the shelf only actually sandboxes when WF_RUNS_ROOT pins it
+    # (checked before any home resolution). Without this, these saves land in
+    # the SHARED estate library.
+    os.environ["WF_RUNS_ROOT"] = str(Path(tmp) / "workflows")
     started = []
     original_spawn = door._spawn_runner
     original_alive = door.runner_alive
@@ -135,4 +142,8 @@ with tempfile.TemporaryDirectory(prefix="authoring-", dir=BUILD) as tmp:
             os.environ.pop("HERMES_HOME", None)
         else:
             os.environ["HERMES_HOME"] = original_home
+        if original_runs is None:
+            os.environ.pop("WF_RUNS_ROOT", None)
+        else:
+            os.environ["WF_RUNS_ROOT"] = original_runs
 print("ALL PASS")

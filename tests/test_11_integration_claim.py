@@ -16,6 +16,7 @@ sys.path.insert(0, str(ROOT))
 spec = importlib.util.spec_from_file_location('lane_e_claim_door', ROOT/'__init__.py')
 door = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(door)
+import wf_test_isolation as _iso71_door18; _iso71_door18.install(door)  # #71 r5: pin settings.runs_root alongside WF_RUNS_ROOT
 
 class Claim(unittest.TestCase):
     def setUp(self):
@@ -79,6 +80,10 @@ class Claim(unittest.TestCase):
 from pathlib import Path
 spec=importlib.util.spec_from_file_location('door',Path(sys.argv[1])/'__init__.py')
 m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
+# The -c child has no tests/ on sys.path: load the test-only pin by explicit path.
+iso_spec=importlib.util.spec_from_file_location('wf_test_isolation',Path(sys.argv[1])/'tests'/'wf_test_isolation.py')
+iso=importlib.util.module_from_spec(iso_spec);iso_spec.loader.exec_module(iso)
+iso.install(m)
 print(json.dumps(m.act_run({'graph':json.loads(Path(sys.argv[2]).read_text()),'lane_key':'claim/fixture'})))
 """
         p = [subprocess.Popen([sys.executable,'-c',script,str(ROOT),str(self.graph_file)],env=self.env,

@@ -20,6 +20,7 @@ sys.path.insert(0, str(ROOT))
 spec = importlib.util.spec_from_file_location('lane_e_door', ROOT / '__init__.py')
 door = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(door)
+import wf_test_isolation as _iso71_door22; _iso71_door22.install(door)  # #71 r5: pin settings.runs_root alongside WF_RUNS_ROOT
 import wfcommon as common
 
 

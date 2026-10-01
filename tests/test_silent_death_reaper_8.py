@@ -141,6 +141,8 @@ with tempfile.TemporaryDirectory(prefix="reaper8-", dir=HERE,
 
     wfcommon = load("reaper_wfcommon", ROOT / "wfcommon.py")
     door = load("reaper_door", ROOT / "__init__.py")
+    os.environ["WF_RUNS_ROOT"] = str(runs)  # #71 r5: env pin — resolver takes this over settings/home default
+    import wf_test_isolation as _iso71_reaper8; _iso71_reaper8.install(door)  # #71 r5: pin settings.runs_root too
 
     # ---- A. silent death -> act_wait respawn must leave the reap trace ----
     r = mk_run(runs, "r8-silent", "hang a while")
