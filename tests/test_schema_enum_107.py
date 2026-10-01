@@ -91,10 +91,14 @@ def enum_err(bad_schema):
     return [e for e in V(agent_node(bad_schema))
             if e["node"] == "a" and e["field"].endswith(".enum")]
 
-for bad in (["merge", 5], "merge", {"v": 1}, 7):
+for bad in ("merge", {"v": 1}, 7):
     errs = enum_err({"type": "string", "enum": bad})
     check(f"enum {bad!r} rejected as non-list", errs and "must be a non-empty list" in errs[0]["msg"],
           json.dumps(errs))
+errs = enum_err({"type": "string", "enum": ["merge", 5]})
+check("non-string member rejected as bad members (it IS a list)",
+      errs and "enum members must be a list of non-empty strings" in errs[0]["msg"],
+      json.dumps(errs))
 errs = enum_err({"type": "string", "enum": []})
 check("empty enum rejected at validate time", errs and "must be a non-empty list" in errs[0]["msg"],
       json.dumps(errs))

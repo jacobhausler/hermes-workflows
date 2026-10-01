@@ -294,7 +294,12 @@ def last_balanced_object(text):
     return last
 
 def validate(out, schema):
-    """Tiny forgiving validator: type / required / properties / items."""
+    """Tiny forgiving validator: type / required / properties / items / enum.
+    #107: `enum` membership is ENFORCED here — a str value against a
+    string-membered enum (exactly what the door's schema_check admits: a
+    non-empty list of non-empty strings on type:'string'), so a misspelled
+    verdict takes the same typed-correction-retry path as a `type` violation
+    and the error string names the allowed set for the retry prompt."""
     errs = []
     if not schema:
         return errs
@@ -305,6 +310,11 @@ def validate(out, schema):
         elif t == "string" and not isinstance(v, str): errs.append(f"{path}: expected string")
         elif t == "boolean" and not isinstance(v, bool): errs.append(f"{path}: expected boolean")
         elif t in ("number", "integer") and not isinstance(v, (int, float)): errs.append(f"{path}: expected number")
+        en = s.get("enum")
+        if (isinstance(v, str) and isinstance(en, list) and en
+                and all(isinstance(x, str) for x in en) and v not in en):
+            errs.append(f"{path}: not an allowed value (allowed: "
+                        + ", ".join(repr(x) for x in en) + ")")
         if isinstance(v, dict):
             for r in s.get("required", []):
                 if r not in v: errs.append(f"{path}: missing required '{r}'")
