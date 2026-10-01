@@ -32,6 +32,7 @@ INCLUDE_FILES = (
     "examples/incident-response.json",
     "examples/machine-watch.workflow.json",
     "examples/portable-review.workflow.json",
+    "examples/quorum-probe.workflow.json",
     "examples/smoke.json",
     "plugin.yaml",
     "CHANGELOG.md",

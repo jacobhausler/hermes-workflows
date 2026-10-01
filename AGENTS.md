@@ -177,6 +177,11 @@ lifecycle TEMPLATE (alert-triggered incident: verdict-branch gate pair, machine
 recovery probe with human escalation, merge-gated close) meant to be adapted —
 its `run_context` seeds and the sweep-adapter contract are the swap points; it
 validates but is not smoke-run (real lanes need your stack).
+[examples/quorum-probe.workflow.json](examples/quorum-probe.workflow.json) folds
+the speed/coverage contrast into one file: a `quorum`-raced probe fan-out whose
+report must state the cancelled straggler set honestly, beside a no-quorum barrier
+that reconciles survivors against an explicit master catalog so a dead lane prints
+as a loud coverage gap, never silent loss. Two author laps, one per mode.
 
 ### 3d. Failures, resume, amend
 
