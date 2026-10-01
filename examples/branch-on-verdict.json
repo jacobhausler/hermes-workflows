@@ -4,7 +4,6 @@
     {
       "goal": "You are a judge. Decide ONE verdict for this statement: 'The number 17 is prime.' Reply with ONLY a fenced json block: {\"verdict\": \"ship\" | \"hold\", \"why\": \"<one line>\"}. Use 'ship' when the statement is true.",
       "id": "judge",
-      "model": "qwen38-next",
       "schema": {
         "properties": {
           "verdict": {
@@ -59,7 +58,6 @@
       "inputs": [
         "judge"
       ],
-      "model": "qwen38-next",
       "schema": {
         "properties": {
           "arm": {
@@ -85,7 +83,6 @@
       ],
       "goal": "The hold-arm ran because the judge said hold and the owner released the gate. Reply with ONLY a fenced json block: {\"arm\": \"hold\"}.",
       "id": "escalate",
-      "model": "qwen38-next",
       "schema": {
         "properties": {
           "arm": {
@@ -111,7 +108,6 @@
       "inputs": [
         "judge"
       ],
-      "model": "qwen38-next",
       "schema": {
         "properties": {
           "arms_seen": {

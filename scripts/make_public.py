@@ -22,6 +22,33 @@ from pathlib import Path
 
 GIT = "/usr/bin/git"
 PATTERN = re.compile(r"192\.168|\bhaus\b|callindor|gaidin|rhuidean|jacob|\bnous\b", re.I)
+SCRUB_LIST_FILE = "scripts/scrub-list.txt"
+
+
+def load_scrub_list(repo: Path) -> re.Pattern:
+    """Core-10 contract: the peer-agreed scrub-grep categories (hostnames, LAN IPs,
+    Discord snowflakes, estate/internal vocab, model aliases) live in the committed
+    scripts/scrub-list.txt (one case-insensitive regex per line; '' and '#' ignored)
+    and are MERGED with the built-in pattern above — never replacing it. An absent
+    file = built-in only (pre-Core-10 trees keep auditing exactly as before); a line
+    that fails to compile is fatal, never silently skipped."""
+    pats = [PATTERN.pattern]
+    f = repo / SCRUB_LIST_FILE
+    if f.exists():
+        for raw in f.read_text(encoding="utf-8").splitlines():
+            entry = raw.strip()
+            if not entry or entry.startswith("#"):
+                continue
+            try:
+                re.compile(entry, re.I)
+            except re.error as e:
+                print(f"FATAL: {SCRUB_LIST_FILE}:{raw[:60]!r} does not compile: {e}",
+                      file=sys.stderr)
+                raise SystemExit(2)
+            pats.append(entry)
+    return re.compile("|".join(f"(?:{p})" for p in pats), re.I)
+
+
 EXCLUDE_DIRS = {".git", "__pycache__"}
 EXCLUDE_PATTERNS = ["docs/PUBLISH-SCRUB.md",
                     "*/__pycache__/*", "__pycache__/*",
@@ -70,6 +97,9 @@ def main() -> int:
     copied = [rel for rel in listed if not excluded(rel)]
 
     # Audit BEFORE copying: a non-guard hit in any copied file is fatal.
+    # The audit pattern is the built-in PATTERN MERGED with the committed
+    # scripts/scrub-list.txt (Core-10 contract with the peer estate).
+    audit = load_scrub_list(repo)
     guard_files, guard_lines, guard_regexes = load_guards(repo)
     offences: list[str] = []
     for rel in copied:
@@ -77,7 +107,7 @@ def main() -> int:
             continue
         text = (repo / rel).read_text(encoding="utf-8", errors="replace")
         for i, line in enumerate(text.splitlines(), 1):
-            if PATTERN.search(line):
+            if audit.search(line):
                 if rel in guard_files or (rel, i) in guard_lines:
                     continue
                 if any(rx.search(line) for rx in guard_regexes):

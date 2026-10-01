@@ -1441,7 +1441,7 @@ def _seat_alias_map(home):
 
 def _route_hold(meta, result, node=None):
     """#25: commit-time fail-closed hold (field report fb-fix-9c575645: pinned
-    billed the seat's fallback qwen38-next for 3 whole nodes while the submit ping had
+    billed the seat's fallback model for 3 whole nodes while the submit ping had
     ALREADY reported the fallback-ladder surprise). When the door proved this node's
     route alive at submit (`route_verified`, door-baked — absent = never proved = no
     hold, every legacy run behaves byte-identically), a KNOWN served_model that is

@@ -29,20 +29,20 @@ def mkprofile(name, config=True, consent=None):
         (ph / "workflow_team.json").write_text(json.dumps(consent))
     return ph
 
-mkprofile("teammate", consent={"accept_from": ["gh-dispatch", "default"]})
+mkprofile("teammate", consent={"accept_from": ["repo-bot", "default"]})
 mkprofile("noconsent", consent=None)
 mkprofile("wronglist", consent={"accept_from": ["someone-else"]})
 mkprofile("badjson")
 (PROOT / "badjson" / "workflow_team.json").write_text("{not json")
-mkprofile("nolist", consent={"accept_from": "gh-dispatch"})
-mkprofile("noconfig", config=False, consent={"accept_from": ["gh-dispatch"]})
+mkprofile("nolist", consent={"accept_from": "repo-bot"})
+mkprofile("noconfig", config=False, consent={"accept_from": ["repo-bot"]})
 
 def nodes(**over):
     base = {"id": "review", "type": "agent", "goal": "g", "after": ["fix"]}
     base.update(over)
     return [dict(base), {"id": "fix", "type": "agent", "goal": "g"}]
 
-PE = lambda ns, launcher="gh-dispatch": wfcommon.profile_errors(ns, launcher=launcher,
+PE = lambda ns, launcher="repo-bot": wfcommon.profile_errors(ns, launcher=launcher,
                                                                  profiles_dir=PROOT)
 
 # ---------- F2 validation ----------
@@ -55,11 +55,11 @@ check(len(e) == 1 and "default" in e[0]["msg"], "profile 'default' rejected (nev
 e = PE(nodes(profile="")) + PE(nodes(profile="   ")) + PE(nodes(profile=None)) + PE(nodes(profile=7))
 check(len(e) == 4 and all(x["field"] == "profile" for x in e),
       "empty/whitespace/non-string profile rejected 4/4")
-e = PE(nodes(profile="noconsent"), launcher="gh-dispatch")
+e = PE(nodes(profile="noconsent"), launcher="repo-bot")
 check(len(e) == 1 and "workflow_team.json" in e[0]["msg"] and "delegation" in e[0]["msg"],
       "missing consent file rejected; msg documents delegation-not-isolation + the file to write")
 e = PE(nodes(profile="wronglist"))
-check(len(e) == 1 and "gh-dispatch" in e[0]["msg"] and "someone-else" in e[0]["msg"],
+check(len(e) == 1 and "repo-bot" in e[0]["msg"] and "someone-else" in e[0]["msg"],
       "launcher not in accept_from rejected, naming both launcher and the list")
 e = PE(nodes(profile="noconsent"), launcher="default")
 check(len(e) == 1, "'default' IS a legal launcher name (still needs consent)")
@@ -82,8 +82,8 @@ check(PE([{"id": "n", "type": "echo", "output": {}, "profile": "ghost"}]) == [],
 # launcher resolution: from HERMES_HOME only, never a graph arg
 ph2 = PROOT / "launcher"
 ph2.mkdir(parents=True)
-os.environ["HERMES_HOME"] = str(PROOT / "gh-dispatch")
-check(wfcommon.launcher_profile() == "gh-dispatch", "launcher from HERMES_HOME under profiles/")
+os.environ["HERMES_HOME"] = str(PROOT / "repo-bot")
+check(wfcommon.launcher_profile() == "repo-bot", "launcher from HERMES_HOME under profiles/")
 os.environ["HERMES_HOME"] = str(BASE / "root")
 check(wfcommon.launcher_profile() == "default", "non-profile HERMES_HOME -> launcher 'default'")
 check(str(wfcommon.profiles_root(BASE / "root" / "profiles" / "x")) == str(PROOT),
@@ -206,7 +206,7 @@ check(wfcommon.node_child_metrics(run, "solo") == wfcommon.child_metrics(run.nam
 check(wfcommon.node_child_metrics(run, "ghost") == {},
       "unreadable target DB -> {} (the api_calls_known:false UNKNOWN path, never zero)")
 # profile-only record (no profile_home) derives <profiles_root>/<name>
-os.environ["HERMES_HOME"] = str(PROOT / "gh-dispatch")
+os.environ["HERMES_HOME"] = str(PROOT / "repo-bot")
 (run / "nodes" / "derived.json").write_text(json.dumps({"status": "done", "profile": "teammate"}))
 check(wfcommon.node_child_home(run, "derived") == home_t,
       "profile-only record derives profile_home = <profiles_root>/<profile>")

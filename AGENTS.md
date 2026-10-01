@@ -162,6 +162,12 @@ succeed, the rest are cancelled; without it the fan-out waits for every item;
 `wait:{"until_argv":[…],"every_s":60,"timeout_s":3600}`. Tested examples:
 [examples/approve-publish.json](examples/approve-publish.json),
 [examples/branch-on-verdict.json](examples/branch-on-verdict.json).
+[examples/gated-publish.workflow.json](examples/gated-publish.workflow.json) is a
+human-gated publish TEMPLATE built from the approve-publish seed (draft -> owner
+gate -> complementary `when`+`on_skip:"prune"` pair on the answer -> exactly one
+arm; no node names a vendor model — role vocabulary lives in prose, routing is the
+seat default). Launch seeds `run_context:{"artifact":"<name>"}`. Validate + author
+run tested (receipts/gated-publish/).
 [examples/incident-response.json](examples/incident-response.json) is a full
 lifecycle TEMPLATE (alert-triggered incident: verdict-branch gate pair, machine
 recovery probe with human escalation, merge-gated close) meant to be adapted —

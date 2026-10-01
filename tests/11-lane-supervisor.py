@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Twenty real runner crash/resume cycles; status lane_key checked against /proc.
-Failure writes a JSONL evidence line before exiting; suitable for keeper canaries.
+Failure writes a JSONL evidence line before exiting; suitable for supervisor canaries.
 """
 import importlib.util
 import json
@@ -28,14 +28,14 @@ def until(pred,seconds=5):
 
 
 def main():
-    with tempfile.TemporaryDirectory(prefix='wf11-keeper-') as td:
+    with tempfile.TemporaryDirectory(prefix='wf11-lane-sup-') as td:
         td=Path(td);runs=td/'runs';runs.mkdir()
         env={**os.environ,'HERMES_HOME':str(td),'WF_RUNS_ROOT':str(runs),
              'HERMES_WF_HERMES_BIN':str(ROOT/'tests/fixtures/11-fake-hermes.py')}
         with patch.dict(os.environ,env,clear=True):
             for cycle in range(20):
-                key='keeper/'+str(cycle)
-                graph={'name':'keeper-'+str(cycle),'nodes':[{'id':'a','type':'agent','goal':'SLEEP 0.25'}]}
+                key='lane-sup/'+str(cycle)
+                graph={'name':'lane-sup-'+str(cycle),'nodes':[{'id':'a','type':'agent','goal':'SLEEP 0.25'}]}
                 start=door.act_run({'graph':graph,'lane_key':key})
                 assert 'run_id' in start,start
                 rid=start['run_id'];r=runs/rid
@@ -57,6 +57,6 @@ def main():
                 assert final['runner_live'] == common.runner_alive(r),(cycle,final)
                 assert not (r/'runner.log').read_text().count('WORKFLOW_BUSY'),(cycle,'busy crash')
                 print(json.dumps({'cycle':cycle+1,'status':final['state'],'live':final['runner_live']}),flush=True)
-    print('20/20 keeper kill/resume')
+    print('20/20 lane-supervisor kill/resume')
 
 if __name__=='__main__':main()
