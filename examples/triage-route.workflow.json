@@ -1,0 +1,243 @@
+{
+  "grammar": "wf/1",
+  "name": "triage-route",
+  "description": "Triage a work queue with one classifier node and the complementary two-gate branch pair: gates with negated `when` predicates and on_skip=prune route the run down exactly one arm (human escalation OR batch handling) and the dead arm's descendants never spawn. run_context seeds (ALL required): 'work_queue' = where the open items live (a file path, a command, or a URL your tools can read); 'action_target' = where routine actions are APPLIED (the ledger/ticket/file/CLI the rule's actions mutate — often the same place as work_queue, say so explicitly); 'decision_rule' = the owner's standing rule the classifier applies verbatim; 'owner_notify' = how a human is reached (a command, channel name, or file to write). ADAPTER CONTRACT for work_queue: the intake node must be able to enumerate open items from it with whatever read-only tools the receiver has; nothing here mutates your tracker — every write/escalate step is a node you can point at your real system. Seeds are plain text: a seed value containing { or } breaks fan-out re-rendering and the launch refuses.",
+  "provenance": {
+    "owner": "austin-exec",
+    "source": "hermes-workflows/examples/triage-route.workflow.json"
+  },
+  "defaults": {
+    "timeout": 900,
+    "context": "You are one lane of a triage-route workflow. Ground rules:\n- Read-only unless your node's goal explicitly says to act or escalate.\n- Self-report is not proof: every classification cites the field or evidence in the item that drove it.\n- Apply the owner's standing rule as written; do not invent policy. An item the rule does not clearly cover is 'ambiguous' — never force it into routine or urgent.\n- Keep answers to the schema; one fenced ```json block as your final message. Never print secrets."
+  },
+  "nodes": [
+    {
+      "id": "intake",
+      "type": "agent",
+      "max_turns": 6,
+      "shape": "recon",
+      "goal": "Enumerate the open items in the work queue: {run.work_queue}\nRead them with whatever read-only tools you have. Ignore items closed/answered out-of-band. Return up to 20 items, each reduced to one line.\nReply with ONLY fenced json {\"items\": [{\"id\": \"<stable identifier>\", \"summary\": \"<one line>\"}], \"count\": <int>, \"notes\": \"<anything unreadable or skipped, with reason>\"}",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "summary"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "summary": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "count": {
+            "type": "integer"
+          },
+          "notes": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "items",
+          "count"
+        ]
+      }
+    },
+    {
+      "id": "classify",
+      "type": "agent",
+      "after": [
+        "intake"
+      ],
+      "max_turns": 8,
+      "shape": "recon",
+      "goal": "Classify every item from the intake payload (in ## Inputs) using the owner's standing rule, applied verbatim:\nRULE: {run.decision_rule}\nBuckets (an item goes in exactly one):\n- routine: the rule says how to handle it AND no human judgment is needed\n- urgent: the rule or its evidence says it must not wait for the batch\n- ambiguous: the rule does not clearly cover it\nReply with ONLY fenced json {\"has_urgent\": true|false, \"routine\": [{\"id\": \"<id>\", \"action\": \"<what the rule says to do>\"}], \"urgent\": [{\"id\": \"<id>\", \"evidence\": \"<why it must not wait>\"}], \"ambiguous\": [{\"id\": \"<id>\", \"why\": \"<the gap in the rule>\"}], \"rule_citations\": \"<one line: which part of the rule drove each bucket>\"}\nhas_urgent MUST be true iff the urgent array is non-empty — the branch gates read that boolean (the gate grammar cannot see array length).",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "has_urgent": {
+            "type": "boolean"
+          },
+          "routine": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "urgent": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "ambiguous": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "rule_citations": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "has_urgent",
+          "routine",
+          "urgent",
+          "ambiguous"
+        ]
+      }
+    },
+    {
+      "id": "route-urgent",
+      "type": "gate",
+      "after": [
+        "classify"
+      ],
+      "when": "out.classify.has_urgent == True",
+      "on_skip": "prune",
+      "wait": {
+        "wait_s": 0.01
+      }
+    },
+    {
+      "id": "route-batch",
+      "type": "gate",
+      "after": [
+        "classify"
+      ],
+      "when": "out.classify.has_urgent == False",
+      "on_skip": "prune",
+      "wait": {
+        "wait_s": 0.01
+      }
+    },
+    {
+      "id": "escalate",
+      "type": "gate",
+      "after": [
+        "route-urgent"
+      ],
+      "question": "Urgent items need a human now — release which option?",
+      "options": [
+        "act",
+        "hold",
+        "dismiss"
+      ],
+      "context": "Urgent set and evidence are in the classify output above (## Inputs). Owner-escalation channel: {run.owner_notify}. Escalation means surfacing the item to a human, not silently acting on it."
+    },
+    {
+      "id": "handle-urgent",
+      "type": "agent",
+      "after": [
+        "escalate"
+      ],
+      "max_turns": 8,
+      "shape": "build",
+      "goal": "The human answered the escalation gate with an option and reason (see ## Inputs from 'escalate'). If the released option is NOT 'act', do nothing to the items: reply {\"acted\": [], \"skipped\": \"not approved: <option>\"} and stop.\nIf it IS 'act': execute exactly what the human's release reason authorized for the urgent items (in the classify payload), nothing more. Record per item what was done and the evidence.\nReply with ONLY fenced json {\"acted\": [{\"id\": \"<id>\", \"action\": \"<what was done>\", \"evidence\": \"<command/output>\"}], \"skipped\": \"<reason or empty>\"}",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "acted": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "skipped": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "acted"
+        ]
+      }
+    },
+    {
+      "id": "batch-run",
+      "type": "agent",
+      "after": [
+        "route-batch",
+        "classify"
+      ],
+      "max_turns": 10,
+      "fanout": {
+        "items_from": "classify.routine",
+        "goal": "Execute the rule's prescribed action for this routine item: {item}\nApply it at the action target: {run.action_target}\nWork only this item. If the action target does not exist or the item cannot be located in it, do NOT invent a target or write anywhere else: report action_taken as 'not applied: <why>' with your probe evidence.\nReply with ONLY fenced json {\"id\": \"<item id>\", \"action_taken\": \"<what was done, or 'not applied: <why>'>\", \"evidence\": \"<command/output establishing it>\"}"
+      },
+      "schema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "action_taken": {
+            "type": "string"
+          },
+          "evidence": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "action_taken"
+        ]
+      }
+    },
+    {
+      "id": "report",
+      "type": "agent",
+      "after": [
+        "handle-urgent",
+        "batch-run"
+      ],
+      "inputs": [
+        "classify"
+      ],
+      "max_turns": 6,
+      "shape": "review",
+      "goal": "Write the triage closeout from the payloads in ## Inputs. One arm will be absent — that is correct (the losing branch was pruned); say which arm ran. Cover: items seen, per-bucket counts, what was done per item with evidence, the ambiguous set the owner must rule on (list every one — they are the rule-gap backlog), and the gate answer if escalation ran.\nReply with ONLY fenced json {\"lane\": \"urgent|batch\", \"seen\": <int>, \"done\": [\"<id: action + evidence>\"], \"ambiguous_for_owner\": [\"<id: the gap>\"], \"gate\": \"<released option + reason, or 'not reached'>\"}",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "lane": {
+            "type": "string",
+            "description": "one of: urgent, batch"
+          },
+          "seen": {
+            "type": "integer"
+          },
+          "done": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "ambiguous_for_owner": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "gate": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "lane",
+          "seen",
+          "done",
+          "ambiguous_for_owner"
+        ]
+      }
+    }
+  ]
+}

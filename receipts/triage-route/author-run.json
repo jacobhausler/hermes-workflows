@@ -1,0 +1,19 @@
+{
+  "template": "triage-route",
+  "receipt_kind": "author-run",
+  "author_estate": "austin-exec (homelab profile, devbox)",
+  "graph_file": "examples/triage-route.workflow.json",
+  "graph_sha256": "734d71d30d62f23291eaac2515754b4454cd3804ea62b47e471b4204e67e2363",
+  "source_digest": "e33162f9b627b6a8e448b4e93e0798e7bc197455b6b36ec979d0a94ee17524e7",
+  "run_id": "20261001-000557-author-run-triage-route-",
+  "runs_root": "~/.hermes/profiles/homelab/workflows",
+  "runner_exit": {
+    "reason": "done",
+    "at": "2026-10-01T00:06:55+00:00",
+    "graph_fingerprint": "ef1f58647723ec7b"
+  },
+  "outcome": "batch arm: 8 nodes terminal \u2014 intake done, classify done (has_urgent=false), route-urgent gate SKIPPED with prune, escalate+handle-urgent pruned, route-batch done, batch-run fan-out 3/3 done with per-item evidence, report done. The complementary-branch idiom fired exactly once on the live arm.",
+  "branch_coverage_honesty": "the URGENT arm (escalate human gate + handle-urgent reading the gate answer as data) was NOT exercised by this run \u2014 the fixture had no urgent items and the prune branch was the one deliberately exercised. First real urgent use walks the other arm.",
+  "lap_history": "v1 run 20261001-000209 surfaced a real template gap (no 'action_target' seed for where routine actions apply \u2014 lanes refused to invent a write target, correctly); fixed in-file by adding the seed before this receipt. v2 verified all 3 fan-out items applied against the target with grep evidence.",
+  "notes": "Substitution proof: zero {run.*} in spawned prompts (graph materialized via door _bind_run_context pre-launch)."
+}

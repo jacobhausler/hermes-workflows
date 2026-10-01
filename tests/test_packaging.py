@@ -73,6 +73,7 @@ def main() -> None:
                       "dashboard/manifest.json", "dashboard/plugin_api.py", "desktop/plugin.js",
                       "README.md", "INSTALL.md", "SKILL.md", "examples/smoke.json",
                       "examples/approve-publish.json", "examples/branch-on-verdict.json",
+                      "examples/triage-route.workflow.json",
                       "examples/portable-review.workflow.json",
                       "examples/incident-response.json", "references/portable.md",
                       "tests/test_packaging.py", "tests/test_fanout_ui.mjs", "tests/test_card_frontend_contract.mjs",
@@ -88,6 +89,7 @@ def main() -> None:
                   and {m[len(root):] for m in members if m.startswith(root + "examples/")}
                       == {"examples/smoke.json", "examples/approve-publish.json",
                           "examples/branch-on-verdict.json",
+                          "examples/triage-route.workflow.json",
                           "examples/incident-response.json",
                           "examples/portable-review.workflow.json"})
             checksum_text = archive.read(root + "SHA256SUMS").decode("utf-8")

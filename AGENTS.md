@@ -167,6 +167,13 @@ lifecycle TEMPLATE (alert-triggered incident: verdict-branch gate pair, machine
 recovery probe with human escalation, merge-gated close) meant to be adapted —
 its `run_context` seeds and the sweep-adapter contract are the swap points; it
 validates but is not smoke-run (real lanes need your stack).
+[examples/triage-route.workflow.json](examples/triage-route.workflow.json) is a
+queue-triage TEMPLATE (intake -> classifier -> complementary `when` gate pair
+with `on_skip: prune`, routing exactly one arm: human escalation with the gate
+answer consumed as data, or a rule-driven batch fan-out). The classifier emits a
+`has_urgent` boolean because the gate grammar cannot see array length.
+Author-run receipt:
+[receipts/triage-route/author-run.json](receipts/triage-route/author-run.json).
 
 ### 3d. Failures, resume, amend
 
