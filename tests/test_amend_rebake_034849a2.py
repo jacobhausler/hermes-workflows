@@ -12,6 +12,7 @@ tmp_dir = tempfile.TemporaryDirectory(prefix=".tmp-rebake-", dir=HERE / "tests")
 atexit.register(tmp_dir.cleanup)
 home = Path(tmp_dir.name)
 os.environ["HERMES_HOME"] = str(home)
+os.environ["WF_RUNS_ROOT"] = str(home / "workflows")  # #71 shelf pin
 ALIASES = ("  aliases:\n    fable: anthropic/claude-fable-5.1\n    opus: anthropic/claude-opus-5-5\n"
            "    sol: openai-codex/gpt-6-sol\n")
 SEAT_DEFAULT = "model:\n  default: qwen38-next\n" + ALIASES      # default-profile seat
@@ -20,6 +21,7 @@ TIERS_DEFAULT = {"worker": "qwen38-next", "manager": "fable", "frontier": "sol"}
 TIERS_FIXER = {"worker": "qwen38-next", "manager": "opus", "frontier": "sol"}
 (home / "config.yaml").write_text(SEAT_DEFAULT)
 door = importlib.import_module("__init__")
+import wf_test_isolation as _iso71; _iso71.install(door)  # #71 r5: pin settings.runs_root alongside WF_RUNS_ROOT
 from wfcommon import efp
 door._ping_route_once = lambda p, m: {"liveness": "unknown"}   # no network
 

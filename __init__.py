@@ -51,7 +51,8 @@ def _inline_graph_size_error(graph):
     return None
 GRAPH_KEYS = {"name", "nodes", "description", "defaults", "model_policy",
               "provenance",   # 1.1 (RATIFY F5): opt-in library provenance block, door-written
-              "grammar"}      # #32: dialect tag of a shared file ("wf/1"; absent = wf/1)
+              "grammar",      # #32: dialect tag of a shared file ("wf/1"; absent = wf/1)
+              "concurrency", "item_concurrency"}  # #100: optional run-level limits
 
 def _model_names_valid(names):
     return isinstance(names, list) and all(isinstance(n, str) and n.strip() for n in names)
@@ -136,6 +137,10 @@ def _validation_error(graph):
     # #32: a file may state its dialect; absent = wf/1, unknown = refused with the
     # supported list (fail-closed: a newer dialect must never be misrun as wf/1).
     errs.extend(_common.grammar_errors(graph))
+    for key in ("concurrency", "item_concurrency"):
+        if key in graph and (type(graph[key]) is not int or graph[key] <= 0):
+            errs.append({"node": None, "field": key,
+                         "msg": f"{key} must be a positive integer"})
     if "defaults" in graph:
         # ONE truth: the same per-key rules a node key gets; apply_graph_defaults
         # bakes this block into the agent defs before graph.json is written.
@@ -222,6 +227,25 @@ def _owner_setting_read(key):
         return None
 
 _common.set_owner_setting_reader(_owner_setting_read)
+
+# #100: absent settings keep the runner's historic 4/8 defaults. A supplied
+# author limit can never exceed its owner cap; an owner cap below the default also
+# constrains runs whose graph omitted the key. No optional key is baked otherwise.
+_CONCURRENCY_CAPS = {"concurrency": ("max_concurrency", 4),
+                     "item_concurrency": ("max_item_concurrency", 8)}
+
+def _concurrency_bake(graph):
+    baked = {}
+    for key, (setting, default) in _CONCURRENCY_CAPS.items():
+        cap = _common.owner_setting(setting)
+        if cap is not None and (type(cap) is not int or cap <= 0):
+            return None, {"error": f"owner settings invalid: settings.{setting} must be a positive integer"}
+        if key in graph or cap is not None:
+            limit = min(graph.get(key, default), cap if cap is not None else default)
+            # No graph key + no effective change = the old run.json, byte for byte.
+            if key in graph or limit != default:
+                baked[key] = limit
+    return baked, None
 
 def _owner_settings_error():
     """FAIL-CLOSED at the door (#42): a malformed `settings.runs_root` / `settings.profile`
@@ -900,12 +924,88 @@ def _same_ping_route(ri, provider, model):
     lp, lm = str(provider).strip().lower(), str(model).strip().lower()
     return bool(rp) and rp == lp and (rm == lm or rm == lm.rsplit("/", 1)[-1])
 
+_PING_SUBPROCESS = '''import json, sys
+try:
+    from agent.auxiliary_client import call_llm
+    ri = {}
+    try:
+        call_llm(task="wf-preflight-ping", provider=sys.argv[1], model=sys.argv[2],
+                 messages=[{"role": "user", "content": "ping"}], max_tokens=1,
+                 timeout=float(sys.argv[3]), route_info=ri)
+        verdict = {"route": ri, "ok": True}
+    except Exception as e:
+        import re
+        status = getattr(e, "status_code", None)
+        if not isinstance(status, int):
+            m = re.search(r"Error code:\\s*(\\d{3})", str(e))
+            status = int(m.group(1)) if m else None
+        verdict = {"route": ri, "ok": False, "status": status,
+                   "note": str(e)[:160], "kind": type(e).__name__}
+    print(json.dumps(verdict))
+except Exception:
+    print(json.dumps({"unavailable": True}))
+'''
+
+def _ping_subprocess(provider, model):
+    """Core-less cron door: use the operator's child launcher's venv Python.
+    Missing binary, unrecognised wrapper, failed import, or timeout = unknown.
+    Never run an author-supplied executable; hermes_bin is operator-controlled.
+    """
+    unknown = {"liveness": "unknown", "note":
+               "core auxiliary client not importable (ModuleNotFoundError) — ping skipped"}
+    try:
+        launcher = Path(shutil.which(_hermes_bin()) or _hermes_bin())
+        candidates = [launcher.parent / "python", launcher.parent / "python3"]
+        # A shell shim may exec the actual venv launcher; follow only absolute
+        # hermes paths in that operator-controlled shim, never arbitrary shell.
+        if launcher.is_file() and launcher.stat().st_size < 16384:
+            for path in re.findall(r"/[A-Za-z0-9_./+~-]+/hermes\b", launcher.read_text(errors="replace")):
+                candidates.extend((Path(path).parent / "python", Path(path).parent / "python3"))
+        python = next((p for p in candidates if p.is_file() and os.access(p, os.X_OK)), None)
+        if python is None:
+            return unknown
+        env = os.environ.copy()
+        # A venv alone may not have the source checkout on sys.path. The core
+        # launcher sets PYTHONPATH to its repo root; mirror that for this -c call.
+        repo = python.parent.parent.parent
+        env["PYTHONPATH"] = str(repo) + os.pathsep + env.get("PYTHONPATH", "")
+        p = subprocess.run([str(python), "-c", _PING_SUBPROCESS, provider, model,
+                            str(PING_TIMEOUT_S)], env=env, capture_output=True,
+                           text=True, timeout=PING_TIMEOUT_S + 2)
+        if p.returncode or not p.stdout.strip():
+            return unknown
+        verdict = json.loads(p.stdout.strip().splitlines()[-1])
+        if not isinstance(verdict, dict) or verdict.get("unavailable"):
+            return unknown
+        ri = verdict.get("route")
+        if not isinstance(ri, dict):
+            return unknown
+        if verdict.get("ok"):
+            if _same_ping_route(ri, provider, model):
+                return {"liveness": "alive"}
+            return {"liveness": "unknown", "wrong_route": True,
+                    "note": "ping answered by a different route (fallback ladder) — not counted as alive"}
+        status = verdict.get("status")
+        if status in _PING_DEAD_STATUSES and _same_ping_route(ri, provider, model):
+            note = _PING_KEYISH.sub("[redacted]", str(verdict.get("note") or "")[:_PING_NOTE_MAX])
+            return {"liveness": "dead", "retry_after_s": None,
+                    "note": f"HTTP {status}: {note}"}
+        if status in _PING_DEAD_STATUSES:
+            return {"liveness": "unknown",
+                    "note": f"dead-status on an unattributed route {ri.get('provider')!r} — not counted"}
+        return {"liveness": "unknown", "note":
+                _PING_KEYISH.sub("[redacted]", str(verdict.get("note") or "")[:_PING_NOTE_MAX])}
+    except Exception:
+        return unknown
+
 def _ping_route_once(provider, model):
     """One auxiliary ping on the pinned (provider, model) route — explicit provider AND
     model, ONE call, no ladder of ours; core's own recovery is only trusted when the
     recorded route is the pinned one. NEVER raises: returns the annotation dict."""
     try:
         call_llm = _import_call_llm()
+    except ModuleNotFoundError:
+        return _ping_subprocess(provider, model)
     except Exception as e:
         return {"liveness": "unknown",
                 "note": f"core auxiliary client not importable ({type(e).__name__}) — ping skipped"}
@@ -1803,6 +1903,9 @@ def act_run(args):
     bad = _validation_error(graph) or _team_args_error(args)
     if bad:
         return bad
+    concurrency_meta, bad = _concurrency_bake(graph)
+    if bad:
+        return bad
     name = args.get("name", graph.get("name", "workflow"))
     if not isinstance(name, str) or not name.strip():
         return {"error": "run name must be a non-empty string"}
@@ -1872,10 +1975,13 @@ def act_run(args):
                             "needs_resume": incumbent["needs_resume"],
                             "last_event_ts": incumbent["last_event_ts"],
                             "hint": f"wait run_id={incumbent['run_id']} resumes it"}
-            return _create_run(args, graph, lib_name, models, routes, _liveness_notes, path)
-    return _create_run(args, graph, lib_name, models, routes, _liveness_notes)
+            return _create_run(args, graph, lib_name, models, routes, _liveness_notes, path,
+                               concurrency_meta=concurrency_meta)
+    return _create_run(args, graph, lib_name, models, routes, _liveness_notes,
+                       concurrency_meta=concurrency_meta)
 
-def _create_run(args, graph, lib_name, models, routes, _liveness_notes, lane_path=None):
+def _create_run(args, graph, lib_name, models, routes, _liveness_notes, lane_path=None,
+                *, concurrency_meta=None):
     """Under the lane flock: complete run dir, atomic registry entry, then spawn."""
     name = graph["name"]
     base = time.strftime("%Y%m%d-%H%M%S") + "-" + "".join(
@@ -1902,6 +2008,8 @@ def _create_run(args, graph, lib_name, models, routes, _liveness_notes, lane_pat
             "owner": {"session_id": _session_env("HERMES_SESSION_ID") or None,
                       "ui_session_id": _session_env("HERMES_UI_SESSION_ID") or None,
                       "platform": _session_env("HERMES_SESSION_PLATFORM") or None}}
+    if concurrency_meta:
+        meta.update(concurrency_meta)
     meta.update(_identity_stamps(args, graph, lib_name))   # 1.1: only derivable keys land
     (r / "run.json").write_text(json.dumps(meta))
     if lane_path is not None:

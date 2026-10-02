@@ -8,6 +8,7 @@ All execution is in temporary homes. Both sides run identical graph plans.
 import importlib.util
 import json
 import os
+from contextlib import contextmanager
 from pathlib import Path
 import re
 import subprocess
@@ -15,6 +16,7 @@ import sys
 import tempfile
 import time
 from unittest.mock import patch
+import hermes_constants as hc
 
 SCENARIOS = {
     'dag': [{'id':'a','type':'agent','goal':'JSON:{"result":"ok"}'},
@@ -62,12 +64,23 @@ def normalize(value, paths):
     return value
 
 
-def capture(root):
+@contextmanager
+def _core_home(path):
+    token = hc.set_hermes_home_override(path)
+    try:
+        yield
+    finally:
+        hc.reset_hermes_home_override(token)
+
+
+def capture(root, after_save=None):
+    inherited_override = hc.get_hermes_home_override()
     root = Path(root).resolve()
     sys.path.insert(0, str(root))
     spec = importlib.util.spec_from_file_location('golden_door', root/'__init__.py')
     door = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(door)
+    import wf_test_isolation as _iso71_door70; _iso71_door70.install(door)  # #71 r5: pin settings.runs_root alongside WF_RUNS_ROOT
     result = {}
     with tempfile.TemporaryDirectory(prefix='wf11-golden-') as td:
         td = Path(td)
@@ -86,7 +99,9 @@ def capture(root):
         for key in ('WF_RUNS_ROOT','FAKE_MODE','FAKE_API_CALLS','FAKE_LOG','FAKE_PROMPT_LOG','FAKE_ARGV_LOG'):
             env.pop(key,None)
         paths = [(str(Path(__file__).resolve().parents[1]),'<REPO>'),(str(root),'<REPO>'), (str(td),'<TEMP>')]
-        with patch.dict(os.environ, env, clear=True):
+        # The child runs retain their original seat-default identity (no launch_root).
+        # Shield them from an inherited core-home override without altering HERMES_HOME.
+        with patch.dict(os.environ, env, clear=True), _core_home(home):
             for label, nodes in SCENARIOS.items():
                 trace_file = home/'11-golden-env.jsonl'
                 before = len(trace_file.read_text().splitlines()) if trace_file.exists() else 0
@@ -96,8 +111,18 @@ def capture(root):
                 else:
                     os.environ.pop('FAKE_MODE', None)
                 if label == 'legacy-ra-sample':
-                    save = door.act_save({'graph':graph,'name':'ra-review-golden'})
-                    assert 'saved' in save, save
+                    # Exercise the inherited owner override at the actual save. The
+                    # env pin and installed resolver keep its configured root out;
+                    # remove the pin only AFTER save so runs keep v1.0.15 bytes.
+                    os.environ['WF_RUNS_ROOT'] = str(home/'workflows')
+                    try:
+                        with _core_home(inherited_override):
+                            save = door.act_save({'graph':graph,'name':'ra-review-golden'})
+                            assert 'saved' in save, save
+                            if after_save is not None:
+                                after_save(home/'workflows')  # probe before any runner spawn
+                    finally:
+                        os.environ.pop('WF_RUNS_ROOT', None)
                     library = door.act_library({})
                     started = door.act_run({'from':'ra-review-golden'})
                 else:

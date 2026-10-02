@@ -31,6 +31,7 @@ ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("wf_door_50", ROOT / "__init__.py")
 door = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(door)
+import wf_test_isolation as _iso71_door50; _iso71_door50.install(door)  # #71 r5: pin settings.runs_root alongside WF_RUNS_ROOT
 
 G = {"name": "lib50", "nodes": [{"id": "x", "type": "echo", "output": {"ok": True}}]}
 WHY = "the library has no graph for this shape: " + "it fans discovery before build " * 3  # >=80

@@ -168,6 +168,10 @@ gate -> complementary `when`+`on_skip:"prune"` pair on the answer -> exactly one
 arm; no node names a vendor model — role vocabulary lives in prose, routing is the
 seat default). Launch seeds `run_context:{"artifact":"<name>"}`. Validate + author
 run tested (receipts/gated-publish/).
+[examples/machine-watch.workflow.json](examples/machine-watch.workflow.json) is a
+scheduled-watcher TEMPLATE (zero-token machine-gate poll, releases on exit 0;
+launch with `lane_key` so cron double-fire dedupes; timeout fails loudly for
+the next deduped dispatch). Validate + smoke-run tested.
 [examples/incident-response.json](examples/incident-response.json) is a full
 lifecycle TEMPLATE (alert-triggered incident: verdict-branch gate pair, machine
 recovery probe with human escalation, merge-gated close) meant to be adapted —
