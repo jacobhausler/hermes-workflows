@@ -201,6 +201,16 @@ as a loud coverage gap, never silent loss. The two fan-outs are sibling nodes wi
 branch gates, so every author/peer lap walks both folded modes in a single launch;
 laps exist per-engine-side, not per-mode.
 [examples/bulk-transform.workflow.json](examples/bulk-transform.workflow.json) is a barrier-fan-out TEMPLATE (declared manifest -> per-file transform lanes -> audit that reconciles all_results against the manifest via an ancestor `inputs:` ref and re-checks the filesystem itself; evidence-without-command is a failed lane). Smoke-run on the author estate: [receipts/bulk-transform/author-run.json](receipts/bulk-transform/author-run.json).
+[examples/census-fanout.workflow.json](examples/census-fanout.workflow.json) is a
+census TEMPLATE (fan-out auditing N generic machine items with a DETERMINISTIC
+TALLY): an echo roster node carries the master item list, a no-quorum barrier
+audits every item against `{item, observed, ok}`, and the tally synth READS
+`audit.all_results` against the roster — every item answered or NAMED missing,
+counts computed from the record, never prose. One item (battery-gauge) is a
+designed dead gauge so the tally's loud-row law is exercised on every run; the
+report node consumes the tally via `after_partial`. Two author laps — honest
+(dead gauge as a loud red row) and severed (a child cut from the record becomes
+a NAMED missing row): [receipts/census-fanout/author-run.json](receipts/census-fanout/author-run.json).
 [examples/escalation-ladder.workflow.json](examples/escalation-ladder.workflow.json) is a verify-then-branch TEMPLATE (builder -> fresh independent verifier -> when-pair: verified lands behind a human gate, failed escalates to a human hold with the whole packet; core has NO loop idiom - retry ownership is spelled out, not implied). Both arms smoke-run: [receipts/escalation-ladder/author-run.json](receipts/escalation-ladder/author-run.json).
 
 ### 3d. Failures, resume, amend
