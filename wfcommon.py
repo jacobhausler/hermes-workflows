@@ -766,15 +766,32 @@ def validate_graph_errors(nodes):
         errs.append({"node": nid, "field": field, "msg": msg})
 
     def schema_check(nid, field, schema):
-        # Runner's validator consumes only this subset; description is prompt-only
-        # annotation. Never accept a constraint such as enum that cannot be enforced.
-        for k in sorted(set(schema) - {"type", "required", "properties", "items", "description"}):
-            E(nid, f"{field}.{k}", "unsupported schema keyword; supported: type, required, properties, items, description")
+        # The runner's validator consumes exactly this subset; description is
+        # prompt-only annotation; enum is ENFORCED at harvest (#107 — the old
+        # law "never accept a constraint that cannot be enforced" stays TRUE:
+        # enum joined the subset only once wf.validate() checks membership).
+        for k in sorted(set(schema) - {"type", "required", "properties", "items",
+                                       "description", "enum"}):
+            E(nid, f"{field}.{k}", "unsupported schema keyword; supported: type, required, properties, items, description, enum")
         if "type" in schema and schema["type"] not in ("object", "array", "string", "number", "integer", "boolean"):
             E(nid, f"{field}.type", "unsupported schema type")
         if "required" in schema and (not isinstance(schema["required"], list)
                                       or not all(isinstance(x, str) for x in schema["required"])):
             E(nid, f"{field}.required", "required must be a list of strings")
+        if "enum" in schema:
+            # #107: closed vocabulary. Stricter choice on placement — enum is
+            # REJECTED on a non-string (or type-less) schema, not merely
+            # documented: wf.validate() enforces membership only for str
+            # values against a string-membered enum, so anything else is a
+            # constraint the harvester cannot enforce — the closed-subset
+            # law refuses it at the door instead of shipping a dead keyword.
+            en = schema["enum"]
+            if not isinstance(en, list) or not en:
+                E(nid, f"{field}.enum", "enum must be a non-empty list of non-empty strings")
+            elif not all(isinstance(x, str) and x for x in en):
+                E(nid, f"{field}.enum", "enum members must be a list of non-empty strings")
+            elif schema.get("type") != "string":
+                E(nid, f"{field}.enum", "enum is only legal on type:'string' (the harvester enforces string membership only)")
         props = schema.get("properties")
         if props is not None:
             if not isinstance(props, dict):
