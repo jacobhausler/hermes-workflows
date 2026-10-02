@@ -183,11 +183,24 @@ verify-list). Its seats pin CAPABILITY CLASSES (`council_a`, `council_b`) bound
 through `settings.models` — no vendor model id appears in the file; an unbound
 class fails the launch closed. Author-run receipt:
 [receipts/blind-council/author-run.json](receipts/blind-council/author-run.json).
+[examples/triage-route.workflow.json](examples/triage-route.workflow.json) is a
+queue-triage TEMPLATE (intake -> classifier -> complementary `when` gate pair
+with `on_skip: prune`, routing exactly one arm: human escalation with the gate
+answer consumed as data, or a rule-driven batch fan-out). The classifier emits a
+`has_urgent` boolean because the gate grammar cannot see array length, and each arm
+hangs ONLY on its route gate (prune law: a node skips when ALL its `after` deps
+skip — a shared classifier dep resurrects the dead arm); the fan-out head is an
+arm-scoped `batch-prep` forwarding the routine set, not the classifier itself.
+Author-run receipt:
+[receipts/triage-route/author-run.json](receipts/triage-route/author-run.json).
 [examples/quorum-probe.workflow.json](examples/quorum-probe.workflow.json) folds
 the speed/coverage contrast into one file: a `quorum`-raced probe fan-out whose
 report must state the cancelled straggler set honestly, beside a no-quorum barrier
 that reconciles survivors against an explicit master catalog so a dead lane prints
-as a loud coverage gap, never silent loss. Two author laps, one per mode.
+as a loud coverage gap, never silent loss. The two fan-outs are sibling nodes with no
+branch gates, so every author/peer lap walks both folded modes in a single launch;
+laps exist per-engine-side, not per-mode.
+[examples/bulk-transform.workflow.json](examples/bulk-transform.workflow.json) is a barrier-fan-out TEMPLATE (declared manifest -> per-file transform lanes -> audit that reconciles all_results against the manifest via an ancestor `inputs:` ref and re-checks the filesystem itself; evidence-without-command is a failed lane). Smoke-run on the author estate: [receipts/bulk-transform/author-run.json](receipts/bulk-transform/author-run.json).
 [examples/census-fanout.workflow.json](examples/census-fanout.workflow.json) is a
 census TEMPLATE (fan-out auditing N generic machine items with a DETERMINISTIC
 TALLY): an echo roster node carries the master item list, a no-quorum barrier

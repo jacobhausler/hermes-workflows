@@ -2,5 +2,5 @@
   "template": "census-fanout",
   "receipt_kind": "peer-clean-run",
   "status": "pending_peer",
-  "from": "austin-exec estate"
+  "from": "peer estate (independent of the author)"
 }

@@ -1,0 +1,23 @@
+{
+  "template": "triage-route",
+  "receipt_kind": "peer-clean-run",
+  "reviewer_estate": "peer estate (cross-estate clean-run seat)",
+  "graph_file": "examples/triage-route.workflow.json",
+  "graph_sha256": "f490199edcb08cc2c7f762e4c6b529c1a2efc75ba0e3b4b0f51b3a68fa1921b9",
+  "source_digest": "52559c3cfb6ff966f4c282e8d956287e0f81f523d19b64f20ef52411d451ed31",
+  "run_id": "20261001-013844-peer90v3-urgent-lap",
+  "prior_runs": {
+    "20261001-005725-peer90-triage-route": "v1-file FAIL — batch arm resurrected beside held escalate gate (prune-law collision; see superseded receipt text in git history and PR comment)",
+    "v2-fix verification (peer side)": "batch-prep hung on route-batch ONLY + belt (has_urgent -> routine=[]): prune now cascades — batch-prep + batch-run both 'all deps pruned', ZERO fan-out spawns with urgent item pending."
+  },
+  "verdict": "PASS",
+  "urgent_arm_walked": "escalate released with an authorized reason ('act append ESCALATED ... out-202 only'); handle-urgent executed EXACTLY the authorized line (ledger diff 1a2, one line, scope out-202); report lane=urgent. Combined with the v2 lap (act WITHOUT reason -> correct refusal), BOTH release semantics of the escalation pattern are now walked across the two estates: refuse-on-empty-auth, execute-on-authorized.",
+  "one_arm_proved": "events.jsonl: node.skipped batch-prep + batch-run reason='all deps pruned'; item.started count=0 while escalate held; ledger gained ONLY the ESCALATED line — the batch fan-out cannot write beside a held human gate anymore.",
+  "runner_exit": {
+    "reason": "done",
+    "at": "2026-10-01T01:44:36+00:00",
+    "graph_fingerprint": "dc4ef16f5dcc3754"
+  },
+  "notes": "engine main b84a49b; file digests match author receipt v3 header exactly; zero vendor ids. Ship-order note: the peer estate's #5 machine-watch author receipt in-tree (run 20261001-012844 + lane_key dedup proof + loud timeout probe).",
+  "revision": "v3 bytes restamped: the v3 lap ran template bytes graph_sha256 291d4e8d.../source 52559c3c... (the v1 FAIL lap ran f34ba8e-era bytes; the v2 fix lap ran ca2697e bytes). Published at commit 243153e on branch wofs/3-triage-route-peerreceipt-v3; folded into PR head with estate names replaced by role wording per publish-scrub law — lap facts, run ids and digests unchanged. PROVENANCE restamp: provenance.owner -> role wording per publish-scrub; per portable law 10 provenance is annotation-only, so source_digest (52559c3c) is UNCHANGED and every walked lap ran node-identical bytes; only the file sha moved. AUTHOR-SIDE RESTAMP NOTE (P1 fix commit): the walked lap ran bytes 291d4e8d/52559c3c; the template then gained the empty-queue belt (route-empty gate + empty-notice echo + classify.routine_empty), shipped bytes now 26758b8e/5028f755. Pins above stay bound to executed bytes (no laundering); the peer clean-run clock re-stamps at the new head per the ratified law."
+}
