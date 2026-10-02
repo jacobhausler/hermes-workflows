@@ -1,0 +1,22 @@
+{
+  "template": "quorum-probe",
+  "receipt_kind": "peer-clean-run",
+  "reviewer_estate": "peer estate (cross-estate clean-run seat)",
+  "graph_file": "examples/quorum-probe.workflow.json",
+  "graph_sha256": "12f190cf1095753b1b86eb66d8f9bc407c253b4a8755e5384e72618ce8ed1ecd",
+  "source_digest": "8915e542bb60fbfa4095fcfae50caed35b9046839cb45fe97631b156ba4449a7",
+  "tested_head": "5037cd4 (PR #108 head, cold-reader hardening; supersedes 4c00cef lap 20261001-205401, whose digests pinned the pre-fix bytes - both boundaries stated, per-lap honesty law)",
+  "run_id": "20261001-211642-quorum-probe-peer108v2",
+  "runs_root": "peer estate profile workflows root",
+  "verdict": "PASS at 5037cd4 (and PASS at 4c00cef superseded) - cold-reader hardening verified effective",
+  "race_shape_proof": "probe_race committed at quorum 2/3 (host-kernel, utc-clock done; sleep-marshal item.finished failed error_class=cancelled). The report node itemizes the incomplete set EXACTLY: dispatched roster of 3, answered 2, cancelled-at-quorum named, with the engine's cancel evidence quoted (had output at quorum moment: log_bytes=74, work_files=1). No full-roster claim anywhere in the leaf output.",
+  "coverage_shape_proof": "probe_coverage barrier committed 3/3 statuses, but reconcile judged archive-lane's self-declared offline obs ('No commands executed') a gap DESPITE its done status - exactly the law the description states - and verdict reads 'COVERAGE GAP: archive-lane answered nothing'. The synth chain survived with after_partial semantics (report done, not darkened).",
+  "runner_exit": {
+    "reason": "done",
+    "at": "2026-10-01T21:17:59+00:00",
+    "graph_fingerprint": "346aaa22707e5904"
+  },
+  "capability_note": "unchanged from v1 lap: after_partial is an engine floor at #91; the cold launch on a door process predating #91 fails closed pre-spawn with the closed-set validator error. Optional: name the floor in the file description. NOT blocking; the #101-class payload ambiguity is fixed in v2 bytes.",
+  "notes": "Zero run_context seeds needed (verified: no {run.*} refs in any spawned prompt, grep-0). Self-contained probes: no estate paths, no vendor ids, zero scrub hits on this estate's audit of the shipped file. Cold-clone workflow: fresh clone -> fetch PR head -> validate [] on shared validator -> launch. Two laps of the author's own claims reproduced verbatim on independent hardware.",
+  "hardening_verified": "report declares inputs [probe_race.all_results, reconcile] and an output schema (quorum_shape/coverage_shape/honest_statement required); reconcile schema covered/coverage_gaps/verdict. The lap C read the dispatched roster FROM all_results (names + ms latencies + cancel evidence log_bytes=74) rather than reciting a baked template - the gauge-reading law holds under cold eyes. Race 2/3 with straggler cancelled-at-quorum itemized; archive-lane printed as COVERAGE GAP despite done-status while the barrier node stayed done. No full-roster claim anywhere."
+}
