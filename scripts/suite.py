@@ -11,6 +11,13 @@ anything: only a fully-green integrated SHA (zero reds, base or fix) is green
 and exits 0; pre-existing reds land in blocking_base_reds for a linked fix
 item, never hand-carried. Without --baseline every red is reported as
 introduced (there is no evidence it pre-existed).
+
+Zero-discovery is a failed admission (#112): an empty tests/ dir that
+discovers no cases is not a pass — the run writes exits.json == [] and
+admission.json green:false + zero_discovery:true and exits nonzero, so a
+suite that ran nothing can never report green. An invalid root (missing
+root or missing tests directory) fails closed as exit 2 BEFORE any out-dir
+side effects, leaving no ledger or admission behind.
 """
 import json
 import os
@@ -46,9 +53,12 @@ def admission(base_reds, reds, baseline_path=None, present=None):
     auto-waives' law covers deletion, so `missing` blocks like a red does).
     `fixed` therefore requires the test PRESENT (in `present`, the set of every
     test the fix run executed) AND green. `present` defaults to
-    set(base) | set(reds) for library callers."""
+    set(base) | set(reds) for library callers. Zero discovery is a failed
+    admission (#112): green requires a non-empty present set — a suite that
+    ran nothing never reports green."""
     base = dict(base_reds) if base_reds is not None else {}
     present = set(reds) if present is None else set(present)
+    zero_discovery = not present
     base_reds_only = {n: rc for n, rc in base.items() if rc != 0}
     introduced = sorted(n for n, rc in reds.items() if base.get(n) != rc)
     pre_existing = sorted(n for n, rc in reds.items() if base.get(n) == rc)
@@ -67,7 +77,8 @@ def admission(base_reds, reds, baseline_path=None, present=None):
         'missing': missing,
         'blocking_base_reds': sorted(set(pre_existing) | set(missing)),  # never waived
         'fixed': fixed,
-        'green': not reds and not missing,  # fully-green integrated SHA only
+        'zero_discovery': zero_discovery,
+        'green': not reds and not missing and not zero_discovery,  # fully-green integrated SHA only
     }
 
 
@@ -91,6 +102,11 @@ def parse_args(argv):
 
 
 root, out, _baseline_path = parse_args(sys.argv)
+# #112: validate the invocation BEFORE any out-dir side effects — an invalid
+# root must never leave a green-looking ledger or admission behind.
+if not root.is_dir() or not (root / 'tests').is_dir():
+    print(f'suite: invalid root: {root} (missing root or tests directory)', flush=True)
+    raise SystemExit(2)
 base_reds = load_baseline(_baseline_path) if _baseline_path else None
 out.mkdir(parents=True, exist_ok=True)
 ledger = out / 'exits.json'
@@ -132,8 +148,10 @@ adm = admission(None if base_reds is None else dict(base_reds), reds,
 tmp = (out / 'admission.json').with_suffix('.tmp')
 tmp.write_text(json.dumps(adm, indent=2) + '\n')
 os.replace(tmp, out / 'admission.json')
+if adm['zero_discovery']:
+    print(f'suite: zero cases discovered under {root / "tests"} — refusing green', flush=True)
 print(f'TOTAL {len(rows)} FAIL {sum(row["exit"] != 0 for row in rows)}', flush=True)
 if _baseline_path:
     print(f"ADMISSION introduced={len(adm['introduced'])} pre_existing={len(adm['pre_existing'])} "
           f"missing={len(adm['missing'])} fixed={len(adm['fixed'])} green={'true' if adm['green'] else 'false'}", flush=True)
-raise SystemExit(1 if (any(row['exit'] != 0 for row in rows) or adm['missing']) else 0)
+raise SystemExit(1 if (any(row['exit'] != 0 for row in rows) or adm['missing'] or adm['zero_discovery']) else 0)
