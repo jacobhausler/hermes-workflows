@@ -782,41 +782,32 @@ def extract_json(text):
         return obj, None
     return None, err
 
-def _match_object(text, i):
-    """Index of the '}' closing the '{' at i (string-aware), or -1 if unbalanced."""
-    depth = 0; in_str = False; esc = False
-    for j in range(i, len(text)):
-        ch = text[j]
-        if in_str:
-            if esc: esc = False
-            elif ch == "\\": esc = True
-            elif ch == '"': in_str = False
-            continue
-        if ch == '"': in_str = True
-        elif ch == "{": depth += 1
-        elif ch == "}":
-            depth -= 1
-            if depth == 0: return j
-    return -1
+_DECODER = json.JSONDecoder()   # #111: stdlib decoder replaces the hand-written scanner
 
 def last_balanced_object(text):
-    """Sprint101 #9: the LAST top-level balanced {...} in stdout that json.loads
-    accepts (string-aware; fence markers, prose, and stray unbalanced braces
-    around it tolerated — a broken earlier candidate never hides a good later
-    one). Returns None when no candidate parses."""
+    """Sprint101 #9: the LAST top-level balanced {...} in stdout that json
+    accepts (fence markers, prose, and stray unbalanced braces around it
+    tolerated — a broken earlier candidate never hides a good later one).
+    #111 (audit WF-01): each '{' candidate is attempted with
+    json.JSONDecoder.raw_decode; on success scanning resumes at the decoder's
+    consumed end, so an accepted parent swallows its children — a nested item
+    can no longer silently replace its parent when a candidate-count cap
+    dropped the parent's opening brace (the old [-200:] cap did exactly that).
+    Returns None when no candidate parses."""
     text = text or ""
-    starts = [m.start() for m in re.finditer(r"\{", text)][-200:]
-    last = None; skip_until = -1
-    for i in starts:
-        if i <= skip_until: continue   # nested inside an already-accepted object
-        j = _match_object(text, i)
-        if j < 0: continue
+    last = None
+    i = text.find("{")
+    while i >= 0:
         try:
-            cand = json.loads(text[i:j + 1])
-        except Exception:
+            cand, end = _DECODER.raw_decode(text, i)
+        except ValueError:
+            i = text.find("{", i + 1)      # malformed here: next candidate
             continue
         if isinstance(cand, dict):
-            last = cand; skip_until = j
+            last = cand
+            i = text.find("{", end)        # accepted parent swallows its children
+        else:
+            i = text.find("{", i + 1)
     return last
 
 def validate(out, schema):
