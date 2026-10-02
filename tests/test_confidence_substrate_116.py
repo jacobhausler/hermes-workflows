@@ -2,7 +2,7 @@
 """#116 — confidence_substrate: engine-stamped fallback when a pinned confidence
 route is quota-dead.
 
-fb-fix-2dd8de73-r8-qwenc: pinned sol-class route ping-dead → #25 fail-closes
+field case (issue #116 driver): pinned route ping-dead → #25 fail-closes
 (correct), but the only lawful recovery was a manual node-by-node recut with
 hand-written SUBSTRATE_DISCLOSURE prose — prompt-authored honesty is
 theater-adjacent. This test pins the STRUCTURAL law:
@@ -117,16 +117,16 @@ check("(a1) no config + dead pin: launch refused (route_unavailable at submit)",
 check("(a2) no config: NOTHING spawned", len(_spawned) == 0, _spawned)
 check("(a3) no config: no substitution vocabulary anywhere in the refusal",
       "substrate" not in json.dumps(out).lower(), out)
-set_ping({"*": {"record": {"provider": "fallback_chain[0](other)", "model": "qwen-fallback"}}})
+set_ping({"*": {"record": {"provider": "fallback_chain[0](other)", "model": "alt-b"}}})
 out = door.act_run({"graph": pinned_graph()})
 check("(a4) no config + fallback-ladder surprise: refused, no substitution fields",
       "error" in out and "FALLBACK LADDER" in out.get("error", "")
       and "substrate" not in json.dumps(out).lower(), out)
 
 # ---------- (b) config declares the sanctioned substrate: substitution ----------
-SUB_P, SUB_M = "openai", "qwen38-next"
+SUB_P, SUB_M = "openai", "turbo-a"
 write_substrate_config("model:\n  default: seat-default\nworkflows:\n  confidence_substrate:\n"
-                       "    - openai/qwen38-next\n")
+                       "    - openai/turbo-a\n")
 set_ping(alive((SUB_P, SUB_M)))
 n_before = len(_spawned)
 out = door.act_run({"graph": pinned_graph()})
@@ -191,7 +191,7 @@ else:
 # require_route:false + dead: OLD warn-and-surface launch on the PINNED route —
 # substitution is NOT forced onto opted-out nodes (semantics unchanged).
 clear_substrate_config(); write_substrate_config(
-    "workflows:\n  confidence_substrate:\n    - openai/qwen38-next\n")
+    "workflows:\n  confidence_substrate:\n    - openai/turbo-a\n")
 set_ping(DEAD)
 n_before = len(_spawned)
 out = door.act_run({"graph": pinned_graph(require_route=False)})
@@ -216,7 +216,7 @@ check("(d3) malformed substrate config: fail-closed as today, no substitution",
       "error" in out and "route_unavailable at submit" in out.get("error", "")
       and "substrate" not in json.dumps(out).lower(), out)
 # every rung dead => no alive rung => fail closed with the ORIGINAL message shape
-write_substrate_config("workflows:\n  confidence_substrate:\n    - openai/qwen38-next\n"
+write_substrate_config("workflows:\n  confidence_substrate:\n    - openai/turbo-a\n"
                        "    - anthropic/claude-x\n")
 set_ping(DEAD)
 out = door.act_run({"graph": pinned_graph()})
@@ -225,24 +225,24 @@ check("(d4) ladder fully quota-dead + pin dead: fails closed, original message s
       and "substrate" not in json.dumps(out).lower(), out)
 
 # ---------- (e) ladder: first ALIVE rung serves; harvest records the rung ----------
-write_substrate_config("workflows:\n  confidence_substrate:\n    - openai/qwen38-next\n"
-                       "    - openai/qwen-max-pro\n")
-set_ping(alive(("openai", "qwen-max-pro")))     # rung 1 dead, rung 2 alive
+write_substrate_config("workflows:\n  confidence_substrate:\n    - openai/turbo-a\n"
+                       "    - openai/pro-c\n")
+set_ping(alive(("openai", "pro-c")))     # rung 1 dead, rung 2 alive
 out = door.act_run({"graph": pinned_graph()})
 rid = out.get("run_id")
 check("(e2) ladder: dead rung 1 skipped, alive rung 2 serves",
-      rid and baked(rid)["nodes"][0].get("model") == "qwen-max-pro"
-      and baked(rid)["nodes"][0].get("substrate_substituted", {}).get("to") == "openai/qwen-max-pro",
+      rid and baked(rid)["nodes"][0].get("model") == "pro-c"
+      and baked(rid)["nodes"][0].get("substrate_substituted", {}).get("to") == "openai/pro-c",
       baked(rid)["nodes"][0] if rid else out)
 
 # ---------- (f) runner: forged/mismatched stamp fails closed ----------
 import wf as wfmod
 class Meta(dict): pass
 meta = Meta({"_run": Path(tmp_dir.name)})
-write_substrate_config("workflows:\n  confidence_substrate:\n    - openai/qwen38-next\n")
-STAMP_OK = {"model": "qwen38-next", "provider": "openai",
-            "route_verified": "openai/qwen38-next",
-            "substrate_substituted": {"from": "openai/m-1", "to": "openai/qwen38-next",
+write_substrate_config("workflows:\n  confidence_substrate:\n    - openai/turbo-a\n")
+STAMP_OK = {"model": "turbo-a", "provider": "openai",
+            "route_verified": "openai/turbo-a",
+            "substrate_substituted": {"from": "openai/m-1", "to": "openai/turbo-a",
                                       "reason": "pinned route dead", "source": "config:x[0]"}}
 out2 = wfmod._stamp_served(meta, {"status": "done", "output": {"result": "ok"}}, STAMP_OK)
 check("(f1) runner: config-declared substituted node commits with stamp + disclosure",
@@ -274,10 +274,10 @@ check("(g1) def_hash ignores the substrate_substituted ANNOTATION (A3, like rout
       h0 == h1, f"{h0} vs {h1}")
 check("(g2) def_hash still sees real work changes", wc2.def_hash({**base, "goal": "y"}) != h0)
 check("(g3) def_hash still sees a real model change (route key, unlike the proof annotation)",
-      wc2.def_hash({**base, "model": "qwen38-next"}) != h0)
+      wc2.def_hash({**base, "model": "turbo-a"}) != h0)
 
 # ---------- (h) author-forged stamp is stripped at the door ----------
-write_substrate_config("workflows:\n  confidence_substrate:\n    - openai/qwen38-next\n")
+write_substrate_config("workflows:\n  confidence_substrate:\n    - openai/turbo-a\n")
 set_ping(alive(("openai", "m-1")))              # pin ALIVE: no substitution should occur
 forged = pinned_graph()
 forged["nodes"][0]["substrate_substituted"] = {"from": "x", "to": "evil/w", "source": "c",
@@ -288,23 +288,23 @@ check("(h1) author-forged substrate_substituted is stripped at resolve, launch p
       out_f)
 # (h2) F2 idempotence shape: an alive-proved, SUBSTITUTED committed def re-submitted
 # VERBATIM must be accepted (the stamp rides like a route key, never trips un-bake).
-set_ping(alive(("openai", "qwen38-next")))
+set_ping(alive(("openai", "turbo-a")))
 out_h2 = door.act_run({"graph": {"name": "h2re", "nodes": [
-    {"id": "a", "type": "agent", "goal": "x", "model": "qwen38-next", "provider": "openai",
-     "route_verified": "openai/qwen38-next",
-     "substrate_substituted": {"from": "openai/m-1", "to": "openai/qwen38-next",
+    {"id": "a", "type": "agent", "goal": "x", "model": "turbo-a", "provider": "openai",
+     "route_verified": "openai/turbo-a",
+     "substrate_substituted": {"from": "openai/m-1", "to": "openai/turbo-a",
                                "reason": "r", "source": "config:x[0]"}}]}})
 check("(h2) verbatim committed def WITH stamp still accepted (F2 shape)",
       "error" not in out_h2, out_h2)
 
 # ---------- env override: WF_CONFIDENCE_SUBSTRATE beats/stands in for config ----------
 clear_substrate_config()
-os.environ["WF_CONFIDENCE_SUBSTRATE"] = "openai/qwen-turbo-x,openai/qwen-turbo-y"
-set_ping(alive(("openai", "qwen-turbo-y")))
+os.environ["WF_CONFIDENCE_SUBSTRATE"] = "openai/ladder-x,openai/ladder-y"
+set_ping(alive(("openai", "ladder-y")))
 out = door.act_run({"graph": pinned_graph()})
 rid = out.get("run_id")
 check("(i1) env-declared ladder substitutes when no config file key exists",
-      rid and baked(rid)["nodes"][0].get("model") == "qwen-turbo-y", out)
+      rid and baked(rid)["nodes"][0].get("model") == "ladder-y", out)
 os.environ.pop("WF_CONFIDENCE_SUBSTRATE", None)
 
 print("ALL PASS" if fails == 0 else f"FAILURES: {fails}")
