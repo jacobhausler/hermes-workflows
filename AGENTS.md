@@ -212,6 +212,14 @@ report node consumes the tally via `after_partial`. Two author laps — honest
 (dead gauge as a loud red row) and severed (a child cut from the record becomes
 a NAMED missing row): [receipts/census-fanout/author-run.json](receipts/census-fanout/author-run.json).
 [examples/escalation-ladder.workflow.json](examples/escalation-ladder.workflow.json) is a verify-then-branch TEMPLATE (builder -> fresh independent verifier -> when-pair: verified lands behind a human gate, failed escalates to a human hold with the whole packet; core has NO loop idiom - retry ownership is spelled out, not implied). Both arms smoke-run: [receipts/escalation-ladder/author-run.json](receipts/escalation-ladder/author-run.json).
+[examples/exchange-run.workflow.json](examples/exchange-run.workflow.json) is the
+byte-portability TEACHING PAIR — the file itself is the artifact that travels the
+save → library → re-run loop (the loop's verbs, told in the description; the proof
+laps live in the author receipt, never in node prose). An echo commits the token at
+zero tokens, a courier copies it as pure data from its declared input, and the leaf
+proves the hand-off only by re-reading both committed records from its `## Inputs` —
+never from chat memory. No node names a model; children ride seat defaults.
+Author-run receipt: [receipts/exchange-run/author-run.json](receipts/exchange-run/author-run.json).
 
 ### 3d. Failures, resume, amend
 

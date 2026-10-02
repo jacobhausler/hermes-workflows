@@ -29,6 +29,7 @@ INCLUDE_FILES = (
     "examples/approve-publish.json",
     "examples/blind-council.workflow.json",
     "examples/branch-on-verdict.json",
+    "examples/exchange-run.workflow.json",
     "examples/gated-publish.workflow.json",
     "examples/triage-route.workflow.json",
     "examples/incident-response.json",
