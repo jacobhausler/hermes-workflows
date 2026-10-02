@@ -390,6 +390,18 @@ dated backups. `.graphifyignore` excludes `graphify-out/` and `.github/` from th
    the plugin under system Python with neither `hermes_cli` nor PyYAML on path.
 8. **Honest degradation over hidden failure.** If a field is absent (untyped turn
    report, missing metrics row), say `unknown`; never fabricate a value.
+9. **Receipts state per-lap facts as facts and totals as pointers into the
+   enumeration.** Never a hand-maintained headline ("four exits", "five legs")
+   that must be re-edited every time a lap lands — a count no cold reader can
+   re-derive from the cited records is a publication block (born twice in the
+   Core-10 mill; both times the author's own re-sweep found more than the block
+   named). Enumerate `laps[]` with run_ids; let clauses cite it.
+10. **A run's fingerprint lives in `runner_exit.json` (with `reason` +
+    `fp_rule_version`); `run.json` carries no fingerprint.** Same-shape trap:
+    a shelf row saved from a *run-id* carries the run-dir digest (budgets baked
+    in), only save-from-*file* carries the template's own `source_digest`. The
+    door writes `source` only when passed explicitly — a null-source row is a
+    bare save, not a broken shelf.
 
 ### 4d. Release
 
