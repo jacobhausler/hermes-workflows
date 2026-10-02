@@ -1,0 +1,16 @@
+{
+  "template": "blind-council",
+  "receipt_kind": "peer-clean-run",
+  "reviewer_estate": "peer estate (cross-cool clean-run)",
+  "graph_file": "examples/blind-council.workflow.json",
+  "graph_sha256": "a9f756c743945db00e51b183f3ab9eacd8d141023ea1fc64cb503d8a20effb60",
+  "source_digest": "f38028629a8ee8d22c6d8401b2e4a1b9d2955823e83ed0dfb807d038edcf1ceb",
+  "run_id": "20261001-005618-peer89-blind-council",
+  "runs_root": "~/.hermes/workflows",
+  "verdict": "PASS",
+  "seat_binding_proof": "capability slots bound via plugins.entries.hermes-workflows.settings.models at launch: council_a -> the peer estate's frontier-reasoning alias, council_b -> the peer estate's fast-economy alias, seat-local + synthesis rode seat default (zero frontier spend). UNBOUND probe: with settings.models empty the launch refused closed naming 'council_a' + the valid tier list, nothing written to the runs root. (Model names elided per the Core-10 model-alias law; binding is the receiver's dial.)",
+  "outcome": "4/4 nodes terminal (runner_exit done); seat-a done, seat-b/seat-local partial-harvest consumed correctly; synthesis returned a grounded blocked verdict with verify-list against the review target. Blindness held: three independent findings, zero shared-context leakage.",
+  "clean_run_exercised": "the template was run ON A REAL TARGET: the peer estate's own examples/triage-route.workflow.json (PR #90). The council independently converged on that template's batch-arm prune defect (recorded in that template's peer clean-run receipt at commit 243153e on branch wofs/3-triage-route-peerreceipt-v3 of PR #90 — not in this commit).",
+  "notes": "No vendor ids in-file (grep 0 hits). Digests match the author receipt byte-exact. Engine version: main b84a49b checkout at fdeb524.",
+  "revision": "v3: executed-byte boundary stated plainly — live lap 20261001-005618 ran the v1 template bytes (file e8e0cc47…, source f5c6e1c3…), NOT the current pins below. The v2 delta (provenance/prose only) and the v3 delta (seat-only blindness contract moved from defaults.context to per-seat context + citation/revision text) change node context, so fingerprints move; the walked LAW (blindness held, synthesis merged three payloads, unbound-class launch refused closed) is unaffected by those deltas. Current pins: file a9f756c7…, source f3802862…."
+}
