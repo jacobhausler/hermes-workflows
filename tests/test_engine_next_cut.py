@@ -171,19 +171,31 @@ class EngineNextCut(unittest.TestCase):
                 self.assertIn(field, [e["field"] for e in wfcommon.validate_graph_errors([node])])
 
     def test_unimplemented_schema_keyword_is_rejected(self):
-        schema = {"type": "object", "properties": {"verdict": {"type": "string",
-                                                              "enum": ["ship", "hold"]}}}
-        for field, value in (("schema", schema),
-                             ("fanout.schema", schema)):
+        # #107 flipped the enum law: a well-formed enum (non-empty list of
+        # non-empty strings on type:'string') is ADMITTED and ENFORCED at
+        # harvest (tests/test_schema_enum_107.py). The unimplemented-keyword
+        # refusal stays for everything the validator cannot enforce.
+        ok_schema = {"type": "object", "properties": {"verdict": {"type": "string",
+                                                                   "enum": ["ship", "hold"]}}}
+        bad_schema = {"type": "object", "properties": {"verdict": {"type": "string",
+                                                                    "patternProperties": {}}}}
+        for field, schema, good in (("schema", ok_schema, True),
+                                    ("fanout.schema", ok_schema, True),
+                                    ("schema", bad_schema, False),
+                                    ("fanout.schema", bad_schema, False)):
             node = {"id": "a", "type": "agent", "goal": "JSON:{}"}
             if field == "schema":
-                node["schema"] = value
+                node["schema"] = schema
             else:
-                node["fanout"] = {"items": ["x"], "goal": "JSON:{}", "schema": value}
-            with self.subTest(field=field):
+                node["fanout"] = {"items": ["x"], "goal": "JSON:{}", "schema": schema}
+            with self.subTest(field=field, good=good):
                 errors = wfcommon.validate_graph_errors([node])
-                self.assertTrue(any(e["field"] == field + ".properties.verdict.enum"
-                                    for e in errors), errors)
+                kw = [e for e in errors if "unsupported schema keyword" in e["msg"]]
+                if good:
+                    self.assertEqual([], kw, errors)
+                else:
+                    self.assertTrue(any(e["field"] == field + ".properties.verdict.patternProperties"
+                                        for e in kw), errors)
 
     def test_missing_upstream_input_fails_loud(self):
         graph = {"nodes": [{"id": "seed", "type": "agent", "goal": "JSON:{}"},
