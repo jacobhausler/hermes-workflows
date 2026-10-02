@@ -114,8 +114,8 @@ check(Vs([{"id": "a", "type": "agent", "goal": "g"},
 # two host-specific historical drafts are intentionally excluded from packaging
 # and retain unsupported schema types; they are not compatibility fixtures.
 graphs = [BUILD / "examples" / f"{name}.json" for name in
-          ("approve-publish", "branch-on-verdict", "incident-response", "smoke",
-           "gated-publish.workflow", "machine-watch.workflow")]
+          ("approve-publish", "blind-council.workflow", "branch-on-verdict", "incident-response", "smoke",
+           "gated-publish.workflow", "machine-watch.workflow", "triage-route.workflow", "quorum-probe.workflow", "bulk-transform.workflow", "escalation-ladder.workflow")]
 bad_graphs = []
 for f in graphs:
     try:

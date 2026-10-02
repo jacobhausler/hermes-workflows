@@ -8,3 +8,8 @@ tests/fake-*
 tests/prompt-*.log
 ci-out/
 artifacts/
+
+# lane scratch that must never be crawled
+.wt/
+*-ci-out*/
+tests/tb-parity-*/
