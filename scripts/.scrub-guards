@@ -60,6 +60,8 @@ regex:Suite hook for the standalone 20-cycle
 # verbatim (from: austin-exec estate) — the public contract names the peer whose
 # PASS gates the merge; guarded, not hidden.
 receipts/gated-publish/peer-clean-run.json
+# Core-10 #6: same peer-agreed stub contract for the exchange-run clean-run seat.
+receipts/exchange-run/peer-clean-run.json
 # Core-10 #4 fold (ruling wf-101-disposition): the austin-estate clean-run receipt
 # names the reviewing estate (austin-exec) as its evidence provenance — the peer's
 # identity IS the receipt; guarded, not hidden.
