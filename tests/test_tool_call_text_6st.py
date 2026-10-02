@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """est-6st - a reply that IS serialized tool-call markup must never coerce.
 
-Field case (haus-fixer ledger row 569586f70e1d1d51): a verify node attempt
+Field case (feedback ledger row 569586f70e1d1d51): a verify node attempt
 ended with its FINAL REPLY as literal serialized tool-call markup,
 turn_exit_reason unknown, exit 1. Under the sprint101 #9 tolerance in
 extract_json a no-fence reply is coerced json.loads -> last_balanced_object
