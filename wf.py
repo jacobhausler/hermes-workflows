@@ -1061,6 +1061,22 @@ def _proc_state():
             last = e
     return "unknown"
 
+def _proc_boottime(pid):
+    """Kernel start tick of a pid: field 22 of /proc/pid/stat (starttime,
+    clock ticks since boot), read as rest[19] after the comm-split — comm may
+    hold spaces/parens, so the naive index is never safe. None when the row
+    cannot be read (#61b B2 law: unknown is never a number and never a proof).
+    A pid's boottime is monotone across PID reuse: a recycled pid shows a
+    STRICTLY LATER tick, so 'row.boottime <= live boottime' is the occupant
+    identity test (#80 finding 1) — the kernel's own answer to 'is this still
+    the process that registered?'."""
+    try:
+        rest = Path(f"/proc/{pid}/stat").read_text(errors="replace").rsplit(")", 1)[1].split()
+        bt = int(rest[19])
+        return bt if bt >= 0 else None
+    except (OSError, IndexError, ValueError):
+        return None
+
 def _proc_snapshot():
     """One pass over /proc: {pid: (ppid, pgid)} for LIVE (non-zombie) pids.
     Zombie = dead (same identity law as _proc_alive); a row whose pid vanished
@@ -1207,23 +1223,46 @@ _aux_lock = threading.Lock()
 _aux_pids = set()          # pids the RUNNER itself launched (git garnish, gate
                           # checks): never escapees, never sweep targets.
 
+AUX_KILL_GRACE_S = 2.0   # #80 R3: bounded window after the timeout kill in
+                         # which communicate() must return before we cut losses
+
 def _aux_run(cmd, timeout=None, **kw):
     """subprocess.run-shaped helper for the runner's OWN auxiliary probes,
     registered in _aux_pids while live so the orphan pool can tell a runner-
     launched helper apart from an adopted escapee. Timeout semantics match
-    subprocess.run: the child is killed on timeout (communicate alone would
-    leave it live) and its output is still collected, so callers see the
-    same (returncode, stdout, stderr) triple."""
+    subprocess.run — BOUNDEDLY (#80 R3): the aux child runs in its OWN group
+    (start_new_session) so the timeout kill reaches the WHOLE tree
+    (killpg+pid), not only the parent; a pipe-inheriting descendant can then
+    never block the second communicate() past the kill grace, after which the
+    pipe ends are closed (nothing more can arrive for US) and the parent is
+    waited with its own bound. The deadline law: _aux_run returns within
+    timeout + 2*kill-grace, always — an unbounded communicate() here parked
+    the runner's machine-gate deadline in review (#80 finding 3)."""
+    kw.pop("start_new_session", None)              # ours is non-negotiable
     p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                         text=True, **kw)
+                         text=True, start_new_session=True, **kw)
     with _aux_lock:
         _aux_pids.add(p.pid)
     try:
         try:
             out, err = p.communicate(timeout=timeout)
         except subprocess.TimeoutExpired:
-            p.kill()                               # subprocess.run equivalence
-            out, err = p.communicate()
+            _kill_aux_tree(p)
+            try:
+                out, err = p.communicate(timeout=AUX_KILL_GRACE_S)
+            except subprocess.TimeoutExpired:
+                # a straggler OUTSIDE the group still holds the inherited
+                # pipes: we stop reading (close our ends) and reap the parent
+                # with its own bound — the straggler, reparented to the
+                # subreaper, dies under the orphan sweep, never here forever.
+                for h in (p.stdout, p.stderr):
+                    try: h.close()
+                    except Exception: pass
+                out, err = "", ""
+                try:
+                    p.wait(timeout=AUX_KILL_GRACE_S)
+                except subprocess.TimeoutExpired:
+                    pass
         class _R:
             returncode, stdout, stderr = p.returncode, out, err
         return _R()
@@ -1233,6 +1272,15 @@ def _aux_run(cmd, timeout=None, **kw):
         for h in (p.stdout, p.stderr):
             try: h.close()
             except Exception: pass
+
+def _kill_aux_tree(p):
+    """SIGKILL the aux child AND its group (the child is its own group leader
+    via start_new_session — #80 R3: killing only the parent left
+    pipe-inheriting descendants live)."""
+    try: os.killpg(os.getpgid(p.pid), signal.SIGKILL)
+    except OSError: pass
+    try: p.kill()
+    except OSError: pass
 
 def _proc_envv(pid):
     """/proc/PID/environ as a dict; {} when unreadable (absence loses only the
@@ -1388,11 +1436,16 @@ def _sidecar_path(run):
     return Path(run) / SIDECAR_NAME
 
 def _sidecar_read(run):
-    """[(pid, token)] for every registration row. A torn line (a writer
-    mid-append) is skipped — a row that never fully landed means the registrant
-    died before completing its duty; the /proc re-check at each probe decides.
-    A file that exists but cannot be READ raises OSError — the caller fails
-    closed (#61b B2 family), never reports 'no rows'."""
+    """[(pid, token, boottime)] for every registration row — boottime is the
+    registrant's kernel start tick pinned AT registration (None on legacy
+    two-field rows). A torn line (a writer mid-append) is skipped — a row that
+    never fully landed means the registrant died before completing its duty;
+    the /proc re-check at each probe decides. A file that exists but cannot be
+    READ raises OSError — the caller fails closed (#61b B2 family), never
+    reports 'no rows'. NOTE: rows are CLAIMS, never permissions — nothing may
+    signal a pid straight from these rows; go through _sidecar_trusted_pids,
+    which proves the CURRENT occupant against /proc first (#80 finding 1:
+    after PID reuse, an unverified row is a loaded gun at a stranger)."""
     p = _sidecar_path(run)
     if not p.exists():
         return []
@@ -1403,28 +1456,76 @@ def _sidecar_read(run):
             continue
         try:
             rec = json.loads(line)
-            pid, tok = rec.get("pid"), rec.get("token")
+            pid, tok, bt = rec.get("pid"), rec.get("token"), rec.get("boottime")
             if isinstance(pid, int) and pid > 0 and isinstance(tok, str) and tok:
-                rows.append((pid, tok))
+                if not (isinstance(bt, int) and not isinstance(bt, bool) and bt >= 0):
+                    bt = None                        # legacy/garbage: no pinned identity
+                rows.append((pid, tok, bt))
         except Exception:
             continue
     return rows
 
+def _sidecar_trusted_pids(run, tokens=None):
+    """The ONLY door from registry CLAIMS to pids we may act on: a row counts
+    while /proc still vouches for its occupant. The row pins the registrant's
+    kernel start tick at registration; the CURRENT /proc start tick must EQUAL
+    it — a still-alive process never changes its start tick, and a recycled pid
+    shows a strictly later one, so equality is the occupant identity test
+    (#80 finding 1: after PID reuse, an unverified row is a loaded gun at a
+    stranger). Rows without a pinned boottime (legacy two-field shape) NEVER
+    authorize a signal — they load safely and are skipped; the cooperation-free
+    subreaper + env-token channel still sees real escapees while a runner is
+    alive, and live ADOPTED children never registered anyway.
+    tokens=None means any token (the boot sweep, across the dead runner's
+    spawns). Returns (trusted_set, verdict); verdict 'unknown' = a surviving
+    row could not be verified (unreadable table/occupant/sidecar) — callers
+    fail closed; 'ok' = every surviving row was decided. On a machine with NO
+    procfs there is nothing to vouch and nothing to verify: rows decide
+    nothing (honest degradation — the registration helper is /proc-based
+    anyway, so no rows exist to trust)."""
+    wanted = None if tokens is None else {t for t in tokens if isinstance(t, str) and t}
+    try:
+        rows = _sidecar_read(run)
+    except OSError:
+        return set(), "unknown"                      # unreadable registry: unsafe
+    if not rows:
+        return set(), "ok"                           # absent/empty: healthy fast path
+    snap = _proc_snapshot()
+    if snap is None:
+        return set(), "unknown"                      # #61b B2: unreadable = unsafe
+    trusted, unknown = set(), False
+    for pid, tok, bt in rows:
+        if wanted is not None and tok not in wanted:
+            continue
+        if bt is None:
+            continue                                 # legacy shape: never a kill
+        if pid not in snap:
+            continue                                 # dead row: harmless
+        bt_live = _proc_boottime(pid)
+        if bt_live is None:
+            unknown = True                           # live occupant we cannot vouch
+            continue
+        if bt_live == bt:
+            trusted.add(pid)
+        # mismatch: the pid was REUSED — the occupant is a stranger; the claim
+        # died with its registrant and nothing here may touch the stranger.
+    return (set(), "unknown") if unknown else (trusted, "ok")
+
 def _sidecar_live_registered(run, tokens, meta=None):
     """Everything the #61c channels ATTRIBUTE to the spawns carrying one of
     `tokens` that /proc still shows ALIVE. Three channels, all judged by
-    /proc — the registry file alone is never trusted for liveness (a stale
-    line can only ever add one idempotent kill to a stranger pid, never a
-    resurrection of a dead one):
-      (1) registry rows whose token matches — the runner is the only writer
-          of the child-contract rows it honors, and a token is minted at the
-          spawn seam, so a rogue process cannot attribute anything to itself;
+    /proc — the registry file alone is never trusted for liveness, and after
+    #80 finding 1 it is never trusted for IDENTITY either: rows enter only
+    through _sidecar_trusted_pids (boottime-proven occupant, legacy rows
+    inert):
+      (1) token-matched registry rows whose CURRENT occupant is proven to be
+          the registrant (kernel start tick equality);
       (2) subreaper-adopted orphans (PPid == this runner, not a registered
           child, not an aux probe) whose inherited environment still carries
           one of the tokens — the cooperation-FREE half: a fast
           double-fork+setsid escapee lands HERE even if it never wrote a row
           (reviewer B2: PPid=1/dead-PGID is invisible to watch AND pgid walk);
-      (3) the live subtree of every token-matched registered leader — one
+      (3) the live subtree of every trusted token-matched leader — one
           registration SEEDS a whole detached family, not only its leader.
     Attribution stays strictly token-keyed: rows/adoptees under a FOREIGN
     token (another node/item) are never returned, so no kill crosses spawns.
@@ -1432,11 +1533,10 @@ def _sidecar_live_registered(run, tokens, meta=None):
     (unsafe, never 'clean'); returns set() when the registry is absent and
     nothing was adopted (the healthy-spawn fast path, zero side effects)."""
     wanted = {t for t in tokens if isinstance(t, str) and t}
-    try:
-        rows = _sidecar_read(run)
-    except OSError:
-        return None
-    known = {pid for pid, tok in rows if tok in wanted}
+    trusted, verdict = _sidecar_trusted_pids(run, tokens)
+    if verdict == "unknown":
+        return None                                  # unsafe: fail closed upstream
+    known = set(trusted)
     if wanted:
         snap = _proc_snapshot()
         if snap is None:
@@ -1478,12 +1578,20 @@ def _spawn_tokens(meta, node, index):
 def _register_survivor(sidecar_path, token, pid):
     """Append one fsync'd registry row — the documented CHILD-side contract,
     called by a backgrounding descendant (the fake child here, and any real
-    child that opts in) BEFORE its long work. The runner never DEPENDS on it:
-    the subreaper channel is cooperation-free; this row is what lets a
-    survivor still be attributed after its runner dies."""
+    child that opts in) BEFORE its long work. The row PINS the registrant's
+    kernel start tick (#80 finding 1): the runner only ever signals a row's
+    pid after /proc vouches that the CURRENT occupant's start tick equals the
+    pinned one, so a recycled pid can never be mistaken for the registrant.
+    The runner never DEPENDS on this channel: the subreaper half is
+    cooperation-free; this row is what lets a survivor still be attributed
+    after its runner dies. Unreadable own start tick -> the row is not written
+    (a row we cannot pin is a row that can never be trusted anyway)."""
     try:
+        bt = _proc_boottime(pid)
+        if bt is None:
+            return False
         with open(sidecar_path, "a", encoding="utf-8") as f:
-            f.write(json.dumps({"pid": pid, "token": token}) + "\n")
+            f.write(json.dumps({"pid": pid, "token": token, "boottime": bt}) + "\n")
             f.flush()
             os.fsync(f.fileno())
         return True
@@ -1518,19 +1626,34 @@ def _boot_sweep(meta):
     twin of the old blind respawn. A registered survivor has no verified parent
     and no reason to live; live ADOPTED children register nothing (only their
     detached descendants do) and stay reachable through the adoption channel,
-    which verifies identity first. Fail-closed on unreadable: no sweep claim,
-    the per-node guards still fail closed at judgment."""
+    which verifies identity first. #80 findings 1+2: rows enter ONLY through
+    _sidecar_trusted_pids (boottime-proven occupant — an unrelated pid a
+    stale-shaped row points at is never even signalled), and the sweep REPORTS
+    its proof: 'dead' (or 'clean') means every surviving claim was decided and
+    killed; 'stuck'/'unknown' means a predecessor process is still alive or
+    unverifiable, and main() must BLOCK admission on that — never log-and-go.
+    Returns {proof, pids, stuck, why} (or None = registry unreadable; the
+    per-node guards still fail closed at judgment, and admission stays open
+    only because there is nothing PROVEN stuck — a claim the reviewer's probes
+    respected: unknown-registry never spawns blind children either way, the
+    guards fail closed at the first verdict)."""
     run = meta["_run"]
-    try:
-        rows = _sidecar_read(run)
-    except OSError:
+    trusted, verdict = _sidecar_trusted_pids(run, None)
+    if verdict == "unknown":
         return None                              # unreadable: per-node guards fail closed
-    pids = sorted({p for p, _ in rows})
+    pids = sorted(trusted)
     if not pids:
-        return []
+        return {"proof": "clean", "pids": [], "stuck": [], "why": None}
     proof, stuck = _kill_pool(pids, PROCREE_TERM_GRACE_S, _proctree_kill_proof_s(meta))
     log(run, "runner.boot_sweep", pids=pids, proof=proof, stuck=stuck)
-    return pids
+    if proof == "dead":
+        why = None
+    elif proof == "stuck":
+        why = (f"predecessor-registered pids {stuck} survived the boot sweep kill "
+               "(#61c/#80: an alive predecessor tree blocks admission)")
+    else:
+        why = "boot sweep could not complete"
+    return {"proof": proof, "pids": pids, "stuck": stuck, "why": why}
 
 def _proc_unreadable_record(pid, node_id, spawn_no, r=None):
     """#61b B2: the typed fail-closed record for an UNREADABLE process table.
@@ -3150,7 +3273,19 @@ def main(run_id):
     # outlive their runner into the next generation (reviewer B3: prior-
     # generation pids alive at attempt 2/3).
     meta["_run"] = run
-    _boot_sweep(meta)
+    # #80 finding 2: a boot sweep that ends stuck (a predecessor process
+    # survived the kill) or unknown (its death cannot be PROVEN) BLOCKS
+    # admission BEFORE any Popen — typed failure, tree evidence retained.
+    # Log-and-schedule over an alive predecessor is the exact shape the
+    # reviewer's fault injection punished (new child + committed done over a
+    # live prior tree).
+    sweep = _boot_sweep(meta)
+    if sweep is not None and sweep.get("proof") not in ("clean", "dead"):
+        emit(f"WORKFLOW_FAILED {run_id} (boot sweep {sweep.get('proof')}: "
+             f"{sweep.get('stuck') or 'registry/table unreadable'})")
+        write_runner_exit(run, f"blocked: proctree boot sweep {sweep.get('proof')}",
+                          f"stuck={sweep.get('stuck')} why={sweep.get('why')}")
+        sys.exit(2)
     try: (run / "runner_exit.json").unlink()   # fresh verdict per runner process
     except OSError: pass
     _EXIT_WRITTEN[0] = False

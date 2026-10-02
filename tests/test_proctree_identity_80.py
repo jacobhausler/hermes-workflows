@@ -135,7 +135,7 @@ try:
     sweep1 = wf._boot_sweep(meta_b)
     time.sleep(0.3)
     check("R1b boot sweep on a stale-shaped row pointing at an unrelated process: fixture SURVIVES",
-          alive(victim.pid) and sweep1.get("proof") == "dead"
+          alive(victim.pid) and sweep1.get("proof") in ("dead", "clean")
           and victim.pid not in (sweep1.get("pids") or []),
           json.dumps({"victim_alive": alive(victim.pid), "sweep": sweep1}))
     # legacy two-field row shape too: loads, never blind-kills
@@ -143,7 +143,7 @@ try:
     sweep1b = wf._boot_sweep(meta_b)
     time.sleep(0.2)
     check("R1b a legacy two-field row loads safely WITHOUT any kill",
-          alive(victim.pid) and sweep1b.get("proof") == "dead"
+          alive(victim.pid) and sweep1b.get("proof") in ("dead", "clean")
           and victim.pid not in (sweep1b.get("pids") or []),
           json.dumps({"victim_alive": alive(victim.pid), "sweep": sweep1b}))
     # healthy path still sweeps: pin the TRUE boottime -> registrant reaped
@@ -175,9 +175,11 @@ try:
         "p = os.fork()\n"
         "if p == 0:\n"
         "    os.setsid()\n"
-        "    os.fork()\n"
-        "    wf._register_survivor(sys.argv[2], sys.argv[3], os.getpid())\n"
-        "    time.sleep(300); os._exit(0)\n"
+        "    q = os.fork()\n"
+        "    if q == 0:\n"
+        "        wf._register_survivor(sys.argv[2], sys.argv[3], os.getpid())\n"
+        "        time.sleep(300); os._exit(0)\n"
+        "    os._exit(0)\n"                       # intermediary exits: the gc orphanes
         "time.sleep(2)\n")
     kid = subprocess.Popen([sys.executable, str(HOME / "r1c_kid_main.py"),
                             str(BUILD), str(sidecar), token], start_new_session=True)
@@ -236,9 +238,11 @@ try:
     os.environ.update({"HERMES_HOME": str(env_home), "WF_RUNS_ROOT": str(runs2)})
     try:
         # fault ONLY the pool-killer (the reviewer's shape): boot_sweep itself
-        # runs for real over the ghost row; _proc_alive says the ghost lives.
+        # runs for real over the ghost row (snapshot says the ghost is in the
+        # table, boottime matches the pinned identity); only the kill proof
+        # is rigged stuck.
         with patch.object(subprocess, "Popen", spy_popen), \
-             patch.object(mod, "_proc_alive", lambda pid: pid == ghost), \
+             patch.object(mod, "_proc_snapshot", lambda: {ghost: (1, ghost)}), \
              patch.object(mod, "_proc_boottime", lambda pid: 11 if pid == ghost else None), \
              patch.object(mod, "_kill_pool",
                           lambda pids, h, p: ("stuck", sorted(pids))):
@@ -257,8 +261,9 @@ try:
           and str(ghost) in json.dumps(rec),
           json.dumps({"reason": rec.get("reason"), "detail": rec.get("detail")}))
     meta_d = {"_run": run_d, "proctree_kill_proof_s": 0.5, "proctree_hold_s": 0}
-    with patch.object(mod, "_proc_alive", lambda pid: pid == ghost), \
-         patch.object(mod, "_proc_boottime", lambda pid: 11 if pid == ghost else None):
+    with patch.object(mod, "_proc_snapshot", lambda: {ghost: (1, ghost)}), \
+         patch.object(mod, "_proc_boottime", lambda pid: 11 if pid == ghost else None), \
+         patch.object(mod, "_kill_pool", lambda pids, h, p: ("stuck", sorted(pids))):
         sweep_d = mod._boot_sweep(meta_d)
     check("R2 _boot_sweep REPORTS the stuck proof typed (proof=stuck with stuck pids)",
           isinstance(sweep_d, dict) and sweep_d.get("proof") == "stuck"
