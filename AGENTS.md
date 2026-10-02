@@ -197,6 +197,10 @@ validates but is not smoke-run (real lanes need your stack).
   merge are unaffected).
 - `transport | early_death | cap_exhausted | timeout` deaths with tool progress get ONE
   automatic re-drive with a machine resume preamble (`node.retry`); permfails never retry.
+  If the prior attempt's session persisted NO messages (#102 — the pretense-resume shape:
+  a SIGKILL-wave child that banked nothing), the re-drive spawns as a FRESH session seeded
+  instead with a harvest preamble (banked work-dir files + cleaned log tail); the
+  `node.retry` event and the `attempts_log` entry stamp `fresh_session: true`.
 - A child silent for 120 s after spawn is killed as `early_death`; a child still writing its
   log when the wall fires gets one 50 % extension (`node.extended`), then dies.
 - A run with unfinished work and no live runner is `interrupted`. Inspect committed

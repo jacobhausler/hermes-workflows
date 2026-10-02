@@ -1,7 +1,7 @@
 # Graph Report - tree  (2026-10-02)
 
 ## Corpus Check
-- 192 files · ~261,841 words
+- 192 files · ~261,890 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 4 file(s) not represented in the graph (top: (none) 4)
 
