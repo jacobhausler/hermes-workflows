@@ -14,6 +14,8 @@ def jload(p, default=None):
         return default
 
 _BUDGET_KEYS = ("max_turns", "timeout", "run_budget", "shape")
+# #100: scheduling limits are policy, not a change to committed node work.
+_CONCURRENCY_KEYS = ("concurrency", "item_concurrency")
 # #24/#25 (A3): route POLICY (require_route) and the door's proof ANNOTATION
 # (route_verified) are not work either — like budgets they must not participate in
 # def_hash: the door bakes route_verified into graph.json after validation, and the
@@ -32,7 +34,8 @@ def def_hash(node, rule=FP_RULE_VERSION):
     if rule not in FP_RULES:
         raise ValueError(f"unknown fingerprint rule: {rule!r}")
     if rule == FP_RULE_VERSION:
-        node = {k: v for k, v in node.items() if k not in _BUDGET_KEYS and k not in _POLICY_KEYS}
+        node = {k: v for k, v in node.items()
+                if k not in _BUDGET_KEYS and k not in _CONCURRENCY_KEYS and k not in _POLICY_KEYS}
     return hashlib.sha256(json.dumps(node, sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:16]
 
 _EFP_SEP = "\u241f"
@@ -1819,6 +1822,36 @@ def _downstream(byid):
             if a in kids:
                 kids[a].append(n["id"])
     return kids
+
+def blocked_legibility(nodes, states, blocked):
+    """Read-only context for run.blocked: finished work that cannot converge and
+    the failed roots upstream of each blocked-pending node. Reuse the same
+    dependency adjacency as amend_preview; preserve graph order in every list."""
+    byid = {n["id"]: n for n in nodes}
+    kids = _downstream(byid)
+    blocked_set = set(blocked)
+    failed = [n["id"] for n in nodes if states[n["id"]] == "failed"]
+    blockers = {nid: [] for nid in blocked}
+    unconverged = []
+    for n in nodes:
+        nid = n["id"]
+        if states[nid] not in ("failed", "done", "partial"):
+            continue
+        seen, stack = set(), list(kids[nid])
+        while stack:
+            child = stack.pop()
+            if child in seen:
+                continue
+            seen.add(child)
+            stack.extend(kids[child])
+        hits = blocked_set & seen
+        if states[nid] in ("done", "partial") and hits:
+            unconverged.append(nid)
+        elif nid in failed:
+            for target in blocked:
+                if target in hits:
+                    blockers[target].append(nid)
+    return unconverged, blockers
 
 def amend_preview(r, new_nodes):
     """{added, removed, changed, will_rerun, unchanged} for a proposed graph

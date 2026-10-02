@@ -68,6 +68,25 @@ class TeamIntegration(unittest.TestCase):
             node['profile'] = profile
         return {'name': 'lane-e', 'nodes': [node]}
 
+    def first_trace(self, r, timeout=8):
+        """Parse the child's first trace record once it has LANDED. The old
+        predicate was `until(file exists)` — which admits the child's
+        open(trace,'a')-then-write window: the file is created empty at open,
+        and a single buffered write lands at exit, so a poll that sees the
+        CREATED file and reads `splitlines()[0]` hits IndexError on an empty
+        list (exact CI signature, run 36878156698 job 110422814737, plain
+        subtest — the child spawned, the predicate was just wrong). The
+        contract this suite needs is 'first complete (newline-terminated)
+        record', which every assertion below then reads without a torn window."""
+        p = r / '11-child-trace.jsonl'
+        def landed():
+            try:
+                return '\n' in p.read_text(errors='replace')
+            except FileNotFoundError:
+                return False
+        until(landed, timeout)
+        return json.loads(p.read_text().splitlines()[0])
+
     def launch(self, graph=None, *, home=None, **kw):
         with patch.dict(os.environ, {**self.env, 'HERMES_HOME': str(home or self.root)}, clear=False):
             result = door.act_run({'graph': graph or self.graph(), **kw})
@@ -97,8 +116,7 @@ class TeamIntegration(unittest.TestCase):
                                               'LC_ALL': 'C.UTF-8'}, clear=False):
                     rid = door.act_run({'graph': self.graph(profile=profile)})['run_id']
                 r = self.runs / rid
-                until(lambda: (r / '11-child-trace.jsonl').exists())
-                trace = json.loads((r / '11-child-trace.jsonl').read_text().splitlines()[0])
+                trace = self.first_trace(r)
                 if profile:
                     # RATIFY F2: the env WHITELIST is mandated on routed spawns only.
                     self.assertNotIn('LANE_E_SECRET_TOKEN', trace['env'], 'profiled child inherited test secret')
@@ -190,7 +208,7 @@ class TeamIntegration(unittest.TestCase):
         self.assertIn('run_id', result, result)
         rid = result['run_id']
         r = self.runs / rid
-        until(lambda: (r / '11-child-trace.jsonl').exists())
+        self.first_trace(r)
         until(lambda: not common.runner_alive(r), 10)
         shutil.rmtree(target)
         with patch.dict(os.environ, {**self.env, 'HERMES_HOME': str(launcher)}):

@@ -51,7 +51,8 @@ def _inline_graph_size_error(graph):
     return None
 GRAPH_KEYS = {"name", "nodes", "description", "defaults", "model_policy",
               "provenance",   # 1.1 (RATIFY F5): opt-in library provenance block, door-written
-              "grammar"}      # #32: dialect tag of a shared file ("wf/1"; absent = wf/1)
+              "grammar",      # #32: dialect tag of a shared file ("wf/1"; absent = wf/1)
+              "concurrency", "item_concurrency"}  # #100: optional run-level limits
 
 def _model_names_valid(names):
     return isinstance(names, list) and all(isinstance(n, str) and n.strip() for n in names)
@@ -136,6 +137,10 @@ def _validation_error(graph):
     # #32: a file may state its dialect; absent = wf/1, unknown = refused with the
     # supported list (fail-closed: a newer dialect must never be misrun as wf/1).
     errs.extend(_common.grammar_errors(graph))
+    for key in ("concurrency", "item_concurrency"):
+        if key in graph and (type(graph[key]) is not int or graph[key] <= 0):
+            errs.append({"node": None, "field": key,
+                         "msg": f"{key} must be a positive integer"})
     if "defaults" in graph:
         # ONE truth: the same per-key rules a node key gets; apply_graph_defaults
         # bakes this block into the agent defs before graph.json is written.
@@ -222,6 +227,25 @@ def _owner_setting_read(key):
         return None
 
 _common.set_owner_setting_reader(_owner_setting_read)
+
+# #100: absent settings keep the runner's historic 4/8 defaults. A supplied
+# author limit can never exceed its owner cap; an owner cap below the default also
+# constrains runs whose graph omitted the key. No optional key is baked otherwise.
+_CONCURRENCY_CAPS = {"concurrency": ("max_concurrency", 4),
+                     "item_concurrency": ("max_item_concurrency", 8)}
+
+def _concurrency_bake(graph):
+    baked = {}
+    for key, (setting, default) in _CONCURRENCY_CAPS.items():
+        cap = _common.owner_setting(setting)
+        if cap is not None and (type(cap) is not int or cap <= 0):
+            return None, {"error": f"owner settings invalid: settings.{setting} must be a positive integer"}
+        if key in graph or cap is not None:
+            limit = min(graph.get(key, default), cap if cap is not None else default)
+            # No graph key + no effective change = the old run.json, byte for byte.
+            if key in graph or limit != default:
+                baked[key] = limit
+    return baked, None
 
 def _owner_settings_error():
     """FAIL-CLOSED at the door (#42): a malformed `settings.runs_root` / `settings.profile`
@@ -1879,6 +1903,9 @@ def act_run(args):
     bad = _validation_error(graph) or _team_args_error(args)
     if bad:
         return bad
+    concurrency_meta, bad = _concurrency_bake(graph)
+    if bad:
+        return bad
     name = args.get("name", graph.get("name", "workflow"))
     if not isinstance(name, str) or not name.strip():
         return {"error": "run name must be a non-empty string"}
@@ -1948,10 +1975,13 @@ def act_run(args):
                             "needs_resume": incumbent["needs_resume"],
                             "last_event_ts": incumbent["last_event_ts"],
                             "hint": f"wait run_id={incumbent['run_id']} resumes it"}
-            return _create_run(args, graph, lib_name, models, routes, _liveness_notes, path)
-    return _create_run(args, graph, lib_name, models, routes, _liveness_notes)
+            return _create_run(args, graph, lib_name, models, routes, _liveness_notes, path,
+                               concurrency_meta=concurrency_meta)
+    return _create_run(args, graph, lib_name, models, routes, _liveness_notes,
+                       concurrency_meta=concurrency_meta)
 
-def _create_run(args, graph, lib_name, models, routes, _liveness_notes, lane_path=None):
+def _create_run(args, graph, lib_name, models, routes, _liveness_notes, lane_path=None,
+                *, concurrency_meta=None):
     """Under the lane flock: complete run dir, atomic registry entry, then spawn."""
     name = graph["name"]
     base = time.strftime("%Y%m%d-%H%M%S") + "-" + "".join(
@@ -1978,6 +2008,8 @@ def _create_run(args, graph, lib_name, models, routes, _liveness_notes, lane_pat
             "owner": {"session_id": _session_env("HERMES_SESSION_ID") or None,
                       "ui_session_id": _session_env("HERMES_UI_SESSION_ID") or None,
                       "platform": _session_env("HERMES_SESSION_PLATFORM") or None}}
+    if concurrency_meta:
+        meta.update(concurrency_meta)
     meta.update(_identity_stamps(args, graph, lib_name))   # 1.1: only derivable keys land
     (r / "run.json").write_text(json.dumps(meta))
     if lane_path is not None:

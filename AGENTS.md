@@ -162,6 +162,10 @@ succeed, the rest are cancelled; without it the fan-out waits for every item;
 `wait:{"until_argv":[…],"every_s":60,"timeout_s":3600}`. Tested examples:
 [examples/approve-publish.json](examples/approve-publish.json),
 [examples/branch-on-verdict.json](examples/branch-on-verdict.json).
+[examples/machine-watch.workflow.json](examples/machine-watch.workflow.json) is a
+scheduled-watcher TEMPLATE (zero-token machine-gate poll, releases on exit 0;
+launch with `lane_key` so cron double-fire dedupes; timeout fails loudly for
+the next deduped dispatch). Validate + smoke-run tested.
 [examples/incident-response.json](examples/incident-response.json) is a full
 lifecycle TEMPLATE (alert-triggered incident: verdict-branch gate pair, machine
 recovery probe with human escalation, merge-gated close) meant to be adapted —
