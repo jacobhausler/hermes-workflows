@@ -217,7 +217,7 @@ check("(d3) malformed substrate config: fail-closed as today, no substitution",
       and "substrate" not in json.dumps(out).lower(), out)
 # every rung dead => no alive rung => fail closed with the ORIGINAL message shape
 write_substrate_config("workflows:\n  confidence_substrate:\n    - openai/turbo-a\n"
-                       "    - anthropic/claude-x\n")
+                       "    - deepseek/dx-9\n")
 set_ping(DEAD)
 out = door.act_run({"graph": pinned_graph()})
 check("(d4) ladder fully quota-dead + pin dead: fails closed, original message shape",
