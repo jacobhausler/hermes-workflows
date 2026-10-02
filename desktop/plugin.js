@@ -682,17 +682,22 @@ export function splitRuns(runs) {
   }
 }
 
-/** O3 pane action-first grouping: NEEDS YOU (held + failed + interrupted — the
- *  owner must act on all three), RUNNING (running + pending), DONE (done +
- *  stopped). Within each group, newest `updated` first. Pure, so node can
- *  test it without a DOM. */
+/** O4 pane grouping (owner directive 2026-10-02): RUNNING on top — ONLY a
+ *  runner-backed status; a 'pending' row is structurally a never-started husk
+ *  (run_state emits pending only when the runner is NOT alive AND events.jsonl
+ *  is absent), so husks are not rendered at all — they were the "52 running,
+ *  48 not" and the duplicate-label rows. HELD rows speak plainly: the run
+ *  waits on its ORIGINATING AGENT, not the pane's reader. RECENTLY FINISHED
+ *  replaced "NEEDS YOU" — a finished or failed run needs nothing from the
+ *  reader either; it is an index, not a queue. Within each group, newest
+ *  `updated` first. Pure, so node can test it without a DOM. */
 export function groupRuns(runs) {
   const byUpdated = (a, b) => parseTime(b.updated) - parseTime(a.updated)
-  const list = runs || []
+  const list = (runs || []).filter(r => r && r.status !== 'pending')
   return {
-    needsYou: list.filter(r => ['held', 'failed', 'interrupted'].includes(r.status)).sort(byUpdated),
-    running: list.filter(r => ['running', 'pending'].includes(r.status)).sort(byUpdated),
-    done: list.filter(r => ['done', 'stopped'].includes(r.status)).sort(byUpdated)
+    running: list.filter(r => r.status === 'running').sort(byUpdated),
+    held: list.filter(r => r.status === 'held').sort(byUpdated),
+    recent: list.filter(r => ['done', 'failed', 'stopped', 'interrupted'].includes(r.status)).sort(byUpdated)
   }
 }
 
@@ -1979,12 +1984,14 @@ function PaneRow({ run, thisChat }) {
     $selNode.set(null)
     host.navigate('/workflows')
   }
-  // Line 2 is the ONE fact to act on, never a decoration.
+  // Line 2 is the ONE fact to act on, never a decoration. A held run waits on
+  // its ORIGINATING AGENT (owner directive 2026-10-02): the pane is an index,
+  // not a queue addressed to its reader — say who the run waits on.
   let fact
   if (run.status === 'held') fact = run.held_gate?.question || `gate · ${run.held_gate?.id || 'unknown'}`
   else if (run.status === 'failed') fact = run.runner_exit?.reason || 'failed'
   else if (run.status === 'interrupted') fact = `interrupted · ${nodesCount(run)}`
-  else if (run.status === 'running' || run.status === 'pending') {
+  else if (run.status === 'running') {
     const start = parseTime(run.started)
     const elapsed = start ? fmtDur(Date.now() - start) : ''
     const idle = run.metrics ? idleS(run.metrics) : null
@@ -2015,14 +2022,14 @@ function WorkflowsPane() {
   const [showAllDone, setShowAllDone] = useState(false)
   const runs = data?.runs || []
   const owned = new Set(ownedRuns(runs, runtimeSid, storedSid).map(r => r.id))
-  const { needsYou, running, done } = groupRuns(runs)
+  const { running, held, recent } = groupRuns(runs)
   // The census counts are the backend's full-census numbers (wfcommon
   // run_summary); absent means unknown, never a fabricated zero.
   const counts = data?.counts
   const census = counts
     ? `runs ${counts.total ?? '?'} · running ${counts.running ?? 0} · held ${counts.held ?? 0} · failed ${counts.failed ?? 0}`
     : 'runs unknown'
-  const doneShown = showAllDone ? done : done.slice(0, 10)
+  const recentShown = showAllDone ? recent : recent.slice(0, 10)
   const group = (title, list) => (list.length
     ? [
         jsx(PanelSectionLabel, { children: `${title} · ${list.length}` }, title),
@@ -2036,13 +2043,13 @@ function WorkflowsPane() {
       className: 'min-h-0 flex-1',
       children: box(
         'flex flex-col gap-0.5 px-1 pb-2',
-        runs.length
+        (running.length || held.length || recent.length)
           ? [
-              ...group('NEEDS YOU', needsYou),
               ...group('RUNNING', running),
-              ...group('DONE', doneShown),
-              !showAllDone && done.length > 10
-                ? jsx(Button, { size: 'xs', variant: 'ghost', onClick: () => setShowAllDone(true), children: `show all ${done.length}` }, 'show-all')
+              ...group('WAITING ON AGENT', held),
+              ...group('RECENTLY FINISHED', recentShown),
+              !showAllDone && recent.length > 10
+                ? jsx(Button, { size: 'xs', variant: 'ghost', onClick: () => setShowAllDone(true), children: `show all ${recent.length}` }, 'show-all')
                 : null
             ]
           : jsx(EmptyState, { title: 'No runs', description: 'Ask the agent to start a workflow.' })
