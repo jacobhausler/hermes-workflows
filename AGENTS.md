@@ -187,7 +187,9 @@ class fails the launch closed. Author-run receipt:
 the speed/coverage contrast into one file: a `quorum`-raced probe fan-out whose
 report must state the cancelled straggler set honestly, beside a no-quorum barrier
 that reconciles survivors against an explicit master catalog so a dead lane prints
-as a loud coverage gap, never silent loss. Two author laps, one per mode.
+as a loud coverage gap, never silent loss. The two fan-outs are sibling nodes with no
+branch gates, so every author/peer lap walks both folded modes in a single launch;
+laps exist per-engine-side, not per-mode.
 
 ### 3d. Failures, resume, amend
 
