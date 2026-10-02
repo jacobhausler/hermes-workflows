@@ -297,7 +297,12 @@ def last_balanced_object(text):
     return last
 
 def validate(out, schema):
-    """Tiny forgiving validator: type / required / properties / items."""
+    """Tiny forgiving validator: type / required / properties / items / enum.
+    #107: `enum` membership is ENFORCED here — a str value against a
+    string-membered enum (exactly what the door's schema_check admits: a
+    non-empty list of non-empty strings on type:'string'), so a misspelled
+    verdict takes the same typed-correction-retry path as a `type` violation
+    and the error string names the allowed set for the retry prompt."""
     errs = []
     if not schema:
         return errs
@@ -308,6 +313,11 @@ def validate(out, schema):
         elif t == "string" and not isinstance(v, str): errs.append(f"{path}: expected string")
         elif t == "boolean" and not isinstance(v, bool): errs.append(f"{path}: expected boolean")
         elif t in ("number", "integer") and not isinstance(v, (int, float)): errs.append(f"{path}: expected number")
+        en = s.get("enum")
+        if (isinstance(v, str) and isinstance(en, list) and en
+                and all(isinstance(x, str) for x in en) and v not in en):
+            errs.append(f"{path}: not an allowed value (allowed: "
+                        + ", ".join(repr(x) for x in en) + ")")
         if isinstance(v, dict):
             for r in s.get("required", []):
                 if r not in v: errs.append(f"{path}: missing required '{r}'")
@@ -775,6 +785,106 @@ def _tool_progress(run, skey, out, home=None):
     except Exception:
         return False
     return bool(m) and isinstance(m.get("tool_calls"), int) and m["tool_calls"] > 0
+
+# #102 (measured 2026-10-01, three lanes burned 4-6h): the core CLI line a child
+# prints when --continue lands on a session that persisted NO messages. When
+# that line is what the dead capture harvested, drive 2 would re-read pure
+# startup noise as its "prior work" — the pretense is itself a failure signal
+# (postmortem fixture law), so it is never allowed to re-ride a preamble.
+DEAD_SESSION_NOISE = "found but has no messages"
+
+def _session_has_messages(skey, home=None):
+    """Message-existence evidence for the #102 dead-session guard: True when the
+    dead attempt's own session (the exact `--continue <skey>#a<attempt>` title
+    core resolved) has AT LEAST ONE persisted message row, False when its
+    sessions row exists but no messages do — the pretense-resume shape — and
+    None when the evidence is unavailable (missing db / missing sessions row /
+    any query failure). Honest absence: None keeps the current re-drive path,
+    never a guess."""
+    if not skey:
+        return None
+    import sqlite3
+    home = Path(home) if home else hermes_home()
+    db = home / "state.db"
+    if not db.exists():
+        return None
+    title = f"{skey}#a0"   # every spawn is a fresh skey; the re-drive resumes '<skey>#a0'
+    try:
+        c = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=0.5)
+        try:
+            if not c.execute("select 1 from sessions where title=? limit 1", (title,)).fetchone():
+                return None   # no sessions row: honest absence, not a dead session
+            if not c.execute("select 1 from messages where session_id=("
+                             "select id from sessions where title=? limit 1) limit 1",
+                             (title,)).fetchone():
+                return False
+            return True
+        finally:
+            c.close()
+    except Exception:
+        return None
+
+def _clean_capture(text):
+    """Strip the dead-session CLI noise lines from a death capture (#102)."""
+    return "\n".join(l for l in (text or "").splitlines()
+                     if DEAD_SESSION_NOISE not in l)
+
+def _banked_work(run, node, index):
+    """(file_names, [(name, content_excerpt), ...]) of the child's durable work
+    dir — drive-1's banked output, harvested BEFORE the re-drive spawns so
+    drive 2 continues from what exists instead of re-exploring from zero.
+    Newest-mtime first; each file excerpted, the whole section capped.
+    Honest empty on any OSError."""
+    try:
+        wd = child_work_dir(run, node, index)
+        files = sorted((f for f in wd.rglob("*") if f.is_file()),
+                       key=lambda f: f.stat().st_mtime, reverse=True)
+    except OSError:
+        return [], []
+    names = [f.relative_to(wd).as_posix() for f in files]
+    excerpts = []
+    budget = 6000
+    for f, name in list(zip(files, names))[:12]:
+        try:
+            body = f.read_text(errors="replace")[:1200]
+        except OSError:
+            continue
+        take = min(len(body), budget)
+        if take <= 0:
+            break
+        excerpts.append((name, body[:take]))
+        budget -= take
+    return names, excerpts
+
+def _dead_session_harvest(r, eclass, run, node, index):
+    """The #102 harvest preamble for a re-drive whose prior session persisted NO
+    messages: the dead attempt is NOT resumable, so the re-drive is a FRESH
+    session and this block is the ONLY continuity — error_class, the node's
+    banked/committed work (file names + content excerpts from the durable work
+    dir), the cleaned log tail, and the don't-redo law. Prompt-side only, like
+    _resume_preamble: it never touches graph.json, node records or the def hash.
+    The dead-session noise is stripped from every excerpt (fixture law)."""
+    lines = ["## Dead-session re-drive harvest (machine preamble)",
+             f"Your prior attempt ({eclass}) died with its session empty — nothing persisted "
+             f"and NOTHING of it is resumable. This is a fresh session: your continuity is "
+             f"exclusively the harvest below. Do NOT re-run discovery it already covers.",
+             f"Prior attempt died: error_class={eclass}"]
+    names, excerpts = _banked_work(run, node, index)
+    if names:
+        lines.append("Banked files in your durable work dir (already produced; verify, never redo):")
+        lines.extend("- " + n for n in names[:40])
+        for name, body in excerpts:
+            lines.append(f"--- {name} (excerpt) ---")
+            lines.append(body)
+    else:
+        lines.append("Banked files: none found in the durable work dir.")
+    tail_src = _clean_capture(r.get("final")) or _clean_capture(r.get("raw"))
+    tail = [l for l in tail_src.splitlines() if l.strip()][-20:]
+    if tail:
+        lines.append("Last 20 lines of the prior attempt's capture:")
+        lines.extend("> " + l for l in tail)
+    lines.append(RESUME_LINE)
+    return "\n".join(lines)
 
 def _resume_preamble(r):
     """Machine-generated resume preamble prepended to the goal for the ONE
@@ -2586,7 +2696,7 @@ def _seat_alias_map(home):
 
 def _route_hold(meta, result, node=None):
     """#25: commit-time fail-closed hold (field report fb-fix-9c575645: pinned
-    billed the seat's fallback qwen38-next for 3 whole nodes while the submit ping had
+    billed the seat's fallback model for 3 whole nodes while the submit ping had
     ALREADY reported the fallback-ladder surprise). When the door proved this node's
     route alive at submit (`route_verified`, door-baked — absent = never proved = no
     hold, every legacy run behaves byte-identically), a KNOWN served_model that is
@@ -2622,7 +2732,7 @@ def _route_hold(meta, result, node=None):
                         f"you accept falling back on (require_route: false).")
     return result
 
-def _bounded_retry(meta, r, respawn, ev, ev_kw):
+def _bounded_retry(meta, r, respawn, ev, ev_kw, node=None, index=None):
     """#5 bounded auto-retry, run ONCE after _transient_retry: a death whose
     error_class ∈ {transport, early_death, cap_exhausted, timeout} (B1's new
     names; `max_turns` included until the rename lands) AND whose dead attempt
@@ -2633,7 +2743,13 @@ def _bounded_retry(meta, r, respawn, ev, ev_kw):
     schema(no_json) / cancelled / spawn — permfails redrive byte-identically —
     and never a `partial` harvest (#4: harvested, so not retried). The
     re-drive is a fresh spawn: steer rides it via _steer_bake, the fresh
-    skey keeps it a fresh session, and node.retry logs the reason."""
+    skey keeps it a fresh session, and node.retry logs the reason.
+    #102: BEFORE spawning, the prior attempt's session is checked for
+    persisted messages (the same state.db evidence _tool_progress reads); when
+    its sessions row exists but NO message rows do, the resume is a pretense —
+    the re-drive takes the harvest preamble (banked work dir + cleaned log
+    tail) instead of the resume preamble, and node.retry + attempts_log stamp
+    fresh_session. Absent evidence (None) keeps the resume path."""
     run = meta["_run"]
     if r.get("status") != "failed" or r.get("harvest"):
         return r
@@ -2661,12 +2777,26 @@ def _bounded_retry(meta, r, respawn, ev, ev_kw):
         al.append({"attempt": len(al), "error_class": "left_live_descendants", "at": now()})
         iso["attempts_log"] = al
         return iso
+    # #102: dead (empty) session evidence — False is the pretense-resume shape,
+    # True keeps today's resume, None (unavailable) never flips the path.
+    dead = False
+    if node is not None:
+        sess = (_session_has_messages(r.get("skey"), r["profile_home"])
+                if r.get("profile_home") else _session_has_messages(r.get("skey")))
+        dead = (sess is False)
     log(run, ev + ".retry", error_class=eclass,
-        reason=f"bounded auto-retry: {eclass} with tool progress — one machine-resume re-drive",
-        **ev_kw)
+        reason=(f"bounded auto-retry: {eclass} with tool progress — one re-drive as a FRESH "
+                f"session (prior session persisted no messages — #102)" if dead else
+                f"bounded auto-retry: {eclass} with tool progress — one machine-resume re-drive"),
+        **ev_kw, **({"fresh_session": True} if dead else {}))
     al = list(r.get("attempts_log") or [])
-    al.append({"attempt": len(al), "error_class": eclass, "at": now(), "resume": True})
-    r2 = respawn(resume_preamble=_resume_preamble(r))
+    entry = {"attempt": len(al), "error_class": eclass, "at": now(), "resume": True}
+    if dead:
+        entry["fresh_session"] = True
+    al.append(entry)
+    preamble = (_dead_session_harvest(r, eclass, run, node, index) if dead
+                else _resume_preamble(r))
+    r2 = respawn(resume_preamble=preamble)
     r2["attempts_log"] = al
     r2["attempts"] = (r2.get("spawn") + 1) if isinstance(r2.get("spawn"), int) else len(al) + 1
     return r2
@@ -2892,7 +3022,8 @@ def run_agent_node(run, meta, byid, node, outputs, steering):
                                      skey=sk, inputs=inputs_txt, index=i, resume_preamble=resume_preamble)
                 try:
                     r = _transient_retry(meta, spawn(), spawn, "item", {"node": nid, "index": i})
-                    r = _bounded_retry(meta, r, spawn, "item", {"node": nid, "index": i})
+                    r = _bounded_retry(meta, r, spawn, "item", {"node": nid, "index": i},
+                                       node=node, index=i)
                     r = _final_quiesce(meta, r, "item", {"node": nid, "index": i})   # #61
                 except Exception as e:
                     r = {"status": "failed", "error": f"worker crashed: {type(e).__name__}: {e}",
@@ -2993,7 +3124,7 @@ def run_agent_node(run, meta, byid, node, outputs, steering):
                                  node.get("schema"), steering=steering, skey=sk, inputs=inputs_txt,
                                  resume_preamble=resume_preamble)
             r = _transient_retry(meta, spawn(), spawn, "node", {"node": nid})
-            r = _bounded_retry(meta, r, spawn, "node", {"node": nid})
+            r = _bounded_retry(meta, r, spawn, "node", {"node": nid}, node=node)
             r = _final_quiesce(meta, r, "node", {"node": nid})   # #61: never commit over a live tree
             r = _stamp_served(meta, r, node)   # dad50be0: seat truth at the commit, never the alias
             r = _lane_gate(run, node, r)   # 64c6772b: a declared lane must be clean at commit

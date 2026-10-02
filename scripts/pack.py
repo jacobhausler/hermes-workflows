@@ -28,6 +28,7 @@ INCLUDE_FILES = (
     "desktop/plugin.js",
     "examples/approve-publish.json",
     "examples/branch-on-verdict.json",
+    "examples/gated-publish.workflow.json",
     "examples/incident-response.json",
     "examples/machine-watch.workflow.json",
     "examples/portable-review.workflow.json",

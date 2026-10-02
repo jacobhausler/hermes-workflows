@@ -15,3 +15,52 @@ scripts/.scrub-guards
 regex:"author": "(Jacob Hausler|jacobhausler)"
 # Public PR-author credit only; anchored line excludes the change description.
 regex:^- #[0-9]+ — (Hermes Agent; )?@jacobhausler\.$
+
+# ---- Core-10 committed scrub list (2026-10-01): GUARD rows for the merged audit ----
+# Classification discipline per docs/PUBLISH-SCRUB.md: GUARD = load-bearing absence
+# -enforcing or fixture identity; kept verbatim. Everything below names the WHY.
+# Frozen golden-solo capture: the runner spawn env_keys list is compared BYTE-FOR-BYTE
+# against the v1.0.15 baseline; the NOMAD_*/env rows are the captured OS environment
+# surface, renaming them would void the golden-solo law (the ban it enforces is on
+# LEAKING these into prompts, not on the capture naming them).
+tests/golden_solo/v1.0.15.json
+# Model-route test fixtures: the alias/tier names ARE the asserted data (resolution,
+# preflight, route-hold, reasoning-effort tests assert the CLI receives exactly these
+# tokens; neutralizing them would test nothing — the PUBLISH-SCRUB GUARD class).
+tests/test_amend_rebake_034849a2.py
+tests/test_sprint101_A-door.py
+tests/test_routing_routes.py
+tests/test_require_route_25.py
+tests/test_metrics_0923.py
+tests/test_route_efforts_b3c98b2a.py
+tests/test_fatal_quota_24.py
+tests/test_tiers.py
+tests/test_model_preflight_0924.py
+tests/test_run_dry_run.py
+tests/test_model_law_dad50be0.py
+tests/test_failures_0923.py
+# Dialect golden fixtures: `model: 'sonnet'` is a pinned byte of the importer golden
+# (test_dialect_js_33 asserts the export carries it verbatim).
+tests/test_dialect_js_33.py
+tests/fixtures/dialect/golden-export.workflow.json
+tests/fixtures/dialect/sequential-awaits.js
+tests/fixtures/dialect/sequential-awaits.expected.json
+# Vendor-grammar mapping docs: quoting the vendor's vocabulary IS their purpose (the
+# same GUARD class as tests/test_skill_docs.py quoting its own ban).
+references/anthropic-grammar.md
+references/dialect.md
+# Concrete alias-pitfall example in the playbook (line-anchored by regex, not by file,
+# so a future stray model name in the playbook still fires).
+regex:die 404 \(`opus` → `anthropic/opus` while the alias meant `claude-opus-5-5`\)
+# graphify semantic community labels naming the dialect's source scripts (carried
+# verbatim by --fix; AST regeneration re-derives the rest of graphify-out).
+regex:Claude-generated cookbook
+regex:Suite hook for the standalone 20-cycle
+# Core-10 #4: the peer clean-run stub carries the PEER-AGREED contract strings
+# verbatim (from: austin-exec estate) — the public contract names the peer whose
+# PASS gates the merge; guarded, not hidden.
+receipts/gated-publish/peer-clean-run.json
+# Core-10 #4 fold (ruling wf-101-disposition): the austin-estate clean-run receipt
+# names the reviewing estate (austin-exec) as its evidence provenance — the peer's
+# identity IS the receipt; guarded, not hidden.
+receipts/gated-publish/peer-clean-run-austin.json

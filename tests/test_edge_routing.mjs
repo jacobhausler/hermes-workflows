@@ -1,4 +1,4 @@
-// Reproduce hermes-step2-qwen-recon: skip-column dependencies cross coverage/critic.
+// Reproduce the step-2 recon lap: skip-column dependencies cross coverage/critic.
 import assert from 'node:assert/strict'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'

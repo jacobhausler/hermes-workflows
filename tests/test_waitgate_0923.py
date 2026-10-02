@@ -16,7 +16,7 @@ if home.exists():
     import shutil; shutil.rmtree(home)
 home.mkdir()
 os.environ["HERMES_HOME"] = str(home)
-(home / "config.yaml").write_text("model:\n  default: qwen38-next\n")
+(home / "config.yaml").write_text("model:\n  default: seat-default\n")
 sys.path.insert(0, str(BUILD))
 import wfcommon  # noqa: E402
 sys.modules.pop("hermes_cli.config", None)
