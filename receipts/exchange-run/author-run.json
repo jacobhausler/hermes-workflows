@@ -22,6 +22,12 @@
     "law": "description claim (2): library lists the entry with its provenance and source_digest",
     "proof": "act_save(source='hermes-workflows/examples/exchange-run.workflow.json') stamped the shelf entry: provenance={owner: default (launcher profile), source: hermes-workflows/examples/exchange-run.workflow.json, saved_at: 2026-10-02T21:28:13+00:00, source_digest: bb39e93b...39ab7}; the library row carries owner/source/source_digest non-null. The committed file itself carries NO hand-written provenance block - the door writes it, only from the real save."
   },
+  "shelf_byte_equality_proof": {
+    "law": "description claim: what is stored is exactly what is replayed",
+    "template_sha256": "b216164425fd711ffc89dc7bc1b2eec41d6c22e46203db414f48fe0d8362c327",
+    "shelf_raw_sha256": "4a451005588a84860ae0a74c7024ef58aa23e08d40557e9c01efdcc676d50c29",
+    "honest_statement": "the engine stores the entry as the #50 ENVELOPE {meta:{description,tags}, graph} because the author's save carried description+tags, and the door ADDS a provenance block inside the graph when source= is given — so the raw shelf file is NOT byte-identical to the template (different digests, by design). Byte-equality holds at the CANONICAL level, verified per lap-A entry: graph-minus-provenance (name, grammar, description, nodes) is canonical-JSON-equal to the committed template (nodes canon-equal, description string-equal, name equal); the ONLY door additions are provenance={owner,source,saved_at,source_digest} and the meta envelope. run from=exchange-run re-loads those exact shelf bytes and the run froze a copy carrying the same node defs."
+  },
   "seat_binding_proof": "no model id in graph, run.json, or any spawned prompt (grep 0 over lap prompts); children spawned hermes chat with NO --model flag -> seat-default resolution; run.json carries no model keys",
   "laps": [
     {
@@ -61,7 +67,7 @@
       "events_tail": ["node.finished prepare (pre-kill)", "node.started verify", "runner.reaped prev_pid=237126 crashed", "run.resumed", "node.started verify (re-drive)", "node.finished verify", "run.done"]
     }
   ],
-  "outcome": "3/3 nodes done on every lap; four terminal runner_exits all reason=done with the SAME graph_fingerprint - the save -> library -> re-run -> SIGKILL -> wait-resume -> replay-skip -> byte-equality loop stands on the door's real verbs",
+  "outcome": "3/3 nodes done on every lap; THREE terminal runner_exit records all reason=done (laps A/B/C) plus TWO crash reaps disclosed in the event tails (runner.reaped prev_pid=233809 and prev_pid=237126, reason 'crashed (no exit record)' — the SIGKILL generations carry no exit record by design, so they count as reaps, not exits) — five runner generations total, all under the SAME graph_fingerprint: the save -> library -> re-run -> SIGKILL -> wait-resume -> replay-skip -> byte-equality loop stands on the door's real verbs",
   "verification_gates": {
     "test_example_exchange_run": "26 checks PASS (committed bytes); the zero-vendor-vocab guard binds to scripts/scrub-list.txt itself (template must match ZERO lines of the peer-agreed committed scrub list) rather than a hand-copied ban list",
     "test_validate_0923": "ALL PASS (53) - exchange-run.workflow in the compatibility corpus",
