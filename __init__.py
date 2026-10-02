@@ -2026,7 +2026,12 @@ def _create_run(args, graph, lib_name, models, routes, _liveness_notes, lane_pat
             # Copy-exact inducement (papercut #70): the hint IS the paste line —
             # no paraphrase, no fallback. The card is agent-authored by ruling.
             # The liveness suffix rides BEHIND the paste line (prefix stays copy-exact).
+            # The plain-text clause rides BEHIND the card (field case 2026-10-02: agents
+            # "paste" by code-blocking, and markdown eats a fenced directive — the card
+            # renders only as bare prose; quoting the syntax in code stays legitimate).
             f'PASTE this line alone in your reply, then call wait: {_card(rid)}'
+            ' — plain prose only: never wrap the card in backticks or a code fence'
+            ' (a code-blocked directive renders as dead text, not a card)'
             + _liveness_hint_suffix(_liveness_notes),
             "card": _card(rid)}
 

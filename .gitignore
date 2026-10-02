@@ -21,3 +21,8 @@ tests/fake-*
 tests/prompt-*.log
 home-*/
 ci-out*/
+
+# lane scratch that must never be crawled/exported
+.wt/
+*-ci-out*/
+tests/tb-parity-*/
