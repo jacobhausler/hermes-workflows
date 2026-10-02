@@ -115,7 +115,7 @@ check(Vs([{"id": "a", "type": "agent", "goal": "g"},
 # and retain unsupported schema types; they are not compatibility fixtures.
 graphs = [BUILD / "examples" / f"{name}.json" for name in
           ("approve-publish", "blind-council.workflow", "branch-on-verdict", "incident-response", "smoke",
-           "gated-publish.workflow", "machine-watch.workflow", "quorum-probe.workflow")]
+           "gated-publish.workflow", "machine-watch.workflow", "quorum-probe.workflow", "bulk-transform.workflow")]
 bad_graphs = []
 for f in graphs:
     try:

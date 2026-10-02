@@ -190,6 +190,7 @@ that reconciles survivors against an explicit master catalog so a dead lane prin
 as a loud coverage gap, never silent loss. The two fan-outs are sibling nodes with no
 branch gates, so every author/peer lap walks both folded modes in a single launch;
 laps exist per-engine-side, not per-mode.
+[examples/bulk-transform.workflow.json](examples/bulk-transform.workflow.json) is a barrier-fan-out TEMPLATE (declared manifest -> per-file transform lanes -> audit that reconciles all_results against the manifest via an ancestor `inputs:` ref and re-checks the filesystem itself; evidence-without-command is a failed lane). Smoke-run on the author estate: [receipts/bulk-transform/author-run.json](receipts/bulk-transform/author-run.json).
 
 ### 3d. Failures, resume, amend
 
