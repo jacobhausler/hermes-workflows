@@ -211,6 +211,7 @@ designed dead gauge so the tally's loud-row law is exercised on every run; the
 report node consumes the tally via `after_partial`. Two author laps — honest
 (dead gauge as a loud red row) and severed (a child cut from the record becomes
 a NAMED missing row): [receipts/census-fanout/author-run.json](receipts/census-fanout/author-run.json).
+[examples/escalation-ladder.workflow.json](examples/escalation-ladder.workflow.json) is a verify-then-branch TEMPLATE (builder -> fresh independent verifier -> when-pair: verified lands behind a human gate, failed escalates to a human hold with the whole packet; core has NO loop idiom - retry ownership is spelled out, not implied). Both arms smoke-run: [receipts/escalation-ladder/author-run.json](receipts/escalation-ladder/author-run.json).
 
 ### 3d. Failures, resume, amend
 

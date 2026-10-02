@@ -82,7 +82,7 @@ def main() -> None:
                       "examples/gated-publish.workflow.json",
                       "examples/machine-watch.workflow.json",
                       "examples/quorum-probe.workflow.json",
-                      "examples/census-fanout.workflow.json", "examples/bulk-transform.workflow.json", "references/portable.md",
+                      "examples/census-fanout.workflow.json", "examples/escalation-ladder.workflow.json", "examples/bulk-transform.workflow.json", "references/portable.md",
                       "tests/test_packaging.py", "tests/test_fanout_ui.mjs", "tests/test_card_frontend_contract.mjs",
                       "tests/test_inline_header.mjs", "tests/fixtures/mac-source.txt",
                       "references/grammar.md", "references/operations.md", "SHA256SUMS")))
@@ -103,7 +103,7 @@ def main() -> None:
                           "examples/gated-publish.workflow.json",
                           "examples/machine-watch.workflow.json",
                           "examples/quorum-probe.workflow.json",
-                          "examples/census-fanout.workflow.json", "examples/bulk-transform.workflow.json"})
+                          "examples/census-fanout.workflow.json", "examples/escalation-ladder.workflow.json", "examples/bulk-transform.workflow.json"})
             checksum_text = archive.read(root + "SHA256SUMS").decode("utf-8")
             rows = [line.split("  ", 1) for line in checksum_text.splitlines()]
             check("SHA256SUMS verifies every pinned source entry",

@@ -36,6 +36,7 @@ INCLUDE_FILES = (
     "examples/portable-review.workflow.json",
     "examples/quorum-probe.workflow.json",
     "examples/census-fanout.workflow.json",
+    "examples/escalation-ladder.workflow.json",
     "examples/bulk-transform.workflow.json",
     "examples/smoke.json",
     "plugin.yaml",
