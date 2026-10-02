@@ -183,9 +183,23 @@ validates but is not smoke-run (real lanes need your stack).
 - `node.failed` events carry `error_class` from a closed set — `timeout | cap_exhausted |
   early_death | provider_400 | unresolved_model | transport | transport_exhausted | schema |
   crashed | spawn | graph_invalid | cancelled | inputs | quorum | fanout_empty |
-  fatal_quota | route_unavailable | incomplete_work | unknown` —
+  fatal_quota | route_unavailable | incomplete_work | left_live_descendants | unknown` —
   plus `attempts`. Read the class, not the prose. `cancelled` (a `stop`, or a fan-out
   straggler at quorum) is never a failure: the run reads `stopped`, and a `wait` re-drives it.
+  `left_live_descendants` (#61): the runner is process-tree aware — an exit-0 spawn is
+  believed only when its own process group is empty (the /proc walk behind liveness). A
+  child that BACKGROUNDED the real work (detached suite) and printed progress chatter is
+  `failed` with the verdict law in the error, a fenced answer over a live tree commits
+  `partial` with the tree killed and proven dead, and a retry never re-spawns while the
+  prior attempt's tree lives: the ladder kills it and proves death by /proc re-walk, or
+  fails closed. The walk is recursive and the tracked pid-set persists across retries
+  (#61b): double-fork/setsid descendants that reparent before exit are still found,
+  counted, and re-adopted by every later judgment — never under-counted. An unreadable
+  /proc is UNSAFE, never empty: judgment and quarantine probes fail closed typed when
+  the process table cannot be read (machines without procfs keep the honest-empty
+  degradation). An adopted orphan whose tree outlives it never commits a clean `done`
+  — the completeness error rides WITH the answer (`partial` + this class). The class
+  is terminal — never re-driven by either retry ladder.
   `fatal_quota` (#24): a 429 whose own text carries a reset horizon beyond the run's
   reach — fails on the FIRST attempt (the retry ladder cannot beat a multi-day reset)
   and stamps the model into the seat quota cache; the door then refuses a launch on

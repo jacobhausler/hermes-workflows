@@ -38,9 +38,13 @@ SCENARIOS = {
 # GIT_PAGER, provider keys...). Only the runner-set core is comparable across
 # captures; the harness-own session stamps are owner provenance, not run bytes.
 # HERMES_WF_RUN_DIR is the F1 sanctioned env delta (scaffold gate ruling).
+# HERMES_WF_PROCTREE_* are the #61c sanctioned env deltas: the survivor-registry
+# pins (path + per-spawn token) the spawn seam injects for the process-tree
+# escape guard. Runner-minted, never owner state; excluded both sides like F1.
 RUNNER_ENV_CORE = {'HERMES_HOME', 'HERMES_QUIET_TURN_REPORT_FILE', 'HERMES_WRITE_SAFE_ROOT',
                    'GOLDEN_FAKE', 'FAKE_MODE'}
-SANCTIONED_ENV_DELTA = {'HERMES_WF_RUN_DIR'}   # F1; excluded both sides, counted under F1(1)
+SANCTIONED_ENV_DELTA = {'HERMES_WF_RUN_DIR',                        # F1; excluded both sides, counted under F1(1)
+                        'HERMES_WF_PROCTREE_SIDECAR', 'HERMES_WF_PROCTREE_SPAWN'}  # #61c; excluded both sides
 
 def normalize(value, paths):
     if isinstance(value, dict):
