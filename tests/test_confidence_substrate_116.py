@@ -270,8 +270,11 @@ import wfcommon as wc2
 base = {"id": "a", "type": "agent", "goal": "x", "model": "m-1", "provider": "openai"}
 h0 = wc2.def_hash(base)
 h1 = wc2.def_hash({**base, "substrate_substituted": {"from": "a", "to": "b"}})
-check("(g1) def_hash ignores substrate_substituted (A3)", h0 == h1, f"{h0} vs {h1}")
+check("(g1) def_hash ignores the substrate_substituted ANNOTATION (A3, like route_verified)",
+      h0 == h1, f"{h0} vs {h1}")
 check("(g2) def_hash still sees real work changes", wc2.def_hash({**base, "goal": "y"}) != h0)
+check("(g3) def_hash still sees a real model change (route key, unlike the proof annotation)",
+      wc2.def_hash({**base, "model": "qwen38-next"}) != h0)
 
 # ---------- (h) author-forged stamp is stripped at the door ----------
 write_substrate_config("workflows:\n  confidence_substrate:\n    - openai/qwen38-next\n")
@@ -280,9 +283,19 @@ forged = pinned_graph()
 forged["nodes"][0]["substrate_substituted"] = {"from": "x", "to": "evil/w", "source": "c",
                                                "reason": "r"}
 out_f = door.act_run({"graph": forged})
-check("(h1) author-forged substrate_substituted never rides the baked graph",
+check("(h1) author-forged substrate_substituted is stripped at resolve, launch proceeds clean",
       out_f.get("run_id") and "substrate_substituted" not in baked(out_f["run_id"])["nodes"][0],
       out_f)
+# (h2) F2 idempotence shape: an alive-proved, SUBSTITUTED committed def re-submitted
+# VERBATIM must be accepted (the stamp rides like a route key, never trips un-bake).
+set_ping(alive(("openai", "qwen38-next")))
+out_h2 = door.act_run({"graph": {"name": "h2re", "nodes": [
+    {"id": "a", "type": "agent", "goal": "x", "model": "qwen38-next", "provider": "openai",
+     "route_verified": "openai/qwen38-next",
+     "substrate_substituted": {"from": "openai/m-1", "to": "openai/qwen38-next",
+                               "reason": "r", "source": "config:x[0]"}}]}})
+check("(h2) verbatim committed def WITH stamp still accepted (F2 shape)",
+      "error" not in out_h2, out_h2)
 
 # ---------- env override: WF_CONFIDENCE_SUBSTRATE beats/stands in for config ----------
 clear_substrate_config()
