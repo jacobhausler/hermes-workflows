@@ -29,7 +29,7 @@ home.mkdir()
 os.environ["HERMES_HOME"] = str(home)
 os.environ["WF_RUNS_ROOT"] = str(home / "workflows")
 os.environ["HERMES_WF_HERMES_BIN"] = str(HERE / "fake")
-(home / "config.yaml").write_text("model:\n  default: qwen38-next\n")
+(home / "config.yaml").write_text("model:\n  default: seat-default\n")
 sys.path.insert(0, str(BUILD))
 import wfcommon  # noqa: E402
 sys.modules.pop("hermes_cli.config", None)
@@ -114,7 +114,8 @@ check(Vs([{"id": "a", "type": "agent", "goal": "g"},
 # two host-specific historical drafts are intentionally excluded from packaging
 # and retain unsupported schema types; they are not compatibility fixtures.
 graphs = [BUILD / "examples" / f"{name}.json" for name in
-          ("approve-publish", "branch-on-verdict", "incident-response", "machine-watch.workflow", "smoke")]
+          ("approve-publish", "branch-on-verdict", "incident-response", "smoke",
+           "gated-publish.workflow", "machine-watch.workflow")]
 bad_graphs = []
 for f in graphs:
     try:

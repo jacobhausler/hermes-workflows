@@ -162,6 +162,12 @@ succeed, the rest are cancelled; without it the fan-out waits for every item;
 `wait:{"until_argv":[…],"every_s":60,"timeout_s":3600}`. Tested examples:
 [examples/approve-publish.json](examples/approve-publish.json),
 [examples/branch-on-verdict.json](examples/branch-on-verdict.json).
+[examples/gated-publish.workflow.json](examples/gated-publish.workflow.json) is a
+human-gated publish TEMPLATE built from the approve-publish seed (draft -> owner
+gate -> complementary `when`+`on_skip:"prune"` pair on the answer -> exactly one
+arm; no node names a vendor model — role vocabulary lives in prose, routing is the
+seat default). Launch seeds `run_context:{"artifact":"<name>"}`. Validate + author
+run tested (receipts/gated-publish/).
 [examples/machine-watch.workflow.json](examples/machine-watch.workflow.json) is a
 scheduled-watcher TEMPLATE (zero-token machine-gate poll, releases on exit 0;
 launch with `lane_key` so cron double-fire dedupes; timeout fails loudly for
@@ -197,6 +203,10 @@ validates but is not smoke-run (real lanes need your stack).
   merge are unaffected).
 - `transport | early_death | cap_exhausted | timeout` deaths with tool progress get ONE
   automatic re-drive with a machine resume preamble (`node.retry`); permfails never retry.
+  If the prior attempt's session persisted NO messages (#102 — the pretense-resume shape:
+  a SIGKILL-wave child that banked nothing), the re-drive spawns as a FRESH session seeded
+  instead with a harvest preamble (banked work-dir files + cleaned log tail); the
+  `node.retry` event and the `attempts_log` entry stamp `fresh_session: true`.
 - A child silent for 120 s after spawn is killed as `early_death`; a child still writing its
   log when the wall fires gets one 50 % extension (`node.extended`), then dies.
 - A run with unfinished work and no live runner is `interrupted`. Inspect committed

@@ -203,13 +203,13 @@ const baseDef = extra => ({ id: 'a', type: 'agent', goal: 'do work', model: 'm',
 }
 {
   const cur = makeNodeCard(nodeCardSrc)
-  const def = baseDef({ profile: 'wf-mechanic' })
+  const def = baseDef({ profile: 'demo-profile' })
   const t = cur({ runId: 'r1', def, st: baseShown, gate: null, selected: false, owner: 'o', events: [] })
   const solo = texts(t).join('|')
-  assert.ok(solo.includes('as @wf-mechanic'), 'NodeCard shows `as @<profile>` when def.profile set')
-  const badge = walk(t).find(n => typeof n.props?.children === 'string' && n.props.children === 'as @wf-mechanic')
+  assert.ok(solo.includes('as @demo-profile'), 'NodeCard shows `as @<profile>` when def.profile set')
+  const badge = walk(t).find(n => typeof n.props?.children === 'string' && n.props.children === 'as @demo-profile')
   assert.ok(badge, 'badge is a single span element')
-  assert.equal(badge.props.title, 'as @wf-mechanic', 'tooltip title = as @<profile>')
+  assert.equal(badge.props.title, 'as @demo-profile', 'tooltip title = as @<profile>')
 }
 
 // NodePanel solo: same equality, no-team def under the CURRENT code vs BASELINE code.

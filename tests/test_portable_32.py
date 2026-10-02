@@ -24,7 +24,7 @@ HOME.mkdir()
 os.environ["HERMES_HOME"] = str(HOME)
 os.environ["WF_RUNS_ROOT"] = str(HOME / "workflows")
 os.environ["HERMES_WF_HERMES_BIN"] = str(HERE / "fake")
-(HOME / "config.yaml").write_text("model:\n  default: qwen38-next\n")
+(HOME / "config.yaml").write_text("model:\n  default: seat-default\n")
 sys.path.insert(0, str(ROOT))
 import wfcommon  # noqa: E402
 spec = importlib.util.spec_from_file_location("door32", ROOT / "__init__.py")

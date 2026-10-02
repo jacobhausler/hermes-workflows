@@ -118,7 +118,7 @@ def call_llm(*, task, provider, model, messages, max_tokens, timeout, route_info
     db.execute("create table session_model_usage (session_id text, model text, "
                "billing_provider text, task text, api_call_count int)")
     db.executemany("insert into session_model_usage values (?,?,?,?,?)", [
-        ("child1", "qwen-fallback", "other", "", 1),
+        ("child1", "aux-fallback", "other", "", 1),
         ("child1", "m-1", "openai", "", 1),
         ("child1", "aux-model", "other", "aux-task", 1)])
     db.commit(); db.close()
@@ -127,7 +127,7 @@ def call_llm(*, task, provider, model, messages, max_tokens, timeout, route_info
     check("session summary ends on pinned model", cm.get("model") == "m-1", cm)
     wf.seat_forbidden_models = lambda: []
     db = sqlite3.connect(home / "state.db")
-    db.execute("update sessions set model='qwen-fallback' where id='child1'")
+    db.execute("update sessions set model='aux-fallback' where id='child1'")
     db.commit(); db.close()
     wrong_final = wf._stamp_served({"_run": run}, {"skey": title.split("#a", 1)[0],
                                     "status": "done"}, baked)
