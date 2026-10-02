@@ -136,6 +136,59 @@ if _FAKE_MODE == "retry_progress" and "RESUME" in q:    # #5: transport death WI
         sys.exit(2)
     print("```json\n" + json.dumps({"result": "resumed"}) + "\n```")
     sys.exit(0)
+if _FAKE_MODE == "dead_session_102" and "DEADSESS" in q:
+    # #102: drive 1 dies on its wall leaving a session row with tool_call_count>0
+    # (bounded-retry gate opens) and NO persisted messages when FAKE_MESSAGES=0;
+    # its capture is the real burned-lane shape — startup banner + dead-session
+    # noise + a discovery log tail. FAKE_MESSAGES=1 persists a message row (the
+    # non-empty control: today's resume path must be untouched). Drive 2 only
+    # answers when its prompt carried the banked-work harvest it needed.
+    cnt = 0
+    if os.environ.get("FAKE_ATTEMPT_DIR"):
+        os.makedirs(os.environ["FAKE_ATTEMPT_DIR"], exist_ok=True)
+        p = os.path.join(os.environ["FAKE_ATTEMPT_DIR"], "attempts")
+        cnt = int(open(p).read()) if os.path.exists(p) else 0
+        open(p, "w").write(str(cnt + 1))
+    if cnt == 0:
+        if "--continue" in args:
+            import sqlite3
+            title = args[args.index("--continue") + 1]
+            c = sqlite3.connect(os.path.join(_FAKE_HOME, "state.db"))
+            c.execute("create table if not exists sessions (id text primary key, title text, model text, billing_provider text, input_tokens int, output_tokens int, "
+                      "cache_read_tokens int, reasoning_tokens int, api_call_count int, tool_call_count int, estimated_cost_usd real, "
+                      "last_activity_at real, last_activity_description text, ended_at real, started_at real)")
+            c.execute("create table if not exists messages (id integer primary key, session_id text, role text, content text)")
+            t = time.time()
+            c.execute("insert or replace into sessions values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                      ("f-" + title, title, "fake", "fake", 0, 0, 0, 0, 1, 1, 0.0, t, "", None, t))
+            if os.environ.get("FAKE_MESSAGES") == "1":
+                c.execute("insert into messages (session_id, role, content) values (?,?,?)",
+                          ("f-" + title, "user", q[:200]))
+            c.commit(); c.close()
+        # drive 1 banked real work + a discovery log tail, then died at the wall
+        try:
+            os.makedirs("work_state", exist_ok=True)
+            with open("work_state/progress.md", "w") as f:
+                f.write("BANKED-WORKFILE-102: findings banked before the kill\n")
+        except OSError:
+            pass
+        print("  Command helper: applied 2 secrets", flush=True)
+        if "--continue" in args:
+            print("Session 20261001_000000_fake00 found but has no messages. Starting fresh.", flush=True)
+        print("TAIL-LINE-102 discovery finished; about to start the real work", flush=True)
+        _t.sleep(float(os.environ.get("FAKE_HANG_SEC", "30")))   # outlives the wall: the runner kills it (timeout)
+        sys.exit(137)
+    if "BANKED-WORKFILE-102" in q and "progress.md" in q:
+        print("```json\n" + json.dumps({"result": "resumed-102"}) + "\n```")
+        sys.exit(0)
+    if os.environ.get("FAKE_MESSAGES") == "1":
+        # non-empty control: today's path re-feeds the prompt with the standard
+        # resume preamble (no harvest) — the fake answers, pinning that nothing
+        # new rides this branch.
+        print("```json\n" + json.dumps({"result": "resumed-102"}) + "\n```")
+        sys.exit(0)
+    print("no harvest received — redoing all discovery from zero")
+    sys.exit(2)
 from pathlib import Path
 if _FAKE_MODE == "poll_steer":     # B1: child pulls baked steering through the real door
     # and prints what it got — proves the file protocol + cursor, not model compliance.
