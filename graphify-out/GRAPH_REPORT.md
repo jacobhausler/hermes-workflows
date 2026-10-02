@@ -1,7 +1,7 @@
 # Graph Report - tree  (2026-10-02)
 
 ## Corpus Check
-- 197 files · ~262,289 words
+- 197 files · ~262,276 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 4 file(s) not represented in the graph (top: (none) 4)
 
@@ -195,7 +195,7 @@ Nodes (19): atexit, importlib, tempfile, fresh(), Digest 29d (64c6772b): a node 
 
 ### Community 6 - "sys"
 Cohesion: 0.07
-Nodes (22): copy, subprocess, sys, F3 boundary/claim integration: real door processes + kernel flock; no hook in…, GoldenSolo, Frozen v1.0.15 solo gate; six real fake_hermes workflows; no team settings., Keeper, Suite hook for the standalone 20-cycle keeper kill/resume harness. (+14 more)
+Nodes (22): copy, subprocess, sys, F3 boundary/claim integration: real door processes + kernel flock; no hook in…, CrashResume, Suite hook for the standalone 20-cycle crash/resume harness., GoldenSolo, Frozen v1.0.15 solo gate; six real fake_hermes workflows; no team settings. (+14 more)
 
 ### Community 7 - "pathlib"
 Cohesion: 0.06

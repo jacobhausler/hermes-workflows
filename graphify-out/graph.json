@@ -317,6 +317,19 @@
       "source_location": "L25"
     },
     {
+      "id": "tests_test_11_integration_crash_resume_crashresume",
+      "label": "CrashResume",
+      "_callable": true,
+      "_callable_class": true,
+      "_origin": "ast",
+      "community": 6,
+      "community_name": "sys",
+      "file_type": "code",
+      "norm_label": "crashresume",
+      "source_file": "tests/test_11_integration_crash_resume.py",
+      "source_location": "L9"
+    },
+    {
       "id": "tests_test_11_integration_golden_goldensolo",
       "label": "GoldenSolo",
       "_callable": true,
@@ -328,19 +341,6 @@
       "norm_label": "goldensolo",
       "source_file": "tests/test_11_integration_golden.py",
       "source_location": "L10"
-    },
-    {
-      "id": "tests_test_11_integration_keeper_keeper",
-      "label": "Keeper",
-      "_callable": true,
-      "_callable_class": true,
-      "_origin": "ast",
-      "community": 6,
-      "community_name": "sys",
-      "file_type": "code",
-      "norm_label": "keeper",
-      "source_file": "tests/test_11_integration_keeper.py",
-      "source_location": "L9"
     },
     {
       "id": "tests_test_11_integration_lane_supervisor_lanesupervisor",
@@ -10783,6 +10783,18 @@
       "source_location": "L81"
     },
     {
+      "id": "tests_test_11_integration_crash_resume_crashresume_test_twenty_real_runner_cycles",
+      "label": ".test_twenty_real_runner_cycles()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 6,
+      "community_name": "sys",
+      "file_type": "code",
+      "norm_label": ".test_twenty_real_runner_cycles()",
+      "source_file": "tests/test_11_integration_crash_resume.py",
+      "source_location": "L10"
+    },
+    {
       "id": "tests_test_11_integration_golden_goldensolo_test_v1015_six_graphs_and_legacy_run_key_set",
       "label": ".test_v1015_six_graphs_and_legacy_run_key_set()",
       "_callable": true,
@@ -10793,18 +10805,6 @@
       "norm_label": ".test_v1015_six_graphs_and_legacy_run_key_set()",
       "source_file": "tests/test_11_integration_golden.py",
       "source_location": "L11"
-    },
-    {
-      "id": "tests_test_11_integration_keeper_keeper_test_twenty_real_runner_cycles",
-      "label": ".test_twenty_real_runner_cycles()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 6,
-      "community_name": "sys",
-      "file_type": "code",
-      "norm_label": ".test_twenty_real_runner_cycles()",
-      "source_file": "tests/test_11_integration_keeper.py",
-      "source_location": "L10"
     },
     {
       "id": "tests_test_11_integration_lane_supervisor_lanesupervisor_test_twenty_real_runner_cycles",
@@ -11719,7 +11719,7 @@
       "source_location": "L1525"
     },
     {
-      "id": "tests_11_keeper_main",
+      "id": "tests_11_canary_main",
       "label": "main()",
       "_callable": true,
       "_origin": "ast",
@@ -11727,11 +11727,11 @@
       "community_name": "pathlib",
       "file_type": "code",
       "norm_label": "main()",
-      "source_file": "tests/11-keeper.py",
+      "source_file": "tests/11-canary.py",
       "source_location": "L31"
     },
     {
-      "id": "tests_11_keeper_until",
+      "id": "tests_11_canary_until",
       "label": "until()",
       "_callable": true,
       "_origin": "ast",
@@ -11739,7 +11739,7 @@
       "community_name": "pathlib",
       "file_type": "code",
       "norm_label": "until()",
-      "source_file": "tests/11-keeper.py",
+      "source_file": "tests/11-canary.py",
       "source_location": "L23"
     },
     {
@@ -21185,6 +21185,17 @@
       "source_location": "L1"
     },
     {
+      "id": "tests_test_11_integration_crash_resume",
+      "label": "test_11_integration_crash_resume.py",
+      "_origin": "ast",
+      "community": 6,
+      "community_name": "sys",
+      "file_type": "code",
+      "norm_label": "test_11_integration_crash_resume.py",
+      "source_file": "tests/test_11_integration_crash_resume.py",
+      "source_location": "L1"
+    },
+    {
       "id": "tests_test_11_integration_golden",
       "label": "test_11_integration_golden.py",
       "_origin": "ast",
@@ -21193,17 +21204,6 @@
       "file_type": "code",
       "norm_label": "test_11_integration_golden.py",
       "source_file": "tests/test_11_integration_golden.py",
-      "source_location": "L1"
-    },
-    {
-      "id": "tests_test_11_integration_keeper",
-      "label": "test_11_integration_keeper.py",
-      "_origin": "ast",
-      "community": 6,
-      "community_name": "sys",
-      "file_type": "code",
-      "norm_label": "test_11_integration_keeper.py",
-      "source_file": "tests/test_11_integration_keeper.py",
       "source_location": "L1"
     },
     {
@@ -21317,6 +21317,17 @@
       "source_location": "L2"
     },
     {
+      "id": "tests_test_11_integration_crash_resume_rationale_2",
+      "label": "Suite hook for the standalone 20-cycle crash/resume harness.",
+      "_origin": "ast",
+      "community": 6,
+      "community_name": "sys",
+      "file_type": "rationale",
+      "norm_label": "suite hook for the standalone 20-cycle crash/resume harness.",
+      "source_file": "tests/test_11_integration_crash_resume.py",
+      "source_location": "L2"
+    },
+    {
       "id": "tests_test_11_integration_golden_rationale_2",
       "label": "Frozen v1.0.15 solo gate; six real fake_hermes workflows; no team settings.",
       "_origin": "ast",
@@ -21325,17 +21336,6 @@
       "file_type": "rationale",
       "norm_label": "frozen v1.0.15 solo gate; six real fake_hermes workflows; no team settings.",
       "source_file": "tests/test_11_integration_golden.py",
-      "source_location": "L2"
-    },
-    {
-      "id": "tests_test_11_integration_keeper_rationale_2",
-      "label": "Suite hook for the standalone 20-cycle keeper kill/resume harness.",
-      "_origin": "ast",
-      "community": 6,
-      "community_name": "sys",
-      "file_type": "rationale",
-      "norm_label": "suite hook for the standalone 20-cycle keeper kill/resume harness.",
-      "source_file": "tests/test_11_integration_keeper.py",
       "source_location": "L2"
     },
     {
@@ -21938,14 +21938,14 @@
       "source_location": "L1571"
     },
     {
-      "id": "tests_11_keeper",
-      "label": "11-keeper.py",
+      "id": "tests_11_canary",
+      "label": "11-canary.py",
       "_origin": "ast",
       "community": 7,
       "community_name": "pathlib",
       "file_type": "code",
-      "norm_label": "11-keeper.py",
-      "source_file": "tests/11-keeper.py",
+      "norm_label": "11-canary.py",
+      "source_file": "tests/11-canary.py",
       "source_location": "L1"
     },
     {
@@ -22070,14 +22070,14 @@
       "source_location": "L1"
     },
     {
-      "id": "tests_11_keeper_rationale_2",
+      "id": "tests_11_canary_rationale_2",
       "label": "Twenty real runner crash/resume cycles; status lane_key checked against /proc.\u2026",
       "_origin": "ast",
       "community": 7,
       "community_name": "pathlib",
       "file_type": "rationale",
       "norm_label": "twenty real runner crash/resume cycles; status lane_key checked against /proc....",
-      "source_file": "tests/11-keeper.py",
+      "source_file": "tests/11-canary.py",
       "source_location": "L2"
     },
     {
@@ -28198,6 +28198,30 @@
       "weight": 1.0
     },
     {
+      "source": "tests_11_canary_main",
+      "target": "tests_11_canary_until",
+      "relation": "calls",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "context": "call",
+      "source_file": "tests/11-canary.py",
+      "source_location": "L43",
+      "weight": 1.0
+    },
+    {
+      "source": "tests_11_canary_main",
+      "target": "wfcommon_runner_alive",
+      "relation": "calls",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "context": "call",
+      "source_file": "tests/11-canary.py",
+      "source_location": "L43",
+      "weight": 1.0
+    },
+    {
       "source": "tests_11_golden_solo_capture",
       "target": "tests_11_golden_solo_core_home",
       "relation": "calls",
@@ -28255,30 +28279,6 @@
       "context": "call",
       "source_file": "tests/11-golden-solo.py",
       "source_location": "L51",
-      "weight": 1.0
-    },
-    {
-      "source": "tests_11_keeper_main",
-      "target": "tests_11_keeper_until",
-      "relation": "calls",
-      "_origin": "ast",
-      "confidence": "EXTRACTED",
-      "confidence_score": 1.0,
-      "context": "call",
-      "source_file": "tests/11-keeper.py",
-      "source_location": "L43",
-      "weight": 1.0
-    },
-    {
-      "source": "tests_11_keeper_main",
-      "target": "wfcommon_runner_alive",
-      "relation": "calls",
-      "_origin": "ast",
-      "confidence": "EXTRACTED",
-      "confidence_score": 1.0,
-      "context": "call",
-      "source_file": "tests/11-keeper.py",
-      "source_location": "L43",
       "weight": 1.0
     },
     {
@@ -38446,6 +38446,114 @@
       "weight": 1.0
     },
     {
+      "source": "tests_11_canary",
+      "target": "sys",
+      "relation": "imports",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "context": "import",
+      "source_file": "tests/11-canary.py",
+      "source_location": "L10",
+      "weight": 1.0
+    },
+    {
+      "source": "tests_11_canary",
+      "target": "tempfile",
+      "relation": "imports",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "context": "import",
+      "source_file": "tests/11-canary.py",
+      "source_location": "L11",
+      "weight": 1.0
+    },
+    {
+      "source": "tests_11_canary",
+      "target": "time",
+      "relation": "imports",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "context": "import",
+      "source_file": "tests/11-canary.py",
+      "source_location": "L12",
+      "weight": 1.0
+    },
+    {
+      "source": "tests_11_canary",
+      "target": "tests_wf_test_isolation",
+      "relation": "imports",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "context": "import",
+      "source_file": "tests/11-canary.py",
+      "source_location": "L19",
+      "weight": 1.0
+    },
+    {
+      "source": "tests_11_canary",
+      "target": "wfcommon",
+      "relation": "imports",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "context": "import",
+      "source_file": "tests/11-canary.py",
+      "source_location": "L20",
+      "weight": 1.0
+    },
+    {
+      "source": "tests_11_canary",
+      "target": "importlib_util",
+      "relation": "imports",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "context": "import",
+      "source_file": "tests/11-canary.py",
+      "source_location": "L5",
+      "weight": 1.0
+    },
+    {
+      "source": "tests_11_canary",
+      "target": "json",
+      "relation": "imports",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "context": "import",
+      "source_file": "tests/11-canary.py",
+      "source_location": "L6",
+      "weight": 1.0
+    },
+    {
+      "source": "tests_11_canary",
+      "target": "os",
+      "relation": "imports",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "context": "import",
+      "source_file": "tests/11-canary.py",
+      "source_location": "L7",
+      "weight": 1.0
+    },
+    {
+      "source": "tests_11_canary",
+      "target": "signal",
+      "relation": "imports",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "context": "import",
+      "source_file": "tests/11-canary.py",
+      "source_location": "L9",
+      "weight": 1.0
+    },
+    {
       "source": "tests_11_golden_solo",
       "target": "os",
       "relation": "imports",
@@ -38550,114 +38658,6 @@
       "confidence_score": 1.0,
       "context": "import",
       "source_file": "tests/11-golden-solo.py",
-      "source_location": "L9",
-      "weight": 1.0
-    },
-    {
-      "source": "tests_11_keeper",
-      "target": "sys",
-      "relation": "imports",
-      "_origin": "ast",
-      "confidence": "EXTRACTED",
-      "confidence_score": 1.0,
-      "context": "import",
-      "source_file": "tests/11-keeper.py",
-      "source_location": "L10",
-      "weight": 1.0
-    },
-    {
-      "source": "tests_11_keeper",
-      "target": "tempfile",
-      "relation": "imports",
-      "_origin": "ast",
-      "confidence": "EXTRACTED",
-      "confidence_score": 1.0,
-      "context": "import",
-      "source_file": "tests/11-keeper.py",
-      "source_location": "L11",
-      "weight": 1.0
-    },
-    {
-      "source": "tests_11_keeper",
-      "target": "time",
-      "relation": "imports",
-      "_origin": "ast",
-      "confidence": "EXTRACTED",
-      "confidence_score": 1.0,
-      "context": "import",
-      "source_file": "tests/11-keeper.py",
-      "source_location": "L12",
-      "weight": 1.0
-    },
-    {
-      "source": "tests_11_keeper",
-      "target": "tests_wf_test_isolation",
-      "relation": "imports",
-      "_origin": "ast",
-      "confidence": "EXTRACTED",
-      "confidence_score": 1.0,
-      "context": "import",
-      "source_file": "tests/11-keeper.py",
-      "source_location": "L19",
-      "weight": 1.0
-    },
-    {
-      "source": "tests_11_keeper",
-      "target": "wfcommon",
-      "relation": "imports",
-      "_origin": "ast",
-      "confidence": "EXTRACTED",
-      "confidence_score": 1.0,
-      "context": "import",
-      "source_file": "tests/11-keeper.py",
-      "source_location": "L20",
-      "weight": 1.0
-    },
-    {
-      "source": "tests_11_keeper",
-      "target": "importlib_util",
-      "relation": "imports",
-      "_origin": "ast",
-      "confidence": "EXTRACTED",
-      "confidence_score": 1.0,
-      "context": "import",
-      "source_file": "tests/11-keeper.py",
-      "source_location": "L5",
-      "weight": 1.0
-    },
-    {
-      "source": "tests_11_keeper",
-      "target": "json",
-      "relation": "imports",
-      "_origin": "ast",
-      "confidence": "EXTRACTED",
-      "confidence_score": 1.0,
-      "context": "import",
-      "source_file": "tests/11-keeper.py",
-      "source_location": "L6",
-      "weight": 1.0
-    },
-    {
-      "source": "tests_11_keeper",
-      "target": "os",
-      "relation": "imports",
-      "_origin": "ast",
-      "confidence": "EXTRACTED",
-      "confidence_score": 1.0,
-      "context": "import",
-      "source_file": "tests/11-keeper.py",
-      "source_location": "L7",
-      "weight": 1.0
-    },
-    {
-      "source": "tests_11_keeper",
-      "target": "signal",
-      "relation": "imports",
-      "_origin": "ast",
-      "confidence": "EXTRACTED",
-      "confidence_score": 1.0,
-      "context": "import",
-      "source_file": "tests/11-keeper.py",
       "source_location": "L9",
       "weight": 1.0
     },
@@ -39310,74 +39310,74 @@
       "weight": 1.0
     },
     {
-      "source": "tests_test_11_integration_golden",
+      "source": "tests_test_11_integration_crash_resume",
       "target": "subprocess",
       "relation": "imports",
       "_origin": "ast",
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "context": "import",
-      "source_file": "tests/test_11_integration_golden.py",
+      "source_file": "tests/test_11_integration_crash_resume.py",
       "source_location": "L4",
       "weight": 1.0
     },
     {
-      "source": "tests_test_11_integration_golden",
+      "source": "tests_test_11_integration_crash_resume",
       "target": "sys",
       "relation": "imports",
       "_origin": "ast",
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "context": "import",
-      "source_file": "tests/test_11_integration_golden.py",
+      "source_file": "tests/test_11_integration_crash_resume.py",
       "source_location": "L5",
       "weight": 1.0
     },
     {
-      "source": "tests_test_11_integration_golden",
+      "source": "tests_test_11_integration_crash_resume",
       "target": "unittest",
       "relation": "imports",
       "_origin": "ast",
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "context": "import",
-      "source_file": "tests/test_11_integration_golden.py",
+      "source_file": "tests/test_11_integration_crash_resume.py",
       "source_location": "L6",
       "weight": 1.0
     },
     {
-      "source": "tests_test_11_integration_keeper",
+      "source": "tests_test_11_integration_golden",
       "target": "subprocess",
       "relation": "imports",
       "_origin": "ast",
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "context": "import",
-      "source_file": "tests/test_11_integration_keeper.py",
+      "source_file": "tests/test_11_integration_golden.py",
       "source_location": "L4",
       "weight": 1.0
     },
     {
-      "source": "tests_test_11_integration_keeper",
+      "source": "tests_test_11_integration_golden",
       "target": "sys",
       "relation": "imports",
       "_origin": "ast",
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "context": "import",
-      "source_file": "tests/test_11_integration_keeper.py",
+      "source_file": "tests/test_11_integration_golden.py",
       "source_location": "L5",
       "weight": 1.0
     },
     {
-      "source": "tests_test_11_integration_keeper",
+      "source": "tests_test_11_integration_golden",
       "target": "unittest",
       "relation": "imports",
       "_origin": "ast",
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "context": "import",
-      "source_file": "tests/test_11_integration_keeper.py",
+      "source_file": "tests/test_11_integration_golden.py",
       "source_location": "L6",
       "weight": 1.0
     },
@@ -48346,6 +48346,30 @@
       "weight": 1.0
     },
     {
+      "source": "tests_11_canary",
+      "target": "unittest_mock",
+      "relation": "imports_from",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "context": "import",
+      "source_file": "tests/11-canary.py",
+      "source_location": "L13",
+      "weight": 1.0
+    },
+    {
+      "source": "tests_11_canary",
+      "target": "pathlib",
+      "relation": "imports_from",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "context": "import",
+      "source_file": "tests/11-canary.py",
+      "source_location": "L8",
+      "weight": 1.0
+    },
+    {
       "source": "tests_11_golden_solo",
       "target": "contextlib",
       "relation": "imports_from",
@@ -48379,30 +48403,6 @@
       "context": "import",
       "source_file": "tests/11-golden-solo.py",
       "source_location": "L18",
-      "weight": 1.0
-    },
-    {
-      "source": "tests_11_keeper",
-      "target": "unittest_mock",
-      "relation": "imports_from",
-      "_origin": "ast",
-      "confidence": "EXTRACTED",
-      "confidence_score": 1.0,
-      "context": "import",
-      "source_file": "tests/11-keeper.py",
-      "source_location": "L13",
-      "weight": 1.0
-    },
-    {
-      "source": "tests_11_keeper",
-      "target": "pathlib",
-      "relation": "imports_from",
-      "_origin": "ast",
-      "confidence": "EXTRACTED",
-      "confidence_score": 1.0,
-      "context": "import",
-      "source_file": "tests/11-keeper.py",
-      "source_location": "L8",
       "weight": 1.0
     },
     {
@@ -48538,6 +48538,18 @@
       "weight": 1.0
     },
     {
+      "source": "tests_test_11_integration_crash_resume",
+      "target": "pathlib",
+      "relation": "imports_from",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "context": "import",
+      "source_file": "tests/test_11_integration_crash_resume.py",
+      "source_location": "L3",
+      "weight": 1.0
+    },
+    {
       "source": "tests_test_11_integration_golden",
       "target": "pathlib",
       "relation": "imports_from",
@@ -48546,18 +48558,6 @@
       "confidence_score": 1.0,
       "context": "import",
       "source_file": "tests/test_11_integration_golden.py",
-      "source_location": "L3",
-      "weight": 1.0
-    },
-    {
-      "source": "tests_test_11_integration_keeper",
-      "target": "pathlib",
-      "relation": "imports_from",
-      "_origin": "ast",
-      "confidence": "EXTRACTED",
-      "confidence_score": 1.0,
-      "context": "import",
-      "source_file": "tests/test_11_integration_keeper.py",
       "source_location": "L3",
       "weight": 1.0
     },
@@ -54987,6 +54987,28 @@
       "weight": 1.0
     },
     {
+      "source": "tests_11_canary",
+      "target": "tests_11_canary_until",
+      "relation": "contains",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "tests/11-canary.py",
+      "source_location": "L23",
+      "weight": 1.0
+    },
+    {
+      "source": "tests_11_canary",
+      "target": "tests_11_canary_main",
+      "relation": "contains",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "tests/11-canary.py",
+      "source_location": "L31",
+      "weight": 1.0
+    },
+    {
       "source": "tests_11_golden_solo",
       "target": "tests_11_golden_solo_main",
       "relation": "contains",
@@ -55028,28 +55050,6 @@
       "confidence_score": 1.0,
       "source_file": "tests/11-golden-solo.py",
       "source_location": "L76",
-      "weight": 1.0
-    },
-    {
-      "source": "tests_11_keeper",
-      "target": "tests_11_keeper_until",
-      "relation": "contains",
-      "_origin": "ast",
-      "confidence": "EXTRACTED",
-      "confidence_score": 1.0,
-      "source_file": "tests/11-keeper.py",
-      "source_location": "L23",
-      "weight": 1.0
-    },
-    {
-      "source": "tests_11_keeper",
-      "target": "tests_11_keeper_main",
-      "relation": "contains",
-      "_origin": "ast",
-      "confidence": "EXTRACTED",
-      "confidence_score": 1.0,
-      "source_file": "tests/11-keeper.py",
-      "source_location": "L31",
       "weight": 1.0
     },
     {
@@ -55372,6 +55372,17 @@
       "weight": 1.0
     },
     {
+      "source": "tests_test_11_integration_crash_resume",
+      "target": "tests_test_11_integration_crash_resume_crashresume",
+      "relation": "contains",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "tests/test_11_integration_crash_resume.py",
+      "source_location": "L9",
+      "weight": 1.0
+    },
+    {
       "source": "tests_test_11_integration_golden",
       "target": "tests_test_11_integration_golden_goldensolo",
       "relation": "contains",
@@ -55380,17 +55391,6 @@
       "confidence_score": 1.0,
       "source_file": "tests/test_11_integration_golden.py",
       "source_location": "L10",
-      "weight": 1.0
-    },
-    {
-      "source": "tests_test_11_integration_keeper",
-      "target": "tests_test_11_integration_keeper_keeper",
-      "relation": "contains",
-      "_origin": "ast",
-      "confidence": "EXTRACTED",
-      "confidence_score": 1.0,
-      "source_file": "tests/test_11_integration_keeper.py",
-      "source_location": "L9",
       "weight": 1.0
     },
     {
@@ -64117,6 +64117,17 @@
       "weight": 1.0
     },
     {
+      "source": "tests_test_11_integration_crash_resume_crashresume",
+      "target": "tests_test_11_integration_crash_resume_crashresume_test_twenty_real_runner_cycles",
+      "relation": "method",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "tests/test_11_integration_crash_resume.py",
+      "source_location": "L10",
+      "weight": 1.0
+    },
+    {
       "source": "tests_test_11_integration_golden_goldensolo",
       "target": "tests_test_11_integration_golden_goldensolo_test_v1015_six_graphs_and_legacy_run_key_set",
       "relation": "method",
@@ -64125,17 +64136,6 @@
       "confidence_score": 1.0,
       "source_file": "tests/test_11_integration_golden.py",
       "source_location": "L11",
-      "weight": 1.0
-    },
-    {
-      "source": "tests_test_11_integration_keeper_keeper",
-      "target": "tests_test_11_integration_keeper_keeper_test_twenty_real_runner_cycles",
-      "relation": "method",
-      "_origin": "ast",
-      "confidence": "EXTRACTED",
-      "confidence_score": 1.0,
-      "source_file": "tests/test_11_integration_keeper.py",
-      "source_location": "L10",
       "weight": 1.0
     },
     {
@@ -67406,6 +67406,17 @@
       "weight": 1.0
     },
     {
+      "source": "tests_11_canary_rationale_2",
+      "target": "tests_11_canary",
+      "relation": "rationale_for",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "tests/11-canary.py",
+      "source_location": "L2",
+      "weight": 1.0
+    },
+    {
       "source": "tests_11_golden_solo_rationale_2",
       "target": "tests_11_golden_solo",
       "relation": "rationale_for",
@@ -67413,17 +67424,6 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "tests/11-golden-solo.py",
-      "source_location": "L2",
-      "weight": 1.0
-    },
-    {
-      "source": "tests_11_keeper_rationale_2",
-      "target": "tests_11_keeper",
-      "relation": "rationale_for",
-      "_origin": "ast",
-      "confidence": "EXTRACTED",
-      "confidence_score": 1.0,
-      "source_file": "tests/11-keeper.py",
       "source_location": "L2",
       "weight": 1.0
     },
@@ -67538,6 +67538,17 @@
       "weight": 1.0
     },
     {
+      "source": "tests_test_11_integration_crash_resume_rationale_2",
+      "target": "tests_test_11_integration_crash_resume",
+      "relation": "rationale_for",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "tests/test_11_integration_crash_resume.py",
+      "source_location": "L2",
+      "weight": 1.0
+    },
+    {
       "source": "tests_test_11_integration_golden_rationale_2",
       "target": "tests_test_11_integration_golden",
       "relation": "rationale_for",
@@ -67545,17 +67556,6 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "tests/test_11_integration_golden.py",
-      "source_location": "L2",
-      "weight": 1.0
-    },
-    {
-      "source": "tests_test_11_integration_keeper_rationale_2",
-      "target": "tests_test_11_integration_keeper",
-      "relation": "rationale_for",
-      "_origin": "ast",
-      "confidence": "EXTRACTED",
-      "confidence_score": 1.0,
-      "source_file": "tests/test_11_integration_keeper.py",
       "source_location": "L2",
       "weight": 1.0
     },

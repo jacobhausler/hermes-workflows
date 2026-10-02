@@ -172,7 +172,7 @@ const activeTabOf = tree => {
   const shown = { status: 'running', type: 'agent', log_path: '/run/logs/a.a2.log' }
   const tree = render({ detail: detailFor(graphNode({}), shown), sel: { runId: 'r1', nodeId: 'a' }, running: true })
   assert.equal(activeTabOf(tree), 'Log', 'running defaults to Log')
-  // Log header names attempt + log path (fable critic fix).
+  // Log header names attempt + log path (critic fix).
   const t = texts(tree).join('|')
   assert.ok(/attempt 2 · a\.a2\.log/.test(t), `Log header names attempt + log path: ${t.slice(0, 200)}`)
   const logQ = queries[0]
