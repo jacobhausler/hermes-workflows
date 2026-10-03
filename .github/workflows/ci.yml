@@ -67,7 +67,24 @@ jobs:
         run: python3 scripts/make_public.py /tmp/public-tree
 
       - name: PR branches do not touch the knowledge graph (single-writer)
+        if: github.event_name == 'pull_request'
         run: python3 scripts/graph_path_ban.py
 
       - name: Validate plugin against pinned hermes
         run: hermes plugins validate .
+
+  graph-main:
+    # Single-writer honesty guarantee (#153): the committed graph on MAIN must
+    # equal the AST of the main tree. The regen lane (ra-graph-regen) is the
+    # only writer; this job is the proof it cannot lie. AST-only, no LLM.
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install pinned graphify
+        run: pip install "graphifyy==0.9.67"
+      - name: Committed graph matches main source (AST only)
+        run: python3 scripts/graph_check.py
