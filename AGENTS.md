@@ -321,6 +321,8 @@ subscription routes.
 | `tests/` | Stdlib-only serial scripts; each prints `PASS`/`FAIL` lines, exit 0 = green. `.mjs` under Node. `tests/fake_hermes.py` is the child stand-in (`FAKE_MODE=…`) |
 | `scripts/suite.py` | Serial runner with per-test logs + `exits.json` ledger (the merge gate); `--baseline <ledger>` adds `admission.json` splitting reds into introduced vs pre-existing (exact name+exit identities; a base red is blocking, never waived — and a base red whose test was DELETED reports `missing`, which blocks too, so `rm` can't launder a red to green) |
 | `scripts/pack.py` | Release zip + `SHA256SUMS` + sidecar |
+| `scripts/graph_path_ban.py` | PR gate (#153, single-writer): fails a PR whose diff vs merge-base(origin/<base-ref>, HEAD) touches `graphify-out/`, unless head branch is the regen lane (`^chore/graph-`) and the diff is ONLY graph files |
+| `scripts/graph_regen.py` | The single writer (#153): at `--repo-dir` with `HEAD == --base-sha`, AST update + `graph_check.py --fix`, then prints `NO_CHANGES` (no PR) or `FILES` for the caller's `chore(graph):` PR — never pushes, never opens the PR itself |
 | `scripts/make_public.py` | Publish-tree exporter with a private-string audit gate (`scripts/.scrub-guards` allow-list) |
 | `docs/` | Patched-core guide, manifest decisions, catalog entry + PR body, scrub audit |
 
@@ -334,12 +336,14 @@ node --experimental-strip-types tests/test_edge_routing.mjs
 python3 scripts/suite.py . ci-out                 # full serial suite → ci-out/exits.json (merge gate)
 hermes plugins validate .                         # manifest + SDK-surface + security scan
 python3 scripts/make_public.py /tmp/public-tree   # private-string audit; must print "0 scrub hits"
-python3 scripts/graph_check.py                    # committed knowledge graph matches the tree
+python3 scripts/graph_path_ban.py                 # PR diff touches no graphify-out/ (single-writer, #153)
 ```
 
 A change is done when: its targeted test is green, the full suite is green, validate
-prints `Validation passed.`, the scrub audit prints `0 scrub hits`, and the graph gate
-prints `OK`. CI runs the same five gates ([.github/workflows/ci.yml](.github/workflows/ci.yml)).
+prints `Validation passed.`, the scrub audit prints `0 scrub hits`, and the path-ban
+prints `OK`. CI runs the same gates ([.github/workflows/ci.yml](.github/workflows/ci.yml));
+the knowledge-graph honesty gate (`scripts/graph_check.py`) runs there only as the
+push-on-main `graph-freshness` job — the regen lane owns the graph (#153).
 
 ### 4b′. Navigate with the knowledge graph
 
@@ -362,13 +366,18 @@ graphify god-nodes --top 12                                    # the hubs everyt
 surprising cross-file links). Every edge is tagged `EXTRACTED` (read from source) or
 `INFERRED` (resolved by graphify) so you know what was found vs guessed.
 
-Keeping it current:
+Keeping it current (**single-writer, #153**: PRs never touch `graphify-out/` — CI's
+`scripts/graph_path_ban.py` enforces it; only the main-owned regen lane
+(`scripts/graph_regen.py` via `ra-graph-regen`, branch `chore/graph-<sha7>`) writes
+it, and `scripts/graph_check.py` runs as a push-on-main job proving main graph ==
+main source):
 
 | you did | run |
 |---|---|
-| changed any `.py`/`.js`/`.md` | `graphify update .` (AST only, ~3 s) and commit `graphify-out/{graph.json,GRAPH_REPORT.md,manifest.json}` |
-| want to check without rewriting | `python3 scripts/graph_check.py` (`--fix` rewrites) |
-| added/renamed whole subsystems | `graphify label . --missing-only` names new communities — the ONLY LLM step; any OpenAI-compatible endpoint works (`OPENAI_BASE_URL`, `OPENAI_MODEL`, `GRAPHIFY_MAX_OUTPUT_TOKENS=16000` for thinking models). Never run in CI |
+| changed any `.py`/`.js`/`.md` in a PR | nothing — main's graph refreshes itself after merge (the bot's regen lane; do NOT run `graphify update` in a PR branch) |
+| maintain main / the regen lane | `python3 scripts/graph_regen.py --repo-dir <clone> --base-sha <main sha>` (AST-only update + `graph_check.py --fix`; prints NO_CHANGES or FILES for the caller's PR — never pushes) |
+| want to check without rewriting | `python3 scripts/graph_check.py` (`--fix` rewrites — regen lane only) |
+| added/renamed whole subsystems | `graphify label . --missing-only` names new communities — the ONLY LLM step; any OpenAI-compatible endpoint works (`OPENAI_BASE_URL`, `OPENAI_MODEL`, `GRAPHIFY_MAX_OUTPUT_TOKENS=16000` for thinking models). Never run in CI; weekly on the regen lane |
 
 Committed: `graph.json`, `GRAPH_REPORT.md`, `manifest.json`, `.graphify_labels.json(.sig)`,
 `.graphify_analysis.json`, `.graphify_root`. Ignored: `graph.html`, `cache/`, `cost.json`,
