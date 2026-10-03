@@ -56,9 +56,9 @@ const run = (id, status, updated, owner = null, extra = {}) =>
   ({ id, status, updated, owner, name: id, ...extra })
 
 // originLabel: every source of truth, in priority order, never invented.
-assert.equal(originLabel({ session_id: '20260928_030941_83dc6c' }, 'wf-mechanic'), 'wf-mechanic',
+assert.equal(originLabel({ session_id: '20260101_000000_fa11e1' }, 'alpha-bot'), 'alpha-bot',
   'resolved profile wins')
-assert.equal(originLabel({ session_id: '20260928_030941_83dc6c' }, null), '20260928_030941_83dc6c',
+assert.equal(originLabel({ session_id: '20260101_000000_fa11e1' }, null), '20260101_000000_fa11e1',
   'session id fallback')
 assert.equal(originLabel({ session_id: 'cron_95bb2ef2ef4d_20261002_191640' }, null), 'cron',
   'cron-shaped session')
@@ -77,12 +77,12 @@ const rows = [
   run('husk', 'pending', iso(3), { session_id: 's1' }),
   run('dead', 'failed', iso(10), { session_id: 's4' })
 ]
-const m = paneModel(rows, { 's1': 'zap', 's3': 'wf-mechanic' })
+const m = paneModel(rows, { 's1': 'beta-bot', 's3': 'alpha-bot' })
 assert.deepEqual(m.running.map(r => r.id), ['fast-run', 'slow-run'], 'running on top, newest action first')
 assert.deepEqual(m.rest.map(r => r.id), ['held-gate', 'old-done', 'dead'],
   'The Rest descend by last action — held/done/failed interleaved by updated, no queue framing')
 assert.deepEqual(Object.fromEntries([...m.running, ...m.rest].map(r => [r.id, r.origin])),
-  { 'fast-run': 'wf-mechanic', 'slow-run': 's2', 'held-gate': 'zap', 'old-done': 'zap', 'dead': 's4' },
+  { 'fast-run': 'alpha-bot', 'slow-run': 's2', 'held-gate': 'beta-bot', 'old-done': 'beta-bot', 'dead': 's4' },
   'every row carries its resolved-or-fallback origin')
 assert.equal(m.running.find(r => r.id === 'husk'), undefined, 'never-started husks stay unrendered')
 assert.equal(m.rest.find(r => r.id === 'husk'), undefined, 'husks are absent from The Rest too')
