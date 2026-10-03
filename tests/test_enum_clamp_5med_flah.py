@@ -39,7 +39,15 @@ def check(label, cond, detail=""):
     print(("PASS " if cond else "FAIL " + label + (f"  {detail}" if detail else "")))
     if not cond: ok = False
 
-CORE = os.path.isdir("/opt/hermes")   # validator availability decides toolsets expectations
+# Gate on the SAME judgment the runner makes at spawn (wf._filter_child_toolsets
+# tries `from toolsets import validate_toolset`), never on a host-layout guess:
+# a CI runner can have core importable via site-packages without any /opt tree,
+# and asserting the pass-through branch there would pin the opposite of reality.
+try:
+    import toolsets  # noqa: F401  (the runner's own validator import)
+    CORE = True
+except Exception:
+    CORE = False
 
 # ---------- (a) _nearest_supported: core clamp_effort's law, weaker-first ----------
 NS = wf._nearest_supported
