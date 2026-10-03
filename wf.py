@@ -1311,19 +1311,33 @@ def _clamp_warn(run, meta, node, kind, requested, clamped, lane, supported):
     emit(f"wf: CLAMP {node.get('id')} {kind} requested={requested} -> {clamped} "
          f"(lane: {lane}; supported: {', '.join(supported) if supported else 'unknown'})")
 
-def _resolve_child_reasoning(run, meta, node, override=None):
+def _resolve_child_reasoning(run, meta, node, override=None, override_source=None,
+                             index=None, cache=None):
     """The value to actually pass --reasoning at spawn: author's value clamped to
     the lane's supported set (weaker-first), logged once. Unknown lane tables
     never invent a verdict — the value passes through and the gate-400 escape
     hatch (server-declared set) is the recourse. run.json `reasoning_lanes`
     {provider: [values]} overrides the core-derived table (test seam, same
-    shape as hermes_bin)."""
+    shape as hermes_bin).
+
+    est-vsgj B1-crossed: a gate-400 clamp is a fact about this (node, index,
+    lane, requested) for the RUN, not just for the inner re-drive. Without
+    memory, the OUTER ladders (transient/bounded) respawn through spawn() with
+    no override, re-clamp the author's value against the stale table, and the
+    server rejects it again — argv high-medium-high-medium, one needless
+    gate-400 per respawn. `cache` (runner-private meta, never persisted)
+    remembers server-declared values; only override_source="server" may WRITE
+    it — a test-seam override can never poison it."""
     val = override if override is not None else node.get("reasoning")
     if not val:
         return None
     req = str(val).strip().lower()
     if req == "none":
         return "none"                                   # wfcommon's extension, always valid
+    authored = node.get("reasoning")
+    areq = str(authored).strip().lower() if authored else None
+    key = (node.get("id"), index, (node.get("provider") or "").strip().lower(),
+           node.get("model"), areq)
     if override is not None:
         # est-flah gate-400 escape hatch: the override came FROM the server's
         # own declared supported set (deep review #163 B1) — re-clamping it
@@ -1333,7 +1347,14 @@ def _resolve_child_reasoning(run, meta, node, override=None):
         # claimed clamped=medium). The server's word outranks the local table;
         # the override is passed through verbatim (one sealed loop: run_child
         # only re-enters this leg from the gate-400 re-drive).
+        if override_source == "server" and isinstance(cache, dict) and areq:
+            cache[key] = req                # keyed by the AUTHOR's ask: the outer
+                                            # ladder re-asks authored, never medium
+                                            # (survives to the outer ladders)
         return req
+    if isinstance(cache, dict) and key in cache:
+        return cache[key]                   # outer-ladder respawn: ask the server's
+                                            # value again, never re-learn the 400
     lanes = meta.get("reasoning_lanes")
     provider = (node.get("provider") or "").strip().lower()
     supported = None
@@ -3077,7 +3098,10 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
     # VERBATIM (omission would silently broaden to the seat's full defaults —
     # never the author's ask). Warnings land in
     # events.jsonl as node.clamped, once per (node, kind, requested, clamped).
-    _eff = _resolve_child_reasoning(run, meta, node, override=reasoning_override)
+    _eff = _resolve_child_reasoning(run, meta, node, override=reasoning_override,
+                                    override_source="server" if reasoning_override is not None else None,
+                                    index=index,
+                                    cache=meta.get("_reasoning_server_clamp"))
     if _eff: cmd += ["--reasoning", _eff]
     _ts = _filter_child_toolsets(run, meta, node)
     if _ts is not None: cmd += ["-t", ",".join(_ts)]
@@ -4363,6 +4387,9 @@ def main(run_id):
     meta["_run"] = run                      # Q1: spawn records + per-spawn logs
     meta["_spawn_n"] = {}                   # per (node,item) spawn counter for log names
     meta["_retries_left"] = _retry_conf_params(meta)[1]   # Q4 per-run retry budget
+    meta["_reasoning_server_clamp"] = {}   # est-vsgj B1-crossed: (node,index,lane,asked)
+                                           # -> server-declared value; runner-private,
+                                           # never persisted; survives outer-ladder respawns
     exit_graph = [jload(run / "graph.json")]
 
     def _stop_watcher():

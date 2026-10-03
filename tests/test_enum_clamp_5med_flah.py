@@ -320,6 +320,66 @@ check("B3-fail unit: _proc_unreadable_record carries attempts_log forward",
       _rec_ur.get("attempts_log") == [{"attempt": 0, "error_class": "transport"}],
       json.dumps(_rec_ur.get("attempts_log")))
 
+# ---------- (c5) est-vsgj B1-crossed: the server-declared clamp survives the
+# OUTER ladders. The (c2) fix sealed only the INNER gate-400 re-drive; a
+# transient death after a SUCCESSFUL re-drive (or any outer retry) respawns
+# through spawn() with no override and re-learns the very 400 the server already
+# answered — argv high-medium-high-medium, one needless gate-400 per respawn
+# (est-vsgj's probe verbatim). Law: a server-declared value is a fact for the
+# RUN (node, index, lane, author-ask), cached runner-private at the moment the
+# server names it; a test-seam override may NEVER write the cache.
+argv_log10 = HOME / "argv-outer-ladder.log"
+r10 = mk("flah-outer", [{"id": "a", "type": "agent", "goal": "GO outer",
+                         "model": "relay-m1", "provider": "relay", "reasoning": "high"}],
+        {"reasoning_lanes": {"relay": ["high"]}})   # STALE: contradicts the server
+p10 = drive(r10, {"FAKE_ARGV_LOG": str(argv_log10), "FAKE_MODE": "reasoning_gate400",
+                  "FAKE_SUPPORTED_EFFORTS": "medium,low", "FAKE_REJECT_EFFORT": "high",
+                  "FAKE_GATE_THEN_TRANSPORT": "1", "FAKE_API_CALLS": "0"})
+rec10 = record(r10, "a")
+lines10 = argv_log10.read_text().splitlines() if argv_log10.exists() else []
+_asks10 = [(l.split("--reasoning")[1].split()[0] if "--reasoning" in l else "")
+           for l in lines10]
+check("B1-crossed e2e: the honest first ask was high, the server answered medium, and the "
+      "OUTER ladder respawns kept asking medium (high NEVER re-asks)",
+      len(lines10) >= 3 and _asks10[0] == "high"
+      and all(a == "medium" for a in _asks10[1:]),
+      f"asks={_asks10} status={rec10.get('status')}/{rec10.get('error_class')}")
+_cl10 = [e for e in events(r10) if e.get("event") == "node.clamped"
+         and e.get("kind") == "reasoning_gate400"]
+check("B1-crossed e2e: the gate-400 lesson was learned ONCE — exactly one clamp event total",
+      len(_cl10) == 1, f"{len(_cl10)} clamp events: {_cl10}")
+# unit: the cache is the resolve classifier's own law
+_cache = {}
+_u_meta = {"reasoning_lanes": {"relay": ["high"]}}
+_u_node = {"id": "u", "provider": "relay", "model": "relay-m1", "reasoning": "high"}
+_v1 = wf._resolve_child_reasoning(r10, _u_meta, _u_node, override="medium",
+                                  override_source="server", index=None, cache=_cache)
+check("B1-crossed unit: a server-sourced override returns verbatim AND seeds the cache",
+      _v1 == "medium" and list(_cache.values()) == ["medium"],
+      f"{_v1} cache={_cache}")
+_v2 = wf._resolve_child_reasoning(r10, _u_meta, _u_node, index=None, cache=_cache)
+check("B1-crossed unit: the outer-ladder re-ask (author's high vs stale table [high]) "
+      "resolves from the cache — medium, never the server-rejected high",
+      _v2 == "medium", str(_v2))
+_v3 = wf._resolve_child_reasoning(r10, _u_meta, _u_node, override="low",
+                                  override_source=None, index=None, cache=_cache)
+check("B1-crossed unit: a TEST-SEAM override passes through but can never poison the cache",
+      _v3 == "low" and list(_cache.values()) == ["medium"], f"{_v3} cache={_cache}")
+# isolation: different index / different author-ask never shares a slot
+_c2x = {}
+wf._resolve_child_reasoning(r10, _u_meta, _u_node, override="medium",
+                            override_source="server", index=None, cache=_c2x)
+_wf_fresh = wf._resolve_child_reasoning(r10, _u_meta, _u_node, override="low",
+                                        override_source="server", index=3, cache=_c2x)
+_v4 = wf._resolve_child_reasoning(r10, _u_meta, _u_node, index=3, cache=_c2x)
+_v5 = wf._resolve_child_reasoning(
+    r10, _u_meta, {"id": "u", "provider": "relay", "model": "relay-m1", "reasoning": "ultra"},
+    index=None, cache=_c2x)
+check("B1-crossed unit: cache slots are per (node,index,lane,author-ask) — fanout items "
+      "and different asks never inherit each other's value",
+      _wf_fresh == "low" and _v4 == "low" and len(_c2x) == 2 and _v5 != "medium",
+      f"idx3={_v4} ultra={_v5} cache={_c2x}")
+
 # ---------- (d) e2e toolsets: unknown names are a clean no-op, never a child death ----------
 def toolsets_run(run_id, toolsets_value, argv_log_path):
     r = mk(run_id, [{"id": "a", "type": "agent", "goal": f"GO {run_id}", "toolsets": toolsets_value}])

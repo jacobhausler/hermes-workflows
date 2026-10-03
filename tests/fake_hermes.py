@@ -105,6 +105,16 @@ if _FAKE_MODE == "reasoning_gate400":
                   "\"Unsupported type: {g}. Supported types are {s}\", 'type': 'invalid_request_error'}}}}"
                   .format(g=_got, s=", ".join(_sup)))
             sys.exit(1)
+        if os.environ.get("FAKE_GATE_THEN_TRANSPORT"):
+            # est-vsgj B1 probe: the value the SERVER declared survives the gate,
+            # then the spawn dies the transient shape (transport marker, zero api
+            # calls) so the OUTER ladder respawns it. The respawn must re-ask the
+            # server's value — never re-clamp the author's against the stale
+            # local table. High reappearing after the first accepted medium is
+            # the B1-crossed signature (argv high-medium-high-medium).
+            print("Warning: Unknown toolsets: bogus")
+            print("hermes -z: agent failed: openai.APIConnectionError. Connection error.")
+            sys.exit(2)
 if _FAKE_MODE == "toolset_warn_ok":   # est-flah: the CLI warns 'Unknown toolset', still answers (exit 0)
     print("⚠️  Unknown toolset: bogus")
 if _FAKE_MODE == "transport":      # stable marker oneline the runner can pin (oneshot escalation shape)
