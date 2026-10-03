@@ -15,6 +15,11 @@ scripts/.scrub-guards
 regex:"author": "(Jacob Hausler|jacobhausler)"
 # Public PR-author credit only; anchored line excludes the change description.
 regex:^- #[0-9]+ — (Hermes Agent; )?@jacobhausler\.$
+# MIT license identity: the copyright-holder line is load-bearing by design
+# (renaming it would mislicense the package); the audit reaching it is a
+# feature of content-based text detection, not a regression. Anchored so the
+# guard covers ONLY the copyright line of LICENSE.
+regex:^Copyright \(c\) \d{4} (Jacob Hausler|jacobhausler)$
 
 # ---- Core-10 committed scrub list (2026-10-01): GUARD rows for the merged audit ----
 # Classification discipline per docs/PUBLISH-SCRUB.md: GUARD = load-bearing absence

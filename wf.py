@@ -3735,6 +3735,19 @@ def _adopt_child(meta, node, byid, index, child, schema, fo_cancel=None):
     eclass, marker = _classify_rc_output(out)
     if eclass == "fatal_quota":   # #24: adopted death caches the horizon too
         _quota_note(node.get("model") or node.get("provider") or "seat default", marker)
+    if eclass == "unknown" and _tool_call_as_text(final_reply or out or ""):
+        # est-2ek.1.541 R8 (sibling coverage): the adopted-death path must classify
+        # the malformed-turn shape exactly like the fresh-head path — same reply,
+        # same class, whatever path the runner reaches it by. The bounded ladder
+        # may not be available here (the attempt already committed its spend and
+        # the rc is unobservable); the classification law itself is path-invariant.
+        verdict = _verdict_lines(final_reply or out)
+        return {"status": "failed",
+                "error": "adopted child died with a malformed turn: reply is a "
+                        "serialized tool call rendered as text (tool-call-as-text; "
+                        f"typed malformed turn; not harvestable). Verdict: {verdict}",
+                "error_class": "malformed_turn", "raw": (out or "")[-2000:], "ms": ms,
+                "final": final_reply, **evd}
     verdict = _verdict_lines(marker if marker else out)
     rec = {"status": "failed", "error": f"adopted child died (rc unobservable — runner was "
             f"respawned): {verdict}", "error_class": eclass, "raw": (out or "")[-2000:],

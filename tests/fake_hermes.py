@@ -329,6 +329,11 @@ if _FAKE_MODE == "toolcall_text_541" and "TOOLCALL541" in q:
             c.execute("insert or replace into sessions values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                       ("f-" + title, title, "fake", "fake-provider", 100, 20, 0, 0, 2, 3, 0.0, t, "", t, t))
             c.commit(); c.close()
+        # opt-in hold so a pin can register this fake as a verified LIVE orphan
+        # (adoption-path pins); default 0 leaves every existing pin unchanged.
+        _hold = float(os.environ.get("FAKE_DELAY", "0") or 0)
+        if _hold:
+            time.sleep(_hold)
         reply = json.loads('"\\u003cinvoke name=\\"process_manage\\">\\n\\u003cparameter name=\\"action\\">poll\\u003c/parameter>\\n\\u003cparameter name=\\"session_id\\">lane-7\\u003c/parameter>\\n\\u003c/invoke>"')
         rc = int(os.environ.get("FAKE_RC", "1"))
         if rc != 0:

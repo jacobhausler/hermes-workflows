@@ -103,9 +103,18 @@ def main() -> int:
     guard_files, guard_lines, guard_regexes = load_guards(repo)
     offences: list[str] = []
     for rel in copied:
-        if Path(rel).suffix not in AUDIT_SUFFIXES:
+        # The suffix allowlist must never create a blind spot: a shipped
+        # extensionless text file (tests/fake-b1 — observed carrying forbidden
+        # vocabulary while the audit reported 0 hits) is exactly what the audit
+        # exists to catch. Text-ness is decided by content (null-byte sniff,
+        # the git heuristic), not by file name.
+        p = repo / rel
+        if p.suffix and p.suffix not in AUDIT_SUFFIXES:
             continue
-        text = (repo / rel).read_text(encoding="utf-8", errors="replace")
+        raw = p.read_bytes()
+        if b"\0" in raw[:8192]:
+            continue                                   # binary: nothing to scrub
+        text = raw.decode("utf-8", errors="replace")
         for i, line in enumerate(text.splitlines(), 1):
             if audit.search(line):
                 if rel in guard_files or (rel, i) in guard_lines:
