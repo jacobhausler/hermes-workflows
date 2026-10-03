@@ -39,6 +39,8 @@ INCLUDE_FILES = (
     "examples/census-fanout.workflow.json",
     "examples/escalation-ladder.workflow.json",
     "examples/bulk-transform.workflow.json",
+    "examples/release-lifecycle.workflow.json",
+    "examples/issue-to-pr.workflow.json",
     "examples/smoke.json",
     "plugin.yaml",
     "CHANGELOG.md",
