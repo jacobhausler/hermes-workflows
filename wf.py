@@ -1865,6 +1865,12 @@ def _left_live_record(pid, stuck, note, r=None):
            "raw": (r.get("raw") or "")[-2000:], "ms": r.get("ms", 0),
            "tree_descendants": stuck, "tree_proof": "stuck",
            "attempts": r.get("attempts", 1)}
+    # deep review #163c B3: the quarantine FAIL path of the gate-400 re-drive
+    # (and both retry ladders) stamps the dead attempt into attempts_log BEFORE
+    # calling us; dropping it here erased the only evidence of WHICH attempt
+    # died unquarantinable. Carry it forward like the log paths.
+    if r.get("attempts_log") is not None:
+        rec["attempts_log"] = r["attempts_log"]
     for k in ("log_path", "prompt_path", "pid", "spawn", "skey", "final",
               "tree_pids", "profile_home"):
         if r.get(k) is not None:
@@ -2580,6 +2586,11 @@ def _proc_unreadable_record(pid, node_id, spawn_no, r=None):
            "raw": (r.get("raw") or "")[-2000:], "ms": r.get("ms", 0),
            "tree_descendants": [], "tree_proof": "unknown",
            "attempts": r.get("attempts", 1)}
+    # deep review #163c B3: same carry-forward law as _left_live_record — the
+    # quarantine stamp on the dead attempt is the only witness of WHICH death
+    # failed quarantine; the unreadable record must not erase it.
+    if r.get("attempts_log") is not None:
+        rec["attempts_log"] = r["attempts_log"]
     for k in ("log_path", "prompt_path", "pid", "spawn", "skey", "profile_home"):
         if r.get(k) is not None:
             rec[k] = r[k]
@@ -3410,10 +3421,19 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
                     # Popen, or fail closed typed. An unproven tree is exactly the
                     # contamination the law exists to forbid.
                     iso = _isolate_prior(meta, {"pid": proc.pid, "spawn": spawn_no,
-                                                "tree_pids": _tree_live},
+                                                "tree_pids": _tree_live,
+                                                "attempts_log": [
+                                                    {"attempt": 0, "error_class": "provider_400",
+                                                     "at": now(), "gate400_dead": True}]},
                                          "node", {"node": node["id"], "index": index})
                     if iso is not None:
-                        al = list(r.get("attempts_log") or [])
+                        # deep review #163c B3: `r` is NEVER bound on this rc!=0
+                        # path (it belongs to the transient ladder below) — the
+                        # dead attempt's evidence rides in via the r dict we
+                        # handed _isolate_prior, which now carries attempts_log
+                        # forward into the typed record. Reading local `r` here
+                        # was an UnboundLocalError: no typed record, no stamp.
+                        al = list(iso.get("attempts_log") or [])
                         al.append({"attempt": len(al), "error_class": "provider_400", "at": now(),
                                    "gate400_clamp": target, "quarantine": "failed"})
                         iso["attempts_log"] = al

@@ -252,6 +252,74 @@ check("B3 e2e: no prior-generation descendant survives to the verdict; node not 
       and (rec8.get("status") == "done" or rec8.get("tree_proof") == "dead"),
       f"status={rec8.get('status')} proof={rec8.get('tree_proof')}")
 
+# ---------- (c4) deep review #163c B3 OPEN: the quarantine FAIL path of the
+# gate-400 re-drive. Two defects, one scenario (committee: UnboundLocalError
+# proven via dependency-faulted REAL _isolate_prior; attempts_log dropped by
+# _left_live_record / _proc_unreadable_record carry-forward tuples):
+#   (i) the fail branch reads local `r`, which run_child only binds in the
+#       transient ladder (wf.py:3411) — on this path `r` is an unbound local,
+#       so the typed fail-closed record dies as NameError instead of committing;
+#   (ii) the two quarantine record builders drop attempts_log, so the
+#       "quarantine":"failed" stamp on the dead provider_400 attempt is lost —
+#       unsatisfiable on the one-line (i) fix alone (adversary finding).
+# Fault injection mirrors test_proctree_61b B2: os.listdir("/proc") denied ->
+# _isolate_prior must return its typed unreadable record BEFORE spawn 2.
+import subprocess as _sp
+from unittest.mock import patch as _patch
+from wf import _left_live_record as _llr, _proc_unreadable_record as _pur
+
+argv_log9 = HOME / "argv-gate-iso.log"
+r9 = mk("flah-gate-iso", [{"id": "a", "type": "agent", "goal": "GO gate iso",
+                           "model": "relay-m1", "reasoning": "high"}])
+# The fault must exist INSIDE the runner and fire ONLY for /proc reads issued
+# from _isolate_prior's own call stack (the committee's dependency-fault method):
+# every other /proc channel (admission liveness, run_state) keeps reading truth.
+(HOME / "sitecustomize.py").write_text(
+    "import os, inspect\n"
+    "_real=os.listdir\n"
+    "def _u(p):\n"
+    "    if str(p)=='/proc':\n"
+    "        if any(f.function=='_isolate_prior' for f in inspect.stack()):\n"
+    "            raise PermissionError('fault: proc denied in _isolate_prior')\n"
+    "    return _real(p)\n"
+    "os.listdir=_u\n")
+_env9 = dict(os.environ, HERMES_HOME=str(HOME),
+             FAKE_LOG=str(HOME / "fake-gate-iso.log"),
+             FAKE_ARGV_LOG=str(argv_log9), FAKE_MODE="reasoning_gate400",
+             FAKE_SUPPORTED_EFFORTS="xhigh,medium,low", FAKE_REJECT_EFFORT="high",
+             PYTHONPATH=str(HOME) + os.pathsep + os.environ.get("PYTHONPATH", ""))
+p9 = _sp.run([sys.executable, str(BUILD.parent / "wf.py"), "run", str(r9)],
+             env=_env9, capture_output=True, timeout=180, text=True)
+(HOME / "sitecustomize.py").unlink(missing_ok=True)
+rec9 = json.loads((r9 / "nodes" / "a.json").read_text()) \
+    if (r9 / "nodes" / "a.json").exists() else {"status": "<no record>"}
+lines9 = argv_log9.read_text().splitlines() if argv_log9.exists() else []
+check("B3-fail e2e: quarantine-unprovable gate-400 dies TYPED, never a NameError crash",
+      rec9.get("error_class") == "left_live_descendants"
+      and "UnboundLocalError" not in (rec9.get("error") or "")
+      and "NameError" not in (rec9.get("error") or ""),
+      f"{rec9.get('status')}/{rec9.get('error_class')}/{(rec9.get('error') or '')[:160]}")
+check("B3-fail e2e: NO blind spawn 2 over the unprovable tree (fail closed before Popen)",
+      len(lines9) <= 1, f"argv lines: {lines9}")
+_al9 = (rec9.get("attempts_log") or [])
+check("B3-fail e2e: the typed record CARRIES the dead attempt's log incl. quarantine stamp",
+      any(a.get("error_class") == "provider_400" and a.get("quarantine") == "failed"
+          for a in _al9),
+      json.dumps(_al9)[:300])
+
+# (c4-unit) the two quarantine record builders carry attempts_log forward
+_rec_ll = _llr(4242, [4243], "note",
+               {"attempts_log": [{"attempt": 0, "error_class": "provider_400"}],
+                "raw": "x", "ms": 5})
+check("B3-fail unit: _left_live_record carries attempts_log forward",
+      _rec_ll.get("attempts_log") == [{"attempt": 0, "error_class": "provider_400"}],
+      json.dumps(_rec_ll.get("attempts_log")))
+_rec_ur = _pur(4242, "n", 1,
+               {"attempts_log": [{"attempt": 0, "error_class": "transport"}]})
+check("B3-fail unit: _proc_unreadable_record carries attempts_log forward",
+      _rec_ur.get("attempts_log") == [{"attempt": 0, "error_class": "transport"}],
+      json.dumps(_rec_ur.get("attempts_log")))
+
 # ---------- (d) e2e toolsets: unknown names are a clean no-op, never a child death ----------
 def toolsets_run(run_id, toolsets_value, argv_log_path):
     r = mk(run_id, [{"id": "a", "type": "agent", "goal": f"GO {run_id}", "toolsets": toolsets_value}])
