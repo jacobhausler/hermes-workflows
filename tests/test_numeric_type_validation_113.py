@@ -23,7 +23,6 @@ Contract asserted here (per the issue, per modern JSON Schema):
 Minimal-fix law (#113): no jsonschema, no framework, the type names stay
 admitted at the door; the fix is the one predicate.
 """
-import ast
 import json
 import os
 import shutil
@@ -51,14 +50,10 @@ def check(label, cond, detail=""):
 V = wfcommon.validate_graph_errors
 
 # ============ 0. the issue's exact repro: the PRODUCTION validate() ============
-# AST-extract the function as the audit did, so the assertion is about the
-# shipped code path, not a copy. (Same function the runner's harvest uses.)
-_src = ast.parse((BUILD / "wf.py").read_text())
-_node = next(n for n in _src.body
-             if isinstance(n, ast.FunctionDef) and n.name == "validate")
-_ns = {}
-exec(compile(ast.Module(body=[_node], type_ignores=[]), "wf.py", "exec"), _ns)
-_prod_validate = _ns["validate"]
+# Bind the shipped production function directly (wf is imported above; same
+# function the runner's harvest uses). CONTRIBUTING.md R6: tests call the
+# production API — no reading wf.py as source text / exec'ing an AST excerpt.
+_prod_validate = wf.validate
 
 for value, kind in [(1.5, "integer"), (True, "integer"),
                     (True, "number"), (False, "number")]:
