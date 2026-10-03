@@ -87,6 +87,36 @@ def _fake_state_row(n):
 if os.environ.get("FAKE_API_CALLS"):
     _fake_state_row(os.environ["FAKE_API_CALLS"])
 _FAKE_MODE = os.environ.get("FAKE_MODE")
+# est-flah (field report, 2026-10-02): the narrow-vocabulary relay enum-gate shape — a child
+# whose --reasoning value the RELAY itself rejects (the door's route table missed it)
+# must die with the server's "Supported types are ..." 400 so the runner's escape
+# hatch can clamp-to-nearest and re-drive. FAKE_SUPPORTED_EFFORTS (csv, default
+# 'xhigh,medium,low') = the relay's vocabulary; FAKE_REJECT_EFFORT = the single value
+# rejected ('*' = reject whatever is asked whenever it is outside the supported set).
+if _FAKE_MODE == "reasoning_gate400":
+    _sup = [s.strip() for s in os.environ.get("FAKE_SUPPORTED_EFFORTS", "xhigh,medium,low").split(",") if s.strip()]
+    _rej = os.environ.get("FAKE_REJECT_EFFORT", "").strip()
+    _got = args[args.index("--reasoning") + 1] if "--reasoning" in args else ""
+    if _got:
+        _hit = bool(_got) and _got.lower() not in [s.lower() for s in _sup] if _rej == "" or _rej == "*" \
+            else _got == _rej
+        if _hit:
+            print("hermes -z: agent failed: Error code: 400 - {{'error': {{'message': "
+                  "\"Unsupported type: {g}. Supported types are {s}\", 'type': 'invalid_request_error'}}}}"
+                  .format(g=_got, s=", ".join(_sup)))
+            sys.exit(1)
+        if os.environ.get("FAKE_GATE_THEN_TRANSPORT"):
+            # est-vsgj B1 probe: the value the SERVER declared survives the gate,
+            # then the spawn dies the transient shape (transport marker, zero api
+            # calls) so the OUTER ladder respawns it. The respawn must re-ask the
+            # server's value — never re-clamp the author's against the stale
+            # local table. High reappearing after the first accepted medium is
+            # the B1-crossed signature (argv high-medium-high-medium).
+            print("Warning: Unknown toolsets: bogus")
+            print("hermes -z: agent failed: openai.APIConnectionError. Connection error.")
+            sys.exit(2)
+if _FAKE_MODE == "toolset_warn_ok":   # est-flah: the CLI warns 'Unknown toolset', still answers (exit 0)
+    print("⚠️  Unknown toolset: bogus")
 if _FAKE_MODE == "transport":      # stable marker oneline the runner can pin (oneshot escalation shape)
     print("Warning: Unknown toolsets: bogus")
     print("hermes -z: agent failed: openai.APIConnectionError. Connection error.")
