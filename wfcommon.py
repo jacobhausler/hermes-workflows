@@ -116,45 +116,52 @@ def hermes_home():
 
 # ---------- originating-bot attribution (agent-first pane, 2026-10-03) ----------
 # run.json owner.session_id names the LAUNCHING session but not WHO it was. Core
-# stores every session in the profile that owns it: profiles/<name>/state.db ->
-# sessions(id, profile_name). A read-only sweep of those tables resolves
-# session -> bot name for the desktop pane and the drawer; it NEVER writes and
-# never fails a listing (a locked/absent db just contributes no rows). TTL cache
-# so a pane poll doesn't reopen every profile's db.
+# stores every session in the profile that owns it: the estate root's own state.db
+# (root/default profile) and profiles/<name>/state.db (sessions: id, profile_name).
+# A read-only sweep of those tables resolves session -> bot name for the desktop
+# pane and the drawer; it NEVER writes and never fails a listing (a locked/absent
+# db just contributes no rows). TTL cache so a pane poll doesn't reopen every
+# profile's db; the cache is keyed by the NORMALIZED estate root (est-wk7l): a
+# named-profile home resolves through hermes_root() to the estate root, so sibling
+# profiles and the root's own default db participate, and one root's cached map can
+# never be served for a different root (a stale map is a wrong label, not a cache win).
 _PROFILE_BY_SESSION_TTL = 60.0
-_profile_by_session_cache = {"at": 0.0, "map": {}}
+_profile_by_session_cache = {}   # normalized root str -> {"at": ts, "map": {...}}
 
 
 def profiles_by_session(home=None):
-    """{session_id: profile_name} across every profile's state.db (read-only).
-    Absent/locked db or missing table contributes nothing; a session absent from
-    every table resolves to nothing — callers fall back honestly, never invent."""
+    """{session_id: profile_name} across the estate root's default db and every
+    profile's state.db (read-only). Absent/locked db or missing table contributes
+    nothing; a session absent from every table resolves to nothing — callers fall
+    back honestly, never invent."""
     import time
+    root = hermes_root(home)          # named profile home -> estate root (normalizer)
+    key = str(root)
     now = time.time()
-    c = _profile_by_session_cache
-    if now - c["at"] < _PROFILE_BY_SESSION_TTL:
+    c = _profile_by_session_cache.get(key)
+    if c is not None and now - c["at"] < _PROFILE_BY_SESSION_TTL:
         return c["map"]
     out = {}
     try:
-        profiles = (Path(home) if home else hermes_home()) / "profiles"
-        for db in sorted(profiles.glob("*/state.db")):
-            try:
-                import sqlite3
-                con = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=1.5)
-                try:
-                    for sid, prof in con.execute(
-                            "SELECT id, profile_name FROM sessions WHERE profile_name IS NOT NULL"):
-                        out[str(sid)] = str(prof)
-                finally:
-                    con.close()
-            except Exception:
-                continue  # locked/foreign-schema db: no rows, never an error
+        db_files = [root / "state.db", *sorted(profiles_root(home).glob("*/state.db"))]
     except Exception:
-        pass
-    if out:  # a total sweep failure must not blank a good previous map
-        c["map"] = out
-    c["at"] = now  # even an empty sweep caches: never re-open every db per poll
-    return c["map"]
+        db_files = []
+    for db in db_files:
+        try:
+            import sqlite3
+            con = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=1.5)
+            try:
+                for sid, prof in con.execute(
+                        "SELECT id, profile_name FROM sessions WHERE profile_name IS NOT NULL"):
+                    out[str(sid)] = str(prof)
+            finally:
+                con.close()
+        except Exception:
+            continue  # locked/foreign-schema/absent db: no rows, never an error
+    # every sweep commits its OWN answer for its OWN root (empty included): a
+    # different root never inherits the previous root's labels.
+    _profile_by_session_cache[key] = {"at": now, "map": out}
+    return out
 
 
 # ---------- owner settings (#41/#42: tool-bridge first-class) ----------

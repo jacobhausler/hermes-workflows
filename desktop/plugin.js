@@ -723,12 +723,25 @@ export function paneModel(runs, profilesBySession) {
     .map(r => ({
       ...r,
       origin: originLabel(r.owner,
-        r.owner_profile || (profilesBySession || {})[r.owner?.session_id] || null)
+        r.owner_profile || safeProfileLabel(profilesBySession, r.owner?.session_id))
     }))
   return {
     running: list.filter(r => r.status === 'running').sort(byUpdated),
     rest: list.filter(r => r.status !== 'running').sort(byUpdated)
   }
+}
+
+/** Own-property-only session->profile read (est-wk7l): a persisted session id
+ *  that collides with an Object.prototype member (toString / constructor /
+ *  __proto__) must never resolve through the prototype chain — the pane would
+ *  print a native function or '[object Object]' as the agent's name. Only an
+ *  OWN, typed-string entry counts; anything else reads as no-resolution and the
+ *  row falls back honestly to its raw owner fields. */
+export function safeProfileLabel(map, sessionId) {
+  if (!map || sessionId === null || sessionId === undefined) return null
+  if (!Object.prototype.hasOwnProperty.call(map, String(sessionId))) return null
+  const v = map[String(sessionId)]
+  return typeof v === 'string' && v ? v : null
 }
 
 // O4 (owner 2026-10-02) had RUNNING + WAITING-ON-AGENT + RECENTLY FINISHED; the
