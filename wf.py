@@ -1109,7 +1109,7 @@ ERROR_CLASSES = frozenset(("provider_400", "unresolved_model", "cap_exhausted",
                            "incomplete_work", "early_death", "cancelled",
                            "schema", "spawn", "graph_invalid", "inputs",
                            "quorum", "fanout_empty", "crashed", "unknown",
-                           # est-vb65: committed by the seat floor / policy gate
+                           # committed by the seat floor / policy gate
                            # (wf forbidden_model sites) and by unmet input deps
                            # (_fail_precondition). AGENTS.md cites this set as
                            # THE closed set — it must be exhaustive; the static

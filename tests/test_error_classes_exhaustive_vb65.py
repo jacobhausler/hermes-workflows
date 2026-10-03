@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""est-vb65 — ERROR_CLASSES is the closed set AGENTS.md cites; it must actually be
+"""error-class closed set — ERROR_CLASSES is the closed set AGENTS.md cites; it must actually be
 EXHAUSTIVE over committed classes.
 
 Blind spot (PR #155 deep review, first-read P1): the runner commits
@@ -37,7 +37,8 @@ missing = sorted(committed - set(wf.ERROR_CLASSES))
 check("every committed error_class is a member of the closed set", not missing,
       f"missing from ERROR_CLASSES: {missing}")
 
-# the two named by the bead, explicitly (a rename of either literal must trip the check above)
+# the two historically-missing classes, explicitly (a rename of either
+# literal must trip the scanner check above)
 check("forbidden_model is a member", "forbidden_model" in wf.ERROR_CLASSES)
 check("precondition is a member", "precondition" in wf.ERROR_CLASSES)
 
