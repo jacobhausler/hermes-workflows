@@ -59,7 +59,7 @@ EXCLUDE_PATTERNS = ["docs/PUBLISH-SCRUB.md",
 # this set is a whole-file blind spot — .yml (the shipped .github/workflows/
 # ci.yml) and .txt (mac-source.txt) both exported forbidden lines with "0 scrub
 # hits" under the old set. New text file types join here, never the skip path.
-AUDIT_SUFFIXES = {".py", ".js", ".mjs", ".md", ".json", ".yaml", ".yml", ".txt"}
+AUDIT_SUFFIXES = {".py", ".js", ".mjs", ".md", ".json", ".yaml", ".yml", ".txt", ".sig"}
 
 
 def excluded(rel: str) -> bool:

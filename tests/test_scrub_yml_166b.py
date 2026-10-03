@@ -99,5 +99,22 @@ rc, out, exp = run_export({"adversary-probe.txt": b"\0" + (FORBIDDEN_LINE + "\n"
 check(".txt with NUL@0 + forbidden line is REFUSED before export",
       rc != 0 and "adversary-probe.txt:1" in out, f"rc={rc} out={out[:160]}")
 
+# .sig — the wf166d adversary's reproducible gap (B2): the SHIPPED
+# graphify-out/.graphify_labels.json.sig is plain NUL-free UTF-8 JSON (od -c:
+# starts `{"0": "c55709b2...`), not base64/minisign material — a text shape the
+# repo ships, so it belongs in AUDIT_SUFFIXES, never the skip path. A poisoned
+# copy must refuse export exactly like every other known-text shape.
+rc, out, exp = run_export({"adversary-probe.sig": (FORBIDDEN_LINE + "\n").encode()}, "sig-plain")
+check(".sig with forbidden line REFUSED before export (shipped .sig is plain JSON)",
+      rc != 0 and "adversary-probe.sig:1" in out, f"rc={rc} out={out[:160]}")
+rc, out, exp = run_export({"adversary-probe.sig": b"\x00" + (FORBIDDEN_LINE + "\n").encode()},
+                         "sig-nul0")
+check(".sig with NUL@0 + forbidden line is REFUSED (NUL cannot exempt a known suffix)",
+      rc != 0 and "adversary-probe.sig:1" in out, f"rc={rc} out={out[:160]}")
+rc, out, exp = run_export({"adversary-probe.sig": b'{"0": "deadbeef"}\n'}, "sig-clean")
+check("clean .sig still exports (audit, not ban)",
+      rc == 0 and exp and "adversary-probe.sig" in exp,
+      f"rc={rc} exported={bool(exp and 'adversary-probe.sig' in (exp or {}))}")
+
 print("DONE test_scrub_yml_166b", "OK" if ok else "FAIL")
 sys.exit(0 if ok else 1)
