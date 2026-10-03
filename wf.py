@@ -2716,6 +2716,28 @@ def _adopt_child(meta, node, byid, index, child, schema, fo_cancel=None):
                 f"(timeout, cap from original started={child.get('started')})",
                 "error_class": "timeout", "raw": (out or "")[-2000:], "ms": ms,
                 "final": final_reply, **evd}
+    # est-jam8 (PR #162 deep review, wf162a): an adopted child whose capture is
+    # the fast config death must NOT be laundered into done. rc is unobservable
+    # for an orphan — that is grounds for humility, not for confidence: the
+    # harvest-once coercion (out -> {result: prose}) happily satisfied a
+    # {result} schema with the Unknown-provider diagnostic itself, so a
+    # deterministic config typo committed done, the one outcome est-tmuu
+    # forbids. Same classifier, same window (ms is measured from the record's
+    # ORIGINAL started, so a long-lived orphan that died late keeps its
+    # existing classification — the precision guard transfers intact).
+    cfg, cfg_marker = _classify_config_input(out, ms)
+    if cfg:
+        _note_turn_tier(run, nid, report_path)
+        try: os.unlink(report_path)
+        except OSError: pass
+        return {"status": "failed",
+                "error": f"adopted child died with a provider/config input error (rc "
+                         f"unobservable — runner was respawned): the pinned provider/alias "
+                         f"is not defined on this seat; fix the node's provider pin or the "
+                         f"seat config, a re-run of the same graph dies identically. "
+                         f"Marker: {cfg_marker}",
+                "error_class": "config_input", "raw": (out or "")[-2000:], "ms": ms,
+                "final": final_reply, **evd}
     parsed, perr = extract_json(out)
     v_schema = strip_engine_disclosure(schema, (node or {}).get("substrate_substituted"))  # #116
     errs = validate(parsed, v_schema) if (parsed is not None and perr is None) else None
@@ -3102,19 +3124,15 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
             return {"status": "failed", "error": "child died with an empty log (no messages)",
                     "error_class": "early_death", "raw": "", "ms": ms, **sk, **evd}
         eclass, marker = _classify_rc_output(out)
-        hv = _harvest_death(out, harvest_schema)       # #4: rc!=0 with a valid fenced answer on stdout
-        if hv:
-            return {"status": "partial",
-                    "error": f"child exited rc={rc} (answer harvested from stdout)",
-                    "error_class": eclass, "ms": ms, "final": final_reply, **hv, **sk, **evd}
+        # est-jam8 (PR #162 deep review, wf162a): the config classifier runs
+        # BEFORE the #4 harvest. A fast deterministic config death that also
+        # prints a schema-valid fence is still a config typo — the harvest used
+        # to return partial/unknown first and the deterministic death vanished
+        # into the unknown bucket, which is exactly what est-tmuu forbids. The
+        # harvest is window-gated, not deleted: an OUTSIDE-the-window death with
+        # a valid fence still harvests (the pin's slow twin).
         cfg, cfg_marker = _classify_config_input(out, ms)
         if cfg:
-            # est-tmuu: deterministic provider/alias config death (the
-            # 'Unknown provider <alias>' rc!=0-in-~0.1s shape). The class is
-            # outside _RETRYABLE_CLASSES/_BOUNDED_RETRY_CLASSES, so neither
-            # ladder fires and _retries_left is NEVER decremented — this ONE
-            # attempt is the node's verdict (the #24 fatal_quota law applied to
-            # config typos). The error names the fix: the pin is the problem.
             return {"status": "failed",
                     "error": f"child exited rc={rc} in {ms} ms with a provider/config input "
                              f"error — the pinned provider/alias is not defined on this seat; "
@@ -3122,6 +3140,11 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
                              f"same graph dies identically. Marker: {cfg_marker}",
                     "error_class": "config_input", "raw": (out or "")[-2000:], "ms": ms,
                     "final": final_reply, **sk, **evd}
+        hv = _harvest_death(out, harvest_schema)       # #4: rc!=0 with a valid fenced answer on stdout
+        if hv:
+            return {"status": "partial",
+                    "error": f"child exited rc={rc} (answer harvested from stdout)",
+                    "error_class": eclass, "ms": ms, "final": final_reply, **hv, **sk, **evd}
         if eclass == "fatal_quota":
             # #24: name the model + record the horizon (advisory cache); the class
             # is outside _RETRYABLE_CLASSES/_BOUNDED_RETRY_CLASSES, so the ladder

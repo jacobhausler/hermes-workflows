@@ -107,6 +107,9 @@ if _FAKE_MODE == "cfgtypos":       # est-tmuu: the verified 'Unknown provider <a
           "'hermes model' for available providers, or run 'hermes doctor' to diagnose "
           "config issues. Falling back to auto provider detection.")
     print("Error: Unknown provider 'nope'")
+    if os.environ.get("FAKE_CFG_FENCED"):   # est-jam8: a schema-valid fence rides
+        # along with the config death — harvest must NOT launder it to partial/unknown.
+        print('```json\n{"diagnostic": "invalid provider pin"}\n```')
     if os.environ.get("FAKE_CFG_SLOW"):
         time.sleep(float(os.environ["FAKE_CFG_SLOW"]))
     sys.exit(2)
