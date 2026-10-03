@@ -127,6 +127,48 @@ if _FAKE_MODE == "untyped_report":   # tier self-report (0924): report exists bu
         with open(_rp, "w") as f:
             json.dump({"pid": os.getpid(), "exit_code": 2, "error": "boom", "reply": ""}, f)
     print("prose death without the typed key"); sys.exit(2)
+if _FAKE_MODE == "toolcall_text_541" and "TOOLCALL541" in q:
+    # est-2ek.1.541: the agent child whose FINAL REPLY is serialized tool-call markup
+    # ('<invoke name=...>'-shape rendered as text, turn_exit_reason unknown, exit 1).
+    # The markup is json-quoted so this file stays free of raw open-tag sequences
+    # (6st law). FAKE_RC selects the exit code (0 = the exit-0 shape, 1 = the bead);
+    # FAKE_TERN is the turn report's turn_exit_reason (bead: "unknown"). The dead
+    # attempt registers a state.db row with api_calls/tool_calls > 0 — the shape IS a
+    # turn that really called tools and rendered the call as its answer; that is also
+    # the positive tool-progress evidence the #5 bounded retry gate reads.
+    # FAKE_ATTEMPT_DIR: first spawn dies malformed, later spawns answer valid (the
+    # re-drive-success shape); FAKE_ALWAYS=1: every spawn dies malformed (budget pin).
+    cnt = 0
+    if os.environ.get("FAKE_ATTEMPT_DIR"):
+        os.makedirs(os.environ["FAKE_ATTEMPT_DIR"], exist_ok=True)
+        p = os.path.join(os.environ["FAKE_ATTEMPT_DIR"], "attempts")
+        cnt = int(open(p).read()) if os.path.exists(p) else 0
+        open(p, "w").write(str(cnt + 1))
+    if cnt == 0 or os.environ.get("FAKE_ALWAYS") == "1":
+        if "--continue" in args:   # dead attempt made real tool calls
+            import sqlite3
+            title = args[args.index("--continue") + 1]
+            c = sqlite3.connect(os.path.join(_FAKE_HOME, "state.db"))
+            c.execute("create table if not exists sessions (id text primary key, title text, model text, billing_provider text, input_tokens int, output_tokens int, "
+                      "cache_read_tokens int, reasoning_tokens int, api_call_count int, tool_call_count int, estimated_cost_usd real, "
+                      "last_activity_at real, last_activity_description text, ended_at real, started_at real)")
+            t = time.time()
+            c.execute("insert or replace into sessions values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                      ("f-" + title, title, "fake", "fake-provider", 100, 20, 0, 0, 2, 3, 0.0, t, "", t, t))
+            c.commit(); c.close()
+        reply = json.loads('"\\u003cinvoke name=\\"process_manage\\">\\n\\u003cparameter name=\\"action\\">poll\\u003c/parameter>\\n\\u003cparameter name=\\"session_id\\">lane-7\\u003c/parameter>\\n\\u003c/invoke>"')
+        rc = int(os.environ.get("FAKE_RC", "1"))
+        if rc != 0:
+            _rp = os.environ.get("HERMES_QUIET_TURN_REPORT_FILE")
+            if _rp:
+                with open(_rp, "w") as f:
+                    json.dump({"pid": os.getpid(), "exit_code": rc, "error": "",
+                               "reply": reply,
+                               "turn_exit_reason": os.environ.get("FAKE_TERN", "unknown")}, f)
+        print(reply)
+        sys.exit(rc)
+    print("```json\n" + json.dumps({"result": "redriven"}) + "\n```")
+    sys.exit(0)
 if _FAKE_MODE == "die_after_json" and "DIETEST" in q:   # #4: dies AFTER a valid fenced answer
     print("```json\n" + json.dumps({"result": "harvested"}) + "\n```")
     sys.exit(1)

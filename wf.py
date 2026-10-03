@@ -1020,7 +1020,13 @@ DEFAULT_RETRY_BUDGET = 6
 # below is documentary law — membership in _BOUNDED_RETRY_CLASSES is the gate:
 # provider_400, unresolved_model, graph_invalid, schema/no_json, cancelled,
 # spawn (3 real runs retried a permfail byte-identically 3x).
-_BOUNDED_RETRY_CLASSES = ("transport", "early_death", "cap_exhausted", "timeout")
+_BOUNDED_RETRY_CLASSES = ("transport", "early_death", "cap_exhausted", "timeout",
+                          # est-2ek.1.541: a malformed turn (final reply IS serialized
+                          # tool-call markup, turn_exit_reason unknown) by definition made
+                          # real tool calls — the bounded (tool-progress) ladder is the
+                          # right re-drive channel; never Q4 (zero-calls evidence is the
+                          # wrong proof here) and never beyond the ONE bounded re-drive.
+                          "malformed_turn")
 _BOUNDED_RETRY_BACKOFF = 5.0
 RESUME_LINE = "Do not redo finished work; continue from the state above."
 
@@ -1118,6 +1124,9 @@ ERROR_CLASSES = frozenset(("provider_400", "unresolved_model", "cap_exhausted",
                            # out of it (the B1-class pin only sees OBSERVED
                            # classes, so an unwalked path slipped through).
                            "forbidden_model", "precondition",
+                           # est-2ek.1.541: rc!=0 death whose reply IS serialized
+                           # tool-call markup rendered as text — typed, not generic unknown.
+                           "malformed_turn",
                            # #61: an attempt that exited while its own process group
                            # still held live backgrounded work — terminal, in BOTH ladders.
                            "left_live_descendants"))
@@ -3067,6 +3076,20 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
                              f"provider message below; amend the node to a live model instead "
                              f"of waiting. Marker: {marker}",
                     "error_class": "fatal_quota", "raw": (out or "")[-2000:], "ms": ms,
+                    "final": final_reply, **sk, **evd}
+        if eclass == "unknown" and _tool_call_as_text(final_reply or out or ""):
+            # est-2ek.1.541 malformed turn: the rc!=0 death whose reply IS serialized
+            # tool-call markup rendered as text — no marker line to pin, no fenced answer
+            # to harvest (the fenced-only #4 law above already ran and refused). This is
+            # NOT a generic unknown death: type it, carry the verbatim diagnostic, and let
+            # the bounded (tool-progress) ladder re-drive it exactly once — a turn that
+            # rendered its call as the answer made real tool calls by definition.
+            verdict = _verdict_lines(final_reply or out)
+            return {"status": "failed",
+                    "error": f"child exited rc={rc} with a malformed turn: reply is a "
+                             "serialized tool call rendered as text (tool-call-as-text; "
+                             f"typed malformed turn; not harvestable). Verdict: {verdict}",
+                    "error_class": "malformed_turn", "raw": (out or "")[-2000:], "ms": ms,
                     "final": final_reply, **sk, **evd}
         verdict = _verdict_lines(marker if marker else out)
         return {"status": "failed", "error": f"child exited rc={rc}: {verdict}",
