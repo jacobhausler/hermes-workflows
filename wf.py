@@ -800,12 +800,17 @@ def last_balanced_object(text):
     while i >= 0:
         try:
             cand, end = _DECODER.raw_decode(text, i)
-        except (ValueError, RecursionError):
+        except (ValueError, RecursionError, MemoryError):
             # est-jec0 (#122 B1): raw_decode raises RecursionError (a RuntimeError,
             # NOT a ValueError) on pathological nesting ~20KB deep — CI's own 3.12
-            # re-proved it. The pre-#111 parent scanner wrapped json.loads in
-            # `except Exception`; keep that containment: a candidate that cannot
-            # be decoded is simply skipped, it must never crash the node.
+            # re-proved it. est-px11 (#122 re-review): it can also raise
+            # MemoryError — a plain Exception, measured 4/4 escaping the tuple
+            # under an RLIMIT_AS parse-entry ceiling with a resident 1M-zero flat
+            # candidate + shallow trailing {"ok":true}, on 3.12 and 3.14, unmocked
+            # decoder (main returned {"ok": true} where head died). The pre-#111
+            # parent scanner wrapped json.loads in `except Exception`; keep that
+            # containment: a candidate that cannot be decoded is simply skipped,
+            # it must never crash the node.
             i = text.find("{", i + 1)      # malformed here: next candidate
             continue
         if isinstance(cand, dict):
