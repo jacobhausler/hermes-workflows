@@ -95,7 +95,11 @@ try:
                 "_visible_cards", "_LAUNCHED", "_HELD", "_HELD_TTL_SECONDS",
                 "_LAUNCH_LOCK", "_VISIBLE_CARD_RE", "_CARD_ATTR_RE"):
         check(f"symbol {sym} no longer exists on the door", not hasattr(door, sym))
-    check("no register_hook call remains in __init__.py", "register_hook" not in src)
+    # #157 re-armed exactly ONE hook (the card-enforcement last-resort shipper);
+    # the O1 law still holds for the deleted auto-card machine: no other hook.
+    check("exactly one register_hook call remains, the #157 card-enforcement hook",
+          src.count("register_hook") == 1
+          and 'register_hook("transform_llm_output"' in src)
 finally:
     door._spawn_runner = _orig_spawn
     shutil.rmtree(HOME, ignore_errors=True)
