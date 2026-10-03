@@ -50,7 +50,7 @@ python3 scripts/pr_tag_audit.py                   # release step: every `(open P
 ```
 
 Admission is strict: a suite run that **discovers zero test cases counts as a
-failure, never green** `(open PR #121)`. Every line must pass on your branch. If a
+failure, never green** `(shipped in v1.2.1)`. Every line must pass on your branch. If a
 test fails, run it on a clean `main` too — a failure that also fails on `main` is a
 baseline issue (say so in the PR; it blocks merge and needs its own fix item), a
 failure only on your branch is yours.

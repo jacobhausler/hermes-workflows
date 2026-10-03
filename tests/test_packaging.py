@@ -103,10 +103,27 @@ def main() -> None:
                   "scripts/pr_tag_audit.py" in packed_scripts)
             check("pack-list contract: ZIP scripts/ set equals the exact declared packed set",
                   packed_scripts == {"scripts/graph_check.py", "scripts/pack.py",
-                                      "scripts/pr_tag_audit.py", "scripts/suite.py"})
-            check("pack-list contract: every repo scripts/*.py is packed or declared source-only (no silent middle)",
-                  {p.name for p in (ROOT / "scripts").glob("*.py")} ==
-                  {Path(s).name for s in packed_scripts} | {"make_public.py", "lane_recover.py"})
+                                      "scripts/pr_tag_audit.py", "scripts/suite.py",
+                                      "scripts/graph_path_ban.py", "scripts/graph_regen.py"})
+            # wf165d: the no-silent-middle half only has a premise in a REPO
+            # checkout — the source-only scripts (make_public.py,
+            # lane_recover.py) never travel inside the ZIP, so from the
+            # unpacked root the equality is unsatisfiable by construction
+            # (the committee's repro: exit 1 at the unpacked root while CI
+            # is green). Premise is .git, NOT the source-only files
+            # themselves: an adversary who deletes make_public.py +
+            # lane_recover.py and smuggles a silent-middle script must not
+            # flip the check into a silent skip — inside a git clone it still
+            # runs and REDs. The ZIP-side equality above stays unconditional
+            # and still bites a smuggled extra script INTO the package.
+            if (ROOT / ".git").exists():
+                check("pack-list contract: every repo scripts/*.py is packed or declared source-only (no silent middle)",
+                      {p.name for p in (ROOT / "scripts").glob("*.py")} ==
+                      {Path(s).name for s in packed_scripts}
+                      | {"make_public.py", "lane_recover.py"})
+            else:
+                print("SKIP pack-list repo-side half: no .git — running from an "
+                      "unpacked ZIP/archive, where the premise does not exist")
             check("the test that executes the audit helper ships beside it",
                   root + "tests/test_pr_tag_audit.py" in members)
             unsafe = ("/.git/", "/home", "/workflows/", "/state.db", "/runner.log",

@@ -33,10 +33,10 @@ not re-paid.
 | **Route integrity** | A node that pins a `model` is fail-closed (`require_route`, on by default): a proven-dead pin refuses to launch rather than silently bill another model; with an owner-configured `confidence_substrate` ladder (#116) the substitution is engine-stamped and disclosed in the node's result contract — never silent |
 | **Process-tree honesty** | An exit-0 child is believed only when its whole process tree is dead; a backgrounded worker is typed, never mistaken for done, and a fenced answer over a live tree commits `partial` with proof |
 | **Compact status** | Mid-run `status`/`wait` return output *pointers* and per-node metrics (missing evidence reads unknown, never a false zero); `detail:"full"` opts into everything |
-| **Wedged-lock recovery** | A dead runner's lock is cleared by an audited escape hatch that proves the holder dead first and never deletes a live lock (open PR #47) |
+| **Wedged-lock recovery** | The runner is admitted by a kernel flock on `runner.lock` held for the process's whole life — a dead holder's lock is released by the kernel itself, the next spawn contends cleanly, and there is no stale lock to clear by hand |
 | **Desktop DAG view** | Live graph, fan-out stacks, timeline, and a `::workflow{id="…"}` inline card in any reply; RUNNING / THE REST agent-first panes (every row carries its originating agent), and a session strip under the composer showing this chat's runs (core ≥ v2026.7.30; older shells get the fallback slot) |
 | **Library** | `save` a proven graph (description + tags — flat or `facet:value`, e.g. `use_case:code-review`), `library` lists it richly and filters by tags (with a `tag_vocab` echo so agents reuse the live taxonomy), `run from:"<name>"` replays it; a hand-rolled graph the library missed goes to `submit` with a `why_not_library` receipt — quarantined for study, never auto-saved; `inbox kind:"submissions"` lists them |
-| **Composite graphs** | A graph-level `include` expands shelved library graphs into a run at launch — namespace-isolated ids, cycle/depth/size guards, model policy unions in and never relaxes (open PR #84) |
+| **Composite graphs** | A graph-level `include` expands shelved library graphs into a run at launch — namespace-isolated ids, cycle/depth/size guards, model policy unions in and never relaxes (shipped in v1.3.0) |
 | **Authoring skill** | Bundled `workflow` skill: grammar, operations, and **measured** per-shape budget presets (`recon`/`build`/`review`/`publish`) |
 
 <table><tr>
@@ -64,7 +64,6 @@ One tool, action-routed — the complete surface, with the flags that matter:
 | `library` | List shelved graphs richly (nodes, gates, fan-outs, description, tags, provenance), filterable by ALL-match tags; an empty filtered result says which tag starved. |
 | `validate` | Dry-run the door's validation pipeline (defaults fill, defect collection, model/route policy) with no ping and no writes — `{ok, errors:[{node,field,msg}], resolved_routes}`. |
 | `doctor_version` | Read-only version truth for THIS install: `{live_version, newest_packaged, source_commit, drift}` — plugin.yaml vs the `install.json` provenance `pack.py` stamps at build time; one read, no network. |
-| `release_lock` | *(open PR #47)* Release a wedged `runner.lock` after proving the holder dead (also `python3 wf.py release-lock <run_id>`). Refuses contested, gate-held, or alive cases; never unlinks a lock. |
 
 Plus a `/wf` slash command: bare `/wf` lists the library; `/wf <name> [note]`
 launches that graph with the note as its context seed.
@@ -106,9 +105,9 @@ results under `nodes/`, prompts and logs under `logs/`, gate answers under
 `gates/`, and a `summary.md`. Resume, `amend`, and the desktop all read the same
 shared state. There is no hidden control plane and no daemon: exactly one runner
 process per run, admitted by a kernel lock, spawned outside the caller's process
-tree. Run states (`running`, `held`, `interrupted`, `done`, `failed`, `stopped`,
-and `liveness-unknown` where a liveness probe cannot answer, open PR #47), owner
-wake semantics, silent-runner reaping, and recovery procedures:
+tree. Run states (`running`, `held`, `interrupted`, `done`, `failed`,
+`stopped`), owner wake semantics, silent-runner reaping, and recovery
+procedures:
 [references/operations.md](references/operations.md).
 
 ## Install

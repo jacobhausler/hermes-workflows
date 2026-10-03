@@ -24,6 +24,39 @@ Read-model / DX:
   behavior is byte-identical (no `resolved_via` field on a resolved-root read).
   Test: `tests/test_door_sibling_root_58.py` (5 red at base → all green at head;
   hermetic two-root sandbox, fake launcher).
+- #est-tmuu — deterministic provider/alias config deaths are never respawned. A
+  node pinning a provider the seat does not define made the CLI exit rc!=0 in
+  ~0.1s (`Unknown provider 'x'. Check 'hermes model' …`); the runner surfaced
+  that death as the transient classes and the Q4 ladder respawned the WHOLE
+  recovery sequence on a deterministic input error, landing
+  `transport_exhausted` with the budget burned (operator-verified report,
+  2026-10-02). The runner now types it `config_input`: a child that dies rc!=0
+  within ~1 s of spawn AND whose capture carries the config-error marker line
+  fails on the FIRST attempt — the class sits outside both retry ladders (the
+  #24 fatal_quota law), the respawn budget is never decremented, and the error
+  names the fix (the node's provider pin or the seat config). The window is the
+  precision guard: the same capture dying late keeps its existing
+  classification; `unknown model` stays `unresolved_model` territory. Pin:
+  `tests/test_config_input_tmuu.py` (fake mode `cfgtypos`).
+- Docs-surface guard hardening (PR #155 follow-up) — four adversary-confirmed
+  blind spots closed, test-first. The drift pin now executes the door and
+  compares ACTUAL `ACTIONS` dispatch keys against the README action table
+  (regex-scanning source stayed green while an unlisted callable lived in the
+  dispatch dict; mutation self-proofs 7a-7d run every pass). `pr_tag_audit.py`
+  gained the INVERSE assertion — an `(open PR #NN)` tag on a row whose action
+  is dispatched fails even while the PR is open — and missing `gh` now exits 2
+  with file:line diagnostics instead of an uncaught traceback. The audit helper
+  joins the pack list beside `graph_path_ban.py`/`graph_regen.py`
+  (`scripts/pack.py`), and `test_packaging.py` pins the
+  exact packed `scripts/` set plus a packed-or-declared-source-only contract,
+  so a helper can never again sit outside the ZIP while its test ships green.
+  Stale doc tags aged in the same commit (red-on-base rule): the #121 tags in
+  CONTRIBUTING.md + references/development.md → `(shipped in v1.2.1)`, the #84
+  tags in README + references/portable.md → `(shipped in v1.3.0)`, and the
+  three #47 tag sites in README rewritten to current truth — #47 closed
+  unmerged, so the `release_lock` row and the `liveness-unknown` run state are
+  removed and wedged-lock recovery describes the shipped kernel-flock
+  admission. `pr_tag_audit.py --repo jacobhausler/hermes-workflows` exits 0.
 
 ## 1.3.0 — 2026-10-05
 

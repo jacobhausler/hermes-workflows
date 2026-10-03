@@ -68,6 +68,24 @@ def make_tree(tmp: Path, readme_mut=None) -> Path:
     return tree
 
 
+# The fixture's own doc-only tagged row: `release_lock` is NOT dispatched by the
+# door, so this is the sanctioned (open PR #NN) shape. The scenarios below that
+# need a tag to audit inject THIS instead of borrowing whatever the live docs
+# happen to carry — a released tag ages to nothing and would go the suite blind
+# (observed at c09c2fc: after the #47 ageing, B1 saw exit 0 instead of the
+# no-gh exit 2 and C0 crashed on an empty tag set).
+DOC_ONLY_TAG_ROW = ("| `release_lock` | *(open PR #47)* Release a wedged `runner.lock` after "
+                    "proving the holder dead. Refuses contested, gate-held, or alive cases; "
+                    "never unlinks a lock. |")
+
+
+def add_doc_only_tag(text: str) -> str:
+    """Insert DOC_ONLY_TAG_ROW as the last row of the tool action table."""
+    needle = "\n\nPlus a `/wf`"
+    assert needle in text, "README lost the end-of-table anchor the fixture injects at"
+    return text.replace(needle, "\n" + DOC_ONLY_TAG_ROW + needle, 1)
+
+
 def make_fake_gh(tmp: Path, states: dict) -> Path:
     """A deterministic stand-in for gh: answers `pr view N --repo ... --json ...`
     from a {number: OPEN|MERGED|CLOSED} map; unknown number -> exit 3."""
@@ -124,8 +142,10 @@ with tempfile.TemporaryDirectory(prefix=".tmp-prtag-", dir=ROOT / "tests") as td
     check("A4 open PR state cannot launder a shipped-row tag", r.returncode == 1,
           f"exit={r.returncode} out={r.stdout!r} err={r.stderr!r}")
 
-    # ---- B1/B2: gh genuinely absent, unmutated tree -> exit 2 + named diagnostics
-    tree = make_tree(tdp / "b")
+    # ---- B1/B2: gh genuinely absent, fixture-tagged tree -> exit 2 + named diagnostics
+    # (the tag comes from the fixture, not the live docs — an aged tag set would
+    # turn exit 2 into a legitimate exit 0 and leave B1/B2 nothing to pin)
+    tree = make_tree(tdp / "b", add_doc_only_tag)
     r = run_audit(tree, NO_GH)
     check("B1 missing gh exits 2 (docstring promise), not 1", r.returncode == 2,
           f"exit={r.returncode} err_tail={r.stderr[-160:]!r}")
@@ -153,9 +173,11 @@ with tempfile.TemporaryDirectory(prefix=".tmp-prtag-", dir=ROOT / "tests") as td
           and re.search(r"#\d+", diag) is not None,
           f"expected={expected} out={r.stdout[:300]!r} err={r.stderr[:300]!r}")
 
-    # ---- C: state machine with fake gh on the UNMUTATED tree
+    # ---- C: state machine with fake gh on the FIXTURE-TAGGED tree
+    # (the tree carries the fixture's doc-only #47 row, not whatever the live
+    # docs age to over time)
     states_all_open = {47: "OPEN", 84: "OPEN", 121: "OPEN"}
-    tree = make_tree(tdp / "c")
+    tree = make_tree(tdp / "c", add_doc_only_tag)
     bindir = make_fake_gh(tdp / "c", states_all_open)
     r = run_audit(tree, {**NO_GH, "PATH": str(bindir)})
     check("C1 every tag pointing at an OPEN PR exits 0", r.returncode == 0,
@@ -183,8 +205,8 @@ with tempfile.TemporaryDirectory(prefix=".tmp-prtag-", dir=ROOT / "tests") as td
           r.returncode == 1 and re.search(r"closed", r.stdout, re.I) is not None,
           f"exit={r.returncode} out={r.stdout!r}")
 
-    # ---- D: the doc-only sanctioned shape stays green — release_lock row + open #47
-    tree = make_tree(tdp / "d")
+    # ---- D: the doc-only sanctioned shape stays green — fixture release_lock row + open #47
+    tree = make_tree(tdp / "d", add_doc_only_tag)
     bindir = make_fake_gh(tdp / "d", states_all_open)
     r = run_audit(tree, {**NO_GH, "PATH": str(bindir)})
     check("D unshipped (doc-only) tagged rows are the sanctioned green shape",

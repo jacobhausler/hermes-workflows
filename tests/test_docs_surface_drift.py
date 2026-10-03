@@ -69,25 +69,35 @@ TAG_RE = re.compile(r"open PRs?\s+#\d+")
 
 
 def table_rows(readme_text: str) -> dict:
-    """action -> full row line, from the rows under the tool-table anchor."""
+    """action -> full row line, from the rows under the tool-table anchor.
+
+    wf165c/B3: a duplicate row for the same action used to SILENTLY OVERWRITE —
+    a tagged shipped row followed by an untagged copy read as untagged and the
+    inverse check went blind. Occurrences are counted; check 6b holds the line.
+    """
     section = readme_text.split(TABLE_ANCHOR, 1)
     assert len(section) == 2, f"README lost the {TABLE_ANCHOR!r} section the action table lives in"
     table = section[1].split(TABLE_END, 1)[0]
     rows = {}
+    seen: dict = {}
     for line in table.splitlines():
         m = re.match(r"^\|\s*`([a-z_]+)`\s*\|", line.strip())
         if m:
-            rows[m.group(1)] = line.strip()
+            action = m.group(1)
+            seen[action] = seen.get(action, 0) + 1
+            rows[action] = line.strip()
+    rows["__duplicates__"] = sorted(a for a, n in seen.items() if n > 1)
     assert rows, "README action table parsed zero rows — did the table shape change? Fix this test WITH the README."
     return rows
 
 
 def compare(code_actions: set, rows: dict) -> dict:
     """Pure bidirectional comparison — the self-proof mutates inputs, never the tree."""
+    real = {a: r for a, r in rows.items() if a != "__duplicates__"}
     return {
-        "missing": sorted(code_actions - set(rows)),
-        "extra_untagged": sorted(a for a in set(rows) - code_actions if not TAG_RE.search(rows[a])),
-        "shipped_tagged": sorted(a for a in code_actions & set(rows) if TAG_RE.search(rows[a])),
+        "missing": sorted(code_actions - set(real)),
+        "extra_untagged": sorted(a for a in set(real) - code_actions if not TAG_RE.search(real[a])),
+        "shipped_tagged": sorted(a for a in code_actions & set(real) if TAG_RE.search(real[a])),
     }
 
 
@@ -127,6 +137,13 @@ check("6 no shipped action carries an open-PR tag (inverse assertion)",
       not res["shipped_tagged"],
       f"shipped action row(s) tagged (open PR #NN) while dispatched: {res['shipped_tagged']} "
       f"— remove the tag or un-shim the code")
+
+# ---- 6b: duplicate rows for one action are a drift-hiding hazard (wf165c/B3):
+# a tagged shipped row followed by an untagged copy used to overwrite silently
+# and blind checks 4-6. One row per action, full stop.
+check("6b no action appears twice in the README action table",
+      not rows["__duplicates__"],
+      f"duplicate row(s) for action(s): {rows['__duplicates__']} — last-write-wins hid drift")
 
 
 # ---- 7: mutation self-proof — every direction bites, asserted every run.
@@ -180,6 +197,23 @@ with tempfile.TemporaryDirectory(prefix=".tmp-table-mut-") as td:
     stripped = dict(synth, **{doc_key: _untagged_row(good[doc_key])})
     check("7d untagged doc-only row goes RED naming it",
           compare(code_actions, stripped)["extra_untagged"] == [doc_key], doc_key)
+    # 7e: the wf165c/B3 attack, at the REAL parser — replay the README with a
+    # TAGGED copy of one shipped action's row injected immediately BEFORE the
+    # real (untagged) row: the exact pair the old last-write-wins read as a
+    # clean untagged shipped row, blinding checks 4-6. table_rows now counts
+    # occurrences, so the duplicate itself is named RED whatever the tags say.
+    dupe = sorted(code_actions)[0]
+    lines = readme.splitlines()
+    for i, ln in enumerate(lines):
+        if re.match(r"^\|\s*`" + re.escape(dupe) + r"`\s*\|", ln.strip()):
+            injected = lines[:i] + [ln.strip() + " (open PR #0)", ln.strip()] + lines[i + 1 :]
+            break
+    else:
+        injected = None
+    reparsed = table_rows("\n".join(injected)) if injected is not None else {}
+    check("7e duplicate-row pair (tagged then untagged) REDs the real parse",
+          injected is not None and reparsed.get("__duplicates__") == [dupe],
+          f"replay-injected duplicate row for {dupe!r} not named by table_rows")
 
 print(f"TOTAL {count_pass} PASS {count_fail} FAIL")
 sys.exit(0 if ok else 1)
