@@ -52,7 +52,10 @@ def _inline_graph_size_error(graph):
 GRAPH_KEYS = {"name", "nodes", "description", "defaults", "model_policy",
               "provenance",   # 1.1 (RATIFY F5): opt-in library provenance block, door-written
               "grammar",      # #32: dialect tag of a shared file ("wf/1"; absent = wf/1)
-              "concurrency", "item_concurrency"}  # #100: optional run-level limits
+              "concurrency", "item_concurrency",  # #100: optional run-level limits
+              "include"}      # composite graphs: shelved-DAG expansion annotation; STRIPPED on
+                              # expand, so a committed graph.json never carries it (only the
+                              # library author form does)
 
 def _model_names_valid(names):
     return isinstance(names, list) and all(isinstance(n, str) and n.strip() for n in names)
@@ -129,47 +132,15 @@ def _input_graph(args, *, run_id=False, library=False):
     return None, None
 
 def _validation_error(graph):
-    """Return graph-level and node-level defects together, before any write/spawn."""
-    errs = []
-    for key in sorted(set(graph) - GRAPH_KEYS):
-        errs.append({"node": None, "field": key,
-                     "msg": f"unknown graph key; allowed: {sorted(GRAPH_KEYS)}"})
-    # #32: a file may state its dialect; absent = wf/1, unknown = refused with the
-    # supported list (fail-closed: a newer dialect must never be misrun as wf/1).
-    errs.extend(_common.grammar_errors(graph))
-    for key in ("concurrency", "item_concurrency"):
-        if key in graph and (type(graph[key]) is not int or graph[key] <= 0):
-            errs.append({"node": None, "field": key,
-                         "msg": f"{key} must be a positive integer"})
-    if "defaults" in graph:
-        # ONE truth: the same per-key rules a node key gets; apply_graph_defaults
-        # bakes this block into the agent defs before graph.json is written.
-        errs.extend(_common._defaults_errors(graph["defaults"]))
-    policy = graph.get("model_policy", {})
-    if not isinstance(policy, dict):
-        errs.append({"node": None, "field": "model_policy", "msg": "model_policy must be an object"})
-    else:
-        for key in sorted(set(policy) - {"require_model", "forbidden_models"}):
-            errs.append({"node": None, "field": f"model_policy.{key}", "msg": "unknown policy key"})
-        if "require_model" in policy and not isinstance(policy["require_model"], bool):
-            errs.append({"node": None, "field": "model_policy.require_model", "msg": "require_model must be boolean"})
-        if "forbidden_models" in policy and not _model_names_valid(policy["forbidden_models"]):
-            errs.append({"node": None, "field": "model_policy.forbidden_models",
-                         "msg": "forbidden_models must be a list of non-empty strings"})
-    if not _model_names_valid(_common.seat_forbidden_models()):
-        errs.append({"node": None, "field": "model.workflows_forbidden_models",
-                     "msg": "seat forbidden model floor must be a list of non-empty strings"})
-    for key in ("name", "description"):
-        if key in graph and (not isinstance(graph[key], str) or not graph[key].strip()):
-            errs.append({"node": None, "field": key, "msg": f"{key} must be a non-empty string"})
-    if "provenance" in graph:
-        prov = graph["provenance"]
-        if not isinstance(prov, dict):
-            errs.append({"node": None, "field": "provenance", "msg": "provenance must be an object"})
-        else:
-            for key in sorted(set(prov) - _common.PROVENANCE_KEYS):
-                errs.append({"node": None, "field": f"provenance.{key}",
-                             "msg": "unknown key; allowed: " + json.dumps(sorted(_common.PROVENANCE_KEYS))})
+    """Return graph-level and node-level defects together, before any write/spawn.
+
+    PR#84 review F-2: the structural (graph-level) half is delegated to
+    wfcommon.structural_graph_errors — the SAME rules the include door measures
+    every expanded shelf with — so submitted graphs and included graphs can
+    never diverge in strictness again. This side keeps the door-specific node
+    normalization (author-forged route_verified stripping) and composes it with
+    the shared node-level validator."""
+    errs = list(_common.structural_graph_errors(graph))
     nodes = graph.get("nodes")
     # The shared validator assumes hashable ids and iterable dependency lists.
     # Normalize only those invalid shapes in a copy, collecting their errors while
@@ -616,7 +587,13 @@ WORKFLOW_PARAMS = {
             "model aliases and literal IDs are preserved (tiers resolve explicitly, and a matching provider/model prefix is removed for the CLI). Run/amend responses include requested/resolved provider/model routes. Gate node: {id, type:'gate', after, question, options, context, when (bounded expr: out.<node>.<dotted.path> with == != > >= < <=, and/or/not, parens; "
             "malformed when is rejected at run/amend validation and holds the gate at fire \u2014 never a silent skip), wait:{wait_s, until_argv:[fixed argv, no shell], every_s (default 60), timeout_s (default 3600)} (machine-answered gate: parks the run at zero tokens \u2014 wait_s alone = timer; until_argv re-runs until exit 0; timeout \u2192 gate fails; its last stdout/stderr tail is the gate's output, "
             "usable via inputs). A human release pre-empts a park), on_skip:'pass'|'prune' (with when: prune commits the gate `skipped` and every node whose deps are ALL skipped is skipped too \u2014 terminal, not a failure; a join with one live dep runs; default pass = the arm still runs)}. Echo node: {id, type:'echo', after, "
-            "output} \u2014 commits its `output` verbatim as the node result with zero tokens and no child spawn; downstream nodes consume it via after/inputs like any done node. Any key outside these closed sets is rejected at run/amend with errors:[{node, field, msg}] for EVERY defect."
+            "output} — commits its `output` verbatim as the node result with zero tokens and no child spawn; downstream nodes consume it via after/inputs like any done node. Composite graphs: a top-level `include:[{as, use, seeds?, exports?}]` names library graphs "
+            "to expand into this graph at materialize time (never a node type): `as` is the alias (alnum start, [A-Za-z0-9_], no hyphen or dot, <= 24 chars, unique), `use` the library name, `seeds` a closed map {KEY: non-empty string} that renders {run.KEY} inside the "
+            "included subtree ONLY, `exports` an optional {inner_id: public_name} map. Included nodes land namespaced as `alias__<id>`; parent refs must name an exported public name or a literal alias__id (a bare inner id is refused); a present-but-malformed "
+            "include (null, object, empty list) is refused; an included graph's model_policy.forbidden_models unions into the parent (noted in include_notes); the committed graph.json is "
+            "the EXPANDED, include-STRIPPED truth (amend edits the expanded form; save shelves the author form with the include key — save(run_id) of a composite run refuses, save the author graph inline). Every guard refusal — unknown library entry, include cycle, alias/id collision, unbound seed, oversized merge — returns the same "
+            "errors:[{node:'include:<alias>', field, msg}] envelope before any write or spawn; non-fatal resolver warnings (e.g. a shared fixed scratch path) echo as include_notes on run/status and run.json records provenance `includes:[{alias, name, source_digest}]`. "
+            "Any key outside these closed sets is rejected at run/amend with errors:[{node, field, msg}] for EVERY defect."
             ),
         },
         "answer": {"type": "string", "description": "release: the human's answer text (from clarify)."},
@@ -1497,6 +1474,107 @@ def _lib_rel_name(p):
     `library` both answer to)."""
     return (str(p.relative_to(library_root()))[:-5] if p.parent == library_root() / _GENERAL_PREFIX
             else p.stem)
+def _library_reader():
+    """The include resolver's library reader: a closure over _lib_read — the SAME
+    resolver `from=<name>` uses (resolved root first, legacy launch root second).
+    Returns the parsed graph dict, or None when the entry does not exist / does not
+    parse (the resolver turns None into its named `unknown library entry` refusal)."""
+    def read(name):
+        try:
+            p = _lib_read(name)
+        except ValueError:
+            return None          # invalid library name -> resolver's named refusal
+        return jload(p) if p.exists() else None
+    return read
+
+def _include_error_from_valueerror(e):
+    """A resolver ValueError rides the existing door error envelope (the
+    _validation_error shape, __init__.py's errors[{node,field,msg}] + error head).
+    The alias is extracted from the resolver's `include '<alias>': ...` wording so
+    the row names `include:<alias>` as its node; a bare message still lands in one
+    named row rather than an untyped crash."""
+    msg = str(e)
+    node = "include:"
+    if msg.startswith("include '") and "':" in msg[9:]:
+        node = "include:" + msg[9:msg.index("':")]
+    return {"error": f"graph invalid: node {node}: {msg}",
+            "errors": [{"node": node, "field": "include", "msg": msg}]}
+
+def _unbound_include_refs(graph, provenance):
+    """Fail-closed check for composite runs (live composite-run receipt, 2026-09-30): after include
+    seeds and run_context binding, NO {run.KEY} may survive inside an included
+    subtree. The check is alias-scoped — the subtree's refs come from shelved
+    bytes the parent author never sees — while parent-authored nodes keep the
+    plain-graph behavior (seed-less literal spawns are their documented
+    leniency). Returns an error envelope naming alias, node, and key.
+
+    PR#84 review F-3: the text surface is the SHARED _include_text_fields
+    traversal (goal/context/question/profile, fan-out goal + item goals, AND an
+    echo node's string `output`), not a private field list here. The private
+    list omitted echo output — the one surface the runner commits VERBATIM — so
+    an included echo holding `verdict={run.MISSING}` survived a closed seeds
+    map and landed as literal placeholder text in a DONE run, consumable
+    downstream as a verdict. One traversal means run/amend/binding/scratch-notes
+    can never drift apart again."""
+    aliases = [f"{p['alias']}__" for p in provenance]
+    for node in graph["nodes"]:
+        nid = node.get("id", "")
+        if not any(nid.startswith(a) for a in aliases):
+            continue
+        for text in _common._include_texts(node):
+            m = _RUN_REF.search(text)
+            if m:
+                return {"error": (
+                    f"include seed contract unbound: node {nid!r} still references "
+                    f"{{run.{m.group(1)}}} after include seeds and run_context binding — "
+                    "supply it in the include `seeds` map or the run_context; "
+                    "refused before any write or spawn")}
+    return None
+
+
+def _expand_includes_at_door(graph):
+    """The single door choke point for composite graphs (design: expand BEFORE
+    _validation_error, apply_graph_defaults and _bind_run_context, on run/amend/save).
+    Returns (graph_out, notes, provenance, bad_response):
+      - a graph WITHOUT an `include` key passes through byte-identical with empty
+        notes/provenance and no response (no-op: an amended already-expanded run
+        amends the expanded form, which carries no include key);
+      - a resolver ValueError -> (None, [], None, envelope) — caller returns it
+        verbatim before any write/spawn;
+      - success -> (expanded include-STRIPPED graph, notes[], provenance[], None).
+    Provenance is computed from the AUTHOR form (strip-on-expand means the expanded
+    graph honestly has nothing to report), and a provenance-pass failure is the
+    same named-envelope refusal as an expansion failure. Expansion and provenance
+    are TWO passes over the shelf — a memoized reader makes them one: every library
+    name is read ONCE per call, so a shelf rewritten between the two passes can
+    never stamp a source_digest that differs from the bytes actually expanded
+    (digest and graph must come from ONE view of the library, or the provenance
+    lie says so in every later audit)."""
+    if not isinstance(graph, dict) or "include" not in graph:
+        return graph, [], [], None
+    _memo = {}
+    base_reader = _library_reader()
+    def reader(name):
+        # dict-valued memo: the key's presence marks the read; None is a cached
+        # absence (the resolver's unknown-entry refusal), not a cache miss.
+        if name not in _memo:
+            data = base_reader(name)
+            # #50: a shelved file is bare graph or the {meta, graph} envelope —
+            # unwrap to the graph here, the same normalizer `from=<name>` uses, so
+            # the resolver's full standalone validation measures THE GRAPH, not
+            # the envelope wrapper (PR#84 review F-2 made the shelf check strict
+            # enough to refuse an envelope's unknown `meta`/`graph` keys).
+            if isinstance(data, dict) and isinstance(data.get("graph"), dict) \
+                    and not isinstance(data.get("nodes"), list):
+                data = data["graph"]
+            _memo[name] = data
+        return _memo[name]
+    try:
+        expanded, notes = _common.expand_includes(graph, reader)
+        provenance = _common.include_provenance(graph, reader)
+    except ValueError as e:
+        return None, [], None, _include_error_from_valueerror(e)
+    return expanded, notes, provenance, None
 
 def act_save(args):
     """Shelve a graph under a name: from an existing run (`run_id`) or an inline `graph`.
@@ -1509,9 +1587,32 @@ def act_save(args):
         return bad
     if graph is None and args.get("run_id"):
         graph = jload(run_dir(args["run_id"]) / "graph.json")
+        # A composite run's graph.json is the EXPANDED, include-stripped truth —
+        # shelving it would freeze one expansion of the shelf and break the
+        # author-form contract (a shelved composite must re-expand at each run so
+        # shelf fixes propagate). The author form lives in amends history at best,
+        # not in a shape save can read back losslessly: refuse and redirect.
+        _run_meta = jload(run_dir(args["run_id"]) / "run.json", {}) or {}
+        if _run_meta.get("includes"):
+            return {"error": f"run {args['run_id']} was a composite (include-expanded); "
+                             "its graph.json is the expanded form and shelving it would "
+                             "freeze the shelf. Save the AUTHOR graph instead: "
+                             "save(graph=...) or save(graph_path=...) with the graph's "
+                             "`include` annotation intact"}
     if graph is None:
         return {"error": "save needs graph, graph_path or run_id of an existing run"}
-    bad = _validation_error(graph)
+    # Composite graphs: a shelved composite keeps the AUTHOR form (include key on
+    # disk) so the shelf tracks shelf updates — resolution stays at run time. The
+    # resolver still runs ONCE here, purely to validate guards (unknown use,
+    # cycles, collisions, standalone validity) before anything is written. A
+    # graph without an include key passes the choke point through byte-identical.
+    _expanded, _include_notes, _includes, bad = _expand_includes_at_door(graph)
+    if bad:
+        return bad
+    # Node-level truth is the EXPANDED graph (a composite author form's `alias__id`
+    # refs exist only post-expansion; the resolver itself has already guarded the
+    # include block's structure). The WRITE below stays the AUTHOR form.
+    bad = _validation_error(_expanded)
     if bad:
         return bad
     try:
@@ -2137,6 +2238,13 @@ def act_run(args):
         lib_name = _lib_rel_name(_lib_path(args["from"]))   # #50: general/ names keep their prefix
     if graph is None:
         return {"error": "run needs graph, graph_path or from=<library name>"}
+    # Composite graphs: expand `include` BEFORE every other gate so validation,
+    # defaults baking and {run.KEY} binding all see the flat namespaced node list
+    # (design: the runner/read model/desktop never learn includes exist).
+    graph, _include_notes, _includes, bad = _expand_includes_at_door(graph)
+    if bad:
+        return bad
+    assert graph is not None   # bad None <=> expansion succeeded (same law as `assert models`)
     bad = _validation_error(graph) or _team_args_error(args)
     if bad:
         return bad
@@ -2158,6 +2266,16 @@ def act_run(args):
             graph = _bind_run_context(graph, args["run_context"])
         except ValueError as e:
             return {"error": str(e)}
+    if _includes:
+        # Composite runs are fail-closed on unbound refs (live composite-run receipt,
+        # 2026-09-30): a shelved sub-graph's {run.KEY} contract is invisible to a
+        # parent author, so the plain-graph leniency (literal placeholder spawns)
+        # silently seats a placeholder verdict when run_context is absent or a
+        # seed value missed a key. Every {run.*} surviving include seeds +
+        # run_context binding is a refusal before any write/spawn.
+        bad = _unbound_include_refs(graph, _includes)
+        if bad:
+            return bad
     # 1.1 (RATIFY F2): profile validation runs on the RENDERED graph ({run.KEY} resolved).
     bad = _profile_error(graph)
     if bad:
@@ -2192,9 +2310,12 @@ def act_run(args):
     # run; return their verdict WITHOUT touching the lane registry, creating a run
     # dir, or spawning a runner.
     if args.get("dry_run"):
-        return {"ok": True, "dry_run": True, "models": models, "routes": routes,
-                "hint": "nothing written — re-run without dry_run to launch"
-                        + _liveness_hint_suffix(_liveness_notes)}
+        out = {"ok": True, "dry_run": True, "models": models, "routes": routes,
+               "hint": "nothing written — re-run without dry_run to launch"
+                       + _liveness_hint_suffix(_liveness_notes)}
+        if _include_notes:
+            out["include_notes"] = _include_notes
+        return out
     key = args.get("lane_key")
     if key is not None:
         path, lock_path = _lane_paths(key)
@@ -2216,12 +2337,14 @@ def act_run(args):
                             "lifecycle_notice": _lifecycle_notice(incumbent["run_id"]),
                             "hint": f"wait run_id={incumbent['run_id']} resumes it"}
             return _create_run(args, graph, lib_name, models, routes, _liveness_notes, path,
+                               includes=_includes, include_notes=_include_notes,
                                concurrency_meta=concurrency_meta)
     return _create_run(args, graph, lib_name, models, routes, _liveness_notes,
+                       includes=_includes, include_notes=_include_notes,
                        concurrency_meta=concurrency_meta)
 
 def _create_run(args, graph, lib_name, models, routes, _liveness_notes, lane_path=None,
-                *, concurrency_meta=None):
+                *, concurrency_meta=None, includes=None, include_notes=None):
     """Under the lane flock: complete run dir, atomic registry entry, then spawn."""
     name = graph["name"]
     base = time.strftime("%Y%m%d-%H%M%S") + "-" + "".join(
@@ -2251,6 +2374,13 @@ def _create_run(args, graph, lib_name, models, routes, _liveness_notes, lane_pat
     if concurrency_meta:
         meta.update(concurrency_meta)
     meta.update(_identity_stamps(args, graph, lib_name))   # 1.1: only derivable keys land
+    # Composite runs record which shelf bytes they expanded from (author-form
+    # provenance) and any non-fatal resolver notes (scratch collisions). Empty =
+    # key omitted: a plain run keeps the exact pre-include run.json key set.
+    if includes:
+        meta["includes"] = includes
+    if include_notes:
+        meta["include_notes"] = include_notes
     (r / "run.json").write_text(json.dumps(meta))
     # AUTHORITY LAW (owner ruling, PR#97 review): every owner-facing automatic wake
     # is RUNNER-AUTHORED protocol text; graph-authored prose (gate questions etc.)
@@ -2271,7 +2401,7 @@ def _create_run(args, graph, lib_name, models, routes, _liveness_notes, lane_pat
         finally:
             tmp.unlink(missing_ok=True)
     _spawn_runner(r)
-    return {"run_id": rid, "models": models, "routes": routes, "hint":
+    out = {"run_id": rid, "models": models, "routes": routes, "hint":
             # Copy-exact inducement (papercut #70): the hint IS the paste line —
             # no paraphrase, no fallback. The card is agent-authored by ruling.
             # The liveness suffix rides BEHIND the paste line (prefix stays copy-exact).
@@ -2283,6 +2413,9 @@ def _create_run(args, graph, lib_name, models, routes, _liveness_notes, lane_pat
             ' (a code-blocked directive renders as dead text, not a card)'
             + _liveness_hint_suffix(_liveness_notes),
             "card": _card(rid), "lifecycle_notice": _lifecycle_notice(rid)}
+    if include_notes:
+        out["include_notes"] = include_notes   # scratch-collision warnings ride the launch
+    return out
 
 def _steer_event(r, ev, **kw):
     """#17: steer is only real if it lands in events.jsonl — the 45 real steers
@@ -2334,6 +2467,11 @@ def act_status(args):
            # O1: the card to paste into the report rides on EVERY status (and via
            # act_wait, every wait) — the inducement never depends on the agent recalling it.
            "card": _card(st["run_id"])}
+    # Composite runs surface their resolver notes (scratch-collision warnings) on
+    # every status read, read straight from the run.json the door stamped.
+    _inotes = jload(r / "run.json", {}) or {}
+    if _inotes.get("include_notes"):
+        out["include_notes"] = _inotes["include_notes"]
     # Tier self-report (2026-09-24): a failed child's core -Q turn report carried
     # its typed verdict key ("typed") or not ("untyped"); absent = never noted.
     tier_rec = jload(r / "turn_report.tier")
@@ -2666,6 +2804,21 @@ def act_amend(args):
         return bad
     if new is None:
         return {"error": "amend needs full replacement graph or graph_path"}
+    # An amend of an include-expanded run passes the EXPANDED graph (no `include`
+    # key — strip-on-expand), so this is the identity no-op; a replacement graph
+    # that DOES carry includes is a fresh author form and expands before validation
+    # exactly like run. On-disk graph.json stays the expanded truth either way.
+    new, _include_notes, _includes, bad = _expand_includes_at_door(new)
+    if bad:
+        return bad
+    assert new is not None
+    if _includes:
+        # amend never re-binds run_context, so an author-form include graph under
+        # amend is ALWAYS unbound — same fail-closed law as run, scoped to the
+        # included subtree.
+        bad = _unbound_include_refs(new, _includes)
+        if bad:
+            return bad
     bad = _validation_error(new) or _profile_error(new)
     if bad:
         return bad
@@ -2713,7 +2866,22 @@ def act_amend(args):
     tmp.write_text(json.dumps(new, ensure_ascii=False, indent=2))
     os.replace(tmp, r / "graph.json")
     meta = jload(r / "run.json", {}) or {}
-    if meta.get("name") != new["name"]:
+    # An author-form amend of a composite run restamps run.json's include truth the
+    # same way act_run writes it: the notes/provenance describing THIS graph, not
+    # the previous one. SET-OR-REMOVE: fresh author-form provenance replaces the
+    # notes even when the new graph produces NONE (PR#84 review F-5: replacing a
+    # warning-bearing include with a clean one succeeded while run.json/status
+    # kept warning about the old graph's fixed scratch path — a stale note list
+    # describes a graph the run no longer carries). An expanded-form amend yields
+    # empty lists here, so the keys are left exactly as they stand (the
+    # intentional no-op: a plain run never grows them).
+    if _includes:
+        meta["includes"] = _includes
+        if _include_notes:
+            meta["include_notes"] = _include_notes
+        else:
+            meta.pop("include_notes", None)
+    if meta.get("name") != new["name"] or _includes or _include_notes:
         meta["name"] = new["name"]
         mtmp = r / f"run.json.{os.getpid()}.tmp"
         mtmp.write_text(json.dumps(meta, ensure_ascii=False))

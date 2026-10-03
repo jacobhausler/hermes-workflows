@@ -35,6 +35,100 @@
   no-config EMPTY-diff gate); `require_route: false` stays a pure opt-out and
   an explicit live pin always beats the config. Rides the existing #25
   route-hold path (R6), no parallel gate.
+- door: composite graphs — a top-level `include:[{as, use, seeds?, exports?}]` annotation
+  expands shelved library DAGs into the parent graph at MATERIALIZE time
+  (`wfcommon.expand_includes` core + door wiring; design 2026-09-30). Composition happens
+  before validation, before `defaults` baking and before `{run.KEY}` binding on run,
+  amend and save: the runner, read model, gates and desktop never learn includes
+  exist, so every load-bearing invariant holds by construction (efp replay-skip,
+  `on_skip:prune` priceability, closed-set node validator — zero new node kinds —
+  and static arm-drawing). Deterministic `alias__<inner-id>` namespacing rewrites
+  all five id-ref surfaces in one pass (`after`, `inputs` heads, `requires` keys,
+  `fanout.items_from` head + its `after` entry in lockstep, `when` `out.<id>.`
+  paths whose heads validate never existence-checks); seeds are a closed map that
+  renders `{run.KEY}` inside the included subtree only; the parent reaches an
+  include only through an exported public name or a literal `alias__id` — a bare
+  inner id is refused. Every guard (unknown library entry, standalone-invalid
+  child, alias/id collision, cross-include cycle, depth-4 cap, merged node/byte
+  caps, unbound seed, dot/overflow id) refuses with the existing
+  `errors:[{node:'include:<alias>',field,msg}]` envelope before any write or spawn;
+  non-fatal resolver warnings (shared fixed scratch paths — detect-and-warn, never
+  rewrite) echo as `include_notes` on run/status and land in run.json.
+  Strip-on-expand is the storage contract: the committed `graph.json` is the
+  expanded, include-stripped truth (amend edits the expanded form; amending an
+  already-expanded run is an identity no-op), while library `save` keeps the
+  AUTHOR form so a shelved composite tracks shelf updates — resolution stays at
+  run time — and save runs the resolver once purely to validate guards.
+  `run.json` gains `includes:[{alias,name,source_digest}]` provenance (empty
+  omitted; a plain run's key set is byte-unchanged, golden-solo stays an empty
+  diff). `GRAPH_KEYS` admits `include` (grammar/provenance precedent); the
+  WORKFLOW_PARAMS graph description documents the surface.
+  Hardening pass (blind-review findings, 2026-09-30): an included graph's
+  `model_policy.forbidden_models` UNIONS into the parent's policy (deterministic
+  sorted order, `include_note` names the alias — a shelved safety floor survives
+  composition; no other child top-level key is carried); the alias grammar is
+  tightened to `[A-Za-z0-9_]` (no hyphen — a hyphenated alias + a child `when`
+  gate fell through the when-token grammar as a confusing when-syntax error, now
+  a named include-guard refusal at declaration); an explicit `include: null` (or
+  any present-but-not-non-empty-list) refuses instead of retaining the key past
+  the include-stripped contract; the door memoizes its library reader so the
+  expansion and the provenance digests are stamped from ONE view of the shelf
+  bytes (no torn read between the two passes); an author-form amend restamps
+  run.json's `includes`/`include_notes` (provenance never describes the previous
+  graph); `save(run_id=…)` REFUSES for composite runs (their graph.json is the
+  expanded form — save the author graph inline); and the merged node/byte caps
+  re-check the FINAL fused graph after the parent-ref rewrite, not just the
+  pre-rewrite candidate.
+  Round-2 P1 follow-up: gate `options[]` and `wait.until_argv[]` joined the
+  shared `_include_text_fields` traversal — an included gate's option labels
+  (verbatim on the human release card) and fixed argv (exec'd by the wait pass)
+  are now seed-rendered AND survivor-swept like every other text surface; the
+  nested write-back was generalized to a copy-on-write path setter (the old one
+  assumed every nested field was `fanout`, so a seeded value could not land in
+  options/argv at all). Unseeded placeholders refuse through the errors
+  envelope; include-free gate bytes keep their verbatim leniency.
+  Tests: `tests/test_include_door.py` (100 door contracts — expand-before-validate,
+  refusal envelopes with zero run dirs, dry_run side-effect-free lint,
+  amend identity-stability, save author-form, from= replay, provenance + notes
+  round-trip) and `tests/test_include_expansion_core.py` (core-resolver contracts).
+- #59 validator: string-typed keys are TYPE-checked at submit, never discovered at the
+  wall (fb-fix ledger 97e90c2205f17fb0 — run `20260930-051209-fb-fix-436f89c3-rem`
+  authored an agent `context` as a LIST; it passed the truthy-only checks and died at
+  FIRST spawn in `run_child`'s prompt concat, `node crashed: TypeError: can only
+  concatenate str`, `error_class:'crashed'`, burning an already-answered gate release).
+  `validate_graph_errors` now rejects, with named-node `{node, field, msg}` errors
+  mirroring the fan-out item-goal law: agent `goal` — a PRESENT non-str (`[]`, `{}`,
+  `0`, `False`, `null` included; truthiness-independent, ra-59 review finding 1) — and
+  plain-agent whitespace-only str; agent AND gate `context` and gate `question` —
+  present-key-must-be-str, so explicit null is rejected like a list/dict (string-when-
+  present contract, ra-59 review finding 2; absent and `''` stay legal optional keys);
+  `fanout.goal` template present-non-str (same first-spawn crash class — `fmt_goal`
+  re.sub + node-goal concat); and echo `output` non-JSON-serialisable (the door's own
+  `graph.json`/node commit write is where a set or custom object used to explode;
+  dict/list/str/num/bool/null stay the documented verbatim-commit shapes — the echo
+  JSON-verbatim contract is RETAINED, per the ra-59 compatibility clarification).
+  Absent/`''` goals keep the exact legacy "agent node has no goal" message. NO coercion
+  at resolve — strict-at-submit is the engine law (closed grammar: an un-validatable
+  graph must never be accepted). Additive validation: well-typed graphs validate
+  identically, golden-solo stays EMPTY, zero run-dir writes and zero spawns on a
+  rejected submit.
+  Test: `tests/test_string_type_validation_59.py` (issue repro, every key × good/bad
+  shape incl. falsy/null rows and the review's exact case set, legacy-message pin,
+  door-level zero-writes/zero-spawns rows per rejected case, valid-graph zero-errors
+  control).
+- door: `run_context` transport guards in `_bind_run_context` (string branch). Two silent
+  routes to a launched run full of unsubstituted `{run.KEY}` refs, both now rejecting
+  before any run write, same fail-closed style as the #7 brace guard: (1) a JSON object
+  handed over as a STRING (a caller that meant the map form — tool transports routinely
+  stringify objects) was routed to SEED mode and bound nothing; it now raises and names
+  the mistake. (2) a seed string against a graph holding `{run.KEY}` refs appended to
+  context and launched anyway, leaving the refs literal in the persisted graph; it now
+  raises naming the offending node id and key. The map branch is untouched; prose and
+  `k=v` seeds behave exactly as before. The `run_context` schema entry declares
+  `["string","object"]` and states both rejections.
+  Test: `tests/test_run_context_seed_guard.py` (encoded-map rejects atomically — no run
+  written, no spawn; seed-with-refs rejects naming node+key; dict binding still
+  substitutes; prose seeds still launch).
 
 ## 1.2.0 — 2026-10-03
 

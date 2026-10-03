@@ -1123,6 +1123,790 @@ def validate_graph(nodes):
     e = errs[0]
     return (e["msg"] if e["node"] is None else f"node {e['node']}: {e['msg']}")
 
+# ---------- full structural graph validation (shared: door + include door) ----------
+# PR#84 review F-2: the door's `_validation_error` and the include resolver's
+# shelf check were TWO validators with different strictness — a shelf carrying an
+# unknown graph key, invalid defaults, a malformed model_policy or provenance was
+# refused when submitted directly and silently accepted when included, because the
+# lossy top-level projection in the expansion pass drops those keys before the
+# fused graph ever reaches the door validator. ONE validator now serves both
+# doors: the structural (graph-level) half lives here, next to the node half it
+# composes with, and the stdlib-only core stays independent of the door (the door
+# delegates here; this module never imports the door).
+
+STRUCTURAL_GRAPH_KEYS = {"name", "nodes", "description", "defaults", "model_policy",
+                         "provenance", "grammar", "include",
+                         "concurrency", "item_concurrency"}  # #100: optional run-level limits
+
+def model_names_valid(names):
+    return isinstance(names, list) and all(isinstance(n, str) and n.strip() for n in names)
+
+def model_policy_errors(policy):
+    """Closed-set + type rules for one model_policy object, as messages of the
+    form 'model_policy.<field>: <detail>'. ONE list of rules: the structural
+    graph validator AND the include fuse (which ORs child require_model floors
+    into the parent) both consume it — a policy that would fail direct submission
+    can never slip through the merge's coercion path (PR#84 review F-2: a parent
+    require_model:'false' became boolean True via the OR and then passed)."""
+    msgs = []
+    if not isinstance(policy, dict):
+        return ["model_policy: model_policy must be an object"]
+    for key in sorted(set(policy) - {"require_model", "forbidden_models"}):
+        msgs.append(f"model_policy.{key}: unknown policy key")
+    if "require_model" in policy and not isinstance(policy["require_model"], bool):
+        msgs.append("model_policy.require_model: require_model must be boolean")
+    if "forbidden_models" in policy and not model_names_valid(policy["forbidden_models"]):
+        msgs.append("model_policy.forbidden_models: forbidden_models must be a "
+                    "list of non-empty strings")
+    return msgs
+
+def structural_graph_errors(graph, extra_keys=()):
+    """Graph-level (non-node) defects as [{node:None, field, msg}] — the exact
+    checks the door historically ran, moved verbatim so submitted graphs AND each
+    expanded shelf are measured by the SAME rules. `extra_keys` extends the
+    closed top-level key set (the door passes its own additions); `include` is
+    always allowed here — the author form carries it by design, and the fused
+    output is include-STRIPPED, so the door's GRAPH_KEYS law stays intact on
+    every submitted surface. Callers compose with validate_graph_errors (the
+    node-level half)."""
+    if not isinstance(graph, dict):
+        return [{"node": None, "field": "graph", "msg": "graph must be an object"}]
+    errs = []
+    def E(field, msg):
+        errs.append({"node": None, "field": field, "msg": msg})
+    for key in sorted(set(graph) - STRUCTURAL_GRAPH_KEYS - set(extra_keys)):
+        E(key, f"unknown graph key; allowed: {sorted(STRUCTURAL_GRAPH_KEYS | set(extra_keys))}")
+    # #32: a file may state its dialect; absent = wf/1, unknown = refused.
+    errs.extend(grammar_errors(graph))
+    # #100: run-level concurrency limits, positive integers only.
+    for key in ("concurrency", "item_concurrency"):
+        if key in graph and (type(graph[key]) is not int or graph[key] <= 0):
+            E(key, f"{key} must be a positive integer")
+    if "defaults" in graph:
+        errs.extend(_defaults_errors(graph["defaults"]))
+    if "model_policy" in graph:
+        for msg in model_policy_errors(graph["model_policy"]):
+            field, _, detail = msg.partition(": ")
+            E(field, detail)
+    if not model_names_valid(seat_forbidden_models()):
+        E("model.workflows_forbidden_models", "seat forbidden model floor must be a list of non-empty strings")
+    for key in ("name", "description"):
+        if key in graph and (not isinstance(graph[key], str) or not graph[key].strip()):
+            E(key, f"{key} must be a non-empty string")
+    if "provenance" in graph:
+        prov = graph["provenance"]
+        if not isinstance(prov, dict):
+            E("provenance", "provenance must be an object")
+        else:
+            for key in sorted(set(prov) - PROVENANCE_KEYS):
+                E(f"provenance.{key}", "unknown key; allowed: " + json.dumps(sorted(PROVENANCE_KEYS)))
+    return errs
+
+def validate_graph_full(graph):
+    """The WHOLE structural+node validation of a graph object (unnormalized) —
+    what a submitted graph is measured with at the door. Returns the defect list;
+    empty means sound. Node-shape normalization (unhashable ids, non-list after,
+    author-forged route_verified) is the door's caller-side job — see
+    _validation_error there; this function never mutates its input."""
+    if not isinstance(graph, dict):
+        return [{"node": None, "field": "graph", "msg": "graph must be an object"}]
+    errs = structural_graph_errors(graph)
+    nodes = graph.get("nodes")
+    safe = [] if isinstance(nodes, list) else nodes
+    if isinstance(nodes, list):
+        for index, node in enumerate(nodes):
+            if not isinstance(node, dict):
+                safe.append(node)  # shared validator identifies the first non-object
+                continue
+            item = dict(node)
+            nid = node.get("id")
+            if isinstance(nid, (dict, list)):
+                errs.append({"node": None, "field": f"nodes[{index}].id",
+                             "msg": "node id must be a string"})
+                item["id"] = f"__invalid_id_{index}__"
+            deps = node.get("after", [])
+            if not isinstance(deps, list) or any(not isinstance(dep, str) for dep in deps):
+                errs.append({"node": nid if isinstance(nid, str) else None,
+                             "field": "after", "msg": "after must be a list of node id strings"})
+                item["after"] = []
+            safe.append(item)
+    errs.extend(validate_graph_errors(safe))
+    return errs
+
+# ---------- include-by-expansion (design 2026-09-30) ----------
+# Composition at MATERIALIZE time, never invocation: a graph carrying a top-level
+# `include: [{as, use, seeds, exports}]` annotation expands to a plain wf/1 graph
+# BEFORE validation/persistence. The runner, read model, gates and desktop never
+# learn includes exist; the closed-set node validator is untouched (include is not
+# a node kind — it is a graph-level annotation like `grammar`, :564-568). The door
+# owns the call sites (run/amend/save, before _validation_error) and supplies
+# library_reader(name) -> dict|None (the same resolver `from=<name>` uses); this
+# module must never import the door.
+#
+# Invariants this pass is built to keep:
+#   * deterministic namespacing: id -> `<alias>__<inner-id>` (double underscore,
+#     never a dot — ids double as nodes/<id>.json basenames and `out.<id>` syntax),
+#     length-checked against ID_OK's 64-char cap: on overflow REFUSE, never truncate.
+#   * five id-ref surfaces rewritten in lockstep inside the subtree: after, inputs
+#     heads, requires keys, fanout.items_from head AND its after entry (the
+#     items_from head must remain a direct after parent, :914-920), and `when`
+#     out.<id>. paths. `when` heads are NOT existence-checked by the validator
+#     (:1298-1309 parses structure only), so this pass validates them against the
+#     namespace-local id set itself — a missed rewrite is a silent gate-fire failure.
+#   * seed contract: include `seeds` render {run.KEY} INSIDE the included subtree
+#     ONLY; an unbound reference there is the #69 fail-closed refusal (the message
+#     names the alias). Parent {run.X} text is never touched by child seeds.
+#   * strip-on-expand: the returned graph has NO `include` key (golden-solo byte
+#     pins; a committed graph.json carrying `include` is by definition unexpanded).
+#   * efp stability: parent nodes not wired to an include stay byte-identical —
+#     def_hash/efp/replay-skip are untouched by construction; only rewired nodes
+#     move, which is precisely the intended re-run granularity.
+# Constants here MIRROR the door's (GRAPH_MAX_BYTES __init__.py:39); the door owns
+# its copies and may re-check the merged artifact with its own caps after expansion.
+INCLUDE_DEPTH_MAX = 4        # nested composites: A includes B includes C includes D
+INCLUDE_NODES_MAX = 256      # merged node-count cap (tunable)
+INCLUDE_BYTES_MAX = 1024 * 1024   # merged bytes cap, mirrors door GRAPH_MAX_BYTES
+INCLUDE_KEYS = {"as", "use", "seeds", "exports"}
+# No hyphen, no dots: an alias becomes the head prefix of generated ids, and ids
+# appear inside `when` out.<id> paths — WHEN_TOKEN (:1738) lexes heads as
+# [A-Za-z0-9_.] only, so a hyphenated alias + a child when-gate would make the
+# when rewrite/head-check silently no-op (a silent gate-fire failure). The alias
+# grammar must stay a SUBSET of the when-token head grammar; refuse at declaration.
+INCLUDE_ALIAS_OK = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_]{0,23}$")   # <= 24
+INCLUDE_USE_OK = re.compile(r"^[a-z0-9][a-z0-9_.-]{0,63}$")          # mirrors door LIB_OK
+_INCLUDE_RUN_REF = re.compile(r"\{run\.([^{}]*)\}")
+_INCLUDE_RUN_KEY = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
+# absolute/~-rooted path literals with >= 2 segments (a bare "/x" is prose noise) —
+# the shared fixed-scratch-path probe. Lookbehind keeps URL/email tails (http://host/p,
+# x/y inside words) out.
+_INCLUDE_ABS_PATH = re.compile(
+    r"(?<![\w~./:-])(?:/[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)+|~(?:/[A-Za-z0-9._-]+)+)")
+_INCLUDE_NS_SEP = "__"
+
+
+def _include_error(alias, msg):
+    """ONE error shape for every refusal: a single human-readable string that names
+    the include (the door's door turns the ValueError into its errors[include:<alias>]
+    envelope; never raise a list/dict here)."""
+    return ValueError(f"include '{alias}': {msg}" if alias else f"include: {msg}")
+
+
+def _include_text_fields(node):
+    """The string fields the {run.KEY} seed-render surface touches: the exact set
+    _bind_run_context (map mode) renders — goal/context/question/profile plus the
+    fan-out goal template and item goals — PLUS an echo node's string `output`
+    PLUS a gate's `options[]` and `wait.until_argv[]`.
+    The echo addition closes PR#84 review F-3: echo output is a text surface the
+    runner commits VERBATIM (wf.py echo pass), so a seed placeholder surviving it
+    became a literal `{run.MISSING}` verdict in a done run. The options/argv
+    addition closes the F-3 carry-over (PR#84 round-2 P1): `options` surface
+    VERBATIM on the human release card and `until_argv` is exec'd as fixed argv
+    (wf.py wait pass) — a surviving `{run.OPTION}` was a literal button label /
+    a literal unbound argv element. Only PRESENT string fields are yielded (a
+    dict/other output is data, not text). One definition feeds seed-render,
+    scratch-path detection, and the door's survivor check — run/amend/binding/
+    notes cannot drift apart again. Duplicated here (not imported from the door)
+    so the resolver stays hermes-free."""
+    for f in ("goal", "context", "question", "profile"):
+        if isinstance(node.get(f), str):
+            yield f, (f,)
+    if node.get("type") == "echo" and isinstance(node.get("output"), str):
+        yield "output", ("output",)
+    opts = node.get("options")
+    if isinstance(opts, list):
+        for i, o in enumerate(opts):
+            if isinstance(o, str):
+                yield f"options[{i}]", ("options", i)
+    wait = node.get("wait")
+    if isinstance(wait, dict) and isinstance(wait.get("until_argv"), list):
+        for i, a in enumerate(wait["until_argv"]):
+            if isinstance(a, str):
+                yield f"wait.until_argv[{i}]", ("wait", "until_argv", i)
+    fo = node.get("fanout")
+    if isinstance(fo, dict):
+        if isinstance(fo.get("goal"), str):
+            yield "fanout.goal", ("fanout", "goal")
+        for i, it in enumerate(fo.get("items") or []):
+            if isinstance(it, dict) and isinstance(it.get("goal"), str):
+                yield f"fanout.items[{i}].goal", ("fanout", "items", i, "goal")
+
+
+def _include_get(node, path):
+    """Read one authored string by path segments (str = dict key, int = list
+    index). Companion of _include_set; both walk the same grammar
+    _include_text_fields yields."""
+    cur = node
+    for p in path:
+        cur = cur[p]
+    return cur
+
+
+def _include_set(node, path, val):
+    """Write one rendered string back by path segments, COPY-ON-WRITE at every
+    level: each dict/list on the path is shallow-copied before the child write,
+    so the shelf's own node objects are never mutated (shelf immutability) and
+    NO nested shape needs to be special-cased. This replaces the old hand-rolled
+    setter that assumed every nested field was `fanout` — with options[] and
+    wait.until_argv[] in the traversal it would have rebuilt the wrong chain
+    (PR#84 round-2 fix caution)."""
+    head, rest = path[0], path[1:]
+    if not isinstance(node, dict):
+        # node is a LIST: head is an integer index
+        items = list(node)
+        items[head] = val if not rest else _include_set(items[head], rest, val)
+        return items
+    if not rest:
+        return {**node, head: val}
+    child = node[head]
+    if isinstance(child, dict) or isinstance(child, list):
+        return {**node, head: _include_set(child, rest, val)}
+    return {**node, head: val}
+
+
+def _include_texts(node):
+    out = []
+    for _, path in _include_text_fields(node):
+        out.append(_include_get(node, path))
+    return out
+
+
+def _include_render(text, seeds, *, fanout=False, alias=None, where=None):
+    """One-pass {run.KEY} substitution mirroring _bind_run_context's contract: no
+    str.format, substituted values are never re-interpolated. Unbound key = the #69
+    fail-closed refusal, worded to name the alias and the include surface."""
+    def replace(m):
+        key = m.group(1)
+        if not _INCLUDE_RUN_KEY.fullmatch(key):
+            raise _include_error(alias, f"malformed reference {m.group(0)!r} in {where}")
+        if key not in seeds:
+            raise _include_error(alias, f"unbound {{run.{key}}} in {where}: "
+                                        f"add {key!r} to the include's seeds")
+        if fanout and ("{" in seeds[key] or "}" in seeds[key]):
+            raise _include_error(alias, f"seed {key!r} must not contain braces when "
+                                        f"bound into a fan-out goal ({where})")
+        return seeds[key]
+    return _INCLUDE_RUN_REF.sub(replace, text)
+
+
+def _include_seed_scan(seeds, alias):
+    """Seeds are a CLOSED map: values are non-empty strings, keys are identifiers,
+    and no value may carry braces (existing fan-out guard, applied to every include
+    seed — the resolver cannot know which field a value lands in at bind time)."""
+    if not isinstance(seeds, dict) or not seeds:
+        raise _include_error(alias, "seeds must be a non-empty object {KEY: value}")
+    for k, v in seeds.items():
+        if not isinstance(k, str) or not _INCLUDE_RUN_KEY.fullmatch(k):
+            raise _include_error(alias, f"seeds invalid key {k!r}: expected identifier")
+        if not isinstance(v, str) or not v.strip():
+            raise _include_error(alias, f"seeds[{k!r}] must be a non-empty string")
+        if "{" in v or "}" in v:
+            raise _include_error(alias, f"seeds[{k!r}] must not contain braces "
+                                        "(no-interpolation-of-substituted-values contract)")
+
+
+def _include_scratch_paths(node):
+    """Absolute/~-rooted path literals appearing in a node's authored strings."""
+    found = set()
+    for t in _include_texts(node):
+        found.update(_INCLUDE_ABS_PATH.findall(t))
+    return found
+
+
+def _rewrite_child_head(h, ns):
+    """Map one ref head inside the included subtree: internal -> namespaced,
+    anything else kept (child-standalone validation rejects true danglers first)."""
+    return ns.get(h, h)
+
+
+def _include_when_rewrite(expr, map_head):
+    """Token-wise rewrite of `out.<head>.<path>` refs in a when expression — via
+    the WHEN_TOKEN tokenizer so quoted string LITERALS that merely contain
+    'out.x.y' text are never rewritten or validated. Returns the ORIGINAL string
+    byte-identical when no head maps — a parent node whose when does not touch an
+    include keeps its def bytes (efp stability). Malformed expr passes through:
+    the validator owns that error."""
+    try:
+        toks = _tok_when(expr)
+    except ValueError:
+        return expr
+    changed = False
+    pieces = []
+    for t in toks:
+        if t.startswith("out."):
+            segs = t.split(".")
+            nh = map_head(segs[1]) if len(segs) > 1 else segs[-1]
+            if nh != segs[1]:
+                segs[1] = nh
+                changed = True
+            pieces.append(".".join(segs))
+        else:
+            pieces.append(t)
+    # Rebuild joins tokens with single spaces: every WHEN_TOKEN match is ONE token
+    # (string literals keep their internal spacing inside the token), so the result
+    # re-parses identically. Only ever done when a head actually mapped — untouched
+    # whens stay byte-identical (efp stability).
+    return " ".join(pieces) if changed else expr
+
+
+def _include_when_heads(expr):
+    """Heads of genuine out.<id> references (tokenizer-driven; string literals
+    excluded) — the set this pass must existence-check since the validator does
+    not."""
+    try:
+        toks = _tok_when(expr)
+    except ValueError:
+        return []
+    return [t.split(".")[1] for t in toks if t.startswith("out.") and len(t.split(".")) > 1]
+
+
+def _include_namespace_child(child, alias, library_name):
+    """Step 3+4 of the design pass: namespace every id of the (already recursively
+    expanded) child graph and rewrite the FIVE ref surfaces inside it in lockstep.
+    Returns (nodes, nsset). Raises ValueError (named) on dot/overflow, dangling
+    items_from lockstep, or a dangling `when` head."""
+    cids = [n["id"] for n in child["nodes"]]
+    ns = {}
+    for cid in cids:
+        gen = f"{alias}{_INCLUDE_NS_SEP}{cid}"
+        # no dots in generated ids (ids double as nodes/<id>.json basenames and the
+        # dot IS out.<id> syntax); 64-char cap via ID_OK — REFUSE, never truncate.
+        if "." in gen or not ID_OK.match(gen):
+            raise _include_error(alias, f"namespaced id {gen!r} for library node "
+                                        f"{cid!r} of '{library_name}' is invalid "
+                                        f"(no dots, alnum start, <= 64 chars) — "
+                                        f"shorten the alias or the inner id")
+        ns[cid] = gen
+    nsset = set(ns.values())
+    out = []
+    for n in child["nodes"]:
+        n = dict(n)
+        n["id"] = ns[n["id"]]                      # the id itself gets namespaced
+        if isinstance(n.get("after"), list):
+            n["after"] = [_rewrite_child_head(a, ns) for a in n["after"]]
+        if isinstance(n.get("inputs"), list):
+            n["inputs"] = [f"{_rewrite_child_head(ref.split('.', 1)[0], ns)}"
+                           f"{('.' + ref.split('.', 1)[1]) if '.' in ref else ''}"
+                           for ref in n["inputs"]]
+        if isinstance(n.get("requires"), dict):
+            n["requires"] = {ns.get(k, k): v for k, v in n["requires"].items()}
+        fo = n.get("fanout")
+        if isinstance(fo, dict) and isinstance(fo.get("items_from"), str) \
+                and fo.get("items") is None:
+            head, _, rest = fo["items_from"].partition(".")
+            n["fanout"] = dict(fo, items_from=f"{ns.get(head, head)}.{rest}" if rest
+                               else ns.get(head, head))
+            # items_from+after LOCKSTEP (:914-920 law): the rewritten head must be a
+            # direct rewritten parent. Same map over both surfaces makes this
+            # structural; assert anyway — a pre-rewrite authoring slip must not
+            # survive into the merged graph.
+            new_head = n["fanout"]["items_from"].split(".")[0]
+            if new_head not in (n.get("after") or []):
+                raise _include_error(alias, f"node {n['id']!r}: fanout."
+                                            f"items_from head {new_head!r} is not in "
+                                            f"its after list (the source must remain "
+                                            f"a direct parent after namespacing)")
+        if isinstance(n.get("when"), str):
+            n["when"] = _include_when_rewrite(n["when"], lambda h: ns.get(h, h))
+            # validate-time never existence-checks when heads -> do it HERE against
+            # the namespace-local id set (the whole point of the mechanical rewrite).
+            for h in _include_when_heads(n["when"]):
+                if h not in nsset:
+                    raise _include_error(alias, f"node {n['id']!r}: `when` references "
+                                                f"out.{h} whose head is not a "
+                                                f"node in the included graph — dangling "
+                                                f"gate condition")
+        out.append(n)
+    return out, nsset
+
+
+def _rewrite_parent_head(h, parent_ids, full_ns, aliases, exports_map, inner_bare,
+                         alias_of_inner, nid, site):
+    """Parent-ref-site mapping (design step 7). Parent may touch an included graph
+    ONLY through namespaced names: a literal alias__id (kept), an exported public
+    name (rewritten to the namespaced id). A bare inner id or a bare alias is a
+    REFUSE — never a silent pass-through the door validator can't catch (when)."""
+    if h in parent_ids or h in full_ns:
+        return h
+    if h in exports_map:
+        return exports_map[h]
+    head_alias = h.split(_INCLUDE_NS_SEP, 1)[0]
+    if _INCLUDE_NS_SEP in h and head_alias in aliases:
+        raise ValueError(f"include '{head_alias}': node {nid!r} {site} references "
+                         f"{h!r} — no such node in that included graph "
+                         f"(use an exported name or '{head_alias}__<id>')")
+    if h in aliases:
+        raise ValueError(f"include '{h}': node {nid!r} {site} names the include "
+                         f"alias directly — an alias is not a node id (use "
+                         f"'{h}__<id>' or an exported name)")
+    if h in inner_bare:
+        raise _include_error(alias_of_inner[h], f"node {nid!r} {site} references the "
+                             f"bare inner id {h!r} of this include — parent graphs "
+                             f"may only reach an included graph through "
+                             f"'{alias_of_inner[h]}__{h}' or an exported name")
+    return h  # not include-related: parent's own ref (dangling or not — door law)
+
+
+def _expand_include_pass(graph, library_reader, notes, chain, depth):
+    """One recursive pass: inner-first expansion of every include, namespacing,
+    subtree rewrite, seed rendering, parent-ref rewrite, guards, and the strip.
+    `chain` = tuple of library names on the expansion stack (cycle visit-set)."""
+    def own(alias, msg):
+        raise _include_error(alias, msg)
+
+    nodes = graph.get("nodes", [])
+    if not isinstance(nodes, list) or any(not isinstance(n, dict) for n in nodes):
+        own(None, "graph nodes must be a list of node objects")
+    # ABSENT key = nothing to expand (byte-identical passthrough, the golden-solo
+    # pin). PRESENT-but-not-a-list — including explicit null — is a REFUSE: the
+    # passthrough branch must never retain an `include` key, or the fused output
+    # would violate the include-stripped storage contract (a committed graph.json
+    # carrying `include` is by definition unexpanded).
+    if "include" not in graph:
+        return dict(graph, nodes=[dict(n) for n in nodes])
+    includes = graph["include"]
+    if not isinstance(includes, list) or not includes:
+        own(None, "include must be a non-empty list of {as, use, seeds?, exports?} directives")
+
+    # --- guards first (structure, alias collisions, depth) ---
+    aliases = []
+    alias_of_inner = {}
+    for inc in includes:
+        if not isinstance(inc, dict):
+            own(None, f"include entry {inc!r} is not an object")
+        bad = sorted(set(inc) - INCLUDE_KEYS)
+        if bad:
+            own(inc.get("as"), f"unknown key(s) {bad}; allowed: {sorted(INCLUDE_KEYS)}")
+        alias = inc.get("as")
+        if not isinstance(alias, str) or not INCLUDE_ALIAS_OK.match(alias):
+            own(alias, f"invalid alias {alias!r} (alnum start, [A-Za-z0-9_], "
+                       f"no dots or hyphens, <= 24 chars)")
+        use = inc.get("use")
+        if not isinstance(use, str) or not INCLUDE_USE_OK.match(use):
+            own(alias, f"invalid library name {use!r} (lowercase alnum start, "
+                       f"[a-z0-9_.-], <= 64 chars)")
+        if "exports" in inc and not isinstance(inc["exports"], dict):
+            own(alias, "exports must be an object {inner_id: public_name}")
+        if alias in aliases:
+            own(alias, "duplicate alias — two includes share the alias "
+                       f"{alias!r} (every alias must be unique)")
+        aliases.append(alias)
+    if depth + 1 > INCLUDE_DEPTH_MAX:
+        own(aliases[0], f"nested includes exceed the maximum depth of "
+                        f"{INCLUDE_DEPTH_MAX} (chain: {' -> '.join(chain)})")
+
+    parent_ids = {n.get("id") for n in nodes if n.get("id")}
+    expanded = [dict(n) for n in nodes]          # parent nodes, rewritten after grafting
+    merged = []                                  # grafted included nodes, decl order
+    exports_map = {}                             # public_name -> namespaced id
+    export_claims = []                           # [(public, alias, ns_id)] — F-4 pass 1
+    full_ns = set()                              # every generated alias__id
+    inner_bare = set()                           # every child inner id (bare-ref refuse)
+    child_scratch_seen = set()                   # paths in previously expanded graphs
+    child_policies = []                          # [(alias, forbidden_models)] to union at fuse
+    child_require_aliases = []                   # [(alias, bool)] — require_model floor
+    parent_scratch = set()
+    for n in nodes:
+        parent_scratch.update(_include_scratch_paths(n))
+
+    for inc in includes:
+        alias, use = inc["as"], inc["use"]
+        if use in chain:
+            own(alias, f"include cycle: {' -> '.join(chain)} -> {use}")
+        entry = library_reader(use)
+        if entry is None:
+            own(alias, f"unknown library entry {use!r} — shelve it first "
+                       f"(save graph=...) or fix the include's use")
+        if not isinstance(entry, dict):
+            own(alias, f"library entry {use!r} is not a graph object")
+        if entry.get("defaults"):
+            notes.append(f"{alias}: included graph's `defaults` are NOT applied — "
+                         f"the merged run bakes under the parent's defaults only")
+        # inner-first: recursively expand the child BEFORE namespacing it
+        child = _expand_include_pass(entry, library_reader, notes,
+                                     chain + (use,), depth + 1)
+        # PR#84 review F-2: the shelf is measured with validate_graph_full — the
+        # SAME complete structural+node validator a submitted graph gets at the
+        # door — not the node-only validate_graph_errors. Before this, the lossy
+        # top-level projection (fused = parent keys minus include) dropped a
+        # child's unknown graph key / bad defaults / bad provenance before the
+        # door ever saw them: refused when submitted directly, silently accepted
+        # when included. The full pass ALSO runs before any hashable-id contact
+        # (validate_graph_errors' duplicate-id `set(ids)` used to TypeError on
+        # id:["bad"] and leak a trace) — a malformed child now gets the named
+        # include-envelope refusal, same contract as direct submission.
+        cerr = validate_graph_full(child)
+        if cerr:
+            e = cerr[0]
+            where = e["node"] or "graph"
+            own(alias, f"library entry {use!r} fails to validate standalone: "
+                       f"{where}: {e['msg']}")
+        # child model_policy.forbidden_models must SURVIVE composition (unioned
+        # into the parent at fuse; see below) — a shelved graph that forbids a
+        # model may not stop forbidding it because someone included it. The
+        # child is already recursively expanded, so a nested composite's merged
+        # policy rides up transitively at this level. Anything malformed here is
+        # a named refusal, never a silent drop. The rules are ONE list with the
+        # door's (model_policy_errors): an int/str require_model:0 that direct
+        # submission refuses can no longer slip in as truthy through the bool().
+        cp = child.get("model_policy")
+        if cp is not None:
+            cperr = model_policy_errors(cp)
+            if cperr:
+                own(alias, f"library entry {use!r} has an invalid model_policy: "
+                           + "; ".join(cperr))
+            if cp.get("require_model") is not None:
+                child_require_aliases.append((alias, cp["require_model"]))
+            _fb = cp.get("forbidden_models")
+            if _fb:
+                child_policies.append((alias, list(_fb)))
+        child_nodes, nsset = _include_namespace_child(child, alias, use)
+
+        # --- seed contract: render {run.KEY} inside the subtree ONLY ---
+        seeds = inc.get("seeds")
+        if seeds is not None:
+            _include_seed_scan(seeds, alias)
+            rendered = []
+            for n in child_nodes:
+                n = dict(n)
+                for label, path in _include_text_fields(n):
+                    text = _include_get(n, path)
+                    is_fo = label.startswith("fanout") or (label == "goal"
+                                                           and isinstance(n.get("fanout"), dict))
+                    val = _include_render(text, seeds, fanout=is_fo, alias=alias,
+                                          where=f"node {n['id']} {label}")
+                    # write back through the generic copy-on-write setter: the
+                    # old hand-rolled fanout-chain rebuild ASSUMED every nested
+                    # path was fanout, so options[i] and wait.until_argv[i]
+                    # could never land (PR#84 round-2 fix caution).
+                    n = _include_set(n, path, val)
+                rendered.append(n)
+            child_nodes = rendered
+
+        # --- shared fixed-scratch-path detection (note, never rewrite) ---
+        child_paths = set()
+        for n in child_nodes:
+            child_paths.update(_include_scratch_paths(n))
+        for p in sorted((child_paths & parent_scratch) | (child_paths & child_scratch_seen)):
+            notes.append(f"{alias}: fixed path {p} shared; run single-instance or "
+                         f"materialize")
+        child_scratch_seen |= child_paths
+
+        # --- exports: inner_id -> public_name, verified against the child ids ---
+        # PR#84 review F-4: the namespace-shadowing half is a TWO-PASS check —
+        # claims are collected here and measured after the loop against the
+        # COMPLETE fused namespace. The old in-loop check saw only namespaced ids
+        # generated SO FAR: include A exporting `s` as `b__s` passed, then include
+        # B minted a real `b__s` node, and the parent-ref mapper preferred the
+        # real node — A's exported verdict silently resolved to B's, and only the
+        # reverse declaration order refused. Declaration order must never decide
+        # which shelf a public name points at.
+        for inner, public in (inc.get("exports") or {}).items():
+            ns_id = f"{alias}{_INCLUDE_NS_SEP}{inner}"
+            if not isinstance(inner, str) or ns_id not in nsset:
+                own(alias, f"exports names {inner!r} — no such node in library "
+                           f"entry {use!r}")
+            if not isinstance(public, str) or not ID_OK.match(public):
+                own(alias, f"exports public name {public!r} is not a valid id "
+                           f"(alnum start, [A-Za-z0-9_.-], <= 64)")
+            if public in exports_map:
+                own(alias, f"exports public name {public!r} collides with include "
+                           f"'{exports_map[public].split(_INCLUDE_NS_SEP, 1)[0]}'")
+            exports_map[public] = ns_id
+            export_claims.append((public, alias, ns_id))
+
+        if nsset & (parent_ids | full_ns):
+            clash = sorted(nsset & (parent_ids | full_ns))[0]
+            own(alias, f"namespaced id {clash!r} collides with an existing node id "
+                       f"in the merged graph — rename the parent node or the alias")
+        inner_bare |= {n["id"] for n in child["nodes"]}   # child-form raw ids
+        for n in child["nodes"]:
+            alias_of_inner.setdefault(n["id"], alias)
+        full_ns |= nsset
+        merged.extend(child_nodes)
+
+        # --- per-include merged-size guards ---
+        if len(expanded) + len(merged) > INCLUDE_NODES_MAX:
+            own(alias, f"merged graph would exceed the node-count cap "
+                       f"({INCLUDE_NODES_MAX}) — the include pushes the composite "
+                       f"past the materialize budget")
+        candidate = json.dumps(dict(graph, nodes=expanded + merged), sort_keys=True,
+                               ensure_ascii=False, separators=(",", ":"))
+        if len(candidate.encode()) > INCLUDE_BYTES_MAX:
+            own(alias, f"merged graph would exceed the size cap "
+                       f"({INCLUDE_BYTES_MAX} bytes) — do not include graphs this "
+                       f"large into an already-large parent")
+
+    # --- F-4 pass 2: export claims vs the COMPLETE fused namespace. By here
+    # full_ns holds every alias__id of EVERY include (pass 1 only saw the ones
+    # generated so far), parent_ids and aliases were closed before the loop — so
+    # every refusal below is order-independent. `public != ns_id` keeps the
+    # benign self-shape (a public name that IS the claim's own namespaced id:
+    # the ref mapper resolves it to the same node) out of the refusal, matching
+    # the old in-loop position's tolerance; everything else shadowing any real
+    # id, alias, or namespace is refused no matter which include came first.
+    for public, alias, ns_id in export_claims:
+        if public != ns_id and (public in parent_ids or public in aliases
+                                or public in full_ns):
+            own(alias, f"exports public name {public!r} shadows an existing "
+                       f"node id or include alias")
+
+    # --- parent ref sites rewritten against the include boundary (step 7) ---
+    def map_site(nid, site, h):
+        return _rewrite_parent_head(h, parent_ids, full_ns, set(aliases), exports_map,
+                                    inner_bare, alias_of_inner, nid, site)
+    rewritten_parent = []
+    for n in expanded:
+        n = dict(n)
+        nid = n.get("id")
+        if isinstance(n.get("after"), list):
+            n["after"] = [map_site(nid, "after", a) for a in n["after"]]
+        if isinstance(n.get("inputs"), list):
+            n["inputs"] = [f"{map_site(nid, 'inputs', ref.split('.', 1)[0])}"
+                           f"{('.' + ref.split('.', 1)[1]) if '.' in ref else ''}"
+                           for ref in n["inputs"]]
+        if isinstance(n.get("requires"), dict):
+            n["requires"] = {map_site(nid, "requires", k): v
+                             for k, v in n["requires"].items()}
+        fo = n.get("fanout")
+        new_item_head = None
+        if isinstance(fo, dict) and isinstance(fo.get("items_from"), str) \
+                and fo.get("items") is None:
+            head, _, rest = fo["items_from"].partition(".")
+            new_head = map_site(nid, "fanout.items_from", head)
+            new_item_head = f"{new_head}.{rest}" if rest else new_head
+            n["fanout"] = dict(fo, items_from=new_item_head)
+        if isinstance(n.get("when"), str):
+            n["when"] = _include_when_rewrite(n["when"], lambda h: map_site(nid, "when", h))
+        if new_item_head is not None and \
+                new_item_head.split(".")[0] not in (n.get("after") or []):
+            raise _include_error(None, f"node {nid!r}: fanout.items_from head "
+                                 f"{new_item_head!r} must be a direct parent in the "
+                                 f"node's after list (items_from+after lockstep)")
+        rewritten_parent.append(n)
+
+    fused = {k: v for k, v in graph.items() if k != "include"}   # strip-on-expand
+    fused["nodes"] = rewritten_parent + merged
+    # C1 story: an included graph's model_policy.forbidden_models is a shelved
+    # safety floor — including a graph must never relax what it forbids. UNION
+    # (set semantics, deterministic sorted order) into the parent's policy;
+    # require_model ORs upward below; other child top-level keys (defaults, ...)
+    # are NOT carried and are noted where meaningful.
+    # PR#84 review F-2: the PARENT's model_policy is type-checked BEFORE the
+    # forbidden union / require_model OR run, with the same model_policy_errors
+    # list the door uses. Without this the merge itself repaired a malformed
+    # parent: require_model:'false' is truthy, `want = pol.get(...) or any(...)`
+    # kept it, and the write-back stored boolean True — a policy that direct
+    # submission refuses emerged from composition as a coerced floor. Malformed
+    # parent policy is now a named refusal, never a silent repair. (Checked on
+    # any composition that touches the policy — union OR require propagation.)
+    if (child_policies or child_require_aliases) and "model_policy" in fused:
+        _perr = model_policy_errors(fused["model_policy"])
+        if _perr:
+            own(None, "parent model_policy is invalid before a child policy can "
+                      "merge into it: " + "; ".join(_perr))
+    if child_policies:
+        if "model_policy" in fused and not isinstance(fused["model_policy"], dict):
+            own(None, "parent model_policy must be an object before a child policy "
+                      "can merge into it (the door's validator rejects the shape "
+                      "too — refused here so the merge never crashes)")
+        pol = dict(fused.get("model_policy") or {})
+        merged_fb = set(pol.get("forbidden_models") or [])
+        for alias, fb in child_policies:
+            added = set(fb) - merged_fb
+            merged_fb |= set(fb)
+            notes.append(f"{alias}: model_policy.forbidden_models merged into "
+                         f"parent" + ("" if added else " (already covered)"))
+        pol["forbidden_models"] = sorted(merged_fb)
+        fused["model_policy"] = pol
+    if child_require_aliases:
+        # require_model is a floor too: an included graph whose shelf demands an
+        # explicit model per agent node must not stop demanding it because someone
+        # included it. OR it upward (never down — a parent asserting True keeps it;
+        # a child asserting False cannot relax a parent's True). Loud by note.
+        pol = dict(fused.get("model_policy") or {})
+        want = pol.get("require_model", False) or any(v for _, v in child_require_aliases)
+        if want != bool(pol.get("require_model", False)):
+            names = ", ".join(a for a, v in child_require_aliases if v)
+            notes.append(f"{names}: model_policy.require_model propagated to the "
+                         "composite (every agent node must name an explicit model)")
+        if want:
+            pol["require_model"] = True
+            fused["model_policy"] = pol
+    # The per-include guards above measured the PRE-rewrite candidate; the parent
+    # ref rewrite and the policy merge just happened. Re-check the FINAL fused
+    # artifact (door's graph.json write form) against both caps — an oversized
+    # composite must refuse here, not ship bytes the door will clip or choke on.
+    if len(fused["nodes"]) > INCLUDE_NODES_MAX:
+        own(None, f"expanded graph exceeds the node-count cap "
+                  f"({INCLUDE_NODES_MAX}: {len(fused['nodes'])} nodes) after the "
+                  f"parent-reference rewrite")
+    if len(json.dumps(fused).encode()) > INCLUDE_BYTES_MAX:
+        own(None, f"expanded graph exceeds the size cap ({INCLUDE_BYTES_MAX} "
+                  f"bytes) after the parent-reference rewrite — the merged form, "
+                  f"not just the candidate, must fit the materialize budget")
+    return fused
+
+
+def expand_includes(graph, library_reader):
+    """expand_includes(graph, library_reader) -> (expanded_graph, notes[]).
+
+    Expand a graph's top-level `include` annotation into a plain, include-STRIPPED
+    wf/1 graph: every included library graph is recursively expanded inner-first,
+    namespaced (`alias__<inner-id>`), rewritten across the five id-ref surfaces,
+    seed-rendered on {run.KEY} INSIDE its subtree only, then spliced; the parent's
+    refs to the include must use exported names or literal alias__id (bare inner
+    ids are refused). Every guard is a ValueError with a named single-string
+    message (missing/cyclic/oversized include, alias/id collision, depth cap,
+    unbound seed, dot/overflow id). notes[] carries non-fatal warnings — shared
+    fixed-scratch-path collisions between included graphs and the parent (or other
+    includes) are reported there, NEVER rewritten. library_reader(name) -> dict is
+    injected by the door; this module never touches the library root."""
+    if not isinstance(graph, dict):
+        raise ValueError("expand_includes: graph must be an object {name, nodes, include?}")
+    if not callable(library_reader):
+        raise ValueError("expand_includes: library_reader must be callable "
+                         "(name -> graph dict | None)")
+    notes = []
+    expanded = _expand_include_pass(graph, library_reader, notes, chain=("<graph>",),
+                                    depth=0)
+    return expanded, notes
+
+
+def include_provenance(graph, library_reader):
+    """[{alias, name, source_digest}] for every include a graph uses — the stamp the
+    door writes into run.json so each expanded run records which shelf's node bytes
+    it ran with. source_digest hashes the canonical `nodes` list only (its standing
+    contract): it pins node content, NOT include directives, seed values, or
+    model_policy — an edit outside `nodes` keeps the digest (PR#84 review F-6: the
+    prose says exactly this, never promising whole-author-file integrity). Walks the author form (include keys intact), recursively, in declaration
+    order, inner-aliased under their parents (`outer__inner`); digests are over the
+    raw library entries as read (shelf bytes, not the expansion). [] when the graph
+    carries no includes (a stripped/expanded graph is honestly provenance-less here:
+    the stamp belongs to the author form)."""
+    out = []
+    def walk(g, prefix, chain):
+        for inc in (g.get("include") or []):
+            if not isinstance(inc, dict) or "as" not in inc or "use" not in inc:
+                raise ValueError(f"include provenance: malformed directive {inc!r}")
+            alias = f"{prefix}{_INCLUDE_NS_SEP}{inc['as']}" if prefix else inc["as"]
+            use = inc["use"]
+            if use in chain:
+                raise ValueError(f"include '{alias}': include cycle: "
+                                 f"{' -> '.join(chain)} -> {use}")
+            entry = library_reader(use)
+            if entry is None:
+                raise ValueError(f"include '{alias}': unknown library entry {use!r}")
+            if not isinstance(entry, dict):
+                raise ValueError(f"include '{alias}': library entry {use!r} is not "
+                                 f"a graph object")
+            out.append({"alias": alias, "name": use,
+                        "source_digest": source_digest(entry)})
+            walk(entry, alias, chain + (use,))
+    if isinstance(graph, dict):
+        walk(graph, "", ("<graph>",))
+    return out
+
+
 def quote_json_parse_error(text, exc):
     """±40 chars of the source around the offset of a JSONDecodeError — what the
     door shows when a graph ever arrives as a malformed JSON string."""
