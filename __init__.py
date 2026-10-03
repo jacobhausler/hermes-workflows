@@ -1719,6 +1719,15 @@ def _session_env(name):
 def _card(rid):
     return f'::workflow{{id="{rid}"}}'
 
+def _lifecycle_notice(rid):
+    """#157 (belt): the paste contract as a RESULT FIELD, not only hint prose.
+    A hint the model skims past is how a perfectly running workflow goes
+    invisible; this compact field keeps the exact directive line plus a
+    one-line reminder prompt-visible in every run launch payload. The hint
+    stays the copy-exact inducement; this is the suspenders beside it."""
+    return (f'{_card(rid)} — the desktop card renders from this line; '
+            'paste it standalone in your reply')
+
 _RUN_REF = re.compile(r"\{run\.([^{}]*)\}")
 _RUN_KEY = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
 
@@ -2202,6 +2211,9 @@ def act_run(args):
                             "state": incumbent["state"], "runner_live": incumbent["runner_live"],
                             "needs_resume": incumbent["needs_resume"],
                             "last_event_ts": incumbent["last_event_ts"],
+                            # #157 belt: a dedupe still owes the paste — the
+                            # incumbent run's card is the visible artifact.
+                            "lifecycle_notice": _lifecycle_notice(incumbent["run_id"]),
                             "hint": f"wait run_id={incumbent['run_id']} resumes it"}
             return _create_run(args, graph, lib_name, models, routes, _liveness_notes, path,
                                concurrency_meta=concurrency_meta)
@@ -2270,7 +2282,7 @@ def _create_run(args, graph, lib_name, models, routes, _liveness_notes, lane_pat
             ' — plain prose only: never wrap the card in backticks or a code fence'
             ' (a code-blocked directive renders as dead text, not a card)'
             + _liveness_hint_suffix(_liveness_notes),
-            "card": _card(rid)}
+            "card": _card(rid), "lifecycle_notice": _lifecycle_notice(rid)}
 
 def _steer_event(r, ev, **kw):
     """#17: steer is only real if it lands in events.jsonl — the 45 real steers
