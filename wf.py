@@ -1324,6 +1324,16 @@ def _resolve_child_reasoning(run, meta, node, override=None):
     req = str(val).strip().lower()
     if req == "none":
         return "none"                                   # wfcommon's extension, always valid
+    if override is not None:
+        # est-flah gate-400 escape hatch: the override came FROM the server's
+        # own declared supported set (deep review #163 B1) — re-clamping it
+        # against the STALE local lane table re-creates the very provider_400
+        # the re-drive exists to escape (relay:[high] vs server medium/low
+        # re-spawned --reasoning high, twice, and the gate400 record falsely
+        # claimed clamped=medium). The server's word outranks the local table;
+        # the override is passed through verbatim (one sealed loop: run_child
+        # only re-enters this leg from the gate-400 re-drive).
+        return req
     lanes = meta.get("reasoning_lanes")
     provider = (node.get("provider") or "").strip().lower()
     supported = None
@@ -1350,33 +1360,76 @@ def _resolve_child_reasoning(run, meta, node, override=None):
     return str(val)
 
 def _filter_child_toolsets(run, meta, node):
-    """The list to pass -t at spawn, or None to omit the flag (clean no-op).
-    Unknown names are dropped with ONE warning; ALL unknown => no flag at all,
-    which is the no-op (the child runs on the seat's configured toolsets — the
-    -z CLI would exit 2 on an all-invalid list, a hard death the runner must
-    never volunteer for). Core `toolsets.validate_toolset` is the validator;
-    when core is not importable this host cannot judge — pass through (chat
-    side already no-ops with a cosmetic warn) and never hard-fail here."""
+    """The list to pass -t at spawn, or None ONLY when the author declared
+    nothing at all. Deep review #163 B2 rewrote the validation leg: bare
+    `toolsets.validate_toolset` is NOT the child's complete namespace — the
+    chat child itself (cli_init_mixin._init_toolsets) keeps every name that
+    validates OR is a configured mcp_servers key OR a plugin-declared toolset
+    key, and only WARNS on the rest. The runner's weaker check silently
+    dropped valid plugin/MCP/legacy names, and an all-unknown collapse to an
+    OMITTED -t was never the promised no-op: omission selects the seat's
+    full default toolsets — a silent broadening (boundary probe: the same
+    persisted 4-tool graph spawned 41 defaults with unchanged bytes).
+    Contract now: mirror the child's own acceptance exactly — keep everything
+    the child would keep, drop only the unknown residue; when NOTHING is
+    known, pass the flag through VERBATIM (the child's warn-and-continue is
+    its documented semantics; its honest typed death beats our silent
+    broadening). Core not importable => pass through, never hard-fail here."""
     ts = node.get("toolsets")
     if ts is None:
         return None
     names = [s.strip() for s in (ts if isinstance(ts, list) else str(ts).split(",")) if str(s).strip()]
     if not names:
         return None
+    if any(n.lower() in ("all", "*") for n in names):
+        return names                                   # the child's own all-semantics
+    if all(n.lower() == "none" for n in names):
+        # est-flah's pinned sentinel (NOT an unknown name): toolsets:"none" is
+        # the author explicitly declaring "no selection request" — the flag is
+        # omitted and ONE warning records it. Distinct from an all-UNKNOWN
+        # list, which must ride verbatim below: an author's typo is not a
+        # silent broadening, but the sentinel is the author's own ask.
+        _clamp_warn(run, meta, node, "toolsets", ",".join(names),
+                    "(omitted — the author's explicit 'no selection')",
+                    _lane_label(node), names)
+        return None
     try:
         from toolsets import validate_toolset
     except Exception:
-        return names
+        return names                                   # cannot judge on this host: pass through
+    try:
+        from hermes_cli.plugins import get_plugin_toolset_keys_nowait
+        plugin_keys = set(get_plugin_toolset_keys_nowait() or ())
+    except Exception:
+        plugin_keys = set()
+    try:
+        from hermes_cli.config import read_raw_config
+        _cfg = read_raw_config() or {}
+        _mcp = _cfg.get("mcp_servers") if isinstance(_cfg.get("mcp_servers"), dict) else {}
+        mcp_keys = {str(k) for k in _mcp}
+    except Exception:
+        mcp_keys = set()
     keep, dropped = [], []
     for n in names:
         try:
-            (keep if validate_toolset(n) else dropped).append(n)
+            ok = bool(validate_toolset(n)) or n in plugin_keys or n in mcp_keys
         except Exception:
-            keep.append(n)                              # validator itself failed: pass through
-    if dropped:
+            ok = True                                   # validator itself failed: pass through
+        (keep if ok else dropped).append(n)
+    if keep and dropped:
         _clamp_warn(run, meta, node, "toolsets", ",".join(names),
-                    ",".join(keep) if keep else "(omitted)", _lane_label(node),
-                    [n for n in names if n not in dropped])
+                    ",".join(keep), _lane_label(node), list(keep))
+        return keep
+    if not keep:
+        # All-unknown: the flag rides VERBATIM (child warns, the graph author
+        # sees their typo surface as a typed child death) — NEVER omitted,
+        # because omission silently hands the child every default toolset.
+        _clamp_warn(run, meta, node, "toolsets", ",".join(names),
+                    "(passed verbatim — no name is known to this seat; the "
+                    "child warns and continues; -t omitted here would BROADEN "
+                    "selection, which is never the author's ask)",
+                    _lane_label(node), names)
+        return names
     return keep or None
 
 def _classify_rc_output(out):
@@ -3005,9 +3058,13 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
         cmd += ["--continue", f"{skey}#a{attempt}", "--create-if-missing"]
     if node.get("model"): cmd += ["-m", node["model"]]
     if node.get("provider"): cmd += ["--provider", node["provider"]]
-    # est-flah: nothing reaches the CLI verbatim that the runner can already see
-    # will die — unknown effort clamps to nearest-supported, unknown toolsets
-    # drop (all-unknown => the flag itself is the no-op). Warnings land in
+    # est-flah + deep review #163 B2: nothing reaches the CLI verbatim that the
+    # runner can already see will die — unknown effort clamps to
+    # nearest-supported; the -t list is validated against the CHILD's own
+    # namespace (validate OR configured mcp_servers OR plugin toolset keys),
+    # unknown residue dropped with one warning, an all-unknown list rides
+    # VERBATIM (omission would silently broaden to the seat's full defaults —
+    # never the author's ask). Warnings land in
     # events.jsonl as node.clamped, once per (node, kind, requested, clamped).
     _eff = _resolve_child_reasoning(run, meta, node, override=reasoning_override)
     if _eff: cmd += ["--reasoning", _eff]
@@ -3346,6 +3403,21 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
                 if target is not None and target != req_g:
                     _clamp_warn(run, meta, node, "reasoning_gate400", req_g, target,
                                 _lane_label(node), sup_g)
+                    # #61 quarantine law binds the gate-400 re-drive exactly like
+                    # both retry ladders (deep review #163 B3): the dead attempt's
+                    # descendants may still hold the worktree — isolate (killpg +
+                    # /proc-prove dead via the survivor registry) BEFORE the next
+                    # Popen, or fail closed typed. An unproven tree is exactly the
+                    # contamination the law exists to forbid.
+                    iso = _isolate_prior(meta, {"pid": proc.pid, "spawn": spawn_no,
+                                                "tree_pids": _tree_live},
+                                         "node", {"node": node["id"], "index": index})
+                    if iso is not None:
+                        al = list(r.get("attempts_log") or [])
+                        al.append({"attempt": len(al), "error_class": "provider_400", "at": now(),
+                                   "gate400_clamp": target, "quarantine": "failed"})
+                        iso["attempts_log"] = al
+                        return iso
                     r2 = run_child(meta, node, byid, goal, context, schema,
                                    attempt_note=attempt_note, steering=steering, attempt=attempt,
                                    skey=skey, inputs=inputs, index=index,

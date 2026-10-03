@@ -9,10 +9,18 @@ Verified shapes (field report, 2026-10-02):
 
 The runner law pinned here: at spawn, an unknown reasoning-effort clamps to the
 nearest supported value (core clamp_effort's weaker-first law) with ONE warning
-naming lane / requested / supported set; an unknown toolset name is dropped with
-one warning, and an all-unknown list omits -t entirely (the clean no-op). When the
+naming lane / requested / supported set; a toolset list is validated against the
+CHILD's own namespace (validate_toolset OR configured mcp_servers OR plugin
+toolset keys — deep review #163 B2: bare validate_toolset is NOT the child's
+complete view), unknown residue is dropped with one warning, and an all-unknown
+list rides VERBATIM — omitting -t would silently broaden the child to the seat's
+full default toolsets (boundary probe: 4 declared tools became 41 defaults),
+which is never the author's ask. When the
 SERVER's own enum-gate 400 names the vocabulary the lane accepts, the runner
-re-drives ONCE with the clamped value instead of a permfail (escape hatch).
+re-drives ONCE with the clamped value instead of a permfail (escape hatch), the
+server-declared override bypasses the stale local lane table (B1: re-clamping
+it re-created the very 400), and the re-drive obeys the #61 quarantine law like
+both retry ladders (B3: _isolate_prior before the next Popen, fail closed typed).
 
 CLI-side half (boundary, recorded not patched): the warn+continue lives in core
 model_tools._apply_toolset_selection, and the all-invalid -z hard error lives in
@@ -169,6 +177,81 @@ check("plain provider_400 stays permfail (no enum words: no re-drive)",
       rec3.get("status") == "failed" and rec3.get("error_class") == "provider_400"
       and len(lines3) == 1, f"{rec3.get('error_class')} spawns={len(lines3)}")
 
+# ---------- (c2) deep review #163 B1: the server-declared override bypasses
+# the STALE local table. Committee probe verbatim: relay lane table says
+# [high], the SERVER says only medium/low exist. Old code re-clamped the
+# server's own chosen value back to high — spawn 2 asked high AGAIN, died
+# provider_400 twice, while reasoning_gate400 falsely recorded clamped=medium.
+# Fixed code passes the server's word through: spawn 2 asks medium and lives.
+argv_log7 = HOME / "argv-stale-table.log"
+r7 = mk("flah-stale", [{"id": "a", "type": "agent", "goal": "GO stale",
+                        "model": "relay-m1", "provider": "relay", "reasoning": "high"}],
+       {"reasoning_lanes": {"relay": ["high"]}})   # STALE: contradicts the server
+p7 = drive(r7, {"FAKE_ARGV_LOG": str(argv_log7), "FAKE_MODE": "reasoning_gate400",
+                "FAKE_SUPPORTED_EFFORTS": "medium,low", "FAKE_REJECT_EFFORT": "high"})
+rec7 = record(r7, "a")
+lines7 = argv_log7.read_text().splitlines() if argv_log7.exists() else []
+check("B1 e2e: server override survives the stale table — node DONE, not provider_400",
+      rec7.get("status") == "done",
+      f"{rec7.get('status')}/{rec7.get('error_class')} argv={lines7}")
+check("B1 e2e: spawn 2 asked the SERVER'S medium, never the table's high again",
+      len(lines7) == 2 and "--reasoning medium" in lines7[1]
+      and "--reasoning high" not in lines7[1], str(lines7))
+check("B1 e2e: the gate400 record tells the truth (requested high -> clamped medium)",
+      (rec7.get("reasoning_gate400") or {}).get("clamped") == "medium"
+      and (rec7.get("reasoning_gate400") or {}).get("requested") == "high",
+      str(rec7.get("reasoning_gate400")))
+# unit-level companion: the bypass is the classifier's own law, table present or not
+_b = wf._resolve_child_reasoning(r7, {"reasoning_lanes": {"relay": ["high"]}},
+                                 {"id": "x", "provider": "relay", "model": "relay-m1",
+                                  "reasoning": "high"},
+                                 override="medium")
+check("B1 unit: server override 'medium' returns verbatim against a table that says ['high']",
+      _b == "medium", str(_b))
+
+# ---------- (c3) deep review #163 B3: the gate-400 re-drive obeys the #61
+# quarantine law. The dead attempt's backgrounded grandchild (FAKE_GC, same
+# group, outlives the child) must be killed + /proc-proven dead BEFORE spawn 2
+# — exactly what both retry ladders do via _isolate_prior. Old code re-drove
+# blind: the second Popen launched while the first attempt's descendant was
+# still alive, sharing the workdir (holdout-head.json B3).
+gc_pids = HOME / "gc-b3.pids"
+gc_pids.unlink(missing_ok=True)
+argv_log8 = HOME / "argv-gate-gc.log"
+r8 = mk("flah-gate-gc", [{"id": "a", "type": "agent", "goal": "GO gate gc",
+                           "model": "relay-m1", "reasoning": "high"}])
+p8 = drive(r8, {"FAKE_ARGV_LOG": str(argv_log8), "FAKE_MODE": "reasoning_gate400",
+                "FAKE_SUPPORTED_EFFORTS": "xhigh,medium,low", "FAKE_REJECT_EFFORT": "high",
+                "FAKE_GC": "1", "FAKE_GC_PIDS": str(gc_pids)})
+rec8 = record(r8, "a")
+lines8 = argv_log8.read_text().splitlines() if argv_log8.exists() else []
+ev8 = events(r8)
+evnames = [e["event"] for e in ev8]
+_gcs = [int(x) for x in (gc_pids.read_text().split() if gc_pids.exists() else [])]
+_first_gc = _gcs[0] if _gcs else None       # the first attempt's descendant
+_reaps = [i for i, e in enumerate(ev8) if e["event"] == "node.respawn_reap"]
+_spawns2 = [i for i, e in enumerate(ev8) if e["event"] == "steer.baked"]
+check("B3 e2e: gate400 re-drive quarantines BEFORE spawn 2 (respawn_reap between the spawns)",
+      len(lines8) == 2 and _reaps and len(_spawns2) >= 2 and _reaps[0] < _spawns2[1],
+      f"ev={evnames}")
+check("B3 e2e: the quarantine names the FIRST attempt's live descendant",
+      _first_gc is not None and any(_first_gc in (e.get("pids") or [])
+                                     for i, e in enumerate(ev8)
+                                     if e["event"] == "node.respawn_reap" and i < (_spawns2[1] if len(_spawns2) > 1 else 10**9)),
+      f"gc={_first_gc} reaps={[e.get('pids') for e in ev8 if e['event']=='node.respawn_reap']}")
+_gc_alive = False
+for _l in _gcs:
+    try:
+        os.kill(_l, 0); _gc_alive = True
+    except (ProcessLookupError, ValueError):
+        pass
+    except PermissionError:
+        _gc_alive = True
+check("B3 e2e: no prior-generation descendant survives to the verdict; node not permfail",
+      not _gc_alive and rec8.get("status") in ("done", "partial")
+      and (rec8.get("status") == "done" or rec8.get("tree_proof") == "dead"),
+      f"status={rec8.get('status')} proof={rec8.get('tree_proof')}")
+
 # ---------- (d) e2e toolsets: unknown names are a clean no-op, never a child death ----------
 def toolsets_run(run_id, toolsets_value, argv_log_path):
     r = mk(run_id, [{"id": "a", "type": "agent", "goal": f"GO {run_id}", "toolsets": toolsets_value}])
@@ -202,6 +285,38 @@ if CORE:
           rec6.get("status") == "done" and lines6 and "-t web" in lines6[0], str(lines6))
     check("e2e toolsets: all-valid list logs NO clamp",
           not [e for e in events(r6) if e.get("event") == "node.clamped"], "")
+
+    # ---------- (d2) deep review #163 B2: the child's namespace, not the bare
+    # validator. Configured-but-unregistered MCP names are KEPT (the child's own
+    # _init_toolsets would keep them; the runner dropping them + omitting -t
+    # silently broadened a 4-tool graph to 41 defaults); an all-unknown list
+    # rides VERBATIM — the flag is NEVER silently omitted.
+    r_ts = mk("flah-ts-unit", [{"id": "x", "type": "agent", "goal": "GO ts", "toolsets": ["bogus-xyz"]}])
+    out_ts = wf._filter_child_toolsets(r_ts, {}, {"id": "x", "toolsets": ["bogus-xyz"]})
+    check("B2 unit: all-unknown list rides VERBATIM (never None: omission = silent broadening)",
+          out_ts == ["bogus-xyz"], str(out_ts))
+    (HOME / "config.yaml").write_text(
+        "mcp_servers:\n  audit_mcp:\n    command: /bin/true\n    enabled: true\n")
+    # read_raw_config resolves config.yaml from HERMES_HOME at CALL time — the
+    # in-process unit needs the env pointed at the fixture home (restore after).
+    _saved_home = os.environ.get("HERMES_HOME")
+    os.environ["HERMES_HOME"] = str(HOME)
+    try:
+        out_mcp = wf._filter_child_toolsets(r_ts, {}, {"id": "x",
+                                                       "toolsets": ["bogus-xyz", "audit_mcp"]})
+    finally:
+        if _saved_home is None: os.environ.pop("HERMES_HOME", None)
+        else: os.environ["HERMES_HOME"] = _saved_home
+    check("B2 unit: configured mcp_servers name survives the runner filter (child's own namespace)",
+          out_mcp == ["audit_mcp"], str(out_mcp))
+    (HOME / "config.yaml").unlink(missing_ok=True)
+    out_mix = wf._filter_child_toolsets(r_ts, {}, {"id": "x",
+                                                    "toolsets": ["web", "bogus-xyz"]})
+    check("B2 unit: mixed list keeps valid, drops only the true unknown",
+          out_mix == ["web"], str(out_mix))
+    out_none = wf._filter_child_toolsets(r_ts, {}, {"id": "x", "toolsets": ["none"]})
+    check("B2 unit: the author's explicit 'none' sentinel still means omission",
+          out_none is None, str(out_none))
 else:
     # honest degradation documented: without the core validator importable the
     # runner passes names through (warn+continue is core's job on the chat path)
