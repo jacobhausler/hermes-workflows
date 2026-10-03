@@ -90,6 +90,27 @@ def main() -> None:
                       "references/grammar.md", "references/operations.md", "SHA256SUMS")))
             check("fake child retains executable mode in ZIP",
                   (archive.getinfo(root + "tests/fake").external_attr >> 16) & 0o111 == 0o111)
+            # est-4vnq finding 4 (pack-list omission, made explicit — pack_choice=INCLUDED):
+            # scripts/pr_tag_audit.py was outside INCLUDE_FILES/INCLUDE_PATTERNS while
+            # tests/test_pr_tag_audit.py (shipped via the tests/test_*.py glob) executes
+            # it, and test_packaging stayed green (observed red-proof on base f83e5d0:
+            # pack.collect_sources() scripts members == ['scripts/graph_check.py',
+            # 'scripts/pack.py', 'scripts/suite.py'] — helper absent, ALL PASS).
+            # The helper SHIPS because its shipped test subprocess-executes it from the
+            # package root; the four checks below are the mechanical contract.
+            packed_scripts = {m[len(root):] for m in members if m.startswith(root + "scripts/")}
+            check("audit helper ships: scripts/pr_tag_audit.py is in the ZIP (explicit include decision)",
+                  "scripts/pr_tag_audit.py" in packed_scripts)
+            check("pack-list contract: ZIP scripts/ set equals the exact declared packed set",
+                  packed_scripts == {"scripts/graph_check.py", "scripts/pack.py",
+                                      "scripts/pr_tag_audit.py", "scripts/suite.py",
+                                      "scripts/graph_path_ban.py", "scripts/graph_regen.py"})
+            check("pack-list contract: every repo scripts/*.py is packed or declared source-only (no silent middle)",
+                  {p.name for p in (ROOT / "scripts").glob("*.py")} ==
+                  {Path(s).name for s in packed_scripts}
+                  | {"make_public.py", "lane_recover.py"})
+            check("the test that executes the audit helper ships beside it",
+                  root + "tests/test_pr_tag_audit.py" in members)
             unsafe = ("/.git/", "/home", "/workflows/", "/state.db", "/runner.log",
                       "/pre-lanes", "/home1/", "/.tmp-")
             check("archive excludes generated homes, owner-local examples, state, backups, logs, and Git metadata",
