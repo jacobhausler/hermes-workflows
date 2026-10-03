@@ -23,6 +23,14 @@ jload = _common.jload
 amend_preview = _common.amend_preview
 quote_json_parse_error = _common.quote_json_parse_error
 
+# #157: card enforcement — bind our OWN wfcommon (never a sys.path sibling).
+_ce_spec = importlib.util.spec_from_file_location("_hermes_workflows_card_enforcement",
+                                                  Path(__file__).resolve().parent / "card_enforcement.py")
+assert _ce_spec is not None and _ce_spec.loader is not None
+_card_enforcement = importlib.util.module_from_spec(_ce_spec)
+_ce_spec.loader.exec_module(_card_enforcement)
+
+
 def _coerce_graph(graph):
     """The door only ever sees `graph` as a parsed object from the tool schema, but a
     model CAN hand the string form; parse it and, on malformed JSON, quote ±40 chars
@@ -1719,6 +1727,11 @@ def _session_env(name):
 def _card(rid):
     return f'::workflow{{id="{rid}"}}'
 
+# #157: ONE card grammar — the enforcement module ships exactly what the tool
+# result carries, injected here rather than duplicated there.
+_card_enforcement.bind(_common, _card)
+
+
 def _lifecycle_notice(rid):
     """#157 (belt): the paste contract as a RESULT FIELD, not only hint prose.
     A hint the model skims past is how a perfectly running workflow goes
@@ -2853,5 +2866,8 @@ def register(ctx):
             " — pick per node by how hard the step is. "
             "Unset = seat default. run echoes the resolved {node: model} table.")
     ctx.register_tool(name="workflow", toolset="workflows", schema=WORKFLOW_SCHEMA, handler=handle)
+    # #157: last-resort card shipper (core fires this once per turn before the
+    # assistant row persists; fail-open, marker-ledgered — see card_enforcement.py).
+    ctx.register_hook("transform_llm_output", _card_enforcement._card_hook)
     ctx.register_command("wf", _wf_command, description="Workflow library: `/wf` lists, `/wf <name> [note]` replays a shelved graph",
                          args_hint="[name] [note]", argument_mode="text")
