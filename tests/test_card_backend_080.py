@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """Regression: launch a run in the tool's session; the payload carries a
-parser-valid card. O1 (1.1): the auto-card hook machine is deleted — the card
-is agent-authored (copy-exact paste), so this suite locks ONLY the owner
-record and the `card` fields on the run payload. No hook symbols remain."""
+parser-valid card. O1 (1.1) deleted the auto-card hook (the model's paste became
+the card); #157 re-arms it as the ENFORCEMENT rung (card_enforcement.py) — a
+last-resort shipper behind the paste, not a replacement for the payload card.
+This suite locks the owner record, the `card` fields on the run payload, and the
+register() surface (exactly the transform_llm_output hook, nothing else).
+"""
 import importlib.util
 import json
 import os
@@ -88,8 +91,9 @@ class CardBackend(unittest.TestCase):
         finally:
             clear_session_vars(tokens)
 
-    def test_register_wires_nothing_but_tool_skill_command(self):
-        # O1: the hook machine is gone — register() must wire no hooks at all.
+    def test_register_wires_tool_skill_command_and_card_hook(self):
+        # #157: register() wires the tool, skill, command, and exactly the
+        # card-enforcement hook — nothing else (the O1 law pins the surface).
         class Context:
             hooks = {}
             def register_hook(self, name, fn): self.hooks[name] = fn
@@ -100,7 +104,9 @@ class CardBackend(unittest.TestCase):
             def get_config(self, _, default): return default
         ctx = Context()
         wf.register(ctx)
-        self.assertEqual(ctx.hooks, {})
+        self.assertEqual(set(ctx.hooks), {"transform_llm_output"})
+        self.assertIs(ctx.hooks["transform_llm_output"],
+                      wf._card_enforcement._card_hook)
 
 
 if __name__ == "__main__":
