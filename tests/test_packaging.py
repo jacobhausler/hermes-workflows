@@ -103,10 +103,12 @@ def main() -> None:
                   "scripts/pr_tag_audit.py" in packed_scripts)
             check("pack-list contract: ZIP scripts/ set equals the exact declared packed set",
                   packed_scripts == {"scripts/graph_check.py", "scripts/pack.py",
-                                      "scripts/pr_tag_audit.py", "scripts/suite.py"})
+                                      "scripts/pr_tag_audit.py", "scripts/suite.py",
+                                      "scripts/graph_path_ban.py", "scripts/graph_regen.py"})
             check("pack-list contract: every repo scripts/*.py is packed or declared source-only (no silent middle)",
                   {p.name for p in (ROOT / "scripts").glob("*.py")} ==
-                  {Path(s).name for s in packed_scripts} | {"make_public.py", "lane_recover.py"})
+                  {Path(s).name for s in packed_scripts}
+                  | {"make_public.py", "lane_recover.py"})
             check("the test that executes the audit helper ships beside it",
                   root + "tests/test_pr_tag_audit.py" in members)
             unsafe = ("/.git/", "/home", "/workflows/", "/state.db", "/runner.log",
