@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased
+
+- #116 — confidence_substrate: engine-stamped fallback when a pinned confidence
+  route is quota-dead. The owner declares a sanctioned fallback substrate once
+  (`plugins.entries.hermes-workflows.settings.confidence_substrate`, top-level
+  `workflows: confidence_substrate:` config, or `WF_CONFIDENCE_SUBSTRATE` env —
+  a `"provider/model"`, comma list, or ladder list; ORDER is the ladder). The
+  door consults it ONLY on the #25 dead/fallback-ladder-surprise branch: the
+  first rung whose own submit ping proves alive serves, the node def is
+  re-routed and engine-stamped `substrate_substituted` {from, to, reason,
+  source}, `route_verified` re-bakes to the served rung, and the node's result
+  schema machine-gains the required `substrate_disclosure` clause — the runner
+  stamps the honest label into `nodes/<n>.json` at commit; a child can neither
+  author it away nor be killed for omitting it. Author-written stamps are
+  stripped at the door; the runner re-verifies the stamp against the estate
+  config at commit and fails closed (`route_unavailable`) on a forged one.
+  Absent config = today's fail-closed refusal byte-identical (golden-solo +
+  no-config EMPTY-diff gate); `require_route: false` stays a pure opt-out and
+  an explicit live pin always beats the config. Rides the existing #25
+  route-hold path (R6), no parallel gate.
+
 ## 1.2.0 — 2026-10-03
 
 Minor line, 12 commits since v1.1.4 (enumerated below in merge order
