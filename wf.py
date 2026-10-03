@@ -1109,6 +1109,15 @@ ERROR_CLASSES = frozenset(("provider_400", "unresolved_model", "cap_exhausted",
                            "incomplete_work", "early_death", "cancelled",
                            "schema", "spawn", "graph_invalid", "inputs",
                            "quorum", "fanout_empty", "crashed", "unknown",
+                           # est-vb65: committed by the seat floor / policy gate
+                           # (wf forbidden_model sites) and by unmet input deps
+                           # (_fail_precondition). AGENTS.md cites this set as
+                           # THE closed set — it must be exhaustive; the static
+                           # pin tests/test_error_classes_exhaustive_vb65.py
+                           # fails the build if a committed class ever falls
+                           # out of it (the B1-class pin only sees OBSERVED
+                           # classes, so an unwalked path slipped through).
+                           "forbidden_model", "precondition",
                            # #61: an attempt that exited while its own process group
                            # still held live backgrounded work — terminal, in BOTH ladders.
                            "left_live_descendants"))
