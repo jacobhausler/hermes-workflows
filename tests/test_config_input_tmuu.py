@@ -73,7 +73,7 @@ check("same capture dying LATE is not config_input (window is the precision guar
 hit3, _ = wf._classify_config_input("hermes -z: agent failed: openai.APIConnectionError. Connection error.", 100)
 check("fast transport death stays transport (needs the config marker, not just speed)",
       hit3 is False)
-hit4, _ = wf._classify_config_input("Warning: Unknown model 'qwen42x' vanished", 90)
+hit4, _ = wf._classify_config_input("Warning: Unknown model 'turbo-x42' vanished", 90)
 check("'unknown model' is unresolved_model territory, never config_input",
       hit4 is False)
 check("window constant is the ~1s reported shape", wf._CONFIG_INPUT_WINDOW_MS == 1000,
@@ -88,7 +88,7 @@ shutil.rmtree(HOME, ignore_errors=True)
 HOME.mkdir(parents=True); RUNS.mkdir()
 (HOME / "fake.log").write_text("")
 
-r = mk("tmuu-fast", [{"id": "a", "type": "agent", "goal": "cfg TMUU-FAST", "model": "sol", "provider": "nope"}],
+r = mk("tmuu-fast", [{"id": "a", "type": "agent", "goal": "cfg TMUU-FAST", "model": "turbo-a", "provider": "nope"}],
        retry_backoff=[0.05, 0.1])
 out = wf_run("tmuu-fast", {"FAKE_MODE": "cfgtypos", "FAKE_API_CALLS": "0"})
 rec = rec_of(r, "a")
@@ -130,8 +130,8 @@ check("both ladders pass a config_input verdict through: zero respawns, budget i
 # Run-level corroboration: a second config node in the same run also gets exactly
 # one spawn (a respawn-burn would show as extra spawns / retry events / attempts_log).
 (HOME / "fake.log").write_text("")
-r = mk("tmuu-budget", [{"id": "cfg", "type": "agent", "goal": "cfg TMUU-BCFG", "model": "sol", "provider": "nope"},
-                       {"id": "cfg2", "type": "agent", "goal": "cfg TMUU-BCFG2", "model": "sol", "provider": "nope"}])
+r = mk("tmuu-budget", [{"id": "cfg", "type": "agent", "goal": "cfg TMUU-BCFG", "model": "turbo-a", "provider": "nope"},
+                       {"id": "cfg2", "type": "agent", "goal": "cfg TMUU-BCFG2", "model": "turbo-a", "provider": "nope"}])
 out = wf_run("tmuu-budget", {"FAKE_MODE": "cfgtypos", "FAKE_API_CALLS": "0"})
 recs = (rec_of(r, "cfg"), rec_of(r, "cfg2"))
 ev_txt = (r / "events.jsonl").read_text()
@@ -145,7 +145,7 @@ check("two config deaths: one spawn each, typed, zero ladder events",
 
 # blocked descendant never spawns behind the config death
 (HOME / "fake.log").write_text("")
-r = mk("tmuu-budget2", [{"id": "cfg", "type": "agent", "goal": "cfg TMUU-C2", "model": "sol", "provider": "nope"},
+r = mk("tmuu-budget2", [{"id": "cfg", "type": "agent", "goal": "cfg TMUU-C2", "model": "turbo-a", "provider": "nope"},
                         {"id": "tr", "type": "agent", "goal": "tr TMUU-T2", "after": ["cfg"]}])
 out = wf_run("tmuu-budget2", {"FAKE_MODE": "cfgtypos", "FAKE_API_CALLS": "0"})
 check("blocked descendant never spawns behind the config death",
@@ -166,7 +166,7 @@ check("control: transport ladder still spends its full 2 respawns (3 spawns)",
 
 # ---------- (d) the slow twin keeps the existing classification ----------
 (HOME / "fake.log").write_text("")
-r = mk("tmuu-slow", [{"id": "a", "type": "agent", "goal": "cfg TMUU-SLOW", "model": "sol", "provider": "nope"}],
+r = mk("tmuu-slow", [{"id": "a", "type": "agent", "goal": "cfg TMUU-SLOW", "model": "turbo-a", "provider": "nope"}],
        retry_backoff=[0.05, 0.1])
 out = wf_run("tmuu-slow", {"FAKE_MODE": "cfgtypos", "FAKE_CFG_SLOW": "1.5",
                            "FAKE_API_CALLS": "0"})
