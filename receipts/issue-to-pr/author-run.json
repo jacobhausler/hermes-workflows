@@ -1,7 +1,7 @@
 {
   "template": "issue-to-pr",
   "receipt_kind": "author-run",
-  "author_estate": "author estate (homelab seat, devbox)",
+  "author_provenance": "the author's own machine, run 2026-10-03",
   "graph_file": "examples/issue-to-pr.workflow.json",
   "graph_sha256": "2f26f6ebabf6a6ec10283db3c85d37671149f0929e2931fb9525d422d455d320",
   "source_digest": "4dbbac0b47ba86d8b3ecd89a4f595c3ba7c487ac3653a38ba159dee92a973385",

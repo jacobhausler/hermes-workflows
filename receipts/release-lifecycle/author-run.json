@@ -1,7 +1,7 @@
 {
   "template": "release-lifecycle",
   "receipt_kind": "author-run",
-  "author_estate": "author estate (homelab seat, devbox)",
+  "author_provenance": "the author's own machine, run 2026-10-03",
   "graph_file": "examples/release-lifecycle.workflow.json",
   "graph_sha256": "12e0c21e804037b8e4b00b4afc21ad82ea3fcbc5e0798f488a0d6c587702f893",
   "source_digest": "0b4a97f11341379ef7cbd0a9a92185abc1f6bc76c8aa1e586a3c317abeddda04",
