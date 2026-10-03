@@ -1999,10 +1999,10 @@ export function WorkflowsPage() {
                   box('text-sm font-medium', d.name || d.id),
                   box('text-xs text-(--ui-text-tertiary)', statusLabel(d.status)),
                   // Agent-first (2026-10-03): the record page names the launching
-                  // agent next to the state — the same fact the pane row shows.
-                  originLabel(d.owner, d.owner_profile) !== 'unknown'
-                    ? jsx('span', { className: 'text-xs text-(--ui-text-tertiary)', title: 'launched by this agent', children: `@${originLabel(d.owner, d.owner_profile)}` })
-                    : null,
+                  // agent next to the state — the same fact the pane row shows,
+                  // honest 'unknown' included (deep review #156 A2 — one law,
+                  // both surfaces; never a fabricated name).
+                  jsx('span', { className: 'text-xs text-(--ui-text-tertiary)', title: 'launched by this agent', children: `@${originLabel(d.owner, d.owner_profile)}` }),
                   hdr.elapsed ? jsx('span', { className: 'text-xs text-(--ui-text-tertiary)', children: hdr.elapsedLabel }) : null,
                   d.metrics ? jsx(Vitals, { m: d.metrics, live: false, size: 'xs', cost: true }) : null,
                   d.metrics?.live ? jsx('span', { className: 'text-(--ui-text-tertiary)', style: { fontSize: 10 }, children: `${d.metrics?.live} live` }) : null,
@@ -2057,11 +2057,11 @@ function PaneRow({ run, thisChat }) {
       className: 'inline-flex min-w-0 items-center gap-1',
       children: [
         jsx('span', { className: 'truncate', children: run.name || run.id }),
-        // Agent-first (2026-10-03): who launched it, on every row. Resolved bot
-        // name when the read model knows it, honest fallback otherwise.
-        run.origin && run.origin !== 'unknown'
-          ? jsx('span', { className: 'shrink-0 text-[0.6875rem] text-(--ui-text-tertiary)', title: `launched by @${run.origin}`, children: `@${run.origin}` })
-          : null,
+        // Agent-first (2026-10-03): who launched it, on EVERY row — including
+        // the honest word 'unknown' when the read model cannot attribute it
+        // (deep review #156 A2: 'originator on every row' is the law; silence
+        // was a contrary contract). Never a fabricated name.
+        jsx('span', { className: 'shrink-0 text-[0.6875rem] text-(--ui-text-tertiary)', title: `launched by @${run.origin || 'unknown'}`, children: `@${run.origin || 'unknown'}` }),
         thisChat ? jsx(PanelPill, { tone: 'muted', children: 'this chat' }) : null
       ]
     }),
@@ -2071,13 +2071,12 @@ function PaneRow({ run, thisChat }) {
   }, run.id)
 }
 
-function WorkflowsPane() {
+export function WorkflowsPane() {
   const { data } = useQuery(listQuery())
   // Same key pairing as SessionStrip: owner.session_id pairs with the runtime id,
   // both atoms live under host.state (sdk/index.ts:665-697 — see #23).
   const runtimeSid = useValue(focusAtom(host?.state?.focusedSessionId))
   const storedSid = useValue(focusAtom(host?.state?.focusedStoredSessionId))
-  const [showAllDone, setShowAllDone] = useState(false)
   const runs = data?.runs || []
   const owned = new Set(ownedRuns(runs, runtimeSid, storedSid).map(r => r.id))
   // Agent-first index (owner 2026-10-03): a human viewer never launches runs,
@@ -2091,7 +2090,11 @@ function WorkflowsPane() {
   const census = counts
     ? `runs ${counts.total ?? '?'} · running ${counts.running ?? 0} · held ${counts.held ?? 0} · failed ${counts.failed ?? 0}`
     : 'runs unknown'
-  const recentShown = showAllDone ? rest : rest.slice(0, 10)
+  // Agent-first pane law (owner, est-wk7l round): THE REST renders EVERY row —
+  // no pane-level cap, no fold. paneModel is uncapped and the consumer must
+  // not re-introduce one (the old slice(0,10)+show-all fold made the PR body's
+  // "no caps on foreign runs" a lie; the render pin mounts the pane with >10
+  // foreign rows to keep them welded together).
   const group = (title, list) => (list.length
     ? [
         jsx(PanelSectionLabel, { children: `${title} · ${list.length}` }, title),
@@ -2108,10 +2111,7 @@ function WorkflowsPane() {
         (running.length || rest.length)
           ? [
               ...group('RUNNING', running),
-              ...group('THE REST', recentShown),
-              !showAllDone && rest.length > 10
-                ? jsx(Button, { size: 'xs', variant: 'ghost', onClick: () => setShowAllDone(true), children: `show all ${rest.length}` }, 'show-all')
-                : null
+              ...group('THE REST', rest)
             ]
           : jsx(EmptyState, { title: 'No runs', description: 'Ask the agent to start a workflow.' })
       )

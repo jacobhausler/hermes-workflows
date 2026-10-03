@@ -1,6 +1,7 @@
 // L3 acceptance: the registration surface is exactly {transcript.directives,
 // routes, panes, one composer area}; the pane docks {pane:'sessions', pos:'center',
-// enforce:true}; groupRuns puts held/failed/interrupted under NEEDS YOU;
+// enforce:true}; paneModel puts every RUNNING row on top and The Rest by
+// last action (agent-first, owner 2026-10-03 — no NEEDS YOU framing);
 // SMIL <animate> rides ONLY paths leaving running nodes; the MiniGraph ghost
 // stack is gone (one FanStack — grep 'inset: 4px 0 0 4px' must be 0).
 //
@@ -242,4 +243,4 @@ const rcCalls = src.match(/runningCount\(/g).length
 const rcDefs = src.match(/const runningCount =/g).length
 assert.equal(rcCalls + rcDefs, 2, 'runningCount: definition + tabTitle call only')
 
-console.log('ALL PASS: register surface, dock, O4 pane grouping, SMIL-only-on-running, one fan-stack')
+console.log('ALL PASS: register surface, dock, agent-first pane model, SMIL-only-on-running, one fan-stack')
