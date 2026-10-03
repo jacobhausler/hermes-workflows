@@ -763,7 +763,16 @@ def validate(out, schema):
         elif t == "array" and not isinstance(v, list): errs.append(f"{path}: expected array")
         elif t == "string" and not isinstance(v, str): errs.append(f"{path}: expected string")
         elif t == "boolean" and not isinstance(v, bool): errs.append(f"{path}: expected boolean")
-        elif t in ("number", "integer") and not isinstance(v, (int, float)): errs.append(f"{path}: expected number")
+        elif t in ("number", "integer") and (
+                isinstance(v, bool)
+                or not isinstance(v, (int, float))
+                or (t == "integer" and isinstance(v, float) and not v.is_integer())):
+            # #113: the two admitted numeric types are DISTINCT contracts.
+            # bool is never a number (Python bool subclasses int — the old
+            # isinstance(v, (int, float)) let True/False through both).
+            # integer accepts integral-valued floats (1.0 is an integer, the
+            # modern JSON Schema contract) but rejects fractional ones.
+            errs.append(f"{path}: expected number")
         en = s.get("enum")
         if (isinstance(v, str) and isinstance(en, list) and en
                 and all(isinstance(x, str) for x in en) and v not in en):
