@@ -40,6 +40,10 @@
   Pin: `tests/test_ratelimit_park_walls_159c.py` (mutation-proved on all three
   defects; test_ratelimit_54 pins undrifted).
 
+- #166c — the scrub audit's suffix set covers every shipped text shape: .yml and
+  .txt joined AUDIT_SUFFIXES (the shipped ci.yml exported forbidden lines with
+  '0 scrub hits' under the old set, NUL or not). New text types join the set,
+  never the skip path.
 - #116 — confidence_substrate: engine-stamped fallback when a pinned confidence
   route is quota-dead. The owner declares a sanctioned fallback substrate once
   (`plugins.entries.hermes-workflows.settings.confidence_substrate`, top-level
