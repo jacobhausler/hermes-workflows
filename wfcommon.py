@@ -114,6 +114,49 @@ def hermes_home():
         return Path(os.environ.get("HERMES_HOME") or (Path.home() / ".hermes"))
 
 
+# ---------- originating-bot attribution (agent-first pane, 2026-10-03) ----------
+# run.json owner.session_id names the LAUNCHING session but not WHO it was. Core
+# stores every session in the profile that owns it: profiles/<name>/state.db ->
+# sessions(id, profile_name). A read-only sweep of those tables resolves
+# session -> bot name for the desktop pane and the drawer; it NEVER writes and
+# never fails a listing (a locked/absent db just contributes no rows). TTL cache
+# so a pane poll doesn't reopen every profile's db.
+_PROFILE_BY_SESSION_TTL = 60.0
+_profile_by_session_cache = {"at": 0.0, "map": {}}
+
+
+def profiles_by_session(home=None):
+    """{session_id: profile_name} across every profile's state.db (read-only).
+    Absent/locked db or missing table contributes nothing; a session absent from
+    every table resolves to nothing — callers fall back honestly, never invent."""
+    import time
+    now = time.time()
+    c = _profile_by_session_cache
+    if now - c["at"] < _PROFILE_BY_SESSION_TTL:
+        return c["map"]
+    out = {}
+    try:
+        profiles = (Path(home) if home else hermes_home()) / "profiles"
+        for db in sorted(profiles.glob("*/state.db")):
+            try:
+                import sqlite3
+                con = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=1.5)
+                try:
+                    for sid, prof in con.execute(
+                            "SELECT id, profile_name FROM sessions WHERE profile_name IS NOT NULL"):
+                        out[str(sid)] = str(prof)
+                finally:
+                    con.close()
+            except Exception:
+                continue  # locked/foreign-schema db: no rows, never an error
+    except Exception:
+        pass
+    if out:  # a total sweep failure must not blank a good previous map
+        c["map"] = out
+    c["at"] = now  # even an empty sweep caches: never re-open every db per poll
+    return c["map"]
+
+
 # ---------- owner settings (#41/#42: tool-bridge first-class) ----------
 # `plugins.entries.hermes-workflows.settings.{runs_root,profile}` are OWNER vocabulary,
 # read at CALL time (no restart) through the same plugin-scoped helper `_hermes_bin`

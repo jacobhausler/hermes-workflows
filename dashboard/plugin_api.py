@@ -111,6 +111,16 @@ def _view(r, full=False):
             "started": st.get("started"), "owner": st.get("owner"),
             "nodes_done": st["done"], "nodes_skipped": st["skipped"], "nodes_total": st["total"],
             "updated": (r / "events.jsonl").stat().st_mtime if (r / "events.jsonl").exists() else 0}
+    # Agent-first pane (2026-10-03): stamp WHO launched this run. The read model
+    # resolves owner.session_id -> profile name via the profiles' own session
+    # tables (wfcommon.profiles_by_session, read-only). Absent stays absent —
+    # the UI falls back to the raw session id, never invents a bot.
+    try:
+        p = _workflow_common().profiles_by_session().get((st.get("owner") or {}).get("session_id"))
+        if p:
+            view["owner_profile"] = p
+    except Exception:
+        pass
     if st["held_gate"]:
         view["held_gate"] = st["held_gate"]
     if st.get("runner_exit"):

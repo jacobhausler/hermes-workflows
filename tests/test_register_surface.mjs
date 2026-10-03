@@ -154,19 +154,20 @@ assert.equal(typeof pane.data.tabTitle, 'function', 'tabTitle renders WORKFLOWS 
 assert.equal(typeof pane.data.tabTitleText, 'function')
 assert.equal(typeof pane.render, 'function')
 
-// -- 3. groupRuns (O4, owner 2026-10-02): RUNNING runner-backed only; pending
-// husks are never rendered; RECENTLY FINISHED holds done+failed+stopped+
-// interrupted; held runs sit in their own group waiting on their AGENT. -----
+// -- 3. paneModel (agent-first, owner 2026-10-03): RUNNING runner-backed only;
+// pending husks are never rendered; everything else (held/done/failed/stopped/
+// interrupted) is THE REST, descending by last action — one index, no queue
+// framing. Origin label resolves or falls back, never fabricates. ----------
 const mk = (id, status, updated) => ({ id, status, updated, owner: {} })
 const runs = [
   mk('h1', 'held', 1), mk('f1', 'failed', 2), mk('i1', 'interrupted', 3),
   mk('r1', 'running', 4), mk('p1', 'pending', 5),
   mk('d1', 'done', 6), mk('s1', 'stopped', 7)
 ]
-const g = mod.groupRuns(runs)
+const g = mod.paneModel(runs, {})
 assert.deepEqual(g.running.map(r => r.id), ['r1'], 'RUNNING is runner-backed only; pending husk excluded')
-assert.deepEqual(g.held.map(r => r.id), ['h1'], 'held in its own WAITING-ON-AGENT group')
-assert.deepEqual(g.recent.map(r => r.id), ['s1', 'd1', 'i1', 'f1'], 'RECENTLY FINISHED = done+failed+stopped+interrupted, updated desc')
+assert.deepEqual(g.rest.map(r => r.id), ['s1', 'd1', 'i1', 'f1', 'h1'],
+  'The Rest = held+done+failed+stopped+interrupted together, updated desc — held is not a section')
 
 // -- 4. SMIL candy: <animate> ONLY on paths leaving running nodes ----------------
 const grab = name => {
