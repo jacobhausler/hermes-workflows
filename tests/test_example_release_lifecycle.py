@@ -92,6 +92,16 @@ check("{run.publish_command}" in nodes["publish"]["goal"]
 aw = nodes["await-ci"]
 check(aw["type"] == "gate" and "until_argv" in aw["wait"],
       "await-ci is a machine gate (until_argv park, zero tokens while waiting)")
+# the probe is EXECUTED CODE, not prose: it must compile (a comment edit once
+# replaced the try:/sys.exit() lines and left an orphaned except — the string
+# checks below all stayed green while the gate could never run: this is the pin).
+try:
+    compile(aw["wait"]["until_argv"][2], "<await-ci-probe>", "exec")
+    _probe_compiled = True
+except SyntaxError as _e:
+    _probe_compiled = False
+    print(f"  probe SyntaxError: {_e}")
+check(_probe_compiled, "await-ci probe PYTHON COMPILES (executed code, not just prose)")
 argv_blob = json.dumps(aw["wait"]["until_argv"])
 check("{run." not in argv_blob,
       "the gate argv carries NO {run.*} seed: the check command travels via the handoff file, never as substituted shell")
