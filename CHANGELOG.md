@@ -2,32 +2,35 @@
 
 ## Unreleased
 
+- docs: full documentation refresh — union state through open PRs #47/#79/#84/#118/#121; README action/feature tables, authoring skill, grammar, operations, contributor docs rewritten; new docs-surface drift test
+
 - #59 validator: string-typed keys are TYPE-checked at submit, never discovered at the
-  wall (fb-fix ledger 97e90c2205f17fb0 — run `20260930-051209-fb-fix-436f89c3-rem`
-  authored an agent `context` as a LIST; it passed the truthy-only checks and died at
+  wall (an early incident: a run authored an agent `context` as a LIST; it passed the
+  truthy-only checks and died at
   FIRST spawn in `run_child`'s prompt concat, `node crashed: TypeError: can only
   concatenate str`, `error_class:'crashed'`, burning an already-answered gate release).
   `validate_graph_errors` now rejects, with named-node `{node, field, msg}` errors
   mirroring the fan-out item-goal law: agent `goal` — a PRESENT non-str (`[]`, `{}`,
-  `0`, `False`, `null` included; truthiness-independent, ra-59 review finding 1) — and
+  `0`, `False`, `null` included; truthiness-independent, per code review finding 1) — and
   plain-agent whitespace-only str; agent AND gate `context` and gate `question` —
   present-key-must-be-str, so explicit null is rejected like a list/dict (string-when-
-  present contract, ra-59 review finding 2; absent and `''` stay legal optional keys);
+  present contract, code review finding 2; absent and `''` stay legal optional keys);
   `fanout.goal` template present-non-str (same first-spawn crash class — `fmt_goal`
-  re.sub + node-goal concat); and echo `output` non-JSON-serialisable (the door's own
+  re.sub + node-goal concat); and echo `output` non-JSON-serialisable (the tool entry
+  point's own
   `graph.json`/node commit write is where a set or custom object used to explode;
   dict/list/str/num/bool/null stay the documented verbatim-commit shapes — the echo
-  JSON-verbatim contract is RETAINED, per the ra-59 compatibility clarification).
+  JSON-verbatim contract is RETAINED, per the review's compatibility clarification).
   Absent/`''` goals keep the exact legacy "agent node has no goal" message. NO coercion
   at resolve — strict-at-submit is the engine law (closed grammar: an un-validatable
   graph must never be accepted). Additive validation: well-typed graphs validate
-  identically, golden-solo stays EMPTY, zero run-dir writes and zero spawns on a
+  identically, the byte-identical no-graph fixture stays EMPTY, zero run-dir writes and zero spawns on a
   rejected submit.
   Test: `tests/test_string_type_validation_59.py` (issue repro, every key × good/bad
   shape incl. falsy/null rows and the review's exact case set, legacy-message pin,
-  door-level zero-writes/zero-spawns rows per rejected case, valid-graph zero-errors
+  tool-entry-point-level zero-writes/zero-spawns rows per rejected case, valid-graph zero-errors
   control).
-- door: `run_context` transport guards in `_bind_run_context` (string branch). Two silent
+- the `workflow` tool entry point: `run_context` transport guards in `_bind_run_context` (string branch). Two silent
   routes to a launched run full of unsubstituted `{run.KEY}` refs, both now rejecting
   before any run write, same fail-closed style as the #7 brace guard: (1) a JSON object
   handed over as a STRING (a caller that meant the map form — tool transports routinely
@@ -41,29 +44,31 @@
   written, no spawn; seed-with-refs rejects naming node+key; dict binding still
   substitutes; prose seeds still launch).
 
-- #57 door: provenance census counters on the `list` payload (quartermaster digest
-  contract, #52 vocab — field names `provenance.dispatched_by_set` / `provenance.total`
-  are PINNED; renames go through zap's digest-format thread first). One fold over the
+- #57 tool entry point: provenance census counters on the `list` payload (monitoring
+  contract, #52 vocabulary — field names `provenance.dispatched_by_set` / `provenance.total`
+  are PINNED; renames need a coordinated change on the consuming side first). One fold over the
   run.jsons the `act_list` loop ALREADY enumerates (`meta = jload(r/"run.json")` feeds
   the lane_key/team rows; the stamp read rides the same load — zero extra scans): runs
   with a `dispatched_by` stamp count toward both counters, an absent key or a null value
   counts toward `total` only (pre-identity runs, honest degradation on an unreadable
-  run.json). Additive key emitted ONLY when at least one run carries the stamp — the F1
+  run.json). Additive key emitted ONLY when at least one run carries the stamp — the
   emit-only-when-derivable law — so a solo install answers with the exact v1.0.15 key
-  set `{runs, total, counts}` and golden-solo stays EMPTY. The QM digest consumes
+  set `{runs, total, counts}` and the byte-identical no-graph fixture stays EMPTY. The monitoring
+  dashboard derives
   `provenance_blind_pct = 1 - set/total` without hand-scanning run.jsons.
   Test: `tests/test_provenance_counters_57.py` (mixed fixture root, both counters,
   solo key-set, fold-cost spy).
 
-- #37 lane hygiene (digest 20260929f / spool 8edcc9bfc91b9683 — a build lane wiped its
-  uncommitted implementation with a base checkout over its own dirty tree for a RED run,
+- #37 lane hygiene (one incident drove this: a build lane wiped its
+  uncommitted implementation with a base checkout over its own dirty tree for a failing-test run,
   then died on the turn cap; recovery was a hand replay of 17 journaled tool calls). Two
   parts. (1) A machine lane-hygiene preamble on every build-shape spawn (`shape: "build"`
   or a declared `repo:` lane; solo, fan-out item, transient retry and bounded resume all
   pass the one `run_child` seam) — prompt-side only, modeled on `_resume_preamble`, so
-  graph.json, `nodes/*.json`, `run.json` and the def hash are byte-untouched and golden-solo
-  stays EMPTY: the ban on checkout-over-dirty-tree RED runs, commit-tests-first + detached
-  throwaway worktree / named stash for the RED state, WIP-commit-before-the-cap, and the
+  graph.json, `nodes/*.json`, `run.json` and the def hash are byte-untouched and the
+  byte-identical no-graph fixture
+  stays EMPTY: the ban on checkout-over-dirty-tree failing-test runs, commit-tests-first + detached
+  throwaway worktree / named stash for the failing-test state, WIP-commit-before-the-cap, and the
   name of the exit. (2) `scripts/lane_recover.py` (stdlib, state.db opened `mode=ro`):
   `--profile/--skey` or `--run/--node[/--index]` (key read from the node record, db home
   resolved the way the read model does) lists the journaled write_file/patch calls, and

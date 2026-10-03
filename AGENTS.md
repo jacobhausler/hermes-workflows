@@ -1,335 +1,199 @@
 # AGENTS.md — front door for agents
 
-You are an agent. This file is written for you. It covers **installing** the plugin,
-**operating** workflows once installed, and **contributing** to this repo. Each
-section is self-contained; jump to the one that matches your task. Commands are
-exact and copy-pasteable. Where a claim needs proof, the proof command is given.
+Written for agents, usable by humans: **install**, **operate**, **contribute**.
+Deep detail lives once, in `references/` and the guide files; this file summarizes
+and points — one source per fact.
 
----
+> Union state: items tagged `(open PR #NN)` exist in an open pull request and are
+> not merged yet. Everything untagged is on `main`.
 
-## 1. What this is (30 seconds)
+## 1. What this is
 
 `hermes-workflows` is a [Hermes Agent](https://github.com/NousResearch/hermes-agent)
 plugin. It registers one tool, `workflow`, that runs a **DAG of agent nodes** as a
-background process owned by the calling session, plus a desktop DAG view.
-
-- **Backend half** (`__init__.py`, `wf.py`, `wfcommon.py`, `dashboard/`): Python,
-  stdlib-only, lives under `~/.hermes/plugins/hermes-workflows/` on the machine that
-  runs `hermes serve`. Registers the `workflow` tool, the `workflow` skill, and
-  read-only dashboard routes.
-- **Desktop half** (`desktop/plugin.js`): plain ESM on the Hermes Desktop plugin SDK
-  surface only. Lives under `~/.hermes/desktop-plugins/hermes-workflows/` on the
-  machine that runs the **app**. When app and backend are the same machine, Hermes
-  copies it for you; otherwise you copy it by hand.
-
-Children are spawned as `hermes chat --query-file … -Q --max-turns N` — the stock
-quiet one-shot CLI contract. **No patched Hermes is required.** See
-[docs/patched-core.md](docs/patched-core.md) for the one optional field.
-
----
+background process owned by the calling session, plus a desktop DAG view. No daemon,
+no control plane: one runner process per run, spawned by the tool call itself. The
+**backend half** (`__init__.py`, `wf.py`, `wfcommon.py`, `dashboard/`; stdlib-only
+Python) lives under `~/.hermes/plugins/hermes-workflows/` on the machine running
+`hermes serve`; the **desktop half** (`desktop/plugin.js`, plain ESM on the desktop
+plugin SDK surface) under `~/.hermes/desktop-plugins/hermes-workflows/` on the
+machine running the **app**. Children spawn via the stock quiet one-shot CLI; **no
+patched Hermes is required** ([docs/patched-core.md](docs/patched-core.md) covers
+the one optional field that types turn-cap deaths).
 
 ## 2. Install
 
-### 2a. Catalog install (stock Hermes)
-
 ```sh
-hermes plugins install hermes-workflows
-hermes plugins enable hermes-workflows
-hermes plugins validate ~/.hermes/plugins/hermes-workflows
+hermes plugins install hermes-workflows && hermes plugins enable hermes-workflows
+hermes plugins validate ~/.hermes/plugins/hermes-workflows   # then restart hermes serve
 ```
 
-Then restart the backend (`hermes serve`) — tools and dashboard routes mount only at
-serve start. **Proof it loaded:** this line in the gateway's `~/.hermes/logs/gui.log`:
-
-```
-Mounted plugin API routes: /api/plugins/hermes-workflows/
-```
-
-A `401` on `/api/plugins/hermes-workflows/runs` is *not* proof — the auth layer
-answers 401 for any path, mounted or not.
-
-### 2b. Remote desktop app
-
-If the app runs on a different machine than the backend:
-
-```sh
-mkdir -p ~/.hermes/desktop-plugins/hermes-workflows
-cp desktop/plugin.js ~/.hermes/desktop-plugins/hermes-workflows/plugin.js
-shasum -a 256 ~/.hermes/desktop-plugins/hermes-workflows/plugin.js   # compare to the repo's file
-```
-
-The app fs-watches that directory and hot-loads. If the WORKFLOWS tab is missing from
-the SESSIONS | BOTS | WORKFLOWS strip: Settings → Plugins (toggle on), then ⌘K →
-*Reload desktop plugins*.
-
-### 2c. From a release zip
-
-See [INSTALL.md](INSTALL.md) — verify the `.sha256` sidecar and `SHA256SUMS`, unpack,
-copy the backend and desktop halves, validate, enable, restart.
-
-### 2d. Optional: typed turn-cap deaths
-
-Stock Hermes records a child that dies on its turn cap as `error_class: unknown`
-(partial output and log preserved). Applying the one-field core patch in
-[docs/patched-core.md](docs/patched-core.md) makes it `error_class: cap_exhausted` with the
-loop's own reason. It is an operator choice; the plugin never patches your core. After
-a failed child, `status` reports `turn_report: typed|untyped` so you can tell.
-
----
+**Proof it loaded:** `Mounted plugin API routes: /api/plugins/hermes-workflows/` in
+`~/.hermes/logs/gui.log` (a `401` on a dashboard path is *not* proof — auth answers
+401 for any path). **Remote app:** copy `desktop/plugin.js` to that machine's
+`~/.hermes/desktop-plugins/hermes-workflows/`; it hot-loads (missing tab →
+Settings → Plugins, then ⌘K → *Reload desktop plugins*). Zip install and removal:
+[INSTALL.md](INSTALL.md).
 
 ## 3. Operate
 
-The bundled `workflow` skill ([SKILL.md](SKILL.md)) is loaded into any session that
-has the plugin; it is the authoritative grammar. This section is the operating loop.
+The bundled skill ([SKILL.md](SKILL.md)) loads into any session with the plugin.
+Deep docs, one source each: [grammar](references/grammar.md) ·
+[budgets](references/budgets.md) · [read model & recovery](references/operations.md)
+· [operating lessons](references/operator-playbook.md).
 
-### 3a. The loop
+### 3a. Surfaces map
+
+The `workflow` tool is action-routed — **twelve actions in the union**: eleven on
+`main` (`run`, `status`, `wait`, `release`, `steer`, `inbox`, `amend`, `stop`,
+`list`, `save`, `library`) plus `release_lock` `(open PR #47)`. Parameters and
+refusal rules live once in operations.md:
+
+| Surface | In one line |
+|---|---|
+| `run` `wait` `status` `stop` | Launch (inline `graph`, `graph_path`, or `from:` the library; `lane_key` dedupe) / block & resume — the only read action that respawns an idle runner / read-only snapshot, never spawns / cancel (terminal, not a rollback) |
+| `release` `steer` `inbox` | Answer a held gate / queue text for a running child (cooperative, never interrupts) / the child-side pull of that text |
+| `amend` `save` `library` `list` | Replace the whole graph mid-flight (`dry_run` previews) / shelve a graph / list the shelf / census all runs |
+| `release_lock` `(open PR #47)` | Escape hatch for a wedged runner lock; refuses unless the recorded runner is provably dead and fresh lock probes prove the lock free |
+| Run states | `running`, `held`, `interrupted`, `done`, `failed`, `stopped` + `liveness-unknown` `(open PR #47)`: while the probe can't answer (`runner_live: null`), `wait` refuses to spawn |
+| Graph keys | `name, nodes, description, defaults, model_policy, provenance, grammar` + `include` `(open PR #84)`: expand shelved library graphs into a run at launch (aliased ids, `seeds` for `{run.KEY}`) |
+| Owner config | `workflows.runs_root`, `hermes_bin`, model tiers, `confidence_substrate` `(open PR #118)`: a fallback ladder for a route proved dead; substitutions must be disclosed |
+| Desktop / slash | `/workflows` page, live-run strip under the composer, `::workflow` card; `/wf` lists the library, `/wf <name> [note]` runs it with `note` as run context |
+
+### 3b. The loop
 
 ```
-workflow { "action": "run",    "graph": {…} }             → { run_id, routes, … }
-workflow { "action": "wait",   "run_id": "<id>" }         → repeat until status ∈ {done, failed, stopped}
-workflow { "action": "status", "run_id": "<id>" }         → read-only; never spawns
-workflow { "action": "release","run_id": "<id>", "gate_id": "<gate>", "answer": "…" }
-workflow { "action": "stop",   "run_id": "<id>" }         → terminal, not rollback
+run {graph} → run_id … then wait {run_id} until done/failed/stopped
+status {run_id}   release {run_id, gate_id, answer}   stop {run_id}
 ```
 
-`wait` blocks while a verified runner is live and self-yields ~330 s with a
-"call wait again" note to stay under the harness tool deadline. **Stay in the loop.**
-Ending your turn after `run` is the single most common way a workflow stalls.
+`wait` self-yields ~330 s with a "call wait again" note (host tool deadline).
+Payloads carry a derived `next`: held gate → `release`; running/interrupted →
+`wait`; failure to fix → `amend`; terminal → empty. **Stay in the loop** — ending
+your turn after `run` is the most common way a workflow stalls. Paste the payload's
+`card` line (a pasteable run card) alone on its own line in your reply.
 
-### 3b. Minimal graph
+### 3c. Authoring rules that bite
 
-```json
-{ "name": "check",
-  "nodes": [
-    { "id": "inspect", "type": "agent",
-      "goal": "Inspect <target>. Return one fenced JSON object {ok, findings}.",
-      "model": "<model-id>", "provider": "<provider-name>", "reasoning": "medium",
-      "max_turns": 20, "timeout": 900 }
-  ] }
-```
+Full law: [references/grammar.md](references/grammar.md); tested examples:
+`examples/`.
 
-Or, the 1.0.1 way — settings once, nodes carry only their work:
-
-```json
-{ "name": "check",
-  "defaults": { "model": "<model-id>", "provider": "<provider-name>", "reasoning": "medium",
-                "schema": { "type": "object", "required": ["ok"] } },
-  "nodes": [
-    { "id": "inspect", "type": "agent", "shape": "recon", "goal": "Inspect <target>." },
-    { "id": "verdict", "type": "agent", "after": ["inspect"], "goal": "Judge the inspection." }
-  ] }
-```
-
-Rules that bite:
-
-- **Pin `model` + `provider` on every node** unless you have verified the seat
-  default is the route you want. An unset model rides the seat default — including
-  fan-out children — and a usage-capped or wrong-provider default surfaces as
-  `provider_400`/`429` on every child.
-- **`reasoning` is passed verbatim** to `hermes chat --reasoning`. Hermes clamps it to
-  what the route supports (`agent/reasoning_effort.py`); a level the *relay* itself
-  rejects (some local servers accept only `low|medium|xhigh`) comes back as
-  `provider_400` with the server's message — read it and pick from that list.
-- **`after` orders AND injects.** Every direct parent's committed output lands under
-  `## Inputs` automatically (8 KB per parent). Use `inputs:["a.key"]` only to pick a
-  dotted path or a non-parent ancestor, or `fanout.items_from:"a.items"`. A missing
-  path fails at spawn.
-- **Shared settings go in `defaults`, once.** `defaults:{schema, timeout, max_turns,
-  reasoning, provider, model, context}` at graph level; `shape:recon|build|review|publish`
-  sizes budgets from measured presets. A `schema` makes the runner write the reply
-  contract itself — no contract prose in goals.
-- **Leave budgets unset and name a `shape`; see [references/budgets.md](references/budgets.md).**
-
-### 3c. Fan-out, gates, branches
-
-```json
-{ "id": "lanes", "type": "agent",
-  "fanout": { "items": ["alpha", "beta"], "goal": "Audit {item}. Write <path>/{item}.md first.", "quorum": 1 } }
-
-{ "id": "approve", "type": "gate", "after": ["lanes"],
-  "question": "Ship the report?", "options": ["ship", "hold"] }
-
-{ "id": "go",   "type": "gate", "after": ["judge"], "when": "out.judge.verdict == 'ship'", "on_skip": "prune" }
-{ "id": "hold", "type": "gate", "after": ["judge"], "when": "out.judge.verdict != 'ship'", "on_skip": "prune" }
-```
-
-A human gate holds until `release`; the desktop view shows the question and hands
-the answer back to the owning session. `hold_timeout` + `default_option` makes a
-decorative gate release itself (`gate.auto_released`); `hold_timeout` alone logs
-`gate.expired` once and keeps holding. Fan-out `quorum` (optional) races: once N
-succeed, the rest are cancelled; without it the fan-out waits for every item;
-`goal` is optional when items carry their own. Machine gates: `wait:{"wait_s":N}` or
-`wait:{"until_argv":[…],"every_s":60,"timeout_s":3600}`. Tested examples:
-[examples/approve-publish.json](examples/approve-publish.json),
-[examples/branch-on-verdict.json](examples/branch-on-verdict.json).
+- **Pin `model` + `provider`**: an unset model rides this installation's default
+  (fan-out children too); a wrong or capped default surfaces per child.
+- **`reasoning` is validated per resolved route, not clamped**: each level is
+  checked at launch against the resolved `(provider, model)` route's supported set;
+  an unsupported level is **refused** naming the supported list and nearest level —
+  never a silent downgrade.
+- **`after` orders AND injects**: each direct parent's committed output lands under
+  `## Inputs` (8 KB per parent). Use `inputs` for dotted paths or non-parent
+  ancestors; an unresolvable path fails the node at spawn.
+- **Leave budgets unset and name a `shape`** (fills `max_turns`/`timeout` from
+  measured presets — [budgets](references/budgets.md)); shared settings go in
+  graph-level `defaults`, once. A node `schema` writes the output contract for you.
+- Human gates hold until `release`; `when` branches on upstream output,
+  `on_skip:"prune"` kills the losing arm; machine gates park on a timer or argv
+  probe at zero cost. `fanout` runs N children; an optional `quorum` commits at N
+  and cancels stragglers (`cancelled`, never a failure).
 
 ### 3d. Failures, resume, amend
 
-- `node.failed` events carry `error_class` from a closed set — `timeout | cap_exhausted |
-  early_death | provider_400 | unresolved_model | transport | transport_exhausted | schema |
-  crashed | spawn | graph_invalid | cancelled | inputs | quorum | fanout_empty |
-  fatal_quota | route_unavailable | incomplete_work | unknown` —
-  plus `attempts`. Read the class, not the prose. `cancelled` (a `stop`, or a fan-out
-  straggler at quorum) is never a failure: the run reads `stopped`, and a `wait` re-drives it.
-  `fatal_quota` (#24): a 429 whose own text carries a reset horizon beyond the run's
-  reach — fails on the FIRST attempt (the retry ladder cannot beat a multi-day reset)
-  and stamps the model into the seat quota cache; the door then refuses a launch on
-  that model until the horizon passes (one recovery ping first).
-  `route_unavailable` (#25): a pinned route the door's ping affirmatively proved dead
-  or answered-from-the-fallback-ladder (submit refusal), or a committed served_model
-  that contradicts the door's alive-proof (commit hold) — never silent fallback billing.
-  `incomplete_work` (digest 29d / 64c6772b): a node with `repo: <lane>` committed done/partial while
-  the lane still had uncommitted TRACKED changes — the runner refuses the false hand-off and the
-  record carries `lane_dirty` porcelain; commit in the lane, then amend/re-run re-drives the node.
-- A child that dies after printing a valid fenced answer (rc≠0, wall, cap) is committed as
-  `status: partial` with the death cause kept as `error_class`; downstream runs on it.
-- `transport | early_death | cap_exhausted | timeout` deaths with tool progress get ONE
-  automatic re-drive with a machine resume preamble (`node.retry`); permfails never retry.
-- A child silent for 120 s after spawn is killed as `early_death`; a child still writing its
-  log when the wall fires gets one 50 % extension (`node.extended`), then dies.
-- A run with unfinished work and no live runner is `interrupted`. Inspect committed
-  outputs, then `wait` to resume — finished nodes replay-skip by fingerprint.
-- To change the graph mid-flight: `amend` with the **whole** replacement graph.
-  `dry_run:true` previews `{added, removed, changed, will_rerun, unchanged}`.
-  Amending a `pending` node changes what spawns next; amending a `done` node
-  invalidates it.
-- To resume a lane that died at its wall with work already banked: amend its `goal`
-  to a *resume* prompt that names what is already committed and forbids redoing it.
-  Cold re-runs of a timed-out research lane time out again.
-- Lane hygiene (#37, digest 20260929f): every build-shape spawn (`shape: "build"` or a
-  declared `repo:` lane) is prefixed with a machine preamble — prompt-side only, like the
-  resume preamble, so it never touches graph.json, node records or the def hash. It bans
-  producing a RED run by checking a base ref out over a dirty tree (that overwrites
-  uncommitted work in place), prescribes commit-tests-first + a throwaway detached
-  worktree (or a named stash) for the RED state, and orders a WIP commit before the turn
-  cap. A lane that still dies unbanked is not lost: its tool calls are journaled in the
-  profile's state.db, and `python3 scripts/lane_recover.py --run <id> --node <node>
-  [--out <dir>]` (or `--profile <name> --skey <key>`) replays the write_file/patch calls
-  into a restore dir — triage list by default, files + an unmatched-patch report with
-  `--out`; exit 2 no session, 3 nothing journaled. The db is opened read-only.
-- Steering: `steer` queues text; a running child pulls it via `inbox` at its next
-  seam. It does not interrupt a child mid-turn.
-
-### 3e. Reporting a finished run
-
-Quote the read model's vanity numbers: `tokens in ▸ out | api_calls | tool_calls`,
-per node and run total (they are in every `status`/`wait` payload). Do not lead with
-`estimated_cost_usd` — it is a price-table estimate and reads as spend on
-subscription routes.
-
----
+- Every `node.failed` carries `attempts` and `error_class` from the closed set in
+  `wf.py`: `cancelled, cap_exhausted, crashed, early_death, fanout_empty,
+  fatal_quota, forbidden_model, incomplete_work, inputs, precondition, quorum,
+  route_unavailable, schema, spawn, timeout, transport, transport_exhausted,
+  provider_400, unresolved_model, graph_invalid` (`unknown` is only a harvest-time
+  default). Read the class, not the prose; failed nodes also carry `node_facts`
+  (attempts log, final words, log/prompt paths) — answer from those before
+  re-driving. Per-class semantics live once in operations.md.
+- An explicit `model` pin is fail-closed by default (`require_route: true`): a
+  submit ping proving the pin dead **refuses the launch** (`route_unavailable`)
+  rather than silently billing another model; `require_route: false` opts into
+  fallback. `(open PR #118)` `confidence_substrate`: an owner-declared ladder for
+  proved-dead pins; substituted nodes must disclose the original pin.
+- Unfinished work with no verified live runner reads `interrupted`: inspect
+  committed outputs, then `wait` — finished nodes replay-skip by effective
+  fingerprint (efp); only stale work and its downstream re-run. `amend` takes the
+  **whole** replacement graph (`dry_run:true` previews `{added, removed, changed,
+  will_rerun, unchanged}`); nodes with untouched definition and route keep their
+  results (freeze law).
+- A build lane that dies with work uncommitted is not lost:
+  `python3 scripts/lane_recover.py --run <id> --node <node> [--out <dir>]` replays
+  its journaled file writes from the profile database (read-only) into a restore dir.
+- Report a finished run by the read model's counts (`tokens in/out`, `api_calls`,
+  `tool_calls`); missing evidence reads `unknown`, never a false zero. Never lead
+  with `estimated_cost_usd` — an estimate, not a bill.
 
 ## 4. Contribute
 
-### 4a. Map
+### 4a. Repo map
 
 | Path | Owns |
 |---|---|
-| `__init__.py` | The tool door: schema, action dispatch (`run/status/wait/release/steer/inbox/amend/stop/list/save/library`), model-tier resolution, preflight, compact/full payload shaping |
-| `wf.py` | The background runner: scheduling, child spawn (`-Q` contract), retry gate, typed error classification, steer baking, tier stamping |
-| `wfcommon.py` | The read model: run state, fingerprints (`efp`), node records, metrics join, liveness. Read-only over a run directory |
-| `dashboard/plugin_api.py` | Dashboard routes (API-only; the manifest hides the tab) |
-| `desktop/plugin.js` | Desktop half: runs list, DAG canvas, fan-out stacks, timeline, gate hand-off, `::workflow` card |
-| `SKILL.md`, `references/` | The authoring skill loaded into sessions. Portable: no host names, install paths, or provider lore |
-| `tests/` | Stdlib-only serial scripts; each prints `PASS`/`FAIL` lines, exit 0 = green. `.mjs` under Node. `tests/fake_hermes.py` is the child stand-in (`FAKE_MODE=…`) |
-| `scripts/suite.py` | Serial runner with per-test logs + `exits.json` ledger (the merge gate); `--baseline <ledger>` adds `admission.json` splitting reds into introduced vs pre-existing (exact name+exit identities; a base red is blocking, never waived — and a base red whose test was DELETED reports `missing`, which blocks too, so `rm` can't launder a red to green) |
-| `scripts/pack.py` | Release zip + `SHA256SUMS` + sidecar |
-| `scripts/make_public.py` | Publish-tree exporter with a private-string audit gate (`scripts/.scrub-guards` allow-list) |
-| `docs/` | Patched-core guide, manifest decisions, catalog entry + PR body, scrub audit |
+| `__init__.py` | Tool entry point: schema, action dispatch, model resolution, preflight, payload shaping |
+| `wf.py` · `wfcommon.py` | Runner (scheduling, spawn, retry gate, typed failures in `ERROR_CLASSES`, steer baking) · read model (state, fingerprints, node records, metrics, liveness) |
+| `dashboard/` · `desktop/` | Dashboard routes (API-only) · desktop half (DAG canvas, fan-out stacks, timeline, gate hand-off, card) |
+| `SKILL.md`, `references/` | Authoring skill + deep docs. Portable: no host names, private paths, or provider lore |
+| `tests/` | Stdlib-only serial scripts (exit 0 = green) + `.mjs` under Node; `fake_hermes.py` is the child stand-in |
+| `scripts/` | `suite.py` merge-gate runner + admission ledger — `(open PR #121)`: zero discovered cases is a failure, never green; `graph_check.py` graph drift; `make_public.py` private-string audit; `pack.py` release zip; `lane_recover.py` lane replay |
+| `graphify-out/` | **Tracked** knowledge graph — CI drift-gates it (§4c) |
+| `docs/` · `.github/` | Patched-core guide, catalog entry, scrub audit · the five CI gates, on every push/PR |
 
 ### 4b. Run the checks
 
-```sh
-python3 tests/test_engine.py                      # one targeted suite while iterating
-python3 tests/test_skill_docs.py                  # the portable-skill contract
-node --check desktop/plugin.js                    # desktop half parses
-node --experimental-strip-types tests/test_edge_routing.mjs
-python3 scripts/suite.py . ci-out                 # full serial suite → ci-out/exits.json (merge gate)
-hermes plugins validate .                         # manifest + SDK-surface + security scan
-python3 scripts/make_public.py /tmp/public-tree   # private-string audit; must print "0 scrub hits"
-python3 scripts/graph_check.py                    # committed knowledge graph matches the tree
-```
-
-A change is done when: its targeted test is green, the full suite is green, validate
-prints `Validation passed.`, the scrub audit prints `0 scrub hits`, and the graph gate
-prints `OK`. CI runs the same five gates ([.github/workflows/ci.yml](.github/workflows/ci.yml)).
-
-### 4b′. Navigate with the knowledge graph
-
-The repo ships a [graphify](https://github.com/Graphify-Labs/graphify) knowledge
-graph at `graphify-out/` — ~1600 nodes / ~3200 edges over every function, class, test
-and doc heading, built by deterministic tree-sitter parsing (no LLM, no network); one edge
-per `(source, target, relation)` (`count` marks a collapsed multi-edge; policy in `scripts/graph_check.py`).
-Query it before you grep or open files one by one:
+One canonical entry — what CI itself runs:
 
 ```sh
-uv tool install graphifyy                                      # once; the CLI is `graphify`
-graphify query "how does a failed node get its error_class"    # scoped subgraph for a question
-graphify path "act_run" "run_child" --undirected               # how two symbols connect
-graphify explain "run_state"                                   # one symbol + every neighbour
-graphify god-nodes --top 12                                    # the hubs everything flows through
+python3 scripts/suite.py . ci-out
 ```
 
-`graphify-out/GRAPH_REPORT.md` is the broad-architecture view (community hubs,
-surprising cross-file links). Every edge is tagged `EXTRACTED` (read from source) or
-`INFERRED` (resolved by graphify) so you know what was found vs guessed.
+It runs every `tests/test_*.py` serially and every `tests/test_*.mjs` under
+`node --experimental-strip-types`, writing `ci-out/exits.json` + per-test logs.
+While iterating, run one targeted test (`python3 tests/test_engine.py`); the quick
+desktop syntax gate is `node --check desktop/plugin.js`. The other three CI gates —
+`hermes plugins validate .`, the `make_public.py` scrub audit, `graph_check.py` —
+and the full block with expected verdicts are in [CONTRIBUTING.md](CONTRIBUTING.md);
+contributor discipline in [references/development.md](references/development.md).
 
-Keeping it current:
+### 4c. Navigate with the knowledge graph
 
-| you did | run |
-|---|---|
-| changed any `.py`/`.js`/`.md` | `graphify update .` (AST only, ~3 s) and commit `graphify-out/{graph.json,GRAPH_REPORT.md,manifest.json}` |
-| want to check without rewriting | `python3 scripts/graph_check.py` (`--fix` rewrites) |
-| added/renamed whole subsystems | `graphify label . --missing-only` names new communities — the ONLY LLM step; any OpenAI-compatible endpoint works (`OPENAI_BASE_URL`, `OPENAI_MODEL`, `GRAPHIFY_MAX_OUTPUT_TOKENS=16000` for thinking models). Never run in CI |
+`graphify-out/` is a committed [graphify](https://github.com/Graphify-Labs/graphify)
+graph of every function, class, test, and doc heading (deterministic tree-sitter
+parsing; no LLM, no network). It is **tracked and CI drift-gated**
+(`scripts/graph_check.py` fails if it diverges from the tree);
+`graphify-out/GRAPH_REPORT.md` is the source of truth for its size — never restate
+node/edge counts in docs. Install once (`uv tool install graphifyy`); query before
+you grep: `graphify query "<question>"`, `graphify affected "<symbol>" --depth 2`
+(every caller — review gate R8). After changing any `.py`/`.js`/`.md`:
+`graphify update .` (~3 s) and commit the `graphify-out/` delta with your PR.
 
-Committed: `graph.json`, `GRAPH_REPORT.md`, `manifest.json`, `.graphify_labels.json(.sig)`,
-`.graphify_analysis.json`, `.graphify_root`. Ignored: `graph.html`, `cache/`, `cost.json`,
-dated backups. `.graphifyignore` excludes `graphify-out/` and `.github/` from the corpus.
+### 4d. Rules
 
-### 4c. Rules
+1. **Touch only the files your task names;** forward-only commits, never rewrite history.
+2. **Write-first:** commit the artifact before polishing; an uncommitted worktree at
+   a wall death is lost work.
+3. **Targeted tests while iterating; the full suite at merge.**
+4. **No private strings in shipped files:** no hostnames, LAN addresses, machine
+   vocabularies, or personal paths outside `plugin.yaml`/`docs/catalog`.
+5. **SKILL.md stays portable and under 110 lines;** detail goes in `references/`.
+   One source per fact — write a table or rule once, link it elsewhere.
+6. **Desktop half stays on the SDK surface** (only `@hermes/plugin-sdk`, `react`,
+   `react/jsx-runtime`; no `window.hermesDesktop`, core localStorage, core-UI DOM).
+7. **Stdlib-only Python; host imports lazy and guarded.**
+8. **Honest degradation:** an absent field reads `unknown`; never fabricate.
 
-1. **Lane-scoped edits.** Touch only the files your task names. Never amend or rebase
-   shared history — forward-only commits.
-2. **Write-first.** Commit the artifact before polishing it. An uncommitted worktree
-   at a wall death is lost work.
-3. **Targeted tests while iterating; the full suite at merge.** Lanes that run the
-   whole suite time out.
-4. **No private strings in shipped files.** No hostnames, LAN addresses, machine
-   vocabularies, real names outside `plugin.yaml`/`docs/catalog`. The scrub audit is
-   the gate; add a guard line to `scripts/.scrub-guards` only with a reason.
-5. **SKILL.md stays portable and under 110 lines.** Foreign agents on foreign hosts
-   load it. Deep detail goes in `references/`.
-6. **Desktop half stays on the SDK surface.** Imports only `@hermes/plugin-sdk`,
-   `react`, `react/jsx-runtime`; no `window.hermesDesktop`, no core localStorage
-   keys, no DOM edits of core UI. `hermes plugins validate` checks the automated
-   subset; a human reviewer checks the rest.
-7. **Stdlib-only Python; host imports lazy and guarded.** A local-backend Mac runs
-   the plugin under system Python with neither `hermes_cli` nor PyYAML on path.
-8. **Honest degradation over hidden failure.** If a field is absent (untyped turn
-   report, missing metrics row), say `unknown`; never fabricate a value.
+### 4e. Release
 
-### 4d. Release
-
-```sh
-# bump plugin.yaml / SKILL.md / references/grammar.md / CHANGELOG.md to the new version
-python3 scripts/suite.py . ci-out && hermes plugins validate . && python3 scripts/make_public.py /tmp/pub
-python3 scripts/pack.py                            # artifacts/hermes-workflows-<v>.zip + .sha256
-git tag v<version> && git push --tags
-```
-
-The catalog entry pins a full 40-char commit SHA
+Bump `plugin.yaml` / `SKILL.md` / `references/grammar.md` / `CHANGELOG.md`, then run
+the five gates, `python3 scripts/pack.py` (zip + `.sha256` into `artifacts/`), and
+`git tag v<version> && git push --tags`. The catalog entry pins a full commit SHA
 ([docs/catalog/entry.yaml](docs/catalog/entry.yaml)); bump it in a PR to
 `NousResearch/hermes-agent` → `plugin-catalog/hermes-workflows.yaml`.
 
----
-
 ## 5. Where things live at runtime
 
-| What | Where |
-|---|---|
-| Run directories | `<runs_root>/<run_id>/` (`$WF_RUNS_ROOT`, else `<resolved home>/workflows` — core's `get_hermes_home()`, which on a profile-scoped host is the profile's home, not the launch-root `$HERMES_HOME`) — `graph.json`, `run.json`, `events.jsonl`, `nodes/<id>.json`, `logs/<id>.a<n>.log`, `steer/`, `gates/` |
-| Library | `<runs_root>/library/` |
-| Child turn report | `HERMES_QUIET_TURN_REPORT_FILE` (per spawn, read then unlinked) |
-| Tier stamp | `<run>/turn_report.tier` (`typed` / `untyped`, write-once) |
-| Dashboard API | `/api/plugins/hermes-workflows/runs`, `/runs/{id}`, `POST /runs/{id}/gate` |
-| Desktop plugin | `~/.hermes/desktop-plugins/hermes-workflows/plugin.js` on the **app** machine |
+Run dirs: `<runs_root>/<run_id>/` (settings `workflows.runs_root` > `$WF_RUNS_ROOT`
+> resolved Hermes home's `workflows/`; precedence law: operations.md), holding
+`run.json`, `graph.json`, `events.jsonl`, `nodes/`, `logs/`, `steer/`, `gates/`.
+Library: `<runs_root>/library/`. Turn report: `HERMES_QUIET_TURN_REPORT_FILE` (per
+spawn); cap tier at `<run>/turn_report.tier`. Dashboard API:
+`/api/plugins/hermes-workflows/runs`, `/runs/{id}`, `POST /runs/{id}/gate`.
