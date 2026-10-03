@@ -29,6 +29,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        # fetch-depth:0 — the ban step computes merge-base(origin/main, HEAD);
+        # a shallow checkout (default depth 1) has no shared history with
+        # origin/main, merge-base fails, and the gate fails CLOSED (peer repro,
+        # run 37127917562: rc=2 "cannot compute merge-base"). Full history is
+        # the only way the ban can answer anything but "unknown".
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:
