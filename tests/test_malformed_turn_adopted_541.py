@@ -157,6 +157,25 @@ def drive(mode):
         # silently degrade into a re-run of the fresh-path pin.
         check("R8 adopted: the runner ADOPTED the live orphan (item.adopted event)",
               bool(adopted), f"events={[e.get('event') for e in evs]}")
+        # Committee wf166 A2: the FINAL record is replaced by the bounded
+        # respawn's result (wf.py's ladder hands r2 back), so a wrong class on
+        # the ADOPTED death alone can hide behind a correct fresh-path class.
+        # The load-bearing fact is the RETRY EVENT for the adopted attempt: it
+        # stamps the dead attempt's own error_class. With R8 removed (adopted
+        # death -> transport) this check goes RED even while the final class
+        # stays malformed_turn — the pin can no longer pass on the wrong path.
+        retrying = [e for e in evs if str(e.get("event", "")).endswith(".retry")
+                    and e.get("index") == 0]
+        check("R8 adopted: the ADOPTED attempt's own death was typed malformed_turn "
+              "(retry event carries the dead attempt's class, not the respawn's)",
+              bool(retrying) and retrying[0].get("error_class") == "malformed_turn",
+              f"retrying={[(e.get('event'), e.get('error_class')) for e in retrying]}")
+        item0 = next((i for i in ((rec.get("output") or {}).get("all_results") or [])
+                      if (i.get("attempts_log") or [])), None)
+        al = (item0 or {}).get("attempts_log") or []
+        check("R8 adopted: attempts_log[0] — the adopted generation — carries the typed class",
+            bool(al) and al[0].get("error_class") == "malformed_turn",
+              f"attempts_log={[(a.get('error_class')) for a in al]}")
     return rec, results
 
 
