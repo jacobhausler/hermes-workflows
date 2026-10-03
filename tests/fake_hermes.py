@@ -87,7 +87,7 @@ def _fake_state_row(n):
 if os.environ.get("FAKE_API_CALLS"):
     _fake_state_row(os.environ["FAKE_API_CALLS"])
 _FAKE_MODE = os.environ.get("FAKE_MODE")
-# est-flah (keeper report 2026-10-02T16:41Z): the qwen-relay enum-gate shape — a child
+# est-flah (field report, 2026-10-02): the narrow-vocabulary relay enum-gate shape — a child
 # whose --reasoning value the RELAY itself rejects (the door's route table missed it)
 # must die with the server's "Supported types are ..." 400 so the runner's escape
 # hatch can clamp-to-nearest and re-drive. FAKE_SUPPORTED_EFFORTS (csv, default

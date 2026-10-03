@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """est-flah — unknown enum values clamp at RESOLVE time, never a hard child death.
 
-Verified shapes (haus-keeper report 2026-10-02T16:41Z):
-  (1) reasoning:high on a qwen-relay lane hard-400s ("Supported types are xhigh,
+Verified shapes (field report, 2026-10-02):
+  (1) reasoning:high on a narrow-vocabulary relay lane hard-400s ("Supported types are xhigh,
       medium, low") — provider_400 is permfail, the node died with zero recourse;
   (2) `hermes chat -t none` warns "Unknown toolsets: none" (and the -z path exits 2
       when EVERY name is invalid) instead of no-op.
@@ -101,8 +101,8 @@ if HOME.exists(): shutil.rmtree(HOME)
 HOME.mkdir(parents=True); RUNS.mkdir(parents=True)
 argv_log = HOME / "argv-lane.log"
 r = mk("flah-lane", [{"id": "a", "type": "agent", "goal": "GO lane",
-                      "model": "qwen38-next", "provider": "qwen", "reasoning": "high"}],
-       {"reasoning_lanes": {"qwen": ["xhigh", "medium", "low"]}})
+                      "model": "relay-m1", "provider": "relay", "reasoning": "high"}],
+       {"reasoning_lanes": {"relay": ["xhigh", "medium", "low"]}})
 p = drive(r, {"FAKE_ARGV_LOG": str(argv_log), "FAKE_MODE": ""})
 rec = record(r, "a")
 argv_lines = argv_log.read_text().splitlines() if argv_log.exists() else []
@@ -119,8 +119,8 @@ if cl:
     check("warning names kind/requested/clamped", cl[0].get("kind") == "reasoning"
           and cl[0].get("requested") == "high" and cl[0].get("clamped") == "medium", str(cl[0]))
     check("warning names the lane and the supported set",
-          "model=qwen38-next" in (cl[0].get("lane") or "")
-          and "provider=qwen" in (cl[0].get("lane") or "")
+          "model=relay-m1" in (cl[0].get("lane") or "")
+          and "provider=relay" in (cl[0].get("lane") or "")
           and cl[0].get("supported") == ["xhigh", "medium", "low"], str(cl[0]))
     check("warning is human-readable on the runner stdout too",
           "CLAMP" in p.stdout and "high" in p.stdout and "medium" in p.stdout, p.stdout[:200])
@@ -128,7 +128,7 @@ if cl:
 # ---------- (c) e2e escape hatch: the SERVER names the vocabulary, one re-drive ----------
 argv_log2 = HOME / "argv-gate.log"
 r2 = mk("flah-gate", [{"id": "a", "type": "agent", "goal": "GO gate",
-                       "model": "qwen38-next", "reasoning": "high"}])
+                       "model": "relay-m1", "reasoning": "high"}])
 p2 = drive(r2, {"FAKE_ARGV_LOG": str(argv_log2), "FAKE_MODE": "reasoning_gate400",
                 "FAKE_SUPPORTED_EFFORTS": "xhigh,medium,low", "FAKE_REJECT_EFFORT": "high"})
 rec2 = record(r2, "a")

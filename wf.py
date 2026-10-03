@@ -1225,7 +1225,7 @@ def _quota_note(model, marker):
         pass
 
 # ---------- est-flah: resolve-time clamps (reasoning effort + toolsets) ----------
-# Two verified child-death shapes (keeper report 2026-10-02T16:41Z):
+# Two verified child-death shapes (field report, 2026-10-02):
 #   (1) a lane whose relay enum-gates reasoning_effort hard-400s a canonical
 #       value the door's route table missed ("Unsupported type: high. Supported
 #       types are xhigh, medium, low") — provider_400 is permfail, so the node
@@ -1279,7 +1279,7 @@ def _bespoke_middle(supported):
     ladder.sort(key=lambda s: EFFORT_ORDER.index(s) if s in EFFORT_ORDER else -1)
     return ladder[len(ladder) // 2]
 
-# The relay enum-gate shape, exactly as the fake relays it (keeper report): the
+# The relay enum-gate shape, exactly as the fake relays it (field report): the
 # server NAMES its vocabulary — that message is the only trustworthy source for
 # a lane narrower than any table the runner could carry.
 _GATE400_RE = re.compile(r"unsupported type:\s*([\w.+-]+).*?supported types are\s+([\w.,\s+-]+)",
