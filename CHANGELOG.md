@@ -16,6 +16,17 @@
   precision guard: the same capture dying late keeps its existing
   classification; `unknown model` stays `unresolved_model` territory. Pin:
   `tests/test_config_input_tmuu.py` (fake mode `cfgtypos`).
+- Docs-surface guard hardening (PR #155 follow-up) — four adversary-confirmed
+  blind spots closed, test-first. The drift pin now executes the door and
+  compares ACTUAL `ACTIONS` dispatch keys against the README action table
+  (regex-scanning source stayed green while an unlisted callable lived in the
+  dispatch dict; mutation self-proofs 7a-7d run every pass). `pr_tag_audit.py`
+  gained the INVERSE assertion — an `(open PR #NN)` tag on a row whose action
+  is dispatched fails even while the PR is open — and missing `gh` now exits 2
+  with file:line diagnostics instead of an uncaught traceback. The audit helper
+  joins the pack list (`scripts/pack.py`), and `test_packaging.py` pins the
+  exact packed `scripts/` set plus a packed-or-declared-source-only contract,
+  so a helper can never again sit outside the ZIP while its test ships green.
 
 - #116 — confidence_substrate: engine-stamped fallback when a pinned confidence
   route is quota-dead. The owner declares a sanctioned fallback substrate once

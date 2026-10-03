@@ -47,6 +47,12 @@ INCLUDE_FILES = (
     "scripts/graph_check.py",
     "scripts/pack.py",
     "scripts/pr_tag_audit.py",  # est-4vnq: tests/test_pr_tag_audit.py executes it; the shipped suite must not die on a missing helper
+    # wf165c: tests/test_graph_single_writer_153.py exec-modules BOTH at import
+    # (spec_from_file_location, repo convention) — the shipped suite must not
+    # die FileNotFoundError from the unpacked root. CI needs neither inside
+    # the package, but the suite does, so they pack.
+    "scripts/graph_path_ban.py",
+    "scripts/graph_regen.py",
     "scripts/suite.py",
     "graphify-out/GRAPH_REPORT.md",
     "graphify-out/graph.json",
