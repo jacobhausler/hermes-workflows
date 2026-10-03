@@ -2,7 +2,7 @@
 """est-2ek.1.541 — a malformed turn (final reply = serialized tool-call markup)
 must never commit as an answer and must re-drive.
 
-Field shape (bead; its named turn-report locator was deleted by design — the
+Field shape (issue #541; its named turn-report locator was deleted by design — the
 runner unlinks the per-spawn turn report on every harvest/death path — so this
 pin REBUILDS the shape from the description instead of trusting the locator):
 an agent child's turn ends with its FINAL REPLY being raw serialized tool-call
@@ -15,7 +15,7 @@ Law pinned (the intake's demand, asserted against the REAL runner + tests/fake):
     A2 the node is re-driven exactly once (the attempt<1 correction retry);
     A3 the eventual failure is typed (class from the closed set) and its error
        carries the verbatim tool-call-as-text diagnostic.
- B  rc!=0 child (turn_exit_reason unknown — the bead shape) with the same markup:
+ B  rc!=0 child (turn_exit_reason unknown — the reported shape) with the same markup:
     B1 never done/partial, no harvest, markup never a committed output;
     B2 the node IS re-driven (bounded re-drive within budget: exactly one extra
        spawn when the re-drive answers, never a loop when it doesn't);
@@ -118,7 +118,7 @@ check("A3 exit-0: node.failed event typed (closed set)",
       any(e.get("event") == "node.failed" and e.get("error_class") in wfmod.ERROR_CLASSES
           for e in events(r)), json.dumps(events(r))[-200:])
 
-# ================= B: rc!=0, turn_exit_reason unknown — the bead shape =================
+# ================= B: rc!=0, turn_exit_reason unknown — the reported shape =================
 # B-always: every spawn dies malformed — the budget + typed-diagnostic pin.
 r = mk("m541-die", [{"id": "verify", "type": "agent",
                      "goal": "TOOLCALL541 m541-die verify", "schema": SCHEMA}])
