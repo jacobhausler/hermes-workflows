@@ -126,10 +126,12 @@ Rules that bite:
   default is the route you want. An unset model rides the seat default — including
   fan-out children — and a usage-capped or wrong-provider default surfaces as
   `provider_400`/`429` on every child.
-- **`reasoning` is passed verbatim** to `hermes chat --reasoning`. Hermes clamps it to
-  what the route supports (`agent/reasoning_effort.py`); a level the *relay* itself
-  rejects (some local servers accept only `low|medium|xhigh`) comes back as
-  `provider_400` with the server's message — read it and pick from that list.
+- **`reasoning`** rides `hermes chat --reasoning`, validated PER RESOLVED ROUTE at the
+  door: the level is checked against the (provider, model) route's supported set and a
+  level the route doesn't support is REFUSED at submit with the supported list named
+  (and the nearest level suggested) — never silently clamped or downgraded. Some relays
+  accept only a subset at runtime; that surfaces as `provider_400` with the server's
+  message — read it and pick from that list.
 - **`after` orders AND injects.** Every direct parent's committed output lands under
   `## Inputs` automatically (8 KB per parent). Use `inputs:["a.key"]` only to pick a
   dotted path or a non-parent ancestor, or `fanout.items_from:"a.items"`. A missing
@@ -200,7 +202,7 @@ that reconciles survivors against an explicit master catalog so a dead lane prin
 as a loud coverage gap, never silent loss. The two fan-outs are sibling nodes with no
 branch gates, so every author/peer lap walks both folded modes in a single launch;
 laps exist per-engine-side, not per-mode.
-[examples/bulk-transform.workflow.json](examples/bulk-transform.workflow.json) is a barrier-fan-out TEMPLATE (declared manifest -> per-file transform lanes -> audit that reconciles all_results against the manifest via an ancestor `inputs:` ref and re-checks the filesystem itself; evidence-without-command is a failed lane). Smoke-run on the author estate: [receipts/bulk-transform/author-run.json](receipts/bulk-transform/author-run.json).
+[examples/bulk-transform.workflow.json](examples/bulk-transform.workflow.json) is a barrier-fan-out TEMPLATE (declared manifest -> per-file transform lanes -> audit that reconciles all_results against the manifest via an ancestor `inputs:` ref and re-checks the filesystem itself; evidence-without-command is a failed lane). Smoke-run on the author's deployment: [receipts/bulk-transform/author-run.json](receipts/bulk-transform/author-run.json).
 [examples/census-fanout.workflow.json](examples/census-fanout.workflow.json) is a
 census TEMPLATE (fan-out auditing N generic machine items with a DETERMINISTIC
 TALLY): an echo roster node carries the master item list, a no-quorum barrier
@@ -223,10 +225,12 @@ Author-run receipt: [receipts/exchange-run/author-run.json](receipts/exchange-ru
 
 ### 3d. Failures, resume, amend
 
-- `node.failed` events carry `error_class` from a closed set — `timeout | cap_exhausted |
-  early_death | provider_400 | unresolved_model | transport | transport_exhausted | schema |
-  crashed | spawn | graph_invalid | cancelled | inputs | quorum | fanout_empty |
-  fatal_quota | route_unavailable | incomplete_work | left_live_descendants | unknown` —
+- `node.failed` events carry `error_class` from the closed set defined in code
+  (`wf.py ERROR_CLASSES`) — `cancelled | cap_exhausted | crashed | early_death |
+  fanout_empty | fatal_quota | forbidden_model | graph_invalid | incomplete_work |
+  inputs | left_live_descendants | precondition | provider_400 | quorum |
+  route_unavailable | schema | spawn | timeout | transport | transport_exhausted |
+  unresolved_model`, plus `unknown` as the harvest-time default when nothing matches —
   plus `attempts`. Read the class, not the prose. `cancelled` (a `stop`, or a fan-out
   straggler at quorum) is never a failure: the run reads `stopped`, and a `wait` re-drives it.
   `left_live_descendants` (#61): the runner is process-tree aware — an exit-0 spawn is
@@ -340,8 +344,9 @@ prints `OK`. CI runs the same five gates ([.github/workflows/ci.yml](.github/wor
 ### 4b′. Navigate with the knowledge graph
 
 The repo ships a [graphify](https://github.com/Graphify-Labs/graphify) knowledge
-graph at `graphify-out/` — ~1600 nodes / ~3200 edges over every function, class, test
-and doc heading, built by deterministic tree-sitter parsing (no LLM, no network); one edge
+graph at `graphify-out/` — every function, class, test, and doc heading
+(see `graphify-out/GRAPH_REPORT.md` line 1 for the current node/edge census — stated
+figures in prose go stale; the report is regenerated with the graph), built by deterministic tree-sitter parsing (no LLM, no network); one edge
 per `(source, target, relation)` (`count` marks a collapsed multi-edge; policy in `scripts/graph_check.py`).
 Query it before you grep or open files one by one:
 

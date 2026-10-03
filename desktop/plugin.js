@@ -438,7 +438,8 @@ export function pillModel(run) {
 }
 
 function DirectiveBody({ id }) {
-  const { data, error } = useQuery(runQuery(id))
+  const qc = useQueryClient()
+  const { data, error, isFetching } = useQuery(runQuery(id))
   const fanOpen = useValue($fanOpen)
   const fanItem = useValue($fanItem)
   const [open, setOpen] = useState(false)
@@ -449,8 +450,21 @@ function DirectiveBody({ id }) {
     border: '1px solid var(--ui-stroke-secondary)', borderRadius: 8, padding: '8px 10px',
     background: 'var(--ui-bg-secondary, transparent)', verticalAlign: 'top'
   }
-  if (error) return jsx('span', { style: frame, className: 'text-xs text-(--ui-text-tertiary)', children: `workflow ${id}` })
-  if (!data) return jsx('span', { style: frame, className: 'text-xs text-(--ui-text-tertiary)', children: 'workflow…' })
+  // data WINS over error. A refetch failure with a cached success keeps
+  // showing the last good pill (slightly stale beats dead text); the error
+  // branch only renders when NOTHING was ever fetched, and it is clickable —
+  // retry via invalidate — never inert chrome.
+  const retry = () => qc.invalidateQueries({ queryKey: [...Q, 'run', id] })
+  if (!data) {
+    if (error) {
+      return jsx('button', {
+        type: 'button', style: { ...frame, cursor: 'pointer' }, title: 'Retry',
+        onClick: retry,
+        children: `${isFetching ? 'workflow…' : `workflow (${id})`}`
+      })
+    }
+    return jsx('span', { style: frame, className: 'text-xs text-(--ui-text-tertiary)', children: 'workflow…' })
+  }
   const openRun = e => { if (e) e.stopPropagation(); $selRun.set(data.id); host.navigate('/workflows') }
   const pill = pillModel(data)
   // Collapsed (the default): one line + ▾ toggles expand in place, ↗ opens

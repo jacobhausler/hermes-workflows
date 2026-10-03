@@ -1,7 +1,7 @@
 # Node budgets
 
 Leave `max_turns`/`timeout` unset and name a `shape`; the runner fills them from the
-measured p95 presets in `wfcommon.SHAPE_PRESETS` (the single source; measured 2026-09-24):
+measured p95 presets in `wfcommon.SHAPE_PRESETS` (the single source; measured 2026-09-25):
 
 | shape | max_turns | timeout |
 |---|---|---|
