@@ -15,10 +15,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 SUITE = ROOT / "scripts" / "suite.py"
 fails = 0
+total = 0
 
 
 def check(name, ok, detail=""):
-    global fails
+    global fails, total
+    total += 1
     print(("PASS " if ok else "FAIL ") + name + (f" — {detail}" if detail and not ok else ""))
     fails += 0 if ok else 1
 
@@ -124,5 +126,31 @@ with tempfile.TemporaryDirectory(prefix="suite-zero-112-") as td:
         check("(f) missing base red reported missing", adm_f["missing"] == ["test_red.py"], str(adm_f.get("missing")))
         check("(f) missing base red green=false", adm_f["green"] is False)
 
-print(f"TOTAL {23 - fails} PASS {fails} FAIL", flush=True)
+    # (g) review F4: REUSED out-dir + invalid invocation must not leave a prior
+    # green admission standing (#112 §1: 'none left green'). Prior green run into
+    # OUT, then invalid root reusing the SAME OUT: exit 2, admission gone/non-green,
+    # and out/ is never CREATED when it did not exist (covered fresh by (a)/(b)).
+    green_root = make_root(td / "g-green", {"test_ok.py": 0})
+    notests_root = td / "g-notests" / "root"
+    notests_root.mkdir(parents=True)          # root exists, tests/ absent
+    for variant, bad_root in (("missing-root", td / "g-missing" / "nope"),  # never created
+                              ("no-tests", notests_root)):
+        out_g = td / f"g-out-{variant}"
+        rg, adm_g, led_g = run_suite(green_root, out_g)
+        check(f"(g:{variant}) prior run green", bool(adm_g) and adm_g["green"] is True, str(adm_g))
+        check(f"(g:{variant}) prior ledger non-empty", bool(led_g), str(led_g))
+        # reuse the SAME out-dir with an invalid invocation
+        ri, adm_i, led_i = run_suite(bad_root, out_g)
+        check(f"(g:{variant}) invalid reuse exits 2", ri.returncode == 2, str(ri.returncode))
+        check(f"(g:{variant}) prior admission NOT left green",
+              adm_i is None or adm_i.get("green") is not True, str(adm_i))
+        check(f"(g:{variant}) stale ledger invalidated", led_i is None or led_i == [], str(led_i))
+
+    # (h) F4 belt: invalid invocation must never CREATE a fresh out/ (spec §1) —
+    # asserted again here explicitly beside the (g) reuse family.
+    fresh_out = td / "g-out-fresh"
+    rh, _, _ = run_suite(td / "g" / "nope", fresh_out)
+    check("(h) invalid invocation creates no out/ dir", not fresh_out.exists(), str(fresh_out))
+
+print(f"TOTAL {total - fails} PASS {fails} FAIL", flush=True)
 raise SystemExit(1 if fails else 0)

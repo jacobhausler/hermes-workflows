@@ -106,6 +106,14 @@ root, out, _baseline_path = parse_args(sys.argv)
 # root must never leave a green-looking ledger or admission behind.
 if not root.is_dir() or not (root / 'tests').is_dir():
     print(f'suite: invalid root: {root} (missing root or tests directory)', flush=True)
+    # review F4 (#112 §1 "none left green"): an invalid invocation must not leave a
+    # PRIOR green admission standing when the out-dir is reused (CI cache reuse,
+    # --baseline flows pointing at an old OUT would read a green admission for a
+    # run that never executed). Invalidate persisted artifacts if the dir already
+    # exists — but never CREATE out/ (fresh invalid invocations still create nothing).
+    if out.exists():
+        (out / 'admission.json').unlink(missing_ok=True)
+        (out / 'exits.json').unlink(missing_ok=True)
     raise SystemExit(2)
 base_reds = load_baseline(_baseline_path) if _baseline_path else None
 out.mkdir(parents=True, exist_ok=True)
