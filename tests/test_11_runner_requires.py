@@ -40,8 +40,9 @@ with tempfile.TemporaryDirectory() as td:
         # Change the upstream definition: fingerprint replay invalidates the failed record.
         fix["output"]["pr_url"] = "https://example.test/pr"
         (r / "graph.json").write_text(json.dumps({"nodes": [fix, lint, review]}))
-        os.close(wf._LOCK_FD)
-        wf._LOCK_FD = None
+        if wf._LOCK_FD is not None:
+            os.close(wf._LOCK_FD)
+            setattr(wf, "_LOCK_FD", None)
         wf.main("precondition")
         rec = json.loads((r / "nodes" / "review.json").read_text())
         assert rec["status"] == "done" and (root / "spawns").read_text() == "x", rec

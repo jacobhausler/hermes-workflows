@@ -49,6 +49,19 @@ Three merged PRs since the previous tag, in merge order (#91 → #62 → #82).
 and rides #80. The later CI-only workflow_dispatch commit (#99) and the examples-only
 incident-response fix (#93) change no plugin code.
 
+- #70 faceted library tags, ported onto #62's discovery-first library: `tags` tokens
+  are now legacy-flat OR `facet:value` with a CLOSED facet set
+  (`use_case|repo|domain|risk|note`; hard namespace, soft values — the k8s
+  well-known-labels split), validated on every save path with case-normalization and
+  dup collapse; `library` gains an ALL-match `tags` filter (normalized queries),
+  a whole-library `tag_vocab` echo once the library carries tags (the anti-drift
+  loop: reuse what you see), and `tag_match_counts` so an empty filtered result
+  diagnoses itself (spelling vs sparse co-occurrence). RETAIN-ON-OVERWRITE: a resave
+  that omits tags/description carries the previous envelope's values; library writes
+  are atomic (tmp+os.replace). `/wf` lists tags inline. Council/ponytail/folksonomy
+  adjudicated cuts with named triggers: did-you-mean (observed bad save), aliases /
+  OR grammar / facet-grouped vocab (100+ entries), desktop view (separate feature).
+
 - #91 — @jacobhausler.
   fix(runner,validator): a partial ancestor no longer releases plain after-edges (#87).
   A harvest-on-death `partial` no longer silently satisfies a plain after-edge.

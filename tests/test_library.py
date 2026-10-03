@@ -106,4 +106,84 @@ check("L7h removing broken fully restores (no skip rows at all)",
       and "skipped" not in out and "quarantined" not in out, _json.dumps(out)[:200])
 
 call(action="stop", run_id=rid)
+
+# ---- L8 faceted tags (#70) on the #50 envelope dialect ----
+def entry(name):  # raw file content of a library entry
+    return json.loads((HOME / "workflows" / "library" / f"{name}.json").read_text())
+
+r = call(action="save", graph=G, name="tagged8", description="tagged demo",
+         tags=["Use_Case:Code-Review", "use_case:code-review", "repo:sglang"])
+check("L8 save normalizes+collapses into meta envelope",
+      entry("tagged8")["meta"]["tags"] == ["use_case:code-review", "repo:sglang"], json.dumps(r))
+check("L8b legacy flat token still valid", "saved" in call(
+    action="save", graph=G, name="flat8", tags=["review"]))
+check("L8c unknown facet lists facets", "allowed facets" in json.dumps(
+    call(action="save", graph=G, name="t1", tags=["intent:x"])))
+check("L8d bare facet rejected", "invalid tag" in json.dumps(
+    call(action="save", graph=G, name="t1", tags=["risk:"])))
+check("L8e double colon rejected (not silently flat)", "invalid tag" in json.dumps(
+    call(action="save", graph=G, name="t1", tags=["use_case:a:b"])))
+check("L8f 49-char tag rejected", "invalid tag" in json.dumps(
+    call(action="save", graph=G, name="t1", tags=["note:" + "x" * 44])))
+check("L8g tags:[] stays the #50 fail-closed error", "tags" in json.dumps(
+    call(action="save", graph=G, name="tagged8", tags=[])))
+
+# retain-on-overwrite: resave the SAME entry with no tags arg -> old tags ride
+r = call(action="save", graph=G, name="tagged8", description="re-shelved")
+check("L8h resave without tags RETAINS meta tags AND prior meta description",
+      entry("tagged8")["meta"]["tags"] == ["use_case:code-review", "repo:sglang"]
+      and entry("tagged8")["meta"]["description"] == "re-shelved", json.dumps(entry("tagged8")["meta"]))
+call(action="save", graph=dict(G, description="bare desc"), name="bare8")
+call(action="save", graph=G, name="bare8", tags=["use_case:research"])
+check("L8i tagging a BARE entry carries its top-level description into meta",
+      entry("bare8")["meta"]["tags"] == ["use_case:research"]
+      and entry("bare8")["meta"]["description"] == "bare desc", json.dumps(entry("bare8").get("meta")))
+
+# library: filter, vocab, self-diagnosis
+call(action="save", graph=dict(G, name="D8"), name="d8", description="x",
+     tags=["use_case:code-review", "domain:gpu"])
+lib = call(action="library", tags=["use_case:code-review"])["library"]
+check("L8j ALL-match filter returns tagged rows only",
+      {x["name"] for x in lib} == {"tagged8", "d8"}, json.dumps([x["name"] for x in lib]))
+lib = call(action="library", tags=["USE_CASE:CODE-REVIEW", "REPO:SGLANG"])["library"]
+check("L8k mis-cased compound filter still matches",
+      [x["name"] for x in lib] == ["tagged8"], json.dumps([x["name"] for x in lib]))
+res = call(action="library", tags=["use_case:code-review", "repo:nope"])
+check("L8l empty result self-diagnoses via match counts",
+      res["library"] == [] and res["tag_match_counts"] == {"use_case:code-review": 2, "repo:nope": 0},
+      json.dumps(res.get("tag_match_counts")))
+vocab = call(action="library")["tag_vocab"]
+check("L8m tag_vocab whole-library", vocab.get("use_case:code-review") == 2
+      and vocab.get("review") == 1, json.dumps(vocab))  # legacy flat token counts too
+check("L8n filter reuses the same law", "unknown facet" in json.dumps(call(action="library", tags=["task:x"])))
+
+# a tagged envelope entry replays end to end
+r = call(action="run", **{"from": "tagged8"})
+rid2 = r.get("run_id"); check("L8o tagged envelope replays", bool(rid2), json.dumps(r))
+g2 = json.load(open(HOME / "workflows" / rid2 / "graph.json"))
+check("L8p replayed graph.json stays validator-clean (tags live in meta, not the graph)",
+      "tags" not in g2 and g2.get("name") == "tagged8", json.dumps(list(g2)))
+call(action="stop", run_id=rid2)
+
+check("L8q /wf lists tags inline", "[use_case:code-review repo:sglang]" in hw._wf_command(""))
+check("L8r unfiltered call on a tagged library carries the reuse-hint",
+      "never coin unseen tags" not in call(action="library")["hint"]
+      and "never coin unseen tags" in call(action="library", tags=["use_case:research"])["hint"])
+
+# #146 item 3: erase-by-file-edit is a STATE, not a resurrection; garbage fails closed
+call(action="save", graph=G, name="erase8", tags=["domain:net"], description="keep")
+_ep = HOME / "workflows" / "library" / "erase8.json"
+_e = json.loads(_ep.read_text()); _e["meta"]["tags"] = []; _ep.write_text(json.dumps(_e))
+call(action="save", graph=G, name="erase8")   # plain resave over the deliberate erase
+_e2 = json.loads(_ep.read_text())
+check("L8s stored tags:[] is the erase state — resave keeps [] AND the envelope",
+      _e2.get("meta", {}).get("tags") == [] and "graph" in _e2, json.dumps(_e2)[:200])
+_e2["meta"]["tags"] = "notalist"; _ep.write_text(json.dumps(_e2))
+r3 = call(action="save", graph=G, name="erase8")
+check("L8t stored non-list meta.tags fails closed (repair-or-delete)",
+      "error" in r3 and "not a list" in r3["error"], json.dumps(r3))
+_e3 = json.loads(_ep.read_text())
+check("L8u the refused resave left the file untouched", _e3["meta"]["tags"] == "notalist")
+
+call(action="stop", run_id=rid)
 print("ALL PASS" if ok else "FAILURES PRESENT"); sys.exit(0 if ok else 1)
