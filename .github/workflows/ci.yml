@@ -2,7 +2,7 @@
 #   1. desktop half parses as ESM
 #   2. serial test suite (stdlib Python + Node .mjs) → ci-out/exits.json + per-test logs
 #   3. private-string scrub audit
-#   4. knowledge-graph drift (committed graphify-out/graph.json == AST of this tree; no LLM)
+#   4. knowledge-graph single-writer (PR branches must not touch graphify-out/; main owns regen)
 #   5. `hermes plugins validate .` against a PINNED upstream commit
 #
 # HERMES_PIN = the measured requires_hermes floor, tag v2026.9.21 (first release
@@ -66,8 +66,8 @@ jobs:
       - name: Scrub audit (private strings)
         run: python3 scripts/make_public.py /tmp/public-tree
 
-      - name: Knowledge graph is current (graphify, AST only)
-        run: python3 scripts/graph_check.py
+      - name: PR branches do not touch the knowledge graph (single-writer)
+        run: python3 scripts/graph_path_ban.py
 
       - name: Validate plugin against pinned hermes
         run: hermes plugins validate .
