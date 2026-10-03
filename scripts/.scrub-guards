@@ -71,3 +71,13 @@ receipts/exchange-run/peer-clean-run.json
 # names the reviewing estate (austin-exec) as its evidence provenance — the peer's
 # identity IS the receipt; guarded, not hidden.
 receipts/gated-publish/peer-clean-run-austin.json
+
+# ---- committee wf166c A1 (suffix widening .yml/.txt): rows newly SEEN by the audit ----
+# The audit's own input: every line of scripts/scrub-list.txt IS a forbidden-pattern
+# regex by role — guarding it is the contract (the audit must read it verbatim; the
+# ban is on LEAKING the vocabulary into shipped docs/code, not on the input naming it).
+scripts/scrub-list.txt
+# Suffix-blind-spot pin: the FORBIDDEN_LINE constant is fixture identity — the probe
+# asserts the AUDITOR refuses this exact token in .yml/.txt; neutralizing it would
+# pin nothing (same GUARD class as the model-route fixtures above).
+tests/test_scrub_yml_166b.py
