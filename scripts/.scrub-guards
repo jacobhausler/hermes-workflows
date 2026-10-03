@@ -39,6 +39,11 @@ tests/test_model_preflight_0924.py
 tests/test_run_dry_run.py
 tests/test_model_law_dad50be0.py
 tests/test_failures_0923.py
+# #54 credential-window fixture: the banner the fake child prints carries the model
+# token verbatim because the runner's give-up error must quote it back byte-for-byte
+# (the same GUARD class as tests/test_fatal_quota_24.py's fixture quota banner).
+tests/fake_hermes.py
+tests/test_ratelimit_54.py
 # Dialect golden fixtures: `model: 'sonnet'` is a pinned byte of the importer golden
 # (test_dialect_js_33 asserts the export carries it verbatim).
 tests/test_dialect_js_33.py

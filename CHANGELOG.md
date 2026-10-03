@@ -16,6 +16,29 @@
   precision guard: the same capture dying late keeps its existing
   classification; `unknown model` stays `unresolved_model` territory. Pin:
   `tests/test_config_input_tmuu.py` (fake mode `cfgtypos`).
+- #54 — credential-window 429s get their own `ratelimit` error class and a bounded
+  park. The child CLI's `Anthropic credentials are rate-limited for <model>` banner
+  (hermes_cli/runtime_provider.py) used to classify as transport/unknown and burn
+  the 5 s/20 s ladder in ~10 s against a 36+ minute provider window; the runner now
+  parks ~5 minutes (jittered; `run.json` `ratelimit_interval`/`ratelimit_jitter`,
+  meta-only like `retry_backoff`) and re-spawns while the node's wall budget still
+  fits a park, emitting `node.retrying error_class=ratelimit backoff_s=…` per park.
+  On give-up — budget full, stop set, or the shared per-run retry budget exhausted —
+  the node fails with the verbatim `credential rate-limited for <model>` as its
+  error text so the dispatcher can switch model instead of requeue. Plain 429s stay
+  transport, quota-horizon 429s stay `fatal_quota` (banner wins when both match);
+  every existing classification pin is green.
+- wf159c — the ratelimit WALL is a REAL bound + late banners reach the park +
+  the park sees the quorum cancel. A park may fire only when the worst-case
+  jittered wait plus a real respawn window (>=15% wall, floor 0.25 s) fit the
+  wall; the deadline is rechecked after the wait and the parked respawn runs
+  CLAMPED to the remaining wall (a park can never buy a fresh full timeout).
+  A banner discovered after a ladder respawn is handed to the same park by
+  the transient ladder (dispatcher contract identical for late deaths). The
+  park's wait observes the fan-out quorum cancel — a satisfied quorum never
+  waits out a parked straggler (the 300 s default was the last held minute).
+  Pin: `tests/test_ratelimit_park_walls_159c.py` (mutation-proved on all three
+  defects; test_ratelimit_54 pins undrifted).
 
 - #116 — confidence_substrate: engine-stamped fallback when a pinned confidence
   route is quota-dead. The owner declares a sanctioned fallback substrate once

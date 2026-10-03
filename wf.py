@@ -14,7 +14,7 @@ Staleness law (wfcommon.efp): each stored result is verified under its stamped r
 against the current graph (own def + all ancestors' defs). An amend upstream makes
 downstream result stale — downstream nodes re-run or re-hold; unchanged chains replay.
 """
-import json, os, re, signal, socket, subprocess, sys, threading, time
+import json, os, random, re, signal, socket, subprocess, sys, threading, time
 import fcntl
 import hashlib
 import urllib.error
@@ -1099,6 +1099,22 @@ _QUOTA_PHRASE_TOKENS = ("usage limit", "quota exceeded", "quota exceeded for",
                         "subscription", "out of credits", "spending limit",
                         "insufficient_quota")
 _QUOTA_HORIZON_RE = re.compile(r"reset(?:s|ting)?\D{0,10}?(\d+)\s*(hour|hr|h|day|d|min|minute)")
+# est-t0vz (issue #54): the credential-window 429 — its OWN class, never transport.
+# The banner is the hermes CLI's own AuthError text, raised verbatim at
+# /opt/hermes/hermes_cli/runtime_provider.py:358
+#   `AuthError(f"Anthropic credentials are rate-limited for {model}; other Claude
+#    models remain available (see `hermes auth list`).")`  (the f-string interpolates
+#    the sent model id; the static shape is what the runner matches).
+# It reaches the runner's merged capture ONLY as the oneshot escalation line
+# `hermes -z: agent failed: {failure}` (/opt/hermes/hermes_cli/oneshot.py:322, rc=1).
+# The hyphenated "rate-limited" carries none of the transport tokens and no status
+# digits, so before this class it fell to `unknown` and burned the 5s/20s ladder in
+# ~10 s against a 36+ minute window (field repro 2026-09-30 03:14-03:55Z). Match the
+# exact banner; a marker carrying a quota phrase/reset horizon still classifies
+# fatal_quota BELOW this check only when the banner is absent (banner wins: the
+# CLI-named credential window must never stamp the seat's quota cache).
+_RATELIMIT_BANNER_RE = re.compile(
+    r"credentials are rate-limited for ([a-z0-9][a-z0-9._:/+-]*)", re.IGNORECASE)
 # sprint101 #3: a dead/renamed model id surfaces as 404 or a model-not-found
 # marker — a distinct class from a generic 400, and never retryable.
 _UNRESOLVED_MODEL_TOKENS = ("model not found", "no such model", "unknown model",
@@ -1112,7 +1128,7 @@ _CAP_TOKENS = ("tool-call limit", "tool call limit", "turn limit",
 # The CLOSED set every node.failed (record + event) must carry (sprint101 #3).
 ERROR_CLASSES = frozenset(("provider_400", "unresolved_model", "cap_exhausted",
                            "timeout", "transport", "transport_exhausted",
-                           "fatal_quota", "route_unavailable",
+                           "fatal_quota", "ratelimit", "route_unavailable",
                            "incomplete_work", "early_death", "cancelled",
                            "schema", "spawn", "graph_invalid", "inputs",
                            "quorum", "fanout_empty", "crashed", "unknown",
@@ -1248,8 +1264,14 @@ def _classify_rc_output(out):
     if any(t in low for t in _PROVIDER400_TOKENS) or "error code: 400" in low or "http 400" in low:
         return "provider_400", marker
     if "429" in low and (any(t in low for t in _QUOTA_PHRASE_TOKENS)
-                         or _QUOTA_HORIZON_RE.search(low)):
+                         or _QUOTA_HORIZON_RE.search(low)) \
+            and not _RATELIMIT_BANNER_RE.search(low):
         return "fatal_quota", marker    # #24: horizon outlasts the ladder — never retry
+                                        # (est-t0vz: unless the CLI named the credential
+                                        # window — the banner below wins the class)
+    if _RATELIMIT_BANNER_RE.search(low):
+        return "ratelimit", marker      # est-t0vz (issue #54): credential-window 429 —
+                                        # its own bounded park, not the 5s/20s ladder
     if any(t in low for t in ("tool-call limit", "tool call limit", "turn limit")):
         return "cap_exhausted", marker
     if any(t in low for t in _TRANSPORT_TOKENS):
@@ -2792,9 +2814,12 @@ def _adopt_child(meta, node, byid, index, child, schema, fo_cancel=None):
     if eclass == "fatal_quota":   # #24: adopted death caches the horizon too
         _quota_note(node.get("model") or node.get("provider") or "seat default", marker)
     verdict = _verdict_lines(marker if marker else out)
-    return {"status": "failed", "error": f"adopted child died (rc unobservable — runner was "
+    rec = {"status": "failed", "error": f"adopted child died (rc unobservable — runner was "
             f"respawned): {verdict}", "error_class": eclass, "raw": (out or "")[-2000:],
             "ms": ms, "final": final_reply, **evd}
+    if eclass == "ratelimit":   # est-t0vz: adopted deaths keep the banner too
+        rec["ratelimit_banner"] = marker
+    return rec
 
 def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering=None, attempt=0, skey=None,
               inputs="", index=None, resume_preamble=""):
@@ -3172,8 +3197,11 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
                     "error_class": "malformed_turn", "raw": (out or "")[-2000:], "ms": ms,
                     "final": final_reply, **sk, **evd}
         verdict = _verdict_lines(marker if marker else out)
-        return {"status": "failed", "error": f"child exited rc={rc}: {verdict}",
-                "error_class": eclass, "raw": (out or "")[-2000:], "ms": ms, "final": final_reply, **sk, **evd}
+        rec = {"status": "failed", "error": f"child exited rc={rc}: {verdict}",
+               "error_class": eclass, "raw": (out or "")[-2000:], "ms": ms, "final": final_reply, **sk, **evd}
+        if eclass == "ratelimit":   # est-t0vz: keep the verbatim banner for the park's
+            rec["ratelimit_banner"] = marker   # give-up text + model extraction
+        return rec
     parsed, perr = extract_json(out)
     # #61 completeness gate — ABOVE every exit-0 verdict, done and correction-
     # retry alike: before an exit-0 spawn is believed at all, its own process
@@ -3247,6 +3275,92 @@ def _attempt_api_calls(run, skey, home=None):
     if not m or m.get("api_calls_known") is not True:
         return None
     return m.get("api_calls")
+
+def _ratelimit_conf_params(meta):
+    """est-t0vz (issue #54): credential-window park interval + jitter fraction come
+    ONLY from run.json meta (the door's channel — same law as _retry_conf_params).
+    Defaults: ~5-minute parks, ±20% jitter, so a 36-45 min provider window outlasts
+    at most a handful of respawns instead of the 5s/20s ladder burning it in ~10s."""
+    iv = meta.get("ratelimit_interval")
+    iv = float(iv) if isinstance(iv, (int, float)) and not isinstance(iv, bool) \
+         and 0 <= float(iv) <= 3600 else 300.0
+    jf = meta.get("ratelimit_jitter")
+    jf = float(jf) if isinstance(jf, (int, float)) and not isinstance(jf, bool) \
+         and 0 <= float(jf) < 1 else 0.2
+    return iv, jf
+
+def _ratelimit_park(meta, r, respawn, ev, ev_kw, node=None):
+    """est-t0vz (issue #54): the bounded credential-window park, run BEFORE
+    _transient_retry when the death classified `ratelimit`. A credential-window 429
+    outlasts the 5s/20s transport ladder by orders of magnitude (field repro: a
+    36+ min window, ladder spent in ~10 s), so instead of respawning at once the
+    runner parks ~5 min (jittered ±20% by default) and re-spawns while the NODE'S
+    OWN wall budget still holds room for the next attempt plus one interval
+    (budget = the node's wall clock — node `timeout`, else run meta `node_timeout`
+    (900 s default) — measured from the park's start; the transient/bounded ladders
+    are untouched afterwards). Every park emits `<ev>.retrying` with
+    error_class=ratelimit and backoff_s (the machine-wait event shape). On give-up
+    — budget can no longer fit a park, stop set, or the retry budget (meta
+    _retries_left, shared with the other ladders) exhausted — the node fails with
+    the VERBATIM banner 'credential rate-limited for <model>' as the error text so
+    the dispatcher can tell switch-model from requeue without parsing prose."""
+    run = meta["_run"]
+    if r.get("status") != "failed" or r.get("error_class") != "ratelimit":
+        return r
+    interval, jitfrac = _ratelimit_conf_params(meta)
+    try:
+        wall = float((node or {}).get("timeout", meta.get("node_timeout", 900)))
+    except (TypeError, ValueError):
+        wall = 900.0
+    if not wall or wall <= 0:
+        wall = 900.0
+    banner = str(r.get("ratelimit_banner") or "")
+    bm = _RATELIMIT_BANNER_RE.search(banner) or _RATELIMIT_BANNER_RE.search(str(r.get("raw") or ""))
+    model = (bm.group(1).rstrip(".") if bm else None) or \
+            (node or {}).get("model") or "seat default"
+    park_deadline = time.time() + wall
+    attempts_log = []
+    while r.get("status") == "failed" and r.get("error_class") == "ratelimit":
+        if meta["_stop"].is_set():
+            break
+        # bounded: the park may only fire while the node's remaining budget can
+        # still fit the park itself — at give-up there is no room left to wait.
+        if time.time() + interval > park_deadline:
+            break
+        with meta["_procs_lock"]:
+            if meta["_retries_left"] <= 0:
+                blocked = True
+            else:
+                meta["_retries_left"] -= 1
+                blocked = False
+        if blocked:
+            log(run, ev + ".retry_skipped", reason="retry budget exhausted",
+                error_class="ratelimit", **ev_kw)
+            break
+        backoff = max(0.0, interval * (1.0 + jitfrac * (2.0 * random.random() - 1.0)))
+        attempts_log.append({"attempt": len(attempts_log),
+                             "error_class": "ratelimit", "at": now()})
+        log(run, ev + ".retrying", error_class="ratelimit", backoff_s=round(backoff, 1),
+            attempts_log=list(attempts_log), **ev_kw)
+        if meta["_stop"].wait(backoff) or meta["_stop"].is_set():
+            break
+        iso = _isolate_prior(meta, r, ev, ev_kw)   # #61 quarantine law, same as the ladders
+        if iso is not None:
+            iso["attempts_log"] = attempts_log
+            return iso
+        r = respawn()
+    if attempts_log:
+        r["attempts_log"] = attempts_log
+        last_spawn = r.get("spawn")
+        r["attempts"] = last_spawn + 1 if isinstance(last_spawn, int) \
+            else len(attempts_log) + r.get("attempts", 0)
+    if r.get("status") == "failed" and r.get("error_class") == "ratelimit" \
+            and not meta["_stop"].is_set():
+        # honest give-up: the verbatim banner IS the error text (issue #54). A
+        # stopped run keeps its death text — node_rec demotes stop-deaths anyway.
+        r["error"] = f"credential rate-limited for {model}"
+        r["ratelimit_gave_up"] = True
+    return r
 
 def _transient_retry(meta, r, respawn, ev, ev_kw):
     """Q4 transient retry: re-spawn a failed child at most 2 more times (5 s, 20 s
@@ -3674,7 +3788,9 @@ def run_agent_node(run, meta, byid, node, outputs, steering):
                                      fo.get("schema") or node.get("schema"), steering=steering,
                                      skey=sk, inputs=inputs_txt, index=i, resume_preamble=resume_preamble)
                 try:
-                    r = _transient_retry(meta, spawn(), spawn, "item", {"node": nid, "index": i})
+                    r = _ratelimit_park(meta, spawn(), spawn, "item",   # est-t0vz
+                                        {"node": nid, "index": i}, node=node)
+                    r = _transient_retry(meta, r, spawn, "item", {"node": nid, "index": i})
                     r = _bounded_retry(meta, r, spawn, "item", {"node": nid, "index": i},
                                        node=node, index=i)
                     r = _final_quiesce(meta, r, "item", {"node": nid, "index": i})   # #61
@@ -3776,7 +3892,8 @@ def run_agent_node(run, meta, byid, node, outputs, steering):
                 return run_child(meta, node, byid, node.get("goal", ""), node.get("context", ""),
                                  node.get("schema"), steering=steering, skey=sk, inputs=inputs_txt,
                                  resume_preamble=resume_preamble)
-            r = _transient_retry(meta, spawn(), spawn, "node", {"node": nid})
+            r = _ratelimit_park(meta, spawn(), spawn, "node", {"node": nid}, node=node)  # est-t0vz
+            r = _transient_retry(meta, r, spawn, "node", {"node": nid})
             r = _bounded_retry(meta, r, spawn, "node", {"node": nid}, node=node)
             r = _final_quiesce(meta, r, "node", {"node": nid})   # #61: never commit over a live tree
             r = _stamp_served(meta, r, node)   # dad50be0: seat truth at the commit, never the alias
