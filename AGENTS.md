@@ -229,6 +229,7 @@ Author-run receipt: [receipts/exchange-run/author-run.json](receipts/exchange-ru
   (`wf.py ERROR_CLASSES`) — `cancelled | cap_exhausted | config_input | crashed | early_death |
   fanout_empty | fatal_quota | forbidden_model | graph_invalid | incomplete_work |
   inputs | left_live_descendants | malformed_turn | precondition | provider_400 | quorum |
+  ratelimit |
   route_unavailable | schema | spawn | timeout | transport | transport_exhausted |
   unresolved_model`, plus `unknown` as the harvest-time default when nothing matches —
   plus `attempts`. Read the class, not the prose. `cancelled` (a `stop`, or a fan-out
@@ -256,6 +257,16 @@ Author-run receipt: [receipts/exchange-run/author-run.json](receipts/exchange-ru
   reach — fails on the FIRST attempt (the retry ladder cannot beat a multi-day reset)
   and stamps the model into the seat quota cache; the door then refuses a launch on
   that model until the horizon passes (one recovery ping first).
+  `ratelimit` (#54): a credential-window 429 — the child's stdout carries the CLI's
+  own `... credentials are rate-limited for <model> ...` banner. Classified BEFORE
+  transport/fatal_quota (the banner wins even when quota phrases co-occur: this death
+  never stamps the quota cache — the seat is fine, the credential window is closed).
+  The node PARKS at jittered ~5-minute intervals (tunables `ratelimit_interval` /
+  `ratelimit_jitter`, run.json meta-only like `retry_backoff`), bounded by BOTH the
+  shared retry budget and the wall clock — an interval that cannot still fit fires
+  zero parks. Each park emits `node.retrying error_class=ratelimit backoff_s=N`;
+  give-up commits the verbatim banner as the error text (plus `ratelimit_banner`) so
+  a dispatcher can switch model instead of requeue.
   `route_unavailable` (#25): a pinned route the door's ping affirmatively proved dead
   or answered-from-the-fallback-ladder (submit refusal), or a committed served_model
   that contradicts the door's alive-proof (commit hold) — never silent fallback billing.
