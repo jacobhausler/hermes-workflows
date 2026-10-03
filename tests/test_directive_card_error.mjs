@@ -1,4 +1,4 @@
-// #147 pin: the directive card must never degrade to dead text when a refetch
+// Pin: the directive card must never degrade to dead text when a refetch
 // fails with cached data, and the never-fetched error branch must be clickable
 // (retry), not inert. Root cause of the flip-flop: `if (error)` ran BEFORE
 // `if (!data)`, so any transient auth/transport blip evicted a good pill into
@@ -86,4 +86,4 @@ function render(queryState) {
   assert.equal(out.props.children, 'workflow…')
 }
 
-console.log('ALL PASS: #147 directive card — data wins over error, error branch retries')
+console.log('ALL PASS: directive card — data wins over error, error branch retries')

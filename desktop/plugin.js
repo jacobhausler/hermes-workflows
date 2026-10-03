@@ -450,7 +450,7 @@ function DirectiveBody({ id }) {
     border: '1px solid var(--ui-stroke-secondary)', borderRadius: 8, padding: '8px 10px',
     background: 'var(--ui-bg-secondary, transparent)', verticalAlign: 'top'
   }
-  // #147: data WINS over error. A refetch failure with a cached success keeps
+  // data WINS over error. A refetch failure with a cached success keeps
   // showing the last good pill (slightly stale beats dead text); the error
   // branch only renders when NOTHING was ever fetched, and it is clickable —
   // retry via invalidate — never inert chrome.
