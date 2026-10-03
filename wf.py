@@ -1224,6 +1224,161 @@ def _quota_note(model, marker):
     except Exception:
         pass
 
+# ---------- est-flah: resolve-time clamps (reasoning effort + toolsets) ----------
+# Two verified child-death shapes (keeper report 2026-10-02T16:41Z):
+#   (1) a lane whose relay enum-gates reasoning_effort hard-400s a canonical
+#       value the door's route table missed ("Unsupported type: high. Supported
+#       types are xhigh, medium, low") — provider_400 is permfail, so the node
+#       died with zero recourse;
+#   (2) an unknown toolset name makes `hermes chat -t` warn, and on the -z path
+#       ALL-invalid toolsets exit 2 BEFORE the child runs.
+# The law here: never spawn a child the runner can already see will die, and
+# when the SERVER's own enum message proves the lane narrower than declared,
+# clamp-to-nearest and re-drive once instead of a permfail. "Nearest" is the
+# core law (agent/reasoning_effort.clamp_effort): weaker-first, never escalate
+# cost, never land on 'none' for an enabled ask, bespoke (non-ladder) names
+# pass through — custom providers may use them.
+EFFORT_ORDER = ("none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra")
+
+def _nearest_supported(requested, supported):
+    """Clamp `requested` onto `supported` (the lane's/relay's vocabulary), or None
+    when there is nothing honest to clamp to. Mirrors core clamp_effort's law:
+    supported passthrough -> None (no clamp happened); bespoke (non-ladder)
+    requested -> None at resolve (pass through); otherwise nearest by ladder
+    index, ties weaker (never escalates), 'none' excluded (it switches thinking
+    OFF — never a degradation target for an enabled ask); when nothing weaker
+    exists, the supported floor is the closest honest match."""
+    sup = [s for s in (str(x).strip().lower() for x in (supported or ())) if s]
+    req = str(requested or "").strip().lower()
+    if not sup or not req or req in sup:
+        return None
+    if req == "none":
+        return None                                     # explicit no-thinking ask: passes through untouched
+    ladder = [s for s in sup if s in EFFORT_ORDER and s != "none"]
+    if not ladder:
+        return None
+    if req not in EFFORT_ORDER:
+        return None                                     # bespoke name: pass through
+    ri = EFFORT_ORDER.index(req)
+    # Core clamp_effort's law (agent/reasoning_effort.py): strongest WEAKER
+    # supported level; when nothing weaker exists the supported FLOOR is the
+    # closest honest match. NEVER escalates — a weaker-first clamp can only
+    # reduce cost, never silently raise it.
+    below = [s for s in ladder if EFFORT_ORDER.index(s) < ri]
+    return max(below, key=lambda s: EFFORT_ORDER.index(s)) if below \
+        else min(ladder, key=lambda s: EFFORT_ORDER.index(s))
+
+def _bespoke_middle(supported):
+    """A bespoke (non-ladder) requested value against a server-declared supported
+    set: the middle of that set by ladder order — deterministic, neither the
+    cheapest nor the most expensive assumption. None when nothing is orderable."""
+    ladder = [s for s in (str(x).strip().lower() for x in (supported or ())) if s]
+    ladder = [s for s in ladder if s != "none"] or ladder
+    if not ladder:
+        return None
+    ladder.sort(key=lambda s: EFFORT_ORDER.index(s) if s in EFFORT_ORDER else -1)
+    return ladder[len(ladder) // 2]
+
+# The relay enum-gate shape, exactly as the fake relays it (keeper report): the
+# server NAMES its vocabulary — that message is the only trustworthy source for
+# a lane narrower than any table the runner could carry.
+_GATE400_RE = re.compile(r"unsupported type:\s*([\w.+-]+).*?supported types are\s+([\w.,\s+-]+)",
+                         re.I | re.S)
+
+def _gate400_parse(text):
+    """(requested, [supported...]) from an enum-gate 400 marker, or None."""
+    m = _GATE400_RE.search(text or "")
+    if not m:
+        return None
+    sup = [s.strip().strip(".,;:").lower() for s in m.group(2).split(",") if s.strip()]
+    return (m.group(1).strip().strip(".,;:").lower(), sup) if sup else None
+
+def _lane_label(node):
+    m = node.get("model") or "seat-default"
+    p = node.get("provider")
+    return f"model={m}" + (f" provider={p}" if p else "")
+
+def _clamp_warn(run, meta, node, kind, requested, clamped, lane, supported):
+    """ONE warning per (node, kind, requested, clamped, lane, supported) — the
+    escape-hatch respawn re-enters run_child and must not spam events."""
+    seen = meta.setdefault("_clamp_warned", set())
+    key = (node.get("id"), kind, str(requested), str(clamped), lane, tuple(supported or ()))
+    if key in seen:
+        return
+    seen.add(key)
+    log(run, "node.clamped", node=node.get("id"), kind=kind, requested=requested,
+        clamped=clamped, lane=lane, supported=list(supported or ()))
+    emit(f"wf: CLAMP {node.get('id')} {kind} requested={requested} -> {clamped} "
+         f"(lane: {lane}; supported: {', '.join(supported) if supported else 'unknown'})")
+
+def _resolve_child_reasoning(run, meta, node, override=None):
+    """The value to actually pass --reasoning at spawn: author's value clamped to
+    the lane's supported set (weaker-first), logged once. Unknown lane tables
+    never invent a verdict — the value passes through and the gate-400 escape
+    hatch (server-declared set) is the recourse. run.json `reasoning_lanes`
+    {provider: [values]} overrides the core-derived table (test seam, same
+    shape as hermes_bin)."""
+    val = override if override is not None else node.get("reasoning")
+    if not val:
+        return None
+    req = str(val).strip().lower()
+    if req == "none":
+        return "none"                                   # wfcommon's extension, always valid
+    lanes = meta.get("reasoning_lanes")
+    provider = (node.get("provider") or "").strip().lower()
+    supported = None
+    if isinstance(lanes, dict):
+        for k, v in lanes.items():
+            if str(k).strip().lower() == provider:
+                supported = list(v)
+                break
+    elif provider == "openai-codex":
+        try:
+            from agent.reasoning_effort import route_supported_efforts
+            supported = list(route_supported_efforts(node.get("provider"), node.get("model")))
+        except Exception:
+            supported = None
+    if supported is None:
+        try:
+            supported = list(wfcommon.reasoning_levels())
+        except Exception:
+            return str(val)
+    hit = _nearest_supported(req, supported)
+    if hit is not None and hit != req:
+        _clamp_warn(run, meta, node, "reasoning", req, hit, _lane_label(node), supported)
+        return hit
+    return str(val)
+
+def _filter_child_toolsets(run, meta, node):
+    """The list to pass -t at spawn, or None to omit the flag (clean no-op).
+    Unknown names are dropped with ONE warning; ALL unknown => no flag at all,
+    which is the no-op (the child runs on the seat's configured toolsets — the
+    -z CLI would exit 2 on an all-invalid list, a hard death the runner must
+    never volunteer for). Core `toolsets.validate_toolset` is the validator;
+    when core is not importable this host cannot judge — pass through (chat
+    side already no-ops with a cosmetic warn) and never hard-fail here."""
+    ts = node.get("toolsets")
+    if ts is None:
+        return None
+    names = [s.strip() for s in (ts if isinstance(ts, list) else str(ts).split(",")) if str(s).strip()]
+    if not names:
+        return None
+    try:
+        from toolsets import validate_toolset
+    except Exception:
+        return names
+    keep, dropped = [], []
+    for n in names:
+        try:
+            (keep if validate_toolset(n) else dropped).append(n)
+        except Exception:
+            keep.append(n)                              # validator itself failed: pass through
+    if dropped:
+        _clamp_warn(run, meta, node, "toolsets", ",".join(names),
+                    ",".join(keep) if keep else "(omitted)", _lane_label(node),
+                    [n for n in names if n not in dropped])
+    return keep or None
+
 def _classify_rc_output(out):
     """(error_class, last-marker line) from the child's MERGED stdout/stderr
     capture. Pin on the LAST line that looks like a machine-readable marker line
@@ -2797,7 +2952,7 @@ def _adopt_child(meta, node, byid, index, child, schema, fo_cancel=None):
             "ms": ms, "final": final_reply, **evd}
 
 def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering=None, attempt=0, skey=None,
-              inputs="", index=None, resume_preamble=""):
+              inputs="", index=None, resume_preamble="", reasoning_override=None):
     run = meta["_run"]
     # #116: harvest validates against the same engine-stripped view as the happy
     # path — a death's fenced answer is not killed for omitting the disclosure.
@@ -2850,9 +3005,14 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
         cmd += ["--continue", f"{skey}#a{attempt}", "--create-if-missing"]
     if node.get("model"): cmd += ["-m", node["model"]]
     if node.get("provider"): cmd += ["--provider", node["provider"]]
-    if node.get("reasoning"): cmd += ["--reasoning", node["reasoning"]]   # validated at submit (Q5)
-    if node.get("toolsets") is not None:
-        ts = node["toolsets"]; cmd += ["-t", ",".join(ts) if isinstance(ts, list) else str(ts)]
+    # est-flah: nothing reaches the CLI verbatim that the runner can already see
+    # will die — unknown effort clamps to nearest-supported, unknown toolsets
+    # drop (all-unknown => the flag itself is the no-op). Warnings land in
+    # events.jsonl as node.clamped, once per (node, kind, requested, clamped).
+    _eff = _resolve_child_reasoning(run, meta, node, override=reasoning_override)
+    if _eff: cmd += ["--reasoning", _eff]
+    _ts = _filter_child_toolsets(run, meta, node)
+    if _ts is not None: cmd += ["-t", ",".join(_ts)]
     if node.get("max_turns"): cmd += ["--max-turns", str(node["max_turns"])]
     if node.get("run_budget"): cmd += ["--run-budget", str(node["run_budget"])]
     lp = spawn_log_path(run, node, index, spawn_no)   # Q1: per-spawn stdout capture
@@ -3171,6 +3331,34 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
                              f"typed malformed turn; not harvestable). Verdict: {verdict}",
                     "error_class": "malformed_turn", "raw": (out or "")[-2000:], "ms": ms,
                     "final": final_reply, **sk, **evd}
+        if eclass == "provider_400" and reasoning_override is None:
+            # est-flah escape hatch: the SERVER itself named the vocabulary the
+            # lane accepts ("Unsupported type: high. Supported types are xhigh,
+            # medium, low") — a fact no resolve-time table could have carried.
+            # One re-drive with the clamped value instead of a permfail; the
+            # re-drive's own reasoning_override seals the hatch (no loop).
+            g = _gate400_parse(out)
+            if g:
+                req_g, sup_g = g
+                target = _nearest_supported(req_g, sup_g)
+                if target is None and req_g and req_g not in EFFORT_ORDER:
+                    target = _bespoke_middle(sup_g)     # bespoke name: middle of the declared set
+                if target is not None and target != req_g:
+                    _clamp_warn(run, meta, node, "reasoning_gate400", req_g, target,
+                                _lane_label(node), sup_g)
+                    r2 = run_child(meta, node, byid, goal, context, schema,
+                                   attempt_note=attempt_note, steering=steering, attempt=attempt,
+                                   skey=skey, inputs=inputs, index=index,
+                                   resume_preamble=resume_preamble,
+                                   reasoning_override=target)
+                    r2["ms"] = r2.get("ms", 0) + ms
+                    r2["reasoning_gate400"] = {"requested": req_g, "clamped": target,
+                                               "supported": sup_g}
+                    al = list(r2.get("attempts_log") or [])
+                    al.append({"attempt": len(al), "error_class": "provider_400", "at": now(),
+                               "gate400_clamp": target})
+                    r2["attempts_log"] = al
+                    return r2
         verdict = _verdict_lines(marker if marker else out)
         return {"status": "failed", "error": f"child exited rc={rc}: {verdict}",
                 "error_class": eclass, "raw": (out or "")[-2000:], "ms": ms, "final": final_reply, **sk, **evd}
