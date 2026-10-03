@@ -719,6 +719,45 @@ WORK_DIR_NOTE = ("Your working directory {WORK_DIR} is durable; write your artif
 
 JSON_FENCE = re.compile(r"```json\s*\n(.*?)\n```", re.S)
 
+# est-6st: a reply that IS serialized tool-call markup (the model leaked the
+# CALL as text instead of making the call — the field case ended its turn with
+# literal invoke/parameter markup, turn_exit_reason unknown) must never pass
+# the sprint101 #9 prose coercion: the {result: text} shape or a harvested
+# parameter object would commit as a done answer (false green). Refused BEFORE
+# every coercion path; the fenced-json path is untouched — fenced-json-first:
+# a parseable fence returns before this gate is consulted.
+_TOOLCALL_MARKUP_TAGS = (
+    chr(60) + 'invoke name=', chr(60) + 'function name=', chr(60) + 'parameter name=',
+    chr(60) + '/' + 'invoke>', chr(60) + '/' + 'function>',
+)
+_TOOLCALL_OPENS = re.compile(r'(?<![/A-Za-z0-9_-])' + chr(60)
+                    + r'(?:invoke|function|parameter)[^>]*name=', re.I)
+
+def _tool_call_as_text(text):
+    # True when the reply IS serialized tool-call markup rather than an
+    # answer: it opens with an invoke/function/parameter open tag, or carries
+    # 2+ DISTINCT markup tags of the closed set above — and holds no parseable
+    # json fence (any such fence is extracted earlier and returned intact).
+    # Pure prose that merely mentions invoke/parameter words stays False.
+    t = (text or "").strip()
+    if not t:
+        return False
+    if JSON_FENCE.search(t):
+        try:
+            json.loads(JSON_FENCE.findall(t)[-1])
+            return False
+        except Exception:
+            pass
+    if t.startswith(_TOOLCALL_MARKUP_TAGS):
+        return True
+    seen = set()
+    for tag in _TOOLCALL_MARKUP_TAGS:
+        if tag in t:
+            seen.add(tag)
+    if len(seen) >= 2:
+        return True
+    return bool(_TOOLCALL_OPENS.search(t))
+
 def extract_json(text):
     err = "no json fence found"
     fences = JSON_FENCE.findall(text or "")
@@ -727,6 +766,9 @@ def extract_json(text):
             return json.loads(f), None
         except Exception as e:
             err = f"last json fence failed to parse: {e}"
+    if _tool_call_as_text(text):
+        return None, ('reply is a serialized tool call rendered as text '
+                      '(tool-call-as-text; typed malformed turn; not harvestable)')
     if not fences and text and text.strip():
         try:
             return json.loads(text.strip()), None
