@@ -80,13 +80,17 @@ ok(wf.last_balanced_object('{"broken": [1,2 oops {"good":true} tail') == {"good"
    "T4 broken earlier candidate never hides a good later one")
 ok(wf.last_balanced_object("no json at all") is None, "T5 no candidate -> None")
 
-# T4: interpreter-honest cross-check on the tuple itself — whatever raises
-# at the seam (ValueError/RecursionError/MemoryError), the scan skips the
-# candidate and finds the good one; nothing escapes.
-ok(True, "T6 tuple carries MemoryError (grep pin below)")
-src = (BUILD / "wf.py").read_text()
-ok("except (ValueError, RecursionError, MemoryError):" in src,
-   "T6 raw_decode seam contains MemoryError")
+# T6: the containment is BEHAVIORAL, not textual — T1/T2 already prove the
+# seam swallows the decoder's MemoryError at the measured pressure point
+# (red-proof: the pre-fix (ValueError, RecursionError) tuple ESCAPED it 4/4 on
+# 3.12.13 + 3.14.7, where clean main returned {"ok": true}). Deleting any
+# member of the tuple re-drops T1/T2 to FAIL/ESCAPED, so an assertion that
+# READS the production source text here would be theater that could stay
+# green over a broken machine gate. Per CONTRIBUTING.md §R6 we pin the
+# behavior and leave the bytes alone.
+out3 = run_probe(8, "extract")
+ok(out3.startswith("RESULT") and "ESCAPED" not in out3,
+   "T6 no exception class escapes the public entry under sustained pressure", out3[:70])
 
 print("px11:", "FAIL" if FAILED else "PASS")
 sys.exit(1 if FAILED else 0)
