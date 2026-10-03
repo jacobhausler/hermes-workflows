@@ -3004,11 +3004,23 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
     extended = False
     first_msg_s = _first_message_s(meta)
     wall = node.get("timeout", meta.get("node_timeout", 900))
+    # wf159c finding 1 (wall-clamp): after a credential park, the remaining
+    # wall IS the per-spawn timeout for this (node,index) — a park can never
+    # buy a fresh full timeout, for the parked respawn or any later ladder
+    # spawn. #11's one-time extend still stacks on top of the clamp.
+    _rl_cap = (meta.get("_rl_timeout_cap") or {}).get((node["id"], index))
+    if isinstance(_rl_cap, (int, float)):
+        _rem = float(_rl_cap) - t0
+        if _rem <= 0:
+            _rem = 0.05
+        if not isinstance(wall, (int, float)) or wall > _rem:
+            wall = _rem
     deadline = t0 + wall if wall is not None else float("inf")
     silence_deadline = t0 + first_msg_s if first_msg_s > 0 else None
     rc = None
     tclass, treason = None, ""
-    timeout_s = node.get("timeout", meta.get("node_timeout", 900))
+    timeout_s = wall if isinstance(wall, (int, float)) \
+        else node.get("timeout", meta.get("node_timeout", 900))
     final_reply = ""
     # #61: live tree accounting — children are attributed to this spawn ONLY
     # while it lives (after death+reap they reparent); the pgid walk reaches the
@@ -3289,21 +3301,54 @@ def _ratelimit_conf_params(meta):
          and 0 <= float(jf) < 1 else 0.2
     return iv, jf
 
-def _ratelimit_park(meta, r, respawn, ev, ev_kw, node=None):
+def _park_wait(meta, seconds, cancel=None):
+    """Wait out a park WITHOUT going blind: observes the global stop AND the
+    fan-out quorum cancel (wf159c finding 3 — the old park waited only on
+    _stop, so a satisfied quorum sat through the full 300 s default).
+    Returns True if interrupted (stop/cancel), False if the wait completed."""
+    stop = meta["_stop"]
+    end = time.time() + max(0.0, seconds)
+    while True:
+        rem = end - time.time()
+        if rem <= 0:
+            return False
+        if stop.wait(min(rem, 0.1)):
+            return True
+        if cancel is not None and cancel.is_set():
+            return True
+
+
+def _ratelimit_park(meta, r, respawn, ev, ev_kw, node=None, cancel=None,
+                    prior_attempts_log=None):
     """est-t0vz (issue #54): the bounded credential-window park, run BEFORE
-    _transient_retry when the death classified `ratelimit`. A credential-window 429
-    outlasts the 5s/20s transport ladder by orders of magnitude (field repro: a
-    36+ min window, ladder spent in ~10 s), so instead of respawning at once the
-    runner parks ~5 min (jittered ±20% by default) and re-spawns while the NODE'S
-    OWN wall budget still holds room for the next attempt plus one interval
-    (budget = the node's wall clock — node `timeout`, else run meta `node_timeout`
-    (900 s default) — measured from the park's start; the transient/bounded ladders
-    are untouched afterwards). Every park emits `<ev>.retrying` with
-    error_class=ratelimit and backoff_s (the machine-wait event shape). On give-up
-    — budget can no longer fit a park, stop set, or the retry budget (meta
-    _retries_left, shared with the other ladders) exhausted — the node fails with
-    the VERBATIM banner 'credential rate-limited for <model>' as the error text so
-    the dispatcher can tell switch-model from requeue without parsing prose."""
+    _transient_retry when the death classified `ratelimit`, and REACHED from
+    inside the ladders when a banner death surfaces after a respawn
+    (wf159c finding 2 — the dispatcher contract must hold for late banners
+    too). A credential-window 429 outlasts the 5s/20s transport ladder by
+    orders of magnitude (field repro: a 36+ min window, ladder spent in
+    ~10 s), so instead of respawning at once the runner parks ~5 min
+    (jittered +/-20% by default) and re-spawns under the node's wall law.
+
+    wf159c finding 1 — the wall is now actually a bound:
+      * the fit check consumes the WORST-CASE jittered wait, interval *
+        (1 + jitter_fraction), never the unjittered interval; AND
+      * the park may only fire when a real respawn window still fits after
+        the wait — window = max(0.25 s, 15% of the wall). Buying a wait that
+        leaves no room to answer is a fake retry: refuse and give up typed.
+      * after the wait the deadline is RECHECKED before isolate/respawn;
+      * the parked respawn (and every later spawn this node makes, via the
+        meta cap below) is CLAMPED to the remaining wall — a park can never
+        buy a fresh full timeout. The cap lives in meta[_rl_timeout_cap]
+        keyed by (node id, index) so concurrent nodes/items keep their own
+        budgets and run.json stays untouched.
+    Every park emits `<ev>.retrying` with error_class=ratelimit and
+    backoff_s (the machine-wait event shape). On give-up — budget can no
+    longer fit a park, stop/cancel set, or the retry budget (meta
+    _retries_left, shared with the other ladders) exhausted — the node fails
+    with the VERBATIM banner 'credential rate-limited for <model>' as the
+    error text so the dispatcher can tell switch-model from requeue without
+    parsing prose. A quorum-cancel during the wait returns the established
+    `cancelled: quorum already met` shape, not a ratelimit failure."""
     run = meta["_run"]
     if r.get("status") != "failed" or r.get("error_class") != "ratelimit":
         return r
@@ -3319,13 +3364,20 @@ def _ratelimit_park(meta, r, respawn, ev, ev_kw, node=None):
     model = (bm.group(1).rstrip(".") if bm else None) or \
             (node or {}).get("model") or "seat default"
     park_deadline = time.time() + wall
-    attempts_log = []
+    attempts_log = list(prior_attempts_log or [])
+    key = (ev_kw.get("node"), ev_kw.get("index"))
     while r.get("status") == "failed" and r.get("error_class") == "ratelimit":
         if meta["_stop"].is_set():
             break
-        # bounded: the park may only fire while the node's remaining budget can
-        # still fit the park itself — at give-up there is no room left to wait.
-        if time.time() + interval > park_deadline:
+        if cancel is not None and cancel.is_set():
+            return {"status": "failed", "error": "cancelled: quorum already met",
+                    "error_class": "cancelled", "ms": 0,
+                    "attempts_log": attempts_log}
+        # bounded (wf159c): worst-case jitter must fit AND leave a real
+        # respawn window — a park that cannot leave room to ANSWER is refused.
+        wait_max = interval * (1.0 + jitfrac)
+        window = max(0.25, 0.15 * wall)
+        if time.time() + wait_max + window > park_deadline:
             break
         with meta["_procs_lock"]:
             if meta["_retries_left"] <= 0:
@@ -3342,12 +3394,25 @@ def _ratelimit_park(meta, r, respawn, ev, ev_kw, node=None):
                              "error_class": "ratelimit", "at": now()})
         log(run, ev + ".retrying", error_class="ratelimit", backoff_s=round(backoff, 1),
             attempts_log=list(attempts_log), **ev_kw)
-        if meta["_stop"].wait(backoff) or meta["_stop"].is_set():
+        if _park_wait(meta, backoff, cancel=cancel):
+            if cancel is not None and cancel.is_set() and not meta["_stop"].is_set():
+                return {"status": "failed", "error": "cancelled: quorum already met",
+                        "error_class": "cancelled", "ms": 0,
+                        "attempts_log": attempts_log}
+            break
+        # deadline RECHECK after the wait, before anything spawns (wf159c).
+        if time.time() + window > park_deadline:
             break
         iso = _isolate_prior(meta, r, ev, ev_kw)   # #61 quarantine law, same as the ladders
         if iso is not None:
             iso["attempts_log"] = attempts_log
             return iso
+        # wall-clamp the parked respawn AND every later spawn of this
+        # (node,index): the remaining wall IS the new per-spawn timeout, so a
+        # park can never buy a fresh full timeout (wf159c finding 1, second
+        # defect). #11's one-time extend still applies on top of the clamp —
+        # that law was bought separately and stays intact.
+        meta.setdefault("_rl_timeout_cap", {})[key] = park_deadline
         r = respawn()
     if attempts_log:
         r["attempts_log"] = attempts_log
@@ -3362,7 +3427,7 @@ def _ratelimit_park(meta, r, respawn, ev, ev_kw, node=None):
         r["ratelimit_gave_up"] = True
     return r
 
-def _transient_retry(meta, r, respawn, ev, ev_kw):
+def _transient_retry(meta, r, respawn, ev, ev_kw, node=None, cancel=None):
     """Q4 transient retry: re-spawn a failed child at most 2 more times (5 s, 20 s
     backoff) ONLY when ALL hold — error_class ∈ {transport, unknown} AND the dead
     attempt made api_calls == 0 AND stop is not set AND the per-run retry budget
@@ -3413,6 +3478,20 @@ def _transient_retry(meta, r, respawn, ev, ev_kw):
             iso["attempts_log"] = attempts_log
             return iso
         r = respawn()
+        # wf159c finding 2: a banner death that surfaces AFTER a ladder
+        # respawn must reach the park too — the dispatcher contract (parks
+        # while wall+budget allow, then verbatim banner + ratelimit_gave_up)
+        # is the same law for late-discovered credential windows. The
+        # attempts already made ride along in attempts_log.
+        if (r.get("status") == "failed" and r.get("error_class") == "ratelimit"
+                and attempts_log):
+            # The park owns the terminal word on this banner: parked-recovery,
+            # typed give-up, or a quorum-cancel from the wait — all propagate
+            # unchanged (dropping a cancel here would launder it into the
+            # ladder's transport bookkeeping).
+            return _ratelimit_park(meta, r, respawn, ev, ev_kw,
+                                   node=node, cancel=cancel,
+                                   prior_attempts_log=attempts_log)
     if attempts_log:
         r["attempts_log"] = attempts_log
         last_spawn = r.get("spawn")
@@ -3789,8 +3868,10 @@ def run_agent_node(run, meta, byid, node, outputs, steering):
                                      skey=sk, inputs=inputs_txt, index=i, resume_preamble=resume_preamble)
                 try:
                     r = _ratelimit_park(meta, spawn(), spawn, "item",   # est-t0vz
-                                        {"node": nid, "index": i}, node=node)
-                    r = _transient_retry(meta, r, spawn, "item", {"node": nid, "index": i})
+                                        {"node": nid, "index": i}, node=node,
+                                        cancel=fo_cancel)                  # wf159c finding 3
+                    r = _transient_retry(meta, r, spawn, "item", {"node": nid, "index": i},
+                                         node=node, cancel=fo_cancel)
                     r = _bounded_retry(meta, r, spawn, "item", {"node": nid, "index": i},
                                        node=node, index=i)
                     r = _final_quiesce(meta, r, "item", {"node": nid, "index": i})   # #61
@@ -3893,7 +3974,7 @@ def run_agent_node(run, meta, byid, node, outputs, steering):
                                  node.get("schema"), steering=steering, skey=sk, inputs=inputs_txt,
                                  resume_preamble=resume_preamble)
             r = _ratelimit_park(meta, spawn(), spawn, "node", {"node": nid}, node=node)  # est-t0vz
-            r = _transient_retry(meta, r, spawn, "node", {"node": nid})
+            r = _transient_retry(meta, r, spawn, "node", {"node": nid}, node=node)
             r = _bounded_retry(meta, r, spawn, "node", {"node": nid}, node=node)
             r = _final_quiesce(meta, r, "node", {"node": nid})   # #61: never commit over a live tree
             r = _stamp_served(meta, r, node)   # dad50be0: seat truth at the commit, never the alias

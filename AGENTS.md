@@ -262,9 +262,15 @@ Author-run receipt: [receipts/exchange-run/author-run.json](receipts/exchange-ru
   transport/fatal_quota (the banner wins even when quota phrases co-occur: this death
   never stamps the quota cache — the seat is fine, the credential window is closed).
   The node PARKS at jittered ~5-minute intervals (tunables `ratelimit_interval` /
-  `ratelimit_jitter`, run.json meta-only like `retry_backoff`), bounded by BOTH the
-  shared retry budget and the wall clock — an interval that cannot still fit fires
-  zero parks. Each park emits `node.retrying error_class=ratelimit backoff_s=N`;
+  `ratelimit_jitter`, run.json meta-only like `retry_backoff`). The wall is a real
+  bound: a park fires only when the WORST-CASE jittered wait (interval × (1 + jitter))
+  plus a real respawn window (≥ 15% of the wall, floor 0.25 s) still fit inside it —
+  otherwise zero parks — the deadline is rechecked after the wait, and every spawn
+  after a park is CLAMPED to the remaining wall (a park can never buy a fresh full
+  timeout). A banner death discovered AFTER a ladder respawn reaches the same park
+  (the transient ladder hands it over, attempts included). The wait also observes the
+  fan-out quorum cancel: a satisfied quorum never waits out a parked straggler.
+  Each park emits `node.retrying error_class=ratelimit backoff_s=N`;
   give-up commits the verbatim banner as the error text (plus `ratelimit_banner`) so
   a dispatcher can switch model instead of requeue.
   `route_unavailable` (#25): a pinned route the door's ping affirmatively proved dead

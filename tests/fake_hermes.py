@@ -118,6 +118,38 @@ if _FAKE_MODE == "quota":          # #24: subscription-quota 429 with a reset ho
     print('Provider said: HTTP 429: {"error": {"message": "ChatGPT or Codex '
           'Subscription usage limit reached, resets in ~109 hours"}}')
     sys.exit(1)
+# ---- committee wf159c pins. Placed ABOVE the est-t0vz block on purpose: both
+# ---- mode names start with "ratelimit" and would otherwise be hijacked by its
+# ---- startswith() dispatch; they carry their own counter, same file shape. ----
+def _rl159_count(key):
+    if not os.environ.get("FAKE_ATTEMPT_DIR"):
+        return 0
+    os.makedirs(os.environ["FAKE_ATTEMPT_DIR"], exist_ok=True)
+    pth = os.path.join(os.environ["FAKE_ATTEMPT_DIR"], "rl159-" + key)
+    c = int(open(pth).read()) if os.path.exists(pth) else 0
+    open(pth, "w").write(str(c + 1))
+    return c
+if _FAKE_MODE == "ratelimit_after_transport":
+    _k159 = "".join(ch for ch in (q.splitlines()[0] if q.strip() else "x") if ch.isalnum())[:24] or "x"
+    if _rl159_count(_k159) == 0:                     # first spawn: transport death
+        print("Warning: Unknown toolsets: bogus")
+        print("hermes -z: agent failed: openai.APIConnectionError. Connection error.")
+        sys.exit(2)
+    if _rl159_count(_k159 + "b") < int(os.environ.get("FAKE_RL_FAILS", "9999")):
+        print("Warning: Unknown toolsets: bogus")
+        print("hermes -z: agent failed: Anthropic credentials are rate-limited for "
+              "claude-fable-5-1; other Claude models remain available (see `hermes auth list`).")
+        sys.exit(1)
+    print("```json\n" + json.dumps({"result": "answered-after-window"}) + "\n```")
+    sys.exit(0)
+if _FAKE_MODE == "ratelimit_straggler":
+    if "b3-late" in q:
+        print("Warning: Unknown toolsets: bogus")
+        print("hermes -z: agent failed: Anthropic credentials are rate-limited for "
+              "claude-fable-5-1; other Claude models remain available (see `hermes auth list`).")
+        sys.exit(1)
+    print("```json\n" + json.dumps({"result": "winner-answer"}) + "\n```")
+    sys.exit(0)
 # ---- est-t0vz (issue #54): credential-window 429 park modes ----
 # The banner below is the VERBATIM AuthError text the stock CLI raises at
 # /opt/hermes/hermes_cli/runtime_provider.py:358, as it reaches the runner's merged

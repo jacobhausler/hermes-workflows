@@ -44,6 +44,7 @@ tests/test_failures_0923.py
 # (the same GUARD class as tests/test_fatal_quota_24.py's fixture quota banner).
 tests/fake_hermes.py
 tests/test_ratelimit_54.py
+tests/test_ratelimit_park_walls_159c.py
 # Dialect golden fixtures: `model: 'sonnet'` is a pinned byte of the importer golden
 # (test_dialect_js_33 asserts the export carries it verbatim).
 tests/test_dialect_js_33.py
