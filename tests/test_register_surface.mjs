@@ -154,7 +154,9 @@ assert.equal(typeof pane.data.tabTitle, 'function', 'tabTitle renders WORKFLOWS 
 assert.equal(typeof pane.data.tabTitleText, 'function')
 assert.equal(typeof pane.render, 'function')
 
-// -- 3. groupRuns: NEEDS YOU holds held + failed + interrupted ------------------
+// -- 3. groupRuns (O4, owner 2026-10-02): RUNNING runner-backed only; pending
+// husks are never rendered; RECENTLY FINISHED holds done+failed+stopped+
+// interrupted; held runs sit in their own group waiting on their AGENT. -----
 const mk = (id, status, updated) => ({ id, status, updated, owner: {} })
 const runs = [
   mk('h1', 'held', 1), mk('f1', 'failed', 2), mk('i1', 'interrupted', 3),
@@ -162,10 +164,9 @@ const runs = [
   mk('d1', 'done', 6), mk('s1', 'stopped', 7)
 ]
 const g = mod.groupRuns(runs)
-assert.deepEqual(g.needsYou.map(r => r.id), ['i1', 'f1', 'h1'],
-  'held+failed+interrupted under NEEDS YOU, updated desc')
-assert.deepEqual(g.running.map(r => r.id), ['p1', 'r1'], 'running+pending under RUNNING')
-assert.deepEqual(g.done.map(r => r.id), ['s1', 'd1'], 'done+stopped under DONE')
+assert.deepEqual(g.running.map(r => r.id), ['r1'], 'RUNNING is runner-backed only; pending husk excluded')
+assert.deepEqual(g.held.map(r => r.id), ['h1'], 'held in its own WAITING-ON-AGENT group')
+assert.deepEqual(g.recent.map(r => r.id), ['s1', 'd1', 'i1', 'f1'], 'RECENTLY FINISHED = done+failed+stopped+interrupted, updated desc')
 
 // -- 4. SMIL candy: <animate> ONLY on paths leaving running nodes ----------------
 const grab = name => {
@@ -240,4 +241,4 @@ const rcCalls = src.match(/runningCount\(/g).length
 const rcDefs = src.match(/const runningCount =/g).length
 assert.equal(rcCalls + rcDefs, 2, 'runningCount: definition + tabTitle call only')
 
-console.log('ALL PASS: register surface, dock, NEEDS YOU grouping, SMIL-only-on-running, one fan-stack')
+console.log('ALL PASS: register surface, dock, O4 pane grouping, SMIL-only-on-running, one fan-stack')

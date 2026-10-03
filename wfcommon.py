@@ -22,7 +22,12 @@ _CONCURRENCY_KEYS = ("concurrency", "item_concurrency")
 # runner computes efp on the baked node; an author amend that flips
 # defaults.require_route would otherwise un-freeze every committed node and re-run
 # it. Nodes without these keys hash byte-identically to before (no legacy drift).
-_POLICY_KEYS = ("require_route", "route_verified")
+# #116: the engine's substitution ANNOTATION is policy too (like the proof it
+# accompanies): the door bakes it into graph.json after validation, so a stamped
+# node must not un-freeze on replay. The node's real model/provider DO participate —
+# a substitution changes the work's route, and the hash sees it (unlike route_verified,
+# which annotates a route that never moved).
+_POLICY_KEYS = ("require_route", "route_verified", "substrate_substituted")
 FP_RULE_LEGACY = 1  # before b79fa21: budgets participated in def_hash
 FP_RULE_VERSION = 2  # b79fa21: exclude budgets
 FP_RULES = (FP_RULE_LEGACY, FP_RULE_VERSION)
@@ -553,6 +558,11 @@ AGENT_KEYS = {"id", "type", "after", "goal", "context", "schema", "model", "prov
               # graph, but _resolve_models drops any author/pre-submit value — only
               # this submit's ping (or a frozen committed restore) can prove a route.)
               "require_route", "route_verified",
+              # #116: the engine's substitution stamp (from/to/reason/source) is
+              # door-baked AFTER validation like route_verified — it lives here so the
+              # runner accepts the committed graph; _resolve_models strips any
+              # author-submitted value (only this submit's ping+config bake is trusted).
+              "substrate_substituted",
               # 1.1 (RATIFY F2/F4): OPTIONAL team keys. `profile` = run this node AS a named
               # teammate profile (consent-gated, node-level only); `requires` = output
               # preconditions on ancestors ({"<ancestor>": ["field", "dotted.path", ...]}).
@@ -1952,6 +1962,158 @@ def seat_forbidden_models():
             else:
                 return text  # malformed list, not an empty ban
     return values
+
+# ---------- #116: confidence_substrate — the estate's sanctioned fallback ladder ----------
+# When a node's PINNED confidence route is proved dead at submit the #25 gate
+# fail-closes (correct). confidence_substrate is the owner's declared, sanctioned
+# substitute: consulted ONLY on that proved-dead branch, so absent config keeps
+# today's fail-closed behavior byte-identical. Resolution is ENGINE-stamped (node
+# record + machine-injected result-schema disclosure) — a child can neither learn
+# the substitution away nor author the honest label itself.
+# Sources, first hit wins: env WF_CONFIDENCE_SUBSTRATE (explicit override; comma
+# list) > `plugins.entries.hermes-workflows.settings.confidence_substrate`
+# (owner-settings vocabulary, door ctx or raw config read) > top-level
+# `workflows: confidence_substrate:` in the seat's config.yaml. Shapes accepted:
+# "provider/model", comma-separated list of those, list of "provider/model"
+# strings, list of {provider, model} mappings. A malformed value is NO ladder
+# (fail closed as today) — never a substitution invented from garbage.
+
+SUBSTRATE_ENV = "WF_CONFIDENCE_SUBSTRATE"
+SUBSTRATE_DISCLOSURE_KEY = "substrate_disclosure"
+
+def _substrate_rungs(raw):
+    """Normalize any accepted raw shape to an ORDERED list of 'provider/model'
+    rungs; unusable entries are dropped, an unusable whole value yields [] ."""
+    if raw is None:
+        return []
+    items = []
+    if isinstance(raw, str):
+        items = [s.strip() for s in raw.split(",")] if "," in raw else [raw]
+    elif isinstance(raw, dict):
+        items = [raw]
+    elif isinstance(raw, (list, tuple)):
+        items = list(raw)
+    rungs = []
+    for it in items:
+        if isinstance(it, str):
+            s = it.strip().strip("'\"")
+            p, sep, m = s.partition("/")
+            if sep and p.strip() and m.strip():
+                rungs.append(f"{p.strip()}/{m.strip()}")
+        elif isinstance(it, dict):
+            p = str(it.get("provider") or "").strip()
+            m = str(it.get("model") or "").strip()
+            if p and m:
+                rungs.append(f"{p}/{m}")
+    return rungs
+
+def _substrate_from_config_top(home):
+    """Top-level `workflows: confidence_substrate:` — full YAML when a loader is
+    importable, else the YAML-lite scan (simple list/scalar shapes only), the same
+    spirit as seat_forbidden_models' bare-CLI fallback."""
+    try:
+        text = (Path(home) / "config.yaml").read_text(encoding="utf-8")
+    except OSError:
+        return None
+    try:
+        cfg = _yaml_load(text) or {}
+        if isinstance(cfg, dict):
+            sec = cfg.get("workflows")
+            return (sec.get("confidence_substrate") if isinstance(sec, dict) else None)
+    except Exception:
+        pass
+    section = None
+    key = None
+    values = []
+    scalar = None
+    for raw in text.splitlines():
+        line = raw.split(" #", 1)[0]
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        indent = len(line) - len(line.lstrip())
+        t = line.strip()
+        if indent == 0:
+            if section == "workflows" and key == "confidence_substrate":
+                break
+            section, key = t.partition(":")[0], None
+        elif section == "workflows" and indent == 2:
+            k, _, v = t.partition(":")
+            if k == "confidence_substrate":
+                key = k
+                if v.strip():
+                    scalar = v.strip().strip("'\"")
+        elif section == "workflows" and key == "confidence_substrate" and indent > 2:
+            if t.startswith("- "):
+                values.append(t[2:].strip().strip("'\""))
+            else:
+                return None      # lite parser can't answer this shape honestly
+    if scalar is not None:
+        return scalar
+    return values or None
+
+def confidence_substrate(home=None):
+    """(ordered rungs, source) for the estate's sanctioned fallback substrate.
+    [] = no declared substrate (the #116 branch never fires; #25 stays law)."""
+    env = (os.environ.get(SUBSTRATE_ENV) or "").strip()
+    if env:
+        rungs = _substrate_rungs(env)
+        if rungs:
+            return rungs, f"env:{SUBSTRATE_ENV}"
+        return [], None
+    try:
+        v = owner_setting("confidence_substrate")
+    except Exception:
+        v = None
+    rungs = _substrate_rungs(v)
+    if rungs:
+        return rungs, "settings:confidence_substrate"
+    if v is not None and (isinstance(v, (str, dict, list))):
+        # a present-but-unusable settings value is a no-ladder, like a bad config
+        return [], None
+    raw = _substrate_from_config_top(home if home is not None else hermes_home())
+    return _substrate_rungs(raw), ("config:workflows.confidence_substrate" if raw is not None else None)
+
+def substrate_disclosure_text(stamp):
+    """The engine's honest-label sentence — verbatim material for the schema
+    description and the committed record. Built ONLY from the stamp dict."""
+    return (f"SUBSTRATE DISCLOSURE (engine-stamped, not author-written): this node was "
+            f"pinned {stamp.get('from')!r}; the estate confidence_substrate policy served "
+            f"{stamp.get('to')!r} ({stamp.get('reason') or 'route proved unavailable at submit'}).")
+
+def apply_substrate_disclosure(node, stamp):
+    """Engine-inject the disclosure clause into the node's RESULT SCHEMA (mirrors how
+    the runner forces the answer/schema blocks — the child cannot author it away):
+    property + REQUIRED key `substrate_disclosure`, description naming the original
+    pin. Mutates node['schema'] in place (creates one when the node had none)."""
+    schema = node.get("schema")
+    if not isinstance(schema, dict):
+        schema = {"type": "object", "properties": {}}
+        node["schema"] = schema
+    props = schema.setdefault("properties", {})
+    props[SUBSTRATE_DISCLOSURE_KEY] = {"type": "string",
+                                       "description": substrate_disclosure_text(stamp)}
+    req = schema.setdefault("required", [])
+    if SUBSTRATE_DISCLOSURE_KEY not in req:
+        req.append(SUBSTRATE_DISCLOSURE_KEY)
+
+def strip_engine_disclosure(schema, stamp):
+    """The validation-view of a substituted node's schema: the disclosure key is
+    ENGINE-owned (the runner stamps it into the record at commit), so its ABSENCE in
+    a child answer is never a schema failure — the child cannot author it and must
+    not be killed for omitting it. Returns the schema unchanged for everything else."""
+    if not stamp or not isinstance(schema, dict):
+        return schema
+    s = dict(schema)
+    if SUBSTRATE_DISCLOSURE_KEY in (s.get("required") or []):
+        s["required"] = [k for k in s["required"] if k != SUBSTRATE_DISCLOSURE_KEY]
+        if not s["required"]:
+            s.pop("required", None)
+    props = s.get("properties")
+    if isinstance(props, dict) and SUBSTRATE_DISCLOSURE_KEY in props:
+        s["properties"] = {k: v for k, v in props.items() if k != SUBSTRATE_DISCLOSURE_KEY}
+        if not s["properties"]:
+            s.pop("properties", None)
+    return s
 
 # ---------- live child metrics (state.db join) ----------
 # Children run with `--continue wf:<run>:<node>[:<i>]:<efp8>#a<attempt>`, so each child's

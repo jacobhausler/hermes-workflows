@@ -197,6 +197,12 @@ def _validation_error(graph):
             if node.get("type") == "agent" and "route_verified" in node:
                 node.pop("route_verified", None)
                 item.pop("route_verified", None)
+            # #116: same law for the engine's substitution stamp — the closed set
+            # carries the key so the RUNNER loads a committed graph, but an AUTHOR
+            # value is never trusted; shelved copies (act_save) drop it too.
+            if node.get("type") == "agent" and "substrate_substituted" in node:
+                node.pop("substrate_substituted", None)
+                item.pop("substrate_substituted", None)
             deps = node.get("after", [])
             if not isinstance(deps, list) or any(not isinstance(dep, str) for dep in deps):
                 errs.append({"node": nid if isinstance(nid, str) else None,
@@ -602,7 +608,9 @@ WORKFLOW_PARAMS = {
             "explicit keys win), repo (optional path \u2014 absolute, or run-dir-relative \u2014 of the git lane this node owns: a done/partial whose lane still has uncommitted TRACKED changes commits as failed error_class incomplete_work instead of a false hand-off (the dad50be0 shape: fix green but uncommitted, downstream verifies the mutant); commit in the lane, then amend/re-run re-drives), run_budget (s, "
             "child's own budget), reasoning (a hermes reasoning effort: none|minimal|low|medium|high|xhigh|max|ultra \u2014 passed to the child as --reasoning; levels are validated PER ROUTE at the door against the resolved (provider, model) route's supported set, with the supported list and nearest level in the error \u2014 no silent downgrade), require_route (bool, "
             "default TRUE on nodes that pin an explicit model: the door's submit ping affirmatively proving the pinned route dead \u2014 or answered from the fallback ladder \u2014 refuses the launch instead of silently billing another model; set false to opt into the ladder explicitly; the ping proving a route alive additionally binds the runner's served-model hold; "
-            "the sibling `route_verified` proof annotation is DOOR-BAKED only \u2014 never author-writable, an author value is dropped at resolve and re-proved by this submit's ping), inputs:['<ancestor>' | '<ancestor>.<dotted.path>', ...] (inject a committed upstream output into the prompt as a labelled json block under '## Inputs'; unresolvable ref fails the node at spawn; "
+            "when the owner declares an estate `confidence_substrate` (plugin settings / workflows config), a proved-dead pin resolves to the first ping-alive declared rung instead of refusing \u2014 "
+            "engine-stamped substitution with a machine-injected result-schema disclosure (#116); no config = the refusal, verbatim; the sibling `route_verified` proof annotation is DOOR-BAKED only \u2014 never author-writable, "
+            "an author value is dropped at resolve and re-proved by this submit's ping), inputs:['<ancestor>' | '<ancestor>.<dotted.path>', ...] (inject a committed upstream output into the prompt as a labelled json block under '## Inputs'; unresolvable ref fails the node at spawn; "
             "DIRECT parents from `after` are auto-injected capped at 8KB with a truncation marker \u2014 use inputs only to pick a dotted path or a non-parent ancestor; a parent listed in both appears once), fanout:{items | items_from:'<node_id>.<dotted.path>', goal (OPTIONAL template; an item's own `goal` key overrides it \u2014 when items carry their own goals the shared node goal prefixes each item prompt, "
             "so no placeholder template is ever needed), schema, quorum (OPTIONAL positive int; ONLY when set: once quorum items have committed, the still-running stragglers are cancelled with error_class 'cancelled' and excluded from the failure math; when unset there is NO default \u2014 the fan-out waits for every item)}} \u2014 agent node. A provider requires a non-empty model; "
             "model aliases and literal IDs are preserved (tiers resolve explicitly, and a matching provider/model prefix is removed for the CLI). Run/amend responses include requested/resolved provider/model routes. Gate node: {id, type:'gate', after, question, options, context, when (bounded expr: out.<node>.<dotted.path> with == != > >= < <=, and/or/not, parens; "
@@ -776,7 +784,10 @@ def model_preflight(requests, tiers, seat_raw):
         return "model preflight: " + " | ".join(route_errs)
     return None
 
-_ROUTE_KEYS = ("model", "tier", "provider", "route_verified")   # #25: the door's
+_ROUTE_KEYS = ("model", "tier", "provider", "route_verified",
+               "substrate_substituted")   # #25: the door's proof; #116: the door's
+# substitution stamp rides the same frozen-restore loop — a replay-skipped node
+# keeps its engine substitution verbatim.
 # (F2): the "def unchanged → keep the committed bake verbatim" comparisons exclude
 # the proof annotation — the author can never legally write route_verified (it is
 # popped pre-submit / restored from the commit), so requiring equality on it would
@@ -822,6 +833,23 @@ def _resolve_models(nodes, committed=None, keep=()) -> tuple[str | None, dict | 
             # this submit's ping re-proves it or the node simply runs un-held.
             # Frozen (replay-skip) nodes restore the committed proof via _ROUTE_KEYS.
             n.pop("route_verified", None)
+            # #116: the same law for the substitution stamp — an author value is
+            # dropped (the runner's closed set carries the key so the committed
+            # graph loads); only this submit's dead-pin + declared-substrate bake
+            # is trusted. A frozen (replay-skip) node restores its committed stamp
+            # verbatim below via _ROUTE_KEYS; a NON-frozen node whose route keys
+            # (model/provider/tier) are unchanged from a committed def that carried
+            # the stamp restores it verbatim too (the F2 un-bake law: an amend that
+            # didn't move the route must not launder away the engine's disclosure
+            # stamp), while any route change — or an author stamp with no matching
+            # commit — drops it and lets this submit's ping+config re-prove.
+            c_st = c.get("substrate_substituted") if c else None
+            if n.get("id") not in keep:
+                same_route = bool(c_st) and all(n.get(k) == c.get(k) for k in _ROUTE_MATCH_KEYS)
+                if same_route:
+                    n["substrate_substituted"] = c_st
+                else:
+                    n.pop("substrate_substituted", None)
         if frozen:
             for k in _ROUTE_KEYS:
                 if c.get(k) is None:
@@ -1157,7 +1185,48 @@ def _require_route_effective(node, graph):
         return bool(node.get("model"))
     return bool(v)
 
-def _route_enforcement(graph, routes, skip=()):
+def _confidence_substitute(n, ent, reason_note):
+    """#116: declared-fallback branch of the #25 gate (R6: same path, not a parallel
+    gate). Called ONLY when the submit ping affirmatively proved the node's pinned
+    route unusable (dead / fallback-ladder surprise) AND the node did not opt out.
+    Consults the estate `confidence_substrate` (wfcommon.confidence_substrate:
+    owner-settings key or top-level `workflows:` config; absent = no ladder, the
+    #25 refusal rides byte-identically). A rung serves only when ITS OWN ping proves
+    it alive (the owner's ladder ruling: first alive rung wins). On success the node
+    def is re-routed IN PLACE and engine-stamped (original pin, served substrate,
+    reason, config source) with the result-schema disclosure clause machine-injected;
+    the routes entry updates to the served route so the alive branch bakes
+    `route_verified` against what will actually bill. Returns the stamp dict or None
+    (never raises the submit: an unusable config is simply no ladder)."""
+    try:
+        rungs, source = _common.confidence_substrate()
+    except Exception:
+        return None
+    for rung in rungs:
+        p, _, m = rung.partition("/")
+        try:
+            ann = _ping_route_once(p, m)
+        except Exception:
+            continue
+        if ann.get("liveness") != "alive":
+            continue                                   # next rung; the ladder decides
+        original = f"{(ent.get('resolved') or {}).get('provider') or ''}/" \
+                   f"{(ent.get('resolved') or {}).get('model') or n.get('model') or ''}"
+        stamp = {"from": original, "to": rung, "reason": reason_note, "source": source or "declared"}
+        n["provider"] = p
+        n["model"] = m
+        n["substrate_substituted"] = stamp
+        _common.apply_substrate_disclosure(n, stamp)
+        ent["resolved"] = {"provider": p, "model": m}
+        ent["liveness"] = "alive"
+        ent["substituted_from"] = original
+        ent["note"] = f"#116 confidence_substrate: pinned route unavailable " \
+                      f"({reason_note}); sanctioned substrate {rung} ping-alive serves " \
+                      f"(source {stamp['source']})"
+        return stamp
+    return None
+
+def _route_enforcement(graph, routes, skip=(), models=None):
     """#25: a node that pins an explicit route and did NOT opt into the
     fallback ladder refuses to launch when the submit ping AFFIRMATIVELY proves the
     pinned route unusable — `dead`, or the fallback-ladder surprise (recorded route !=
@@ -1167,7 +1236,10 @@ def _route_enforcement(graph, routes, skip=()):
     ping PROVED the route alive, the node def bakes `route_verified` = the verified
     "provider/model": the runner holds the committed served_model to it
     (route_unavailable). Returns the error string or None — the FIRST refusal fails
-    the whole submit (a partial graph on a dead pinned route is a lie anyway)."""
+    the whole submit (a partial graph on a dead pinned route is a lie anyway).
+    #116: the dead/surprise branch first consults the estate confidence_substrate
+    (see _confidence_substitute); a substituted node re-enters the same alive/bake
+    law against its served route; no config (or no alive rung) = this refusal, verbatim."""
     bad = []
     for n in graph["nodes"]:
         nid = n.get("id")
@@ -1182,6 +1254,16 @@ def _route_enforcement(graph, routes, skip=()):
             continue                                  # unpinnable: nothing to hold
         liv = ent.get("liveness")
         if liv == "dead":
+            if _confidence_substitute(n, ent, f"HTTP-dead: {ent.get('note') or 'ping failed'}"):
+                if models is not None and nid in models:
+                    models[nid] = f"{n['provider']}/{n['model']} (confidence_substrate)"
+                liv = "alive"                         # re-enter the bake law below
+        elif liv == "unknown" and ent.get("wrong_route"):
+            if _confidence_substitute(n, ent, "fallback-ladder surprise"):
+                if models is not None and nid in models:
+                    models[nid] = f"{n['provider']}/{n['model']} (confidence_substrate)"
+                liv = "alive"
+        if liv == "dead":
             bad.append(f"node {nid!r} pins {p}/{m}: route DEAD at submit "
                        f"({ent.get('note') or 'ping failed'}) — repoint it, or opt into "
                        f"the fallback ladder explicitly with require_route: false ON THAT "
@@ -1192,7 +1274,7 @@ def _route_enforcement(graph, routes, skip=()):
                        f"not pin. Repoint it, or accept fallback with require_route: "
                        f"false ON THAT NODE (a `defaults` flip opts the whole graph in)")
         elif liv == "alive":
-            n["route_verified"] = f"{p}/{m}"
+            n["route_verified"] = f"{n.get('provider') or p}/{n.get('model') or m}"
     return ("route_unavailable at submit — " + "; ".join(bad)) if bad else None
 
 def _quota_refusal(graph, routes=None, cache_path=None, skip=()):
@@ -2093,7 +2175,7 @@ def act_run(args):
     # fallback-ladder-surprised pinned route refuses the launch unless the node
     # opted into the ladder (require_route: false); alive-proved nodes bake
     # route_verified so the runner holds served_model to it at commit.
-    _r = _route_enforcement(graph, routes)
+    _r = _route_enforcement(graph, routes, models=models)
     if _r:
         return {"error": _r, "routes": routes}
     # run dry_run — the amend dry_run shape on the launch path: every gate above
@@ -2601,7 +2683,7 @@ def act_amend(args):
     _q = _quota_refusal(new, _routes, skip=_frozen)
     if _q:
         return {"error": _q}
-    _r = _route_enforcement(new, _routes, skip=_frozen)
+    _r = _route_enforcement(new, _routes, skip=_frozen, models=_models)
     if _r:
         return {"error": _r, "routes": _routes}
     # Q3 preview — the same replay-skip law the runner applies (wfcommon.efp +

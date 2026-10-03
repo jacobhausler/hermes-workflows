@@ -30,6 +30,8 @@ from wfcommon import (efp, graph_fingerprint, jload, validate_graph, node_rec, g
                       when_true, child_metrics, prune_states, dep_satisfied, active_child,
                       FP_RULE_VERSION, record_efp_valid, seat_forbidden_models, runs_root,
                       hermes_root, profile_home, find_run, blocked_legibility,
+                      confidence_substrate, strip_engine_disclosure,
+                      substrate_disclosure_text, SUBSTRATE_DISCLOSURE_KEY,
                       hermes_home as _wfcommon_hermes_home)
 
 def _route_home(result):
@@ -91,6 +93,26 @@ def _lane_gate(run, node, r):
 
 def _stamp_served(meta, result, node=None):
     """Commit actual child seat truth, never the requested alias. No row means unknown."""
+    # #116: engine substitution stamp validation at the commit (verified against
+    # the estate config at bake/commit time). A stamp whose `to` is NOT a declared
+    # rung — a forged node_def edit through a hand-edited graph.json — fails closed
+    # exactly like the #25 mismatch (route_unavailable). A stamp the CURRENT config
+    # cannot see at all (config removed mid-run) is the door's word: the node was
+    # legitimately substituted at submit; absence of evidence invents no death (R2).
+    stamp = (node or {}).get("substrate_substituted")
+    if isinstance(stamp, dict) and stamp.get("to"):
+        try:
+            rungs, _src = confidence_substrate()
+        except Exception:
+            rungs = None
+        if rungs and str(stamp["to"]) not in rungs:
+            result.update(status="failed", error_class="route_unavailable",
+                          error=f"route_unavailable: node record claims a confidence_substrate "
+                                f"substitution to {stamp['to']!r} but the estate config does not "
+                                f"declare that rung — a substitution is the engine's word, never "
+                                f"a node-def edit. Delete the node record and wait to re-drive, "
+                                f"or declare the substrate in the owner settings.")
+            return result
     skey = result.get("skey")
     metric = child_metrics(meta["_run"].name, _route_home(result)).get(skey, {}) if skey else {}
     result["served_model"] = metric.get("model")
@@ -111,6 +133,14 @@ def _stamp_served(meta, result, node=None):
         return result
     if node:   # #25: the committed node def, never stored in a child record.
         result = _route_hold(meta, result, node)
+        # #116: the substituted node's served substrate is the engine's declared
+        # fallback, not a false mismatch: the hold passed above because route_verified
+        # was re-baked to the served rung at submit. Loud, never silent — the node
+        # record carries the stamp verbatim plus the honest-label disclosure.
+        if isinstance(stamp, dict) and stamp.get("to") and result.get("status") in ("done", "partial"):
+            result["substrate_substituted"] = stamp
+            if not result.get(SUBSTRATE_DISCLOSURE_KEY):
+                result[SUBSTRATE_DISCLOSURE_KEY] = substrate_disclosure_text(stamp)
         if node.get("route_verified") and result.get("status") in ("done", "partial") and skey:
             # sessions.model is only the FINAL route. Core's per-call usage table
             # preserves every main-loop model even when a later --continue switches
@@ -2464,6 +2494,7 @@ def _final_quiesce(meta, r, ev, ev_kw):
     return r
 
 def _adopt_child(meta, node, byid, index, child, schema, fo_cancel=None):
+    harvest_schema = strip_engine_disclosure(schema, (node or {}).get("substrate_substituted"))  # #116
     """790c6ad: ADOPT a verified live orphan instead of re-spawning it (the
     respawned-runner token-loss bug: waveA3 re-ran 8 live children from zero
     because the fanout branch re-spawned unconditionally). Contract mirrors
@@ -2574,7 +2605,7 @@ def _adopt_child(meta, node, byid, index, child, schema, fo_cancel=None):
         _note_turn_tier(run, nid, report_path)
         try: os.unlink(report_path)
         except OSError: pass
-        hv = _harvest_death(out, schema)
+        hv = _harvest_death(out, harvest_schema)
         if hv:
             return {"status": "partial", "error": f"adopted child exceeded its re-armed wall "
                     "(answer harvested from stdout)", "error_class": "timeout",
@@ -2584,7 +2615,8 @@ def _adopt_child(meta, node, byid, index, child, schema, fo_cancel=None):
                 "error_class": "timeout", "raw": (out or "")[-2000:], "ms": ms,
                 "final": final_reply, **evd}
     parsed, perr = extract_json(out)
-    errs = validate(parsed, schema) if (parsed is not None and perr is None) else None
+    v_schema = strip_engine_disclosure(schema, (node or {}).get("substrate_substituted"))  # #116
+    errs = validate(parsed, v_schema) if (parsed is not None and perr is None) else None
     def _complete(rec):
         # #61b B4: the completeness verdict is SHARED with the exit-0 parse
         # path, not left to the commit edge alone: a quiet adopted child whose
@@ -2609,7 +2641,7 @@ def _adopt_child(meta, node, byid, index, child, schema, fo_cancel=None):
         # capture freezes at the kill, so the snapshot is honest to the quorum
         # moment; error_class/quorum math unchanged.
         suffix, snap = _cancel_evidence(run, nid, index, lp)
-        hv = _harvest_cancelled(out, schema, run, nid, index)
+        hv = _harvest_cancelled(out, harvest_schema, run, nid, index)
         rec = {"status": "failed", "error": "cancelled: quorum already met" + suffix,
                "error_class": "cancelled", "raw": (out or "")[-2000:], "ms": ms,
                "cancel_evidence": snap, **evd}
@@ -2620,7 +2652,7 @@ def _adopt_child(meta, node, byid, index, child, schema, fo_cancel=None):
         return {"status": "failed", "error": f"adopted child answer failed schema validation: {errs}",
                 "error_class": "schema", "output": parsed, "raw": (out or "")[-2000:],
                 "ms": ms, "final": final_reply, **evd}
-    hv = _harvest_death(out, schema)   # #4 law applies to adopted deaths too
+    hv = _harvest_death(out, harvest_schema)   # #4 law applies to adopted deaths too
     if hv:
         return {"status": "partial", "error": "adopted child died before exit was observable "
                 "(answer harvested from stdout)", "error_class": tclass or "unknown",
@@ -2643,6 +2675,9 @@ def _adopt_child(meta, node, byid, index, child, schema, fo_cancel=None):
 def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering=None, attempt=0, skey=None,
               inputs="", index=None, resume_preamble=""):
     run = meta["_run"]
+    # #116: harvest validates against the same engine-stripped view as the happy
+    # path — a death's fenced answer is not killed for omitting the disclosure.
+    harvest_schema = strip_engine_disclosure(schema, (node or {}).get("substrate_substituted"))
     spawn_no = _next_spawn_no(meta, node, index)
     # #61c: the survivor-registry token for THIS spawn — unique per Popen (a
     # pid can be recycled, a token cannot). A detached descendant registers
@@ -2916,7 +2951,7 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
                          f"(killed; log empty — never got past its first call)",
                 "error_class": "early_death", "raw": "", "ms": ms, **sk, **evd}
     if timed_out:
-        hv = _harvest_death(out, schema)   # #4: a timeout that printed a valid answer keeps it
+        hv = _harvest_death(out, harvest_schema)   # #4: a timeout that printed a valid answer keeps it
         if hv:
             return {"status": "partial", "error": f"timeout after {timeout_s}s "
                     "(answer harvested from stdout before the kill)",
@@ -2938,7 +2973,7 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
             # class was excluded from _harvest_death — this is cancelled's own pass;
             # classification and quorum math untouched, error_class stays cancelled).
             suffix, snap = _cancel_evidence(run, node["id"], index, lp)
-            hv = _harvest_cancelled(out, schema, run, node["id"], index)
+            hv = _harvest_cancelled(out, harvest_schema, run, node["id"], index)
             rec = {"status": "failed", "error": "cancelled: quorum already met" + suffix,
                    "error_class": "cancelled",
                    "raw": (out or "")[-2000:], "ms": ms, "final": final_reply,
@@ -2947,7 +2982,7 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
                 rec.update(hv)
             return rec
         if tclass == "cap_exhausted":
-            hv = _harvest_death(out, schema)   # #4: every cap death that "said so precisely" keeps its answer
+            hv = _harvest_death(out, harvest_schema)   # #4: every cap death that "said so precisely" keeps its answer
             if hv:
                 return {"status": "partial",
                         "error": f"child hit its turn budget: {treason} (max_turns={node.get('max_turns')}; "
@@ -2965,7 +3000,7 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
             return {"status": "failed", "error": "child died with an empty log (no messages)",
                     "error_class": "early_death", "raw": "", "ms": ms, **sk, **evd}
         eclass, marker = _classify_rc_output(out)
-        hv = _harvest_death(out, schema)       # #4: rc!=0 with a valid fenced answer on stdout
+        hv = _harvest_death(out, harvest_schema)       # #4: rc!=0 with a valid fenced answer on stdout
         if hv:
             return {"status": "partial",
                     "error": f"child exited rc={rc} (answer harvested from stdout)",
@@ -3024,13 +3059,17 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
                     "error_class": "left_live_descendants", "ms": ms,
                     "final": final_reply, **hv, **extra, **sk, **evd}
     valid_answer = False
+    errs = None
     if parsed is not None and perr is None:
-        valid_answer = not validate(parsed, schema)
+        # #116: the disclosure key is engine-owned (stamped into the record at
+        # commit); its absence in a child answer is never a schema failure.
+        errs = validate(parsed, strip_engine_disclosure(schema, (node or {}).get("substrate_substituted")))
+        valid_answer = not errs
     if valid_answer:
         # healthy: extract_json verdict + an empty tree. Record shape
         # byte-identical to the pre-#61 runner (solo byte-identity law).
         return {"status": "done", "output": parsed, "ms": ms, **sk, **evd}
-    note = (f"Your previous answer failed schema validation: {validate(parsed, schema)}"
+    note = (f"Your previous answer failed schema validation: {errs}"
             if parsed is not None and perr is None else
             f"Your previous answer had no parseable json block ({perr})")
     if attempt < 1:
