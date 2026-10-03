@@ -68,7 +68,13 @@ jobs:
 
       - name: PR branches do not touch the knowledge graph (single-writer)
         if: github.event_name == 'pull_request'
-        run: python3 scripts/graph_path_ban.py
+        # merge-base needs real history: default fetch-depth:1 checkout has no
+        # origin/main ref and the ban correctly fails closed (peer review #170).
+        # The suite above ran BEFORE this step on the shallow tree, so deepening
+        # here is order-safe.
+        run: |
+          git fetch --no-recurse-submodules origin main
+          python3 scripts/graph_path_ban.py
 
       - name: Validate plugin against pinned hermes
         run: hermes plugins validate .
