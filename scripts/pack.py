@@ -105,6 +105,7 @@ INCLUDE_FILES = (
     "CHANGELOG.md",
     "scripts/graph_check.py",
     "scripts/pack.py",
+    "scripts/pr_tag_audit.py",  # est-4vnq: tests/test_pr_tag_audit.py executes it; the shipped suite must not die on a missing helper
     "scripts/suite.py",
     "graphify-out/GRAPH_REPORT.md",
     "graphify-out/graph.json",
