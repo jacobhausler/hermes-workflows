@@ -403,6 +403,39 @@ def _respawn_runner(r):
     _spawn_runner(r)
 
 
+def _resume_after_action(r, grace_s=0.75, consumed=None):
+    """Close the live-runner terminal handoff window after a durable action.
+
+    A release/amend/stop can run inside the runner's synchronous owner-wake POST.
+    In that shape the runner cannot exit until this call returns, so the runner's
+    post-notify boundary consumes the durable answer/marker. For an independent
+    actor landing after that boundary but just before process exit, briefly watch
+    verified liveness and respawn once the old runner is truly gone. Flock
+    admission makes concurrent winners harmless; only one runner can enter.
+
+    `consumed` distinguishes a runner that completed the requested boundary from
+    one that died before consuming it; a completed stop/amend/release must never
+    be respawned merely because the old process exited quickly.
+    """
+    def _after_death():
+        if consumed is not None and consumed():
+            return "consumed"
+        st = run_state(r) or {}
+        if st.get("status") in ("done", "stopped"):
+            return "consumed"
+        _respawn_runner(r)
+        return "respawned"
+
+    if not runner_alive(r):
+        return _after_death()
+    deadline = time.monotonic() + grace_s
+    while time.monotonic() < deadline:
+        time.sleep(0.05)
+        if not runner_alive(r):
+            return _after_death()
+    return "live"
+
+
 # #8 (P0): the transient daemonize hop. The door Popen's THIS, it forks the real
 # runner (own session, ready-pipe write end inherited non-cloexec) and exits at
 # once so the runner leaves the caller's process tree BEFORE handle() returns —
@@ -559,7 +592,7 @@ WORKFLOW_PARAMS = {
         "from": {"type": "string", "description": "run: library graph name to replay (instead of graph or graph_path)."},
         "run_context": {"type": ["string", "object"], "description": "run only: non-empty string seed appended to every first-wave agent (including agents behind gate-only paths), OR non-empty map of identifier keys to non-empty strings replacing only explicit {run.KEY} in node goals/contexts, fan-out goals/item goals and gate questions. Missing keys/malformed bindings reject before any run write — as does a seed against a graph with {run.KEY} refs, or a JSON-encoded map passed as a string. Values are persisted in prompts; do not supply secrets. A seed cannot replace baked literals."}, 
         "description": {"type": "string", "description": "save: one-line purpose shown by library/list."},
-        "tags": {"type": "array", "items": {"type": "string"}, "description": "save (optional): 1-10 short discovery tags (lowercase alnum, [-_.], <=32 chars each), validated like the library name; stored in the entry's meta envelope next to the description."},
+        "tags": {"type": "array", "items": {"type": "string"}, "description": "save (optional): 1-10 discovery tags — legacy flat tokens (lowercase alnum [-_.] <=32) or faceted `facet:value` (facets: use_case, repo, domain, risk, note; values [a-z0-9._-] <=48; e.g. use_case:code-review). Call `library` first and reuse its tag_vocab values VERBATIM — never coin a tag you have not seen. Resaving without tags keeps the entry's existing tags; stored in the meta envelope. library (optional): filter to entries carrying ALL listed tags (same 1-10 law as save — an empty array errors on BOTH verbs; omit tags for no filter); an empty result's tag_match_counts says which term starved."},
         "why_not_library": {"type": "string", "description": "submit (REQUIRED, >=80 chars): why no library graph covered this task — name the entries you checked and the shape you needed. The receipt is what makes hand-rolling honest."},
         "lane": {"type": "string", "description": "submit (optional, <=128 chars): lane label carried beside the submission for the quartermaster's triage; no scheduling effect."},
         "kind": {"type": "string", "enum": ["submissions"], "description": "inbox (optional): 'submissions' = list workflow submit study items newest-first (read-only; promotion is a human decision). Omit inside a child spawn to pull baked steering as before."},
@@ -1393,17 +1426,45 @@ LIB_OK = re.compile(r"^[a-z0-9][a-z0-9_.-]{0,63}$")
 _GENERAL_PREFIX = "general/"
 TAG_OK = re.compile(r"^[a-z0-9][a-z0-9_.-]{0,31}$")
 TAGS_MAX = 10
+# #70 faceted tags: one colon, both sides non-empty charset-safe; the facet set is
+# CLOSED (the only hard check in the feature); `note:` is the sanctioned escape hatch.
+TAG_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*:[a-z0-9][a-z0-9._-]*$")
+TAG_FACETS = ("domain", "note", "repo", "risk", "use_case")
+TAG_LEN = 48
 DESC_MAX = 200
 
-def _tags_error(tags):
-    """#50: `tags` is a list of 1..TAGS_MAX short tokens, each under the library-name
-    grammar. Fail-closed: anything else is an error, never a silent drop."""
+def _norm_tags(tags):
+    """#50/#70: `tags` is a list of 1..TAGS_MAX tokens, each a legacy FLAT token
+    (library-name grammar) or a FACETED `facet:value` tag — hard facet namespace
+    {use_case,repo,domain,risk,note} (the k8s well-known-labels split: the facet axis
+    is the one drift class a consolidate agent cannot repair, so it is the only
+    enforced check; values stay open and drift is handled by the tag_vocab echo + the
+    seed list in references/grammar.md). Returns (normalized, error): lowercase-
+    trimmed, dups collapsed, exactly one ':' with [a-z0-9._-] both sides.
+    Fail-closed: anything else is an error, never a silent drop."""
     if not isinstance(tags, list) or not 1 <= len(tags) <= TAGS_MAX:
-        return {"error": f"tags must be a list of 1-{TAGS_MAX} short tokens"}
+        return None, f"tags must be a list of 1-{TAGS_MAX} tokens (flat or facet:value)"
+    out = []
     for t in tags:
-        if not isinstance(t, str) or not TAG_OK.match(t):
-            return {"error": f"invalid tag {t!r} (lowercase alnum, [-_.], <=32 chars)"}
-    return None
+        if not isinstance(t, str):
+            return None, f"invalid tag {t!r} (want a string)"
+        t = t.strip().lower()
+        if ":" in t:
+            if len(t) > TAG_LEN or not TAG_RE.match(t):
+                return None, (f"invalid tag {t[:60]!r} (facet:value — one ':', non-empty "
+                              "both sides, [a-z0-9._-], <=48 chars)")
+            if t.split(":", 1)[0] not in TAG_FACETS:
+                return None, f"unknown facet in {t!r}; allowed facets: {list(TAG_FACETS)}"
+        elif not TAG_OK.match(t):
+            return None, f"invalid tag {t!r} (flat: lowercase alnum [-_.] <=32; or facet:value)"
+        if t not in out:
+            out.append(t)
+    return out, None
+
+
+def _tags_error(tags):
+    bad = _norm_tags(tags)
+    return {"error": bad[1]} if bad[1] else None
 
 def _lib_path(name):
     """WRITE resolver: always the resolved root (current best version lands there).
@@ -1440,8 +1501,9 @@ def _lib_rel_name(p):
 def act_save(args):
     """Shelve a graph under a name: from an existing run (`run_id`) or an inline `graph`.
     Overwrites — a library entry is the CURRENT best version of that graph.
-    #50: `description` (<=200) and `tags` (1-10 short tokens) ride in the entry's
-    `meta` envelope; a save carrying NEITHER keeps writing the pre-#50 BARE bytes."""
+    #50: `description` (<=200) and `tags` (1-10 flat or #70 `facet:value` tokens) ride
+    in the entry's `meta` envelope; a save carrying NEITHER keeps writing the pre-#50
+    BARE bytes. #70: omitting a field carries the previous envelope's value forward."""
     graph, bad = _input_graph(args, run_id=True)
     if bad:
         return bad
@@ -1464,9 +1526,62 @@ def act_save(args):
         return {"error": f"description must be a non-empty string of at most {DESC_MAX} characters"}
     tags = args.get("tags")
     if tags is not None:
-        bad = _tags_error(tags)
-        if bad:
-            return bad
+        norm, terr = _norm_tags(tags)
+        if terr:
+            return {"error": terr}
+        tags = norm
+    # #70 RETAIN-ON-OVERWRITE: a resave that says nothing about a meta field carries
+    # the previous entry's value (re-shelve-from-run_id is the documented normal flow
+    # and must not silently drop discovery coverage). `tags:[]` stays the #50 error
+    # (fail-closed: an agent's sloppy empty array never erases coverage; removing a
+    # tag is a deliberate edit of the entry file).
+    if (desc is None or tags is None):
+        prev_path = _lib_read(p.stem) if p.parent == library_root() else p
+        if prev_path.exists():
+            # #70 peer review: the retain read must not be unguarded — jload
+            # returns None on corrupt bytes, which fell through to "no previous
+            # envelope" and SILENTLY WIPED a tagged entry's tags on re-shelve.
+            # Fail closed: refuse until the file is repaired or deleted.
+            prev_raw = jload(prev_path)
+            if prev_raw is None:
+                return {"error": f"cannot retain from unreadable entry '{p.stem}' "
+                                 "(corrupt JSON): repair or delete the file, then "
+                                 "resave with explicit tags/description"}
+            prev = _common.library_entry(prev_raw)
+            pm = prev.get("meta") or {}
+            # description: library_entry merged meta-over-graph, so this also picks
+            # up a BARE entry's top-level description when the entry is re-shelved
+            # into an envelope. Only when the incoming graph doesn't state its own —
+            # the fresh graph wins over stale carried bytes.
+            if (desc is None and isinstance(prev.get("description"), str)
+                    and prev["description"].strip() and "description" not in graph):
+                desc = prev["description"]
+            # #146 item 3: the retain KEYS ON PRESENCE, not truthiness. Truthiness
+            # made a deliberate file-edit erase (`meta.tags: []`) indistinguishable
+            # from never-tagged (envelope collapsed on next resave), while a truthy
+            # garbage value (a non-list) was retained VERBATIM into the new envelope.
+            # An absent key retains nothing (pre-envelope entry); a stored [] keeps
+            # the erase deliberate and the envelope intact; a non-list stored tags
+            # is an invalid shape — fail closed, same law as the corrupt-prev read.
+            if tags is None and "tags" in pm:
+                stored = pm["tags"]
+                if not isinstance(stored, list):
+                    return {"error": f"cannot retain from entry '{p.stem}': "
+                                     "meta.tags is not a list "
+                                     f"({type(stored).__name__}): repair or delete "
+                                     "the file, then resave with explicit tags"}
+                # stored [] is the deliberate-erase state: retained as [], envelope
+                # stays. A non-empty stored list re-normalizes under the save law
+                # (a hand-edited element like ["x", 5] fails closed, never rides on).
+                if stored:
+                    norm, terr = _norm_tags(stored)
+                    if terr:
+                        return {"error": f"cannot retain from entry '{p.stem}': "
+                                         f"{terr}: repair or delete the file, then "
+                                         "resave with explicit tags"}
+                    tags = norm
+                else:
+                    tags = []
     p.parent.mkdir(parents=True, exist_ok=True)
     graph = dict(graph, name=p.stem)
     owner = _common.launcher_profile()
@@ -1487,7 +1602,10 @@ def act_save(args):
         # bare form (pre-#50 bytes, and what the solo golden freezes): the
         # description rides top-level like 1.1 always wrote it — there is none here.
         data = graph
-    p.write_text(json.dumps(data, ensure_ascii=False, indent=2))
+    # Atomic replace (the release path's own idiom): a torn write loses an entry outright.
+    tmp = p.with_name(f"{p.stem}.json.{os.getpid()}.tmp")
+    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2))
+    os.replace(tmp, p)
     saved = _lib_rel_name(p)   # #50: a general/<name> save must echo the replayable name
     return {"saved": saved, "nodes": len(graph["nodes"]),
             "hint": f"re-run any time: workflow run from={saved}  |  /wf {saved}"}
@@ -1545,7 +1663,7 @@ def _library_rows():
             rows.append(row)
     return rows, skipped, quarantined
 
-def act_library(_args):
+def act_library(args):
     rows, skipped, quarantined = _library_rows()
     # The 1.1 hint stays verbatim for the bare/empty library (golden-solo byte law);
     # the submit nudge rides along once the library carries #50 discovery entries —
@@ -1553,7 +1671,35 @@ def act_library(_args):
     hinted = "workflow run from=<name> replays one; workflow save graph=... shelves a new one"
     if any(("id" in r) for r in rows):
         hinted += "; a hand-rolled graph the library doesn't cover: workflow submit with why_not_library"
+    # #70: tag_vocab is the WHOLE-library {tag: count} — it rides every response once
+    # the library carries tags (golden-bytes law: nothing to teach, nothing echoed).
+    # The anti-drift loop: the agent sees the live taxonomy on the list call it
+    # already makes and reuses it; the hint says so at the point of save.
+    vocab = {}
+    for r in rows:
+        for t in r.get("tags") or []:
+            vocab[t] = vocab.get(t, 0) + 1
+    want = None
+    if args.get("tags") is not None:
+        # #70 peer review: ONE tags grammar across save and library —
+        # `tags:[]` is the #50 error on save, so the same arg on a query errors
+        # too rather than silently meaning match-all (an agent that learned the
+        # save law reads an empty array as meaningful). Omit tags for no filter.
+        want, terr = _norm_tags(args["tags"])
+        if terr:
+            return {"error": terr}
+        # ALL-match (no OR grammar at this scale — two calls to union); untagged
+        # entries never match a filtered query: they are simply not tagged yet.
+        rows = [r for r in rows if all(t in (r.get("tags") or []) for t in want)]
+        hinted += "; filter with tags:[...] ALL-match; reuse tag_vocab values verbatim, never coin unseen tags"
     out = {"library": rows, "hint": hinted}
+    if vocab:
+        out["tag_vocab"] = vocab
+        if want:
+            # A filtered response — especially an EMPTY one — must DIAGNOSE itself:
+            # per-tag whole-library counts say whether a term starved on spelling
+            # (0 in vocab) or on sparse co-occurrence (exists, never together).
+            out["tag_match_counts"] = {t: vocab.get(t, 0) for t in want}
     if skipped:
         out["skipped"] = skipped
     if quarantined:   # F-2 (#62): every refused entry is named WITH its typed reason;
@@ -2094,6 +2240,15 @@ def _create_run(args, graph, lib_name, models, routes, _liveness_notes, lane_pat
         meta.update(concurrency_meta)
     meta.update(_identity_stamps(args, graph, lib_name))   # 1.1: only derivable keys land
     (r / "run.json").write_text(json.dumps(meta))
+    # AUTHORITY LAW (owner ruling, PR#97 review): every owner-facing automatic wake
+    # is RUNNER-AUTHORED protocol text; graph-authored prose (gate questions etc.)
+    # is attributed data — it lives in events.jsonl / status / the desktop card and
+    # NEVER rides a role:user owner turn. This stamp is the durable marker that the
+    # run was created under that law (the door writes it at creation; the runner
+    # reads it for the probe context and never rewrites it). A run dir made outside
+    # the door carries no stamp — status shows it, and a replaying runner stays
+    # compatible (the text law lives in wf.notify itself, not in this file).
+    (r / "wake_protocol").write_text("runner-authored/v1\n")
     if lane_path is not None:
         entry = {"lane_key": args["lane_key"], "run_id": rid,
                  "claimed_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
@@ -2367,14 +2522,19 @@ def act_release(args):
         # serialize stop→release: an answer must not land on a run that is being
         # (or already was) stopped — amend or re-run instead.
         return {"error": "run is stopped/stop pending — answer refused; amend or re-run to continue"}
-    res = _release_core(r, args.get("gate_id"), args.get("answer", ""))
+    gate_id = args.get("gate_id")
+    res = _release_core(r, gate_id, args.get("answer", ""))
     if not res.get("ok"):
         return res
-    if not runner_alive(r):
-        _respawn_runner(r)
+    mode = _resume_after_action(
+        r, consumed=lambda: (((run_state(r) or {}).get("nodes", {}).get(gate_id) or {})
+                              .get("status") in ("done", "skipped")))
+    if mode == "respawned":
         res["auto_resumed"] = True
-    res["hint"] = "workflow wait to follow the next boundary"
-    return res
+        hint = "runner respawned; the next transition wakes the owner automatically"
+    else:
+        hint = "answer recorded; the live runner commits it at its boundary and the next transition wakes the owner automatically"
+    return {**res, "hint": hint}
 
 def act_steer(args):
     r = run_dir(args.get("run_id"))
@@ -2549,14 +2709,14 @@ def act_amend(args):
     with open(r / "events.jsonl", "a") as f:
         f.write(json.dumps({"ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
                             "event": "graph.amended"}) + "\n")
-    if runner_alive(r):
-        (r / "restart.request").write_text("1")
-        applies = "live runner hot-reloads at its next wave boundary; call wait (it will resume as needed)"
-    else:
-        _respawn_runner(r)
+    (r / "restart.request").write_text("1")
+    mode = _resume_after_action(r, consumed=lambda: not (r / "restart.request").exists())
+    if mode == "respawned":
         applies = "runner respawned; efp replay-skip re-runs changed nodes and everything downstream"
+    else:
+        applies = "live runner hot-reloads at its next wave boundary; the next transition wakes the owner automatically"
     return {"ok": True, "models": _models, "routes": _routes, "applies": applies,
-            "hint": "workflow wait to follow" + _liveness_hint_suffix(_liveness_notes), **preview}
+            "hint": "continuation is automatic; do not wait or poll" + _liveness_hint_suffix(_liveness_notes), **preview}
 
 def act_stop(args):
     r = run_dir(args.get("run_id"))
@@ -2566,10 +2726,10 @@ def act_stop(args):
     if st and st["status"] in ("done", "failed", "stopped"):
         return {"ok": True, "already": st["status"]}
     (r / "stop.request").write_text(datetime.now(timezone.utc).isoformat(timespec="seconds"))
-    if not runner_alive(r):
-        _respawn_runner(r)  # consume the marker even from an idle/held run
-        return {"ok": True, "note": "was idle — runner spawned just to honour the stop"}
-    return {"ok": True, "note": "stop lands at the next boundary; in-flight children are killed"}
+    mode = _resume_after_action(r, consumed=lambda: not (r / "stop.request").exists())
+    if mode == "respawned":
+        return {"ok": True, "note": "runner spawned to consume the stop marker"}
+    return {"ok": True, "note": "stop recorded; the live runner consumes it at its next boundary"}
 
 def act_list(_args):
     roots = [runs_root()]
@@ -2638,6 +2798,7 @@ def _wf_command(raw_args):
             return ("Workflow library is empty. Shelve one: `workflow save run_id=<run> name=<name>` "
                     "or ask the agent to save a graph it just ran.")
         rows = "\n".join(f"- **{x['name']}** — {x['nodes']} nodes, {x['gates']} gate(s), {x['fanouts']} fan-out(s)"
+                          + (" [" + " ".join(x["tags"]) + "]" if x.get("tags") else "")
                           + (f": {x['description']}" if x.get('description') else "") for x in lib)
         # F-2 (#62): a quarantined entry lists with WHY it was refused — visible,
         # never fatal; a clean library never grows these lines (golden bytes).
