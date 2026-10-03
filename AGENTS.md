@@ -226,7 +226,7 @@ Author-run receipt: [receipts/exchange-run/author-run.json](receipts/exchange-ru
 ### 3d. Failures, resume, amend
 
 - `node.failed` events carry `error_class` from the closed set defined in code
-  (`wf.py ERROR_CLASSES`) — `cancelled | cap_exhausted | crashed | early_death |
+  (`wf.py ERROR_CLASSES`) — `cancelled | cap_exhausted | config_input | crashed | early_death |
   fanout_empty | fatal_quota | forbidden_model | graph_invalid | incomplete_work |
   inputs | left_live_descendants | malformed_turn | precondition | provider_400 | quorum |
   route_unavailable | schema | spawn | timeout | transport | transport_exhausted |
@@ -247,6 +247,11 @@ Author-run receipt: [receipts/exchange-run/author-run.json](receipts/exchange-ru
   degradation). An adopted orphan whose tree outlives it never commits a clean `done`
   — the completeness error rides WITH the answer (`partial` + this class). The class
   is terminal — never re-driven by either retry ladder.
+  `config_input` (est-tmuu, operator-verified 2026-10-02): a child that dies rc!=0 within
+  ~1 s of spawn AND whose capture carries a provider/alias config-error marker (`Unknown
+  provider '<alias>' …`) is a deterministic INPUT error, not transient transport — the node
+  fails on the FIRST attempt (the class is outside both retry ladders, the respawn budget is
+  never burned) and the error names the fix: the node's provider pin or the seat config.
   `fatal_quota` (#24): a 429 whose own text carries a reset horizon beyond the run's
   reach — fails on the FIRST attempt (the retry ladder cannot beat a multi-day reset)
   and stamps the model into the seat quota cache; the door then refuses a launch on

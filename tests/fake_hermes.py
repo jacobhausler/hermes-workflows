@@ -98,6 +98,18 @@ if _FAKE_MODE == "provider400":    # 400 with inherited CLI advice lines that mu
 if _FAKE_MODE == "unknown":        # dies with prose only — no machine-readable marker
     print("some daemon died unexpectedly, see your provider dashboard")
     sys.exit(7)
+if _FAKE_MODE == "cfgtypos":       # est-tmuu: the verified 'Unknown provider <alias>' shape —
+    # CLI arg-parse class death: marker on stdout, rc!=0 inside ~0.1s, zero api_calls.
+    # The runner must land config_input on ONE spawn (no respawn, no budget burn).
+    # FAKE_CFG_SLOW=<sec> adds a post-marker sleep so the same capture dies OUTSIDE
+    # the fast window (the slow twin: keeps its existing classification).
+    print(f"Warning: Unknown provider '{os.environ.get('FAKE_CFG_ALIAS', 'nope')}'. Check "
+          "'hermes model' for available providers, or run 'hermes doctor' to diagnose "
+          "config issues. Falling back to auto provider detection.")
+    print("Error: Unknown provider 'nope'")
+    if os.environ.get("FAKE_CFG_SLOW"):
+        time.sleep(float(os.environ["FAKE_CFG_SLOW"]))
+    sys.exit(2)
 if _FAKE_MODE == "quota":          # #24: subscription-quota 429 with a reset horizon
     print("Warning: install out of sync")
     print('Provider said: HTTP 429: {"error": {"message": "ChatGPT or Codex '

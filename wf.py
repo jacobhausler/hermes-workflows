@@ -1130,7 +1130,10 @@ ERROR_CLASSES = frozenset(("provider_400", "unresolved_model", "cap_exhausted",
                            "malformed_turn",
                            # #61: an attempt that exited while its own process group
                            # still held live backgrounded work — terminal, in BOTH ladders.
-                           "left_live_descendants"))
+                           "left_live_descendants",
+                           # est-tmuu: a deterministic provider/alias config death (see
+                           # _CONFIG_INPUT_WINDOW_MS) — terminal, in BOTH ladders.
+                           "config_input"))
 _AGENT_FAIL_PREFIX = "hermes -z: agent failed:"
 # turn_failure_copy.py ends every non-retryable failure with a fixed-format trailer
 # `Provider said: <summary>`; api_error_summary.py:49 formats the summary as
@@ -1255,6 +1258,44 @@ def _classify_rc_output(out):
     if m and int(m.group(1)) in _TRANSPORT_STATUS:
         return "transport", marker
     return "unknown", marker
+
+# ---------- est-tmuu: deterministic config/typo deaths are never respawned ----------
+# Verified field report (2026-10-02T16:41Z): a node pinning a provider alias
+# the seat does not define makes the CLI exit rc!=0 in ~0.1s printing
+# `Unknown provider 'x'. Check 'hermes model' ...`. Before this classification the
+# death surfaced as the transient classes and the Q4 ladder respawned the WHOLE
+# attempt sequence on a deterministic input error — respawn 1 and 2 re-died
+# byte-identically, then the run landed transport_exhausted. A typo-class death is
+# an INPUT fact, not transient transport: it is terminal at the first attempt and
+# burns no respawn budget (the same law as fatal_quota #24).
+#
+# Two facts must BOTH hold — neither alone is sufficient:
+#   1. the child died rc!=0 within _CONFIG_INPUT_WINDOW_MS of spawn (wall,
+#      runner-known; the report measures ~0.1s, the window is 1s with slack);
+#   2. its capture carries the config-error marker line (core emits these to
+#      stdout — hermes_cli/main.py:2074, providers.py, tools_config_providers.py).
+# The window is the precision guard: a provider-registry failure at session START
+# dies inside it, while a child that died much later had already established a
+# working provider, so its death is not this deterministic config shape and keeps
+# its existing classification. The tokens are CLI config messages, deliberately
+# disjoint from _UNRESOLVED_MODEL_TOKENS ("unknown model" is a dead model id, a
+# different fact) and from the transient transport markers.
+_CONFIG_INPUT_WINDOW_MS = 1000
+_CONFIG_INPUT_TOKENS = ("unknown provider", "not a known provider",
+                        "provider not found", "no provider named")
+
+def _classify_config_input(out, ms):
+    """(bool, marker) — True only when BOTH est-tmuu facts hold: the child died
+    within _CONFIG_INPUT_WINDOW_MS of spawn AND its capture carries a
+    provider/alias config-error marker line. Returns (False, None) otherwise;
+    the caller keeps the existing classification exactly."""
+    if ms is None or ms >= _CONFIG_INPUT_WINDOW_MS:
+        return False, None
+    for l in (out or "").splitlines():
+        low = l.strip().lower()
+        if low and any(t in low for t in _CONFIG_INPUT_TOKENS):
+            return True, l.strip()
+    return False, None
 
 # ---------- #4 harvest-on-death / #5 bounded auto-retry (sprint101w2) ----------
 
@@ -3066,6 +3107,21 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
             return {"status": "partial",
                     "error": f"child exited rc={rc} (answer harvested from stdout)",
                     "error_class": eclass, "ms": ms, "final": final_reply, **hv, **sk, **evd}
+        cfg, cfg_marker = _classify_config_input(out, ms)
+        if cfg:
+            # est-tmuu: deterministic provider/alias config death (the
+            # 'Unknown provider <alias>' rc!=0-in-~0.1s shape). The class is
+            # outside _RETRYABLE_CLASSES/_BOUNDED_RETRY_CLASSES, so neither
+            # ladder fires and _retries_left is NEVER decremented — this ONE
+            # attempt is the node's verdict (the #24 fatal_quota law applied to
+            # config typos). The error names the fix: the pin is the problem.
+            return {"status": "failed",
+                    "error": f"child exited rc={rc} in {ms} ms with a provider/config input "
+                             f"error — the pinned provider/alias is not defined on this seat; "
+                             f"fix the node's provider pin or the seat config, a re-run of the "
+                             f"same graph dies identically. Marker: {cfg_marker}",
+                    "error_class": "config_input", "raw": (out or "")[-2000:], "ms": ms,
+                    "final": final_reply, **sk, **evd}
         if eclass == "fatal_quota":
             # #24: name the model + record the horizon (advisory cache); the class
             # is outside _RETRYABLE_CLASSES/_BOUNDED_RETRY_CLASSES, so the ladder

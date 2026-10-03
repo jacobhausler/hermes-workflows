@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- #est-tmuu — deterministic provider/alias config deaths are never respawned. A
+  node pinning a provider the seat does not define made the CLI exit rc!=0 in
+  ~0.1s (`Unknown provider 'x'. Check 'hermes model' …`); the runner surfaced
+  that death as the transient classes and the Q4 ladder respawned the WHOLE
+  recovery sequence on a deterministic input error, landing
+  `transport_exhausted` with the budget burned (operator-verified report,
+  2026-10-02). The runner now types it `config_input`: a child that dies rc!=0
+  within ~1 s of spawn AND whose capture carries the config-error marker line
+  fails on the FIRST attempt — the class sits outside both retry ladders (the
+  #24 fatal_quota law), the respawn budget is never decremented, and the error
+  names the fix (the node's provider pin or the seat config). The window is the
+  precision guard: the same capture dying late keeps its existing
+  classification; `unknown model` stays `unresolved_model` territory. Pin:
+  `tests/test_config_input_tmuu.py` (fake mode `cfgtypos`).
+
 - #116 — confidence_substrate: engine-stamped fallback when a pinned confidence
   route is quota-dead. The owner declares a sanctioned fallback substrate once
   (`plugins.entries.hermes-workflows.settings.confidence_substrate`, top-level
