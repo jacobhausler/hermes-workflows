@@ -228,7 +228,7 @@ Author-run receipt: [receipts/exchange-run/author-run.json](receipts/exchange-ru
 - `node.failed` events carry `error_class` from the closed set defined in code
   (`wf.py ERROR_CLASSES`) — `cancelled | cap_exhausted | crashed | early_death |
   fanout_empty | fatal_quota | forbidden_model | graph_invalid | incomplete_work |
-  inputs | left_live_descendants | precondition | provider_400 | quorum |
+  inputs | left_live_descendants | malformed_turn | precondition | provider_400 | quorum |
   route_unavailable | schema | spawn | timeout | transport | transport_exhausted |
   unresolved_model`, plus `unknown` as the harvest-time default when nothing matches —
   plus `attempts`. Read the class, not the prose. `cancelled` (a `stop`, or a fan-out
