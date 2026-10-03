@@ -1,5 +1,47 @@
 # Changelog
 
+## 1.2.0 — 2026-10-03
+
+Minor line, 12 commits since v1.1.4 (enumerated below in merge order
+#80 → #108 → #89 → #119 → #137 → #90 → #139 → #138 → #142 → #141 → #143 → #144):
+seven teaching templates (Core-10 #2/#3/#6/#7/#8/#9/#10) with dual receipts under
+`receipts/` — author run + independent peer clean-run, digests recomputable from
+shipped bytes — forged across two estates (the Core-10 mill), plus the #61b
+process-tree runner close and one door fix.
+
+- a4a5266 #80 — feat(runner): process-tree accounting closes the false-green-suite
+  hole (#61b). An exit-0 spawn is believed only when its own process group is
+  provably empty (recursive /proc walk, pid-set persists across retries); an
+  adopted orphan whose tree outlives it commits `partial`, never a clean `done`.
+- 94fadf4 #108 — feat(examples): quorum-probe — folded speed/coverage contrast
+  (#8): quorum-raced probe fan-out beside a no-quorum barrier reconciling against
+  a master catalog; dead lanes print as loud coverage gaps.
+- 712b7bc #89 — feat(examples): blind-council review template (#2): isolated seats
+  bound to capability classes via settings.models; synthesis with mandatory
+  verify-list; unbound class fails launch closed.
+- cccec53 #119 — fix(door): run hint forbids code-blocking the card line.
+- 4656098 #137 — feat(examples): bulk-transform barrier-audit template (#9):
+  manifest fan-out, audit reconciles all_results against the manifest and
+  re-checks the filesystem itself.
+- 282a5c1 #90 — feat(examples): triage-route queue template (#3): classifier +
+  complementary when-gate pair, exactly one arm, empty queue closes not fails.
+- 7c89a1a #139 — docs(AGENTS): quorum-probe lap law — both folded modes walk
+  every launch; laps exist per-engine-side, not per-mode.
+- 425ac7c #138 — feat(examples): escalation-ladder verify-then-branch (#10):
+  builder → fresh verifier → verified lands behind a human gate, failed escalates
+  to a human hold; both arms smoke-run.
+- 6e96af1 #142 — feat(examples): census-fanout (#7): deterministic tally — every
+  item answered or NAMED missing, counts read from the record, never prose;
+  designed dead gauge exercises the loud-row law every run.
+- 33aac84 #141 — feat(examples): exchange-run (#6): byte-portability teaching
+  pair — the file itself travels save → library → re-run; leaf proves hand-off
+  only from committed records.
+- 6f6ecd4 #143 — receipts(exchange-run): peer clean-run signature — four laps at
+  the peer door on the shipped bytes; completes the dual-receipt dir.
+- fde3e23 #144 — docs(AGENTS): receipt arithmetic + fingerprint/shelf-provenance
+  laws (rules 9–10): totals are pointers into the enumeration, never
+  hand-maintained headlines; fingerprint lives in runner_exit.json.
+
 ## 1.1.3 — 2026-10-01
 
 Three merged PRs since the previous tag, in merge order (#91 → #62 → #82).
