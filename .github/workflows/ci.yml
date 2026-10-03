@@ -2,9 +2,7 @@
 #   1. desktop half parses as ESM
 #   2. serial test suite (stdlib Python + Node .mjs) → ci-out/exits.json + per-test logs
 #   3. private-string scrub audit
-#   4. knowledge-graph single-writer (#153): PR diffs never touch graphify-out/
-#      (scripts/graph_path_ban.py); the honesty gate (scripts/graph_check.py, AST
-#      only, no LLM) runs as the push-on-main graph-freshness job instead
+#   4. knowledge-graph drift (committed graphify-out/graph.json == AST of this tree; no LLM)
 #   5. `hermes plugins validate .` against a PINNED upstream commit
 #
 # HERMES_PIN = the measured requires_hermes floor, tag v2026.9.21 (first release
@@ -30,11 +28,7 @@ jobs:
   gates:
     runs-on: ubuntu-latest
     steps:
-      # fetch-depth 0: scripts/graph_path_ban.py resolves merge-base against
-      # origin/<base-ref>, which the default depth-1 PR checkout does not fetch.
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:
@@ -72,42 +66,8 @@ jobs:
       - name: Scrub audit (private strings)
         run: python3 scripts/make_public.py /tmp/public-tree
 
-      - name: PR branches do not touch the knowledge graph (single-writer)
-        run: python3 scripts/graph_path_ban.py --base-ref "${{ github.base_ref }}"
+      - name: Knowledge graph is current (graphify, AST only)
+        run: python3 scripts/graph_check.py
 
       - name: Validate plugin against pinned hermes
         run: hermes plugins validate .
-
-  # The honesty gate moved, it did not vanish (#153): instead of proving
-  # PR graph == PR source while forcing N writers, the push-on-main job below
-  # proves main graph == main source on the only commit allowed to change it.
-  # The regen lane (scripts/graph_regen.py via ra-graph-regen) is the sole
-  # writer; its --fix diff must already be empty by the time this runs.
-  graph-freshness:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-
-      - name: Checkout pinned hermes-agent
-        run: |
-          git clone --filter=blob:none https://github.com/NousResearch/hermes-agent /tmp/hermes-agent
-          git -C /tmp/hermes-agent checkout "$HERMES_PIN"
-
-      - name: Install pinned hermes (editable) + graphify
-        run: |
-          pip install -e /tmp/hermes-agent
-          pip install "graphifyy==0.9.67"
-          hermes --version || true
-          graphify --version
-
-      - name: Knowledge graph is current for main (graphify, AST only)
-        run: python3 scripts/graph_check.py
