@@ -44,6 +44,9 @@ python3 scripts/suite.py . ci-fix --baseline ci-base/exits.json
 hermes plugins validate .                         # → Validation passed.
 python3 scripts/make_public.py /tmp/public-tree   # → 0 scrub hits
 python3 scripts/graph_check.py                    # committed knowledge graph matches the tree → OK
+python3 scripts/pr_tag_audit.py                   # release step: every `(open PR #NN)` doc tag still
+                                                  # points at an OPEN PR; a merged PR's tag must be
+                                                  # rewritten to (shipped in vX) in that release commit
 ```
 
 Admission is strict: a suite run that **discovers zero test cases counts as a

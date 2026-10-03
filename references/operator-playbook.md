@@ -115,8 +115,8 @@ for unfinished work with no verified live runner (see operations.md).
 - **Model routing: pin provider+model when it matters.** A literal id that is a
   profile alias's TARGET can resolve differently than the alias (HTTP 400/404
   from the wrong route), and an alias can preflight its bare name to the provider
-  and die 404 (an alias like `opus` preflighting `anthropic/opus` when it means a
-  specific `claude-opus-…` id). For anything but the profile default model, pass
+  and die 404 (`opus` → `anthropic/opus` while the alias meant `claude-opus-5-5`).
+  For anything but the profile default model, pass
   explicit `provider` + literal `model`, read the `run` response's resolved route
   table — and check the child's served-model stamp before trusting execution.
 - Bound reasoning effort as well as turns on recon nodes: set an explicit effort
