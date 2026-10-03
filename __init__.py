@@ -1474,8 +1474,32 @@ def act_save(args):
             if (desc is None and isinstance(prev.get("description"), str)
                     and prev["description"].strip() and "description" not in graph):
                 desc = prev["description"]
-            if tags is None and pm.get("tags"):
-                tags = pm["tags"]
+            # #146 item 3: the retain KEYS ON PRESENCE, not truthiness. Truthiness
+            # made a deliberate file-edit erase (`meta.tags: []`) indistinguishable
+            # from never-tagged (envelope collapsed on next resave), while a truthy
+            # garbage value (a non-list) was retained VERBATIM into the new envelope.
+            # An absent key retains nothing (pre-envelope entry); a stored [] keeps
+            # the erase deliberate and the envelope intact; a non-list stored tags
+            # is an invalid shape — fail closed, same law as the corrupt-prev read.
+            if tags is None and "tags" in pm:
+                stored = pm["tags"]
+                if not isinstance(stored, list):
+                    return {"error": f"cannot retain from entry '{p.stem}': "
+                                     "meta.tags is not a list "
+                                     f"({type(stored).__name__}): repair or delete "
+                                     "the file, then resave with explicit tags"}
+                # stored [] is the deliberate-erase state: retained as [], envelope
+                # stays. A non-empty stored list re-normalizes under the save law
+                # (a hand-edited element like ["x", 5] fails closed, never rides on).
+                if stored:
+                    norm, terr = _norm_tags(stored)
+                    if terr:
+                        return {"error": f"cannot retain from entry '{p.stem}': "
+                                         f"{terr}: repair or delete the file, then "
+                                         "resave with explicit tags"}
+                    tags = norm
+                else:
+                    tags = []
     p.parent.mkdir(parents=True, exist_ok=True)
     graph = dict(graph, name=p.stem)
     owner = _common.launcher_profile()

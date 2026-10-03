@@ -170,5 +170,20 @@ check("L8r unfiltered call on a tagged library carries the reuse-hint",
       "never coin unseen tags" not in call(action="library")["hint"]
       and "never coin unseen tags" in call(action="library", tags=["use_case:research"])["hint"])
 
+# #146 item 3: erase-by-file-edit is a STATE, not a resurrection; garbage fails closed
+call(action="save", graph=G, name="erase8", tags=["domain:net"], description="keep")
+_ep = HOME / "workflows" / "library" / "erase8.json"
+_e = json.loads(_ep.read_text()); _e["meta"]["tags"] = []; _ep.write_text(json.dumps(_e))
+call(action="save", graph=G, name="erase8")   # plain resave over the deliberate erase
+_e2 = json.loads(_ep.read_text())
+check("L8s stored tags:[] is the erase state — resave keeps [] AND the envelope",
+      _e2.get("meta", {}).get("tags") == [] and "graph" in _e2, json.dumps(_e2)[:200])
+_e2["meta"]["tags"] = "notalist"; _ep.write_text(json.dumps(_e2))
+r3 = call(action="save", graph=G, name="erase8")
+check("L8t stored non-list meta.tags fails closed (repair-or-delete)",
+      "error" in r3 and "not a list" in r3["error"], json.dumps(r3))
+_e3 = json.loads(_ep.read_text())
+check("L8u the refused resave left the file untouched", _e3["meta"]["tags"] == "notalist")
+
 call(action="stop", run_id=rid)
 print("ALL PASS" if ok else "FAILURES PRESENT"); sys.exit(0 if ok else 1)
