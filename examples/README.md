@@ -1,7 +1,7 @@
 # Workflow examples
 
-Batteries-included [`wf/1`](references/grammar.md) graphs you can run as-is
-(`workflow run graph_path=...`), fork as a starting point, or shelve into your
+Batteries-included [`wf/1`](../references/grammar.md) graphs you can run with the
+seeds declared in their descriptions (`workflow run graph_path=...`), fork as a starting point, or shelve into your
 library (`workflow save graph_path=... name=...`). Each file's top-level
 `description` is the full contract — seeds it expects, arms it can take, and
 what each node owns; this page is just the map.
@@ -36,7 +36,7 @@ them as blueprints, not proofs.
 | File | Shape | Teaches |
 |---|---|---|
 | [`blind-council.workflow.json`](review/blind-council.workflow.json) | blind seats → synthesis | Independent review: seats never see each other, synthesis must carry a verify-list; seats pin capability *classes*, not vendor models. |
-| [`portable-review.workflow.json`](review/portable-review.workflow.json) | recon → 2-way fan-out → synth | A review that runs on any estate with no host vocabulary in its goals. |
+| [`portable-review.workflow.json`](review/portable-review.workflow.json) | recon → 2-way fan-out → synth | A review that runs on any estate with no host vocabulary in its goals. Seeded run: `run_context` `target_dir` = the directory to review (every node spawns in an empty per-node work dir, so the target must be named). |
 | [`escalation-ladder.workflow.json`](review/escalation-ladder.workflow.json) | builder → verifier → branch | Verify-then-branch: a fresh verifier outranks the builder's claim; verified lands behind a human gate, failed escalates the *whole packet* to a human hold. `after_partial` keeps a partially-dead verifier from darkening the packet. |
 
 ## release/ — the SDLC back half
@@ -56,6 +56,21 @@ them as blueprints, not proofs.
 | [`incident-response.json`](ops/incident-response.json) | alert → sweep → verdict-branch → recovery probe → close | Full incident lifecycle: verdict-branch gate pair, machine recovery probe with human escalation, merge-gated close. Adapt the lanes to your stack. |
 
 ## Running one
+
+For portable-review, choose an existing directory containing at least two
+readable files. Pass its absolute path explicitly: every agent starts in its
+own work directory, not the directory containing the graph.
+
+```jsonc
+workflow { "action": "run",
+           "graph_path": "/abs/path/to/clone/examples/review/portable-review.workflow.json",
+           "run_context": { "target_dir": "/abs/path/to/files-to-review" } }
+```
+
+Then `wait` on the returned `run_id`. Without a target this is not a useful
+review; an empty target cannot supply the review fan-out.
+
+For issue-to-pr:
 
 ```jsonc
 workflow { "action": "run",

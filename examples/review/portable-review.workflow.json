@@ -1,16 +1,16 @@
 {
   "grammar": "wf/1",
   "name": "portable-review",
-  "description": "Portable file walk-in: recon -> two-way fan-out review -> summary. No code, no secrets; drop anywhere and run graph_path=<abs path>.",
+  "description": "Portable file walk-in: recon -> two-way fan-out review -> three-line summary. run_context seeds (ALL required): 'target_dir' = the absolute path to an existing directory containing at least two readable files. Recon lists its two most important files; review reads each for a one-paragraph finding. No code or secrets travel with the graph. Nodes start in their own work directories, so the target must be supplied explicitly.",
   "provenance": {
     "owner": "hermes-workflows",
-    "source": "hermes-workflows/examples/portable-review.workflow.json"
+    "source": "hermes-workflows/examples/review/portable-review.workflow.json"
   },
   "nodes": [
     {
       "id": "recon",
       "type": "agent",
-      "goal": "List the two most important files in the current directory. Reply with exactly this JSON shape and nothing else: {\"files\": [\"<path>\", \"<path>\"]}",
+      "goal": "List the two most important files in {run.target_dir} (use a file listing; do not invent names). Reply with exactly this JSON shape and nothing else: {\"files\": [\"<path>\", \"<path>\"]}",
       "schema": {
         "type": "object",
         "required": [
