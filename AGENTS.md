@@ -228,7 +228,7 @@ Author-run receipt: [receipts/exchange-run/author-run.json](receipts/exchange-ru
 - `node.failed` events carry `error_class` from the closed set defined in code
   (`wf.py ERROR_CLASSES`) — `cancelled | cap_exhausted | config_input | crashed | early_death |
   fanout_empty | fatal_quota | forbidden_model | graph_invalid | incomplete_work |
-  inputs | left_live_descendants | malformed_turn | precondition | provider_400 | quorum |
+  inputs | lane_wreckage | left_live_descendants | malformed_turn | precondition | provider_400 | quorum |
   ratelimit |
   route_unavailable | schema | spawn | timeout | transport | transport_exhausted |
   unresolved_model`, plus `unknown` as the harvest-time default when nothing matches —
@@ -279,6 +279,14 @@ Author-run receipt: [receipts/exchange-run/author-run.json](receipts/exchange-ru
   `incomplete_work` (digest 29d / 64c6772b): a node with `repo: <lane>` committed done/partial while
   the lane still had uncommitted TRACKED changes — the runner refuses the false hand-off and the
   record carries `lane_dirty` porcelain; commit in the lane, then amend/re-run re-drives the node.
+  `lane_wreckage` (est-2ek.1.660): the boot-time twin of the lane gate — a (re-)drive whose graph
+  declares `repo:` lanes is checked at STARTUP (`git status --porcelain --untracked-files=no`, the
+  #80 boot-sweep shape: admission blocked BEFORE any Popen, never a silent continue). A dirty lane
+  refuses the re-drive — the child would execute onto the dead attempt's uncommitted wreckage and
+  false-green on it hours later. The typed failure names the dirty files and both banking paths:
+  `git stash push -m redrive:<run>:<node>` in the lane, or a patch at `<run>/wip/<node>.patch`.
+  Bank the WIP and the re-drive proceeds; untracked files never block, git-unable lanes fail open,
+  and an undeclared lane is never scanned (scan-free law).
 - A child that dies after printing a valid fenced answer (rc≠0, wall, cap) is committed as
   `status: partial` with the death cause kept as `error_class`; the harvest stays readable, but a
   plain after-edge does NOT release onto it — the descendant fails typed `blocked_by_partial_ancestor`

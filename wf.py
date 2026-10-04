@@ -1133,6 +1133,10 @@ ERROR_CLASSES = frozenset(("provider_400", "unresolved_model", "cap_exhausted",
                            "incomplete_work", "early_death", "cancelled",
                            "schema", "spawn", "graph_invalid", "inputs",
                            "quorum", "fanout_empty", "crashed", "unknown",
+                           # est-2ek.1.660: a (re-)drive refused at startup because a
+                           # declared lane still carries the dead attempt's
+                           # uncommitted TRACKED wreckage — bank it, then re-drive.
+                           "lane_wreckage",
                            # committed by the seat floor / policy gate
                            # (wf forbidden_model sites) and by unmet input deps
                            # (_fail_precondition). AGENTS.md cites this set as
@@ -4555,6 +4559,44 @@ def park_gate(run, run_id, gate, byid, consume_markers):
 
 _EXIT_WRITTEN = [False]  # one exit record per runner process (first verdict wins)
 
+def _boot_lane_assert(run, nodes):
+    """est-2ek.1.660: the clean-lane assert at (re-)drive STARTUP. A re-drive of a
+    run whose agent nodes declare `repo: <lane>` must NEVER blindly re-execute onto
+    the dead attempt's uncommitted wreckage — the child spawns, inherits the half-
+    written tree, and an hour later the run false-greens on wreckage it never wrote.
+    This is the boot-time twin of the commit-time `_lane_gate` (64c6772b): same scan
+    (`git status --porcelain --untracked-files=no`), same scan-free law (NO `repo:`
+    declaration = NO scan — golden-solo bytes untouched), same fail-open where git
+    itself cannot answer, and the same discipline as the #80 boot sweep: it blocks
+    admission BEFORE any Popen with a typed verdict — no silent continue. The
+    operator (or the bank step of the next attempt) must bank the previous
+    attempt's WIP first: `git stash push -m <named>` in the lane, or a patch file
+    under <run>/wip/<node>.patch. Returns [] to proceed, else one typed entry per
+    dirty lane naming the files and BOTH banking paths."""
+    offenders = []
+    for n in nodes:
+        if n.get("type") != "agent" or n.get("repo") is None:
+            continue                                  # scan-free: undeclared = never scanned
+        rp = Path(str(n["repo"])).expanduser()
+        if not rp.is_absolute():
+            rp = Path(run) / rp
+        try:
+            # #61c law: the runner's OWN probe rides _aux_run so the orphan pool
+            # never mistakes it for an adopted escapee.
+            p = _aux_run(["git", "-C", str(rp), "status", "--porcelain",
+                          "--untracked-files=no"], timeout=10)
+        except Exception:
+            continue                          # git can't answer: fail open, never brick the run
+        if p.returncode != 0:
+            continue
+        dirty = [l for l in p.stdout.splitlines() if l.strip()]
+        if not dirty:
+            continue
+        offenders.append({"node": n["id"], "lane": str(rp), "dirty": dirty[:20],
+                          "bank_patch": str(Path(run) / "wip" / f"{n['id']}.patch"),
+                          "bank_cmd": f"git -C {rp} stash push -m redrive:{Path(run).name}:{n['id']}"})
+    return offenders
+
 def write_runner_exit(run, reason, detail=None, graph=None):
     """Write one verdict per runner process, tied to the graph snapshot it ran.
     An amended graph makes this record visibly stale until a fresh runner exits."""
@@ -4625,6 +4667,21 @@ def main(run_id):
              f"{sweep.get('stuck') or 'registry/table unreadable'})")
         write_runner_exit(run, f"blocked: proctree boot sweep {sweep.get('proof')}",
                           f"stuck={sweep.get('stuck')} why={sweep.get('why')}")
+        sys.exit(2)
+    # est-2ek.1.660: the clean-lane assert — BEFORE any spawn, a re-drive refuses
+    # to run onto a declared lane's uncommitted TRACKED wreckage (the dead
+    # attempt's half-written tree). Typed, loud, no silent continue: the WIP must
+    # be banked (named stash or a patch under <run>/wip/) before admission.
+    _offenders = _boot_lane_assert(run, (jload(run / "graph.json") or {}).get("nodes") or [])
+    if _offenders:
+        _why = "; ".join(f"{o['node']}@{o['lane']}: {len(o['dirty'])} tracked change(s) "
+                         f"[{', '.join(o['dirty'][:5])}] — bank first: `{o['bank_cmd']}` "
+                         f"or save a patch at {o['bank_patch']}" for o in _offenders)
+        emit(f"WORKFLOW_FAILED {run_id} (lane_wreckage: {_why})")
+        log(run, "run.lane_wreckage", offenders=_offenders)
+        notify(run, "run.failed", key="pre-start: lane wreckage")
+        write_runner_exit(run, "blocked: lane wreckage — bank the previous attempt's WIP "
+                               "before re-drive (error_class lane_wreckage)", _why)
         sys.exit(2)
     try: (run / "runner_exit.json").unlink()   # fresh verdict per runner process
     except OSError: pass
