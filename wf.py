@@ -31,6 +31,7 @@ from wfcommon import (efp, graph_fingerprint, jload, validate_graph, node_rec, g
                       FP_RULE_VERSION, record_efp_valid, seat_forbidden_models, runs_root,
                       hermes_root, profile_home, find_run, blocked_legibility, residue,
                       release_law,
+                      publisher_gate_check, suite_proof_token_path,
                       confidence_substrate, strip_engine_disclosure,
                       substrate_disclosure_text, SUBSTRATE_DISCLOSURE_KEY,
                       hermes_home as _wfcommon_hermes_home)
@@ -699,6 +700,7 @@ def save_node(run, node, byid, rec):
     tmp = p.with_name(f"{node['id']}.json.{os.getpid()}.tmp")
     tmp.write_text(json.dumps(rec, ensure_ascii=False, default=str))
     os.replace(tmp, p)  # atomic: a completed node file is a committed fact
+    _mint_suite_proof(run, node, rec, byid)   # est-2ek.1.603 (no-op unless declared)
 
 # ---------- child execution ----------
 
@@ -4414,6 +4416,44 @@ def _fail_precondition(run, node, byid, missing, why="precondition unmet: "):
     log(run, "node.failed", node=node["id"], reason="precondition",
         error_class="precondition", error=why + missing[0], attempts=0)
 
+# ---------- publisher capability gate (est-2ek.1.603) ----------
+# Incident (fb key 074cafcbc108a918): a verifier placed a publish-capable node
+# BEFORE the suite node in its ancestor chain; the suite later failed and the
+# publication had already committed. Graph validation cannot infer publication
+# side effects from prose, so the contract is EXPLICIT: `publishes: true` on an
+# agent/echo declares side effects; `suite_proof: true` on an agent/gate declares
+# a recognized proof producer whose done-commit mints the durable token below.
+# A declared publisher is REFUSED TYPED at the wave boundary — pre-execution,
+# like the shelf guard — until every proof-producing after-ancestor has a valid
+# token (wfcommon.publisher_gate_check; fail-closed verification there).
+
+PUBLISHER_REFUSAL = ("publisher_ungated: {nid} declares publication side effects and "
+                     "requires a verified suite proof token; missing proof from: "
+                     "{missing} (a node earns the token only by declaring "
+                     "suite_proof: true and committing done)")
+
+def _publisher_refusal(run, n, byid, missing):
+    why = PUBLISHER_REFUSAL.format(nid=n["id"],
+                                   missing=", ".join(missing) if missing
+                                   else "no suite_proof node in this node's after-ancestry")
+    _fail_precondition(run, n, byid, [why])
+
+def _mint_suite_proof(run, node, rec, byid):
+    """est-2ek.1.603: a declared proof producer that committed done writes its
+    durable token (node id + the committed efp — the same stamp save_node puts on
+    the record). Atomic tmp+replace; minted AFTER the record commits so a token
+    can never exist beside an uncommitted result. partial is not a proof: only
+    status done mints."""
+    if node.get("suite_proof") is not True or rec.get("status") != "done":
+        return
+    tok = {"node": node["id"], "efp": rec.get("efp") or efp(byid, node),
+           "fp_rule_version": rec.get("fp_rule_version", FP_RULE_VERSION),
+           "written_at": now()}
+    p = suite_proof_token_path(run, node)
+    tmp = p.with_name(f"{node['id']}.suite-proof.json.{os.getpid()}.tmp")
+    tmp.write_text(json.dumps(tok))
+    os.replace(tmp, p)   # atomic: a token is a committed fact like a node record
+
 INPUTS_CAP = 12000
 AUTO_INPUTS_CAP = 8000   # #9/#10 lane: per-parent byte cap for auto-injected parents
 
@@ -4833,6 +4873,17 @@ def main(run_id):
         # free: state() == pending only when the stored efp matches (node_rec law).
         for n in rs.nodes:
             if n["type"] == "echo" and states[n["id"]] == "pending" and deps_ok(n) and deps_res(n):
+                # est-2ek.1.603: an echo commits WITHOUT a spawn, so the publisher
+                # gate rides the echo commit path too — a declared publisher echo
+                # with no valid proof token fails typed and never commits.
+                ok, missing = publisher_gate_check(run, n, rs.byid)
+                if not ok:
+                    why = PUBLISHER_REFUSAL.format(
+                        nid=n["id"], missing=", ".join(missing) if missing
+                        else "no suite_proof node in this node's after-ancestry")
+                    _fail_precondition(run, n, rs.byid, [why])
+                    states[n["id"]] = "failed"
+                    continue
                 save_node(run, n, rs.byid, {"status": "done", "output": n.get("output"), "ms": 0})
                 log(run, "node.done", node=n["id"], echo=True)
                 states[n["id"]] = "done"; outputs[n["id"]] = n.get("output")
@@ -4842,6 +4893,17 @@ def main(run_id):
         if ready:
             spawnable = []
             for n in ready:
+                # est-2ek.1.603: the publisher gate is checked BEFORE any Popen —
+                # a declared publisher without a verified suite proof token dies
+                # TYPED pre-execution and never spawns (the publish never runs).
+                ok, missing = publisher_gate_check(run, n, rs.byid)
+                if not ok:
+                    why = PUBLISHER_REFUSAL.format(
+                        nid=n["id"], missing=", ".join(missing) if missing
+                        else "no suite_proof node in this node's after-ancestry")
+                    _fail_precondition(run, n, rs.byid, [why])
+                    states[n["id"]] = "failed"   # the wave's own view sees the verdict
+                    continue
                 missing = _unmet_requires(n, outputs, prov) if n.get("requires") else []
                 if missing:
                     _fail_precondition(run, n, rs.byid, missing)

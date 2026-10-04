@@ -624,13 +624,27 @@ AGENT_KEYS = {"id", "type", "after", "goal", "context", "schema", "model", "prov
               # predecessors (a convoy chain): no data flows over them, and a dead one
               # (failed, or never-runnable behind a failed data edge) is SPLICED out —
               # the node waits on the dead member's own order_only predecessors instead.
-              "order_only"}
+              "order_only",
+              # est-2ek.1.603: publisher capability — an EXPLICIT declaration, never
+              # inferred from prose. `publishes` (bool, agent/echo) says this node has
+              # publication side effects; the runner REFUSES to start it until a
+              # verified suite-proof token exists among its after-ancestors.
+              # `suite_proof` (bool, agent/gate) declares a recognized suite-PROOF
+              # producer: on commit done the runner mints the durable token
+              # nodes/<id>.suite-proof.json (node id + committed efp).
+              "publishes", "suite_proof"}
 GATE_KEYS = {"id", "type", "after", "question", "options", "context", "when", "wait", "on_skip",
              "default_option", "hold_timeout",
              # 1.1 (RATIFY F4): gates take output preconditions too; gates obey the same
              # after_partial law as agents (e68544a37be37657).
-             "requires", "after_partial", "order_only"}
-ECHO_KEYS = {"id", "type", "after", "output"}
+             "requires", "after_partial", "order_only",
+             # est-2ek.1.603: a gate may DECLARE a suite-proof producer (the token is
+             # minted on its committed answer); it can never declare itself a publisher.
+             "suite_proof"}
+ECHO_KEYS = {"id", "type", "after", "output",
+             # est-2ek.1.603: an echo commits at the wave boundary WITHOUT a spawn, so
+             # the publisher gate covers the echo commit path too.
+             "publishes"}
 # 1.1 (RATIFY F5): opt-in library provenance block, written by the door's `save` ONLY when
 # `source` is supplied or the saving door runs under a named profile. Top-level graph key.
 PROVENANCE_KEYS = {"owner", "source", "saved_at", "source_digest"}
@@ -937,6 +951,26 @@ def validate_graph_errors(nodes):
                 stray = [x for x in oo if x not in (n.get("after") or [])]
                 if stray:
                     E(nid, "order_only", f"order_only ids must also appear in after; not in after: {stray}")
+        if "publishes" in n:
+            # est-2ek.1.603: publisher capability is an EXPLICIT declaration — the
+            # validator never infers side effects from prose. agent/echo only (a gate
+            # can never publish); bool only — an unvalidated truthy never opens the gate.
+            if n["type"] == "gate":
+                E(nid, "publishes", "publishes is meaningless on gate nodes "
+                                   "(agent/echo only — a gate has no side effects to declare)")
+            elif not isinstance(n["publishes"], bool):
+                E(nid, "publishes", "publishes must be a boolean "
+                                    "(true = this node has publication side effects; the "
+                                    "runner refuses it until a verified suite proof token exists)")
+        if "suite_proof" in n:
+            # est-2ek.1.603: recognized suite-PROOF producer (agent/gate only; echo
+            # rejects it). On commit done the runner mints nodes/<id>.suite-proof.json.
+            if n["type"] == "echo":
+                E(nid, "suite_proof", "suite_proof is meaningless on echo nodes "
+                                      "(agent/gate only — an echo proves nothing)")
+            elif not isinstance(n["suite_proof"], bool):
+                E(nid, "suite_proof", "suite_proof must be a boolean "
+                                      "(true = committing done mints a suite proof token)")
         for k, hi in (("timeout", 86400), ("max_turns", 200), ("run_budget", 86400)):
             v = n.get(k)
             if v is not None and (not isinstance(v, (int, float)) or isinstance(v, bool) or v <= 0 or v > hi):
@@ -1375,6 +1409,53 @@ def node_rec(r, n, byid):
             return st, rec
         return "pending", rec
     return "pending", rec
+
+# ---------- publisher capability gate (est-2ek.1.603) ----------
+# A node that has publication side effects DECLARES it (`publishes: true`); the
+# runner refuses it pre-spawn until a verified suite-proof token exists among its
+# after-ancestors. A token is minted ONLY when a `suite_proof: true` node commits
+# done (same efp save_node stamps). Verification is fail-closed: the token must
+# name a declared producer, its recorded node record must be a CURRENT efp-valid
+# `done` commit, and the token's own efp must match that record — a stale or
+# forged token never launders a publish. Returns (ok, missing_names):
+# ok=False => the caller must refuse; missing_names = the proof-producing
+# ancestors whose token is absent/invalid (what the refusal names).
+
+def suite_proof_token_path(r, n):
+    return Path(r) / "nodes" / f"{n['id']}.suite-proof.json"
+
+def _token_valid(r, byid, producer):
+    tok = jload(suite_proof_token_path(r, producer))
+    if not isinstance(tok, dict):
+        return False
+    if tok.get("node") != producer["id"] or tok.get("efp") is None:
+        return False
+    rec = jload(Path(r) / "nodes" / f"{producer['id']}.json")
+    if not isinstance(rec, dict) or rec.get("status") != "done":
+        return False
+    # the token must match the CURRENT efp-valid commit — and the committed
+    # record's efp must match the current definition (an amend invalidates it).
+    if tok.get("efp") != rec.get("efp"):
+        return False
+    return record_efp_valid(rec, byid, producer)
+
+def publisher_gate_check(r, n, byid):
+    if n.get("type") == "gate" or n.get("publishes") is not True:
+        return True, []        # not a declared publisher: untouched
+    producers, seen = [], set()
+    stack = list(n.get("after", []))
+    while stack:
+        a = stack.pop()
+        if a in seen or a not in byid:
+            continue
+        seen.add(a)
+        stack.extend(byid[a].get("after", []))
+        if byid[a].get("suite_proof") is True and byid[a].get("type") != "echo":
+            producers.append(a)
+    if not producers:
+        return False, []       # declared publisher with no declared producer upstream
+    missing = [a for a in producers if not _token_valid(r, byid, byid[a])]
+    return (not missing), missing
 
 def gate_answer_valid(r, gate, byid):
     ans = jload(r / "gates" / f"{gate['id']}.json")
