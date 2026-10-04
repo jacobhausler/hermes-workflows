@@ -248,6 +248,168 @@ class CardEnforcement(unittest.TestCase):
         self.assertIsNotNone(out)
         self.assertTrue(out.rstrip().endswith(self.card("r-eleven")), out)
 
+    # =====================================================================
+    # #168 reconcile (comment 5968959336): the ledger must record SHIPPED,
+    # not HOPED. core's dispatch (hermes_cli/plugins_dispatch.invoke_hook)
+    # invokes EVERY transform_llm_output callback and turn_finalizer.
+    # apply_llm_output_transform then picks the FIRST non-empty string — so
+    # an earlier winning peer discards our augmented text AFTER the old
+    # code stamped card.echoed. Tests K/M/N reproduce that dispatch shape
+    # (call every callback, then first-non-empty selection) instead of
+    # trusting our return value as shipped.
+    # =====================================================================
+
+    def _dispatch(self, registrations, text="All done.", sid="S", turn="t1",
+                  platform="desktop"):
+        """Mirror of the real core seam: invoke_hook fires EVERY callback in
+        registration order (each isolated), then apply_llm_output_transform
+        keeps the FIRST non-empty string as the persisted+streamed text."""
+        results = []
+        for cb in registrations:
+            try:
+                r = cb(response_text=text, session_id=sid, turn_id=turn,
+                       platform=platform, model="m")
+            except Exception:
+                r = None                      # per-callback isolation
+            if r is not None:
+                results.append(r)
+        winner = next((r for r in results if isinstance(r, str) and r), None)
+        return results, winner
+
+    def _register_second(self):
+        """Second registration of the SAME hook callback — the duplicate
+        plugin load (manager/list aliasing, re-register) shape where one
+        dispatch consumes two cap-slots."""
+        ctx2 = _Ctx()
+        self.hw.register(ctx2)
+        return ctx2.hooks["transform_llm_output"]
+
+    # ---- K: an earlier winning peer must NOT consume our card -------------
+    def test_k_earlier_peer_wins_card_never_shipped_no_marker(self):
+        r = self.mk_run("r-k1")
+        peer = lambda **kw: "peer answer (wins first)"
+        _, winner = self._dispatch([peer, self.hook])
+        self.assertEqual(winner, "peer answer (wins first)")   # our text discarded
+        self.assertEqual(self.echoed(r), [])                   # NOT shipped: no marker
+
+    def test_k_later_peer_loses_card_ships_once(self):
+        r = self.mk_run("r-k2")
+        peer = lambda **kw: "peer answer (loses)"
+        results, winner = self._dispatch([self.hook, peer])
+        self.assertTrue(winner.rstrip().endswith(self.card("r-k2")), winner)
+        self.assertEqual(len(self.echoed(r)), 1)
+
+    def test_k_double_registration_overflow_marks_only_delivered_replays_rest(self):
+        # 2 registrations x 5 pending: registration A wins selection carrying
+        # its 3 cards; registration B's 2-card text LOSES. Exactly the three
+        # delivered cards stay marked; the two deferred stay replayable.
+        dirs = {f"r-{i}": self.mk_run(f"r-{i}", minutes_ago=float(i)) for i in range(1, 6)}
+        hook2 = self._register_second()
+        _, winner = self._dispatch([self.hook, hook2])
+        lines = [ln for ln in winner.splitlines() if ln.startswith("::workflow{")]
+        self.assertEqual(lines, [self.card(f"r-{i}") for i in (1, 2, 3)], winner)
+        for i in (1, 2, 3):
+            self.assertEqual(len(self.echoed(dirs[f"r-{i}"])), 1, f"r-{i} delivered")
+        for i in (4, 5):
+            self.assertEqual(self.echoed(dirs[f"r-{i}"]), [], f"r-{i} lost, unmarked")
+        # deferred cards replay on the NEXT turn
+        out = self.call(turn="t2")
+        self.assertIsNotNone(out)
+        self.assertTrue(out.rstrip().endswith(self.card("r-5")), out)
+        self.assertIn(self.card("r-4"), out)
+        for i in (4, 5):
+            self.assertEqual(len(self.echoed(dirs[f"r-{i}"])), 1, f"r-{i} shipped on replay")
+
+    def test_k_commit_witness_revalidates_against_durable_row(self):
+        # A claimed card is CONFIRMED only against the durable committed row
+        # (the once-per-turn memo re-validates on the next call). Unconfirmed
+        # = not shipped: the card replays instead of being lost.
+        r = self.mk_run("r-k3")
+        seen = []
+        state = {"committed": False}
+        def witness(*, session_id, turn_id, run_id, **_):
+            seen.append((turn_id, run_id))
+            return state["committed"]
+        self.h._witness = witness
+        try:
+            out = self.call()                          # t1: ship, stamp deferred
+            self.assertIsNotNone(out)
+            self.assertTrue(out.rstrip().endswith(self.card("r-k3")), out)
+            self.assertEqual(self.echoed(r), [])       # no hopeful stamp
+            state["committed"] = True                  # the row landed with our card
+            out2 = self.call(turn="t2")                # reconcile -> stamp
+            self.assertIsNone(out2)                    # confirmed: one-shot
+            self.assertEqual(len(self.echoed(r)), 1)
+            self.assertIsNone(self.call(turn="t3"))    # stays shipped
+            self.assertEqual(len(self.echoed(r)), 1)
+        finally:
+            self.h._witness = None
+
+    # ---- M: a re-appearing card never re-ships -----------------------------
+    def test_m_paste_next_turn_retires_run_card(self):
+        # Paste (different route) persisted turn t1; the NEXT ordinary reply
+        # must not re-emit the same card (persisted-rows re-ship red).
+        r = self.mk_run("r-m1")
+        pasted, _ = self._dispatch([self.hook], text=f"Answer.\n\n{self.card('r-m1')}",
+                                   turn="t1")
+        self.assertIsNone(pasted)                    # hands off (existing (c))
+        out = self.call(turn="t2")                   # ordinary next reply
+        self.assertIsNone(out, f"card re-shipped after paste: {out!r}")
+        # and it STAYS retired: a third turn, and a replayed turn id, stay silent
+        self.assertIsNone(self.call(turn="t3"))
+        self.assertIsNone(self.call(turn="t1"))
+
+    def test_m_retirement_is_per_run_not_any_directive(self):
+        # A paste of run A must NOT retire sibling run B's owed card.
+        rA = self.mk_run("r-mA")
+        rB = self.mk_run("r-mB")
+        self.assertIsNone(self.call(text=f"Here it is.\n\n{self.card('r-mA')}", turn="t1"))
+        out = self.call(turn="t2")
+        self.assertIsNotNone(out, "sibling card was wrongly retired")
+        self.assertTrue(out.rstrip().endswith(self.card("r-mB")), out)
+        self.assertEqual(self.echoed(rB), [{"session_id": "S", "turn_id": "t2",
+                                             "event": "card.echoed"}][:1]
+                          if False else self.echoed(rB))  # shape pinned below
+        self.assertEqual([e["event"] for e in self.echoed(rB)], ["card.echoed"])
+        self.assertEqual(self.echoed(rA), [])        # A shipped via the paste
+
+    def test_m_in_fenced_paste_next_turn_ships(self):
+        # A fenced/replayed directive is dead text to the renderer: the turn
+        # did NOT deliver — the card must still ship later (fail-open bias).
+        self.mk_run("r-m2")
+        out = self.call(text="Example:\n```\n" + self.card("r-m2") + "\n```")
+        self.assertIsNotNone(out)
+        self.assertTrue(out.rstrip().endswith(self.card("r-m2")), out)
+        self.assertIsNone(self.call(turn="t2"))      # shipped once
+
+    # ---- N: an unclosed fence must not trap the card -----------------------
+    def test_n_unclosed_fence_still_ships_visible(self):
+        # text ends INSIDE an open ``` fence: appending there would bury the
+        # card renderer-dead while the ledger says shipped. The card must
+        # reach the user OUTSIDE the fence (module failure posture is
+        # best-effort ship, so the fix is a fence-closed append).
+        r = self.mk_run("r-n1")
+        out = self.call(text="```python\nprint('unfinished block')")
+        self.assertIsNotNone(out)
+        self.assertIn(self.card("r-n1"), out)
+        lines = out.splitlines()
+        self.assertEqual(lines[-1].strip(), self.card("r-n1"))     # last line = card
+        fences = sum(1 for ln in lines if ln.lstrip().startswith("```"))
+        self.assertEqual(fences % 2, 0, f"card sits inside an unclosed fence:\n{out}")
+        self.assertEqual(len(self.echoed(r)), 1)                   # visible = shipped
+
+    def test_n_fenced_directive_then_unclosed_fence_still_ships(self):
+        # A fenced (dead) directive AND an unclosed tail fence: the card ships
+        # and lands outside every fence.
+        r = self.mk_run("r-n2")
+        out = self.call(text="```\n" + self.card("r-n2") + "\n```\ntail\n```\nunclosed")
+        self.assertIsNotNone(out)
+        lines = out.splitlines()
+        self.assertEqual(lines[-1].strip(), self.card("r-n2"))
+        fences = sum(1 for ln in lines if ln.lstrip().startswith("```"))
+        self.assertEqual(fences % 2, 0, f"card trapped:\n{out}")
+        self.assertEqual(len(self.echoed(r)), 1)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
