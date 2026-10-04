@@ -1,0 +1,84 @@
+#!/usr/bin/env python3
+"""est-2ek.1.599 regression pin: lanes must not materialize run graphs onto the
+SHARED shelf (waves 26/27/28/29/31 all re-published ra-pr-deep committee graphs
+into <runs>/library — bare form, empty description, hardcoded PR#/scratch paths).
+
+Machine law: a process that CARRIES its lane identity (HERMES_WF_RUN_DIR, baked by
+the runner at every agent spawn, wf.py) is a spawned child — its `save` may only
+land RUN-LOCAL (under its own run dir). A save that would publish to the shared
+shelf from such a process is refused with typed error_class lane_shelf_write and
+writes NOTHING. A parent/owner process (no lane identity) saves as before.
+
+Three parts, standalone (no pytest), house style. Pinned per #71 law:
+WF_RUNS_ROOT + wf_test_isolation so nothing here can touch the real estate shelf.
+"""
+import importlib.util, json, os, sys, tempfile
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+BUILD = HERE.parent
+ok = True
+
+
+def check(label, cond, detail=""):
+    global ok
+    print(("PASS " if cond else "FAIL " if cond is False else "SKIP ") + label
+          + ("" if cond or not detail else f"  {detail}"))
+    ok = ok and bool(cond)
+
+
+sys.path.insert(0, "/opt/hermes")
+
+spec = importlib.util.spec_from_file_location("hw1599", str(BUILD / "__init__.py"))
+door = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(door)
+import wf_test_isolation as _iso  # noqa: E402
+_iso.install(door)
+
+G = {"name": "ra-pr-deep-committee-probe", "nodes": [{"id": "a", "type": "agent", "goal": "go"}]}
+LANE_ENV_KEYS = ("WF_RUNS_ROOT", "HERMES_WF_RUN_ID", "HERMES_WF_RUN_DIR")
+
+with tempfile.TemporaryDirectory(prefix="shelf1599-") as td:
+    sandbox = Path(td)
+    saved = {k: os.environ.get(k) for k in LANE_ENV_KEYS}
+    try:
+        # ---- T1: a lane child CANNOT publish to the shared shelf ----
+        os.environ["WF_RUNS_ROOT"] = str(sandbox / "runs")
+        runs = sandbox / "runs"
+        (runs / "library").mkdir(parents=True)
+        lane_run = runs / "20261003-131900-ra-pr-deep-wf156c"   # the wave-26 shape
+        lane_run.mkdir()
+        os.environ["HERMES_WF_RUN_ID"] = lane_run.name
+        os.environ["HERMES_WF_RUN_DIR"] = str(lane_run)
+        r = json.loads(door.handle({"action": "save", "graph": G, "name": "ra-pr-deep-wf156c"}))
+        landed = (runs / "library" / "ra-pr-deep-wf156c.json")
+        check("T1a lane-child save is refused", "error" in r and "saved" not in r, json.dumps(r)[:300])
+        check("T1b refusal is typed lane_shelf_write",
+              r.get("error_class") == "lane_shelf_write", json.dumps(r)[:300])
+        check("T1c shared shelf gained NOTHING", not landed.exists(),
+              f"{landed} exists — the wave-26 shape again")
+
+        # ---- T2: run-local graph copies stay allowed (pin resolves shelf under own run dir) ----
+        os.environ["WF_RUNS_ROOT"] = str(lane_run)
+        r = json.loads(door.handle({"action": "save", "graph": G, "name": "ra-pr-deep-wf156c"}))
+        local = lane_run / "library" / "ra-pr-deep-wf156c.json"
+        check("T2 run-local save (child) still succeeds",
+              r.get("saved") == "ra-pr-deep-wf156c" and local.exists(), json.dumps(r)[:300])
+
+        # ---- T3: the owner/parent path is untouched (no lane identity) ----
+        del os.environ["HERMES_WF_RUN_ID"], os.environ["HERMES_WF_RUN_DIR"]
+        os.environ["WF_RUNS_ROOT"] = str(sandbox / "runs")
+        r = json.loads(door.handle({"action": "save", "graph": G, "name": "owner-entry"}))
+        check("T3 owner-process save still succeeds",
+              r.get("saved") == "owner-entry"
+              and (sandbox / "runs" / "library" / "owner-entry.json").exists(),
+              json.dumps(r)[:300])
+    finally:
+        for k, v in saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+print("ALL PASS" if ok else "FAILURES PRESENT")
+sys.exit(0 if ok else 1)

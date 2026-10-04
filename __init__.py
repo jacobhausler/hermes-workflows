@@ -1478,6 +1478,37 @@ def _lib_path(name):
         raise ValueError(f"invalid library name {name!r} (lowercase alnum, [-_.], <=64)")
     return library_root() / f"{n}.json"
 
+# est-2ek.1.599 (waves 26-31): ra-pr-deep committee LANES re-materialized their run
+# graphs onto the SHARED shelf — the runner bakes HERMES_WF_RUN_DIR into every agent
+# spawn (wf.py), so a process carrying it is a spawned child: it may only publish
+# RUN-LOCAL copies (under its own run dir), never onto the shared library.
+def _lane_shelf_guard(p):
+    """Refuse a shared-shelf save from a spawned lane child (typed error_class
+    lane_shelf_write); run-local saves and parent/owner saves pass untouched."""
+    rd = str(os.environ.get("HERMES_WF_RUN_DIR") or "").strip()
+    if not rd:
+        return None
+    tgt = os.path.abspath(str(p))
+    cand = {os.path.abspath(rd)}
+    try:
+        cand.add(str(Path(rd).resolve()))
+    except OSError:
+        pass
+    tgt_r = tgt
+    try:
+        tgt_r = str(Path(tgt).resolve())
+    except OSError:
+        pass
+    for base in cand:
+        if tgt == base or tgt_r == base or os.path.dirname(tgt) == base \
+                or tgt.startswith(base + os.sep) or tgt_r.startswith(base + os.sep):
+            return None
+    rid = str(os.environ.get("HERMES_WF_RUN_ID") or rd).strip()
+    return {"error": f"lane child of run '{rid}' may not save '{p.name}' onto the shared "
+                     "shelf — lanes write run-local graph copies only "
+                     "(est-2ek.1.599; shelf waves 26-31)",
+            "error_class": "lane_shelf_write"}
+
 def _lib_read(name):
     """READ resolver mirroring find_run: resolved first, legacy only for an EXISTING
     graph absent from the resolved root. Returns the path whether or not it exists
@@ -1518,6 +1549,9 @@ def act_save(args):
         p = _lib_path(args.get("name") or graph.get("name"))
     except ValueError as e:
         return {"error": str(e)}
+    blocked = _lane_shelf_guard(p)   # est-2ek.1.599: lanes write run-local only
+    if blocked:
+        return blocked
     source = args.get("source")
     if source is not None and (not isinstance(source, str) or not source.strip() or len(source) > 200):
         return {"error": "source must be a non-empty string of at most 200 characters"}
