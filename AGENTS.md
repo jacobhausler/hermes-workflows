@@ -377,7 +377,7 @@ A change is done when: its targeted test is green, the full suite is green, vali
 prints `Validation passed.`, the scrub audit prints `0 scrub hits`, and the path-ban
 prints `OK`. CI runs the same gates ([.github/workflows/ci.yml](.github/workflows/ci.yml));
 the knowledge-graph honesty gate (`scripts/graph_check.py`) runs there only as the
-push-on-main `graph-freshness` job — the regen lane owns the graph (#153).
+push-on-main `graph-main` job — the regen lane owns the graph (#153).
 
 ### 4b′. Navigate with the knowledge graph
 

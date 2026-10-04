@@ -103,3 +103,6 @@ tests/test_scrub_yml_166b.py
 # SAME fixture-identity GUARD class as tests/fake_hermes.py's banner (line-guarded,
 # not file-guarded: a future stray model name elsewhere in fake-b1 must still fire).
 tests/fake-b1:137
+# SECURITY.md advisories URL (issue #43 conformance): the private-vulnerability-reporting
+# URL is the documented reporter handle and must ship verbatim; guarded.
+regex:github\.com/jacobhausler/hermes-workflows/security/advisories

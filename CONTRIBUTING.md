@@ -115,9 +115,10 @@ You are contributing on behalf of a user. Do this, in order:
    invariants. Then navigate by the knowledge graph instead of grepping:
    `uv tool install graphifyy` (once) → `graphify update .` →
    `graphify query "<your question>"`, `graphify affected "<symbol>"`.
-   `graphify-out/` is a **tracked, CI-gated** directory: when you change code, docs,
-   or tests, run `graphify update .` and commit the `graphify-out/` delta in the same
-   PR — `scripts/graph_check.py` fails CI if the committed graph drifts from the tree.
+   `graphify-out/` is **tracked but single-writer** (#153): never regen or commit
+   `graphify-out/` in a PR branch — `scripts/graph_path_ban.py` fails CI on any PR
+   diff that touches it; the single-writer lane owns main graph refreshes after
+   merge (`scripts/graph_regen.py`, CI job `graph-main`).
 3. **Reproduce before fixing.** Point at the `file:line` where the bug manifests and
    show your fix changes that line's behaviour. A plausible rationale is not a repro.
 4. **Smallest diff that passes R1–R10.** `graphify affected` for siblings (R8). No
