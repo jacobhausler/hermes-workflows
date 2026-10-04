@@ -1,6 +1,59 @@
 # Changelog
 
-## Unreleased
+## 1.2.1 — 2026-10-04
+
+Patch line, 26 commits since v1.2.0 (merge order #136 → #147 → #97 → #148 → #149 →
+#135 → #118 → #140 → #120 → #150 → #155 → #151 → #158 → #161 → #164 → #160 → #121 →
+#167 → #122 → #162 → #170 → #156 → #159 → #169 → #163 → #176): the P1 runner-error
+batch (typed classes + credential-window park + resolve-time clamps), door/desktop
+legibility fixes, the examples rework, and the CI single-writer gate for the
+knowledge graph. No new tool surface.
+
+Earlier merges since the tag, in brief:
+- af2c2f5 #136 @atbrace — feat(door): faceted library tags (`facet:value` save +
+  filter), `tag_vocab` echo, self-diagnosing empty results.
+- 60a4318 #147 @atbrace — docs(grammar): `risk:` seed values + co-occurrence-keyed
+  vocab trigger.
+- 7c7f0d9 #97 @atbrace — wake the owning session on lifecycle transitions
+  (`gate.held` / `run.done` / `run.failed`).
+- 8c1231b #148 — test(door): #146 item 2 — multi-term empty-result diagnosis
+  regression.
+- 87826ef #149 @atbrace — fix(door): erase-by-file-edit is a state — retain keys on
+  presence, garbage fails closed.
+- ce47f63 #135 — fix(validate): split integer/number — reject booleans and
+  fractional values as integer.
+- 07a6786 #140 — feat(desktop): pane rework — RUNNING on top, husks unrendered,
+  RECENTLY FINISHED.
+- e1281e7 #120 — fix(runner): typed tool-call-as-text classifier blocks
+  prose-coercion false green.
+- e253f9a #150 — fix(desktop): directive card keeps the last good pill through
+  refetch errors; error branch retries.
+- 4c5a3a3 #155 @atbrace — docs: refresh against 1.2.0 live surface — stale claims
+  fixed, jargon sweep, docs-surface drift guard.
+- f83e5d0 #151 @atbrace — feat(examples): release-lifecycle + issue-to-pr distilled
+  lifecycle templates.
+- e14978d #158 — fix(tests): est-954r — fake-b1 copy never mutates tracked files on
+  raw runs.
+- 36cb02d #161 — feat(door): run-result `lifecycle_notice` — card delivery as tool
+  RESULT, not just hint.
+- e18eca5 #164 — fix(runner): ERROR_CLASSES gains `forbidden_model` +
+  `precondition` — closed set is now provably exhaustive.
+- ab78114 #160 — fix(runner): malformed turn-shape gets typed `malformed_turn`
+  class + bounded re-drive (#541).
+- 6c67789 #121 — fix(suite): zero-discovery is a failed admission, never green.
+- e75a72e #167 — feat(ci): knowledge graph single-writer — path-ban + regen scripts
+  + `.gitattributes` (closes #153).
+- 3fdff85 #122 — fix(wf): prose-JSON fallback uses `json` raw_decode; no silent
+  nested promotion at 200 items.
+- ae2e8b7 #170 — ci: knowledge-graph single-writer gate swap (2/2 of #153).
+- 6311602 #156 — feat(desktop): agent-first pane — index by originator, no
+  ownership framing.
+- d6dfa27 #163 — fix(runner): resolve-time clamps — an unknown reasoning effort or
+  toolset at resolve time is clamped to the nearest valid value with a
+  `node.clamped` notice, never a hard child death (est-flah).
+- 28aed8e #176 @- — fix(examples): portable-review runs as README documents (#172).
+
+Detailed entries (Unreleased work folded in):
 
 - #est-tmuu — deterministic provider/alias config deaths are never respawned. A
   node pinning a provider the seat does not define made the CLI exit rc!=0 in
