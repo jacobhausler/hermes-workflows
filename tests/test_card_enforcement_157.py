@@ -71,6 +71,7 @@ class CardEnforcement(unittest.TestCase):
         self.env.start()
         os.environ.pop("HERMES_SESSION_ID", None)
         self.hw = _load_door()
+        self.h = self.hw._card_enforcement   # the module the _witness seam lives on
         import wf_test_isolation
         wf_test_isolation.install(self.hw)  # #71 r5: pin settings.runs_root to WF_RUNS_ROOT
         ctx = _Ctx()
@@ -350,9 +351,12 @@ class CardEnforcement(unittest.TestCase):
         # Paste (different route) persisted turn t1; the NEXT ordinary reply
         # must not re-emit the same card (persisted-rows re-ship red).
         r = self.mk_run("r-m1")
-        pasted, _ = self._dispatch([self.hook], text=f"Answer.\n\n{self.card('r-m1')}",
-                                   turn="t1")
-        self.assertIsNone(pasted)                    # hands off (existing (c))
+        pasted, _win = self._dispatch([self.hook], text=f"Answer.\n\n{self.card('r-m1')}",
+                                      turn="t1")
+        self.assertEqual(pasted, [])               # hands off (existing (c));
+        # _dispatch returns (results, winner): the results LIST was the binding
+        # target at authoring — the original assertIsNone(pasted) could never
+        # pass for any implementation. Intent pinned exactly: zero contributions.
         out = self.call(turn="t2")                   # ordinary next reply
         self.assertIsNone(out, f"card re-shipped after paste: {out!r}")
         # and it STAYS retired: a third turn, and a replayed turn id, stay silent

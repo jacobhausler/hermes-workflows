@@ -12,9 +12,33 @@ pastes. The model's paste stays the primary path — this hook only fills silenc
 
 Design notes:
 * ONE-SHOT LEDGER (zero new files): a run's card counts as shipped when its
-  events.jsonl carries a ``card.echoed`` marker (appended HERE, after the
-  augmented text is computed — a failed write costs only a re-ship next turn,
-  never a lost turn). run.json stays byte-identical.
+  events.jsonl carries a ``card.echoed`` marker (appended on CONFIRMATION,
+  below; a failed write costs only a re-ship next turn, never a lost turn).
+  run.json stays byte-identical.
+* SHIPPED MEANS SELECTED (#168 P1): core's dispatch (plugins_dispatch.invoke_hook)
+  fires EVERY transform_llm_output callback and apply_llm_output_transform keeps
+  the FIRST non-empty string — so a return value is a HOPE, not a shipment.
+  A proposal is therefore recorded in-memory (_PENDING) and the card.echoed
+  marker is written only on CONFIRMATION that the text was selected:
+  (1) the returned text is touched — core truth-tests each result at selection
+      time (isinstance + bool) and str-manipulates the winner, so any attribute
+      access or bool coercion of our return proves delivery;
+  (2) at the session's next hook call, a still-referenced proposal text is
+      treated as the persisted winner (a discarded text dies with the dispatch
+      results list);
+  (3) an optional module-level ``_witness`` callable (test seam / durable-row
+      probe) vouches for the committed row directly and suppresses (1).
+  An unconfirmed proposal is simply dropped — the card replays next turn
+  instead of being silently lost. A second proposal for the SAME (session,
+  turn) can never win (first non-empty already holds) and returns None.
+* PASTE RETIREMENT (#168 P2): a bare directive seen in this session's turn text
+  retires that run's owed card PER RUN (a sibling run's card is untouched),
+  even when the directive arrived through a different route (model paste);
+  a fenced/inline-code directive is dead text and retires nothing.
+* FENCE TRAP (#168 P3): appending into a text that ends INSIDE an open ```
+  fence buries the card renderer-dead while the ledger says shipped — the
+  append closes the open fence first so the card always lands outside every
+  fence, as the final lines of the text.
 * RECOGNITION parity with the directive renderer: the exact form
   ``::workflow{id="<run_id>"}`` with run_id matching [A-Za-z0-9._-]+, OUTSIDE any
   ``` fence or `inline code` span — a code-blocked directive is dead text to the
@@ -30,6 +54,7 @@ instance via bind() and every root comes from the existing resolvers
 import json
 import logging
 import re
+import weakref
 from datetime import datetime, timezone
 from typing import Any, Callable, Optional
 
@@ -51,7 +76,20 @@ _INLINE_CODE = re.compile(r"`[^`\n]*`")
 
 _COMMON: Any = None   # the door's bound wfcommon (bind())
 _CARD: Optional[Callable[[str], str]] = None   # the door's _card helper (bind()) — one card grammar, no fork
-_SEEN = {}            # (turn_id, run_id) -> True: in-turn retry dedupe (marker covers turns)
+# In-memory proposal ledger (#168 P1): (session_id, run_id) ->
+# {"dir": run dir, "turn_id": str, "ref": weakref to the proposed text}.
+# Nothing reaches events.jsonl until a proposal is CONFIRMED selected; a
+# proposal whose text died unconfirmed is dropped so the card replays.
+_PENDING: dict = {}
+# Paste retirement (#168 P2): (session_id, run_id) whose bare directive was
+# seen in this session's turn text — delivered through the paste route, so
+# the owed card retires WITHOUT a card.echoed marker.
+_RETIRED = set()
+# (session_id, turn_id) -> True once this hook proposed text for that turn:
+# a second proposal in the same turn (duplicate registration / in-turn retry)
+# can never be selected (first non-empty wins), so it ships nothing.
+_PROPOSED = {}
+_witness: Optional[Callable[..., bool]] = None   # durable-row probe (test seam)
 
 
 def bind(common, card_fn):
@@ -79,8 +117,25 @@ def _strip_code(text):
     return "\n".join(out)
 
 
-def _directive_present(text):
-    return _DIRECTIVE.search(_strip_code(text)) is not None
+def _bare_directive_ids(text):
+    """Run ids whose directive appears LIVE (outside any fence / inline-code
+    span) in this turn's text — the renderer will see them; fenced examples
+    are dead text and never qualify."""
+    return _DIRECTIVE.findall(_strip_code(text))
+
+
+def _open_fence(text):
+    """The fence marker (``` or ~~~) the text ENDS inside, or None. Line-wise
+    toggle parity, same walk the recognition path uses."""
+    open_mark = None
+    for line in text.splitlines():
+        stripped = line.lstrip()
+        if open_mark is None:
+            if stripped.startswith(_FENCE_MARK):
+                open_mark = stripped[:3]
+        elif stripped.startswith(open_mark):
+            open_mark = None
+    return open_mark
 
 
 def _age_minutes(ts, now):
@@ -190,6 +245,8 @@ def _outstanding(session_id, now):
                     continue
                 if any(e.get("event") == "card.echoed" for e in _events(r)):
                     continue
+                if (session_id, r.name) in _RETIRED or (session_id, r.name) in _PENDING:
+                    continue          # pasted (retired) or a live proposal covers it
                 if _terminal_stale(r, now):
                     continue
                 hits.append((age, r.name, r))
@@ -213,6 +270,112 @@ def _mark(r, session_id, turn_id):
         _LOG.debug("card.echoed marker failed for %s: %s", r, exc)
 
 
+def _confirm(session_id, run_id, entry):
+    """Write the card.echoed marker for a proposal proven SELECTED and clear the
+    pending entry. Marker-write failure still clears: the fail-open law says a
+    dead ledger must not suppress forever — the card re-ships next turn."""
+    _PENDING.pop((session_id, run_id), None)
+    _mark(entry["dir"], session_id, entry["turn_id"])
+
+
+def _reconcile(session_id, turn_id):
+    """Decide the fate of PROPOSALS FROM EARLIER TURNS at this session's next
+    call. Confirmed (delivered) -> stamp card.echoed; denied -> drop the entry
+    so the card replays. A discarded text dies with the dispatch results list;
+    a still-referenced one is the persisted winner. With ``_witness`` bound the
+    probe answers instead (durable-row truth, same shape as the reconcile probe
+    for #161's notice belt)."""
+    for key in [k for k in _PENDING if k[0] == session_id]:
+        entry = _PENDING[key]
+        if entry.get("turn_id") == turn_id:
+            continue                        # this turn proposed it; selection hasn't run
+        rid = key[1]
+        try:
+            if _witness is not None:
+                ok = bool(_witness(session_id=session_id,
+                                   turn_id=entry.get("turn_id", ""), run_id=rid))
+            else:
+                ref = entry.get("ref")
+                ok = bool(ref) and ref() is not None
+            if ok:
+                _confirm(session_id, rid, entry)
+            else:
+                _PENDING.pop(key, None)     # never selected: replayable, not lost
+        except Exception as exc:
+            _LOG.debug("card pending reconcile skipped for %s (fail-open): %s", rid, exc)
+            _PENDING.pop(key, None)
+
+
+class _CardText(str):
+    """The augmented reply. A str in every respect, plus the #168 P1 witness:
+    core selection (``isinstance(r, str) and r``) truth-tests and str-methods
+    the WINNER and only the winner, so the first attribute access or bool
+    coercion of this object proves it was selected -> stamp the ledger then.
+    A loser is never touched again after being appended to the results list."""
+
+    def __new__(cls, text, entries, session_id, turn_id):
+        self = str.__new__(cls, text)
+        self._ce_entries = entries          # [(run_id, run dir)]
+        self._ce_session = session_id
+        self._ce_turn = turn_id
+        self._ce_done = False
+        return self
+
+    def _ce_confirm(self):
+        if object.__getattribute__(self, "_ce_done"):
+            return
+        if _witness is not None:
+            return                          # the probe alone vouches (witness mode)
+        entries = object.__getattribute__(self, "_ce_entries")
+        sid = object.__getattribute__(self, "_ce_session")
+        turn = object.__getattribute__(self, "_ce_turn")
+        object.__setattr__(self, "_ce_done", True)
+        for rid, r in entries:
+            entry = _PENDING.get((sid, rid))
+            if entry is not None and entry.get("dir") == r:
+                _confirm(sid, rid, entry)
+
+    def __bool__(self):
+        try:
+            self._ce_confirm()
+        except Exception as exc:            # fail-open: never break selection
+            _LOG.debug("card confirm skipped (fail-open): %s", exc)
+        return True                         # non-empty by construction
+
+    def __getattribute__(self, name):
+        if not name.startswith("_ce_"):
+            try:
+                object.__getattribute__(self, "_ce_confirm")()
+            except Exception as exc:
+                _LOG.debug("card confirm skipped (fail-open): %s", exc)
+        return object.__getattribute__(self, name)
+
+
+def _propose(response_text, take, session_id, turn_id):
+    """Build the augmented text as a _CardText and register the proposals. The
+    weakref callback (not a __del__ hook) drops an unconfirmed proposal the
+    moment core discards the text, keeping the card replayable."""
+    text = response_text.rstrip() + "\n\n" + "\n\n".join(_CARD(rid) for rid, _ in take)
+    open_mark = _open_fence(response_text)
+    if open_mark:                           # fence trap (#168 P3): never ship buried
+        text = response_text.rstrip() + "\n\n" + open_mark + "\n\n" + \
+            "\n\n".join(_CARD(rid) for rid, _ in take)
+    obj = _CardText(text, [(rid, r) for rid, r in take], session_id, turn_id)
+    keys = []
+    for rid, r in take:
+        key = (session_id, rid)
+        _PENDING[key] = {"dir": r, "turn_id": turn_id,
+                         "ref": weakref.ref(obj,
+                                            lambda _r, k=key: _PENDING.pop(k, None))}
+        keys.append(key)
+    _PROPOSED[(session_id, turn_id)] = True
+    if len(_PROPOSED) > 4096:
+        _PROPOSED.clear()                   # a turn key is turn-scoped; a full table just re-arms
+    if len(_RETIRED) > 4096:
+        _RETIRED.clear()
+    return obj
+
+
 def _card_hook(response_text, session_id, turn_id="", model="", platform="", **_):
     """transform_llm_output callback: append outstanding cards, or return None.
 
@@ -227,26 +390,33 @@ def _card_hook(response_text, session_id, turn_id="", model="", platform="", **_
             return None                 # unknown surface — never guess where this renders
         if not session_id:
             return None
-        if _directive_present(response_text):
+        # Turn ledger bookkeeping first: last turn's hopes are settled against
+        # this call (#168 P1 — shipped means SELECTED, not returned).
+        _reconcile(session_id, turn_id)
+        ids = _bare_directive_ids(response_text)
+        if ids:
+            for rid in ids:             # paste route delivered: retire THAT run
+                _RETIRED.add((session_id, rid))
+                _PENDING.pop((session_id, rid), None)
             return None                 # the model pasted (unfenced): hands off
+        if _PROPOSED.get((session_id, turn_id)):
+            return None                 # this turn already proposed; a duplicate
+                                        # registration can never win selection
         now = datetime.now(timezone.utc)
         pending, seen_rid = [], set()
         for rid, r in _outstanding(session_id, now):
             if rid in seen_rid:
                 continue                # same run visible under two roots: ship once
             seen_rid.add(rid)
-            if (turn_id, rid) not in _SEEN:
-                pending.append((rid, r))
+            pending.append((rid, r))
         if not pending:
             return None
         take = pending[:MAX_CARDS_PER_TURN]
-        text = response_text.rstrip() + "\n\n" + "\n\n".join(_CARD(rid) for rid, _ in take)
-        for rid, r in take:
-            _SEEN[(turn_id, rid)] = True
-            _mark(r, session_id, turn_id)   # append-after the found dir (never a re-resolve)
-        if len(_SEEN) > 4096:
-            _SEEN.clear()               # a turn key is turn-scoped; a full table just re-arms
-        return text
+        if not take:
+            return None                 # no proposal may carry the empty string:
+                                        # core keeps non-None results and an
+                                        # empty winner would hijack the reply
+        return _propose(response_text, take, session_id, turn_id)
     except Exception as exc:
         _LOG.debug("card enforcement skipped (fail-open): %s", exc)
         return None
