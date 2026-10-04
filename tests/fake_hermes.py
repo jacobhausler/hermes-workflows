@@ -87,6 +87,41 @@ def _fake_state_row(n):
 if os.environ.get("FAKE_API_CALLS"):
     _fake_state_row(os.environ["FAKE_API_CALLS"])
 _FAKE_MODE = os.environ.get("FAKE_MODE")
+# ---- #8 item 3 (crash-respawn idempotence): the effect-executing child ----
+# FAKE_MODE=effect_once: the child executes an EXTERNAL side effect (one line
+# into FAKE_EFFECT_FILE, keyed by `EFFECTKEY=<k>` in its prompt) and journals
+# the effect to the runner's env pin HERMES_WF_EFFECTS_FILE (the SIDECAR-pin
+# law: the runner names the durable journal, the registrant appends rows). If
+# the spawn's prompt names its own key under the engine's committed-effects
+# machine preamble, the child HONORS reconcile-don't-redo and skips the effect.
+# FAKE_EFFECT_HOLD=<sec> keeps the child alive after committing (crash seam).
+if _FAKE_MODE == "effect_once":
+    import re as _re_cr8
+    _k = _re_cr8.search(r"EFFECTKEY=(\S+)", q)
+    _key = _k.group(1) if _k else ""
+    _done = ("Already committed side effects" in q and _key
+             and _re_cr8.search(r"key=" + _re_cr8.escape(_key) + r"(?![A-Za-z0-9_])", q))
+    if _key and not _done:
+        _pj = os.environ.get("HERMES_WF_EFFECTS_FILE")
+        if _pj:                                   # journal FIRST: a reader that saw
+            _d = os.path.dirname(_pj)             # the effect ledger is guaranteed
+            if _d: os.makedirs(_d, exist_ok=True) # the journal row already landed
+            with open(_pj, "a") as _f:
+                _f.write(json.dumps({
+                    "node": os.environ.get("HERMES_WF_STEER_NODE", ""),
+                    "kind": os.environ.get("FAKE_EFFECT_KIND", "push"),
+                    "key": _key,
+                    "evidence": os.environ.get("FAKE_EFFECT_EVIDENCE", "committed-once"),
+                    "spawn": os.environ.get("HERMES_WF_STEER_SPAWN", "0"),
+                    "node_efp": os.environ.get("HERMES_WF_NODE_EFP", "")}) + "\n")
+        _ef = os.environ.get("FAKE_EFFECT_FILE")
+        if _ef:
+            with open(_ef, "a") as _f:
+                _f.write(_key + "\n")
+    try: time.sleep(float(os.environ.get("FAKE_EFFECT_HOLD") or 0))
+    except ValueError: pass
+    print("```json\n" + json.dumps({"result": "ok", "goal": q.splitlines()[0]}) + "\n```", flush=True)
+    sys.exit(0)
 # est-flah (field report, 2026-10-02): the narrow-vocabulary relay enum-gate shape — a child
 # whose --reasoning value the RELAY itself rejects (the door's route table missed it)
 # must die with the server's "Supported types are ..." 400 so the runner's escape

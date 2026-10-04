@@ -249,6 +249,164 @@ def _wake_owner_text(run_id, event):
 
 _CRASH_GEN: list = [None, None]  # [run_path, generation] for this runner process
 
+# ---------- #8 item 3: crash-respawn idempotence (attempt-N preamble +
+# reconcile-don't-redo) ----------
+# The incident-class-split comment on #8 keeps item 3 open: a respawned runner
+# (the reaper's revival of a dead one) re-drives pending nodes BLIND over the
+# side effects the dead attempt already executed — the firehose shape: the
+# respawned build lane pushes the branch / opens the PR a second time. Three
+# engine facts close it:
+#   (a) an attempt-N PREAMBLE RECORD at the respawn boot (`runner.attempt_preamble`):
+#       which attempt this runner is, what non-terminal spawn records the dead
+#       runner left, what the journal said — the respawn is never anonymous.
+#   (b) the committed side-effect journal (<run>/side_effects.jsonl, rows appended
+#       by registrants through the spawn-time env pin HERMES_WF_EFFECTS_FILE — the
+#       SIDECAR-pin law) is RECONCILED against the current graph at that boot:
+#       a row is a fact iff its node still exists under the current definitions
+#       (an amend orphans it, same law as node_rec's efp check); torn lines
+#       (a writer mid-append when the runner died) are skipped, never facts,
+#       never a crash. The verdict is durable (side_effects.reconcile.json) and
+#       logged (`run.respawn_reconcile`).
+#   (c) reconcile-don't-redo: every spawn after a reconcile carries the
+#       VALID committed-effect inventory for ITS node as a machine preamble
+#       (prompt-side only, def-hash neutral, "" when nothing is committed —
+#       first attempts stay byte-identical), so a re-driven child reconciles
+#       against what already landed instead of redoing it.
+EFFECTS_NAME = "side_effects.jsonl"
+EFFECTS_FILE_ENV = "HERMES_WF_EFFECTS_FILE"
+EFFECTS_EFP_ENV = "HERMES_WF_NODE_EFP"
+EFFECTS_PREAMBLE_TOKEN = "Already committed side effects"
+
+def _effects_path(run):
+    return Path(run) / EFFECTS_NAME
+
+def side_effect_rows(run):
+    """Rows of the run's side-effect journal. A torn line (the writer died
+    mid-append) is skipped — a row that never fully landed is not a committed
+    fact; a file that cannot be READ degrades to [] (the reconcile fails open:
+    a missing inventory must never block admission, it only weakens (c))."""
+    p = _effects_path(run)
+    rows = []
+    try:
+        lines = p.read_text(errors="replace").splitlines()
+    except OSError:
+        return rows
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rec = json.loads(line)
+        except Exception:
+            continue                                   # torn line: never a fact
+        if isinstance(rec, dict) and rec.get("node"):
+            rows.append(rec)
+    return rows
+
+def _effect_row_valid(row, byid):
+    """A journal row is a committed FACT iff its node still resolves under the
+    CURRENT graph definitions — an amend to the node changes its efp and
+    orphans the row (never presented as current, node_rec's law), and a node
+    that no longer exists orphans it outright."""
+    n = byid.get(row.get("node"))
+    if not isinstance(n, dict):
+        return False
+    ne = row.get("node_efp")
+    if isinstance(ne, str) and ne:
+        try:
+            return ne == efp(byid, n)
+        except Exception:
+            return False
+    return True
+
+def reconcile_effects(run, byid):
+    """#8 item 3 (b): reconcile the committed side-effect records against the
+    graph. Returns {reconciled, orphaned, valid:[rows]} — valid rows are the
+    facts spawn preambles carry; orphaned rows (unknown node, amended node)
+    stay on disk as history but are never facts. Never raises."""
+    rows = side_effect_rows(run)
+    valid = [r for r in rows if _effect_row_valid(r, byid)]
+    return {"reconciled": len(valid), "orphaned": len(rows) - len(valid),
+            "valid": valid}
+
+def _respawn_effects_preamble(run, meta, byid, node):
+    """#8 item 3 (c): the machine preamble naming the VALID committed side
+    effects of THIS node (kind/key/evidence), so a re-driven child reconciles
+    instead of redoing them. Prompt-side only — never record bytes (the
+    lane-hygiene neutrality law): with an empty inventory the block is "" and
+    every first-attempt prompt stays byte-identical (golden-solo gate)."""
+    inv = meta.get("_effects_valid")
+    if inv is None:
+        return ""
+    mine = [r for r in inv if r.get("node") == node.get("id")]
+    if not mine:
+        return ""
+    lines = ["## Already committed side effects (reconcile — do NOT redo)",
+             "A prior attempt of this node already executed the effects below and "
+             "the journal proves it committed. Check the external state matches "
+             "(branch pushed, PR open, record exists); if it does, DO NOT redo the "
+             "effect — continue from it and say so in your result. Redoing a "
+             "committed effect is the bug this preamble exists to prevent."]
+    for r in mine:
+        lines.append(f"- kind={r.get('kind', '?')} key={r.get('key', '?')} "
+                     f"evidence={r.get('evidence', '?')} (node={r.get('node')} "
+                     f"spawn=a{r.get('spawn', 0)})")
+    return "\n".join(lines)
+
+def _respawn_attempt_record(run, meta, byid):
+    """#8 item 3 (a)+(b), run at boot ONLY on a respawn (events.jsonl already
+    exists — the reaper's revival of a dead runner): writes the attempt-N
+    preamble record (which attempt this is over the dead generations, which
+    spawn records the dead runner left non-terminal), reconciles the committed
+    side-effect journal against the graph, logs `run.respawn_reconcile`, and
+    persists the durable verdict + the valid inventory into meta so every
+    spawn of this runner carries (c). Fail-open by design: a reconcile failure
+    degrades to an empty inventory (weaker (c)), never blocks admission."""
+    try:
+        evs = []
+        try:
+            for l in (run / "events.jsonl").read_text(errors="replace").splitlines():
+                try:
+                    evs.append(json.loads(l))
+                except Exception:
+                    continue
+        except OSError:
+            return
+        if not any(isinstance(e, dict) and e.get("event") == "run.started" for e in evs):
+            return                                     # fresh run: no prior generation
+        attempt = 1 + sum(1 for e in evs if isinstance(e, dict)
+                          and e.get("event") in ("run.started", "run.resumed"))
+        stale = []
+        try:
+            for np in sorted((run / "nodes").glob("*.json")):
+                rec = jload(np)
+                if isinstance(rec, dict) and rec.get("status") == "running":
+                    stale.append(np.stem)
+        except OSError:
+            pass
+        try:
+            verd = reconcile_effects(run, byid)
+        except Exception:                              # fail-open (F3 family)
+            verd = {"reconciled": 0, "orphaned": 0, "valid": []}
+        meta["_effects_valid"] = verd["valid"]
+        log(run, "runner.attempt_preamble", attempt=attempt,
+            prior_stale_spawns=stale, effects_reconciled=verd["reconciled"],
+            effects_orphaned=verd["orphaned"])
+        log(run, "run.respawn_reconcile", reconciled=verd["reconciled"],
+            orphaned=verd["orphaned"], stale_spawns=stale)
+        try:
+            p = run / "side_effects.reconcile.json"
+            tmp = p.with_name(f"{p.name}.{os.getpid()}.tmp")
+            tmp.write_text(json.dumps({"attempt": attempt,
+                                       "reconciled": verd["reconciled"],
+                                       "orphaned": verd["orphaned"],
+                                       "at": now()}))
+            os.replace(tmp, p)                         # atomic: durable verdict
+        except OSError:
+            pass
+    except Exception:
+        meta.setdefault("_effects_valid", [])
+
 def _crash_gen(run):
     """Allocate THIS runner process's crash-decision generation: a durable,
     monotonically increasing counter stored in <run>/crash_gen, bumped under an flock
@@ -3104,9 +3262,13 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
     token = f"{node['id']}:{index}:{spawn_no}:{uuid.uuid4().hex[:8]}"
     # #37: the machine preambles compose at the ONE spawn seam every path shares
     # (solo, fan-out item, transient retry, bounded resume): lane hygiene first
-    # (build shape only, "" otherwise), then the resume preamble, then the goal.
+    # (build shape only, "" otherwise), then the #8-item-3 committed-effects
+    # preamble ("" unless a prior generation committed effects this node owns),
+    # then the resume preamble:
     # Both are prompt-side artifacts (logs/*.prompt.md) — never record bytes.
-    preamble = "\n\n".join(p for p in (_lane_hygiene_preamble(node), resume_preamble) if p)
+    preamble = "\n\n".join(p for p in (_lane_hygiene_preamble(node),
+                                        _respawn_effects_preamble(run, meta, byid, node),
+                                        resume_preamble) if p)
     prompt = ((preamble + "\n\n" + goal) if preamble else goal) + ("\n\n" + context if context else "")
     # A4: the runner states each child's durable work dir (replaces the old
     # write-first authoring rule). It lands in the GOAL half, before '## Inputs':
@@ -3177,6 +3339,12 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
                HERMES_WF_STEER_SPAWN=str(spawn_no),
                HERMES_WF_RUN_ID=run.name,
                HERMES_WF_RUN_DIR=str(run),   # 1.1 (RATIFY F1): absolute run dir; act_inbox prefers it,
+               # #8 item 3: the durable side-effect journal pin (the SIDECAR-pin
+               # law — the runner names the file, the registrant appends rows) +
+               # the node's CURRENT efp so a journal row is stamped with the
+               # definition it was executed under (an amend then orphans it).
+               **{EFFECTS_FILE_ENV: str(_effects_path(run)),
+                  EFFECTS_EFP_ENV: (efp(byid, node) if node.get("id") in byid else "")},
                # #61c: survivor-registry pins (#61b B3/B2). SPREAD, not kwargs:
                # kwargs spell the constant NAMES literally into the child env
                # (SIDECAR_ENV_PATH=…) and the token-keyed adoption channel
@@ -4734,6 +4902,14 @@ def main(run_id):
 
     threading.Thread(target=_stop_watcher, daemon=True).start()
     first = not (run / "events.jsonl").exists()
+    # #8 item 3: crash-respawn idempotence — when a prior runner of this run
+    # already logged (events.jsonl exists — the reaper's revival), write the
+    # attempt-N preamble record and reconcile the committed side-effect journal
+    # BEFORE anything spawns, so this generation is counted and every spawn it
+    # launches carries the reconcile-don't-redo inventory (see
+    # _respawn_attempt_record).
+    _respawn_attempt_record(run, meta,
+                            {n["id"]: n for n in (exit_graph[0] or {}).get("nodes", [])})
     log(run, "run.started" if first else "run.resumed")
     rs = Run(run)
     exit_graph[0] = rs.graph
