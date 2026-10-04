@@ -106,3 +106,8 @@ tests/fake-b1:137
 # SECURITY.md advisories URL (issue #43 conformance): the private-vulnerability-reporting
 # URL is the documented reporter handle and must ship verbatim; guarded.
 regex:github\.com/jacobhausler/hermes-workflows/security/advisories
+
+# Joint-eng-protocol SSOT pointer (AGENTS.md §4d / CONTRIBUTING.md footer): the
+# citation must name the governing repo, file, digest, and public check mirror
+# verbatim — the pointer IS the verification handle a cold reader checks; guarded.
+regex:^Cross-estate joint eng protocol v1 is the SSOT
