@@ -69,8 +69,13 @@ class BlockedLegibility100(unittest.TestCase):
         self.assertEqual(event["blocked"], ["join", "later"])
         self.assertEqual(event["unconverged"], ["seed"])
         self.assertEqual(event["blocked_by"], {"join": ["bad"], "later": ["bad"]})
+        # est-ij0 adds residue (cause classes + committed verdicts) and the
+        # dead-letter attempt ledger; the #100 fields above stay byte-identical.
         self.assertEqual(set(event), {"ts", "event", "failed", "blocked",
-                                      "unconverged", "blocked_by"})
+                                      "unconverged", "blocked_by", "residue", "dead_letter"})
+        self.assertEqual(event["residue"], {"data_dead": ["join", "later"], "order_dead": [],
+                                            "verdicts": {"seed": {"status": "done", "verdict": None}}})
+        self.assertEqual(set(event["dead_letter"]), {"bad"})
         self.assertEqual(json.loads((r / "nodes" / "seed.json").read_text())["status"], "done")
         self.assertFalse((r / "nodes" / "join.json").exists())
 

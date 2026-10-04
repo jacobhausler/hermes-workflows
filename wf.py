@@ -29,7 +29,8 @@ import wfcommon
 from wfcommon import (efp, graph_fingerprint, jload, validate_graph, node_rec, gate_answer_valid,
                       when_true, child_metrics, prune_states, dep_satisfied, active_child,
                       FP_RULE_VERSION, record_efp_valid, seat_forbidden_models, runs_root,
-                      hermes_root, profile_home, find_run, blocked_legibility,
+                      hermes_root, profile_home, find_run, blocked_legibility, residue,
+                      release_law,
                       confidence_substrate, strip_engine_disclosure,
                       substrate_disclosure_text, SUBSTRATE_DISCLOSURE_KEY,
                       hermes_home as _wfcommon_hermes_home)
@@ -1399,6 +1400,27 @@ def _tool_progress(run, skey, out, home=None):
     except Exception:
         return False
     return bool(m) and isinstance(m.get("tool_calls"), int) and m["tool_calls"] > 0
+
+def _attempt_counts(run, r, metrics=None):
+    """est-ij0 per-attempt ledger: {tool_calls, api_calls} of ONE dead attempt from
+    its own state.db row (each spawn has a fresh skey, so the row IS the attempt).
+    Honest absence: no skey / no db / no row -> {} (never zeros), and an
+    unknown api counter stays None. Lets a dead-letter reader tell "worked and
+    died" from "never started" without classifying on final:'' alone."""
+    skey = (r or {}).get("skey")
+    if not skey:
+        return {}
+    try:
+        if metrics is None:
+            metrics = (child_metrics(run.name, r["profile_home"]) if r.get("profile_home")
+                       else child_metrics(run.name))
+        m = metrics.get(skey)
+    except Exception:
+        return {}
+    if not m:
+        return {}
+    return {"tool_calls": m.get("tool_calls"),
+            "api_calls": m.get("api_calls") if m.get("api_calls_known", True) else None}
 
 # #102 (measured 2026-10-01, three lanes burned 4-6h): the core CLI line a child
 # prints when --continue lands on a session that persisted NO messages. When
@@ -3391,7 +3413,8 @@ def _ratelimit_park(meta, r, respawn, ev, ev_kw, node=None, cancel=None,
             break
         backoff = max(0.0, interval * (1.0 + jitfrac * (2.0 * random.random() - 1.0)))
         attempts_log.append({"attempt": len(attempts_log),
-                             "error_class": "ratelimit", "at": now()})
+                             "error_class": "ratelimit", "at": now(),
+                             **_attempt_counts(run, r)})
         log(run, ev + ".retrying", error_class="ratelimit", backoff_s=round(backoff, 1),
             attempts_log=list(attempts_log), **ev_kw)
         if _park_wait(meta, backoff, cancel=cancel):
@@ -3455,12 +3478,14 @@ def _transient_retry(meta, r, respawn, ev, ev_kw, node=None, cancel=None):
                 blocked = False
         if blocked:
             attempts_log.append({"attempt": len(attempts_log),
-                                 "error_class": r["error_class"], "at": now()})
+                                 "error_class": r["error_class"], "at": now(),
+                                 **_attempt_counts(run, r)})
             log(run, ev + ".retry_skipped", reason="retry budget exhausted",
                 error_class=r.get("error_class"), **ev_kw)
             break
         attempts_log.append({"attempt": len(attempts_log),
-                             "error_class": r["error_class"], "at": now()})
+                             "error_class": r["error_class"], "at": now(),
+                             **_attempt_counts(run, r)})
         log(run, ev + ".retrying", error_class=r["error_class"], backoff_s=backoff[len(attempts_log) - 1],
             attempts_log=list(attempts_log), **ev_kw)
         deadline = time.time() + backoff[len(attempts_log) - 1]
@@ -3636,7 +3661,8 @@ def _bounded_retry(meta, r, respawn, ev, ev_kw, node=None, index=None):
                 f"bounded auto-retry: {eclass} with tool progress — one machine-resume re-drive"),
         **ev_kw, **({"fresh_session": True} if dead else {}))
     al = list(r.get("attempts_log") or [])
-    entry = {"attempt": len(al), "error_class": eclass, "at": now(), "resume": True}
+    entry = {"attempt": len(al), "error_class": eclass, "at": now(), "resume": True,
+             **_attempt_counts(run, r)}
     if dead:
         entry["fresh_session"] = True
     al.append(entry)
@@ -4048,7 +4074,29 @@ def _unmet_partial(node, states):
     `partial` released verify+suite onto an uncommitted candidate)."""
     if node.get("after_partial"):
         return []
-    return [a for a in node.get("after", []) if states.get(a) == "partial"]
+    oo = set(node.get("order_only") or ())   # est-ij0: an ordering edge consumes no harvest
+    return [a for a in node.get("after", []) if states.get(a) == "partial" and a not in oo]
+
+
+def _dead_letter(run, failed, byid):
+    """est-ij0: per failed node, the committed attempt ledger — error_class,
+    attempts, whether the final capture was empty, attempts_log (each entry now
+    carries its own tool/api counts), and `last` = the final attempt's counts.
+    One state.db read for the run; a missing ledger is reported as such."""
+    try:
+        metrics = child_metrics(run.name)
+    except Exception:
+        metrics = {}
+    out = {}
+    for n in failed:
+        _st, rec = node_rec(run, n, byid)
+        rec = rec or {}
+        out[n["id"]] = {"error_class": rec.get("error_class"),
+                        "attempts": rec.get("attempts"),
+                        "final_empty": ("final" in rec and not rec.get("final")),
+                        "attempts_log": rec.get("attempts_log") or [],
+                        "last": _attempt_counts(run, rec, metrics) or None}
+    return out
 
 
 def _fail_precondition(run, node, byid, missing, why="precondition unmet: "):
@@ -4083,8 +4131,9 @@ def build_inputs(run, node, outputs):
     blocks = []
     covered = {str(r).split(".")[0] for r in refs}
     injected = set(covered)
+    order_only = set(node.get("order_only") or ())   # est-ij0: ordering edges carry no data
     for pid in node.get("after") or []:
-        if pid in outputs and pid not in covered:
+        if pid in outputs and pid not in covered and pid not in order_only:
             blocks.append(_inputs_block(pid, outputs[pid], AUTO_INPUTS_CAP))
         injected.add(pid)
     # 00e46adb: ancestor gate answers flow DOWNSTREAM automatically. A go-gate answer
@@ -4099,7 +4148,9 @@ def build_inputs(run, node, outputs):
     # released gate gains ZERO bytes here (golden-solo EMPTY holds by construction).
     graph = jload(run / "graph.json", {}) or {}
     gbyid = {n["id"]: n for n in graph.get("nodes") or []}
-    seen, stack = set(), list(node.get("after") or [])
+    # est-ij0: the walk follows DATA edges only — a convoy (order_only) edge never
+    # imports another lane's gate answers.
+    seen, stack = set(), [a for a in node.get("after") or [] if a not in order_only]
     ancestors = []
     while stack:
         a = stack.pop()
@@ -4109,7 +4160,8 @@ def build_inputs(run, node, outputs):
         n = gbyid.get(a)
         if n is None:
             continue
-        stack.extend(n.get("after") or [])
+        noo = set(n.get("order_only") or ())
+        stack.extend(x for x in n.get("after") or [] if x not in noo)
         ancestors.append(a)
     for a in sorted(ancestors):
         n = gbyid.get(a)
@@ -4322,6 +4374,7 @@ def main(run_id):
     rs = Run(run)
     exit_graph[0] = rs.graph
     consumed, steering = set(), {}
+    splice_logged = set()   # est-ij0: one node.spliced per released node per runner
 
     def state(n):
         st, _ = node_rec(run, n, rs.byid)
@@ -4381,9 +4434,9 @@ def main(run_id):
         for nid in prune_states(rs.nodes, states):
             save_node(run, rs.byid[nid], rs.byid, {"status": "skipped", "output": {"skipped": "all deps pruned"}})
             log(run, "node.skipped", node=nid, reason="all deps pruned")
-        def deps_ok(n):  return all(dep_satisfied(states, a, allow_partial=bool(n.get("after_partial"))) for a in n.get("after", []))
-        def deps_res(n): return all(states.get(a) in ("done", "partial", "failed", "skipped") for a in n.get("after", []))  # #4: partial resolves
-
+        # e68544a37be37657 (partial blocks a plain edge) + #4 (partial resolves) +
+        # est-ij0 (a dead order_only predecessor is spliced out of the convoy) —
+        # wfcommon.release_law, shared with the read model.
         # e68544a37be37657: harvest-on-death partials block plain after-edges —
         # every wave-releasable node gets its typed verdict BEFORE anything
         # spawns: blocked ones FAIL TYPED (never hang, never spawn, no silent
@@ -4398,6 +4451,18 @@ def main(run_id):
                 _fail_precondition(run, n, rs.byid, blocked_by,
                                    why="blocked_by_partial_ancestor: ")
                 states[n["id"]] = "failed"   # the wave's own view sees the verdict now
+
+        # e68544a37be37657 (partial blocks a plain edge) + #4 (partial resolves) +
+        # est-ij0 (a dead order_only predecessor is spliced out of the convoy) —
+        # wfcommon.release_law, shared with the read model. Built AFTER the typed
+        # partial pass so its dead set sees this wave's new failures.
+        deps_ok, deps_res, spliced = release_law(rs.nodes, states)
+        for n in rs.nodes:
+            if states[n["id"]] == "pending" and n["id"] not in splice_logged and deps_ok(n):
+                past = spliced(n)
+                if past:
+                    splice_logged.add(n["id"])
+                    log(run, "node.spliced", node=n["id"], past=past)
 
         # #13 echo nodes: an agent whose result is `output` verbatim — commit at the
         # wave boundary, no spawn, no metrics row. Replay-skip by fingerprint comes
@@ -4537,7 +4602,9 @@ def main(run_id):
             blocked = [n["id"] for n in rs.nodes if states[n["id"]] == "pending" and not deps_ok(n)]
             unconverged, blockers = blocked_legibility(rs.nodes, states, blocked)
             log(run, "run.blocked", failed=[n["id"] for n in failed], blocked=blocked,
-                unconverged=unconverged, blocked_by=blockers)
+                unconverged=unconverged, blocked_by=blockers,
+                residue=residue(rs.nodes, states, blocked, unconverged, outputs),
+                dead_letter=_dead_letter(run, failed, rs.byid))
             emit(f"WORKFLOW_FAILED {run_id} ({','.join(n['id'] for n in failed)})")
             notify(run, "run.failed", graph=rs.graph)
             # The corrective owner turn is synchronous with notify(). Consume a

@@ -619,12 +619,17 @@ AGENT_KEYS = {"id", "type", "after", "goal", "context", "schema", "model", "prov
               # e68544a37be37657: `after_partial` (bool) opts this node INTO consuming a
               # harvest-on-death `partial` ancestor — a plain after-edge blocks on one
               # (typed fail at the wave boundary, never a silent release, never a spawn).
-              "profile", "requires", "after_partial"}
+              "profile", "requires", "after_partial",
+              # est-ij0: `order_only` (list, subset of `after`) marks ORDERING-only
+              # predecessors (a convoy chain): no data flows over them, and a dead one
+              # (failed, or never-runnable behind a failed data edge) is SPLICED out —
+              # the node waits on the dead member's own order_only predecessors instead.
+              "order_only"}
 GATE_KEYS = {"id", "type", "after", "question", "options", "context", "when", "wait", "on_skip",
              "default_option", "hold_timeout",
              # 1.1 (RATIFY F4): gates take output preconditions too; gates obey the same
              # after_partial law as agents (e68544a37be37657).
-             "requires", "after_partial"}
+             "requires", "after_partial", "order_only"}
 ECHO_KEYS = {"id", "type", "after", "output"}
 # 1.1 (RATIFY F5): opt-in library provenance block, written by the door's `save` ONLY when
 # `source` is supplied or the saving door runs under a named profile. Top-level graph key.
@@ -903,8 +908,8 @@ def validate_graph_errors(nodes):
             if n["type"] == "agent" and k == "when":
                 E(nid, "when", "only gate nodes take when; use a gate with on_skip:prune to branch")
                 continue
-            if k == "after_partial":
-                continue  # the dedicated block below names the key (echo-meaningless / bool)
+            if k in ("after_partial", "order_only"):
+                continue  # the dedicated blocks below name the key (echo-meaningless / type)
             E(nid, k, "unknown key; allowed: " + json.dumps(sorted(_type_keys)))
         for a in n.get("after", []):
             if a not in idset:
@@ -920,6 +925,18 @@ def validate_graph_errors(nodes):
             elif not isinstance(n["after_partial"], bool):
                 E(nid, "after_partial", "after_partial must be a boolean "
                                         "(true = this node consumes a partial ancestor's harvest)")
+        if "order_only" in n:
+            # est-ij0: ordering-only edges are a declared SUBSET of after — the cycle,
+            # topo and downstream machinery keep reading `after` unchanged.
+            oo = n["order_only"]
+            if n["type"] == "echo":
+                E(nid, "order_only", "order_only is meaningless on echo nodes (agent/gate only)")
+            elif not isinstance(oo, list) or not all(isinstance(x, str) for x in oo):
+                E(nid, "order_only", "order_only must be a list of node ids (a subset of after)")
+            else:
+                stray = [x for x in oo if x not in (n.get("after") or [])]
+                if stray:
+                    E(nid, "order_only", f"order_only ids must also appear in after; not in after: {stray}")
         for k, hi in (("timeout", 86400), ("max_turns", 200), ("run_budget", 86400)):
             v = n.get(k)
             if v is not None and (not isinstance(v, (int, float)) or isinstance(v, bool) or v <= 0 or v > hi):
@@ -1599,6 +1616,56 @@ def dep_satisfied(states, a, allow_partial=False):
         return bool(allow_partial)
     return st in ("done", "skipped")
 
+def dead_set(nodes, states):
+    """est-ij0: ids that can never commit — `failed`, or `pending` behind a dead
+    DATA edge (an after-edge not listed in the node's order_only). A dead ORDER
+    edge never kills: that is exactly what the splice removes."""
+    byid = {n["id"]: n for n in nodes}
+    memo = {}
+    def dead(nid):
+        if nid in memo:
+            return memo[nid]
+        memo[nid] = False                      # DAG is validated; guard anyway
+        st = states.get(nid)
+        if st == "failed":
+            memo[nid] = True
+        elif st == "pending" and nid in byid:
+            oo = set(byid[nid].get("order_only") or ())
+            memo[nid] = any(dead(a) for a in byid[nid].get("after", []) if a not in oo)
+        return memo[nid]
+    return {n["id"] for n in nodes if dead(n["id"])}
+
+def release_law(nodes, states):
+    """ONE after-edge release law for runner and read model -> (deps_ok, deps_res,
+    spliced). Data edges keep dep_satisfied. An order_only edge to X is satisfied
+    when X is satisfied, OR X is dead and X's own order_only predecessors are
+    (recursively) satisfied — the convoy splice: no node inherits a dead member as
+    its predecessor, and chain order among the living is preserved.
+    spliced(n) -> the dead order predecessors this node is released past."""
+    byid = {n["id"]: n for n in nodes}
+    dead = dead_set(nodes, states)
+    def order_ok(a, seen=()):
+        # an ordering edge waits for its predecessor to FINISH, consuming nothing:
+        # a harvested `partial` is finished (it never runs again), so it releases.
+        if states.get(a) in ("done", "skipped", "partial"):
+            return True
+        if a not in dead or a in seen:
+            return False
+        return all(order_ok(p, seen + (a,)) for p in ((byid.get(a) or {}).get("order_only") or ()))
+    def edge_ok(n, a):
+        if a in (n.get("order_only") or ()):
+            return order_ok(a)
+        return dep_satisfied(states, a, allow_partial=bool(n.get("after_partial")))
+    def deps_ok(n):
+        return all(edge_ok(n, a) for a in n.get("after", []))
+    def deps_res(n):
+        oo = n.get("order_only") or ()
+        return all(states.get(a) in ("done", "partial", "failed", "skipped")
+                   or (a in oo and order_ok(a)) for a in n.get("after", []))
+    def spliced(n):
+        return [a for a in (n.get("order_only") or ()) if a in dead and order_ok(a)]
+    return deps_ok, deps_res, spliced
+
 def _verify_spawn_rec(r, n, byid, rec):
     """ONE verification law for a spawn record (790c6ad): status=running + efp
     match + pid alive (non-zombie) + the recorded skey title present in the
@@ -1685,10 +1752,9 @@ def run_state(r):
         if active:
             nodes[n["id"]]["active_spawn"] = active[0]
             nodes[n["id"]]["active_spawns"] = active
-    def deps_ok(n):
-        # e68544a37be37657: mirror the runner law — a plain after-edge is not
-        # satisfied by a `partial`; the after_partial opt-in consumes the harvest.
-        return all(dep_satisfied(states, a, allow_partial=bool(n.get("after_partial"))) for a in n.get("after", []))
+    # e68544a37be37657 + est-ij0: the runner's own release law (partial blocks a
+    # plain edge; a dead order_only predecessor is spliced) — one function, two callers.
+    deps_ok, _deps_res, _spliced = release_law(graph["nodes"], states)
     last = None
     try:
         for line in (r / "events.jsonl").read_text().splitlines()[-20:]:
@@ -1929,6 +1995,40 @@ def blocked_legibility(nodes, states, blocked):
                 if target in hits:
                     blockers[target].append(nid)
     return unconverged, blockers
+
+def residue(nodes, states, blocked, unconverged, outputs):
+    """est-ij0: classify run.blocked residue by CAUSE, not crowd.
+    data_dead  = blocked ids reachable from a failed node over DATA edges only
+                 (true descendants of the death: they need the dead work redone);
+    order_dead = the rest — blocked only through an order_only (convoy) edge, so
+                 their own work never depended on the death.
+    verdicts   = per unconverged id, the committed output's `verdict` (a world-state
+                 claim) beside the committed status — never node.status alone: a
+                 `done` merge seat whose verdict is `not-approved` merged nothing.
+    Graph order everywhere; read-only."""
+    byid = {n["id"]: n for n in nodes}
+    dkids = {i: [] for i in byid}
+    for n in nodes:
+        oo = set(n.get("order_only") or ())
+        for a in n.get("after", []):
+            if a in dkids and a not in oo:
+                dkids[a].append(n["id"])
+    seen, stack = set(), [n["id"] for n in nodes if states.get(n["id"]) == "failed"]
+    while stack:
+        x = stack.pop()
+        for k in dkids.get(x, []):
+            if k not in seen:
+                seen.add(k)
+                stack.append(k)
+    bset = set(blocked)
+    data_dead = [n["id"] for n in nodes if n["id"] in bset and n["id"] in seen]
+    order_dead = [n["id"] for n in nodes if n["id"] in bset and n["id"] not in seen]
+    verdicts = {}
+    for nid in unconverged:
+        out = outputs.get(nid)
+        v = out.get("verdict") if isinstance(out, dict) else None
+        verdicts[nid] = {"status": states.get(nid), "verdict": v if isinstance(v, str) else None}
+    return {"data_dead": data_dead, "order_dead": order_dead, "verdicts": verdicts}
 
 def amend_preview(r, new_nodes):
     """{added, removed, changed, will_rerun, unchanged} for a proposed graph
