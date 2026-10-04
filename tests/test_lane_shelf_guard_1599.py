@@ -81,6 +81,33 @@ with tempfile.TemporaryDirectory(prefix="shelf1599-") as td:
         check("T4c shared shelf gained NOTHING", not esc.exists(),
               f"{esc} exists — saved={r.get('saved')!r}: the symlink escape landed")
 
+        # ---- T5: ancestor-swapped run dir (S3, deep lane 20261004-131221,
+        # recon #179 marker 5980900759). <run> is REPLACED by a symlink to an
+        # ANCESTOR (here: the runs root itself) with the runner-stamped env
+        # UNTOUCHED (WF_RUNS_ROOT=runs, HERMES_WF_RUN_DIR=runs/<lane>). At r4
+        # base_r=resolve(HERMES_WF_RUN_DIR) swallowed the whole root, cand_lib
+        # resolved inside base_r so the shared-shelf veto self-skipped, and the
+        # save to <runs>/library/atk-s3.json LANDED (saved=atk-s3). r5 clause A
+        # (run-dir containment under the resolved runs root) + clause B (tgt_r
+        # vs realpath(library_root()) judged regardless of base_r) must refuse.
+        # Neuter-sensitive BOTH WAYS: deleting clause A turns this block RED
+        # (the save lands); deleting clause B turns this block RED (the veto is
+        # what judges the null-base_r case — see the r5 note on #179).
+        os.unlink(str(lane_run / "library"))            # undo the T4 swap
+        (runs / "library").mkdir(parents=True, exist_ok=True)
+        os.rmdir(str(lane_run))                          # <run> itself...
+        os.symlink(str(runs), str(lane_run))             # ...becomes a symlink to <runs>
+        os.environ["WF_RUNS_ROOT"] = str(runs)           # runner stamp UNTOUCHED
+        os.environ["HERMES_WF_RUN_DIR"] = str(lane_run)  # raw shape still claims runs/<lane>
+        r = json.loads(door.handle({"action": "save", "graph": G, "name": "atk-s3"}))
+        s3 = runs / "library" / "atk-s3.json"
+        check("T5a ancestor-swapped <run> save is refused",
+              "error" in r and "saved" not in r, json.dumps(r)[:300])
+        check("T5b refusal is typed lane_shelf_write",
+              r.get("error_class") == "lane_shelf_write", json.dumps(r)[:300])
+        check("T5c shared shelf gained NOTHING", not s3.exists(),
+              f"{s3} exists — saved={r.get('saved')!r}: the S3 shape landed")
+
         # ---- T3: the owner/parent path is untouched (no lane identity) ----
         del os.environ["HERMES_WF_RUN_ID"], os.environ["HERMES_WF_RUN_DIR"]
         os.environ["WF_RUNS_ROOT"] = str(sandbox / "runs")

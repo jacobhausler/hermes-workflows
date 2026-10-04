@@ -1509,24 +1509,55 @@ def _lane_shelf_guard(p):
     sep = os.sep
     def _inside(t, b):
         return t == b or os.path.dirname(t) == b or t.startswith(b + sep)
+    # CLAUSE A (r5, recon #179 marker 5980900759): the runner bakes
+    # HERMES_WF_RUN_DIR as an absolute dir UNDER the runs root it stamps (wf.py
+    # spawn env; WF_RUNS_ROOT is in its keep-set forward and wins in both
+    # resolvers, else the launch root — wfcommon.launch_runs_root), and wf.py
+    # mkdir's the run dir for real. S3 swapped <run> for a symlink to an ANCESTOR
+    # (the runs root itself) with the stamped env UNTOUCHED: base_r then swallowed
+    # the shared shelf, the r4 conditional veto (cand_lib inside base_r)
+    # self-skipped, and <runs>/library/atk-s3.json LANDED (saved=atk-s3). An
+    # honest stamp is: a REAL dir (no symlink), realpath inside the stamped root,
+    # and — when it collapses onto the root itself — raw-identical to it (the
+    # legal T2 pin stamps WF_RUNS_ROOT AT the run dir). Anything else is an
+    # upward escape: the lane's own-shelf exemption dies and CLAUSE B judges
+    # tgt_r against realpath(library_root()) unconditionally. Deleting CLAUSE A
+    # turns tests/test_lane_shelf_guard_1599.py T5 RED (the escape re-claims its
+    # own-shelf exemption and the S3 save lands); deleting CLAUSE B turns T5 RED
+    # too (nothing vetoes the shared-shelf landing).
+    def _stamped_runs_root():
+        override = os.environ.get("WF_RUNS_ROOT", "")
+        return Path(override) if override else _common.launch_runs_root()
+    raw_root = _stamped_runs_root()
+    try:
+        root_r = str(Path(str(raw_root)).resolve())
+    except OSError:
+        root_r = None           # fail closed: an unjudgeable root is an escape
+    escape = (root_r is None or not _inside(base_r, root_r)
+              or os.path.islink(rd)
+              or (base_r == root_r
+                  and os.path.abspath(rd) != os.path.abspath(str(raw_root))))
     # r3 raw-string refusals stay (fail-closed): a raw shape that does not even
     # claim the run dir is refused outright, before realpath can rescue it.
     raw_claims_run = tgt == base_r or tgt_r == base_r or os.path.dirname(tgt) == base_r \
             or tgt.startswith(base_r + sep) or tgt_r.startswith(base_r + sep)
     # containment is judged on tgt_r ONLY; the run dir itself under realpath.
     inside_run = _inside(tgt_r, base_r)
-    # tgt_r vs library_root(): if it resolves into a library root that lives
-    # OUTSIDE the run dir (e.g. a pre-swapped <run>/library symlink to the shared
-    # shelf), that is a shared-shelf write, whatever the raw path claims.
-    shared_lib_r = None
+    # CLAUSE B (r5, unconditional): tgt_r is judged against realpath(library_root())
+    # REGARDLESS of where base_r sits. The only lane-legal shelf is the lane's OWN
+    # lexical <run>/library (base_r + '/library') under an HONEST run dir: no
+    # upward escape (clause A) and lib_r equal to it, so neither a swapped
+    # <run>/library symlink nor an ancestor-swapped <run> (which makes the shared
+    # shelf trivially equal the lexical own shelf) can pass. The r4 conditional
+    # (`if not _inside(cand_lib, base_r)`) self-skipped for S3-shaped base_r — that
+    # is the veto that must judge tgt_r unconditionally.
     try:
-        cand_lib = str(Path(str(library_root())).resolve())
-        if not _inside(cand_lib, base_r):
-            shared_lib_r = cand_lib
+        lib_r = str(Path(str(library_root())).resolve())
     except OSError:
-        pass
+        lib_r = None          # fail closed: an unjudgeable shelf is a shared shelf
+    onto_shared = lib_r is None or escape or lib_r != base_r + sep + "library"
     if raw_claims_run and inside_run \
-            and not (shared_lib_r is not None and _inside(tgt_r, shared_lib_r)):
+            and not (onto_shared and _inside(tgt_r, lib_r if lib_r is not None else "")):
         return None
     rid = str(os.environ.get("HERMES_WF_RUN_ID") or rd).strip()
     return {"error": f"lane child of run '{rid}' may not save '{p.name}' onto the shared "
