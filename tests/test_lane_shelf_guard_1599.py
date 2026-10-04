@@ -12,7 +12,7 @@ writes NOTHING. A parent/owner process (no lane identity) saves as before.
 Three parts, standalone (no pytest), house style. Pinned per #71 law:
 WF_RUNS_ROOT + wf_test_isolation so nothing here can touch the real estate shelf.
 """
-import importlib.util, json, os, sys, tempfile
+import importlib.util, json, os, shutil, sys, tempfile
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -64,6 +64,22 @@ with tempfile.TemporaryDirectory(prefix="shelf1599-") as td:
         local = lane_run / "library" / "ra-pr-deep-wf156c.json"
         check("T2 run-local save (child) still succeeds",
               r.get("saved") == "ra-pr-deep-wf156c" and local.exists(), json.dumps(r)[:300])
+
+        # ---- T4: symlink run-dir evasion is refused (recon ask 1, marker 5980069065) ----
+        # The legit T2 shape (WF_RUNS_ROOT pinned AT the run dir) with <run>/library
+        # PRE-SWAPPED for a symlink to the SHARED library: containment must be judged
+        # on tgt_r (realpath) only, and tgt_r compared against library_root() — a
+        # raw-string containment pass must not let the graph land on the shared shelf.
+        shutil.rmtree(lane_run / "library")
+        os.symlink(str(runs / "library"), str(lane_run / "library"))
+        r = json.loads(door.handle({"action": "save", "graph": G, "name": "atk-sym-escape"}))
+        esc = runs / "library" / "atk-sym-escape.json"
+        check("T4a symlinked-<run>/library save is refused",
+              "error" in r and "saved" not in r, json.dumps(r)[:300])
+        check("T4b refusal is typed lane_shelf_write",
+              r.get("error_class") == "lane_shelf_write", json.dumps(r)[:300])
+        check("T4c shared shelf gained NOTHING", not esc.exists(),
+              f"{esc} exists — saved={r.get('saved')!r}: the symlink escape landed")
 
         # ---- T3: the owner/parent path is untouched (no lane identity) ----
         del os.environ["HERMES_WF_RUN_ID"], os.environ["HERMES_WF_RUN_DIR"]

@@ -1484,29 +1484,54 @@ def _lib_path(name):
 # RUN-LOCAL copies (under its own run dir), never onto the shared library.
 def _lane_shelf_guard(p):
     """Refuse a shared-shelf save from a spawned lane child (typed error_class
-    lane_shelf_write); run-local saves and parent/owner saves pass untouched."""
+    lane_shelf_write); run-local saves and parent/owner saves pass untouched.
+
+    r4 (recon #179 marker 5980069065): containment is judged on tgt_r — the
+    realpath-resolved target — ONLY. The r3 raw-string branch let a run-dir-SHAPED
+    path whose realpath escapes (pre-swapped <run>/library symlink) pass and land
+    the graph on the SHARED shelf (saved=atk-sym-escape). Every path is compared
+    under realpath (raw tgt kept for display only), plus tgt_r is compared against
+    library_root(): any resolve into the shared shelf from a lane child refuses."""
     rd = str(os.environ.get("HERMES_WF_RUN_DIR") or "").strip()
     if not rd:
         return None
-    tgt = os.path.abspath(str(p))
-    cand = {os.path.abspath(rd)}
-    try:
-        cand.add(str(Path(rd).resolve()))
-    except OSError:
-        pass
+    tgt = os.path.abspath(str(p))          # raw — kept for display only
     tgt_r = tgt
     try:
         tgt_r = str(Path(tgt).resolve())
     except OSError:
         pass
-    for base in cand:
-        if tgt == base or tgt_r == base or os.path.dirname(tgt) == base \
-                or tgt.startswith(base + os.sep) or tgt_r.startswith(base + os.sep):
-            return None
+    base_r = os.path.abspath(rd)
+    try:
+        base_r = str(Path(rd).resolve())
+    except OSError:
+        pass
+    sep = os.sep
+    def _inside(t, b):
+        return t == b or os.path.dirname(t) == b or t.startswith(b + sep)
+    # r3 raw-string refusals stay (fail-closed): a raw shape that does not even
+    # claim the run dir is refused outright, before realpath can rescue it.
+    raw_claims_run = tgt == base_r or tgt_r == base_r or os.path.dirname(tgt) == base_r \
+            or tgt.startswith(base_r + sep) or tgt_r.startswith(base_r + sep)
+    # containment is judged on tgt_r ONLY; the run dir itself under realpath.
+    inside_run = _inside(tgt_r, base_r)
+    # tgt_r vs library_root(): if it resolves into a library root that lives
+    # OUTSIDE the run dir (e.g. a pre-swapped <run>/library symlink to the shared
+    # shelf), that is a shared-shelf write, whatever the raw path claims.
+    shared_lib_r = None
+    try:
+        cand_lib = str(Path(str(library_root())).resolve())
+        if not _inside(cand_lib, base_r):
+            shared_lib_r = cand_lib
+    except OSError:
+        pass
+    if raw_claims_run and inside_run \
+            and not (shared_lib_r is not None and _inside(tgt_r, shared_lib_r)):
+        return None
     rid = str(os.environ.get("HERMES_WF_RUN_ID") or rd).strip()
     return {"error": f"lane child of run '{rid}' may not save '{p.name}' onto the shared "
                      "shelf — lanes write run-local graph copies only "
-                     "(est-2ek.1.599; shelf waves 26-31)",
+                     "(est-2ek.1.599; shelf waves 26-31; r4 realpath-only containment)",
             "error_class": "lane_shelf_write"}
 
 def _lib_read(name):
