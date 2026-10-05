@@ -72,3 +72,12 @@ receipts/exchange-run/peer-clean-run.json
 # names the reviewing estate (austin-exec) as its evidence provenance — the peer's
 # identity IS the receipt; guarded, not hidden.
 receipts/gated-publish/peer-clean-run-austin.json
+# est-2ek.1.641 route-substitution fixture: SUB_M IS the asserted data — B2 pins that
+# the typed error quotes the substituted route verbatim and the seat-stub ledger holds
+# ZERO attempts against it. Neutralizing the token would test nothing (the PUBLISH-SCRUB
+# GUARD class of tests/test_require_route_25.py's pinned proof routes).
+tests/test_route_substitution_641.py
+# The #25/#641 evidence comment names the route a proved-alive pinned lane actually
+# billed on the evidence runs — kept verbatim, line-anchored by regex (not file) so a
+# future stray model name in wf.py still fires.
+regex:# a proved-alive pinned route whose later spawn billed
