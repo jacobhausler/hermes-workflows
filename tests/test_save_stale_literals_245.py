@@ -109,7 +109,7 @@ with tempfile.TemporaryDirectory(prefix="stale245-") as td:
         STALE4 = {"name": "stale-prov-probe",
                   "nodes": [{"id": "a", "type": "agent",
                              "goal": "Read the target; findings to your workdir."}],
-                  "provenance": {"owner": "gh-dispatch", "source": "est-2ek.1.245",
+                  "provenance": {"owner": "seat-agent", "source": "est-2ek.1.245",
                                  "saved_at": "2026-10-05T00:00:00+00:00",
                                  "source_digest": "0123456789abcdef0123456789abcdef"}}
         r4 = json.loads(door.handle({"action": "save", "graph": STALE4,

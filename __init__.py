@@ -1755,7 +1755,7 @@ _STALE_LITERAL_PATTERNS = (
     # (label, pattern) — mirrors dag_lint s11's operative-surface law:
     # provenance/meta cold bytes are exempt; operative goal/context text counts.
     ("ledger key", re.compile(r"\bfb[0-9a-f]{8,}\b")),
-    ("bead id", re.compile(r"\best-[a-z0-9]{3,}(?:\.\d+)?\b")),
+    ("estate id", re.compile(r"\best-[a-z0-9]{3,}(?:\.\d+)?\b")),
     ("branch name", re.compile(r"\b(?:fix|feat|chore|est2ek1|wofs|docs)/[A-Za-z0-9._/-]{3,}\b")),
     ("lane/scratch path", re.compile(r"/home/[\w.-]+/\.hermes(?:/[\w.~+-]+)+")),
     ("dated literal", re.compile(r"\b2026-\d{2}-\d{2}\b")),
