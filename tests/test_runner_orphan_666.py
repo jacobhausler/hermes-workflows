@@ -15,6 +15,10 @@ Law pinned here (RED on base, GREEN on branch):
   T3  the seam exists: spawn pins the runner pid into the child env
       (wf.RUNNER_PID_ENV), the child-side helper is wf.child_parent_watch, and
       the runner registers termination cleanup (killpg on every exit path).
+  T4  the belt's lane probe confirms a held runner.lock: a PEER belt's µs
+      probe flock is never misread as a replacement runner (CI red 37265560243
+      — one misread reset the grace and T2's orphan outlived the window); a
+      real holder still reads live (adoption law kept).
 
 The grandchild heartbeats to FAKE_HB_666 every 0.2 s (stub_orphan_666_child.py),
 detached double-fork+setsid so the child group's killpg alone cannot reach it.
@@ -166,6 +170,38 @@ check("T3 spawn pins the runner pid for the belt (wf.RUNNER_PID_ENV = HERMES_WF_
       getattr(wf, "RUNNER_PID_ENV", None) == "HERMES_WF_RUNNER_PID")
 check("T3 runner registers termination cleanup (killpg on every exit path)",
       callable(getattr(wf, "_runner_term_cleanup", None)))
+
+# ---------- T4: the belt's lane probe is not fooled by a PEER probe ----------------
+# CI red (run 37265560243): the agent child's belt and the grandchild's belt probe
+# runner.lock with the same µs LOCK_EX|LOCK_NB; one sample read a peer's probe as
+# "a replacement runner holds the lane", reset the grace, and the orphan outlived
+# its SIGKILLed runner past the window. Deterministic: a peer holds the lock for a
+# probe-length instant -> NOT a live runner; a real holder that never releases ->
+# still a live runner (adoption law intact).
+import fcntl, threading
+lane = HOME / "t666-probe"; lane.mkdir(parents=True, exist_ok=True)
+(lane / "runner.lock").write_text("")
+def _peer_probe(held, release):
+    fd = os.open(str(lane / "runner.lock"), os.O_RDWR)
+    fcntl.flock(fd, fcntl.LOCK_EX)
+    held.set(); release.wait(5)
+    fcntl.flock(fd, fcntl.LOCK_UN); os.close(fd)
+misreads = 0
+for _ in range(5):
+    held, release = threading.Event(), threading.Event()
+    th = threading.Thread(target=_peer_probe, args=(held, release)); th.start()
+    held.wait(5)
+    threading.Timer(0.003, release.set).start()   # a probe holds for µs; 3ms is generous
+    misreads += bool(wf._lane_has_live_runner(str(lane)))
+    th.join(5)
+check("T4 a peer's transient probe flock is NOT read as a live runner on the lane",
+      misreads == 0, f"{misreads}/5 peer probes misread as a replacement runner")
+hfd = os.open(str(lane / "runner.lock"), os.O_RDWR)
+fcntl.flock(hfd, fcntl.LOCK_EX)                   # a runner: holds for its whole life
+check("T4 a real holder (replacement runner) still reads as live — adoption kept",
+      wf._lane_has_live_runner(str(lane)) is True)
+fcntl.flock(hfd, fcntl.LOCK_UN); os.close(hfd)
+check("T4 a free lane reads as no runner", wf._lane_has_live_runner(str(lane)) is False)
 
 shutil.rmtree(HOME, ignore_errors=True)
 print("RESULT", "GREEN" if ok else "RED")

@@ -2281,10 +2281,22 @@ def _pid_really_alive(pid):
         return True
     return not st.startswith("Z")
 
+CHILD_BELT_LOCK_CONFIRM_N = 5         # a runner holds runner.lock for its whole life;
+CHILD_BELT_LOCK_CONFIRM_GAP_S = 0.02  # a peer PROBE holds it for microseconds
+
 def _lane_has_live_runner(run):
     """True while ANY live process holds the run's runner.lock flock (the kernel
-    drops it on any exit, so free-lock == no runner). Same µs probe the read
-    model uses; admission's 3×10ms retry absorbs the collision."""
+    drops it on any exit, so free-lock == no runner).
+
+    A held lock is CONFIRMED, never trusted on one sample: every belt (the agent
+    child's AND each detached grandchild's) and the fleet read model take the
+    same LOCK_EX|LOCK_NB µs probe, so one sample cannot tell a peer's transient
+    probe from a replacement runner. Measured (est-2ek.1.666 CI red, run
+    37265560243): two in-phase belts misread each other's probe as a live runner
+    on 3-10% of tight-loop samples; ONE such hit resets the belt's grace and the
+    orphan outlives its runner by a whole extra window. A real runner never
+    releases, so "held on every one of N samples over ~80ms" is exact for
+    adoption; ANY free sample proves no runner holds the lane right now."""
     if not run:
         return False
     try:
@@ -2292,15 +2304,19 @@ def _lane_has_live_runner(run):
     except OSError:
         return False
     try:
-        try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError:
-            return True                       # held: a runner lives on this lane
-        try:
-            fcntl.flock(fd, fcntl.LOCK_UN)
-        except OSError:
-            pass
-        return False
+        for i in range(CHILD_BELT_LOCK_CONFIRM_N):
+            if i:
+                time.sleep(CHILD_BELT_LOCK_CONFIRM_GAP_S)
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except OSError:
+                continue                      # held on this sample: confirm again
+            try:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+            except OSError:
+                pass
+            return False                      # free once == no runner on this lane
+        return True                           # held on every sample: a runner lives here
     finally:
         try: os.close(fd)
         except OSError: pass
