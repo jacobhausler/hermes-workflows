@@ -38,8 +38,12 @@ hermes plugins enable hermes-workflows
 hermes plugins validate ~/.hermes/plugins/hermes-workflows
 ```
 
-Then restart the backend (`hermes serve`) — tools and dashboard routes mount only at
-serve start. **Proof it loaded:** this line in the gateway's `~/.hermes/logs/gui.log`:
+Then restart the process that SERVES the plugin API — tools and dashboard routes
+mount only at serve/dashboard start. `hermes plugins enable` alone hot-loads gateway
+*commands* only; on rigs where the dashboard is a separate systemd unit
+(`hermes-dashboard` vs `hermes-gateway`), restart whichever unit hosts `hermes serve`
+— restarting the wrong one leaves every run reading `unknown` while the plugin looks
+enabled. **Proof it loaded:** this line in the gateway's `~/.hermes/logs/gui.log`:
 
 ```
 Mounted plugin API routes: /api/plugins/hermes-workflows/

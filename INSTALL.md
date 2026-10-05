@@ -36,7 +36,7 @@ The bundled skill is registered by the plugin as `hermes-workflows:workflow`; th
 
 If a symlink is impossible on the host, copy instead — but then re-copy after every plugin update, and treat drift as a bug. If a copied or hand-edited skill already exists where the link would go, stop and reconcile it with the package before linking; never silently discard local edits, upstream them (issue on the plugin repo) so the package can carry them.
 
-Enablement and copied source are not proof the running gateway loaded them. Restart the backend after applying the verified plugin, then verify plugin admission, mounted API and tool registration in the new process. Dashboard registration is API-only with a hidden tab.
+Enablement and copied source are not proof the running gateway loaded them. Restart the process that hosts `hermes serve` after applying the verified plugin (on rigs with separate systemd units, that is the serve/dashboard unit — `hermes plugins enable` hot-loads gateway commands only), then verify plugin admission, mounted API and tool registration in the new process. Dashboard registration is API-only with a hidden tab.
 
 ## Desktop app machine
 
