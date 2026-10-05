@@ -51,7 +51,7 @@ else:
 # the pre-#37 tokens a leak would carry (a subset is enough: any one of these in a
 # record file is the bug)
 TOKENS = ("Lane hygiene (machine preamble)", "git worktree add --detach", "lane_recover.py",
-          "RED discipline", "git stash push")
+          "RED discipline", "git stash push", "curl -X POST /-/reload")
 
 
 def home_and_fake(tmp):
@@ -141,6 +141,31 @@ def main():
               i0.split("## Inputs", 1)[1] == i1.split("## Inputs", 1)[1] if "## Inputs" in i0 and "## Inputs" in i1 else False)
         check("the ban names both checkout forms",
               "git checkout <base> -- <paths>" in pb and "git restore --source=<base>" in pb)
+        # ---- est-2ek.1.66: the ONE verified reload form ----
+        check("the reload law is in the block: exactly one line mentions /-/reload",
+              sum("/-/reload" in ln for ln in wf.LANE_HYGIENE_LINES) == 1)
+        reload_line = next(ln for ln in wf.LANE_HYGIENE_LINES if "/-/reload" in ln)
+        check("the reload line bans the unverified curl-as-SIGHUP-equivalent",
+              "curl -X POST /-/reload" in reload_line and "SIGHUP" in reload_line
+              and "web.enable-lifecycle=false" in reload_line and "403" in reload_line,
+              reload_line)
+        check("the reload line commands ONE sanctioned form per deployment, verified live",
+              "ONE sanctioned reload form" in reload_line and "verified live" in reload_line,
+              reload_line)
+        check("the reload law rides the build prompt", "/-/reload" in pb and reload_line in pb)
+        check("the reload law rides the repo: lane prompt", reload_line in pl)
+        check("the reload law rides every fan-out item prompt",
+              all(reload_line in prompt(f"items.{i}") for i in (0, 1)))
+        check("the reload law is ABSENT from the review-shape prompt", "/-/reload" not in pr, pr[:300])
+        check("the reload law is ABSENT from the undeclared (golden-solo) prompt",
+              "/-/reload" not in pp, pp[:300])
+        check("the reload law sits after the gate token and before the goal",
+              0 <= pb.find(wf.LANE_HYGIENE_TOKEN) < pb.find("/-/reload") < pb.find("implement it"),
+              (pb.find(wf.LANE_HYGIENE_TOKEN), pb.find("/-/reload"), pb.find("implement it")))
+        records_text = ((run / "graph.json").read_text()
+                        + (run / "run.json").read_text()
+                        + "\n".join(x.read_text() for x in (run / "nodes").glob("*.json")))
+        check("the reload law never enters a record file", "/-/reload" not in records_text)
         check("the exit is named: scripts/lane_recover.py", "scripts/lane_recover.py" in pb)
         check("turn-budget line: commit BEFORE the cap", "BEFORE the cap" in pb)
 

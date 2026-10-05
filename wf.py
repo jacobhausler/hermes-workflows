@@ -1216,6 +1216,9 @@ LANE_HYGIENE_LINES = (
     "- Your session's tool calls are journaled: worst case `scripts/lane_recover.py` "
     "(--profile/--skey or --run/--node) replays your write_file/patch calls into a "
     "restore dir. Name that exit in your final message if you are dying with an unbanked tree.",
+    "- Reload/apply notes: record ONE sanctioned reload form per deployment, verified live "
+    "against that deployment; never present `curl -X POST /-/reload` as an SIGHUP equivalent "
+    "— it answers 403 when web.enable-lifecycle=false and silently misleads the next operator.",
 )
 LANE_HYGIENE_TOKEN = LANE_HYGIENE_LINES[0]   # the gate token tests grep for
 
