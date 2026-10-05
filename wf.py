@@ -5394,6 +5394,43 @@ def _boot_lane_assert(run, nodes):
                           "bank_cmd": f"git -C {rp} stash push -m redrive:{Path(run).name}:{n['id']}"})
     return offenders
 
+def _unconsume_pending_gate_answers(run):
+    """#152 (runner leg of the mixed-version skew fix): an ADMISSION graph-invalid
+    death (an old bundled wf.py refusing a newer grammar) must never leave a
+    human's gate answer CONSUMED. The answer is durable state; its consumption
+    must not be the last thing a doomed process saw. For every gate whose answer
+    file is currently VALID (gate_answer_valid — the efp law owns the rest) but
+    whose node record never committed done/skipped, rename gates/<id>.json ->
+    gates/<id>.json.unconsumed (never delete — evidence) and log
+    gate.answer_unconsumed with the prior answer's 'at'. The gate returns to
+    pending; the next release from ANY door that can honor the graph re-lands
+    the answer. An already-committed answer (node done/skipped — consumed at a
+    real boundary) NEVER un-consumes. Returns the list of un-consumed gate ids."""
+    out = []
+    try:
+        graph = jload(run / "graph.json") or {}
+        byid = {n["id"]: n for n in graph.get("nodes", [])}
+    except Exception:
+        return out
+    for nid, n in byid.items():
+        if n.get("type") != "gate":
+            continue
+        p = run / "gates" / f"{nid}.json"
+        ans = jload(p)
+        if ans is None or gate_answer_valid(run, n, byid) is None:
+            continue   # no answer on record, or a stale one that never blocked a release
+        rec = jload(run / "nodes" / f"{nid}.json", {}) or {}
+        if rec.get("status") in ("done", "skipped"):
+            continue   # consumed at a real boundary — the committed-answer law
+        try:
+            os.replace(p, p.with_name(p.name + ".unconsumed"))
+        except OSError:
+            continue
+        log(run, "gate.answer_unconsumed", gate=nid, answer_at=ans.get("at"),
+            why="runner admission refused the committed graph; answer returned to pending")
+        out.append(nid)
+    return out
+
 def write_runner_exit(run, reason, detail=None, graph=None):
     """Write one verdict per runner process, tied to the graph snapshot it ran.
     An amended graph makes this record visibly stale until a fresh runner exits."""
@@ -5432,9 +5469,17 @@ def main(run_id):
         write_runner_exit(run, "crashed: no graph.json"); sys.exit(2)
     err = validate_graph(jload(run / "graph.json")["nodes"])
     if err:
+        # #152: an admission death must never CONSUME a pending gate answer —
+        # the answer is durable state and its consumption must not be the last
+        # thing a doomed process saw. Un-consume any answer whose gate node
+        # never committed done/skipped (evidence kept as .unconsumed, never
+        # deleted) so the gate returns to pending and the next release from ANY
+        # capable door re-lands it; the run stays 'interrupted'-resumeable.
+        _uc152 = _unconsume_pending_gate_answers(run)
         emit(f"WORKFLOW_FAILED {run_id} (graph invalid: {err})")
         notify(run, "run.failed", key="pre-start: graph invalid")
-        write_runner_exit(run, "crashed: graph invalid", err); return
+        write_runner_exit(run, "interrupted: admission graph invalid" if _uc152
+                          else "crashed: graph invalid", err); return
     # #85: re-measure the artifact-admission guard against the RUN DIR at runner
     # start (the door proved the 1:1 structural law; only here can the declared
     # bytes be measured — an orchestrator may have pre-seeded them between admit

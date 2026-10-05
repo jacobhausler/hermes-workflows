@@ -3081,6 +3081,21 @@ def _release_core(r, gate_id, answer, ui=False):
     old = jload(r / "gates" / f"{gate_id}.json")
     if old is not None and _common.gate_answer_valid(r, gate, byid) is not None:
         return {"ok": False, "error": "gate already answered (current graph)"}
+    # #152 fail-closed compat check (mixed-version door/runner skew): the respawn
+    # this release may trigger runs THIS door's bundled wf.py — so this door's
+    # validator IS the respawner's admission validator. If it refuses the
+    # committed graph, writing the answer would consume it into a doomed
+    # 'crashed: graph invalid' death: the answer becomes unrecoverable
+    # ('gate already answered') and the lap must be re-walked. Refuse instead,
+    # write NOTHING, leave the hold intact for a door that can honor it.
+    # One-pass defect reporting (c01b4a0 style); zero cost when it passes.
+    _errs = validate_graph_errors(graph["nodes"])  # the respawner validates exactly this
+    if _errs:
+        _off = "; ".join(f"node {e['node']}: {e['field']} — {e['msg']}" for e in _errs[:5])
+        if len(_errs) > 5:
+            _off += f"; (+{len(_errs) - 5} more)"
+        return {"ok": False,
+                "error": f"this door cannot drive this graph — drive it from its own tree ({_off})"}
     rec = {"answer": answer, "_def": efp(byid, gate),
            "fp_rule_version": _common.FP_RULE_VERSION,
            "at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
