@@ -605,7 +605,13 @@ WORKFLOW_PARAMS = {
             "the EXPANDED, include-STRIPPED truth (amend edits the expanded form; save shelves the author form with the include key — save(run_id) of a composite run refuses, save the author graph inline). Every guard refusal — unknown library entry, include cycle, alias/id collision, unbound seed, oversized merge — returns the same "
             "errors:[{node:'include:<alias>', field, msg}] envelope before any write or spawn; non-fatal resolver warnings (e.g. a shared fixed scratch path) echo as include_notes on run/status and run.json records provenance `includes:[{alias, name, source_digest}]`. "
             "Full grammar and worked examples: references/grammar.md in the `workflow` skill — read it before authoring your first graph. "
-            "Join node: {id, type:'join', after:[ids], keys:{label:'<node_id>.<dotted.path>', ...}, wait:'terminal'|'any'} — commits a deterministic json object {label: resolved parent output} at the wave boundary with zero tokens and no child spawn (keys committed sorted by label); wait:'terminal' (default) waits for every `after` parent to settle and fails the join if any failed; wait:'any' fires once one parent is done/partial and drops the keys of failed/skipped legs (fan-out-quorum flavour); a key whose committed parent lacks the dotted path fails the node as an author typo. Any key outside these closed sets is rejected at run/amend with errors:[{node, field, msg}] for EVERY defect."
+            "Join node: {id, type:'join', after:[ids], keys:{label:'<node_id>.<dotted.path>', ...}, wait:'terminal'|'any'} "
+            "— commits a deterministic json object {label: resolved parent output} at the wave boundary with zero tokens "
+            "and no child spawn (keys committed sorted by label); wait:'terminal' (default) waits for every `after` parent "
+            "to settle and fails the join if any failed; wait:'any' fires once one parent is done/partial and drops the "
+            "keys of failed/skipped legs (fan-out-quorum flavour); a key whose committed parent lacks the dotted path "
+            "fails the node as an author typo. "
+            "Any key outside these closed sets is rejected at run/amend with errors:[{node, field, msg}] for EVERY defect."
             ),
         },
         "answer": {"type": "string", "description": "release: the human's answer text (from clarify)."},
