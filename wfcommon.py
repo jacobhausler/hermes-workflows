@@ -633,7 +633,10 @@ AGENT_KEYS = {"id", "type", "after", "goal", "context", "schema", "model", "prov
               # `suite_proof` (bool, agent/gate) declares a recognized suite-PROOF
               # producer: on commit done the runner mints the durable token
               # nodes/<id>.suite-proof.json (node id + committed efp).
-              "publishes", "suite_proof"}
+              "publishes", "suite_proof",
+              # jam-h23: on-death catch. 'skip' commits the failed node `skipped`
+              # (join-tolerant); '<fallback-node-id>' additionally lets that agent run.
+              "on_fail"}
 GATE_KEYS = {"id", "type", "after", "question", "options", "context", "when", "wait", "on_skip",
              "default_option", "hold_timeout",
              # 1.1 (RATIFY F4): gates take output preconditions too; gates obey the same
@@ -922,6 +925,7 @@ def validate_graph_errors(nodes):
             return errs  # non-string ids cannot key the ancestry maps safely
     idset = set(ids)
     parents = {n["id"]: [a for a in n.get("after", []) if a in idset] for n in nodes}
+    byid_of = {n["id"]: n for n in nodes if isinstance(n.get("id"), str)}   # jam-h23: on_fail target lookup
     for n in nodes:
         nid = n["id"]
         if n.get("type") not in NODE_TYPES:
@@ -1162,6 +1166,22 @@ def validate_graph_errors(nodes):
                 E(nid, "on_skip", f"on_skip {osk!r} invalid; allowed: ['pass', 'prune']")
             elif n.get("when") is None:
                 E(nid, "on_skip", "on_skip needs a `when` (nothing else can skip a gate)")
+        ofk = n.get("on_fail")   # jam-h23: agent-only (closed key set rejected others);
+        if ofk is not None:      # non-'skip' value must name an existing, non-ancestor AGENT
+            anc, stack = set(), list(n.get("after", []))
+            while stack:
+                a = stack.pop()
+                if a in anc or a not in idset:
+                    continue
+                anc.add(a); stack.extend(parents[a])
+            if ofk != "skip":
+                tgt = byid_of.get(ofk) if isinstance(ofk, str) else None
+                if not isinstance(ofk, str) or tgt is None:
+                    E(nid, "on_fail", f"on_fail {ofk!r} must be 'skip' or an existing node id")
+                elif tgt.get("type") != "agent":
+                    E(nid, "on_fail", f"on_fail target {ofk!r} must be an agent node")
+                elif ofk in anc or ofk == nid:
+                    E(nid, "on_fail", f"on_fail target {ofk!r} must not be an ancestor of {nid}")
         w = n.get("wait")
         if w is not None:
             if n["type"] != "gate":
@@ -2625,11 +2645,17 @@ def prune_states(nodes, states):
     skipped deps count as satisfied. Mutates `states`; returns ids newly derived skipped
     (pending before) so the runner can commit them as efp-stamped facts."""
     derived, changed = set(), True
+    by_map = {n["id"]: n for n in nodes}
     while changed:
         changed = False
         for n in nodes:
             deps = n.get("after", [])
             if states.get(n["id"]) == "pending" and deps and all(states.get(a) == "skipped" for a in deps):
+                # jam-h23: ONE exception — a fallback survives the pruner. If a
+                # skipped dep died FAILED and its on_fail names THIS node, that
+                # death is the node's reason to run, not a reason to prune it.
+                if any((by_map.get(a) or {}).get("on_fail") == n["id"] for a in deps):
+                    continue
                 states[n["id"]] = "skipped"; derived.add(n["id"]); changed = True
     return derived
 

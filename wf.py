@@ -5132,6 +5132,50 @@ def _mint_suite_proof(run, node, rec, byid):
     tmp.write_text(json.dumps(tok))
     os.replace(tmp, p)   # atomic: a token is a committed fact like a node record
 
+def _on_fail_catch(run, rs, states):
+    """jam-h23 on_fail: a caught agent death becomes the join-tolerant `skipped`
+    terminal commit instead of blocking the run. ONE interception point at the
+    wave boundary covers every failure kind (inputs, quorum, precondition,
+    crashed) uniformly; `cancelled` never lands here (node_rec demotes it to
+    pending). 'skip' catches the node alone; '<fallback-id>' additionally lets
+    that agent run (its dep on the now-skipped node satisfies). Runtime guard:
+    the fallback must exist, be an agent, and not be an ancestor — invalid is
+    LOUD (node.on_fail_invalid) and uncached: the failure stands, run blocks.
+    The failed commit is replaced; its error/error_class are mirrored into the
+    skipped record so the death stays readable. Returns True iff anything was
+    caught — the caller re-makes states so the fallback/join schedules."""
+    caught = False
+    for n in rs.nodes:
+        if states.get(n["id"]) != "failed" or n.get("type") != "agent":
+            continue
+        of = n.get("on_fail")
+        if of is None:
+            continue
+        if of != "skip":
+            fb = rs.byid.get(of)
+            anc, stack = set(), list(n.get("after", []))
+            while stack:
+                a = stack.pop()
+                if a in anc or a not in rs.byid:
+                    continue
+                anc.add(a); stack.extend(rs.byid[a].get("after", []))
+            if fb is None or fb.get("type") != "agent" or of in anc or of == n["id"]:
+                log(run, "node.on_fail_invalid", node=n["id"], on_fail=of,
+                    reason="fallback must exist, be an agent, and not be an ancestor")
+                continue
+        _, rec = node_rec(run, n, rs.byid)
+        save_node(run, n, rs.byid,
+                  {"status": "skipped",
+                   "output": {"skipped": "on_fail", "caught_error": (rec or {}).get("error"),
+                              "caught_error_class": (rec or {}).get("error_class")},
+                   "caught_error": (rec or {}).get("error"),
+                   "caught_error_class": (rec or {}).get("error_class")})
+        log(run, "node.on_fail", node=n["id"], on_fail=of,
+            caught_error_class=(rec or {}).get("error_class"))
+        states[n["id"]] = "skipped"
+        caught = True
+    return caught
+
 INPUTS_CAP = 12000
 AUTO_INPUTS_CAP = 8000   # #9/#10 lane: per-parent byte cap for auto-injected parents
 
@@ -5715,6 +5759,11 @@ def main(run_id):
             continue   # top of loop: the answer reads exactly like a human release
         failed = [n for n in rs.nodes if states[n["id"]] == "failed"]
         if failed:
+            # jam-h23: give every on_fail catch one chance at this quiescent
+            # boundary BEFORE blocking; a caught node re-flows the graph (the
+            # fallback/join schedules at the fresh states at the top of loop).
+            if _on_fail_catch(run, rs, states):
+                continue
             blocked = [n["id"] for n in rs.nodes if states[n["id"]] == "pending" and not deps_ok(n)]
             unconverged, blockers = blocked_legibility(rs.nodes, states, blocked)
             log(run, "run.blocked", failed=[n["id"] for n in failed], blocked=blocked,
