@@ -138,7 +138,7 @@ check("B5 route_substitution_denied is a member of the closed set",
       "route_substitution_denied" in wf.ERROR_CLASSES, sorted(wf.ERROR_CLASSES)[:5])
 
 # ---- B6: require_route:false does NOT opt out of the receipt hold -------------
-rc_node = dict(node, require_route=False)     # opt-out governs the admission ping, not this
+rc_node = dict(node, require_route=False, provider=SUB_P, model=SUB_M)  # opt-out governs the admission ping, not this
 r5 = wf.run_child(meta, rc_node, {"work": rc_node}, "do the work", "", None,
                   skey="wf:r641:work#3")
 check("B6 require_route:false + substitution under a live receipt: still DENIED",

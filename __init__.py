@@ -2469,6 +2469,19 @@ def _create_run(args, graph, lib_name, models, routes, _liveness_notes, lane_pat
             n += 1
     (r / "gates").mkdir(exist_ok=True)
     (r / "graph.json").write_text(json.dumps(graph, ensure_ascii=False, indent=2))
+    # est-2ek.1.641: the door's admission proof is durable BEFORE the runner
+    # spawns — every node this submit's ping proved alive gets its proved-alive
+    # receipt into the lane (the runner refuses any later spawn that would bill
+    # a different model, before submit). Best-effort: a receipt write failure
+    # never blocks the launch (the runner-side bake re-covers at first spawn).
+    try:
+        _wf_mod = importlib.util.spec_from_file_location(
+            "_hermes_workflows_wf", Path(__file__).resolve().parent / "wf.py")
+        _wf_m = importlib.util.module_from_spec(_wf_mod)
+        _wf_mod.loader.exec_module(_wf_m)
+        _wf_m.bake_route_receipts(r, graph)
+    except Exception:
+        pass
     meta = {"name": graph.get("name", "workflow"), "hermes_bin": _hermes_bin(),
             "started": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "fp_rule_version": _common.FP_RULE_VERSION,
@@ -2990,6 +3003,17 @@ def act_amend(args):
     tmp = r / f"graph.json.{os.getpid()}.tmp"
     tmp.write_text(json.dumps(new, ensure_ascii=False, indent=2))
     os.replace(tmp, r / "graph.json")
+    # est-2ek.1.641: an applied amend re-proves routes through this submit's
+    # ping — bake the proved-alive receipts for the NEW defs (frozen replay-skip
+    # nodes keep their committed receipt: the file is merged, never rewritten).
+    try:
+        _wf_spec = importlib.util.spec_from_file_location(
+            "_hermes_workflows_wf", Path(__file__).resolve().parent / "wf.py")
+        _wf_m = importlib.util.module_from_spec(_wf_spec)
+        _wf_spec.loader.exec_module(_wf_m)
+        _wf_m.bake_route_receipts(r, new)
+    except Exception:
+        pass
     meta = jload(r / "run.json", {}) or {}
     # An author-form amend of a composite run restamps run.json's include truth the
     # same way act_run writes it: the notes/provenance describing THIS graph, not

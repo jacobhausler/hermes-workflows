@@ -64,6 +64,37 @@ def _route_receipts_path(run):
 def _route_receipt_load(run):
     return jload(_route_receipts_path(run), {}) or {}
 
+def bake_route_receipts(run, graph):
+    """Door-side admission write (est-2ek.1.641): every agent node the door's
+    ping PROVED alive at THIS submit (route_verified baked by
+    _route_enforcement) records its proved-alive receipt into the run dir,
+    merged over what earlier submits proved. Durable in the LANE (survives
+    runner respawn); the runner refuses any later spawn that would bill a
+    different model. No proof baked = no receipt written = legacy shape."""
+    run = Path(run)
+    wrote = False
+    p = _route_receipts_path(run)
+    try:
+        rec = _route_receipt_load(run)
+        for n in (graph or {}).get("nodes", []) or []:
+            if n.get("type") != "agent" or not n.get("id"):
+                continue
+            verified = n.get("route_verified")
+            route = f"{n.get('provider') or ''}/{n.get('model') or ''}".strip("/")
+            if not verified or not route or route == "/":
+                continue
+            if rec.get(n["id"]) != str(verified):
+                rec[n["id"]] = str(verified)
+                wrote = True
+        if wrote:
+            run.mkdir(parents=True, exist_ok=True)
+            tmp = p.with_name(f"{p.name}.{os.getpid()}.tmp")
+            tmp.write_text(json.dumps(rec, ensure_ascii=False, indent=2))
+            os.replace(tmp, p)
+    except OSError:
+        pass                                   # receipt write best-effort; the HOLD is strict
+    return wrote
+
 def _route_receipt_bake(meta, node):
     """Post-spawn receipt write (the door's proof, executed by the runner): a
     spawn that carried the door's alive-proof records (node id -> verified
@@ -107,10 +138,15 @@ def _route_substitution_refusal(meta, node, spawn_no):
     v = str(verified).strip().lower()
     a = ask.strip().lower()
     v_model = v.rsplit("/", 1)[-1]
+    # Identity is held ONLY against the receipt (full route or bare model name,
+    # plus the seat's alias map for the verified route). The spawn's OWN model
+    # is deliberately NOT a candidate: it is the very thing under suspicion —
+    # a substitution must never self-certify against itself.
     candidates = {v, v_model}
-    own = f"{node.get('provider') or ''}/{node.get('model') or ''}".strip("/").lower()
-    if own:
-        candidates |= {own, own.rsplit("/", 1)[-1]}
+    for alias, target in _seat_alias_map(hermes_home()).items():
+        if alias.lower() in (v, v_model):
+            candidates |= {alias.lower(), str(target).lower(),
+                           str(target).rsplit("/", 1)[-1].lower()}
     if a in candidates or a.rsplit("/", 1)[-1] in candidates:
         return None                            # same route: the receipt is not a spawn lock
     return {"status": "failed",
