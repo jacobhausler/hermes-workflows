@@ -35,8 +35,8 @@ from wfcommon import (efp, graph_fingerprint, jload, validate_graph, node_rec, g
                       publisher_gate_check, suite_proof_token_path,
                       confidence_substrate, strip_engine_disclosure,
                       substrate_disclosure_text, SUBSTRATE_DISCLOSURE_KEY,
-                      hermes_home as _wfcommon_hermes_home)
-
+                      hermes_home as _wfcommon_hermes_home,
+                      kind)
 def _route_home(result):
     """The target owns the child's session DB; absent routing preserves legacy home."""
     return result.get("profile_home") or hermes_home()
@@ -5562,7 +5562,7 @@ def main(run_id):
         # wave boundary, no spawn, no metrics row. Replay-skip by fingerprint comes
         # free: state() == pending only when the stored efp matches (node_rec law).
         for n in rs.nodes:
-            if n["type"] == "echo" and states[n["id"]] == "pending" and deps_ok(n) and deps_res(n):
+            if kind(n).spawns is None and states[n["id"]] == "pending" and deps_ok(n) and deps_res(n):
                 # est-2ek.1.603: an echo commits WITHOUT a spawn, so the publisher
                 # gate rides the echo commit path too — a declared publisher echo
                 # with no valid proof token fails typed and never commits.
@@ -5578,7 +5578,7 @@ def main(run_id):
                 log(run, "node.done", node=n["id"], echo=True)
                 states[n["id"]] = "done"; outputs[n["id"]] = n.get("output")
 
-        ready = [n for n in rs.nodes if n["type"] == "agent" and states[n["id"]] == "pending"
+        ready = [n for n in rs.nodes if kind(n).spawns is True and states[n["id"]] == "pending"
                  and deps_ok(n) and deps_res(n)]
         if ready:
             spawnable = []
@@ -5609,7 +5609,7 @@ def main(run_id):
         if m == "stopped": return "stopped"
         if m == "reloaded": continue
 
-        gate = next((n for n in rs.nodes if n["type"] == "gate" and states[n["id"]] == "pending"
+        gate = next((n for n in rs.nodes if kind(n).spawns is False and states[n["id"]] == "pending"
                      and deps_ok(n) and (not n.get("requires") or deps_res(n))), None)
         if gate:
             missing = _unmet_requires(gate, outputs, prov) if gate.get("requires") else []

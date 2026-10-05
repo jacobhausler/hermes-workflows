@@ -22,6 +22,7 @@ efp = _common.efp
 jload = _common.jload
 amend_preview = _common.amend_preview
 quote_json_parse_error = _common.quote_json_parse_error
+kind = _common.kind   # the door consults the ONE node-kind table (wfcommon.NODE_TYPES) via this
 
 # #157: card enforcement — bind our OWN wfcommon (never a sys.path sibling).
 _ce_spec = importlib.util.spec_from_file_location("_hermes_workflows_card_enforcement",
@@ -77,7 +78,7 @@ def _model_policy_error(graph):
     tiers = model_tiers()
     known = set(seat["aliases"]) | ({seat["default"]} - {None}) | set(tiers.values())
     for node in graph["nodes"]:
-        if node.get("type") in ("gate", "echo"):
+        if kind(node).spawns is not True:   # non-agent (gate/echo): no model route
             continue
         nid, requested = node["id"], node.get("model")
         if policy.get("require_model") and not requested:
@@ -807,7 +808,7 @@ def _resolve_models(nodes, committed=None, keep=()) -> tuple[str | None, dict | 
     committed = committed or {}
     requests = []
     for n in nodes:
-        if n.get("type") in ("gate", "echo"):
+        if kind(n).spawns is not True:   # non-agent (gate/echo): no model route
             continue
         c = committed.get(n.get("id")) or {}
         frozen = bool(c) and n.get("id") in keep
@@ -2855,7 +2856,7 @@ def act_steer(args):
         return {"error": "unknown run_id"}
     run_status = st["status"]
     node_status = (st.get("nodes", {}).get(node["id"]) or {}).get("status")
-    if node["type"] != "agent":
+    if kind(node).spawns is not True:
         return {"ok": False, "error": "gate nodes do not accept steering; use release for a held gate"}
     if run_status in ("done", "failed", "stopped"):
         # Feedback #68: a terminal run has NO runner that will ever spawn that node —

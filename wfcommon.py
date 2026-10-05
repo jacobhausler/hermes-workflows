@@ -5,6 +5,7 @@ Everything that decides "is this result still trustworthy" or "what state is thi
 in" lives here, so the three readers can never disagree.
 """
 import hashlib, json, os, re, shlex, subprocess, sys
+from collections import namedtuple
 from pathlib import Path
 
 def jload(p, default=None):
@@ -504,7 +505,7 @@ def profile_errors(nodes, launcher=None, profiles_dir=None):
     def E(nid, msg):
         errs.append({"node": nid, "field": "profile", "msg": msg})
     for n in nodes or []:
-        if not isinstance(n, dict) or "profile" not in n or n.get("type", "agent") != "agent":
+        if not isinstance(n, dict) or "profile" not in n or kind(n).spawns is not True:
             continue  # non-agent profile keys die on the closed-key grammar
         nid = n.get("id")
         prof = n["profile"]
@@ -645,6 +646,20 @@ ECHO_KEYS = {"id", "type", "after", "output",
              # est-2ek.1.603: an echo commits at the wave boundary WITHOUT a spawn, so
              # the publisher gate covers the echo commit path too.
              "publishes"}
+# ONE table for node kinds: closed key-set + the schedule hook. `spawns` is True
+# (agent: spawn a child when ready), False (gate: hold at the wave boundary), None
+# (echo: commit `output` verbatim at the boundary, zero tokens). Scheduling and
+# validation consult NODE_TYPES, never a hardcoded type-literal tuple.
+NodeKind = namedtuple("NodeKind", "keys spawns")
+NODE_TYPES = {"agent": NodeKind(AGENT_KEYS, True),
+              "gate": NodeKind(GATE_KEYS, False),
+              "echo": NodeKind(ECHO_KEYS, None)}
+
+def kind(node):
+    """A node's NodeKind, with the implicit-agent default for an untyped node and a
+    non-spawning fallback for an unknown type (never raises — the read model must
+    not crash on a legacy graph; the validator owns rejection)."""
+    return NODE_TYPES.get(node.get("type", "agent")) or NodeKind(frozenset(), "none")
 # 1.1 (RATIFY F5): opt-in library provenance block, written by the door's `save` ONLY when
 # `source` is supplied or the saving door runs under a named profile. Top-level graph key.
 PROVENANCE_KEYS = {"owner", "source", "saved_at", "source_digest"}
@@ -781,7 +796,7 @@ def apply_graph_defaults(graph):
     nodes = []
     for n in graph.get("nodes", []):
         n = dict(n)
-        if n.get("type", "agent") == "agent":
+        if kind(n).spawns is True:   # implicit-agent default; unknown types skip (validator owns them)
             if n.get("shape") is not None and n["shape"] not in SHAPE_PRESETS:
                 raise ValueError(json.dumps(
                     [{"node": n.get("id"), "field": "shape",
@@ -909,10 +924,10 @@ def validate_graph_errors(nodes):
     parents = {n["id"]: [a for a in n.get("after", []) if a in idset] for n in nodes}
     for n in nodes:
         nid = n["id"]
-        if n.get("type") not in ("agent", "gate", "echo"):
+        if n.get("type") not in NODE_TYPES:
             E(nid, "type", "type must be agent|gate|echo")
             continue  # per-type key grammar is undefined without a type
-        _type_keys = {"agent": AGENT_KEYS, "gate": GATE_KEYS, "echo": ECHO_KEYS}[n["type"]]
+        _type_keys = NODE_TYPES[n["type"]].keys
         for k in sorted(set(n) - _type_keys):
             # dedicated errors below own these keys (clearer messages, no double-report)
             if n["type"] == "agent" and k == "wait":
@@ -1195,7 +1210,8 @@ def validate_graph_errors(nodes):
                                          f"node in its `after` ancestry (inputs must descend from it)")
     # 1.1 (RATIFY F4): output preconditions — structural check, ancestry via `parents`.
     # Only typed agent/gate nodes reach here (echo's closed key set already rejected it).
-    errs.extend(requires_errors([n for n in nodes if n.get("type") in ("agent", "gate")], parents))
+    errs.extend(requires_errors([n for n in nodes if NODE_TYPES.get(n.get("type"))
+                                 and NODE_TYPES[n["type"]].spawns is not None], parents))
     indeg = {i: 0 for i in idset}
     kids = {i: [] for i in idset}
     for n in nodes:
@@ -2758,7 +2774,7 @@ def run_state(r):
     prune_states(graph["nodes"], states)   # derived view: pruned-but-uncommitted read as skipped
     for n in graph["nodes"]:
         st, rec = states[n["id"]], recs[n["id"]]
-        active = _active_spawns(r, n, byid) if live and st == "pending" and n["type"] == "agent" else []
+        active = _active_spawns(r, n, byid) if live and st == "pending" and kind(n).spawns is True else []
         nodes[n["id"]] = {"type": n["type"], "status": "running" if active else st, "after": n.get("after", []),
                           "fanout": bool(n.get("fanout")),
                           "stale_of_amend": bool(rec) and st == "pending" and rec.get("status") in ("done", "partial", "failed", "skipped") or None}
@@ -2786,7 +2802,7 @@ def run_state(r):
     elif all(s in ("done", "partial", "skipped") for s in states.values()):   # #4: partial closes the run
         status = "done"
     else:
-        gate = next((n for n in graph["nodes"] if n["type"] == "gate"
+        gate = next((n for n in graph["nodes"] if kind(n).spawns is False
                      and states[n["id"]] == "pending" and deps_ok(n)), None)
         if gate and gate.get("wait") and gate_answer_valid(r, gate, byid) is None:
             # machine-answered gate: the runner is polling it — 'running', never 'held'.
@@ -2824,7 +2840,7 @@ def run_state(r):
             meta[nid] = {"held": True}
         elif nodes[nid].get("parked"):
             meta[nid] = {"parked": nodes[nid]["parked"]}
-        elif states[nid] == "pending" and n["type"] == "agent" and deps_ok(n) and nodes[nid].get("active_spawn"):
+        elif states[nid] == "pending" and kind(n).spawns is True and deps_ok(n) and nodes[nid].get("active_spawn"):
             meta[nid] = {"running": True}
     for n in graph["nodes"]:
         if states[n["id"]] == "pending" and not deps_ok(n):
