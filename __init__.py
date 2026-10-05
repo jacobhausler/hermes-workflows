@@ -270,6 +270,61 @@ def _hermes_bin():
 
 runner_alive = _common.runner_alive
 
+def _gw_restart_window_match(r, anchor_iso):
+    """#8 (P0, remaining half): observed gw-restart reason. The incident shape
+    is the gateway itself being SIGTERMed for a restart while the sweep takes
+    the runner down — the death window then shows a `Received SIGTERM` line in
+    <hermes_home>/logs/gateway.log. Match it from FILES ONLY: any such line
+    whose stamp falls within +/-120 s of `anchor_iso` (the death anchor).
+    Never fatal: an absent/unreadable log, an unparseable anchor, or any read
+    error answers False — the reap keeps today's bare reason. The host log is
+    the gateway's own file; the plugin only reads it, never writes."""
+    try:
+        anchor = datetime.fromisoformat(anchor_iso)
+    except (TypeError, ValueError):
+        return False
+    if anchor.tzinfo is None:
+        anchor = anchor.replace(tzinfo=timezone.utc)
+    try:
+        lines = (_common.hermes_home() / "logs" / "gateway.log").read_text(
+            errors="replace").splitlines()
+    except (OSError, ValueError):
+        return False
+    for line in lines:
+        if "Received SIGTERM" not in line:
+            continue
+        for tok in line.replace("[", " ").replace("]", " ").split():
+            try:
+                stamp = datetime.fromisoformat(tok)
+            except ValueError:
+                continue
+            if stamp.tzinfo is None:
+                stamp = stamp.replace(tzinfo=timezone.utc)
+            if abs((stamp - anchor).total_seconds()) <= 120:
+                return True
+    return False
+
+
+def _death_anchor(r):
+    """The death window anchor: the last event ts on the record (the dead
+    runner's last heartbeat), else the wf.pid file's mtime. Files only."""
+    try:
+        for line in reversed((r / "events.jsonl").read_text().splitlines()):
+            try:
+                ts = json.loads(line).get("ts")
+            except ValueError:
+                continue
+            if isinstance(ts, str) and ts:
+                return ts
+    except OSError:
+        pass
+    try:
+        m = (r / "wf.pid").stat().st_mtime
+        return datetime.fromtimestamp(m, tz=timezone.utc).isoformat(timespec="seconds")
+    except OSError:
+        return None
+
+
 def _reap_silent_death(r):
     """#8 fix-law item 2 (crash-visibility): make a silent runner death loud
     BEFORE a door respawn replaces it. The incident shape: runner + children die
@@ -319,6 +374,13 @@ def _reap_silent_death(r):
         # door's own admission path (only one respawn proceeds), so the retry
         # window this pins is sequential.
         now_iso = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        # #8 (P0, remaining half): the observed-reason clause. When the death
+        # window matches a gateway restart (a `Received SIGTERM` line in the
+        # host gateway log within +/-120 s of the last event ts / wf.pid mtime),
+        # the event says so. Never fatal: an absent/unreadable log keeps the
+        # bare reason byte-identical (S2-S4 pins in tests/test_reaper_reason_8).
+        if _gw_restart_window_match(r, _death_anchor(r)):
+            reason = reason + "; gw-restart window match"
         events = [{"ts": now_iso, "event": "runner.reaped", "prev_pid": pid, "reason": reason}]
         for n in graph.get("nodes", []):
             paths = [(r / "nodes" / f"{n['id']}.json", None)]

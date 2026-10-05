@@ -36,6 +36,20 @@ Runs live under `<runs_root>` = `$WF_RUNS_ROOT` when set (absolute dir), else `<
 
 **Identity sources, ranked.** `launcher_profile()` answers (1) the process's own resolved `HERMES_HOME` when it is `<root>/profiles/<name>` → `name`; else (2) `settings.profile` (validated by the same `_PROFILE_NAME_BAD` rule node `profile:` keys use; unsafe → error; and FAIL-CLOSED on a GHOST — the named profile home `<hermes_root>/profiles/<name>/` must EXIST, so a stamped `dispatched_by` nobody can verify is refused at submit with `does not exist` instead of inventing an identity that poisons the consent model; the check applies to the RESOLVED value whatever subtree it came from, settings or legacy `config`); else (3) `"default"`. Env-derived identity ALWAYS wins when present — the setting can only fill an identity the process could not carry (the desktop tool bridge and env-blind gateways launch the tool without a profile home), never override one it does. Consent gates (`workflow_team.json` `accept_from`) then see the real launcher instead of `default`, and `dispatched_by`/`provenance.owner` stamp it. Unset = byte-identical `"default"`.
 
+**Spawn-ledger (the legibility half of #8; claim boundary stated honestly).**
+`<run>/spawn-ledger.jsonl` is written by the ADMITTED RUNNER ONLY (sole-owner
+law, same as `wf.pid`): one `role:runner` row at admission (right after
+`ready_stamp`), one `role:child` row per recorded spawn, one `role:child_end`
+row per judged spawn, every row carrying `{ts,pid,role,node,index,skey,purpose:
+"workflow-runner"}`. It is the EXEMPTION HINT for EXTERNAL reapers — a process
+sweep, a janitor cron, a human `pkill`: consult the ledger before killing, a
+listed pid is a workflow runner or a workflow child and reapers must not kill
+it. The boundary is honest: core's `process_registry` lives OUTSIDE this repo;
+the plugin cannot change core, register anything there, or compel any reaper —
+it can only make the tree legible (same honesty style as the claim boundary in
+`tests/test_daemonize_8.py`). Best-effort by law: a ledger write failure never
+touches a spawn.
+
 **Invariant: a launch must never be invisible.** Whatever process launches a run — tool bridge, gateway, CLI, dashboard — the run lands under the ONE root every reader resolves, and every reader resolves it from the same ranked sources at the same call. There is no second root a tab can look at that the launching path does not write to. If the owner's setting is wrong, the launch says so and refuses; it does not quietly create runs somewhere else.
 
 **Trust note.** `runs_root` and `profile` are OWNER vocabulary: they live in the owner's `config.yaml`, next to `hermes_bin` and `models`. They are deliberately NOT tool arguments — a model-settable graph/run arg could choose the launcher identity or the root, which is exactly the spoof the consent gate exists to refuse, and the hand-roll incentive (#41) dies with a setting the owner declares once, not with an argument the model could set per call. Nothing in the skill or the tool description tells the model to self-serve these keys; a model that edits `config.yaml` mid-session is acting on the owner's config, not on the tool's grammar, and env-derived identity still wins over anything it writes.

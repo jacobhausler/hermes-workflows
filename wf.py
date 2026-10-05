@@ -305,6 +305,31 @@ def log(run, ev, **kw):
 def emit(line):
     print(line, flush=True)
 
+# ---------- #8 (P0, remaining half): the spawn-ledger (issue item 1's legibility half) ----------
+# <run>/spawn-ledger.jsonl rows {ts,pid,role,node,index,skey,purpose:'workflow-runner'}
+# make the runner's spawn tree LEGIBLE to an EXTERNAL reaper (core's
+# process_registry lives outside this repo — the plugin cannot change core; it
+# can only publish the exemption hint). SOLE-OWNER law: the ADMITTED runner
+# writes this file and NOTHING else ownership-shaped — the door appends to it
+# NEVER (same law as wf.pid, ready_stamp above). Append-only, best-effort: a
+# ledger failure never touches a spawn (never-fatal law, same as the reaper's
+# gateway-log match).
+SPAWN_LEDGER_PURPOSE = "workflow-runner"
+
+def ledger_row(meta_or_run, role, pid, node=None, index=None, skey=None):
+    run = meta_or_run.get("_run") if isinstance(meta_or_run, dict) else meta_or_run
+    row = {"ts": now(), "pid": pid, "role": role,
+           "node": node, "index": index, "skey": skey,
+           "purpose": SPAWN_LEDGER_PURPOSE}
+    try:
+        with open(Path(run) / "spawn-ledger.jsonl", "a") as f:
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+    except Exception as e:
+        try:
+            log(run, "spawn.ledger.error", role=role, error=f"{type(e).__name__}: {e}")
+        except Exception:
+            pass   # legibility is diagnostics, never a reason to lose a spawn
+
 # ---------- owner-session wake (lifecycle TRANSITIONS only) ----------
 # The WORKFLOW_* stdout lines above are the runner's log voice and stay exactly as
 # they are (runner.log is the door's redirect). This path is the ADDITIVE push: the
@@ -952,6 +977,9 @@ def ready_stamp(run):
     fd (direct spawn, resume, in-process tests): stamp only, as before."""
     fd = os.environ.pop(_READY_FD_ENV, None)   # first reader wins; gone for children
     (run / "wf.pid").write_text(str(os.getpid()))
+    # #8 spawn-ledger: register the admitted runner right after the stamp —
+    # same sole-owner moment, so the door can never be seen writing ownership.
+    ledger_row(run, "runner", os.getpid())
     if fd is None:
         return
     try:
@@ -3927,6 +3955,8 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
                            started_iso, prompt_path=str(pp))
     except Exception as e:
         log(run, "spawn.record.error", node=node["id"], error=f"{type(e).__name__}: {e}")
+    # #8 spawn-ledger: the child is legible from the moment its spawn record is.
+    ledger_row(meta, "child", proc.pid, node=node["id"], index=index, skey=skey)
     evd = {"log_path": str(lp), "prompt_path": str(pp), "pid": proc.pid,
            "spawn_cmd": spawn_cmd, "started": started_iso, "spawn": spawn_no, **route}
     timed_out = False
@@ -4015,6 +4045,10 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
             meta["_procs"].pop(f"{node['id']}:{id(proc)}", None)
         try: logf.close()
         except Exception: pass
+        # #8 spawn-ledger: close the row for every spawn that reached judgment
+        # (idempotent per pid; a runner dying mid-spawn simply leaves the row
+        # open — the exemption hint errs on the side of not-killing).
+        ledger_row(meta, "child_end", proc.pid, node=node["id"], index=index, skey=skey)
         # Tier self-report BEFORE the report is unlinked: failed children only
         # (timeout or non-zero exit); success leaves no trace (honest absence).
         if timed_out or early_death or (rc is not None and rc != 0):
