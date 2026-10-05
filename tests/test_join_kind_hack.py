@@ -39,9 +39,13 @@ def wf(run_id):
     return p.stdout.strip()
 
 # ---- door (loaded by path, like the C1 test) ----
+# #71: HERMES_HOME alone does NOT sandbox the shelf — WF_RUNS_ROOT pins runs/library
+# and wf_test_isolation neutralises settings.runs_root; without both, saves pollute prod.
 os.environ["HERMES_HOME"] = str(HOME)
+os.environ["WF_RUNS_ROOT"] = str(RUNS)
 _spec = importlib.util.spec_from_file_location("hw_join", BUILD.parent / "__init__.py")
 hw = importlib.util.module_from_spec(_spec); _spec.loader.exec_module(hw)
+import wf_test_isolation as _iso71; _iso71.install(hw)  # #71 r5: pin settings.runs_root alongside WF_RUNS_ROOT
 def call(**a):
     return json.loads(hw.handle(a))
 
