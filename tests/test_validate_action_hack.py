@@ -12,10 +12,17 @@ HOME = BUILD / "home_validate"
 shutil.rmtree(HOME, ignore_errors=True)
 HOME.mkdir(parents=True)
 os.environ["HERMES_HOME"] = str(HOME)
+# Shelf-audit S3 (test_shelf_isolation_71.py): an in-process door writer must pin
+# BOTH doors — WF_RUNS_ROOT env AND the plugin's settings.runs_root — since the
+# owner setting outranks the env pin (09-30 pollution law).
+os.environ["WF_RUNS_ROOT"] = str(HOME / "runs-pin")
 os.environ["HERMES_WF_HERMES_BIN"] = str(BUILD / "fake")
 root = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(root / "tests"))
 spec = importlib.util.spec_from_file_location("hw_validate", str(root / "__init__.py"))
 hw = importlib.util.module_from_spec(spec); spec.loader.exec_module(hw)
+import wf_test_isolation as _iso71
+_iso71.install(hw)
 
 ok = True
 def check(label, cond, detail=""):
