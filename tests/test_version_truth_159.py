@@ -17,7 +17,7 @@ import subprocess
 import sys
 import tempfile
 import zipfile
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -72,8 +72,12 @@ with tempfile.TemporaryDirectory(prefix=".tmp-vt159-") as td:
         check("V4 version is the manifest version verbatim", rec.get("version") == VERSION, repr(rec))
         check("V5 source_commit is the pinned fake sha verbatim",
               rec.get("source_commit") == FAKE_SHA, repr(rec.get("source_commit")))
-        expected_at = datetime.fromtimestamp(int(EPOCH)).astimezone().isoformat()
-        check("V6 packaged_at is the pinned SOURCE_DATE_EPOCH as ISO-8601",
+        # Behavioral expectation, NOT a replay of pack.py's expression: the
+        # pinned epoch renders in explicit UTC (zap review #198 — a host-TZ
+        # conversion here would repeat the implementation's bug, as V6 did).
+        expected_at = "2025-09-04T15:33:20+00:00"
+        assert expected_at == datetime.fromtimestamp(int(EPOCH), timezone.utc).isoformat()
+        check("V6 packaged_at is the pinned SOURCE_DATE_EPOCH rendered in explicit UTC",
               rec.get("packaged_at") == expected_at,
               f"{rec.get('packaged_at')!r} != {expected_at!r}")
     else:
@@ -108,6 +112,40 @@ with tempfile.TemporaryDirectory(prefix=".tmp-vt159-") as td:
               rec2.get("source_commit") != "not-a-sha; rm -rf /"
               and re.fullmatch(r"[0-9a-f]{40}|unknown", str(rec2.get("source_commit"))) is not None,
               repr(rec2.get("source_commit")))
+
+    # ---------- 1b) cross-TZ regression (zap review #198) ----------
+    # Identical HEAD, identical pinned seams, ONLY TZ differs: both packs must
+    # agree on packaged_at (UTC) AND on the ZIP hash. The old implementation
+    # converted through the host timezone and failed both assertions.
+    def pack_under(tz_value, dest):
+        env_tz = {**os.environ, "HERMES_WF_PACK_COMMIT": FAKE_SHA,
+                  "SOURCE_DATE_EPOCH": EPOCH, "TZ": tz_value}
+        res = subprocess.run(
+            [sys.executable, str(ROOT / "scripts/pack.py"), "--output", str(dest)],
+            cwd=ROOT, capture_output=True, text=True, env=env_tz,
+        )
+        return res.returncode == 0 and dest.exists()
+
+    out_utc = Path(td) / "pkg-tz-utc.zip"
+    out_chi = Path(td) / "pkg-tz-chi.zip"
+    ok_utc = pack_under("UTC", out_utc)
+    ok_chi = pack_under("America/Chicago", out_chi)
+    check("V10 cross-TZ: both TZ packs exit 0 and produce a ZIP",
+          ok_utc and ok_chi)
+    if ok_utc and ok_chi:
+        import hashlib
+        h_utc = hashlib.sha256(out_utc.read_bytes()).hexdigest()
+        h_chi = hashlib.sha256(out_chi.read_bytes()).hexdigest()
+        check("V11 cross-TZ: ZIP hash is TZ-invariant (host TZ cannot leak into bytes)",
+              h_utc == h_chi, f"UTC {h_utc} != Chicago {h_chi}")
+        at = {}
+        for name, zp in (("UTC", out_utc), ("America/Chicago", out_chi)):
+            with zipfile.ZipFile(zp) as archive:
+                at[name] = json.loads(archive.read(root + "install.json")
+                                       .decode("utf-8"))["packaged_at"]
+        check("V12 cross-TZ: packaged_at is the UTC rendering under BOTH timezones",
+              at["UTC"] == at["America/Chicago"] == "2025-09-04T15:33:20+00:00",
+              repr(at))
 
 # ---------- 2) the door's doctor_version flags live-vs-packaged drift ----------
 check("D0 doctor_version is a registered action",

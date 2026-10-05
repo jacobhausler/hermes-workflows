@@ -10,7 +10,7 @@ import re
 import stat
 import subprocess
 import zipfile
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -47,7 +47,10 @@ def _packaged_at() -> str:
     # per tree — two packs of one tree stay byte-identical), else "unknown".
     epoch = os.environ.get("SOURCE_DATE_EPOCH", "").strip()
     if epoch.isdigit():
-        return datetime.fromtimestamp(int(epoch)).astimezone().isoformat()
+        # Explicit UTC: astimezone()/local conversion lets the HOST timezone leak
+        # into the bytes — TZ=UTC vs TZ=America/Chicago gave different packaged_at
+        # and different ZIP hashes for one HEAD (zap review, issue #198).
+        return datetime.fromtimestamp(int(epoch), timezone.utc).isoformat()
     try:
         when = subprocess.run(
             ["git", "log", "-1", "--format=%cI", "HEAD"], cwd=ROOT,
