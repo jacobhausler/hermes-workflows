@@ -564,8 +564,8 @@ WORKFLOW_PARAMS = {
     "properties": {
         "action": {
             "type": "string",
-            "enum": ["run", "status", "wait", "release", "steer", "inbox", "amend", "stop", "list", "save", "submit", "library", "doctor_version"],
-            "description": "run=launch a graph; wait=read state, RESPAWNING an idle runner if work is pending (blocks to the next boundary when one is live); status=read-model of a run; release=answer a held human gate; steer=queue steering text for a node; inbox=(child-side, cooperative) pull late steering lines baked for THIS spawn — call once at a natural seam; amend=replace the graph (invalidates changed nodes + all downstream by fingerprint); stop=request stop; list=all runs; save=shelve a graph in the library under a name (from run_id or inline graph); library=list shelved graphs richly (name, description, tags, provenance, path-relative id). run from=<name> replays a shelved graph. submit=quarantine a hand-rolled graph for study (requires why_not_library >=80 chars; never joins the library — the quartermaster's human-gated loop decides); inbox kind=submissions lists them newest-first. doctor_version=read-only version truth for THIS install: {live_version, newest_packaged, source_commit, drift} comparing plugin.yaml against the install.json provenance that pack.py stamps at build time \u2014 one read, no network.",
+            "enum": ["run", "status", "wait", "release", "steer", "inbox", "amend", "stop", "list", "save", "submit", "library", "doctor_version", "validate"],
+            "description": "run=launch a graph; wait=read state, RESPAWNING an idle runner if work is pending (blocks to the next boundary when one is live); status=read-model of a run; release=answer a held human gate; steer=queue steering text for a node; inbox=(child-side, cooperative) pull late steering lines baked for THIS spawn — call once at a natural seam; amend=replace the graph (invalidates changed nodes + all downstream by fingerprint); stop=request stop; list=all runs; save=shelve a graph in the library under a name (from run_id or inline graph); library=list shelved graphs richly (name, description, tags, provenance, path-relative id). validate=dry-run the door's validation pipeline (defaults fill + defect collection + model/route policy) with NO liveness ping and NO writes; returns {ok, errors:[{node,field,msg}], resolved_routes}. run from=<name> replays a shelved graph. submit=quarantine a hand-rolled graph for study (requires why_not_library >=80 chars; never joins the library — the quartermaster's human-gated loop decides); inbox kind=submissions lists them newest-first. doctor_version=read-only version truth for THIS install: {live_version, newest_packaged, source_commit, drift} comparing plugin.yaml against the install.json provenance that pack.py stamps at build time \u2014 one read, no network.",
         },
         "run_id": {"type": "string", "description": "Run id (required for every action except run/list)."},
         "name": {"type": "string", "description": "run: overrides graph.name (default workflow); save: library name overrides graph.name (lowercase, [-_.]). amend: set graph.name in the replacement graph; omitting it retains the run name."},
@@ -579,7 +579,7 @@ WORKFLOW_PARAMS = {
         "team": {"type": "string", "description": "run (optional, <=64 chars): team label stamped into run.json and shown by list; no effect on scheduling."},
         "lane_key": {"type": "string", "description": "run (optional, <=128 chars): in-flight registry key — a second run with the same key while the incumbent is unfinished is deduped (no spawn; returns the incumbent's run_id); status lane_key=<key> reads the incumbent instead of run_id. Keys are global per runs root; prefix with <team>/ yourself."},
         "source": {"type": "string", "description": "save (optional, <=200 chars): where this graph came from (repo path, URL, skill) — records opt-in provenance {owner, source, saved_at, source_digest} in the library entry."},
-        "graph_path": {"type": "string", "description": "run/save/amend: absolute path to a caller-supplied local regular UTF-8 JSON graph file (max 1 MiB, no final symlink). Choose exactly one of graph, graph_path, or run's from / save's run_id. Validated before any write or spawn."},
+        "graph_path": {"type": "string", "description": "run/save/amend/validate: absolute path to a caller-supplied local regular UTF-8 JSON graph file (max 1 MiB, no final symlink). Choose exactly one of graph, graph_path, or run's from / save's run_id. Validated before any write or spawn."},
         "graph": {
             "type": "object",
             "description": (
@@ -1906,6 +1906,33 @@ def act_library(args):
         out["quarantined"] = quarantined   # a clean library never grows this key (golden bytes)
     return out
 
+def act_validate(args):
+    """Dry-run the door's validation pipeline WITHOUT liveness ping or any write:
+    the same defaults fill, defect collection, and model/route policy run/amend do,
+    in the same order, returning {ok, errors:[{node,field,msg}], resolved_routes}."""
+    graph, bad = _input_graph(args)
+    if bad:
+        return bad
+    if graph is None:
+        return {"error": "validate needs graph or graph_path"}
+    bad = _validation_error(graph)
+    if bad:
+        return dict(bad, ok=False)
+    try:
+        graph = _common.apply_graph_defaults(graph)
+    except ValueError as e:
+        return {"ok": False, "error": f"graph invalid: defaults/shape: {e}",
+                "errors": json.loads(str(e))}
+    bad = _profile_error(graph) or _model_policy_error(graph)
+    if bad:
+        return dict(bad, ok=False)
+    err, _models, routes = _resolve_models(graph["nodes"])
+    if err:
+        return {"ok": False, "error": err,
+                "errors": [{"node": None, "field": "model", "msg": err}]}
+    return {"ok": True, "errors": [], "resolved_routes": routes,
+            "hint": "validated only — nothing pinged or written; run it: workflow run graph=..."}
+
 # ---------- actions ----------
 
 def _session_env(name):
@@ -3145,7 +3172,7 @@ def act_doctor_version(args):
 ACTIONS = {"run": act_run, "status": act_status, "wait": act_wait, "release": act_release,
            "steer": act_steer, "inbox": act_inbox, "amend": act_amend, "stop": act_stop, "list": act_list,
            "save": act_save, "submit": act_submit, "library": act_library,
-           "doctor_version": act_doctor_version}
+           "doctor_version": act_doctor_version, "validate": act_validate}
 
 def handle(args, **kwargs):
     try:
