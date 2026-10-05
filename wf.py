@@ -1416,6 +1416,33 @@ def _lane_hygiene_preamble(node):
     retry, bounded resume, fan-out item — carries it; def-hash-neutral by
     construction (nothing here is ever written to graph.json or a node record)."""
     return "\n".join(LANE_HYGIENE_LINES) if _is_build_lane(node) else ""
+# jam-h22/h30 (hackathon): the rate-limit/429 SUBCLASS of transport gets
+# exponential-with-full-jitter sleeps instead of the fixed ladder — many
+# sibling children dying on the same 429 window must not retry in lockstep.
+# It is a marker (record["subtype"]), never a new error_class: the closed
+# ERROR_CLASSES set is read-model law. Detection reuses the same surfaces
+# _classify_rc_output pins on (429 in `error code:`/`http <n>`, the two
+# rate-limit tokens); consequence of a false positive is only WHICH bounded
+# sleep is drawn, never whether a retry happens (class + api_calls gates hold).
+_RATE_LIMIT_TOKENS = ("rate limit", "too many requests")
+_RL_JITTER_CAPS = (5.0, 20.0, 80.0)      # cap doubles-ish per retry attempt
+_RL_JITTER_CEIL = 120.0                  # hard ceiling: a lane never sleeps past 2 min
+
+def _is_rate_limited(raw):
+    low = (raw or "").lower()
+    if any(t in low for t in _RATE_LIMIT_TOKENS):
+        return True
+    m = re.search(r"(?:error code:|http)\s*(\d{3})", low)
+    return bool(m) and m.group(1) == "429"
+
+def _retry_sleep(backoff, i, raw):
+    """jam-h22: the retry delay for attempt i (0-based). Rate-limited deaths draw
+    full jitter random.uniform(0, cap) over the cap ladder (capped 120 s); every
+    other transport death keeps today's fixed backoff ladder, byte-for-behaviour."""
+    if _is_rate_limited(raw):
+        cap = min(_RL_JITTER_CAPS[min(i, len(_RL_JITTER_CAPS) - 1)], _RL_JITTER_CEIL)
+        return random.uniform(0, cap)
+    return backoff[min(i, len(backoff) - 1)]
 
 # The machine-readable lines the child CLI actually emits (verified against
 # /opt/hermes/hermes_cli/oneshot.py: an escaping provider error reaches the
@@ -4428,11 +4455,18 @@ def _transient_retry(meta, r, respawn, ev, ev_kw, node=None, cancel=None):
                 error_class=r.get("error_class"), **ev_kw)
             break
         attempts_log.append({"attempt": len(attempts_log),
-                             "error_class": r["error_class"], "at": now(),
+"error_class": r["error_class"], "at": now(),
                              **_attempt_counts(run, r)})
-        log(run, ev + ".retrying", error_class=r["error_class"], backoff_s=backoff[len(attempts_log) - 1],
+        # jam-h22/h30: rate-limited deaths draw full-jitter sleeps (see _retry_sleep);
+        # a false-positive-free retry decision is unchanged — only the delay differs.
+        rate_limited = _is_rate_limited(r.get("raw"))
+        if rate_limited:
+            r["subtype"] = "rate_limited"
+        delay = _retry_sleep(backoff, len(attempts_log) - 1, r.get("raw"))
+        log(run, ev + ".retrying", error_class=r["error_class"], backoff_s=delay,
+            rate_limited=rate_limited,
             attempts_log=list(attempts_log), **ev_kw)
-        deadline = time.time() + backoff[len(attempts_log) - 1]
+        deadline = time.time() + delay
         while time.time() < deadline:
             if meta["_stop"].is_set():
                 break
@@ -4575,7 +4609,17 @@ def _bounded_retry(meta, r, respawn, ev, ev_kw, node=None, index=None):
                 if r.get("profile_home") else _tool_progress(run, r.get("skey"), r.get("raw")))
     if meta["_stop"].is_set() or not progress:
         return r                                   # no positive progress evidence: fail closed
-    if meta["_stop"].wait(_BOUNDED_RETRY_BACKOFF) or meta["_stop"].is_set():
+    if meta["_stop"].is_set():
+        return r
+    # jam-h22/h30: a rate-limited death waits a FULL-JITTER draw (cap 5 s) before
+    # the one resume re-drive; every other class keeps the fixed 5.0 s wait.
+    rl = _is_rate_limited(r.get("raw"))
+    if rl:
+        r["subtype"] = "rate_limited"
+        delay = random.uniform(0, _BOUNDED_RETRY_BACKOFF)
+    else:
+        delay = _BOUNDED_RETRY_BACKOFF
+    if meta["_stop"].wait(delay) or meta["_stop"].is_set():
         return r
     with meta["_procs_lock"]:
         if meta["_retries_left"] <= 0:
