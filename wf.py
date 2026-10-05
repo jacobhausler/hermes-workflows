@@ -41,6 +41,88 @@ def _route_home(result):
     """The target owns the child's session DB; absent routing preserves legacy home."""
     return result.get("profile_home") or hermes_home()
 
+# ---------- est-2ek.1.641: post-admission route substitution is refused BEFORE submit ----------
+# The #25 gate refuses at the admission PING and the commit hold fires AFTER the
+# billing (evidence runs 20261004-070649-zap-night-est-2ek1562 / 071125 / 072517:
+# a proved-alive pinned route whose later spawn billed claude-opus anyway). The
+# additive fail-closed half: the first spawn under a door-baked alive-proof
+# (`route_verified`) records a proved-alive RECEIPT for the lane (run dir
+# route_receipts.json — durable, survives runner respawn); any LATER spawn for
+# that lane whose effective (provider, model) differs from the receipt raises
+# typed route_substitution_denied BEFORE the Popen. require_route enforcement is
+# untouched — this never relaxes, only tightens, and it never fires on a lane
+# with no receipt (absence = no evidence = the legacy path, byte-identical).
+# The #116 confidence_substrate is unaffected at spawn time: its substitution is
+# engine-decided AT SUBMIT (the receipt is written for whatever route the door
+# certified and baked), so a served rung re-pings as its own route.
+
+ROUTE_RECEPTS_NAME = "route_receipts.json"
+
+def _route_receipts_path(run):
+    return Path(run) / ROUTE_RECEPTS_NAME
+
+def _route_receipt_load(run):
+    return jload(_route_receipts_path(run), {}) or {}
+
+def _route_receipt_bake(meta, node):
+    """Post-spawn receipt write (the door's proof, executed by the runner): a
+    spawn that carried the door's alive-proof records (node id -> verified
+    'provider/model') so every LATER spawn of this lane is held to it —
+    including spawns by a replacement runner (the file is the lane's, not the
+    process's)."""
+    verified = (node or {}).get("route_verified")
+    if not verified:
+        return
+    route = f"{node.get('provider') or ''}/{node.get('model') or ''}".strip("/")
+    if not route or route == "/":
+        return
+    run = meta.get("_run")
+    if run is None:
+        return
+    p = _route_receipts_path(run)
+    try:
+        rec = _route_receipt_load(run)
+        if rec.get(node["id"]) == str(verified):
+            return
+        rec[node["id"]] = str(verified)
+        tmp = p.with_name(f"{p.name}.{os.getpid()}.tmp")
+        tmp.write_text(json.dumps(rec, ensure_ascii=False, indent=2))
+        os.replace(tmp, p)
+    except OSError:
+        pass                                   # receipt best-effort WRITE; the HOLD is strict
+
+def _route_substitution_refusal(meta, node, spawn_no):
+    """est-2ek.1.641: BEFORE submit — if this lane has a proved-alive receipt
+    and this spawn would bill a different model, refuse typed. Same identity
+    law as the #25 commit hold (full route or bare model name match passes);
+    an absent receipt never fires (fail-open on absence is the whole contract
+    of this gate — the substitution evidence must exist to hold against)."""
+    rec = _route_receipt_load(meta.get("_run")) if meta.get("_run") else {}
+    verified = rec.get((node or {}).get("id"))
+    if not verified:
+        return None
+    ask = f"{node.get('provider') or ''}/{node.get('model') or ''}".strip("/")
+    if not ask:
+        return None                            # seat auto-route: nothing pinned, nothing held
+    v = str(verified).strip().lower()
+    a = ask.strip().lower()
+    v_model = v.rsplit("/", 1)[-1]
+    candidates = {v, v_model}
+    own = f"{node.get('provider') or ''}/{node.get('model') or ''}".strip("/").lower()
+    if own:
+        candidates |= {own, own.rsplit("/", 1)[-1]}
+    if a in candidates or a.rsplit("/", 1)[-1] in candidates:
+        return None                            # same route: the receipt is not a spawn lock
+    return {"status": "failed",
+            "error": f"route_substitution_denied: node {node['id']!r} has a proved-alive "
+                     f"receipt for {verified!r} (door-baked at admission); this spawn "
+                     f"would bill {ask!r}. A post-admission route substitution is refused "
+                     f"BEFORE submit — never a silent re-billing of another model "
+                     f"(est-2ek.1.641). Amend the node to the route you accept, or "
+                     f"delete the run's {ROUTE_RECEPTS_NAME} only to re-admit through "
+                     f"the door's ping.",
+            "error_class": "route_substitution_denied", "raw": "", "ms": 0,
+            "attempts": 1, "spawn": spawn_no}
 
 def _profile_evidence(node):
     name = node.get("profile")
@@ -1380,7 +1462,12 @@ ERROR_CLASSES = frozenset(("provider_400", "unresolved_model", "cap_exhausted",
                            "left_live_descendants",
                            # est-tmuu: a deterministic provider/alias config death (see
                            # _CONFIG_INPUT_WINDOW_MS) — terminal, in BOTH ladders.
-                           "config_input"))
+                           "config_input",
+                           # est-2ek.1.641: a spawn refused BEFORE submit because the
+                           # lane carries a proved-alive receipt for another model —
+                           # post-admission route substitution is a denial, never a
+                           # silent re-billing (runs 20261004-070649-zap-night-*).
+                           "route_substitution_denied"))
 _AGENT_FAIL_PREFIX = "hermes -z: agent failed:"
 # turn_failure_copy.py ends every non-retryable failure with a fixed-format trailer
 # `Provider said: <summary>`; api_error_summary.py:49 formats the summary as
@@ -2117,6 +2204,164 @@ def _kill_adopted(pid):
     except Exception:
         try: os.kill(pid, signal.SIGKILL)
         except Exception: pass
+
+# ---------- est-2ek.1.666: a terminating runner never orphans its agent child ----------
+# Witnessed 2026-10-04 15:32Z (fb-closeout): SIGTERM/SIGKILL/crash of a runner left
+# the CURRENT agent-node child alive in its own session, still mutating real state
+# unsupervised. Every spawn already owns its process group (start_new_session=True
+# at Popen == os.setsid at spawn), so the kill channel exists on every path — what
+# was missing is a channel that FIRES when the runner dies:
+#   (1) runner side: _runner_term_cleanup() killpgs every registered child
+#       (SIGTERM grace -> SIGKILL) and sweeps subreaper-adopted escapees; it is
+#       wired to EVERY exit path — normal end, node-failure bail, atexit, and a
+#       SIGTERM handler that cleans and then re-raises the DEFAULT (exit code
+#       and signal semantics unchanged for the door's reaper);
+#   (2) child side (belt-braces, cooperative contract like the #61c registry):
+#       the spawn pins the runner pid into the child env (RUNNER_PID_ENV); a
+#       spawned child that follows the contract calls child_parent_watch() and
+#       self-exits non-zero once its runner is verifiably dead — BUT a 790c6ad
+#       replacement runner claiming the lane (runner.lock held) keeps it alive:
+#       the belt must never eat an adoptable orphan (adoption is law).
+# SIGKILL of the runner leaves no handler able to run — the belt is the only net
+# on that path, which is why it is pinned here.
+
+RUNNER_PID_ENV = "HERMES_WF_RUNNER_PID"      # spawn pin: the runner's own pid
+CHILD_BELT_GRACE_S = 5.0   # replacement-runner (adoption) window before belt self-exit
+CHILD_BELT_POLL_S = 0.25
+
+def _pid_really_alive(pid):
+    """os.kill 0 + zombie-aware /proc state: a SIGKILLed runner lingering as an
+    unreaped zombie is DEAD for every purpose of the belt. Unreadable state on a
+    live os.kill 0 is not death (fail-open on absence, #61b B2 spirit)."""
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    try:
+        st = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[0]
+    except (OSError, IndexError):
+        return True
+    return not st.startswith("Z")
+
+def _lane_has_live_runner(run):
+    """True while ANY live process holds the run's runner.lock flock (the kernel
+    drops it on any exit, so free-lock == no runner). Same µs probe the read
+    model uses; admission's 3×10ms retry absorbs the collision."""
+    if not run:
+        return False
+    try:
+        fd = os.open(str(Path(run) / "runner.lock"), os.O_RDWR)
+    except OSError:
+        return False
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            return True                       # held: a runner lives on this lane
+        try:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+        except OSError:
+            pass
+        return False
+    finally:
+        try: os.close(fd)
+        except OSError: pass
+
+def child_parent_watch(interval=CHILD_BELT_POLL_S, grace_s=CHILD_BELT_GRACE_S):
+    """Child-side belt-braces (est-2ek.1.666): a spawned child that follows the
+    contract calls this; it NEVER returns while the child's runner lives, and
+    hard-exits non-zero once the runner is verifiably dead and no replacement
+    runner has claimed the lane within grace_s (adoption-safe: a respawning
+    door's live runner.lock keeps the child alive exactly as long as adoption
+    law needs). Absent the runner-pid pin it is a no-op — an honest absence,
+    never a guess."""
+    try:
+        runner_pid = int(os.environ.get(RUNNER_PID_ENV) or "")
+    except ValueError:
+        return
+    if runner_pid <= 0:
+        return
+    run = os.environ.get("HERMES_WF_RUN_DIR")
+    gone_since = None
+    while True:
+        if _pid_really_alive(runner_pid) or _lane_has_live_runner(run):
+            gone_since = None
+        else:
+            if gone_since is None:
+                gone_since = time.time()
+            elif time.time() - gone_since >= grace_s:
+                os._exit(70)                  # EX_TEMPFAIL — never exit clean
+        time.sleep(interval)
+
+def _kill_registered_children(meta, reason):
+    """killpg EVERY registered child (each is its own group leader —
+    start_new_session at spawn), SIGTERM grace then SIGKILL, /proc-proven via
+    the existing pool killer. The stop watcher owns the cooperative path; this
+    is the termination path: the runner itself is leaving, cooperatively or not."""
+    run = meta.get("_run")
+    with meta["_procs_lock"]:
+        pids = [getattr(h, "pid", None) for h in meta["_procs"].values()]
+    pids = [p for p in pids if isinstance(p, int)]
+    for p in pids:
+        try: os.killpg(os.getpgid(p), signal.SIGTERM)
+        except Exception: pass
+    gdead = time.time() + PROCREE_TERM_GRACE_S
+    live = [p for p in pids if _pid_really_alive(p)]
+    while live and time.time() < gdead:
+        time.sleep(0.05)
+        live = [p for p in pids if _pid_really_alive(p)]
+    if live:
+        for p in live:
+            try: os.killpg(os.getpgid(p), signal.SIGKILL)
+            except Exception: pass
+        dead, still = _wait_pids_dead(pids, _proctree_kill_proof_s(meta))
+        if log is not None and run is not None:
+            try:
+                log(run, "runner.term_kill", pids=sorted(pids),
+                    proof="dead" if dead else "stuck", stuck=still, reason=reason)
+            except Exception: pass
+    return pids
+
+def _runner_term_cleanup(meta, reason="exit"):
+    """ONE cleanup, every exit path (est-2ek.1.666): registered children are
+    killpg'd, subreaper-adopted escapees are swept, idempotently (a second call
+    is a no-op — normal end fires both the finally-sweep and atexit)."""
+    if meta is None or meta.get("_run") is None:
+        return
+    if meta.get("_term_done"):
+        return
+    meta["_term_done"] = True
+    run = meta["_run"]
+    try: _kill_registered_children(meta, reason)
+    except Exception: pass
+    try: _sweep_orphans(meta, f"term:{reason}")
+    except Exception: pass
+
+def _install_runner_term_cleanup(meta):
+    """Wire the termination cleanup into every exit path of the runner process:
+    * atexit covers the normal end and any bail that unwinds cleanly;
+    * SIGTERM handler: clean, record the death loudly, restore SIG_DFL, and
+      RE-RAISE the signal — the door's silent-death reaper sees the exact same
+      exit semantics as an unhandled SIGTERM.
+    Installed once, after flock admission (before it, the process has no
+    children and the lock-loser's sys.exit(0) must stay untouched)."""
+    import atexit
+    atexit.register(_runner_term_cleanup, meta, "atexit")
+    def _on_sigterm(signum, frame):
+        try: _runner_term_cleanup(meta, "sigterm")
+        except Exception: pass
+        try:
+            if not _EXIT_WRITTEN[0]:
+                write_runner_exit(meta["_run"], "terminated: SIGTERM")
+        except Exception: pass
+        signal.signal(signal.SIGTERM, signal.SIG_DFL)
+        os.kill(os.getpid(), signal.SIGTERM)     # re-raise the default
+    try:
+        signal.signal(signal.SIGTERM, _on_sigterm)
+    except (ValueError, OSError):
+        pass                                      # non-main thread / unsupported
 
 # ---------- #61: process-tree accounting (the false-green-suite law) ----------
 # A spawn that BACKGROUNDS the real work (detached pytest) and returns progress
@@ -3320,6 +3565,14 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
     # path — a death's fenced answer is not killed for omitting the disclosure.
     harvest_schema = strip_engine_disclosure(schema, (node or {}).get("substrate_substituted"))
     spawn_no = _next_spawn_no(meta, node, index)
+    # est-2ek.1.641: BEFORE submit — a lane with a proved-alive receipt may
+    # never re-submit on a different model (post-admission substitution is a
+    # denial, not a fallback). The seat is never touched: zero attempts.
+    _rsd = _route_substitution_refusal(meta, node, spawn_no)
+    if _rsd is not None:
+        log(run, "node.route_substitution_denied", node=node["id"], index=index,
+            spawn=spawn_no, error=_rsd["error"])
+        return _rsd
     # #61c: the survivor-registry token for THIS spawn — unique per Popen (a
     # pid can be recycled, a token cannot). A detached descendant registers
     # itself against it (child-side helper reads these env pins, inherited
@@ -3406,6 +3659,10 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
                HERMES_WF_STEER_NODE=str(node["id"]),
                HERMES_WF_STEER_SPAWN=str(spawn_no),
                HERMES_WF_RUN_ID=run.name,
+               # est-2ek.1.666 belt-braces: the runner's own pid, so a child that
+               # follows the contract can see verifiably (via child_parent_watch)
+               # that its runner is gone and self-exit non-zero.
+               **{RUNNER_PID_ENV: str(os.getpid())},
                HERMES_WF_RUN_DIR=str(run),   # 1.1 (RATIFY F1): absolute run dir; act_inbox prefers it,
                # #8 item 3: the durable side-effect journal pin (the SIDECAR-pin
                # law — the runner names the file, the registrant appends rows) +
@@ -3501,6 +3758,9 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
         except Exception: pass
         return {"status": "failed", "error": f"launcher spawn failed: {e}",
                 "error_class": "spawn", "ms": 0, "spawn": spawn_no, "attempts": 1, **route}
+    # est-2ek.1.641: this spawn billed under the door's alive-proof — record
+    # the lane's proved-alive receipt (durable, replacement-runner-visible).
+    _route_receipt_bake(meta, node)
     # Q1 spawn-time record (after Popen succeeded, before awaiting): the live
     # child is visible mid-run with pid / log / argv / prompt path (A1: the
     # prompt as sent is durable in the run dir — no redaction, no unlink).
@@ -4965,6 +5225,10 @@ def main(run_id):
     meta["_procs"] = {}
     meta["_procs_lock"] = threading.Lock()
     meta["_stop"] = threading.Event()
+    # est-2ek.1.666: termination cleanup wired on EVERY exit path (atexit +
+    # SIGTERM-clean-and-reraise) — a runner that leaves must not leave its
+    # agent-node child mutating real state unsupervised.
+    _install_runner_term_cleanup(meta)
     meta["_run"] = run                      # Q1: spawn records + per-spawn logs
     meta["_spawn_n"] = {}                   # per (node,item) spawn counter for log names
     meta["_retries_left"] = _retry_conf_params(meta)[1]   # Q4 per-run retry budget

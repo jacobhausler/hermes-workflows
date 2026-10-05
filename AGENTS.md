@@ -230,7 +230,7 @@ Author-run receipt: [receipts/exchange-run/author-run.json](receipts/exchange-ru
   fanout_empty | fatal_quota | forbidden_model | graph_invalid | incomplete_work |
   inputs | lane_wreckage | left_live_descendants | malformed_turn | precondition | provider_400 | quorum |
   ratelimit |
-  route_unavailable | schema | spawn | timeout | transport | transport_exhausted |
+  route_unavailable | route_substitution_denied | schema | spawn | timeout | transport | transport_exhausted |
   unresolved_model`, plus `unknown` as the harvest-time default when nothing matches —
   plus `attempts`. Read the class, not the prose. `cancelled` (a `stop`, or a fan-out
   straggler at quorum) is never a failure: the run reads `stopped`, and a `wait` re-drives it.
