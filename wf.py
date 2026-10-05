@@ -15,6 +15,7 @@ against the current graph (own def + all ancestors' defs). An amend upstream mak
 downstream result stale — downstream nodes re-run or re-hold; unchanged chains replay.
 """
 import json, os, random, re, signal, socket, subprocess, sys, threading, time
+import difflib
 import fcntl
 import hashlib
 import urllib.error
@@ -981,6 +982,67 @@ def last_balanced_object(text):
             i = text.find("{", i + 1)
     return last
 
+def _value_type_ok(val, prop):
+    """est-2ek.1.62: does `val` satisfy the declared type in schema fragment
+    `prop` ({} when nothing is declared — an undeclared type leaves nothing
+    left to contradict)? Same predicates as chk() below; bool is never a
+    number (#113), and 'integer' means an integral value. The suggestion
+    gate uses this to REFUSE a rename that would pass `required` and then die
+    on the type check."""
+    if not prop:
+        return True
+    t = prop.get("type")
+    if t == "object":  return isinstance(val, dict)
+    if t == "array":   return isinstance(val, list)
+    if t == "string":  return isinstance(val, str)
+    if t == "boolean": return isinstance(val, bool)
+    if t in ("number", "integer"):
+        if isinstance(val, bool) or not isinstance(val, (int, float)):
+            return False
+        return not (t == "integer" and isinstance(val, float) and not val.is_integer())
+    return True                       # untyped fragment: nothing to contradict
+
+def _rename_hint(r, v, s):
+    """est-2ek.1.62: when a required key is MISSING but the object carries an
+    extra key the schema doesn't name that is CLOSE to it and type-consistent
+    with it, the child most likely RE-USED A SIBLING KEY NAME (mean_ranking
+    for mean_rank, proposal for id) — a complete, correct answer that died
+    error_class=schema because the bare "missing required" gave the retry
+    nothing to correct. Name the rename explicitly so the typed-correction
+    retry converges instead of re-emitting the same shape. The enriched
+    string flows verbatim into the existing retry prompt (validate's callers
+    pass errors through unchanged). Closeness is difflib.get_close_matches
+    (n=1, cutoff 0.6) PLUS a short-name rule: the worked example from the report
+    id/proposal has difflib ratio 0.0 (no shared characters), so similarity
+    is meaningless at that length — when the required name is <=2 chars and
+    EXACTLY ONE unnamed sibling carries a type-consistent value, that single
+    candidate is named. A required name >=3 chars that is a substring of an
+    extra key also counts. Non-suggestion paths return "" so every other
+    error stays byte-identical (the #107 law)."""
+    named = set((s.get("properties") or {}).keys())
+    extra = [k for k in v if k not in named]
+    if not extra:
+        return ""
+    prop = (s.get("properties") or {}).get(r) or {}
+    cand = difflib.get_close_matches(r, extra, n=1, cutoff=0.6)
+    hit = cand[0] if cand else None
+    if hit is None and len(r) <= 2:
+        # 'id'-class names are too short for any similarity signal to fire
+        # (ratio 0.0 against 'proposal'); guess ONLY when exactly one extra
+        # key is type-consistent, so the suggestion is never ambiguous.
+        typed = [k for k in extra if _value_type_ok(v[k], prop)]
+        if len(typed) == 1:
+            hit = typed[0]
+    if hit is None and len(r) >= 3:
+        contained = [k for k in extra if r in k]
+        if contained:
+            hit = min(contained, key=lambda k: (len(k), extra.index(k)))
+    if hit is None:
+        return ""
+    if not _value_type_ok(v[hit], prop):
+        return ""                     # never recommend a rename that still fails
+    return f" (you wrote '{hit}'? the schema needs '{r}')"
+
 def validate(out, schema):
     """Tiny forgiving validator: type / required / properties / items / enum.
     #107: `enum` membership is ENFORCED here — a str value against a
@@ -1014,7 +1076,8 @@ def validate(out, schema):
                         + ", ".join(repr(x) for x in en) + ")")
         if isinstance(v, dict):
             for r in s.get("required", []):
-                if r not in v: errs.append(f"{path}: missing required '{r}'")
+                if r not in v:
+                    errs.append(f"{path}: missing required '{r}'" + _rename_hint(r, v, s))
             for k, sub in (s.get("properties") or {}).items():
                 if k in v: chk(v[k], sub, f"{path}.{k}")
         if isinstance(v, list) and s.get("items"):
