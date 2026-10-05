@@ -1743,6 +1743,61 @@ def _expand_includes_at_door(graph):
         return None, [], None, _include_error_from_valueerror(e)
     return expanded, notes, provenance, None
 
+# est-2ek.1.245 — stale-literal detector for library saves.
+# A reusable graph replays its committed text verbatim on every `run from=<name>`.
+# When that text hard-codes launch-varying values (ledger keys, branch names,
+# per-lane scratch paths) AND the graph carries ZERO {run.KEY} binding points,
+# the entry silently replays the launch that froze it — 1.0.13's run_context
+# exists but nothing made authors add binding points. Warn-and-surface at the
+# save (never block): the author hears "this will go stale" at the exact moment
+# they shelve it, and can either add {run.KEY} bindings or accept the freeze.
+_STALE_LITERAL_PATTERNS = (
+    # (label, pattern) — mirrors dag_lint s11's operative-surface law:
+    # provenance/meta cold bytes are exempt; operative goal/context text counts.
+    ("ledger key", re.compile(r"\bfb[0-9a-f]{8,}\b")),
+    ("bead id", re.compile(r"\best-[a-z0-9]{3,}(?:\.\d+)?\b")),
+    ("branch name", re.compile(r"\b(?:fix|feat|chore|est2ek1|wofs|docs)/[A-Za-z0-9._/-]{3,}\b")),
+    ("lane/scratch path", re.compile(r"/home/[\w.-]+/\.hermes(?:/[\w.~+-]+)+")),
+    ("dated literal", re.compile(r"\b2026-\d{2}-\d{2}\b")),
+)
+_RUN_REF_RE = re.compile(r"\{run\.[A-Za-z_][A-Za-z0-9_]*\}")
+
+def _operative_texts(obj, path=""):
+    """Yield (path, text) for every string in the OPERATIVE subtree (goal,
+    context, question, argv-style lists) — never provenance/meta/description."""
+    if isinstance(obj, str):
+        yield path, obj
+    elif isinstance(obj, dict):
+        for k, v in obj.items():
+            if k in ("provenance", "meta", "description", "source", "saved_at",
+                     "source_digest", "owner", "name"):
+                continue
+            yield from _operative_texts(v, f"{path}.{k}" if path else str(k))
+    elif isinstance(obj, (list, tuple)):
+        for i, v in enumerate(obj):
+            yield from _operative_texts(v, f"{path}[{i}]")
+
+def _stale_literal_warnings(graph):
+    """[] when the graph binds or is literal-free; else one warning string per
+    offending literal, each naming where it lives and the run_context fix."""
+    if _RUN_REF_RE.search(json.dumps(graph.get("nodes") or [], ensure_ascii=False)):
+        return []   # author uses binding points — replay-safe by design
+    hits, seen = [], set()
+    for path, text in _operative_texts({"nodes": graph.get("nodes") or []}):
+        for label, pat in _STALE_LITERAL_PATTERNS:
+            for lit in pat.findall(text):
+                key = (label, lit)
+                if key in seen:
+                    continue
+                seen.add(key)
+                hits.append(
+                    f"stale_literal ({label}): {lit!r} is hard-coded in {path} with no "
+                    f"{{run.KEY}} binding — `run from=` will replay this launch's value; "
+                    f"pass it via run_context and write it as {{run.KEY}} in the goal, "
+                    f"or accept the freeze")
+    return hits
+
+
 def act_save(args):
     """Shelve a graph under a name: from an existing run (`run_id`) or an inline `graph`.
     Overwrites — a library entry is the CURRENT best version of that graph.
@@ -1878,8 +1933,17 @@ def act_save(args):
     tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2))
     os.replace(tmp, p)
     saved = _lib_rel_name(p)   # #50: a general/<name> save must echo the replayable name
-    return {"saved": saved, "nodes": len(graph["nodes"]),
-            "hint": f"re-run any time: workflow run from={saved}  |  /wf {saved}"}
+    out = {"saved": saved, "nodes": len(graph["nodes"]),
+           "hint": f"re-run any time: workflow run from={saved}  |  /wf {saved}"}
+    # est-2ek.1.245: warn-and-surface on a shelved graph that hard-codes
+    # launch-varying literals while carrying ZERO {run.KEY} binding points —
+    # such entries silently replay the launch that froze them. NON-FATAL by
+    # law: the save lands; only a warning key rides the response, and a clean
+    # save's response stays byte-identical (no empty key — golden bytes).
+    _warn = _stale_literal_warnings(graph)
+    if _warn:
+        out["save_warnings"] = _warn
+    return out
 
 def _library_rows():
     """#50: THE discovery read for the library — rich rows + honest skips. One walk
