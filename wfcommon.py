@@ -2189,19 +2189,47 @@ def _legacy_chain_unchanged(r, n, byid):
     return all(a not in byid or _legacy_chain_unchanged(r, byid[a], byid)
                for a in n.get("after", []))
 
+def _answer_harvest_valid(n, rec):
+    """Honest status (jam-aus): a committed record whose answer validates against the
+    node's schema IS an answer, whatever exit the child died with. This is the #4
+    harvest-on-death law applied at READ time, so a record an older/odd runner path
+    committed as `failed` despite carrying a complete harvest (the runner wrote the
+    `harvest` stamp only when the fenced block parsed to a dict and validated) reads
+    done without re-driving finished work. Qualification is strict: harvest evidence
+    stamped by the runner, a dict output that re-validates, and a child-declared
+    terminal status (e.g. 'BLOCKED') never reads as done. The validator lives in
+    wf.py; it is imported lazily so door/dashboard never pay runner import cost and
+    the wf <-> wfcommon cycle stays import-time-free."""
+    hv = rec.get("harvest")
+    if not isinstance(hv, dict):
+        return False
+    declared = hv.get("declared_status")
+    if isinstance(declared, str) and declared.strip().lower() not in ("done", "ok", "success", "pass"):
+        return False
+    out = rec.get("output")
+    if not isinstance(out, dict):
+        return False
+    from wf import validate   # lazy: shared validator, no module-level cycle
+    schema = n.get("schema") or (n.get("fanout") or {}).get("schema")
+    return not validate(out, schema)
+
 def node_rec(r, n, byid):
     """Return (status, rec): done|partial|failed|pending. Stale (efp mismatch after an
     amend) == pending — its stored result must never be presented as current.
     Legacy (pre-efp) records carried def_hash only; a bare stamp is a downgrade
     attack on the validity law, so the whole ancestor chain must be proven
     unchanged legacy commits. `partial` (#4 harvest-on-death) IS a commit:
-    partial output is committed output, downstream may consume it."""
+    partial output is committed output, downstream may consume it.
+    Honest status: an efp-valid `failed` record whose harvest answer validates
+    reads `done` — the child's nonzero exit is history, the answer is the fact."""
     rec = jload(r / "nodes" / f"{n['id']}.json")
     st = (rec or {}).get("status")
     if st == "failed" and (rec or {}).get("error_class") == "cancelled":
         return "pending", rec   # stop != failure (#7): a resume re-drives cancelled work
     if st in ("done", "partial", "failed", "skipped"):
         if record_efp_valid(rec, byid, n):
+            if st == "failed" and _answer_harvest_valid(n, rec):
+                return "done", rec
             return st, rec
         if "efp" not in rec and _legacy_chain_unchanged(r, n, byid):
             return st, rec
@@ -2696,7 +2724,19 @@ def run_state(r):
         if states[n["id"]] == "pending" and not deps_ok(n):
             nodes[n["id"]]["blocked_by"] = blocked_by(n, states, meta)
     exit_state = runner_exit_read(r)
-    if status == "interrupted" and str((exit_state or {}).get("reason", "")).startswith("crashed:"):
+    # Honest status: the runner's own graph-bound verdict in runner_exit.json
+    # OUTRANKS the pid-liveness guess. A fresh runner deletes the record at boot
+    # (wf.py), so a present, fingerprint-valid record was written by a runner
+    # process that already exited — a recycled/stale pid reading "live" must not
+    # keep a finished run looking running (or an exited one look resumable).
+    verdict = str((exit_state or {}).get("reason") or "")
+    if verdict == "done" and not any(s == "failed" for s in states.values()):
+        status = "done"
+    elif verdict == "stopped":
+        status = "stopped"
+    elif verdict.startswith("blocked by failed"):
+        status = "failed"
+    if status == "interrupted" and verdict.startswith("crashed:"):
         status = "failed"  # a recorded fatal error needs an amend, not a wait/respawn loop
     return {"run_id": r.name, "name": graph.get("name"), "status": status,
             "held_gate": held, "nodes": nodes, "graph": graph,
