@@ -33,6 +33,11 @@ shutil.rmtree(BASE, ignore_errors=True)
 
 os.environ.pop("WF_RUNS_ROOT", None)
 os.environ["HERMES_HOME"] = str(SEAT)               # dispatch-side seat view
+os.environ["WF_RUNS_ROOT"] = str(SEAT / "workflows")  # #71 r5 env pin — the SAME
+                                                     # scratch root HERMES_HOME
+                                                     # derives (the pop was a
+                                                     # cleanliness step; equal
+                                                     # values, pinned)
 os.environ["HERMES_WF_HERMES_BIN"] = str(BUILD / "fake")
 FAKE_LOG = BUILD / "fake58.log"
 os.environ["FAKE_LOG"] = str(FAKE_LOG)
@@ -42,6 +47,7 @@ sys.path.insert(0, str(ROOT))
 spec = importlib.util.spec_from_file_location("hw58", ROOT / "__init__.py")
 hw = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(hw)
+import wf_test_isolation as _iso71; _iso71.install(hw)  # #71 r5: pin settings.runs_root alongside WF_RUNS_ROOT
 
 fails = 0
 def check(label, cond, detail=""):
@@ -83,6 +89,9 @@ check("X2 precondition: the run's child was spawned by the dispatch-side runner"
       spawns_before > _base, f"{_base} -> {spawns_before}")
 
 os.environ["HERMES_HOME"] = str(BASE)               # consumer whose env resolves the shared root
+os.environ["WF_RUNS_ROOT"] = str(BASE / "workflows")  # #71 r5: flip the env pin WITH
+                                                     # the home (iso71 keeps the
+                                                     # settings pin locked to this)
 check("X2b precondition: resolved root has no such run dir", not (BASE / "workflows" / rid).exists())
 
 st = call(action="status", run_id=rid)
