@@ -2283,6 +2283,112 @@ def publisher_gate_check(r, n, byid):
     missing = [a for a in producers if not _token_valid(r, byid, byid[a])]
     return (not missing), missing
 
+# ---------- why-rerun: read-model verdict for a stale committed node (hackathon jam-h27) ----------
+
+def _amend_snapshots(r):
+    """[(at, old_nodes, new_nodes)] from amends.jsonl; malformed lines skipped.
+    Only entries with node lists on both sides survive — the same snapshot shape
+    act_amend writes ({at, old, new})."""
+    snaps = []
+    try:
+        lines = (Path(r) / "amends.jsonl").read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return snaps
+    for line in lines:
+        if not line.strip():
+            continue
+        try:
+            m = json.loads(line)
+        except Exception:
+            continue
+        old, new = (m.get("old") or {}).get("nodes"), (m.get("new") or {}).get("nodes")
+        if isinstance(old, list) and isinstance(new, list):
+            snaps.append((m.get("at"), old, new))
+    return snaps
+
+def explain_stale(r, nid, index=None):
+    """One-line 'why is this committed node re-running' verdict for a stale node
+    (stored efp != recomputed efp — node_rec's 'pending with a committed record'
+    state), or None when the record is current/absent (never fabricate).
+
+    Reconstructs the graph timeline from amends.jsonl (first `old` graph, then
+    each `new`, then the current graph.json), finds the EARLIEST state the stale
+    record still validates under — the era the commit really happened in (the
+    whole old/new graph snapshots make the transitive efp replay exact) — then
+    walks the node's own definition plus its ancestor chain (closest first)
+    across each later transition and reports the FIRST transition that changed
+    one: 'stale because <node>: <fields> changed at <ts>'. A transition with no
+    amend behind it (current graph != last recorded `new`) is definition drift.
+    Read model only: nodes/, graph.json, amends.jsonl are the only files read."""
+    name = str(nid) + (f".{index}" if index is not None else "")
+    rec = jload(Path(r) / "nodes" / f"{name}.json")
+    if not isinstance(rec, dict) or rec.get("status") not in ("done", "partial", "failed", "skipped"):
+        return None
+    cur_nodes = (jload(Path(r) / "graph.json") or {}).get("nodes")
+    if not isinstance(cur_nodes, list):
+        return None
+    byid_of = lambda ns: {n["id"]: n for n in ns if isinstance(n, dict) and n.get("id")}
+    cur_byid = byid_of(cur_nodes)
+    node = cur_byid.get(str(nid))  # fan-out item records ride their parent's def
+    if node is None or record_efp_valid(rec, cur_byid, node):
+        return None  # current — nothing to explain
+    rule = rec.get("fp_rule_version")
+    snaps = _amend_snapshots(r)
+    # Timeline: (ts the state took effect, node list). Dedupe states whose
+    # canonical nodes JSON is identical; the current graph closes the timeline —
+    # when no amend's `new` equals it, that last transition is drift (ts None).
+    states = []
+    def push(ts, ns):
+        if states and states[-1][1] == ns:
+            return
+        states.append((ts, ns))
+    if snaps:
+        push(None, snaps[0][1])
+        for at, _old, new in snaps:
+            push(at, new)
+    if not states or states[-1][1] != cur_nodes:
+        push(None, cur_nodes)
+    def commit_era():
+        for i, (_ts, ns) in enumerate(states):
+            bid, x = byid_of(ns), next((n for n in ns if isinstance(n, dict) and n.get("id") == str(nid)), None)
+            if x is not None and record_efp_valid(rec, bid, x):
+                return i
+        return None
+    k = commit_era()
+    if k is None:
+        return "stale: definition drift (no amend on record)"  # commit matches no recorded state
+    def diff_fields(a, b):  # def_hash is the truth; budgets are not work (rule 2+)
+        rules = (rule,) if type(rule) is int and rule in FP_RULES else FP_RULES
+        if any(def_hash(a, rl) == def_hash(b, rl) for rl in rules):
+            return []
+        keys = {k2 for k2 in a} | {k2 for k2 in b}
+        if not (type(rule) is int and rule == FP_RULE_LEGACY):
+            keys -= set(_BUDGET_KEYS)
+        return sorted(k2 for k2 in keys if a.get(k2) != b.get(k2))
+    for i in range(k + 1, len(states)):
+        prev_byid, cur_i_byid = byid_of(states[i - 1][1]), byid_of(states[i][1])
+        # c's ancestor chain at the pre-transition state, closest first (self included:
+        # 'c re-ran because c changed' is as honest as 'because b changed')
+        chain, seen, queue = [], set(), [str(nid)]
+        while queue:
+            x = queue.pop(0)
+            if x in seen or x not in prev_byid:
+                continue
+            seen.add(x)
+            chain.append(x)
+            queue.extend(str(a2) for a2 in prev_byid[x].get("after", []) or [])
+        for x in chain:
+            a, b = prev_byid.get(x), cur_i_byid.get(x)
+            if not (isinstance(a, dict) and isinstance(b, dict)):
+                continue  # added/removed: not a field change to name
+            fields = diff_fields(a, b)
+            if fields:
+                ts = states[i][0]
+                if ts is None:
+                    return "stale: definition drift (no amend on record)"
+                return f"stale because {x}: {', '.join(fields)} changed at {ts}"
+    return "stale: definition drift (no amend on record)"
+
 def gate_answer_valid(r, gate, byid):
     ans = jload(r / "gates" / f"{gate['id']}.json")
     if ans is None:
@@ -2825,6 +2931,9 @@ def node_facts(r, nid, index=None):
     pf = precondition_facts(rec)
     if pf:
         facts["fact"] = pf
+    sb = explain_stale(Path(r), nid, index)   # why-rerun: absent unless actually stale
+    if sb:
+        facts["stale_because"] = sb
     return facts
 
 def _steer_state(r, nid):

@@ -2664,7 +2664,15 @@ def act_status(args):
             if nf:
                 out["nodes"][nid]["node_facts"] = {
                     k: nf[k] for k in ("error_class", "attempts", "attempts_log",
-                                       "final", "log_path", "prompt_path")}
+                                       "final", "log_path", "prompt_path")
+                    if k in nf} | ({"stale_because": nf["stale_because"]}
+                                   if "stale_because" in nf else {})
+        # why-rerun: a pending node WITH a committed record is efp-stale (an amend
+        # invalidated it) — say so beside the fingerprint, read model only.
+        if rec and v["status"] == "pending":
+            sb = _common.explain_stale(r, nid)
+            if sb:
+                out["nodes"][nid]["stale_because"] = sb
     # Cumulative spend is independent of heartbeat. Only a verified spawn's exact
     # session title can supply current activity; historical unended rows are not live.
     try:
