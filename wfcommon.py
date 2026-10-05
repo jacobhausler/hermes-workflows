@@ -1668,6 +1668,20 @@ def _expand_include_pass(graph, library_reader, notes, chain, depth):
     if not isinstance(includes, list) or not includes:
         own(None, "include must be a non-empty list of {as, use, seeds?, exports?} directives")
 
+
+    # Issue #192 (PR#84 follow-up, D15-sibling): a malformed PARENT id (truthy but
+    # unhashable — id:["bad"]) reached the parent_ids set build below and TypeErrors
+    # before any validator could name it, leaking {error, trace} instead of the
+    # errors[] envelope the include contract promises. Checked here — after the
+    # include-shape refusals, before the first hashable-id contact. Include-free
+    # graphs are untouched (they returned above at the passthrough; the door's own
+    # full validator owns their malformed ids), and shelved CHILD graphs keep the
+    # F-2 validate_graph_full refusal (named by alias): this guard only covers the
+    # parent's own node list on the include path.
+    for n in nodes:
+        if n.get("id") is not None and not isinstance(n.get("id"), str):
+            own(None, f"node id {n.get('id')!r} must be a string "
+                      f"(malformed parent node id before expansion)")
     # --- guards first (structure, alias collisions, depth) ---
     aliases = []
     alias_of_inner = {}

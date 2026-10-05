@@ -403,6 +403,19 @@ check("D15 malformed child id envelope: errors rows, no TypeError trace",
       and any(str(e.get("node", "")).startswith("include:x") for e in r.get("errors", [])),
       json.dumps(r)[:200])
 check("D15 malformed child id: no run dir", before == dirs())
+# Issue #192 D15-SIBLING: malformed PARENT id + valid include -> the named errors[]
+# envelope, never a TypeError trace (the parent_ids set build used to crash first).
+(LIB / "okchild.json").write_text(json.dumps(
+    {"name": "okchild", "nodes": [{"id": "s", "type": "echo", "output": "ok"}]}))
+before = dirs()
+r = call(action="run", graph={"name": "d15parent", "include": [{"as": "x", "use": "okchild"}],
+                              "nodes": [{"id": ["bad"], "type": "echo", "output": "1"}]})
+check("D15-sib malformed parent id envelope: errors rows, no TypeError trace",
+      "error" in r and "Traceback" not in json.dumps(r)
+      and "TypeError" not in json.dumps(r)
+      and any("malformed parent node id" in str(e.get("msg", "")) for e in r.get("errors", [])),
+      json.dumps(r)[:200])
+check("D15-sib malformed parent id: no run dir", before == dirs())
 # a MALFORMED PARENT require_model must not be repaired by the policy merge
 # ('false' is truthy -> the old OR wrote boolean True and passed; direct
 # submission refuses the same string).
