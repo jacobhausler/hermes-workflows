@@ -1479,6 +1479,49 @@ def run_dir(run_id):
         raise ValueError(f"invalid run_id {run_id!r}")
     return _common.find_run(rid)
 
+_SIBLING_RID_BAD = re.compile(r"^\.\.?$|[\\/]")   # traversal is off-limits on the scan too
+
+def _find_run_sibling_scan(rid):
+    """#58 (READ paths only): resolve a run dir across the sibling known roots before
+    answering unknown. The consumer's env may resolve a different home than the
+    dispatcher's (profile-scoped seat vs estate shared root), stranding a demonstrably
+    live run outside resolved-root + legacy launch root (all find_run covers). Known
+    roots, from each base home (resolved and launch): the estate root and every
+    profile under it when the base sits under a `profiles/` parent; every seat under
+    `<base>/profiles/` when the base IS the estate; the base itself. First directory
+    holding a graph.json wins. Returns the dir or None. READ-ONLY convenience: write
+    verbs (amend/release/steer/stop/save) keep the strict resolved-root law."""
+    if not rid or _SIBLING_RID_BAD.search(rid):
+        return None
+    resolved = _common.runs_root()
+    homes = []
+    for base in (_common.hermes_home(), _common.launch_runs_root().parent):
+        homes.append(base)
+        if base.parent.name == "profiles":                  # a profile -> estate + seats
+            homes.append(base.parent.parent)
+            try:
+                homes.extend(p for p in sorted(base.parent.iterdir()) if p.is_dir())
+            except OSError:
+                pass
+        try:                                                # an estate -> its seats
+            homes.extend(p for p in sorted((base / "profiles").iterdir()) if p.is_dir())
+        except OSError:
+            pass
+    seen = set()
+    for h in homes:
+        if str(h) in seen:
+            continue
+        seen.add(str(h))
+        d = h / "workflows" / rid
+        if d == resolved / rid:                             # the strict path's own turf
+            continue
+        try:
+            if (d / "graph.json").exists():
+                return d
+        except OSError:
+            continue
+    return None
+
 # ---------- graph library (named, re-runnable graphs) ----------
 
 def library_root():
@@ -2744,6 +2787,21 @@ def _output_pointer(rec):
         [f"items:{len(out)}"] if isinstance(out, list) else [type(out).__name__])
     return {"output_ptr": "nodes (detail=\"full\")", "output_keys": keys, "output_bytes": size}
 
+def _resolve_read_run(rid):
+    """#58: ONE run-dir resolution for the READ verbs (status/wait): strict resolved
+    path first (find_run), sibling-root scan as fallback. Returns (dir, run_state,
+    resolved_via_or_None). run_state is None when no root holds the run."""
+    r = run_dir(rid)
+    st = run_state(r)
+    if st:
+        return r, st, None
+    sib = _find_run_sibling_scan((rid or "").strip())
+    if sib is not None:
+        st = run_state(sib)
+        if st:
+            return sib, st, str(sib)
+    return r, None, None
+
 def act_status(args):
     if args.get("lane_key") is not None:
         key = args["lane_key"]
@@ -2758,8 +2816,7 @@ def act_status(args):
         if not entry:
             return {"lane_key": key, "run_id": None, "unfinished": False}
         return _lane_state(key, entry)
-    r = run_dir(args.get("run_id"))
-    st = run_state(r)
+    r, st, resolved_via = _resolve_read_run(args.get("run_id"))
     if not st:
         return {"error": f"no run at {r}"}
     full = str(args.get("detail") or "").lower() == "full"
@@ -2773,6 +2830,10 @@ def act_status(args):
            # O1: the card to paste into the report rides on EVERY status (and via
            # act_wait, every wait) — the inducement never depends on the agent recalling it.
            "card": _card(st["run_id"])}
+    if resolved_via:   # #58: the run lives outside the caller's resolved root — loud, not silent
+        out["resolved_via"] = resolved_via
+        out["resolved_via_note"] = ("run resolved under a sibling root (dispatch-time home "
+                                    "differs from this consumer's); write verbs stay refused here")
     # Composite runs surface their resolver notes (scratch-collision warnings) on
     # every status read, read straight from the run.json the door stamped.
     _inotes = jload(r / "run.json", {}) or {}
@@ -2912,13 +2973,38 @@ def act_status(args):
         out["next"] = []
     return out
 
+def _wait_foreign(args, r, st, resolved_via):
+    """#58: wait on a run resolved OUTSIDE the caller's resolved root. Read-only
+    watch: follow to a terminal/attention state, never spawn (the runner belongs to
+    the owner's root; _spawn_runner from here would stamp the wrong HERMES_HOME and
+    the runner_alive root-compare would reject it anyway). Answers carry the same
+    resolved_via warning as the sibling status read."""
+    note = ("run lives under a sibling root — this wait is read-only: resume/write "
+            "verbs (wait-resume, release, amend, stop) must be issued from the owning home")
+    cap = min(float(args.get("timeout", 600)), 1800)
+    t0 = time.time()
+    while st["status"] in ("running", "pending") and st.get("runner_live"):
+        if time.time() - t0 > cap:
+            return {**act_status(args), "resolved_via": resolved_via,
+                    "note": f"still running after {int(time.time()-t0)}s (wait again) — {note}"}
+        time.sleep(2)
+        _r, st, _via = _resolve_read_run(args.get("run_id"))
+        if not st:
+            return {"error": "unknown run_id"}
+    out = act_status(args)
+    if isinstance(out, dict) and "error" not in out:
+        out["resolved_via"] = resolved_via
+        out["resolved_via_note"] = note
+    return out
+
 def act_wait(args):
     """Explicit resume/watch verb. Read-only status/list never spawn; wait may
     resume pending or interrupted work, then block while a verified runner lives."""
-    r = run_dir(args.get("run_id"))
-    st = run_state(r)
+    r, st, resolved_via = _resolve_read_run(args.get("run_id"))
     if not st:
         return {"error": "unknown run_id"}
+    if resolved_via:   # #58: read convenience only — never spawn a runner from a foreign root
+        return _wait_foreign(args, r, st, resolved_via)
     top_alive = None
     if st["status"] in ("running", "pending", "interrupted"):
         top_alive = bool(st.get("runner_live"))   # A2 one-read law: THE ONE read

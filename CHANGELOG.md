@@ -11,6 +11,19 @@ Read-model / DX:
   stale root. Non-empty payloads keep the golden-solo key set
   `{runs, total, counts(, provenance)}` byte-identical (F1 identity law).
   Test: `tests/test_list_root_280.py` (6 contracts, RED first).
+- #58 door sibling-root scan (status/wait): a run dispatched under one home (profile
+  seat) and read from a consumer whose env resolves another (estate shared root,
+  sibling profile) answered `unknown run_id` while its runner and events were alive
+  next door — find_run covers only resolved-root + legacy launch root. The READ verbs
+  now scan the sibling known roots (estate + every profile under it, both directions
+  from the resolved and launch homes) before answering unknown, and the answer from a
+  hit carries a `resolved_via` warning naming the foreign dir. Read-only convenience:
+  foreign-root `wait` never spawns a runner (the owning root does; the root-compare in
+  `_runner_pid_alive` would reject a foreign spawn anyway), and write verbs
+  (amend/release/steer/stop/save) stay fail-closed on the resolved root. Same-root
+  behavior is byte-identical (no `resolved_via` field on a resolved-root read).
+  Test: `tests/test_door_sibling_root_58.py` (5 red at base → all green at head;
+  hermetic two-root sandbox, fake launcher).
 
 ## 1.3.0 — 2026-10-05
 

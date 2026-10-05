@@ -70,23 +70,46 @@ r = call(action="run", graph=G, name="sib58-sibling")
 rid = r.get("run_id")
 check("X1 sibling run launches", bool(rid), json.dumps(r))
 check("X1b run lives under the SEAT root", (SEAT / "workflows" / rid / "graph.json").exists())
-spawns_before = FAKE_LOG.read_text().count("\n") if FAKE_LOG.exists() else 0
+# deterministic baseline: let the DISPATCH runner's own child land in the log first
+def _log_lines():
+    return FAKE_LOG.read_text().count("\n") if FAKE_LOG.exists() else 0
+_base = _log_lines()
+for _ in range(100):                       # up to ~10 s for the runner's first spawn
+    if _log_lines() > _base:
+        break
+    time.sleep(0.1)
+spawns_before = _log_lines()
+check("X2 precondition: the run's child was spawned by the dispatch-side runner",
+      spawns_before > _base, f"{_base} -> {spawns_before}")
 
 os.environ["HERMES_HOME"] = str(BASE)               # consumer whose env resolves the shared root
-check("X2 precondition: resolved root has no such run dir", not (BASE / "workflows" / rid).exists())
+check("X2b precondition: resolved root has no such run dir", not (BASE / "workflows" / rid).exists())
 
 st = call(action="status", run_id=rid)
-check("X3 status resolves the sibling run (no unknown)", st.get("status") not in (None,) and "error" not in st,
+check("X3 status resolves the sibling run (no unknown)", "error" not in st,
       json.dumps(st))
 check("X3b status carries resolved_via naming the foreign root",
       st.get("resolved_via") == str(SEAT / "workflows" / rid), json.dumps(st.get("resolved_via")))
+
+# deterministic spawn-guard case: an INTERRUPTED sibling run (no runner) — a local
+# wait would respawn; the foreign read-only wait must not.
+ORPHAN = BASE / "profiles" / "orphan-seat" / "workflows" / "orphan58"
+(ORPHAN / "nodes").mkdir(parents=True)
+(ORPHAN / "graph.json").write_text(json.dumps(
+    {"name": "orphan", "nodes": [{"id": "a", "type": "agent", "goal": "SLEEP 3"}]}))
+(ORPHAN / "run.json").write_text(json.dumps({"name": "orphan"}))
+g = call(action="wait", run_id="orphan58", timeout=5)
+check("X3c foreign wait on an ownerless run never spawns",
+      g.get("status") in ("pending", "interrupted") and g.get("resolved_via") == str(ORPHAN)
+      and _log_lines() == spawns_before,
+      json.dumps({k: g.get(k) for k in ("status", "error", "resolved_via")}))
 
 w = call(action="wait", run_id=rid, timeout=60)
 check("X4 wait resolves the sibling run (no unknown run_id)", w.get("status") == "done" and "error" not in w,
       json.dumps({k: w.get(k) for k in ("status", "error", "note")}))
 check("X4b wait carries resolved_via", w.get("resolved_via") == str(SEAT / "workflows" / rid),
       json.dumps(w.get("resolved_via")))
-spawns_after = FAKE_LOG.read_text().count("\n") if FAKE_LOG.exists() else 0
+spawns_after = _log_lines()
 check("X5 foreign-root wait spawned NO runner child", spawns_after == spawns_before,
       f"{spawns_before} -> {spawns_after}")
 check("X5b foreign-root wait created no run dir under the consumer root",
