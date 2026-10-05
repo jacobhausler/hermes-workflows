@@ -730,7 +730,7 @@ def grammar_errors(graph):
                         + json.dumps(list(GRAMMAR_SUPPORTED))
                         + f" (absent = {GRAMMAR_DEFAULT!r})"}]
     return []
-FANOUT_KEYS = {"items", "items_from", "goal", "schema", "quorum"}
+FANOUT_KEYS = {"items", "items_from", "goal", "schema", "quorum", "ledger"}
 DEFAULTS_KEYS = {"schema", "timeout", "max_turns", "reasoning", "provider", "model", "context",
                  "require_route"}   # #25: bool — fail-closed pinned routes (see AGENT_KEYS)
 # Shape presets (sprint101 #11): max_turns/timeout per rough node shape = the p95 of
@@ -1132,6 +1132,17 @@ def validate_graph_errors(nodes):
                     q = fo.get("quorum")
                     if q is not None and (not isinstance(q, int) or isinstance(q, bool) or q < 1):
                         E(nid, "fanout.quorum", "fanout.quorum must be a positive int")
+                    # #85: the input LEDGER is a list of per-item declarations; row
+                    # CONTENT (source/artifact shape) is measured by the admission
+                    # guard below the door — here only the container shape is a
+                    # validator defect, so an undeclared-input graph stays
+                    # VALIDATOR-CLEAN and the refusal can only come from the guard.
+                    led = fo.get("ledger")
+                    if led is not None and not isinstance(led, list):
+                        E(nid, "fanout.ledger", "fanout.ledger must be a list of input-ledger "
+                                                "rows (one per fan-out item: a '<node_id>.<dotted.path>' "
+                                                "string or {\"source\": ..., \"artifact\": {\"file\": ..., "
+                                                "\"sha256\": <hex>?}})")
                     if fo.get("items") is None and isinstance(fo.get("items_from"), str):
                         head = fo["items_from"].split(".")[0]
                         if head == nid or head not in idset or head not in n.get("after", []):
@@ -1303,6 +1314,159 @@ def validate_graph(nodes):
         return None
     e = errs[0]
     return (e["msg"] if e["node"] is None else f"node {e['node']}: {e['msg']}")
+
+# ---------- #85: artifact-admission guard — input ledgers map 1:1 to sources ----------
+# The class (WOFS W1f evidence-loss, cluster spool aaca9fe5a15f5f2b): a fan-out item
+# consumed an artifact another item's source actually covered — a disposition ledger
+# had silently lost 85/95 rationales and nothing at admission could tell the runner.
+# `fanout.ledger` is the ITEM-INDEXED input ledger: one row per item, positionally
+# aligned; a row is a plain '<node_id>.<dotted.path>' input-ref string or
+# {"source": "<node_id>.<dotted.path>", "artifact": {"file": rel/path, "sha256"?}}
+# naming the on-disk artifact the item will consume. This guard runs at the door
+# BEFORE any write/spawn and refuses, fail-closed, unless rows map 1:1 to items:
+#   * a row without an item ("row N has no item"), or an item (by position) whose
+#     row is absent ("item N is missing ledger source ...");
+#   * two items sharing one source (sources are consumed at most once);
+#   * a source head outside the node's transitive `after` ancestry (same data-edge
+#     law as `inputs` refs — only committed upstream outputs may feed the fan-out);
+#   * a declared artifact whose run-dir file is absent or whose sha256 disagrees
+#     (measured ONLY when run_dir is given — run creation has no run dir yet;
+#     amend/validate-with-dir measure the bytes).
+# Graphs WITHOUT a ledger declaration are byte-unchanged (no ledger, no guard;
+# golden-solo EMPTY-diff law). Row CONTAINER shape (non-list ledger) is a
+# validator defect; everything else about a row is measured here, so the RED
+# graph (an item with no ledger row) stays VALIDATOR-CLEAN and can only be
+# refused by this guard — that split is pinned by tests/test_admission_ledger_85.py.
+
+_SHA_OK = re.compile(r"\A[0-9a-fA-F]{64}\Z")
+
+def _ledger_item_label(item, i):
+    if isinstance(item, dict):
+        for k in ("key", "id", "name", "file", "source"):
+            v = item.get(k)
+            if isinstance(v, str) and v.strip():
+                return repr(v)
+        return f"{json.dumps(item, ensure_ascii=False)[:80]}"
+    return f"(index {i})"
+
+def admission_ledger_errors(graph, run_dir=None):
+    """[{node, field:'fanout.ledger', msg}] — see the #85 block comment. Structural
+    laws always; artifact file/sha laws only when run_dir is provided (the bytes
+    must exist at MEASUREMENT time; run creation has none yet)."""
+    errs = []
+    def E(nid, msg):
+        errs.append({"node": nid, "field": "fanout.ledger", "msg": msg})
+    if not isinstance(graph, dict):
+        return errs
+    nodes = [n for n in (graph.get("nodes") or []) if isinstance(n, dict)]
+    idset = {n.get("id") for n in nodes if isinstance(n.get("id"), str)}
+    parents = {n["id"]: [a for a in n.get("after", []) if isinstance(a, str) and a in idset]
+               for n in nodes if isinstance(n.get("id"), str)}
+    for n in nodes:
+        nid = n.get("id")
+        fo = n.get("fanout")
+        if not isinstance(fo, dict):
+            continue
+        led = fo.get("ledger")
+        if led is None:
+            continue                       # no ledger, no guard (scope law)
+        if not isinstance(led, list):
+            continue                       # container shape is the validator's defect
+        items = fo.get("items")
+        static = isinstance(items, list)   # items_from: count unknown at admit
+        if static:
+            for i in range(len(led) - 1, len(items) - 1, -1) if len(led) > len(items) else ():
+                E(nid, f"ledger row {i} has no item — rows must map 1:1 to "
+                       f"fanout.items ({len(items)} items, {len(led)} rows)")
+            for i, item in enumerate(items):
+                if isinstance(item, dict) and i >= len(led):
+                    E(nid, f"item {i} {_ledger_item_label(item, i)} is missing ledger source "
+                           f"(fanout.ledger row {i} is absent — every item's declared input "
+                           f"must have exactly one ledger row)")
+        seen = {}                          # source ref -> first row index
+        for i, row in enumerate(led):
+            if isinstance(row, str):
+                src = row
+                art = None
+            elif isinstance(row, dict):
+                src = row.get("source")
+                art = row.get("artifact")
+            else:
+                E(nid, f"ledger row {i} {json.dumps(row, ensure_ascii=False)[:80]} must be a "
+                       f"'<node_id>.<dotted.path>' string or an object "
+                       f'{{"source": ..., "artifact": {{"file": ..., "sha256"?}}}}')
+                continue
+            if not isinstance(src, str) or not src.strip() or src.strip() != src \
+                    or "." not in src or not src.split(".", 1)[0] or not src.split(".", 1)[1]:
+                E(nid, f"ledger row {i} has an empty or malformed source "
+                       f"{src!r}: a source is '<node_id>.<dotted.path>'")
+                continue
+            head = src.split(".", 1)[0]
+            closure, stack = set(), list(parents.get(nid) or n.get("after") or [])
+            while stack:
+                a = stack.pop()
+                if a in closure or a not in idset:
+                    continue
+                closure.add(a)
+                stack.extend(parents.get(a, []))
+            if head not in closure:
+                E(nid, f"ledger row {i} source {src!r} head {head!r} is not an ancestor of "
+                       f"node {nid!r} (not in its `after` ancestry — only committed "
+                       f"upstream outputs may feed the fan-out)")
+                continue
+            if src in seen:
+                E(nid, f"item {i} is missing ledger source: {src!r} is already declared by "
+                       f"ledger row {seen[src]} — sources must map 1:1, an item may not "
+                       f"consume another item's source")
+                continue
+            seen[src] = i
+            if art is None:
+                continue
+            if not isinstance(art, dict) or not art:
+                E(nid, f"ledger row {i} artifact must be an object "
+                       f'{{"file": rel/path, "sha256"?}}, got {json.dumps(art, ensure_ascii=False)[:80]}')
+                continue
+            bad_keys = sorted(set(art) - {"file", "sha256"})
+            if bad_keys:
+                E(nid, f"ledger row {i} artifact has unknown key(s) {bad_keys}; "
+                       f"allowed: [file, sha256]")
+            f_, sha_ = art.get("file"), art.get("sha256")
+            if not isinstance(f_, str) or not f_.strip() or os.path.isabs(f_):
+                E(nid, f"ledger row {i} artifact.file {f_!r} must be a non-empty relative "
+                       f"path under the run dir")
+                continue
+            if sha_ is not None and (not isinstance(sha_, str) or not _SHA_OK.match(sha_)):
+                E(nid, f"ledger row {i} artifact.sha256 {sha_!r} must be a 64-char hex digest")
+                sha_ = None
+            if run_dir is None:
+                continue                   # bytes unmeasurable without a run dir
+            base = Path(run_dir).resolve()
+            target = (base / f_).resolve()
+            try:
+                inside = target != base and str(target).startswith(str(base) + os.sep)
+            except (OSError, ValueError):
+                inside = False
+            if not inside:
+                E(nid, f"ledger row {i} artifact.file {f_!r} escapes the run dir")
+                continue
+            if not target.is_file():
+                E(nid, f"item {i} is missing source artifact '{f_}': the declared input "
+                       f"file does not exist in the run dir")
+                continue
+            if sha_ is not None:
+                h = hashlib.sha256()
+                try:
+                    with target.open("rb") as fh:
+                        for chunk in iter(lambda: fh.read(1 << 20), b""):
+                            h.update(chunk)
+                except OSError as exc:
+                    E(nid, f"ledger row {i} artifact '{f_}' cannot be read: {exc}")
+                    continue
+                if h.hexdigest().lower() != sha_.lower():
+                    E(nid, f"ledger row {i} artifact '{f_}' sha256 mismatch: on disk "
+                           f"{h.hexdigest()}, declared {sha_} — the declared bytes and the "
+                           f"run-dir bytes are not the same artifact")
+    return errs
 
 # ---------- full structural graph validation (shared: door + include door) ----------
 # PR#84 review F-2: the door's `_validation_error` and the include resolver's
@@ -1593,6 +1757,21 @@ def _include_scratch_paths(node):
     return found
 
 
+def _ledger_ref_rewrite(row, map_head):
+    """#85: a fanout.ledger row is an id-ref surface like `inputs` — rewrite the
+    source HEAD through `map_head` (string rows and {source, artifact?} rows; any
+    other shape passes through untouched — row shape is the guard's named defect).
+    Used by BOTH include passes so shelf refs and parent refs namespace in
+    lockstep with after/inputs/items_from (the five-surface law, grammar.md)."""
+    def _r(ref):
+        head, sep, rest = ref.partition(".")
+        return map_head(head) + (sep + rest if sep else "")
+    if isinstance(row, str):
+        return _r(row)
+    if isinstance(row, dict) and isinstance(row.get("source"), str):
+        return dict(row, source=_r(row["source"]))
+    return row
+
 def _rewrite_child_head(h, ns):
     """Map one ref head inside the included subtree: internal -> namespaced,
     anything else kept (child-standalone validation rejects true danglers first)."""
@@ -1671,6 +1850,12 @@ def _include_namespace_child(child, alias, library_name):
         if isinstance(n.get("requires"), dict):
             n["requires"] = {ns.get(k, k): v for k, v in n["requires"].items()}
         fo = n.get("fanout")
+        if isinstance(fo, dict) and isinstance(fo.get("ledger"), list):
+            # #85: ledger rows carry '<node_id>.<path>' source refs — the sixth
+            # id-ref surface, namespaced in lockstep with after/inputs/requires.
+            n["fanout"] = dict(fo, ledger=[_ledger_ref_rewrite(r, lambda h: ns.get(h, h))
+                                           for r in fo["ledger"]])
+            fo = n["fanout"]
         if isinstance(fo, dict) and isinstance(fo.get("items_from"), str) \
                 and fo.get("items") is None:
             head, _, rest = fo["items_from"].partition(".")
@@ -1964,6 +2149,12 @@ def _expand_include_pass(graph, library_reader, notes, chain, depth):
                              for k, v in n["requires"].items()}
         fo = n.get("fanout")
         new_item_head = None
+        if isinstance(fo, dict) and isinstance(fo.get("ledger"), list):
+            # #85: ledger source heads are parent refs at the include boundary —
+            # mapped like inputs/requires (the sixth id-ref surface, in lockstep).
+            fo = dict(fo, ledger=[_ledger_ref_rewrite(r, lambda h: map_site(nid, "fanout.ledger", h))
+                                  for r in fo["ledger"]])
+            n["fanout"] = fo
         if isinstance(fo, dict) and isinstance(fo.get("items_from"), str) \
                 and fo.get("items") is None:
             head, _, rest = fo["items_from"].partition(".")

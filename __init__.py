@@ -18,6 +18,7 @@ _spec.loader.exec_module(_common)
 run_state = _common.run_state
 validate_graph = _common.validate_graph
 validate_graph_errors = _common.validate_graph_errors
+admission_ledger_errors = _common.admission_ledger_errors   # #85: the artifact-admission guard
 efp = _common.efp
 jload = _common.jload
 amend_preview = _common.amend_preview
@@ -140,7 +141,7 @@ def _input_graph(args, *, run_id=False, library=False):
         return graph, None
     return None, None
 
-def _validation_error(graph):
+def _validation_error(graph, run_dir=None):
     """Return graph-level and node-level defects together, before any write/spawn.
 
     PR#84 review F-2: the structural (graph-level) half is delegated to
@@ -148,7 +149,14 @@ def _validation_error(graph):
     every expanded shelf with — so submitted graphs and included graphs can
     never diverge in strictness again. This side keeps the door-specific node
     normalization (author-forged route_verified stripping) and composes it with
-    the shared node-level validator."""
+    the shared node-level validator.
+
+    #85: composes the ARTIFACT-ADMISSION guard too (wfcommon.admission_ledger_errors):
+    a fan-out node's declared `fanout.ledger` must map 1:1 to its items' sources or
+    admission is REFUSED with a named error — a mis-declared item silently getting
+    another item's artifacts (WOFS W1f) becomes impossible-by-construction for
+    admitted graphs. `run_dir` (amend; validate given a run dir) additionally measures
+    the declared artifact bytes; run creation passes None — the dir does not exist yet."""
     errs = list(_common.structural_graph_errors(graph))
     nodes = graph.get("nodes")
     # The shared validator assumes hashable ids and iterable dependency lists.
@@ -190,6 +198,12 @@ def _validation_error(graph):
                 item["after"] = []
             safe.append(item)
     errs.extend(validate_graph_errors(safe))
+    # #85: the artifact-admission guard composes with the validator here, so EVERY
+    # door admission path (run/amend/submit/save/validate) measures ledgers before
+    # any write/spawn. Artifact BYTES are measured only when a run dir exists to
+    # measure them in (amend, and validate given run_id); the 1:1 structural law
+    # always runs.
+    errs.extend(admission_ledger_errors(graph, run_dir=run_dir))
     if not errs:
         return None
     first = errs[0]
@@ -654,7 +668,7 @@ WORKFLOW_PARAMS = {
             "engine-stamped substitution with a machine-injected result-schema disclosure (#116); no config = the refusal, verbatim; the sibling `route_verified` proof annotation is DOOR-BAKED only \u2014 never author-writable, "
             "an author value is dropped at resolve and re-proved by this submit's ping), inputs:['<ancestor>' | '<ancestor>.<dotted.path>', ...] (inject a committed upstream output into the prompt as a labelled json block under '## Inputs'; unresolvable ref fails the node at spawn; "
             "DIRECT parents from `after` are auto-injected capped at 8KB with a truncation marker \u2014 use inputs only to pick a dotted path or a non-parent ancestor; a parent listed in both appears once), fanout:{items | items_from:'<node_id>.<dotted.path>', goal (OPTIONAL template; an item's own `goal` key overrides it \u2014 when items carry their own goals the shared node goal prefixes each item prompt, "
-            "so no placeholder template is ever needed), schema, quorum (OPTIONAL positive int; ONLY when set: once quorum items have committed, the still-running stragglers are cancelled with error_class 'cancelled' and excluded from the failure math; when unset there is NO default \u2014 the fan-out waits for every item)}, "
+            "so no placeholder template is ever needed), schema, quorum (OPTIONAL positive int; ONLY when set: once quorum items have committed, the still-running stragglers are cancelled with error_class 'cancelled' and excluded from the failure math; when unset there is NO default \u2014 the fan-out waits for every item), ledger (OPTIONAL item-indexed INPUT LEDGER: one row per item, positionally aligned; a row is a '<node_id>.<dotted.path>' input-ref string or {source:'<node_id>.<dotted.path>', artifact?:{file:rel/path under the run dir, sha256?:64-hex}} naming the on-disk artifact the item consumes. Admission refuses the graph fail-closed unless rows map 1:1 to items: a missing/extra row, two items sharing one source, a source head outside the node's after ancestry, or (when run-dir bytes are measurable \u2014 amend/validate) an absent artifact file or sha256 mismatch are each refused with an error naming the item and the missing/extra source \u2014 an item can never silently consume another item's artifacts (#85))}, "
             "on_fail ('skip' | '<fallback-agent-node-id>' \u2014 on this node's failure commit it `skipped` (join-tolerant, run continues; a join with one live dep still runs), and with a fallback id ALSO let that agent node run; validated at run time: fallback must exist, be an agent, not be an ancestor; cancelled deaths are never caught"
             ")} \u2014 agent node. A provider requires a non-empty model; "
             "model aliases and literal IDs are preserved (tiers resolve explicitly, and a matching provider/model prefix is removed for the CLI). Run/amend responses include requested/resolved provider/model routes. Gate node: {id, type:'gate', after, question, options, context, when (bounded expr: out.<node>.<dotted.path> with == != > >= < <=, and/or/not, parens; "
@@ -1980,13 +1994,20 @@ def act_library(args):
 def act_validate(args):
     """Dry-run the door's validation pipeline WITHOUT liveness ping or any write:
     the same defaults fill, defect collection, and model/route policy run/amend do,
-    in the same order, returning {ok, errors:[{node,field,msg}], resolved_routes}."""
+    in the same order, returning {ok, errors:[{node,field,msg}], resolved_routes}.
+    #85: given run_id, the #85 artifact-admission guard additionally measures the
+    declared artifact bytes against that run dir (the same law amend applies)."""
     graph, bad = _input_graph(args)
     if bad:
         return bad
     if graph is None:
         return {"error": "validate needs graph or graph_path"}
-    bad = _validation_error(graph)
+    _rd = None
+    if args.get("run_id"):
+        _rd = run_dir(args["run_id"])
+        if not (_rd / "graph.json").exists():
+            return {"error": "unknown run_id"}
+    bad = _validation_error(graph, run_dir=_rd)
     if bad:
         return dict(bad, ok=False)
     try:
@@ -3073,7 +3094,7 @@ def act_amend(args):
         bad = _unbound_include_refs(new, _includes)
         if bad:
             return bad
-    bad = _validation_error(new) or _profile_error(new)
+    bad = _validation_error(new, run_dir=r) or _profile_error(new)
     if bad:
         return bad
     old = jload(r / "graph.json") or {}

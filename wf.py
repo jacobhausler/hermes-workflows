@@ -29,6 +29,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import wfcommon
 from wfcommon import (efp, graph_fingerprint, jload, validate_graph, node_rec, gate_answer_valid,
                       when_true, child_metrics, prune_states, dep_satisfied, active_child,
+                      admission_ledger_errors,   # #85: artifact-admission guard at runner re-validation
                       FP_RULE_VERSION, record_efp_valid, seat_forbidden_models, runs_root,
                       hermes_root, profile_home, find_run, blocked_legibility, residue,
                       release_law,
@@ -5434,6 +5435,18 @@ def main(run_id):
         emit(f"WORKFLOW_FAILED {run_id} (graph invalid: {err})")
         notify(run, "run.failed", key="pre-start: graph invalid")
         write_runner_exit(run, "crashed: graph invalid", err); return
+    # #85: re-measure the artifact-admission guard against the RUN DIR at runner
+    # start (the door proved the 1:1 structural law; only here can the declared
+    # bytes be measured — an orchestrator may have pre-seeded them between admit
+    # and spawn). Fail-closed: a missing/mismatched artifact is a named refusal,
+    # never an item silently reading nothing / another item's artifact.
+    _led = admission_ledger_errors(jload(run / "graph.json"), run_dir=run)
+    if _led:
+        _e0 = _led[0]
+        emit(f"WORKFLOW_FAILED {run_id} (graph invalid: "
+             f"{'node ' + str(_e0['node']) + ': ' if _e0.get('node') else ''}{_e0['msg']})")
+        notify(run, "run.failed", key="pre-start: ledger admission")
+        write_runner_exit(run, "crashed: ledger admission", _e0["msg"]); return
     if not meta.get("hermes_bin"):
         import shutil as _sh
         meta["hermes_bin"] = _sh.which("hermes") or "hermes"
@@ -5559,7 +5572,10 @@ def main(run_id):
         Stop is re-checked after the wave and before every terminal decision."""
         if (run / "restart.request").exists():
             g2 = jload(run / "graph.json")
-            ok = g2 and g2.get("nodes") and not validate_graph(g2["nodes"])
+            ok = (g2 and g2.get("nodes") and not validate_graph(g2["nodes"])
+                  # #85: a hot-reloaded graph re-passes the artifact-admission
+                  # guard against the live run dir before it is accepted.
+                  and not admission_ledger_errors(g2, run_dir=run))
             try: (run / "restart.request").unlink()  # consume AFTER parsing, always
             except OSError: pass
             if ok:
