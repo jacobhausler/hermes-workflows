@@ -1553,6 +1553,83 @@ def _note_turn_tier(run, node_id, report_path):
         pass
 
 
+
+# ---------- est-bbfy: pre-cap persist/finish budget cue ----------
+# A capped lane that dies at EXACT max_turns leaves useful work unpersisted and
+# no final answer (est-2ek.1.95 residual half). The runner already counts each
+# spawn's consumed turns through the state.db join that proves liveness
+# (wfcommon.child_metrics); when a capped spawn crosses
+# `max_turns - margin` the runner drops ONE steer line into the run inbox —
+# the same steer.baked channel act_steer uses — so the lane gets one
+# deterministic chance to persist (commit/push) and prepare its final fenced
+# answer before the hard cap. Zero behavior change under the cap: no cap, no
+# counter evidence, or above the soft-cap => no file, no line, no event
+# (honest absence). Idempotent per (node,index) for the life of the RUN: the
+# marker file is the claim, so a respawn/re-drive can never inject a second
+# cue. margin is run-level meta (the door's channel, same law as
+# _retry_conf_params); env is NOT a hook (no env hooks in the runner).
+BUDGET_CUE_MARGIN = 5        # run.json meta `budget_cue_margin` overrides
+BUDGET_CUE_POLL_S = 1.0      # counter-read cadence while a capped spawn is live
+
+def _budget_cue_margin(meta):
+    v = meta.get("budget_cue_margin")
+    return v if isinstance(v, int) and not isinstance(v, bool) and v >= 0 \
+        else BUDGET_CUE_MARGIN
+
+def _budget_cue_claimed(run, node, index):
+    return (Path(run) / "budget_cue" / _node_file(node, index)).is_file()
+
+def _budget_cue_inject(run, node, index, skey, home, max_turns, margin, steer_file=""):
+    """Returns True when THIS spawn may stop checking the counter: either the
+    cue was injected now, or the run-level claim already exists (an earlier
+    generation of this (node,index) earned it — respawn idempotence)."""
+    if not (isinstance(max_turns, int) and not isinstance(max_turns, bool)
+            and max_turns > 0) or not skey:
+        return True                                  # uncapped/unobservable: nothing to do
+    try:
+        m = child_metrics(run.name, home).get(skey)
+    except Exception:
+        return False
+    if not m or m.get("api_calls_known") is not True:
+        return False                                 # honest absence: keep watching
+    consumed = m.get("api_calls")
+    if not isinstance(consumed, int) or consumed < max_turns - margin:
+        return False                                 # still above the soft-cap
+    left = max(0, max_turns - consumed)
+    d = Path(run) / "budget_cue"
+    try:
+        d.mkdir(parents=True, exist_ok=True)
+        fd = os.open(d / _node_file(node, index), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+    except FileExistsError:
+        return True                                  # claimed by a prior generation
+    except OSError:
+        return False                                 # a cue failure never disturbs the run
+    text = (f"turn budget: {left} turns left — persist your work now (commit/push per "
+            "checkpoint law) and prepare your final fenced-json answer")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(json.dumps({"node": node["id"], "index": index, "consumed": consumed,
+                                "turns_left": left, "max_turns": max_turns, "at": now()}) + "\n")
+        with open(run / "inbox.jsonl", "a") as f:   # the ONE steer channel (act_steer's schema)
+            f.write(json.dumps({"node": node["id"], "index": index, "text": text,
+                                "budget_cue": True,
+                                "at": now()}) + "\n")
+    except OSError:
+        return False
+    # The LIVE spawn's bake is HWM-frozen at spawn; the inbox line above only
+    # reaches the NEXT spawn. Append to this spawn's own bake file too (i=-1
+    # always clears the HWM filter in _steer_lines) so the child nearing the
+    # cap pulls the cue at its next inbox seam. Best-effort: never disturbs.
+    if steer_file:
+        try:
+            with open(steer_file, "a", encoding="utf-8") as f:
+                f.write(json.dumps({"i": -1, "text": text}) + "\n")
+        except OSError:
+            pass
+    log(run, "budget_cue.injected", node=node["id"], index=index, consumed=consumed,
+        turns_left=left, max_turns=max_turns)
+    return True
+
 def _quota_cache_path():
     """#24 (b): seat-local memory of models known to be subscription-exhausted."""
     import os
@@ -3854,6 +3931,12 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
     # and the quarantine below, never trusted for the verdict itself.
     tree_seen = set()
     tree_next_watch = 0.0
+    # est-bbfy: pre-cap persist/finish budget cue — one watch per spawn, dead
+    # once the run-level claim exists (respawn idempotence via the marker file).
+    cue_margin = _budget_cue_margin(meta)
+    cue_alive = not _budget_cue_claimed(run, node, index)
+    cue_next = 0.0
+    cue_home = route.get("profile_home") if route else None
     try:
         # #18 child liveness (replaces the blind blocking communicate): poll the
         # spawn log — a child that has written NOTHING by silence_deadline never
@@ -3866,6 +3949,11 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
             if now_s >= tree_next_watch:
                 _tree_watch(proc, tree_seen)
                 tree_next_watch = now_s + PROCREE_POLL_S
+            if cue_alive and now_s >= cue_next:
+                cue_next = now_s + BUDGET_CUE_POLL_S
+                if _budget_cue_inject(run, node, index, skey, cue_home,
+                                      node.get("max_turns"), cue_margin, steer_file):
+                    cue_alive = False
             if silence_deadline is not None and now_s >= silence_deadline \
                     and not _child_spoke(lp):
                 early_death = True

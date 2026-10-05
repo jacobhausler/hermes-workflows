@@ -252,6 +252,27 @@ Detailed entries (Unreleased work folded in):
   Test: `tests/test_run_context_seed_guard.py` (encoded-map rejects atomically — no run
   written, no spawn; seed-with-refs rejects naming node+key; dict binding still
   substitutes; prose seeds still launch).
+- runner: pre-cap persist/finish budget cue (est-bbfy — residual half of
+  est-2ek.1.95). When a capped agent lane's consumed turns (the same
+  `wfcommon.child_metrics` state.db join that already proves liveness) reach
+  `max_turns - margin` — margin from run.json meta `budget_cue_margin`, the door's
+  channel (same law as `retry_backoff`), default 5 — the runner injects ONE steer
+  line on the existing steer channel: appended to the run's `inbox.jsonl` (the next
+  spawn's bake) AND to the live spawn's bake file with `i=-1` (pullable at its next
+  inbox seam), reading `turn budget: N turns left — persist your work now
+  (commit/push per checkpoint law) and prepare your final fenced-json answer`. An
+  `O_EXCL` marker under `<run>/budget_cue/<node>` is the claim — one cue per
+  (node,index) for the life of the run, surviving respawn/re-drive. Zero behavior
+  change under the cap: no cap, unknown counter, or turns still above the soft-cap
+  => no file, no line, no event (honest absence). `act_status` `stop_reason` gains
+  `kind: "budget"` — derive-ONLY off the marker file, and only when #199's tier
+  note already produced a `stop_reason` (plain cap deaths stay class-only,
+  successes stay key-free). Wall kills (`node_timeout`) are an independent clock;
+  `budget_cue_margin` is the lever for turn-cap deaths.
+  Test: `tests/test_budget_cue_bbfy.py` (22 contracts — cue fires inside the 1 s
+  liveness loop for both spawn generations, O_EXCL respawn-idempotence, honest
+  absence under the cap, `kind=budget` derivation; fake modes `budget_lane` /
+  `typed_maxturns`).
 
 ## 1.2.0 — 2026-10-03
 

@@ -2608,6 +2608,15 @@ def act_status(args):
                        "tier_via_node": str(tier_rec.get("via") or ""),
                        "source": "turn_report.tier"}
         out["stop_reason"] = stop_reason
+    # est-bbfy: a cue-injected lane that STILL died at the cap is a BUDGET
+    # stop — the marker file the runner wrote at injection time is the
+    # deterministic fact (derive-only, A3 law: one stat, no prose). Honest
+    # absence: no marker, no kind (a plain cap death stays class-only).
+    if stop_reason is not None and (r / "budget_cue").is_dir():
+        _via = stop_reason.get("tier_via_node") or ""
+        if _via and ((r / "budget_cue" / _via).is_file()
+                     or any((r / "budget_cue").glob(f"{_via}.*"))):
+            stop_reason["kind"] = "budget"
     if st.get("runner_exit"):
         out["runner_exit"] = st["runner_exit"]  # <run>/runner_exit.json or the dead-pid crash note
     if st["held_gate"]:

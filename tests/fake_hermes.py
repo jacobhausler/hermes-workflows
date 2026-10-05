@@ -262,6 +262,44 @@ if _FAKE_MODE == "untyped_report":   # tier self-report (0924): report exists bu
         with open(_rp, "w") as f:
             json.dump({"pid": os.getpid(), "exit_code": 2, "error": "boom", "reply": ""}, f)
     print("prose death without the typed key"); sys.exit(2)
+if _FAKE_MODE == "budget_lane":
+    # est-bbfy: a lane that burns ONE turn (one api_call + one tool_call) every
+    # FAKE_BUDGET_TICK seconds, growing its state.db session row LIVE so the
+    # runner can watch consumed turns approach the cap through the same
+    # child_metrics join that proves liveness. FAKE_BUDGET_STOP_AT=<n>: the
+    # early-finish twin — answer cleanly at n turns (exit 0, no report).
+    # Otherwise die at the hard cap with the loop's typed stamp (exit 2).
+    import sqlite3 as _sql_bc
+    _mt = int(args[args.index("--max-turns") + 1]) if "--max-turns" in args else 60
+    _stop_at = int(os.environ.get("FAKE_BUDGET_STOP_AT") or 0)
+    _tick = float(os.environ.get("FAKE_BUDGET_TICK") or 0.25)
+    _title = args[args.index("--continue") + 1] if "--continue" in args else "bc-x"
+    def _bc_row(n):
+        c = _sql_bc.connect(os.path.join(_FAKE_HOME, "state.db"))
+        c.execute("create table if not exists sessions (id text primary key, title text, model text, billing_provider text, input_tokens int, output_tokens int, "
+                  "cache_read_tokens int, reasoning_tokens int, api_call_count int, tool_call_count int, estimated_cost_usd real, "
+                  "last_activity_at real, last_activity_description text, ended_at real, started_at real)")
+        t = time.time()
+        c.execute("insert or replace into sessions values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                  ("f-" + _title, _title, "fake", "fake-provider", 0, 0, 0, 0, n, n, 0.0, t, "", t, t))
+        c.commit(); c.close()
+    _n = 0
+    while True:
+        _n += 1
+        _bc_row(_n)
+        if _stop_at and _n >= _stop_at:
+            print("```json\n" + json.dumps({"result": "finished-before-cap"}) + "\n```")
+            sys.exit(0)
+        if _n > _mt:
+            _rp = os.environ.get("HERMES_QUIET_TURN_REPORT_FILE")
+            if _rp:
+                with open(_rp, "w") as f:
+                    json.dump({"pid": os.getpid(), "exit_code": 2, "error": "budget",
+                               "reply": "partial answer before the cap",
+                               "turn_exit_reason": "max_iterations_reached(%d/%d)" % (_n, _mt)}, f)
+            print("partial answer before the cap")
+            sys.exit(2)
+        time.sleep(_tick)
 if _FAKE_MODE == "toolcall_text_541" and "TOOLCALL541" in q:
     # est-2ek.1.541: the agent child whose FINAL REPLY is serialized tool-call markup
     # ('<invoke name=...>'-shape rendered as text, turn_exit_reason unknown, exit 1).
