@@ -62,6 +62,7 @@ One tool, action-routed — the complete surface, with the flags that matter:
 | `save` | Shelve a graph in the library under a name (overwrite = current best): `description`, `tags` (1–10, flat or `facet:value`; reuse `library`'s `tag_vocab` verbatim), optional `source` attribution writes provenance (owner, digest, timestamp) — attribution, never access control. |
 | `submit` | Quarantine a hand-rolled graph the library didn't cover for human-gated study — requires a `why_not_library` receipt (≥80 chars); never joins the library. |
 | `library` | List shelved graphs richly (nodes, gates, fan-outs, description, tags, provenance), filterable by ALL-match tags; an empty filtered result says which tag starved. |
+| `doctor_version` | Read-only version truth for THIS install: `{live_version, newest_packaged, source_commit, drift}` — plugin.yaml vs the `install.json` provenance `pack.py` stamps at build time; one read, no network. |
 | `release_lock` | *(open PR #47)* Release a wedged `runner.lock` after proving the holder dead (also `python3 wf.py release-lock <run_id>`). Refuses contested, gate-held, or alive cases; never unlinks a lock. |
 
 Plus a `/wf` slash command: bare `/wf` lists the library; `/wf <name> [note]`

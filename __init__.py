@@ -563,8 +563,8 @@ WORKFLOW_PARAMS = {
     "properties": {
         "action": {
             "type": "string",
-            "enum": ["run", "status", "wait", "release", "steer", "inbox", "amend", "stop", "list", "save", "submit", "library"],
-            "description": "run=launch a graph; wait=read state, RESPAWNING an idle runner if work is pending (blocks to the next boundary when one is live); status=read-model of a run; release=answer a held human gate; steer=queue steering text for a node; inbox=(child-side, cooperative) pull late steering lines baked for THIS spawn — call once at a natural seam; amend=replace the graph (invalidates changed nodes + all downstream by fingerprint); stop=request stop; list=all runs; save=shelve a graph in the library under a name (from run_id or inline graph); library=list shelved graphs richly (name, description, tags, provenance, path-relative id). run from=<name> replays a shelved graph. submit=quarantine a hand-rolled graph for study (requires why_not_library >=80 chars; never joins the library — the quartermaster's human-gated loop decides); inbox kind=submissions lists them newest-first.",
+            "enum": ["run", "status", "wait", "release", "steer", "inbox", "amend", "stop", "list", "save", "submit", "library", "doctor_version"],
+            "description": "run=launch a graph; wait=read state, RESPAWNING an idle runner if work is pending (blocks to the next boundary when one is live); status=read-model of a run; release=answer a held human gate; steer=queue steering text for a node; inbox=(child-side, cooperative) pull late steering lines baked for THIS spawn — call once at a natural seam; amend=replace the graph (invalidates changed nodes + all downstream by fingerprint); stop=request stop; list=all runs; save=shelve a graph in the library under a name (from run_id or inline graph); library=list shelved graphs richly (name, description, tags, provenance, path-relative id). run from=<name> replays a shelved graph. submit=quarantine a hand-rolled graph for study (requires why_not_library >=80 chars; never joins the library — the quartermaster's human-gated loop decides); inbox kind=submissions lists them newest-first. doctor_version=read-only version truth for THIS install: {live_version, newest_packaged, source_commit, drift} comparing plugin.yaml against the install.json provenance that pack.py stamps at build time \u2014 one read, no network.",
         },
         "run_id": {"type": "string", "description": "Run id (required for every action except run/list)."},
         "name": {"type": "string", "description": "run: overrides graph.name (default workflow); save: library name overrides graph.name (lowercase, [-_.]). amend: set graph.name in the replacement graph; omitting it retains the run name."},
@@ -3072,9 +3072,38 @@ def act_list(_args):
         out["provenance"] = {"dispatched_by_set": dispatched_by_set, "total": len(runs)}
     return out
 
+def act_doctor_version(args):
+    """est-2ek.1.159 version truth: one read, no network — compare the seat's live
+    plugin.yaml version against the install.json provenance pack.py stamped at build
+    time. drift:true means "fixed upstream, not deployed here" (the 1.0.1-seat vs
+    1.1.0-source shape); a missing install.json says null provenance, never an
+    invented version."""
+    d = Path(args["plugin_dir"]).expanduser() if args.get("plugin_dir") else HERE
+    yaml_p, inst_p = d / "plugin.yaml", d / "install.json"
+    if not yaml_p.is_file():
+        return {"error": f"no plugin.yaml under {d}"}
+    live = None
+    m = re.search(r"(?m)^version:\s*(\S+)\s*$", yaml_p.read_text(encoding="utf-8", errors="replace"))
+    if m:
+        live = m.group(1)
+    packaged = commit = None
+    if inst_p.is_file():
+        try:
+            rec = json.loads(inst_p.read_text(encoding="utf-8", errors="replace"))
+        except (ValueError, OSError):
+            rec = {}
+        if isinstance(rec, dict):
+            packaged = rec.get("version")
+            commit = rec.get("source_commit")
+    return {"live_version": live, "newest_packaged": packaged,
+            "source_commit": commit,
+            "drift": bool(packaged is not None and live is not None and packaged != live)}
+
+
 ACTIONS = {"run": act_run, "status": act_status, "wait": act_wait, "release": act_release,
            "steer": act_steer, "inbox": act_inbox, "amend": act_amend, "stop": act_stop, "list": act_list,
-           "save": act_save, "submit": act_submit, "library": act_library}
+           "save": act_save, "submit": act_submit, "library": act_library,
+           "doctor_version": act_doctor_version}
 
 def handle(args, **kwargs):
     try:

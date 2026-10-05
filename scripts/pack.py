@@ -4,15 +4,68 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import os
 import re
 import stat
+import subprocess
 import zipfile
+from datetime import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 VERSION = re.search(r"^version:\s*([\d.]+)", (ROOT / "plugin.yaml").read_text(), re.M).group(1)  # single source: the manifest
 PACKAGE_NAME = f"hermes-workflows-{VERSION}"
+
+
+# est-2ek.1.159 version truth: install.json provenance rides the ZIP root so an
+# installed seat can tell "still broken" from "fixed, not deployed". Test seam:
+# HERMES_WF_PACK_COMMIT pins the commit (sanitized: 40-hex only, never raw);
+# SOURCE_DATE_EPOCH pins packaged_at for reproducibility.
+_COMMIT_PIN = re.compile(r"^[0-9a-f]{40}$")
+
+
+def _source_commit() -> str:
+    pin = os.environ.get("HERMES_WF_PACK_COMMIT", "").strip()
+    if _COMMIT_PIN.fullmatch(pin):
+        return pin
+    try:
+        sha = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True,
+            text=True, timeout=10,
+        )
+        if sha.returncode == 0 and _COMMIT_PIN.fullmatch(sha.stdout.strip()):
+            return sha.stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return "unknown"
+
+
+def _packaged_at() -> str:
+    # Reproducibility law: no wall-clock byte may ever enter the ZIP. Pinned by
+    # SOURCE_DATE_EPOCH, else the HEAD commit's own committer date (deterministic
+    # per tree — two packs of one tree stay byte-identical), else "unknown".
+    epoch = os.environ.get("SOURCE_DATE_EPOCH", "").strip()
+    if epoch.isdigit():
+        return datetime.fromtimestamp(int(epoch)).astimezone().isoformat()
+    try:
+        when = subprocess.run(
+            ["git", "log", "-1", "--format=%cI", "HEAD"], cwd=ROOT,
+            capture_output=True, text=True, timeout=10,
+        )
+        if when.returncode == 0 and when.stdout.strip():
+            return datetime.fromisoformat(when.stdout.strip()).isoformat()
+    except (OSError, ValueError, subprocess.SubprocessError):
+        pass
+    return "unknown"
+
+
+def install_provenance() -> bytes:
+    return (json.dumps(
+        {"version": VERSION, "source_commit": _source_commit(),
+         "packaged_at": _packaged_at()},
+        separators=(",", ":"),
+    ) + "\n").encode("utf-8")
 
 # Exact files plus deliberately narrow source patterns. Never package a worktree wholesale.
 INCLUDE_FILES = (
@@ -124,6 +177,13 @@ def build(output: Path) -> tuple[str, Path]:
                 )
             archive.writestr(
                 _zip_info(f"{PACKAGE_NAME}/SHA256SUMS"), checksums,
+                compress_type=zipfile.ZIP_DEFLATED,
+                compresslevel=9,
+            )
+            # Provenance rides AFTER the ledger: SHA256SUMS pins sources only,
+            # install.json is generated (no self-referential row).
+            archive.writestr(
+                _zip_info(f"{PACKAGE_NAME}/install.json"), install_provenance(),
                 compress_type=zipfile.ZIP_DEFLATED,
                 compresslevel=9,
             )
