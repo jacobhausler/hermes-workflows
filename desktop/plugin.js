@@ -646,6 +646,12 @@ const $stripFold = atom(null) // focused sid while its terminal fold is expanded
 // {sid, runId} or null. In-memory plugin atom — never persisted, so a reload
 // never resurrects an expanded panel.
 const $railOpen = atom(null)
+// Collapsible live-run tray (#22, design comment 6003168642, est-8ppm):
+// {expanded, openRun} or null. In-memory plugin atom — never localStorage,
+// so a reload never resurrects an expanded tray. Component family lives in
+// desktop/src/components/runtray.mjs; SessionStrip stays the mount owner
+// (test_register_surface locks the 'session-strip' registration).
+const $trayOpen = atom(null)
 
 /** Pure pill-toggle (exported so node can test the transition table without a
  *  DOM): null → open {sid, runId}; clicking the OPEN pill (same sid AND same
@@ -886,6 +892,45 @@ function RailPanel({ runId }) {
   }, 'rail-panel')
 }
 
+/** ---- Live-run tray (#22, design comment 6003168642, est-8ppm) -----------------
+ *  SKELETON shells: the component family is scaffolded in
+ *  desktop/src/components/runtray.mjs; plugin.js may NOT import-reexport from
+ *  it (test_11_ui_imports freezes plugin.js imports at exactly the three SDK
+ *  sources), so the build lane grows these bodies in place (or inlines the
+ *  shells) and ships the pure models trayScoping/trayModel/
+ *  trayAggregateLabel/trayRecap/ackFinished/toggleTray + $trayOpen as exports
+ *  — tests/test_run_tray.mjs (RED on this commit by design) is the contract.
+ *  Mount law: SessionStrip stays the mount owner; the collapsed RunTrayRow
+ *  stacks as a sibling row of the native tray family ABOVE the chat window
+ *  (same composer registration as PillRail below). */
+export function RunTrayRow({ runs, acked, onExpand }) {
+  // TODO(build-lane): one thicker tray row — ⌬ pulse glyph (cadence tied to
+  // node transitions), aggregate label via trayAggregateLabel (held segment
+  // amber, failed red via the ONE NODE_TONE table), micro node-transition
+  // sparkline, ▾. Click anywhere calls onExpand.
+  return null
+}
+
+export function RunTrayRunRow({ run, open, onOpenPane, onAck }) {
+  // TODO(build-lane): status chip, name + lane_key, per-node state dots +
+  // x/y, current node label, elapsed, token chip; held pinned top ordering is
+  // the model's job (trayModel bands). Row click accordion-expands the shared
+  // MiniGraph (open prop); `open ↗` calls onOpenPane; finished rows keep ×
+  // (onAck, ledger cap 10); held rows reuse GateActions — no new server
+  // surface. steer/stop stay ABSENT until a plugin action surface exists.
+  return null
+}
+
+export function RunTray({ runs, sid }) {
+  // TODO(build-lane): collapsed RunTrayRow + drop-down RunTrayRunRow list
+  // (max ~40% viewport, internal scroll); click-away collapses, Esc collapses
+  // to the collapsed row (scoped onKeyDown law — no global keydown
+  // listeners); zero live runs hides the tray, the last completion lingers
+  // 60 s as `last run done · n/n nodes` (trayRecap) then retracts.
+  // Read $trayOpen via useValue; never .get() inside a handler.
+  return null
+}
+
 export function SessionStrip() {
   // KEY PAIRING (measured 2026-09-26 against this desktop): run.json.owner.session_id
   // carries the GATEWAY runtime id (`20260923_143041_27e8d2` — state.db sessions.id),
@@ -940,6 +985,13 @@ export function SessionStrip() {
       // railModel filters TERMINAL and caps at 3 itself, so the +N overflow
       // stays visible (passing splitRuns' capped `active` pinned overflow to 0
       // and silently lost the affordance — review #28 F1).
+      // #22 live-run tray: the collapsed RunTrayRow stacks as the SIBLING
+      // tray row above the chat window (same composer registration, native
+      // tray family — task-list/subagents/queued-messages). Shell today
+      // (returns null); the build lane grows it against
+      // tests/test_run_tray.mjs. No new hooks here — hook order is frozen
+      // (test_register_surface 1c).
+      jsx(RunTray, { runs: owned, sid: pairKey }, 'run-tray'),
       jsx(PillRail, {
         runs: owned, sid: pairKey, railOpen,
         onPill: id => $railOpen.set(toggleRail(railOpen, pairKey, id)),
