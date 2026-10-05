@@ -160,6 +160,24 @@ if _FAKE_MODE == "provider400":    # 400 with inherited CLI advice lines that mu
     print("Try re-running with a different model via /new or /model")
     print("hermes -z: agent failed: Error code: 400 - {'error': 'bad request'}")
     sys.exit(2)
+if _FAKE_MODE == "fallback_ladder":      # est-2ek.1.164: transport death on any -m that is not $FAKE_OK_MODEL
+    _m = args[args.index("-m") + 1] if "-m" in args else None
+    if _m == os.environ.get("FAKE_OK_MODEL"):
+        print("```json\n" + json.dumps({"result": "answered on " + str(_m)}) + "\n```")
+        sys.exit(0)
+    print("hermes -z: agent failed: openai.APIConnectionError. Connection error.")
+    sys.exit(2)
+if _FAKE_MODE == "partial_remaining":    # est-2ek.1.165: harvest death WITH a declared Remaining block
+    print("did the head of the tail, then the cap took me")
+    print("## Remaining")
+    print("- roll callindor plugin")
+    print("- CLI bake")
+    print("")
+    print("```json\n" + json.dumps({"result": "half done"}) + "\n```")
+    sys.exit(1)
+if _FAKE_MODE == "partial_noremaining":  # est-2ek.1.165: harvest death with NO declared block
+    print("```json\n" + json.dumps({"result": "half done"}) + "\n```")
+    sys.exit(1)
 if _FAKE_MODE == "unknown":        # dies with prose only — no machine-readable marker
     print("some daemon died unexpectedly, see your provider dashboard")
     sys.exit(7)
