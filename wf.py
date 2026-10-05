@@ -3867,12 +3867,24 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
     sr = os.environ.get("HERMES_WRITE_SAFE_ROOT")
     if sr:
         env["HERMES_WRITE_SAFE_ROOT"] = sr + os.pathsep + wd
+        # est-2mhl: under the served estate (multiplex_profiles on) core's
+        # get_safe_write_roots() reads HERMES_WRITE_SAFE_ROOT from the SERVING
+        # profile's bound scope/.env and REPLACES the process-env value, so the
+        # append above is silently dropped when the served profile carries its
+        # own value. Carry the child's own dir in HERMES_WRITE_SAFE_ROOT_EXTRA,
+        # the deployment-scoped companion this PR proposes core to union
+        # unconditionally (like TERMINAL_* / HERMES_KANBAN_* globals). Core
+        # ignores the name today, so this is inert until the core change lands.
+        env["HERMES_WRITE_SAFE_ROOT_EXTRA"] = wd
     if route:
         # Delegation is not isolation. The target's -p resolves against the common
         # root, never the launcher's named-profile home. Do not forward launcher
         # secrets (provider keys and unrelated environment variables).
         keep = {"PATH", "HOME", "LANG", "TERM", "TZ", "TMPDIR",
-                "HERMES_QUIET_TURN_REPORT_FILE", "WF_RUNS_ROOT", "HERMES_WRITE_SAFE_ROOT"}
+                "HERMES_QUIET_TURN_REPORT_FILE", "WF_RUNS_ROOT", "HERMES_WRITE_SAFE_ROOT",
+                # est-2mhl: the work-dir grant rides alongside the deployment
+                # safe root, not as a launcher secret — forwarded like the root.
+                "HERMES_WRITE_SAFE_ROOT_EXTRA"}
         env = {k: v for k, v in env.items()
                if k in keep or k.startswith("LC_") or k.startswith("HERMES_WF_")}
         env["HERMES_HOME"] = str(hermes_root())
