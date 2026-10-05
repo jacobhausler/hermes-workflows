@@ -76,9 +76,23 @@ check(any("type must be agent|gate" in e["msg"] for e in many)
       "error classes: type / after / timeout / schema each named", many)
 dup = V([{"id": "x", "type": "agent", "goal": "g"}, {"id": "x", "type": "agent", "goal": "g"}])
 check(any("duplicate" in e["msg"] for e in dup), "duplicate ids rejected", dup)
+check(any("'x'" in e["msg"] or '"x"' in e["msg"] for e in dup),
+      "duplicate-id error NAMES the duplicated id", dup)
 cyc = V([{"id": "p", "type": "agent", "goal": "g", "after": ["q"]},
          {"id": "q", "type": "agent", "goal": "g", "after": ["p"]}])
 check(any("cycle" in e["msg"] for e in cyc), "cycle rejected", cyc)
+check(any("cycle" in e["msg"] and "'p'" in e["msg"] and "'q'" in e["msg"] for e in cyc),
+      "cycle error NAMES the stuck nodes", cyc)
+# missing type surfaces alongside every other defect, not instead of them
+no_type = V([{"id": "m", "goal": "g", "after": ["ghost"], "timeout": 0}])
+check(any(e["field"] == "type" for e in no_type)
+      and any(e["field"] == "after" and "ghost" in e["msg"] for e in no_type)
+      and any(e["field"] == "timeout" for e in no_type),
+      "missing type reports type + after + timeout in ONE pass (no early continue)", no_type)
+bad_when = V([{"id": "g", "type": "gate", "question": "q", "when": "out.j.v == "}])
+check(any(e["field"] == "when" and "out.<node>" in e["msg"] and "and/or/not" in e["msg"]
+          for e in bad_when),
+      "when rejection quotes the bounded grammar one-liner", bad_when)
 bad_id = V([{"id": "-nope", "type": "agent", "goal": "g"}])
 check(any(e["field"] == "id" and "invalid node id" in e["msg"] for e in bad_id),
       "invalid node id rejected", bad_id)

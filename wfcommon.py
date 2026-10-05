@@ -915,7 +915,8 @@ def validate_graph_errors(nodes):
     if not all(ids):
         E(None, "nodes", "missing node ids")
     if len(set(ids)) != len(ids):
-        E(None, "nodes", "duplicate node ids")
+        dupes = sorted({i for i in ids if ids.count(i) > 1}, key=str)
+        E(None, "nodes", f"duplicate node ids: {dupes}")
     if not all(ids):
         return errs  # per-node checks below need real ids
     for i in ids:
@@ -928,22 +929,26 @@ def validate_graph_errors(nodes):
     byid_of = {n["id"]: n for n in nodes if isinstance(n.get("id"), str)}   # jam-h23: on_fail target lookup
     for n in nodes:
         nid = n["id"]
-        if n.get("type") not in NODE_TYPES:
+        t = n.get("type")
+        if t not in NODE_TYPES:
             E(nid, "type", "type must be agent|gate|echo")
-            continue  # per-type key grammar is undefined without a type
-        _type_keys = NODE_TYPES[n["type"]].keys
-        for k in sorted(set(n) - _type_keys):
-            # dedicated errors below own these keys (clearer messages, no double-report)
-            if n["type"] == "agent" and k == "wait":
-                continue
-            if n["type"] == "gate" and k == "inputs":
-                continue
-            if n["type"] == "agent" and k == "when":
-                E(nid, "when", "only gate nodes take when; use a gate with on_skip:prune to branch")
-                continue
-            if k in ("after_partial", "order_only"):
-                continue  # the dedicated blocks below name the key (echo-meaningless / type)
-            E(nid, k, "unknown key; allowed: " + json.dumps(sorted(_type_keys)))
+            # NO continue: type-INDEPENDENT defects (after refs, numeric bounds,
+            # ids) still surface below in one pass; only the per-type key grammar
+            # (undefined without a type) is skipped via the else-branch.
+        else:
+            _type_keys = NODE_TYPES[t].keys  # the ONE table (est-voip); no second dict
+            for k in sorted(set(n) - _type_keys):
+                # dedicated errors below own these keys (clearer messages, no double-report)
+                if t == "agent" and k == "wait":
+                    continue
+                if t == "gate" and k == "inputs":
+                    continue
+                if t == "agent" and k == "when":
+                    E(nid, "when", "only gate nodes take when; use a gate with on_skip:prune to branch")
+                    continue
+                if k in ("after_partial", "order_only"):
+                    continue  # the dedicated blocks below name the key (echo-meaningless / type)
+                E(nid, k, "unknown key; allowed: " + json.dumps(sorted(_type_keys)))
         for a in n.get("after", []):
             if a not in idset:
                 E(nid, "after", f"references unknown 'after': {a}")
@@ -952,7 +957,7 @@ def validate_graph_errors(nodes):
             # truthy is never enough to open a harvest edge. Echo rejects it
             # explicitly (its closed set also flags it unknown) so the error
             # NAMES the key, per the issue's validation contract.
-            if n["type"] == "echo":
+            if t == "echo":
                 E(nid, "after_partial", "after_partial is meaningless on echo "
                                         "nodes (agent/gate only)")
             elif not isinstance(n["after_partial"], bool):
@@ -962,7 +967,7 @@ def validate_graph_errors(nodes):
             # est-ij0: ordering-only edges are a declared SUBSET of after — the cycle,
             # topo and downstream machinery keep reading `after` unchanged.
             oo = n["order_only"]
-            if n["type"] == "echo":
+            if t == "echo":
                 E(nid, "order_only", "order_only is meaningless on echo nodes (agent/gate only)")
             elif not isinstance(oo, list) or not all(isinstance(x, str) for x in oo):
                 E(nid, "order_only", "order_only must be a list of node ids (a subset of after)")
@@ -974,7 +979,7 @@ def validate_graph_errors(nodes):
             # est-2ek.1.603: publisher capability is an EXPLICIT declaration — the
             # validator never infers side effects from prose. agent/echo only (a gate
             # can never publish); bool only — an unvalidated truthy never opens the gate.
-            if n["type"] == "gate":
+            if t == "gate":
                 E(nid, "publishes", "publishes is meaningless on gate nodes "
                                    "(agent/echo only — a gate has no side effects to declare)")
             elif not isinstance(n["publishes"], bool):
@@ -984,7 +989,7 @@ def validate_graph_errors(nodes):
         if "suite_proof" in n:
             # est-2ek.1.603: recognized suite-PROOF producer (agent/gate only; echo
             # rejects it). On commit done the runner mints nodes/<id>.suite-proof.json.
-            if n["type"] == "echo":
+            if t == "echo":
                 E(nid, "suite_proof", "suite_proof is meaningless on echo nodes "
                                       "(agent/gate only — an echo proves nothing)")
             elif not isinstance(n["suite_proof"], bool):
@@ -1001,13 +1006,13 @@ def validate_graph_errors(nodes):
             if lv not in reasoning_levels():
                 E(nid, "reasoning", f"reasoning {lv!r} invalid; allowed: "
                                     f"{list(reasoning_levels())}")
-        if n["type"] == "gate" and n.get("options") is not None:
+        if t == "gate" and n.get("options") is not None:
             opts = n["options"]
             if not isinstance(opts, list) or not opts \
                     or not all(isinstance(o, str) and o.strip() for o in opts):
                 E(nid, "options", "gate options must be a non-empty list of non-empty strings "
                                   "(or omit the key for a free-form answer)")
-        if n["type"] == "gate":
+        if t == "gate":
             # sprint101 #14: gate defaults are validated at the door, never discovered at the wall.
             dopt = n.get("default_option")
             if dopt is not None:
@@ -1032,7 +1037,7 @@ def validate_graph_errors(nodes):
                 E(nid, "question", f"question {n['question']!r} must be a string")
             if "context" in n and not isinstance(n["context"], str):
                 E(nid, "context", f"context {n['context']!r} must be a string")
-        if n["type"] == "agent":
+        if t == "agent":
             # #59 (fb-fix ledger 97e90c2205f17fb0): the string-typed agent keys
             # are TYPE-checked at submit — a list/dict `context` or non-str `goal`
             # passed the truthy-only check and died at FIRST spawn in run_child's
@@ -1146,7 +1151,7 @@ def validate_graph_errors(nodes):
                     E(nid, "schema", "schema must be an object")
                 else:
                     schema_check(nid, "schema", n["schema"])
-        if n["type"] == "echo":
+        if t == "echo":
             # #59: echo commits `output` VERBATIM (the documented contract). The
             # shapes downstream consumes are JSON values (fixtures and examples
             # author dicts/lists — a str-only law would kill the feature), so the
@@ -1184,14 +1189,14 @@ def validate_graph_errors(nodes):
                     E(nid, "on_fail", f"on_fail target {ofk!r} must not be an ancestor of {nid}")
         w = n.get("wait")
         if w is not None:
-            if n["type"] != "gate":
+            if t != "gate":
                 E(nid, "wait", "only gate nodes take wait")
             else:
                 for e in wait_spec_ok(w):
                     field = "wait" if e["field"] is None else f"wait.{e['field']}"
                     E(nid, field, f"gate node wait: {e['msg']}")
         anc = set()
-        if (n.get("when") is not None and n["type"] == "gate") or n.get("inputs") is not None:
+        if (n.get("when") is not None and t == "gate") or n.get("inputs") is not None:
             stack = list(n.get("after", []))
             while stack:
                 a = stack.pop()
@@ -1199,7 +1204,7 @@ def validate_graph_errors(nodes):
                     continue
                 anc.add(a)
                 stack.extend(parents[a])
-        if n.get("when") is not None and n["type"] == "gate":
+        if n.get("when") is not None and t == "gate":
             err = when_expr_ok(n["when"])
             if err:
                 E(nid, "when", err)   # parse-only (syntax mode is total): NO head check on a broken expr
@@ -1218,7 +1223,7 @@ def validate_graph_errors(nodes):
                                            f"node in its `after` ancestry (when must descend from it)")
         ins = n.get("inputs")
         if ins is not None:
-            if n["type"] == "gate":
+            if t == "gate":
                 E(nid, "inputs", "gates cannot have inputs")
             elif not isinstance(ins, list) or not all(isinstance(x, str) and x.strip() for x in ins):
                 E(nid, "inputs", "inputs must be a list of non-empty ref strings")
@@ -1248,7 +1253,8 @@ def validate_graph_errors(nodes):
             if indeg[k] == 0:
                 queue.append(k)
     if seen != len(idset):
-        E(None, "after", "cycle in graph")
+        stuck = sorted(i for i in idset if indeg[i] > 0)
+        E(None, "after", f"cycle in graph (nodes still waiting on each other: {stuck})")
     return errs
 
 def validate_graph(nodes):
@@ -2548,21 +2554,23 @@ def when_expr_ok(expr):
     so a value TypeError can never short-circuit the structural pass and mask a
     trailing token. Malformed syntax is REJECTED at submit and at runner startup;
     value errors against live data surface at fire time as a HOLD (fail-safe)."""
+    GRAMMAR = ("grammar: out.<node>.<dotted.path> compared (== != > >= < <=) with "
+               "literals, joined by and/or/not, parentheses allowed")
     toks = None
     try:
         toks = _tok_when(expr)
     except ValueError as e:
-        return f"when: {e}"
+        return f"when: {e} ({GRAMMAR})"
     if not toks:
-        return "empty when expression"
+        return f"empty when expression ({GRAMMAR})"
     try:
         _, pos = _when_or(toks, 0, _SYNTAX)
     except ValueError as e:
-        return f"when: {e}"
+        return f"when: {e} ({GRAMMAR})"
     except Exception as e:  # syntax mode must be total: ANY raise = malformed
-        return f"when: {type(e).__name__}: {e}"
+        return f"when: {type(e).__name__}: {e} ({GRAMMAR})"
     if pos != len(toks):
-        return f"when: unexpected token {toks[pos]!r}"
+        return f"when: unexpected token {toks[pos]!r} ({GRAMMAR})"
     return None
 
 def when_true(gate, outputs):
