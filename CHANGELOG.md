@@ -1,5 +1,66 @@
 # Changelog
 
+## 1.3.0 — 2026-10-05
+
+Minor line, 29 commits since v1.2.1: the join/on_fail wave (deterministic merged
+join objects at the wave boundary, caught agent death becomes join-tolerant), the
+read-model honesty batch (honest status, `stale_because`), and the contributor-DX
+sweep. Merge order #168 → #178 → #184 → #185 → #188 → #179 → #193 → #195 → #197 →
+#198 → #199 → #200 → #202 → #203 → #204 → #205 → #206 → #207 → #208 → #209 → #210
+(+ composite include #84; graph refreshes in between).
+
+Runner features — join / on_fail / join-object semantics:
+- 4f5f359 #209 — feat(runner): join nodes — deterministic merged object of named
+  parent outputs at the wave boundary.
+- f8a5956 #207 — feat(runner): on_fail — a caught agent death becomes join-tolerant
+  skipped or a fallback agent.
+- e13a347 #208 — refactor(runner,door): NODE_TYPES is the ONE node-kind table —
+  schedule + validation consult kind(n).
+- 16e705f #206 — feat(runner): full-jitter retry sleeps for rate-limited transport
+  deaths.
+- acc5bc0 #202 — feat(runner): pre-cap persist/finish budget cue + stop_reason
+  kind=budget.
+- 5d89502 #178 — feat(runner): convoy splice (order_only) + run.blocked residue
+  classes + dead-letter ledger.
+- 7bec849 #184 — feat(runner): boot-time clean-lane assert for re-drives.
+- ca456f6 #185 — feat(runner): attempt-N preamble + reconcile-don't-redo on
+  crash-respawn.
+- 9bf28de #168 — feat(plugin): card enforcement — transform_llm_output ships the
+  ::workflow card unasked.
+
+Registry & read-model:
+- 27b2ec4 #210 — feat(read-model): stale_because — the read model says WHY a
+  committed node will rerun.
+- 87306e4 #203 — feat(read-model): honest status — harvest-proven records read
+  done; runner_exit verdict outranks pid-liveness.
+- 967b486 #205 — feat(door): validate action — dry-run the door's whole validation
+  with zero writes and no liveness ping.
+- afcba7f #198 — fix(pack,door): install.json provenance in the ZIP +
+  doctor_version drift check.
+
+DX & fixes:
+- c01b4a0 #204 — fix(dx): error-polish + grammar-pointer — errors name their
+  offender; one-pass defect reporting; when-grammar quoted.
+- d93eef0 #195 — fix(runner): never orphan the agent child; never bill a
+  substituted route.
+- e7f416f #200 — fix(schema): validate() names the fuzzy sibling-key rename on
+  missing-required.
+- 3ed07ed #199 — fix(door): status/wait surface a structured stop_reason for
+  budget deaths.
+- 50234d8 #197 — fix(lane-hygiene): the ONE verified reload form per deployment
+  joins LANE_HYGIENE_LINES.
+- e14f85e #193 — fix(include): malformed parent node id + graph-level include ->
+  named errors[] envelope (issue #192).
+- e7cf7e3 #84 — feat(include): composite graphs — expand shelved library graphs
+  into a run at materialize time.
+- 45e1228 #188 — feat(runner): publisher capability gate — typed refusal until
+  verified suite proof.
+- 1c8ddad #179 — fix(door): lane children cannot publish run graphs onto the
+  shared shelf.
+
+Graph refresh: graphify-out rebuilt at each merge; current refresh at 4f5f359 (#211),
+settled GREEN at tip e1c16ae.
+
 ## 1.2.1 — 2026-10-04
 
 Patch line, 26 commits since v1.2.0 (merge order #136 → #147 → #97 → #148 → #149 →
