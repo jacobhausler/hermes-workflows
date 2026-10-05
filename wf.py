@@ -5622,6 +5622,58 @@ def main(run_id):
                 log(run, "node.done", node=n["id"], echo=True)
                 states[n["id"]] = "done"; outputs[n["id"]] = n.get("output")
 
+        # join nodes (jam-h25, est-6ksu): commit a deterministic json object of named
+        # parent outputs at the wave boundary — zero spawn, zero tokens, same replay-skip
+        # law as echo (state() == pending only when the stored efp matches). The fourth
+        # boundary-commit kind with a dedicated block: kind(n) for a join is the
+        # non-spawning fallback (spawns matches none of the True/False/None branches),
+        # so NODE_TYPES stays the ONE agent/gate/echo schedule table untouched.
+        # keys = {label: '<node_id>.<dotted.path>'}; committed sorted by label so the
+        # object is byte-stable for a given set of committed parent outputs.
+        # wait:'terminal' (default) fires when every `after` parent has settled and
+        # FAILS the join if any failed (a missing leg is a hole in the merged object
+        # — loud, not a silent null). wait:'any' fires as soon as one parent is
+        # done/partial (fan-out-quorum flavour) and DROPS keys of unsettled/failed/
+        # skipped legs. A key whose parent COMMITTED but whose dotted path is absent
+        # is an author typo and FAILS the node (same law as unresolvable `inputs`).
+        for n in rs.nodes:
+            if n["type"] != "join" or states[n["id"]] != "pending":
+                continue
+            aft = n.get("after", [])
+            settled_all = all(states.get(a) in ("done", "partial", "failed", "skipped") for a in aft)
+            any_done = any(states.get(a) in ("done", "partial") for a in aft)
+            wait = n.get("wait", "terminal")
+            if wait == "terminal":
+                if not settled_all:
+                    continue
+                if any(states.get(a) == "failed" for a in aft):
+                    save_node(run, n, rs.byid, {"status": "failed", "error_class": "precondition",
+                                                "error": "join parent failed: "
+                                                + ",".join(a for a in aft if states.get(a) == "failed"), "ms": 0})
+                    log(run, "node.failed", node=n["id"], error="join parent failed", error_class="precondition")
+                    states[n["id"]] = "failed"; continue
+            else:  # 'any'
+                if not any_done:
+                    continue   # nothing resolvable yet; failed legs trip the run's fail check
+            out, typo = {}, None
+            for label, ref in sorted((n.get("keys") or {}).items()):
+                head = str(ref).split(".")[0]
+                v = resolve_ref(outputs, str(ref), _MISSING)
+                if v is _MISSING:
+                    if states.get(head) in ("done", "partial"):
+                        typo = f"{label}<-{ref}: no such path in committed output"
+                        break
+                    continue                             # unsettled/failed/skipped leg: drop
+                out[label] = v
+            if typo:
+                save_node(run, n, rs.byid, {"status": "failed", "error_class": "precondition",
+                                            "error": f"join key {typo}", "ms": 0})
+                log(run, "node.failed", node=n["id"], error=f"join key {typo}", error_class="precondition")
+                states[n["id"]] = "failed"; continue
+            save_node(run, n, rs.byid, {"status": "done", "output": out, "ms": 0})
+            log(run, "node.done", node=n["id"], join=True)
+            states[n["id"]] = "done"; outputs[n["id"]] = out
+
         ready = [n for n in rs.nodes if kind(n).spawns is True and states[n["id"]] == "pending"
                  and deps_ok(n) and deps_res(n)]
         if ready:

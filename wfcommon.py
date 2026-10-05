@@ -649,10 +649,15 @@ ECHO_KEYS = {"id", "type", "after", "output",
              # est-2ek.1.603: an echo commits at the wave boundary WITHOUT a spawn, so
              # the publisher gate covers the echo commit path too.
              "publishes"}
+JOIN_KEYS = {"id", "type", "after", "keys", "wait"}
 # ONE table for node kinds: closed key-set + the schedule hook. `spawns` is True
 # (agent: spawn a child when ready), False (gate: hold at the wave boundary), None
 # (echo: commit `output` verbatim at the boundary, zero tokens). Scheduling and
-# validation consult NODE_TYPES, never a hardcoded type-literal tuple.
+# validation consult NODE_TYPES, never a hardcoded type-literal tuple. The join
+# kind (jam-h25, est-6ksu) is deliberately NOT a table row — it is the fourth
+# boundary-commit kind with its own dedicated block (JOIN_KEYS closed set at the
+# validator, join loop in wf.py); kind() gives it the non-spawning fallback, so
+# it matches none of the True/False/None schedule branches.
 NodeKind = namedtuple("NodeKind", "keys spawns")
 NODE_TYPES = {"agent": NodeKind(AGENT_KEYS, True),
               "gate": NodeKind(GATE_KEYS, False),
@@ -930,13 +935,17 @@ def validate_graph_errors(nodes):
     for n in nodes:
         nid = n["id"]
         t = n.get("type")
-        if t not in NODE_TYPES:
+        if t == "join":                                  # jam-h25: dedicated kind
+            _type_keys = JOIN_KEYS
+        elif t in NODE_TYPES:
+            _type_keys = NODE_TYPES[t].keys  # the ONE table (est-voip); no second dict
+        else:
+            _type_keys = None
             E(nid, "type", "type must be agent|gate|echo")
             # NO continue: type-INDEPENDENT defects (after refs, numeric bounds,
             # ids) still surface below in one pass; only the per-type key grammar
-            # (undefined without a type) is skipped via the else-branch.
-        else:
-            _type_keys = NODE_TYPES[t].keys  # the ONE table (est-voip); no second dict
+            # (undefined without a type) is skipped via _type_keys below.
+        if _type_keys is not None:
             for k in sorted(set(n) - _type_keys):
                 # dedicated errors below own these keys (clearer messages, no double-report)
                 if t == "agent" and k == "wait":
@@ -1189,12 +1198,15 @@ def validate_graph_errors(nodes):
                     E(nid, "on_fail", f"on_fail target {ofk!r} must not be an ancestor of {nid}")
         w = n.get("wait")
         if w is not None:
-            if t != "gate":
-                E(nid, "wait", "only gate nodes take wait")
-            else:
+            if t == "join":                              # jam-h25: join wait
+                if w not in ("terminal", "any"):
+                    E(nid, "wait", f"join wait {w!r} invalid; allowed: ['terminal', 'any']")
+            elif t == "gate":
                 for e in wait_spec_ok(w):
                     field = "wait" if e["field"] is None else f"wait.{e['field']}"
                     E(nid, field, f"gate node wait: {e['msg']}")
+            else:
+                E(nid, "wait", "only gate nodes take wait")   # agent: dedicated error pinned by test_validate_0923
         anc = set()
         if (n.get("when") is not None and t == "gate") or n.get("inputs") is not None:
             stack = list(n.get("after", []))
@@ -1204,6 +1216,32 @@ def validate_graph_errors(nodes):
                     continue
                 anc.add(a)
                 stack.extend(parents[a])
+        ks = n.get("keys")
+        if ks is None and t == "join":
+            E(nid, "keys", "join node needs keys: {label: '<node_id>.<dotted.path>', ...}")
+        if ks is not None:   # join-only (closed key set rejected it elsewhere)
+            if t != "join":
+                E(nid, "keys", "only join nodes take keys")
+            elif not isinstance(ks, dict) or not ks:
+                E(nid, "keys", "join keys must be a non-empty object {label: '<node_id>.<dotted.path>'}")
+            else:
+                anc = set(); stack = list(n.get("after", []))
+                while stack:
+                    a = stack.pop()
+                    if a in anc or a not in idset:
+                        continue
+                    anc.add(a); stack.extend(parents[a])
+                for label, ref in ks.items():
+                    if not isinstance(label, str) or not label.strip():
+                        E(nid, "keys", f"join key label {label!r} must be a non-empty string")
+                    if not isinstance(ref, str) or not ref.strip():
+                        E(nid, f"keys.{label}", "join key ref must be a non-empty '<node_id>.<dotted.path>' string")
+                        continue
+                    head = ref.split(".")[0]
+                    if head not in anc:
+                        E(nid, f"keys.{label}", f"join key ref {ref!r} head {head!r} is not an "
+                                                f"existing node in its `after` ancestry")
+
         if n.get("when") is not None and t == "gate":
             err = when_expr_ok(n["when"])
             if err:

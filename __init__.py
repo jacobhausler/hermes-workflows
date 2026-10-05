@@ -78,7 +78,7 @@ def _model_policy_error(graph):
     tiers = model_tiers()
     known = set(seat["aliases"]) | ({seat["default"]} - {None}) | set(tiers.values())
     for node in graph["nodes"]:
-        if kind(node).spawns is not True:   # non-agent (gate/echo): no model route
+        if kind(node).spawns is not True:   # non-agent (gate/echo/join): no model route
             continue
         nid, requested = node["id"], node.get("model")
         if policy.get("require_model") and not requested:
@@ -583,7 +583,7 @@ WORKFLOW_PARAMS = {
         "graph": {
             "type": "object",
             "description": (
-            "For run/amend: {name, nodes:[...], defaults:{schema, timeout, max_turns, reasoning, provider, model, context, require_route}} where `defaults` fills agent node keys the author left unset (explicit node keys always win; defaults.context is the shared preamble prepended once to each agent's own context) and where node = {id, type:'agent'|'gate'|'echo', after:[node ids], goal, context, "
+            "For run/amend: {name, nodes:[...], defaults:{schema, timeout, max_turns, reasoning, provider, model, context, require_route}} where `defaults` fills agent node keys the author left unset (explicit node keys always win; defaults.context is the shared preamble prepended once to each agent's own context) and where node = {id, type:'agent'|'gate'|'echo'|'join', after:[node ids], goal, context, "
             "schema (json-schema for child output), model, provider (optional explicit Hermes provider paired with model; passed as --provider; when unset it is INHERITED from a provider-qualified model alias/tier), toolsets, max_turns, timeout (s wall-clock kill, default 900), shape (recon|build|review|publish \u2014 fills max_turns/timeout from the measured p95 census presets when the author left them unset; "
             "explicit keys win), repo (optional path \u2014 absolute, or run-dir-relative \u2014 of the git lane this node owns: a done/partial whose lane still has uncommitted TRACKED changes commits as failed error_class incomplete_work instead of a false hand-off (the dad50be0 shape: fix green but uncommitted, downstream verifies the mutant); commit in the lane, then amend/re-run re-drives), run_budget (s, "
             "child's own budget), reasoning (a hermes reasoning effort: none|minimal|low|medium|high|xhigh|max|ultra \u2014 passed to the child as --reasoning; levels are validated PER ROUTE at the door against the resolved (provider, model) route's supported set, with the supported list and nearest level in the error \u2014 no silent downgrade), require_route (bool, "
@@ -605,7 +605,7 @@ WORKFLOW_PARAMS = {
             "the EXPANDED, include-STRIPPED truth (amend edits the expanded form; save shelves the author form with the include key — save(run_id) of a composite run refuses, save the author graph inline). Every guard refusal — unknown library entry, include cycle, alias/id collision, unbound seed, oversized merge — returns the same "
             "errors:[{node:'include:<alias>', field, msg}] envelope before any write or spawn; non-fatal resolver warnings (e.g. a shared fixed scratch path) echo as include_notes on run/status and run.json records provenance `includes:[{alias, name, source_digest}]`. "
             "Full grammar and worked examples: references/grammar.md in the `workflow` skill — read it before authoring your first graph. "
-            "Any key outside these closed sets is rejected at run/amend with errors:[{node, field, msg}] for EVERY defect."
+            "Join node: {id, type:'join', after:[ids], keys:{label:'<node_id>.<dotted.path>', ...}, wait:'terminal'|'any'} — commits a deterministic json object {label: resolved parent output} at the wave boundary with zero tokens and no child spawn (keys committed sorted by label); wait:'terminal' (default) waits for every `after` parent to settle and fails the join if any failed; wait:'any' fires once one parent is done/partial and drops the keys of failed/skipped legs (fan-out-quorum flavour); a key whose committed parent lacks the dotted path fails the node as an author typo. Any key outside these closed sets is rejected at run/amend with errors:[{node, field, msg}] for EVERY defect."
             ),
         },
         "answer": {"type": "string", "description": "release: the human's answer text (from clarify)."},
@@ -811,7 +811,7 @@ def _resolve_models(nodes, committed=None, keep=()) -> tuple[str | None, dict | 
     committed = committed or {}
     requests = []
     for n in nodes:
-        if kind(n).spawns is not True:   # non-agent (gate/echo): no model route
+        if kind(n).spawns is not True:   # non-agent (gate/echo/join): no model route
             continue
         c = committed.get(n.get("id")) or {}
         frozen = bool(c) and n.get("id") in keep
