@@ -3205,6 +3205,13 @@ def act_list(_args):
                         row[key] = meta[key]
                 runs.append(row)
     out = {"runs": runs[:50], **_common.run_summary(runs)}
+    # est-2ek.1.280: an EMPTY scan is the silent case the multi-profile papercut
+    # burned 10h on (profile-scoped tool writes profiles/<p>/workflows while the
+    # API globs the canonical root — both answer []). Emit the scanned roots,
+    # resolved-first, ONLY when nothing was found; a non-empty payload keeps the
+    # golden-solo key set {runs, total, counts(, provenance)} byte-identical.
+    if not runs:
+        out["roots"] = [str(x) for x in roots]
     # Emitted ONLY when derivable (the F1 identity law): a solo root where no run carries
     # dispatched_by keeps the v1.0.15 key set {runs, total, counts} exactly (golden-solo
     # EMPTY). A root with stamped runs gets provenance:{dispatched_by_set,total}.

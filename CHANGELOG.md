@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+Read-model / DX:
+- feat(door,dashboard): est-2ek.1.280 — an EMPTY `list`/`_list_runs` scan now
+  emits `roots:` the resolved runs_root first, then the legacy launch root when
+  different. The multi-profile papercut was a profile-scoped tool writing
+  `profiles/<p>/workflows/` while the API globbed the canonical dir: BOTH
+  answered a silent `[]` and a peer lost ~10h chasing auth instead of the
+  stale root. Non-empty payloads keep the golden-solo key set
+  `{runs, total, counts(, provenance)}` byte-identical (F1 identity law).
+  Test: `tests/test_list_root_280.py` (6 contracts, RED first).
+
 ## 1.3.0 — 2026-10-05
 
 Minor line, 29 commits since v1.2.1: the join/on_fail wave (deterministic merged
