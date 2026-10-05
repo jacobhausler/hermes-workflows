@@ -3000,6 +3000,11 @@
       "runner_live": false,
       "skipped": 0,
       "status": "done",
+      "stop_reason": {
+        "source": "turn_report.tier",
+        "tier_via_node": "a",
+        "turn_tier": "untyped"
+      },
       "total": 1,
       "turn_report": "untyped"
     },
@@ -3042,6 +3047,11 @@
       "runner_live": false,
       "skipped": 0,
       "status": "done",
+      "stop_reason": {
+        "source": "turn_report.tier",
+        "tier_via_node": "a",
+        "turn_tier": "untyped"
+      },
       "total": 1,
       "turn_report": "untyped"
     }
