@@ -2582,14 +2582,32 @@ def act_status(args):
     # Tier self-report (2026-09-24): a failed child's core -Q turn report carried
     # its typed verdict key ("typed") or not ("untyped"); absent = never noted.
     tier_rec = jload(r / "turn_report.tier")
+    # est-2ek.1.95: the same evidence also rides as a STRUCTURED stop_reason so a
+    # budget death is never opaque error_class=unknown downstream. Derive-only
+    # (A3 law): the bytes come from the tier note and the node records already
+    # read in this call — no new state, nothing classified from prose. "class" is
+    # passthrough ONLY when a failed/partial node record itself says
+    # cap_exhausted; honest absence (no key at all) when no tier note exists.
+    stop_reason = None
     if isinstance(tier_rec, dict) and tier_rec.get("tier"):
         out["turn_report"] = str(tier_rec["tier"])
+        stop_reason = {"turn_tier": str(tier_rec["tier"]),
+                       "tier_via_node": str(tier_rec.get("via") or ""),
+                       "source": "turn_report.tier"}
+        out["stop_reason"] = stop_reason
     if st.get("runner_exit"):
         out["runner_exit"] = st["runner_exit"]  # <run>/runner_exit.json or the dead-pid crash note
     if st["held_gate"]:
         out["gate"] = st["held_gate"]
     for nid, v in st["nodes"].items():
         rec = jload(r / "nodes" / f"{nid}.json")
+        # est-2ek.1.95: the stop_reason's class rides ONLY off the via node's own
+        # record saying cap_exhausted (the one node-truth read already in hand);
+        # unknown stays unknown — never invented from prose.
+        if (stop_reason is not None and nid == stop_reason.get("tier_via_node")
+                and v["status"] in ("failed", "partial") and rec
+                and rec.get("error_class") == "cap_exhausted"):
+            stop_reason["class"] = "cap_exhausted"
         if v.get("active_spawn"):
             def _trim(sp):
                 return sp if full else {k: x for k, x in sp.items()
