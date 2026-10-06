@@ -46,6 +46,50 @@ from pathlib import Path
 
 REPLAY_TOOLS = ("write_file", "patch")
 
+# ---------- est-ujtf: ONE live-plugin resolver (respawn must never boot an archive) ----------
+# The incident (run 20261006-041852-fb-fix-fb609): s6-svscan (ppid 1) respawned the
+# runner 07:27:11Z from `plugins/hermes-workflows.old-1.1.2-9073584/wf.py` — an
+# archived pre-update copy — instead of the live plugin. A discovery path that
+# globs the plugins root for wf.py can land on the archive and silently boot a
+# stale engine. Law: the exact-name dir (plain or symlink) carrying wf.py is the
+# ONLY answer; a `*.old-*` sibling is never a match; a missing/broken live dir
+# REFUSES with a message naming every archive it is refusing.
+PLUGIN_NAME = "hermes-workflows"
+
+
+class PluginResolutionError(Exception):
+    """No trustworthy live plugin copy: refuse to resolve, never fall back."""
+    def __init__(self, msg):
+        super().__init__(msg)
+        self.code = 2
+
+
+def _plugins_root(home=None):
+    return Path(home if home else _hermes_home()) / "plugins"
+
+
+def resolve_plugin_dir(plugins_root=None):
+    """Deterministically resolve the LIVE plugin dir under `plugins_root`
+    (default: <hermes_home>/plugins). Returns the exact-name
+    `hermes-workflows` dir when it (or its symlink target) is a dir carrying
+    wf.py; raises PluginResolutionError otherwise — never returns an
+    `*.old-*` archive, never silently picks a sibling."""
+    root = Path(plugins_root) if plugins_root else _plugins_root()
+    live = root / PLUGIN_NAME
+    archives = sorted(p.name for p in root.glob(PLUGIN_NAME + ".old-*") if p.is_dir()) \
+        if root.is_dir() else []
+    if live.is_dir() and (live / "wf.py").is_file():
+        return live
+    detail = (f"live plugin dir {PLUGIN_NAME} "
+              + ("exists but carries no wf.py at " if live.is_dir() else "is absent at ")
+              + str(live))
+    if archives:
+        detail += (f"; refusing to boot an ARCHIVED copy instead — refused: {', '.join(archives)} "
+                   f"under {root}. Restore/reinstall the live plugin and retry.")
+    else:
+        detail += f"; no {PLUGIN_NAME} copy under {root}. Restore/reinstall the live plugin and retry."
+    raise PluginResolutionError(detail)
+
 
 class Bail(Exception):
     """A typed early exit: message + process exit code (2 = no session/run/db)."""

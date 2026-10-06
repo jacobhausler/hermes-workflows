@@ -87,9 +87,7 @@ def main():
         root2 = Path(td) / "plugins2"
         mkcopy(root2, "releases/1.2.0")
         mkcopy(root2, "hermes-workflows.old-1.1.2-9073584")
-        (root2 / "hermes-workflows").unlink()  # mkcopy made a dir; replace with symlink
-        shutil.rmtree(root2 / "hermes-workflows")
-        mkcopy(root2, "hermes-workflows", symlink_to=root2 / "releases" / "1.2.0")
+        (root2 / "hermes-workflows").symlink_to(root2 / "releases" / "1.2.0")
         got2 = resolver(root2)
         check("B: symlink at the exact name resolves to the live release",
               Path(got2).name == "hermes-workflows"
