@@ -354,7 +354,7 @@ out["door"] = snap(door.runs_root)
 out["runner"] = snap(wf.runs_root)            # same function find_run() resolves with
 out["dashboard"] = snap(api._root)
 out["door_launcher"] = snap(door._common.launcher_profile)
-out["runner_launcher"] = snap(lambda: sys.modules["wfcommon"].launcher_profile())
+out["runner_launcher"] = snap(lambda: wf.wfcommon.launcher_profile())  # the runner's PRIVATE binding (import hygiene #133387: no bare 'wfcommon' in sys.modules)
 out["dash_launcher"] = snap(lambda: api._workflow_common().launcher_profile())
 print("@@" + json.dumps(out))
 '''

@@ -36,6 +36,20 @@ from pathlib import Path
 # runs as a script (`python wf.py run <id>`): __file__ is authoritative, so the
 # sibling binds by path without touching sys.path at all.
 _COMMON_PATH = Path(__file__).resolve().parent / "wfcommon.py"
+if not _COMMON_PATH.is_file():
+    # A COPY of this runner executed from a directory without the sibling (the
+    # door's baked/patched runner copies, and tests that stage wf.py into a fake
+    # home): the old `sys.path.insert(0, parent); import wfcommon` fell through
+    # to the launch sys.path (PYTHONPATH carries the plugin dir), so the copy
+    # still resolved the plugin's wfcommon. Keep that resolution WITHOUT the
+    # path mutation or the bare-name bind: a spec LOOKUP only — it never
+    # inserts into sys.modules, so the purity contract still holds.
+    try:
+        _sib_spec = importlib.util.find_spec("wfcommon")
+    except (ImportError, ValueError):
+        _sib_spec = None
+    if _sib_spec is not None and _sib_spec.origin and Path(_sib_spec.origin).is_file():
+        _COMMON_PATH = Path(_sib_spec.origin)
 _common_spec = importlib.util.spec_from_file_location("_hermes_workflows_wfcommon_runner", _COMMON_PATH)
 assert _common_spec is not None and _common_spec.loader is not None
 wfcommon = importlib.util.module_from_spec(_common_spec)
