@@ -1390,7 +1390,7 @@ DEFAULT_RETRY_BUDGET = 6
 # transport / early_death / cap_exhausted / timeout (the latter two land with
 # B1's renames; plain strings, the integrator reconciles). The never-retry list
 # below is documentary law — membership in _BOUNDED_RETRY_CLASSES is the gate:
-# provider_400, unresolved_model, graph_invalid, schema/no_json, cancelled,
+# provider_400, unresolved_model, schema/no_json, cancelled,
 # spawn (3 real runs retried a permfail byte-identically 3x).
 _BOUNDED_RETRY_CLASSES = ("transport", "early_death", "cap_exhausted", "timeout",
                           # est-2ek.1.541: a malformed turn (final reply IS serialized
@@ -1531,7 +1531,7 @@ ERROR_CLASSES = frozenset(("provider_400", "unresolved_model", "cap_exhausted",
                            "timeout", "transport", "transport_exhausted",
                            "fatal_quota", "ratelimit", "route_unavailable",
                            "incomplete_work", "early_death", "cancelled",
-                           "schema", "spawn", "graph_invalid", "inputs",
+                           "schema", "spawn", "inputs",
                            "quorum", "fanout_empty", "crashed", "unknown",
                            # est-2ek.1.660: a (re-)drive refused at startup because a
                            # declared lane still carries the dead attempt's
@@ -3239,28 +3239,6 @@ def _register_survivor(sidecar_path, token, pid):
     except OSError:
         return False
 
-def _register_self_if_detached():
-    """Child-side helper implementing the registration contract: a detached
-    descendant (double-fork + setsid: it forks AFTER import and execs nothing)
-    registers THIS pid against the inherited spawn token when its PPid no
-    longer carries that token (orphaned / setsid family). Bounded, never fatal.
-    Opportunistic by design — #61c never depends on child discipline."""
-    try:
-        path = os.environ.get(SIDECAR_ENV_PATH)
-        token = os.environ.get(SIDECAR_ENV_SPAWN)
-        if not path or not token:
-            return
-        try:
-            stat = Path(f"/proc/{os.getpid()}/stat").read_text()
-            my_ppid = int(stat.rsplit(")", 1)[1].split()[1])
-        except (OSError, IndexError, ValueError):
-            return
-        if my_ppid and _proc_envv(my_ppid).get(SIDECAR_ENV_SPAWN) == token:
-            return                               # still attached to our spawner
-        _register_survivor(path, token, os.getpid())
-    except Exception:
-        pass
-
 def _boot_sweep(meta):
     """#61c: before a (re)spawned runner launches anything, reap the survivors
     the runner it replaced left on the registry — the adoption-verification
@@ -4636,7 +4614,7 @@ def _bounded_retry(meta, r, respawn, ev, ev_kw, node=None, index=None):
     made tool progress gets EXACTLY ONE resume re-drive with a machine-
     generated preamble — never a loop, never a second bounded retry (a retry
     of a retry would need the class tuple to widen, which it does not).
-    Never retried: provider_400 / unresolved_model / graph_invalid /
+    Never retried: provider_400 / unresolved_model /
     schema(no_json) / cancelled / spawn — permfails redrive byte-identically —
     and never a `partial` harvest (#4: harvested, so not retried). The
     re-drive is a fresh spawn: steer rides it via _steer_bake, the fresh
@@ -5157,12 +5135,6 @@ PUBLISHER_REFUSAL = ("publisher_ungated: {nid} declares publication side effects
                      "requires a verified suite proof token; missing proof from: "
                      "{missing} (a node earns the token only by declaring "
                      "suite_proof: true and committing done)")
-
-def _publisher_refusal(run, n, byid, missing):
-    why = PUBLISHER_REFUSAL.format(nid=n["id"],
-                                   missing=", ".join(missing) if missing
-                                   else "no suite_proof node in this node's after-ancestry")
-    _fail_precondition(run, n, byid, [why])
 
 def _mint_suite_proof(run, node, rec, byid):
     """est-2ek.1.603: a declared proof producer that committed done writes its

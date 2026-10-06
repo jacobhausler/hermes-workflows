@@ -67,9 +67,6 @@ GRAPH_KEYS = {"name", "nodes", "description", "defaults", "model_policy",
                               # expand, so a committed graph.json never carries it (only the
                               # library author form does)
 
-def _model_names_valid(names):
-    return isinstance(names, list) and all(isinstance(n, str) and n.strip() for n in names)
-
 def _model_policy_error(graph):
     """Validate effective node routes after defaults and resolution, before graph.json."""
     policy = graph.get("model_policy") or {}
@@ -1601,10 +1598,6 @@ def _norm_tags(tags):
             out.append(t)
     return out, None
 
-
-def _tags_error(tags):
-    bad = _norm_tags(tags)
-    return {"error": bad[1]} if bad[1] else None
 
 def _lib_path(name):
     """WRITE resolver: always the resolved root (current best version lands there).

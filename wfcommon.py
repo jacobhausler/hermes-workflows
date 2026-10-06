@@ -2697,12 +2697,6 @@ def _tok_when(s):
         toks.append(m.group(1)); i = m.end()
     return toks
 
-def _when_expr(toks, pos, outputs, allow_or=True):
-    """Tiny recursive-descent evaluator: or > and > not > comparison > value.
-    Values: out.<node>.dotted.path | string/number/bool/None literals."""
-    val, pos = _when_or(toks, pos, outputs) if allow_or else _when_cmp(toks, pos, outputs)
-    return val, pos
-
 def _when_or(toks, pos, outputs):
     val, pos = _when_and(toks, pos, outputs)
     while pos < len(toks) and toks[pos] == "or":
@@ -3021,10 +3015,6 @@ def active_child(r, n, byid, index=None):
     fname = f"{n['id']}" + (f".{index}" if index is not None else "")
     return _verify_spawn_rec(r, n, byid, jload(r / "nodes" / f"{fname}.json"))
 
-def _active_spawn(r, n, byid):
-    """Compatibility: first verified spawn for existing blocked-by consumers."""
-    return next(iter(_active_spawns(r, n, byid)), None)
-
 def run_state(r):
     """Derived truth of a run dir: status, per-node status, held gate meta.
     status: pending|running|interrupted|held|done|failed|stopped.
@@ -3190,17 +3180,6 @@ def node_child_home(r, nid, index=None):
     if isinstance(prof, str) and prof.strip() and prof != "default":
         return profile_home(prof)
     return None
-
-def node_child_metrics(r, nid, index=None):
-    """Profile-aware per-node child_metrics (1.1 RATIFY F2): the SAME fold as
-    child_metrics, read from the node's OWN child DB home (the target profile's state.db
-    for profile-routed nodes — the launcher's DB never holds a teammate's sessions rows).
-    Committed coordination seam for the runner's harvest/retry/metric sites: it is the
-    one place home resolution lives (wf.py must not re-derive it). Unreadable target DB →
-    {} via child_metrics — the api_calls_known:false UNKNOWN path, never zero."""
-    home = node_child_home(r, nid, index)
-    return child_metrics(Path(r).name, home=home)
-
 
 def run_child_metrics(r):
     """fb 904f5101496be8c1: the run-wide fold the STATUS/WAIT views use — per node
