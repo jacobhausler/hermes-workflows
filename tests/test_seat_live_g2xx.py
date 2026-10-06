@@ -149,10 +149,22 @@ def mk(run_id, meta_extra=None):
     (r / "run.json").write_text(json.dumps(m))
     return r
 
+def _scrubbed_env(extra=None):
+    """Hermetic child env (the test_wake_hermetic_env.py law): an inherited
+    WF_* (e.g. WF_RUNS_ROOT from a bot seat env) OUTRANKS HERMES_HOME in the
+    runs-root resolver, so the child runner resolves elsewhere and the
+    buffered-child case dies "node w never committed within 120s". Build from
+    a scrubbed copy: pop every WF_* key, then pin our own home + runs root."""
+    env = {k: v for k, v in os.environ.items() if not k.startswith("WF_")}
+    env["HERMES_HOME"] = str(HOME)
+    env["WF_RUNS_ROOT"] = str(RUNS)
+    env.update(extra or {})
+    return env
+
 def launch(r, env_extra=None):
-    env = dict(os.environ, HERMES_HOME=str(HOME), **(env_extra or {}))
     return subprocess.Popen([sys.executable, str(ROOT / "wf.py"), "run", r.name],
-                            env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                            env=_scrubbed_env(env_extra),
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 def wait_node(r, nid="w", timeout=120):
     deadline = time.time() + timeout
