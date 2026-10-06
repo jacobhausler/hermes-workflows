@@ -37,6 +37,7 @@ Standalone, stdlib-only: python3 tests/test_gateway_sigterm_detach_6226.py
 import importlib.util
 import json
 import os
+import select
 import shutil
 import signal
 import subprocess
@@ -181,9 +182,14 @@ with tempfile.TemporaryDirectory(prefix="gwsig6226-", dir=HERE,
     kill_soft(runner_pid)
     wait_for(lambda: not alive(runner_pid))
     door.act_wait({"run_id": r.name, "timeout": 2})
-    new_pid = wait_for(lambda: (lambda p: p if p and p != runner_pid else None)(
-        lambda: (int((r / "wf.pid").read_text().strip())
-                 if (r / "wf.pid").exists() else None)))
+
+    def _read_pid(r=r):
+        try:
+            return int((r / "wf.pid").read_text().strip())
+        except (OSError, ValueError):
+            return None
+
+    new_pid = wait_for(lambda: (lambda p: p if p and p != runner_pid else None)(_read_pid()))
     check("A: the respawn path produced a new live runner", bool(new_pid) and alive(new_pid),
           f"new pid {new_pid}")
     if new_pid:
@@ -206,9 +212,15 @@ with tempfile.TemporaryDirectory(prefix="gwsig6226-", dir=HERE,
         start_new_session=True,
         env=dict(os.environ, WF_RUNS_ROOT=str(runs), HERMES_HOME=str(home),
                  PYTHONDONTWRITEBYTECODE="1"))
-    ready = wait_for(lambda: (lambda ln: ln if ln and ln.strip() else None)(
-        parent.stdout.readline), timeout=30)
-    runner_b = int(ready.strip()) if ready else None
+    def _read_ready():
+        rl, _, _ = select.select([parent.stdout], [], [], 0)
+        if not rl:
+            return None
+        line = parent.stdout.readline()
+        return line if line and line.strip() else None
+
+    ready = wait_for(_read_ready, timeout=30)
+    runner_b = int(ready.strip()) if ready and ready.strip().isdigit() else None
     check("B setup: caller-tree parent spawned a runner through the door seam",
           bool(runner_b) and alive(runner_b), f"runner pid {runner_b}")
     if runner_b:
@@ -313,9 +325,15 @@ with tempfile.TemporaryDirectory(prefix="gwsig6226-", dir=HERE,
           json.dumps(rxv)[:250])
     # the phantom gate stays accurate: respawn must actually land a live runner
     res = door.act_wait({"run_id": rc.name, "timeout": 2})
-    new_c = wait_for(lambda: (lambda p: p if p and p != runner_c else None)(
-        lambda: (int((rc / "wf.pid").read_text().strip()) if (rc / "wf.pid").exists() else None)),
-        timeout=20)
+
+    def _read_pid_c(r=rc, excl=runner_c):
+        try:
+            v = int((r / "wf.pid").read_text().strip())
+        except (OSError, ValueError):
+            return None
+        return v if v and v != excl else None
+
+    new_c = wait_for(_read_pid_c, timeout=20)
     check("C: an external-killed lane IS respawn-eligible (act_wait lands a live runner)",
           bool(new_c) and alive(new_c), f"new runner {new_c}; wait -> {json.dumps(res)[:160]}")
     if child_c and alive(child_c):

@@ -2452,6 +2452,20 @@ def runner_exit_read(r, pid_path=None):
         return None
     return None if runner_alive(r, path) else {"reason": "crashed (no exit record)"}
 
+# est-6226: the ONE external-kill classifier. A runner NEVER SIGTERMs itself
+# (stop rides the cooperative stop.request boundary -> "stopped"), so a
+# "terminated: SIGTERM (external: ...)" verdict — the tag wf.py's signal
+# handler writes — is an out-of-band signal death (witnessed shape: the
+# gateway-restart wave propagating beyond the gateway, 2026-10-06 10:06Z).
+# Reaper/dispatcher/read model all classify through THIS function — nobody
+# re-derives external-ness from prose. Strict by design: the bare pre-fix
+# string and every lane-failure shape ("crashed: ...", "crashed (no exit
+# record)", "done", "stopped") are NOT external kills.
+def is_external_kill(reason):
+    return (isinstance(reason, str)
+            and reason.startswith("terminated: SIGTERM")
+            and "(external:" in reason)
+
 # ---------- node state (the ONE validity rule: stored efp == current efp) ----------
 
 def _legacy_chain_unchanged(r, n, byid):

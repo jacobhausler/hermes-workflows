@@ -2414,6 +2414,10 @@ def _kill_adopted(pid):
 # on that path, which is why it is pinned here.
 
 RUNNER_PID_ENV = "HERMES_WF_RUNNER_PID"      # spawn pin: the runner's own pid
+# est-6226: the ONE reason string for an external signal death (see
+# _install_runner_term_cleanup). wfcommon.is_external_kill is its single
+# classifier; the reaper/dispatcher must never re-derive it from prose.
+EXTERNAL_SIGTERM_REASON = "terminated: SIGTERM (external: gateway restart)"
 CHILD_BELT_GRACE_S = 5.0   # replacement-runner (adoption) window before belt self-exit
 CHILD_BELT_POLL_S = 0.25
 
@@ -2558,7 +2562,16 @@ def _install_runner_term_cleanup(meta):
         except Exception: pass
         try:
             if not _EXIT_WRITTEN[0]:
-                write_runner_exit(meta["_run"], "terminated: SIGTERM")
+                # est-6226 honest attribution: the runner NEVER SIGTERMs itself
+                # (stop rides the cooperative stop.request boundary, exits
+                # "stopped"; the timeout kill targets child groups). A SIGTERM
+                # landing HERE is external by construction — the witnessed shape
+                # is the gateway-restart wave propagating beyond the gateway
+                # (2026-10-06 10:06Z: runner + pre-b64 watcher pair killed, the
+                # death logged as if it were a lane death, feeding ALERT storms
+                # and wrong re-dispatch). Tag the record so classification can
+                # tell an external kill from a lane failure.
+                write_runner_exit(meta["_run"], EXTERNAL_SIGTERM_REASON)
         except Exception: pass
         signal.signal(signal.SIGTERM, signal.SIG_DFL)
         os.kill(os.getpid(), signal.SIGTERM)     # re-raise the default

@@ -375,7 +375,16 @@ def _reap_silent_death(r):
         # verdict, and act_wait's rx gate owns it, no reaping.
         rx = _common.runner_exit_read(r) or {}
         reason = rx.get("reason")
-        if reason != "crashed (no exit record)":
+        # est-6226: a RECORDED external kill (the runner's own SIGTERM handler
+        # wrote the external tag before re-raising) is equally a silent death
+        # needing a loud reap — the wave shape records the verdict but no
+        # node.interrupted and no reaped line, leaving watchers staring at
+        # silence while act_wait quietly replaces the runner. The phantom
+        # gate ("crashed (no exit record)") and the external tag are the only
+        # accepted shapes; every other recorded verdict is a lane verdict and
+        # the rx gate in act_wait owns it.
+        _external = _common.is_external_kill(reason)
+        if reason != "crashed (no exit record)" and not _external:
             return
         # Event-level once-per-record dedup (PR #82 review, F3), content-aware:
         # scan the events after the LAST run.resumed (a replacement that
@@ -2890,6 +2899,15 @@ def act_status(args):
             stop_reason["kind"] = "budget"
     if st.get("runner_exit"):
         out["runner_exit"] = st["runner_exit"]  # <run>/runner_exit.json or the dead-pid crash note
+        # est-6226: an EXTERNAL signal death (gateway-restart wave) is
+        # respawn-eligible, not a lane failure — the reaper/dispatcher reads
+        # the classification here instead of re-deriving it from prose
+        # (derive-only, A3 law: the verdict bytes + the ONE classifier).
+        _rxr = (st["runner_exit"] or {}).get("reason")
+        if _common.is_external_kill(_rxr):
+            out["runner_exit"] = {**st["runner_exit"],
+                                  "death_class": "external_kill",
+                                  "respawn_eligible": True}
     if st["held_gate"]:
         out["gate"] = st["held_gate"]
     for nid, v in st["nodes"].items():
