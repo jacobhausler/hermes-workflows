@@ -646,7 +646,7 @@ const $stripFold = atom(null) // focused sid while its terminal fold is expanded
 // {sid, runId} or null. In-memory plugin atom — never persisted, so a reload
 // never resurrects an expanded panel.
 const $railOpen = atom(null)
-// Collapsible live-run tray (#22, design comment 6003168642, est-8ppm):
+// Collapsible live-run tray (#22, design contract on issue #22):
 // {expanded, openRun} or null. In-memory plugin atom — never localStorage,
 // so a reload never resurrects an expanded tray. EXPORTED so the contract
 // test can drive the expanded state (same seam the rail tests probe via
@@ -896,7 +896,7 @@ function RailPanel({ runId }) {
   }, 'rail-panel')
 }
 
-/** ---- Live-run tray (#22, design comment 6003168642, est-8ppm) -----------------
+/** ---- Live-run tray (#22, design contract on issue #22) -----------------
  *  Collapsible situational tray stacked as a sibling of the native
  *  task-list/subagents/queued-messages family directly above the chat window.
  *  The pure models (trayScoping/trayModel/trayAggregateLabel/trayRecap/

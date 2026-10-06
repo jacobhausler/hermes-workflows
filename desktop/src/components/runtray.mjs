@@ -1,6 +1,6 @@
 /**
  * runtray.mjs — SKELETON for the collapsible live-run tray (#22, design
- * comment 6003168642, estate bead est-8ppm).
+ * contract on issue #22).
  *
  * Target shape (accepted design, supersedes the #28 sticky-rail shape for
  * live runs): a collapsible situational tray stacked as a sibling of the

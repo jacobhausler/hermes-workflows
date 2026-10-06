@@ -1,4 +1,4 @@
-// Live-run tray (#22, design comment 6003168642): the PillRail (the #28 sticky
+// Live-run tray (#22, design contract on issue #22): the PillRail (the #28 sticky
 // shape) is SUPERSEDED for live runs by a collapsible situational tray stacked
 // as a sibling of the native task-list/subagents/queued-messages family at the
 // SAME composer mount — SessionStrip stays the mount owner (register-surface
