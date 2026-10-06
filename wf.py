@@ -5498,6 +5498,29 @@ def main(run_id):
     (run / "nodes").mkdir(exist_ok=True)
     (run / "gates").mkdir(exist_ok=True)
     acquire_lock(run)
+    # #152 T3 (stop/release TOCTOU class, admission cut): a stop landing while a
+    # held runner sits in its terminal-handoff fence races the door's
+    # spawn-to-consume. The fence sees the marker, re-acquires, and consumes it
+    # (run.stopped appended, runner_exit "stopped") in the same instant the door —
+    # seeing liveness false across the fence's deliberately-released flock — has
+    # already respawned a consumer. That consumer boots, finds the marker GONE,
+    # and pre-guard deleted runner_exit.json, logged run.resumed, and re-ran the
+    # graph: the stopped run re-held, and a release then saw neither proof (no
+    # marker, run.stopped no longer the last event) and landed the answer with
+    # auto_resumed where the byte-identical refusal is test-locked (reproduced
+    # 10/10 under suite timing; the CI flake class). Admission law now: an
+    # admitted runner whose run dir ALREADY carries the durable stop verdict
+    # with no marker left to consume is a duplicate consumer — retire the spawn,
+    # verdict and evidence intact, no writes, no wf.pid, no runner_exit delete.
+    # A legitimate resume of a stopped run enters only through amend, which
+    # appends graph.amended (last event no longer run.stopped) AND writes
+    # restart.request AND re-fingerprints the graph (the runner_exit record goes
+    # stale) — all three clear this gate. run_state is THE read model; the
+    # door's release refusal consults the same derivation (one truth, one read).
+    if not (run / "stop.request").exists() and \
+            (wfcommon.run_state(run) or {}).get("status") == "stopped":
+        emit(f"WORKFLOW_STOPPED {run_id} (stop already consumed)")
+        return "stopped"
     # #61c: become the subreaper of this subtree FIRST — every orphan a child
     # leaves behind (double-fork+setsid, PPid would otherwise go to 1) then
     # reparents HERE, where _runner_orphans/_survivors can enumerate and kill
