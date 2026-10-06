@@ -104,6 +104,8 @@ INCLUDE_FILES = (
     "plugin.yaml",
     "CHANGELOG.md",
     "scripts/graph_check.py",
+    "scripts/graph_diagram.py",
+    "scripts/diagram_readme.py",
     "scripts/pack.py",
     "scripts/pr_tag_audit.py",  # est-4vnq: tests/test_pr_tag_audit.py executes it; the shipped suite must not die on a missing helper
     # wf165c: tests/test_graph_single_writer_153.py exec-modules BOTH at import

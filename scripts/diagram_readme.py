@@ -10,6 +10,9 @@ generation time — never hand-edited. Run after graph_diagram.py + render step.
 """
 import hashlib, json, os, re, sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from graph_diagram import example_graphs
+
 
 def sha(path):
     return hashlib.sha256(open(path, "rb").read()).hexdigest()[:16]
@@ -51,10 +54,7 @@ def main():
     here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     ex = os.path.join(here, "examples")
     dia = os.path.join(ex, "diagrams")
-    graphs = sorted(
-        os.path.join(dp, f) for dp, _, fs in os.walk(ex) for f in fs
-        if f.endswith(".json") and not f.endswith(".cards.json")
-        and os.path.basename(dp) != os.path.basename(dia))
+    graphs = example_graphs(ex, dia)
     rows, pending_rows = [], []
     for g in graphs:
         stem = os.path.basename(g)[:-5]

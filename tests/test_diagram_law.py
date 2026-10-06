@@ -172,6 +172,47 @@ offenders = [os.path.relpath(p, ROOT)
              for p in [os.path.join(dp, f)] if SPELL.search(open(p, encoding="utf-8").read())]
 check("A3 shipped cards enumerate zero spelled counts", not offenders, str(offenders))
 
+# THE WALKER CONTRACT (born from austin's finding at 364ecf8: both walkers
+# pruned the artifact dir by basename, so examples/diagrams/qa/*.qa.json walked
+# in as phantom graphs — the queue contradicted the tree with CI green).
+# Law: queue rows == graphs lacking a sidecar, by census; and no derived
+# artifact (candidate, qa receipt, stray json) is ever counted as a graph.
+import importlib.util as _ilu
+_wspec = _ilu.spec_from_file_location(
+    "graph_diagram_walker", os.path.join(ROOT, "scripts", "graph_diagram.py"))
+_walk_mod = _ilu.module_from_spec(_wspec)
+_wspec.loader.exec_module(_walk_mod)
+_walk = _walk_mod.example_graphs
+_dia = os.path.join(ROOT, "examples", "diagrams")
+_walked = _walk(os.path.join(ROOT, "examples"), _dia)
+check("WK1 walker counts no derived artifact as a graph",
+      all(not os.path.abspath(f).startswith(os.path.abspath(_dia) + os.sep)
+          for f in _walked),
+      str([f for f in _walked if os.path.abspath(_dia) in os.path.abspath(f)][:3]))
+_sidecar_less = [f for f in _walked
+                 if not os.path.exists(_re.sub(r"\.json$", ".cards.json", f))
+                 and not os.path.exists(os.path.join(
+                     _dia, os.path.basename(f)[:-5] + ".candidate.json"))]
+_tbl = open(os.path.join(_dia, "README.md")).read()
+_queue = [ln for ln in _tbl.splitlines() if ln.startswith("- [ ] `")]
+check("WK2 queue rows == sidecar-less graphs, by census",
+      len(_queue) == len(_sidecar_less),
+      f"queue {len(_queue)} vs census {len(_sidecar_less)}")
+check("WK3 queue names no qa receipt or candidate",
+      not [q for q in _queue if ".qa.json" in q or ".candidate.json" in q],
+      str([q[:60] for q in _queue if ".qa.json" in q][:3]))
+_stray = os.path.join(_dia, "decoy.json")
+open(_stray, "w").write("{}")
+try:
+    _walk(os.path.join(ROOT, "examples"), _dia)
+    check("WK4 unknown artifact under the out dir fails closed", False,
+          "decoy.json walked in silently")
+except SystemExit as e:
+    check("WK4 unknown artifact under the out dir fails closed",
+          "decoy.json" in str(e), str(e)[:120])
+finally:
+    os.remove(_stray)
+
 # QA-receipt-derived gates: lying receipt -> named red; missing -> honest not-run
 _readme_py = os.path.join(ROOT, "scripts", "diagram_readme.py")
 _dia = os.path.join(ROOT, "examples", "diagrams")
