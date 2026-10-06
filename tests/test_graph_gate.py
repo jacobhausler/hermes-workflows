@@ -3,7 +3,7 @@
 graph's shape. Hermetic: builds a throwaway git repo. The graphify CLI is a DECLARED
 test dep (CI installs graphifyy==0.9.67): absent CLI FAILS the gate naming the dep —
 it only SKIPs (exit 0) under the explicit operator opt-out HERMES_ALLOW_SKIP_GRAPH_GATE=1."""
-import json, os, shutil, subprocess, sys, tempfile
+import importlib.util, json, os, shutil, subprocess, sys, tempfile
 from pathlib import Path
 
 from graph_gate_dep import graphify_dep_guard
@@ -32,9 +32,18 @@ check("graph covers the door, runner, read model and desktop half",
       {"__init__.py", "wf.py", "wfcommon.py", "desktop/plugin.js"} <= src)
 check("graph does not index itself or CI", not any(s.startswith(("graphify-out/", ".github/")) for s in src))
 tracked = set(subprocess.run(["git", "-C", str(ROOT), "ls-files"], capture_output=True, text=True).stdout.split())
-orphans = sorted(s for s in src if s not in tracked)
-check("every file the graph indexes is tracked in THIS tree (public graph built from public tree)",
-      not orphans, str(orphans[:5]))
+# Deletion-aware orphan check (est-i24i): an orphan whose source was deleted BY this
+# PR is tolerated until the next single-writer regen (graph_path_ban forbids in-PR
+# regens — that is the whole point of the ban); an orphan the base never tracked is
+# a hard failure. Outside PR context (main) nothing is tolerated. One home for the
+# law: scripts/graph_orphans.py (spec + unit cases: tests/test_graph_orphan_deletion_231.py).
+_spec = importlib.util.spec_from_file_location("graph_orphans_gate", ROOT / "scripts" / "graph_orphans.py")
+_gorph = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_gorph)
+_decision, _orphans, _note = _gorph.decide_orphans(ROOT)
+check("every file the graph indexes is tracked in THIS tree (deletions by THIS PR excepted)",
+      _decision is not None and not _decision["missing"],
+      (_note + " " + str(_decision["missing"][:5] if _decision else ""))[:400])
 ignored = (ROOT / ".gitignore").read_text()
 check(".gitignore keeps viz/cache/cost out of the repo",
       all(k in ignored for k in ("graphify-out/graph.html", "graphify-out/cache/", "graphify-out/cost.json")))
