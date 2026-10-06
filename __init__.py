@@ -2523,6 +2523,15 @@ def _lane_state(key, entry):
         st = None
         r = runs_root() / "__invalid_lane_run__"
     state = st["status"] if st else "pending"
+    # est-2ek.1.199: a lane entry CLAIMING a run whose dir does not exist on
+    # disk is the postmortem's census-blind ghost — 'pending forever' made the
+    # ledger loop sleep 6h. Surface it as an explicit orphaned-run status the
+    # monitor/STALL line can read at plugin level. The dir check is what
+    # distinguishes it from a not-yet-written-but-launching dir: at this point
+    # the door has already passed (or refused) its durability proof, so a
+    # claimed run without a dir is gone, not pending.
+    if st is None and not r.is_dir():
+        state = "orphaned"
     live = st.get("runner_live", False) if st else False   # A2 one-read law
     unfinished = state not in ("done", "failed", "stopped")
     return {"lane_key": key, "run_id": rid, "state": state,
@@ -2851,6 +2860,46 @@ def act_run(args):
                        includes=_includes, include_notes=_include_notes,
                        concurrency_meta=concurrency_meta)
 
+def _prove_run_dir(r):
+    """est-2ek.1.199: the door's durability proof for a fresh run dir, run AFTER
+    the spawn and BEFORE the run_id rides back to the caller.
+
+    fsync the durable files the door wrote (graph.json, run.json, wake_protocol),
+    then fsync the run dir and the runs root so the directory ENTRY itself is
+    durable (a fsynced file in an un-fsynced dir can vanish with the dir on
+    crash). Then VERIFY the dir still exists under the resolved durable root —
+    the stub-door postmortem shape is a run_id whose dir is not under the root
+    the estate census walks. Any failure raises RuntimeError naming the ATTEMPTED
+    PATH (loud, per the bead: never a phantom run_id). handle() turns the raise
+    into the tool's error payload; act_run callers inside the plugin never see a
+    half-proved run advertised as launched.
+    """
+    attempted = str(r)
+    root = r.parent
+    try:
+        for fname in ("graph.json", "run.json", "wake_protocol"):
+            f = r / fname
+            if f.exists():
+                with open(f, "rb") as fh:
+                    os.fsync(fh.fileno())
+        for d in (r, root):
+            dfd = os.open(d, getattr(os, "O_DIRECTORY", 0))
+            try:
+                os.fsync(dfd)
+            finally:
+                os.close(dfd)
+    except OSError as e:
+        raise RuntimeError(
+            f"run dir proof FAILED (fsync) at attempted path {attempted}: "
+            f"{type(e).__name__}: {e} — run not launched-proof; do not resume by id")
+    if not r.is_dir():
+        raise RuntimeError(
+            f"run dir proof FAILED: run dir vanished after launch — attempted path "
+            f"{attempted} is not a directory under the durable runs root {root}; "
+            "no run was durably created (check the launch path's root resolution, "
+            "esp. a stub/non-registering door carrying settings.runs_root)")
+
+
 def _create_run(args, graph, lib_name, models, routes, _liveness_notes, lane_path=None,
                 *, concurrency_meta=None, includes=None, include_notes=None):
     """Under the lane flock: complete run dir, atomic registry entry, then spawn."""
@@ -2925,7 +2974,18 @@ def _create_run(args, graph, lib_name, models, routes, _liveness_notes, lane_pat
             os.replace(tmp, lane_path)
         finally:
             tmp.unlink(missing_ok=True)
+    # est-2ek.1.199 (fb-fix STALL postmortem, run 20260927-082306-fb-fix-cef3acf6):
+    # a stub-_CTX importlib door returned a run_id whose dir never landed under
+    # the durable root; the ledger loop slept 6h on 'in_progress' because nothing
+    # ever proved the dir to the launcher. DURABILITY PROOF law: every durable
+    # file is fsynced, then the run dir itself and the runs root are fsynced
+    # (link durability), and the dir must STILL EXIST under the resolved durable
+    # root before the run_id is handed back. A failed proof RAISES with the
+    # attempted path — handle() surfaces it as the tool error; a phantom run_id
+    # is never returned. (The spawn deliberately precedes the proof: a runner may
+    # already be racing this dir; the proof only decides what the CALLER is told.)
     _spawn_runner(r)
+    _prove_run_dir(r)
     out = {"run_id": rid, "models": models, "routes": routes, "hint":
             # Copy-exact inducement (papercut #70): the hint IS the paste line —
             # no paraphrase, no fallback. The card is agent-authored by ruling.

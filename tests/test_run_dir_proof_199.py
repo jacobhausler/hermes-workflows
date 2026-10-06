@@ -162,10 +162,15 @@ class RunDirProof199(unittest.TestCase):
         self.door._CTX = StubCtx()
         def killer(r):
             shutil.rmtree(r, ignore_errors=True)   # dir "never lands"
-        with patch.object(self.door, "_spawn_runner", side_effect=killer):
-            with self.assertRaises(RuntimeError) as cm:
-                self.door.act_run({"graph": G})
+        # the writer sandbox (wf_test_isolation) keeps the door pinned to the
+        # env root; flip the pin so the door resolves the poisoned root exactly
+        # as the postmortem's stub seat did, then restore.
+        with patch.dict(os.environ, {"WF_RUNS_ROOT": str(bogus)}):
+            with patch.object(self.door, "_spawn_runner", side_effect=killer):
+                with self.assertRaises(RuntimeError) as cm:
+                    self.door.act_run({"graph": G})
         self.assertIn(str(bogus), str(cm.exception))
+        self.assertFalse((bogus / "proof199").exists())
         self.door._CTX = None
 
 
