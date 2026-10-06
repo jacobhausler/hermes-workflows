@@ -1360,7 +1360,14 @@ def admission_ledger_errors(graph, run_dir=None):
         return errs
     nodes = [n for n in (graph.get("nodes") or []) if isinstance(n, dict)]
     idset = {n.get("id") for n in nodes if isinstance(n.get("id"), str)}
-    parents = {n["id"]: [a for a in n.get("after", []) if isinstance(a, str) and a in idset]
+    # The guard runs BEFORE the node validator, so malformed `after` values (int,
+    # dict, str...) must never crash ancestry building — the validator reports the
+    # defect; we treat a non-list `after` as no known parents (same law as the
+    # ledger container shape above).
+    def _after_list(n):
+        a = n.get("after")
+        return a if isinstance(a, list) else []
+    parents = {n["id"]: [a for a in _after_list(n) if isinstance(a, str) and a in idset]
                for n in nodes if isinstance(n.get("id"), str)}
     for n in nodes:
         nid = n.get("id")
@@ -1402,7 +1409,7 @@ def admission_ledger_errors(graph, run_dir=None):
                        f"{src!r}: a source is '<node_id>.<dotted.path>'")
                 continue
             head = src.split(".", 1)[0]
-            closure, stack = set(), list(parents.get(nid) or n.get("after") or [])
+            closure, stack = set(), list(parents.get(nid) or _after_list(n))
             while stack:
                 a = stack.pop()
                 if a in closure or a not in idset:
