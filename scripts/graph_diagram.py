@@ -189,6 +189,40 @@ def cards_for(graph_path):
 # receipt at 6454b50: a mutant 4-node smoke kept saying "three nodes", exit
 # 0). Vocabulary lines carry SHAPE, never counts, in either
 # script — the word list is the small closed set; deletion beats tokenizing.
+def example_graphs(examples_dir, out_dir):
+    """The ONE walker for shipped example graphs — shared by --all here and
+    diagram_readme.py's table (one-source law; the README builder imports it).
+
+    Everything under out_dir is an ARTIFACT, never a graph: candidates, pngs,
+    the derived README, and qa/ receipts. Receipts are *.json too, and the
+    original basename-only exclusion let qa/<stem>.qa.json walk in as phantom
+    pending graphs (the queue contradicted the tree with CI green — austin's
+    finding at 364ecf8). Exclusion is therefore by PATH PREFIX, and the
+    artifact set is fail-closed: any other .json under out_dir names itself
+    and fails, so an unknown artifact can never masquerade as a graph.
+    """
+    ex, out = os.path.abspath(examples_dir), os.path.abspath(out_dir)
+    files = []
+    for dp, _, fs in os.walk(ex):
+        dp = os.path.abspath(dp)
+        if dp == out or dp.startswith(out + os.sep):
+            for f in fs:
+                artifact = (f.endswith(".candidate.json")
+                            or (os.path.basename(dp) == "qa"
+                                and f.endswith(".qa.json")))
+                if f.endswith(".json") and not artifact:
+                    raise SystemExit(f"unknown artifact under {out}: {f} —"
+                                     " artifacts are *.candidate.json or"
+                                     " qa/*.qa.json; graphs live OUTSIDE the"
+                                     " out dir (DIAGRAM LAW: derived files"
+                                     " cannot pose as inputs)")
+            continue
+        for f in fs:
+            if f.endswith(".json") and not f.endswith(".cards.json"):
+                files.append(os.path.join(dp, f))
+    return sorted(files)
+
+
 COUNT_TOKEN = re.compile(r"\{\{(\w+)\}\}")
 BARE_DIGIT = re.compile(r"(?<!\{)\d(?!\})")
 SPELLED_NUM = re.compile(
@@ -244,11 +278,8 @@ def main():
         return 0
     files = list(a.graphs)
     if a.all:
-        d = os.path.join(here, "examples")
-        out_name = os.path.basename(a.out.rstrip("/"))
-        files = sorted(os.path.join(dp, f) for dp, _, fs in os.walk(d) for f in fs
-                       if f.endswith(".json") and not f.endswith(".cards.json")
-                       and os.path.basename(dp) != out_name)
+        files = example_graphs(os.path.join(here, "examples"),
+                               os.path.join(here, a.out))
     bad = 0
     pending = []
     for f in files:
