@@ -38,8 +38,8 @@ def agent(id, after=(), **kw):
     return n
 
 # ---- baseline: a done-committed, b never-committed (pending) with an explicit pin ----
-base = [agent("a", model="qwen", provider="p1"),
-        agent("b", ["a"], model="sol", provider="p2"),
+base = [agent("a", model="m-a", provider="p1"),
+        agent("b", ["a"], model="m-b", provider="p2"),
         agent("c", ["b"])]
 r = fresh("20991006-000000-amenddefdiff", base)
 byid = {n["id"]: n for n in base}
@@ -53,7 +53,7 @@ check("fixture: a committed done, b pending", st_a == "done" and st_b == "pendin
 
 # ---- RED: amend b's model only (provider follows via _alias_provider_pair) ----
 new = [dict(n) for n in base]
-new[1] = {**new[1], "model": "fable", "provider": "p9"}
+new[1] = {**new[1], "model": "m-c", "provider": "p9"}
 pv = wfcommon.amend_preview(r, new)
 check("def-edit to never-committed b is flagged changed",
       "b" in pv["changed"], json.dumps(pv))
