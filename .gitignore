@@ -6,6 +6,13 @@ tests/.suite-home/
 *.log
 artifacts/
 home-40/
+# archify render-side output (html ~740KB each + finalize machine receipts):
+# candidates + png are the committed truth; regenerate html locally on demand
+examples/diagrams/*.html
+examples/diagrams/*.browser-check.json
+examples/diagrams/*.delivery.json
+examples/diagrams/*.finalize.json
+examples/diagrams/*.finalize-summary.json
 # graphify: committed = graph.json, GRAPH_REPORT.md, manifest.json, labels, analysis, root
 #           local-only = viz, cache, cost, dated backups
 graphify-out/graph.html
