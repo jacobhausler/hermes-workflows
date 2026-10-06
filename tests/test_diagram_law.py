@@ -199,5 +199,71 @@ finally:
         open(os.path.join(_qa_dir, f), "wb").write(blob)
     subprocess.run([sys.executable, _readme_py], cwd=ROOT, capture_output=True, text=True)
 
+
+# --- Queue == census (peer finding at #240; haus hand on the generator) ---
+# The old walkers excluded the diagrams dir by BASENAME only, so
+# examples/diagrams/qa/*.qa.json walked in as phantom graphs and the queue
+# contradicted the tree with CI green. Art is not input, at any depth.
+_EX = os.path.join(ROOT, "examples")
+_DIA = os.path.join(_EX, "diagrams")
+
+def _real_graphs_missing_sidecar():
+    out = []
+    for _dp, _dn, _fs in os.walk(_EX):
+        _ap = os.path.abspath(_dp)
+        if _ap == os.path.abspath(_DIA) or _ap.startswith(os.path.abspath(_DIA) + os.sep):
+            continue
+        for _f in _fs:
+            if not _f.endswith(".json") or _f.endswith(".cards.json") or _f.endswith(".candidate.json"):
+                continue
+            _p = os.path.join(_dp, _f)
+            try:
+                _d = json.loads(open(_p, encoding="utf-8").read())
+            except Exception:
+                continue
+            if isinstance(_d, dict) and _d.get("nodes") and \
+               not os.path.exists(_p[:-5] + ".cards.json"):
+                out.append(os.path.relpath(_p, ROOT))
+    return sorted(out)
+
+_r_all = subprocess.run([sys.executable, GEN, "--all"], cwd=ROOT,
+                        capture_output=True, text=True)
+_pending = sorted(l.split()[1] for l in _r_all.stdout.splitlines()
+                  if l.startswith("PENDING"))
+_census = _real_graphs_missing_sidecar()
+check("QW1 queue == census by enumeration", _pending == _census,
+      f"queue-only={[p for p in _pending if p not in _census]} "
+      f"census-only={[p for p in _census if p not in _pending]} rc={_r_all.returncode}")
+
+# QW2: art planted INSIDE examples/ (qa-style and candidate-style) must never
+# walk in as a graph, and must not break --all.
+_mis = os.path.join(_EX, "basics")
+_pl = {"nodes": [{"id": "x"}], "goal": "planted"}
+_p1 = os.path.join(_mis, "planted.qa.json")
+_p2 = os.path.join(_mis, "planted.candidate.json")
+try:
+    json.dump(_pl, open(_p1, "w"))
+    json.dump(_pl, open(_p2, "w"))
+    _r2 = subprocess.run([sys.executable, GEN, "--all"], cwd=ROOT,
+                        capture_output=True, text=True)
+    _leak = [l for l in (_r2.stdout + _r2.stderr).splitlines() if "planted" in l]
+    check("QW2 planted qa/candidate never walk in as graphs",
+          _r2.returncode == 0 and not _leak, _leak[:3])
+finally:
+    for f in (_p1, _p2):
+        if os.path.exists(f):
+            os.remove(f)
+    subprocess.run([sys.executable, GEN, "--all"], cwd=ROOT,
+                   capture_output=True, text=True)
+
+# QW3: the README queue carries zero rows for anything under diagrams/
+_readme_py = os.path.join(ROOT, "scripts", "diagram_readme.py")
+subprocess.run([sys.executable, _readme_py], cwd=ROOT, capture_output=True, text=True)
+_txt = open(os.path.join(_DIA, "README.md"), encoding="utf-8").read()
+_queue = _txt.split("## Diagram queue")[-1]
+check("QW3 no queue row names art under diagrams/",
+      "diagrams/qa" not in _queue and ".candidate.json` —" not in _queue,
+      [l for l in _queue.splitlines() if "diagrams/qa" in l][:2])
+
 print(f"{'ALL PASS' if ok else 'FAILURES PRESENT'} ({_n} diagram-law contracts)")
 sys.exit(0 if ok else 1)

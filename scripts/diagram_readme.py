@@ -51,10 +51,18 @@ def main():
     here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     ex = os.path.join(here, "examples")
     dia = os.path.join(ex, "diagrams")
+    # Art is not input: exclude everything UNDER the diagrams dir (the old
+    # basename-only test let qa/*.qa.json walk in as phantom graphs — peer
+    # finding at #240), and refuse *.candidate.json wherever it lives.
+    def _under_art(dp):
+        ap = os.path.abspath(dp)
+        return ap == os.path.abspath(dia) or ap.startswith(os.path.abspath(dia) + os.sep)
+
     graphs = sorted(
         os.path.join(dp, f) for dp, _, fs in os.walk(ex) for f in fs
         if f.endswith(".json") and not f.endswith(".cards.json")
-        and os.path.basename(dp) != os.path.basename(dia))
+        and not f.endswith(".candidate.json") and not f.endswith(".qa.json")
+        and not _under_art(dp))
     rows, pending_rows = [], []
     for g in graphs:
         stem = os.path.basename(g)[:-5]

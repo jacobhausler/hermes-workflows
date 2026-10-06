@@ -245,10 +245,22 @@ def main():
     files = list(a.graphs)
     if a.all:
         d = os.path.join(here, "examples")
-        out_name = os.path.basename(a.out.rstrip("/"))
+        # The diagrams dir (and its qa/ subdir) is generator ART, not input:
+        # excluding only its basename let qa/*.qa.json walk in as phantom
+        # graphs (peer finding at #240 — queue contradicted tree, CI green).
+        # Exclude every path UNDER the committed art dir or --out, and refuse
+        # *.candidate.json as input wherever it lives: art never feeds the oven.
+        art_dirs = [os.path.abspath(os.path.join(here, "examples", "diagrams")),
+                    os.path.abspath(a.out if os.path.isabs(a.out) else os.path.join(here, a.out))]
+
+        def _art(dp):
+            ap = os.path.abspath(dp)
+            return any(ap == d0 or ap.startswith(d0 + os.sep) for d0 in art_dirs)
+
         files = sorted(os.path.join(dp, f) for dp, _, fs in os.walk(d) for f in fs
                        if f.endswith(".json") and not f.endswith(".cards.json")
-                       and os.path.basename(dp) != out_name)
+                       and not f.endswith(".candidate.json") and not f.endswith(".qa.json")
+                       and not _art(dp))
     bad = 0
     pending = []
     for f in files:
