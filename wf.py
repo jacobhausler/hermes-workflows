@@ -5462,6 +5462,12 @@ class Run:
 
 def main(run_id):
     run = find_run(run_id)   # resolved runs_root first; a pre-fix run stays resumable from the launch root
+    # #152 T3 provenance read (first reader wins — the key NEVER rides into a
+    # child env; spawn envs are dict(os.environ, ...), same law as READY_FD):
+    # a stamped boot came through the door's _spawn_runner (fresh launch,
+    # crash-respawn, wait-resume, release/amend respawn); an unstamped boot is
+    # a direct CLI invocation — the owner-resume shape, always allowed to run.
+    _spawned_by = os.environ.pop("HERMES_WF_SPAWNED_BY", None)
     meta = jload(run / "run.json", {}) or {}
     if not jload(run / "graph.json", {}):
         emit(f"WORKFLOW_FAILED {run_id} (no graph.json)")
@@ -5508,16 +5514,24 @@ def main(run_id):
     # graph: the stopped run re-held, and a release then saw neither proof (no
     # marker, run.stopped no longer the last event) and landed the answer with
     # auto_resumed where the byte-identical refusal is test-locked (reproduced
-    # 10/10 under suite timing; the CI flake class). Admission law now: an
-    # admitted runner whose run dir ALREADY carries the durable stop verdict
-    # with no marker left to consume is a duplicate consumer — retire the spawn,
-    # verdict and evidence intact, no writes, no wf.pid, no runner_exit delete.
-    # A legitimate resume of a stopped run enters only through amend, which
-    # appends graph.amended (last event no longer run.stopped) AND writes
-    # restart.request AND re-fingerprints the graph (the runner_exit record goes
-    # stale) — all three clear this gate. run_state is THE read model; the
-    # door's release refusal consults the same derivation (one truth, one read).
-    if not (run / "stop.request").exists() and \
+    # 10/10 under suite timing; the CI flake class). Admission law now: a DOOR
+    # -spawned runner (proven via the HERMES_WF_SPAWNED_BY stamp the door sets
+    # at _spawn_runner and this boot popped — value must equal THIS run id, so
+    # a stray leak can only ever name its own run) whose run dir ALREADY
+    # carries the durable stop verdict with no marker left to consume is a
+    # duplicate consumer — retire the spawn, verdict and evidence intact, no
+    # writes, no wf.pid, no runner_exit delete. A direct CLI boot carries no
+    # stamp: the owner-resume of a stopped run (`wf.py run <stopped-id>` — the
+    # test-locked B1 #7 shape, which re-drives cancelled nodes as pending) is
+    # exactly what it looks like and always runs. A legitimate door-side resume
+    # of a stopped run enters only through amend, which appends graph.amended
+    # (last event no longer run.stopped) AND writes restart.request AND
+    # re-fingerprints the graph (the runner_exit record goes stale) — all three
+    # clear this gate regardless of provenance. run_state is THE read model;
+    # the door's release refusal consults the same derivation (one truth, one
+    # read).
+    if _spawned_by == run_id and \
+            not (run / "stop.request").exists() and \
             (wfcommon.run_state(run) or {}).get("status") == "stopped":
         emit(f"WORKFLOW_STOPPED {run_id} (stop already consumed)")
         return "stopped"

@@ -512,6 +512,11 @@ _DAEMON_INTERMEDIATE = (
 
 _READY_WAIT_S = 5.0
 
+# #152 T3 spawn-provenance key: door-spawned runners get this env stamp (value =
+# run id) at _spawn_runner; the runner pops it at main() entry — same inherit-
+# then-pop pattern as wf.READY_FD_ENV. Direct CLI boots never carry it.
+_SPAWNED_BY_ENV = "HERMES_WF_SPAWNED_BY"
+
 def _ready_pid(rd):
     """One newline-terminated pid off the ready pipe, <= _READY_WAIT_S. None on
     EOF or timeout: a WORKFLOW_BUSY loser closes the write end without a line."""
@@ -580,38 +585,57 @@ def _spawn_runner(r):
     log = open(r / "runner.log", "a")
     env = ({**os.environ, "HERMES_HOME": str(_common.hermes_home())}
            if r.parent == _common.runs_root() else None)
-    argv = [sys.executable, str(HERE / "wf.py"), "run", r.name]
-    pid = None
-    if hasattr(os, "fork"):                # POSIX: daemonize through a transient hop
-        rd = wd = None
-        try:
-            rd, wd = os.pipe()
-            proc = subprocess.Popen(
-                [sys.executable, "-c", _DAEMON_INTERMEDIATE,
-                 str(HERE / "wf.py"), r.name, str(wd)],
-                stdout=log, stderr=log, stdin=subprocess.DEVNULL,
-                env=env, pass_fds=(wd,), start_new_session=True, cwd=str(HERE))
-            os.close(wd); wd = None        # the transient parent must not hold the write end
-            pid = _ready_pid(rd)
+    # #152 T3 spawn-provenance stamp: every process that leaves _spawn_runner is
+    # DOOR-spawned (fresh launch, crash-reaper revival, explicit wait-resume,
+    # release/amend respawn). The runner pops this at main() entry (never into a
+    # child env) and the admission duplicate-consumer gate ONLY retires a boot
+    # that proves door provenance — a direct CLI resume (`wf.py run <id>`, the
+    # test-locked stopped-run resume shape) carries no stamp and always runs.
+    # Bound to the run id so a stray leak into an unrelated shell can only ever
+    # affect that one run.
+    # The stamp rides BOTH channels: an explicit env dict when the door builds
+    # one, and the live os.environ (inherited) for legacy-location spawns. The
+    # finally-pop guarantees the door's own process never keeps provenance
+    # beyond this spawn — an in-process test door that later Popen's wf.py
+    # directly (the B1 direct-resume shape) must NOT hand it the stamp.
+    if env is not None:
+        env[_SPAWNED_BY_ENV] = r.name
+    os.environ[_SPAWNED_BY_ENV] = r.name
+    try:
+        argv = [sys.executable, str(HERE / "wf.py"), "run", r.name]
+        pid = None
+        if hasattr(os, "fork"):                # POSIX: daemonize through a transient hop
+            rd = wd = None
             try:
-                rc = proc.wait(timeout=5)
+                rd, wd = os.pipe()
+                proc = subprocess.Popen(
+                    [sys.executable, "-c", _DAEMON_INTERMEDIATE,
+                     str(HERE / "wf.py"), r.name, str(wd)],
+                    stdout=log, stderr=log, stdin=subprocess.DEVNULL,
+                    env=env, pass_fds=(wd,), start_new_session=True, cwd=str(HERE))
+                os.close(wd); wd = None        # the transient parent must not hold the write end
+                pid = _ready_pid(rd)
+                try:
+                    rc = proc.wait(timeout=5)
+                except Exception:
+                    rc = 0                     # hung transient: trust the ready line
+                if pid is None and rc not in (0, None):
+                    pid = _spawn_runner_legacy(argv, env, log)   # fork refused pre-fork: direct spawn
             except Exception:
-                rc = 0                     # hung transient: trust the ready line
-            if pid is None and rc not in (0, None):
-                pid = _spawn_runner_legacy(argv, env, log)   # fork refused pre-fork: direct spawn
-        except Exception:
-            pid = _spawn_runner_legacy(argv, env, log)   # daemonize path died pre-exec
-                                                       # (no runner alive): direct spawn;
-                                                       # the flock makes a race harmless
-        finally:
-            for fd in (rd, wd):
-                if fd is not None:
-                    try:
-                        os.close(fd)
-                    except OSError:
-                        pass
-    else:                                  # no-fork platform: today's behavior
-        pid = _spawn_runner_legacy(argv, env, log)
+                pid = _spawn_runner_legacy(argv, env, log)   # daemonize path died pre-exec
+                                                           # (no runner alive): direct spawn;
+                                                           # the flock makes a race harmless
+            finally:
+                for fd in (rd, wd):
+                    if fd is not None:
+                        try:
+                            os.close(fd)
+                        except OSError:
+                            pass
+        else:                                  # no-fork platform: today's behavior
+            pid = _spawn_runner_legacy(argv, env, log)
+    finally:
+        os.environ.pop(_SPAWNED_BY_ENV, None)
     # #8 review (findings 3+4): NO door write of wf.pid — the admitted runner is
     # its sole owner (self-stamp at admission, wf.py ready_stamp). `pid` here is
     # only returned to the caller as the observed pid; on the legacy path the
