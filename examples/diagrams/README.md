@@ -54,26 +54,6 @@ code, not docs — no diagram (rung zero). Census command for the scope:
 `git ls-tree -r --name-only HEAD | grep '\.json$' | grep -v '^graphify-out/'
  | grep -v '^examples/diagrams/' | grep -v '\.cards\.json$'` —
 every file whose parsed JSON has a non-empty `nodes` array must have a
-table row or queue row in this table (receipt at build: examples/ 34
-= 17 table + 17 queue).
-
-## Diagram queue (cards pending — generator skips, CI stays green)
-
-- [ ] `examples/diagrams/qa/approve-publish.qa.json` — needs `<name>.cards.json`, then `--all` derives the row
-- [ ] `examples/diagrams/qa/blind-council.workflow.qa.json` — needs `<name>.cards.json`, then `--all` derives the row
-- [ ] `examples/diagrams/qa/branch-on-verdict.qa.json` — needs `<name>.cards.json`, then `--all` derives the row
-- [ ] `examples/diagrams/qa/bulk-transform.workflow.qa.json` — needs `<name>.cards.json`, then `--all` derives the row
-- [ ] `examples/diagrams/qa/census-fanout.workflow.qa.json` — needs `<name>.cards.json`, then `--all` derives the row
-- [ ] `examples/diagrams/qa/escalation-ladder.workflow.qa.json` — needs `<name>.cards.json`, then `--all` derives the row
-- [ ] `examples/diagrams/qa/exchange-run.workflow.qa.json` — needs `<name>.cards.json`, then `--all` derives the row
-- [ ] `examples/diagrams/qa/gated-publish.workflow.qa.json` — needs `<name>.cards.json`, then `--all` derives the row
-- [ ] `examples/diagrams/qa/incident-response.qa.json` — needs `<name>.cards.json`, then `--all` derives the row
-- [ ] `examples/diagrams/qa/issue-to-pr.workflow.qa.json` — needs `<name>.cards.json`, then `--all` derives the row
-- [ ] `examples/diagrams/qa/machine-watch.workflow.qa.json` — needs `<name>.cards.json`, then `--all` derives the row
-- [ ] `examples/diagrams/qa/portable-review.workflow.qa.json` — needs `<name>.cards.json`, then `--all` derives the row
-- [ ] `examples/diagrams/qa/quorum-probe.workflow.qa.json` — needs `<name>.cards.json`, then `--all` derives the row
-- [ ] `examples/diagrams/qa/release-lifecycle.workflow.qa.json` — needs `<name>.cards.json`, then `--all` derives the row
-- [ ] `examples/diagrams/qa/smoke.qa.json` — needs `<name>.cards.json`, then `--all` derives the row
-- [ ] `examples/diagrams/qa/submit-pr.workflow.qa.json` — needs `<name>.cards.json`, then `--all` derives the row
-- [ ] `examples/diagrams/qa/triage-route.workflow.qa.json` — needs `<name>.cards.json`, then `--all` derives the row
+table row or queue row in this table (receipt at build: examples/ 17
+= 17 table + 0 queue).
 
