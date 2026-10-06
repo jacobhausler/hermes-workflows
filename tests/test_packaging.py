@@ -104,7 +104,13 @@ def main() -> None:
             check("pack-list contract: ZIP scripts/ set equals the exact declared packed set",
                   packed_scripts == {"scripts/graph_check.py", "scripts/pack.py",
                                       "scripts/pr_tag_audit.py", "scripts/suite.py",
-                                      "scripts/graph_path_ban.py", "scripts/graph_regen.py"})
+                                      "scripts/graph_path_ban.py", "scripts/graph_regen.py",
+                                      # est-5p7x: the diagram-law generators — shipped
+                                      # because tests/test_diagram_law.py executes both
+                                      # from the package root (same rationale as the
+                                      # pr_tag_audit include above).
+                                      "scripts/diagram_readme.py",
+                                      "scripts/graph_diagram.py"})
             # wf165d: the no-silent-middle half only has a premise in a REPO
             # checkout — the source-only scripts (make_public.py,
             # lane_recover.py) never travel inside the ZIP, so from the

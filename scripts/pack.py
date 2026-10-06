@@ -112,6 +112,15 @@ INCLUDE_FILES = (
     # the package, but the suite does, so they pack.
     "scripts/graph_path_ban.py",
     "scripts/graph_regen.py",
+    # est-5p7x (PR #165 CI blocker, run 37440782151): tests/test_diagram_law.py
+    # (shipped via the tests/test_*.py glob) subprocess-executes BOTH generators
+    # from the package root — the exact est-4vnq finding-4 shape. The merge ref
+    # gained these files from main (#232/#236 diagram law) while pack.py never
+    # declared them, so the no-silent-middle contract REDed there while the head
+    # tree (predating the files) stayed vacuously green. Stdlib-only, like the
+    # graph helpers above, so the ZIP side stays honest.
+    "scripts/diagram_readme.py",
+    "scripts/graph_diagram.py",
     "scripts/suite.py",
     "graphify-out/GRAPH_REPORT.md",
     "graphify-out/graph.json",
