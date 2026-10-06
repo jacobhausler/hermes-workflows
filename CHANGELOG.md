@@ -165,6 +165,17 @@ Detailed entries (Unreleased work folded in):
   .txt joined AUDIT_SUFFIXES (the shipped ci.yml exported forbidden lines with
   '0 scrub hits' under the old set, NUL or not). New text types join the set,
   never the skip path.
+- est-n58i — the adopted-child death path shares the malformed-turn law: an
+  adopted orphan whose reply IS serialized tool-call markup now classifies
+  `malformed_turn` (verbatim diagnostic carried), not generic `unknown` — the
+  class no longer varies by which path (fresh vs adopted) reached the same
+  death; the bounded ladder still may not re-drive the adopted path (its spend
+  is committed). Pin: `tests/test_malformed_turn_adopted_541.py` drives the
+  REAL runner on both paths and asserts `item.adopted` actually happened.
+  The scrub audit's text-ness is content-based (null-byte sniff, the git
+  heuristic): the shipped `.sig` and extensionless text (`tests/fake-b1`) are
+  audited too — a file name can no longer hide text from the gate; the
+  LICENSE copyright hit is guarded by an anchored exemption.
 - #116 — confidence_substrate: engine-stamped fallback when a pinned confidence
   route is quota-dead. The owner declares a sanctioned fallback substrate once
   (`plugins.entries.hermes-workflows.settings.confidence_substrate`, top-level
