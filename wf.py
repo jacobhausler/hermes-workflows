@@ -168,7 +168,11 @@ def _route_substitution_refusal(meta, node, spawn_no):
         if alias.lower() in (v, v_model):
             candidates |= {alias.lower(), str(target).lower(),
                            str(target).rsplit("/", 1)[-1].lower()}
-    if a in candidates or a.rsplit("/", 1)[-1] in candidates:
+    # est-2ek.1.699: ONE identity contract — core bills under ITS normalized
+    # spelling (claude-fable-5-1) while the door proved the author's (5.1).
+    # Equality is canonical, not raw-string; a different model stays denied
+    # (the spawn's own model is still NOT a candidate — no self-certification).
+    if any(wfcommon.route_ids_equal(a, c) for c in candidates):
         return None                            # same route: the receipt is not a spawn lock
     return {"status": "failed",
             "error": f"route_substitution_denied: node {node['id']!r} has a proved-alive "
@@ -5360,7 +5364,13 @@ def _route_hold(meta, result, node=None, final_served=None):
             candidates |= {alias.lower(), str(target).lower(),
                            str(target).rsplit("/", 1)[-1].lower()}
     s = str(served).strip().lower()
-    if s in candidates or s.rsplit("/", 1)[-1] in candidates:
+    # est-2ek.1.699: the served row is compared to the door's proof under the ONE
+    # canonical model-id contract (wfcommon.route_ids_equal): core normalizes and
+    # bills claude-fable-5-1 while the submit ping proved claude-fable-5.1 — the
+    # same route under two spellings must never bill as a different one. A KNOWN
+    # served model that is not the route under ANY spelling still fails closed:
+    # the gate itself is untouched (no fallback, require_route unchanged).
+    if any(wfcommon.route_ids_equal(s, c) for c in candidates):
         return result
     lead = (f"final served_model {final_served!r}; a mid-session call billed {served!r}"
             if final_served and final_served != served else f"node billed {served!r}")

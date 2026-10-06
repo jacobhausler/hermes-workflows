@@ -96,6 +96,45 @@ def source_digest(graph):
 # overrides so a team can share one root that survives any profile's deletion; unset or
 # empty = the 1.0.15 default, byte-identical.
 
+# ---------- est-2ek.1.699: ONE canonical model-id contract ----------
+# The door proves a route alive at submit under the AUTHOR's spelling
+# (claude-fable-5.1); core normalizes and BILLS under its own (claude-fable-5-1).
+# Every identity comparison between those two worlds — the door's same-route ping
+# law, the runner's #25 commit hold, the #641 post-admission receipt hold — MUST
+# go through this one normalizer, or a proven-and-run item dies route_unavailable
+# over punctuation (field evidence run 20261005-030530-zap-banked-findings-squa).
+# Contract: lowercase, strip whitespace, drop a leading "provider/" and a trailing
+# "(label)" (core's 'main-agent(openai)' route_info shape), and treat the version
+# separators '.' and '-' as ONE character class so dotted/hyphenated aliases of
+# the same model collapse to one id. Deliberately NOT a fuzzy match: different
+# models never collide — only the separator spelling does. This normalizes IDENTITY
+# for comparison only; it never rewrites what gets billed or relaxes any gate.
+_VERSION_SEPS = re.compile(r"[._]+")
+
+def canonical_model_id(model):
+    """The ONE provider-normalization contract for model identity (est-2ek.1.699).
+
+    Returns '' for absent input (absence stays absence: the holds never fire on
+    an unknown served model). Otherwise: strip, lowercase, peel a trailing
+    '(label)' and a leading 'provider/', then fold runs of '.'/'_'/'-' to a
+    single '-' so 'claude-fable-5.1' and 'claude-fable-5-1' compare EQUAL while
+    distinct model names stay distinct."""
+    m = str(model or "").strip().lower()
+    if not m:
+        return ""
+    lbl = re.search(r"\(([^()]*)\)\s*$", m)          # 'model(anthropic)' label shape
+    if lbl and lbl.group(1):
+        m = m[:lbl.start()].strip()
+    m = m.rsplit("/", 1)[-1]                          # provider-qualified -> bare model
+    return _VERSION_SEPS.sub("-", m)
+
+def route_ids_equal(a, b):
+    """True when two model-id spellings name the SAME model under the ONE contract
+    (either side provider-qualified, labeled, or bare). Empty on either side is
+    never equal — absence proves nothing."""
+    ca, cb = canonical_model_id(a), canonical_model_id(b)
+    return bool(ca) and bool(cb) and ca == cb
+
 def hermes_home():
     """Core's resolution when importable, else the raw env (1.0.15 semantics, unchanged).
 
