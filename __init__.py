@@ -1088,7 +1088,7 @@ def _same_ping_route(ri, provider, model):
     nothing about the pinned one — the caller degrades to 'unknown', never 'alive'/'dead'.
     est-2ek.1.699: the MODEL half compares under the ONE canonical model-id contract
     (wfcommon.route_ids_equal) — core records the ping route with ITS normalized
-    spelling (claude-fable-5-1) while the node pins the author's (claude-fable-5.1);
+    spelling ('m-1-1') while the node pins the author's ('m-1.1');
     raw-string equality there falsely called the same route a fallback-ladder
     surprise and refused a healthy pin at submit. The PROVIDER half keeps its
     'label(provider)' extraction; a provider mismatch is still never same-route."""

@@ -38,6 +38,10 @@ tests/test_routing_routes.py
 tests/test_require_route_25.py
 tests/test_metrics_0923.py
 tests/test_route_efforts_b3c98b2a.py
+# est-2ek.1.699: the dotted/hyphenated alias pair IS the asserted data (the
+# route-identity hold asserts 5.1-proved vs 5-1-billed passes while a different
+# model still fails route_unavailable; neutralizing the names would test nothing).
+tests/test_route_identity_699.py
 tests/test_fatal_quota_24.py
 tests/test_tiers.py
 tests/test_model_preflight_0924.py

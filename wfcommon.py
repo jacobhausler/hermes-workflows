@@ -98,7 +98,7 @@ def source_digest(graph):
 
 # ---------- est-2ek.1.699: ONE canonical model-id contract ----------
 # The door proves a route alive at submit under the AUTHOR's spelling
-# (claude-fable-5.1); core normalizes and BILLS under its own (claude-fable-5-1).
+# ('m-1.1'); core normalizes and BILLS under its own ('m-1-1').
 # Every identity comparison between those two worlds — the door's same-route ping
 # law, the runner's #25 commit hold, the #641 post-admission receipt hold — MUST
 # go through this one normalizer, or a proven-and-run item dies route_unavailable
@@ -117,7 +117,7 @@ def canonical_model_id(model):
     Returns '' for absent input (absence stays absence: the holds never fire on
     an unknown served model). Otherwise: strip, lowercase, peel a trailing
     '(label)' and a leading 'provider/', then fold runs of '.'/'_'/'-' to a
-    single '-' so 'claude-fable-5.1' and 'claude-fable-5-1' compare EQUAL while
+    single '-' so 'm-1.1' and 'm-1-1' compare EQUAL while
     distinct model names stay distinct."""
     m = str(model or "").strip().lower()
     if not m:
