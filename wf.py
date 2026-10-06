@@ -18,6 +18,7 @@ import json, os, random, re, signal, socket, subprocess, sys, threading, time
 import difflib
 import fcntl
 import hashlib
+from contextlib import nullcontext as _nullcontext
 import urllib.error
 import urllib.request
 import uuid
@@ -2455,14 +2456,22 @@ def _seat_live_tickets(seats, anc=()):
     of this process (a nested runner launched from inside a seat) is lent, not
     counted: the parent seat is waiting on us — counting it would deadlock the
     nest. est-g255 P255-3: a ticket that cannot be read/parsed is UNCERTAIN
-    capacity — counted live and never pruned (never a silent undercount)."""
+    capacity — counted live and never pruned (never a silent undercount).
+    est-g255 r2 R2: the LENDING exemption requires the child occupant's
+    IDENTITY, not bare PID ancestry membership — the pinned child must pass the
+    same _seat_holder_live test (alive + boottime equal, #80). A contradicted
+    (recycled) child boottime is a stranger wearing the ancestor's pid: no
+    lend, the ticket counts. A live runner holder keeps the ticket occupied, so
+    a stale child pin must never buy a capacity exemption."""
     live = 0
     for t in seats.glob("*.json"):
         try:
             row = json.loads(t.read_text())
             holders = [(int(row["pid"]), row.get("boottime"))]
-            if row.get("child") is not None:
-                holders.append((int(row["child"]), row.get("child_boottime")))
+            child = None if row.get("child") is None else int(row["child"])
+            child_bt = row.get("child_boottime")
+            if child is not None:
+                holders.append((child, child_bt))
             if any(b is not None and type(b) is not int for _, b in holders):
                 raise ValueError("unpinnable boottime")
         except FileNotFoundError:
@@ -2474,8 +2483,9 @@ def _seat_live_tickets(seats, anc=()):
             try: t.unlink()
             except OSError: pass
             continue
-        if anc and len(holders) > 1 and holders[1][0] in anc:
-            continue
+        if (child is not None and anc is not None and len(holders) > 1
+                and child in anc and _seat_holder_live(child, child_bt)):
+            continue   # lent: the SAME proven-live child sits in our ancestry
         live += 1
     return live
 
@@ -2486,14 +2496,18 @@ def _seat_live_tickets(seats, anc=()):
 _SEAT_UNSUPPORTED = object()
 SEAT_LOCK_POLL_S = 0.02
 
-def _seat_acquire(seats, name, cap, bounded_s, on_wait=None, abort=None):
+def _seat_acquire(seats, name, cap, bounded_s, on_wait=None, abort=None,
+                  admit_lock=None):
     """Wait until a seat is free (<= bounded_s), returning the ticket Path; None
     on bounded-wait expiry / abort(); _SEAT_UNSUPPORTED when full and our
     ancestry is unknowable. cap <= 0 disables the semaphore.
     est-g255 P255-2: the wait is bounded and cancellable THROUGH lock
     contention — the registry lock is taken by a non-blocking poll that checks
     deadline/abort between tries, and both are rechecked after the lock is
-    held, immediately before a ticket is written."""
+    held, immediately before a ticket is written. When admit_lock is supplied
+    it is taken (ordering: admit_lock -> .lock flock) and abort() is RECHECKED
+    under both, atomically with ticket creation — a cancel that lands at any
+    earlier moment is decided against at the ticket-creation instant."""
     seats = Path(seats)
     seats.mkdir(parents=True, exist_ok=True)
     if cap is None or cap <= 0:
@@ -2505,35 +2519,45 @@ def _seat_acquire(seats, name, cap, bounded_s, on_wait=None, abort=None):
     waited = False
     safe = re.sub(r"[^A-Za-z0-9_.-]", "_", str(name))[:60]
     while True:
-        fd = os.open(str(seats / ".lock"), os.O_RDWR | os.O_CREAT, 0o644)
-        try:
-            while True:
-                try:
-                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                    break
-                except BlockingIOError:
-                    if _out():
-                        return None
-                    time.sleep(SEAT_LOCK_POLL_S)
+        # est-g255 r2 R1: the cancel-setter synchronizes on admit_lock BEFORE
+        # setting its Event (see the fan-out's _cancel_stragglers), so holding
+        # it here — then rechecking abort() under it AND the .lock flock —
+        # makes ticket creation atomic against a cancel landing at any earlier
+        # moment: either the setter won (abort True under our recheck -> no
+        # ticket) or the ticket exists and the setter's scan sees this holder.
+        al_cm = admit_lock if admit_lock is not None \
+            else _nullcontext()
+        with al_cm:
+            fd = os.open(str(seats / ".lock"), os.O_RDWR | os.O_CREAT, 0o644)
             try:
-                if _out():
-                    return None
-                if _seat_live_tickets(seats, anc) < cap:
+                while True:
+                    try:
+                        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                        break
+                    except BlockingIOError:
+                        if _out():
+                            return None
+                        time.sleep(SEAT_LOCK_POLL_S)
+                try:
                     if _out():
                         return None
-                    t = seats / f"{safe}.{os.getpid()}.{uuid.uuid4().hex[:8]}.json"
-                    tmp = t.with_name(t.name + ".tmp")
-                    tmp.write_text(json.dumps({"pid": os.getpid(), "name": str(name),
-                                               "boottime": _proc_boottime(os.getpid()),
-                                               "ts": round(time.time(), 3)}))
-                    os.replace(tmp, t)
-                    return t
-                if anc is None:
-                    return _SEAT_UNSUPPORTED
+                    if _seat_live_tickets(seats, anc) < cap:
+                        if _out():          # ATOMIC cancel recheck: same lock
+                                          # the cancel-setter takes pre-set
+                            return None
+                        t = seats / f"{safe}.{os.getpid()}.{uuid.uuid4().hex[:8]}.json"
+                        tmp = t.with_name(t.name + ".tmp")
+                        tmp.write_text(json.dumps({"pid": os.getpid(), "name": str(name),
+                                                   "boottime": _proc_boottime(os.getpid()),
+                                                   "ts": round(time.time(), 3)}))
+                        os.replace(tmp, t)
+                        return t
+                    if anc is None:
+                        return _SEAT_UNSUPPORTED
+                finally:
+                    fcntl.flock(fd, fcntl.LOCK_UN)
             finally:
-                fcntl.flock(fd, fcntl.LOCK_UN)
-        finally:
-            os.close(fd)
+                os.close(fd)
         if not waited and on_wait:
             waited = True
             on_wait()
@@ -4020,7 +4044,7 @@ def _adopt_child(meta, node, byid, index, child, schema, fo_cancel=None):
 
 def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering=None, attempt=0, skey=None,
               inputs="", index=None, resume_preamble="", reasoning_override=None,
-              seat_cancel=None, seat_hold=None):
+              seat_cancel=None, seat_hold=None, seat_admit_lock=None):
     # est-g255 P255-1: seat_cancel is the fan-out's quorum cancel Event — it
     # aborts a seat wait and blocks the atomic spawn exactly like meta['_stop'].
     # seat_hold (fan-out items only) is a list the caller owns: a cleanly ended
@@ -4028,6 +4052,10 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
     # it only AFTER the quorum cancel is visible (no straggler can see a free
     # seat before fo_cancel). Any earlier held seat is freed before this
     # spawn's own acquire (a retry ladder never deadlocks against itself).
+    # est-g255 r2 R1: seat_admit_lock is the fan-out's results lock — the SAME
+    # lock _cancel_stragglers holds before fo_cancel becomes visible. It rides
+    # into _seat_acquire as admit_lock so ticket creation is atomic against the
+    # cancel (abort rechecked under it, at the ticket-creation instant).
     run = meta["_run"]
     # #116: harvest validates against the same engine-stripped view as the happy
     # path — a death's fenced answer is not killed for omitting the disclosure.
@@ -4174,7 +4202,7 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
         _seat_wall if isinstance(_seat_wall, (int, float)) else None,
         on_wait=lambda: log(run, "seat.wait", node=node["id"], index=index,
                             spawn=spawn_no, cap=_max_seats(meta)),
-        abort=_cancelled)
+        abort=_cancelled, admit_lock=seat_admit_lock)
     if seat is _SEAT_UNSUPPORTED:
         return {"status": "failed",
                 "error": "seat_unsupported: the global agent-seat semaphore is full and this "
@@ -4196,88 +4224,160 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
                 "spawn": spawn_no, "attempts": 1, **route}
     t0 = time.time()
     proc = None
+    reg_key = None
+    hb_path = None
+    timed_out = early_death = False
+    rc = None
+    _clean_exit = False
+
+    def _reap_child():
+        # est-g255 r2 R3: the ONE kill+reap owner for every failure after a
+        # successful Popen — registration, heartbeat setup, poll loop alike.
+        if proc is None:
+            return
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        except Exception:
+            try: proc.kill()
+            except Exception: pass
+        try:
+            proc.communicate(timeout=10)
+        except Exception:
+            pass
+
+    def _deregister():
+        if reg_key is not None:
+            with meta["_procs_lock"]:
+                meta["_procs"].pop(reg_key, None)
+
     try:
         logf = open(lp, "w", encoding="utf-8", errors="replace")
     except OSError:
         _seat_release(seat)
         raise
     log_created = time.time()   # the file's own creation stamp: never counts as activity
+    launched = False
     try:
-        with meta["_procs_lock"]:
-            # ATOMIC SPAWN: check→Popen→register hold the SAME lock the stop
-            # watcher takes to set _stop and scan. Either the watcher wins (pre-
-            # check cancels, nothing launches) or we win (child is registered and
-            # the watcher's scan WILL see it) — no window for a post-stop launch.
-            # est-g255 P255-1: the fan-out quorum cancel is honoured HERE too —
-            # _cancel_stragglers sets it BEFORE taking this lock for its scan.
-            if _cancelled():
-                logf.close()
-                return {"status": "failed", "error": "cancelled before spawn"
-                        + ("" if meta["_stop"].is_set() else " (quorum already met)"),
-                        "error_class": "cancelled", "ms": 0, **route}
-            if route and not (Path(route["profile_home"]) / "config.yaml").is_file():
-                logf.close()
-                return {"status": "failed", "error": f"profile gone: {node['profile']}",
+        try:
+            with meta["_procs_lock"]:
+                # ATOMIC SPAWN: check→Popen→register hold the SAME lock the stop
+                # watcher takes to set _stop and scan. Either the watcher wins (pre-
+                # check cancels, nothing launches) or we win (child is registered and
+                # the watcher's scan WILL see it) — no window for a post-stop launch.
+                # est-g255 P255-1: the fan-out quorum cancel is honoured HERE too —
+                # _cancel_stragglers takes this lock BEFORE its scan (r2 R1).
+                if _cancelled():
+                    logf.close()
+                    return {"status": "failed", "error": "cancelled before spawn"
+                            + ("" if meta["_stop"].is_set() else " (quorum already met)"),
+                            "error_class": "cancelled", "ms": 0, **route}
+                if route and not (Path(route["profile_home"]) / "config.yaml").is_file():
+                    logf.close()
+                    return {"status": "failed", "error": f"profile gone: {node['profile']}",
+                            "error_class": "spawn", "ms": 0, "spawn": spawn_no,
+                            "attempts": 1, **route}
+                # #61c spawn guard: attempt N+1 may NOT start while ANY earlier
+                # generation of this (node,index) still has a live registered
+                # survivor — quarantine-reap them (SIGTERM grace -> SIGKILL ->
+                # /proc proof) and RECORD the reap before this Popen; an
+                # unprovable slate fails closed typed, never a blind spawn
+                # (reviewer B3: prior_alive must be [] at every attempt start).
+                pre = _sidecar_live_registered(run, tokens)
+                if pre is None:
+                    logf.close()
+                    return {**_proc_unreadable_record(0, node["id"], spawn_no),
+                            "ms": 0, "spawn": spawn_no, "attempts": 1, **route}
+                if pre:
+                    for tp in sorted(pre):
+                        try: os.kill(tp, signal.SIGTERM)
+                        except OSError: pass
+                    gdead = time.time() + PROCREE_TERM_GRACE_S
+                    while any(_proc_alive(p) for p in pre) and time.time() < gdead:
+                        time.sleep(0.05)
+                    for tp in sorted(pre):
+                        try: os.kill(tp, signal.SIGKILL)
+                        except OSError: pass
+                    pdead, stuck = _wait_pids_dead(pre, _proctree_kill_proof_s(meta))
+                    if not pdead:
+                        logf.close()
+                        rec = _left_live_record(0, stuck,
+                            "a respawn of this node may not start while prior-generation "
+                            "survivors of an earlier attempt are still live: ", {})
+                        rec["ms"] = 0
+                        rec["spawn"] = spawn_no
+                        log(run, ("item." if index is not None else "node.") + "tree_kill",
+                            node=node["id"], index=index, pids=sorted(pre), proof="stuck")
+                        return rec
+                    log(run, ("item." if index is not None else "node.") + "respawn_reap",
+                        node=node["id"], index=index, pids=sorted(pre), proof="dead",
+                        prior_alive=[], spawn=spawn_no)
+                # est-g255 r2 R1: the LAUNCH-INSTANT recheck. _procs_lock is held
+                # across check->Popen->register and _cancel_stragglers now takes
+                # the same lock BEFORE fo_cancel becomes visible — a coordinated
+                # setter can never land mid-section. The recheck is the belt: any
+                # cancel that became visible since this section's first check —
+                # during the survivor inspection/reaping above or by an
+                # uncoordinated setter — denies the launch at the Popen instant,
+                # so cancellation is never outrun by a spawn.
+                if _cancelled():
+                    logf.close()
+                    return {"status": "failed", "error": "cancelled at launch instant"
+                            + ("" if meta["_stop"].is_set() else " (quorum already met)"),
+                            "error_class": "cancelled", "ms": 0, **route}
+                tokens.append(token)     # registered BEFORE Popen — a spawn that
+                                         # dies mid-launch still owns its survivors
+                proc = subprocess.Popen(cmd, stdout=logf, stderr=subprocess.STDOUT,
+                                        stdin=subprocess.DEVNULL, env=env, text=True,
+                                        cwd=wd,
+                                        start_new_session=True)  # own pgid: a timeout kill can
+                # est-g255 r2 R3: once Popen returns, the child belongs to the
+                # cleanup owner: register + heartbeat-path setup complete INSIDE
+                # this try — a fault at either reaps the child, deregisters and
+                # frees the seat below, never leaving a live child or a ticket.
+                reg_key = f"{node['id']}:{id(proc)}"
+                meta["_procs"][reg_key] = proc  # never reach runner/siblings
+                hb_path = _heartbeat_path(lp)   # est-g2xx (A): liveness sidecar
+                launched = True
+        except OSError as e:
+            if proc is None:              # the launcher itself failed: typed
+                try: logf.close()
+                except Exception: pass
+                return {"status": "failed", "error": f"launcher spawn failed: {e}",
                         "error_class": "spawn", "ms": 0, "spawn": spawn_no,
                         "attempts": 1, **route}
-            # #61c spawn guard: attempt N+1 may NOT start while ANY earlier
-            # generation of this (node,index) still has a live registered
-            # survivor — quarantine-reap them (SIGTERM grace -> SIGKILL ->
-            # /proc proof) and RECORD the reap before this Popen; an
-            # unprovable slate fails closed typed, never a blind spawn
-            # (reviewer B3: prior_alive must be [] at every attempt start).
-            pre = _sidecar_live_registered(run, tokens)
-            if pre is None:
-                logf.close()
-                return {**_proc_unreadable_record(0, node["id"], spawn_no),
-                        "ms": 0, "spawn": spawn_no, "attempts": 1, **route}
-            if pre:
-                for tp in sorted(pre):
-                    try: os.kill(tp, signal.SIGTERM)
-                    except OSError: pass
-                gdead = time.time() + PROCREE_TERM_GRACE_S
-                while any(_proc_alive(p) for p in pre) and time.time() < gdead:
-                    time.sleep(0.05)
-                for tp in sorted(pre):
-                    try: os.kill(tp, signal.SIGKILL)
-                    except OSError: pass
-                pdead, stuck = _wait_pids_dead(pre, _proctree_kill_proof_s(meta))
-                if not pdead:
-                    logf.close()
-                    rec = _left_live_record(0, stuck,
-                        "a respawn of this node may not start while prior-generation "
-                        "survivors of an earlier attempt are still live: ", {})
-                    rec["ms"] = 0
-                    rec["spawn"] = spawn_no
-                    log(run, ("item." if index is not None else "node.") + "tree_kill",
-                        node=node["id"], index=index, pids=sorted(pre), proof="stuck")
-                    return rec
-                log(run, ("item." if index is not None else "node.") + "respawn_reap",
-                    node=node["id"], index=index, pids=sorted(pre), proof="dead",
-                    prior_alive=[], spawn=spawn_no)
-            tokens.append(token)     # registered BEFORE Popen — a spawn that
-                                     # dies mid-launch still owns its survivors
-            proc = subprocess.Popen(cmd, stdout=logf, stderr=subprocess.STDOUT,
-                                    stdin=subprocess.DEVNULL, env=env, text=True,
-                                    cwd=wd,
-                                    start_new_session=True)  # own pgid: a timeout kill can
-            meta["_procs"][f"{node['id']}:{id(proc)}"] = proc  # never reach runner/siblings
-    except OSError as e:
-        try: logf.close()
-        except Exception: pass
-        return {"status": "failed", "error": f"launcher spawn failed: {e}",
-                "error_class": "spawn", "ms": 0, "spawn": spawn_no, "attempts": 1, **route}
+            # est-g255 r2 R3: an OSError at/after the successful Popen (the
+            # zap registration-OSError seam) is a post-Popen fault: it never
+            # escapes as a typed spawn with a live child and a retained
+            # ticket — kill+reap, deregister, close the fd, free the seat,
+            # surface the fault. (The `with` above already released
+            # _procs_lock on unwind, so _deregister can safely re-take it.)
+            _reap_child()
+            _deregister()
+            try: logf.close()
+            except Exception: pass
+            _seat_release(seat)
+            raise
+        except BaseException:
+            if launched or proc is not None:
+                # Any fault at/after the successful Popen — registry insert,
+                # heartbeat setup, or between them — never escapes the cleanup
+                # owner: kill+reap the child, deregister, close the log fd,
+                # free the seat, then surface the fault. (Locks: the `with`
+                # above already released _procs_lock on unwind, so
+                # _deregister/re-entry are safe here.)
+                _reap_child()
+                _deregister()
+                try: logf.close()
+                except Exception: pass
+                _seat_release(seat)
+            raise
     finally:
         if proc is None:          # nothing launched: the seat goes straight back
             _seat_release(seat)
-    # est-g255 P255-4: ONE cleanup boundary over the whole acquired-seat/child
-    # lifetime — post-Popen setup (bind, receipt, spawn record, ledger) runs
-    # INSIDE the try whose finally frees the seat and deregisters the child;
-    # an exception anywhere in it also kills + reaps the child, then re-raises.
-    hb_path = _heartbeat_path(lp)   # est-g2xx (A): per-spawn liveness sidecar
-    timed_out = early_death = False
-    rc = None
-    _clean_exit = False
+    # est-g255 P255-4 + r2 R3: ONE cleanup boundary over the whole acquired-seat/
+    # child lifetime — registration, heartbeat setup, bind, receipt, spawn record,
+    # ledger and the poll loop all run inside a try whose finally frees the seat
+    # and deregisters the child; an exception anywhere kills + reaps first.
     try:
         _seat_bind(seat, proc.pid)
         # est-2ek.1.641: this spawn billed under the door's alive-proof — record
@@ -4407,8 +4507,7 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
             pass
         raise
     finally:
-        with meta["_procs_lock"]:
-            meta["_procs"].pop(f"{node['id']}:{id(proc)}", None)
+        _deregister()             # est-g255 r2 R3: the key captured at insert
         # est-g2xx (B): the child is reaped — the seat is free. est-g255 P255-1:
         # a fan-out item DEFERS a clean spawn's seat to its caller (freed only
         # after the quorum cancel is visible); an exception always frees it.
@@ -4416,8 +4515,9 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
             seat_hold.append(seat)
         else:
             _seat_release(seat)
-        try: os.unlink(hb_path)
-        except OSError: pass
+        if hb_path is not None:
+            try: os.unlink(hb_path)
+            except OSError: pass
         try: logf.close()
         except Exception: pass
         # #8 spawn-ledger: close the row for every spawn that reached judgment
@@ -5186,8 +5286,17 @@ def run_agent_node(run, meta, byid, node, outputs, steering):
                 # and the durable work dir and append it to the death reason —
                 # 'no output on disk at quorum moment' vs 'had output at quorum
                 # moment (log N bytes, workdir M files)'. Never cancel silently.
-                fo_cancel.set()
+                # est-g255 r2 R1: the SET is coordinated with the spawn critical
+                # section, exactly the stop watcher's v5 law — the setter takes
+                # _procs_lock BEFORE fo_cancel becomes visible, so the cancel can
+                # never land mid-spawn-section: either it lands before the
+                # section's check(s) (that spawn never happens) or the section
+                # completed first and its child is registered for THIS scan to
+                # kill. Callers hold the fan-out results lock; _seat_acquire
+                # takes it as admit_lock (lock -> _procs_lock/flock order is
+                # consistent — nothing takes _procs_lock then the results lock).
                 with meta["_procs_lock"]:
+                    fo_cancel.set()
                     for k, p in list(meta["_procs"].items()):
                         if k.startswith(f"{nid}:"):
                             try:
@@ -5292,7 +5401,8 @@ def run_agent_node(run, meta, byid, node, outputs, steering):
                     return run_child(meta, node, byid, goal, node.get("context", ""),
                                      fo.get("schema") or node.get("schema"), steering=steering,
                                      skey=sk, inputs=inputs_txt, index=i, resume_preamble=resume_preamble,
-                                     seat_cancel=fo_cancel, seat_hold=held)
+                                     seat_cancel=fo_cancel, seat_hold=held,
+                                     seat_admit_lock=lock)
                 def spawn(resume_preamble=""):
                     # est-g255 P255-1: only a DONE answer can trip quorum, so only
                     # its seat stays deferred until one()'s quorum block below; any
