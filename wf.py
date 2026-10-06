@@ -26,15 +26,10 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 
-# Import hygiene (outbound review NousResearch/hermes-agent#133387 ask #1): the
-# OLD top of this module did `sys.path.insert(0, str(Path(__file__).resolve().parent))`
-# before importing wfcommon. The door spec-loads wf.py to reach
-# bake_route_receipts, and an unprefixed `wfcommon` joined sys.modules of the
-# HERMES process — so a run or an amend permanently poisoned the host's import
-# path and its generic `wfcommon` name. Now: wfcommon is spec-loaded PRIVATELY
-# (same law the door already follows for its own copy), and the module still
-# runs as a script (`python wf.py run <id>`): __file__ is authoritative, so the
-# sibling binds by path without touching sys.path at all.
+# Import hygiene (outbound review NousResearch/hermes-agent#133387 ask #1):
+# wfcommon is spec-loaded PRIVATELY under a prefixed module name, bound by path
+# from __file__ — no sys.path mutation, no generic 'wf'/'wfcommon' ever joins a
+# host sys.modules, and the module still runs as `python wf.py run <id>`.
 _COMMON_PATH = Path(__file__).resolve().parent / "wfcommon.py"
 if not _COMMON_PATH.is_file():
     # A COPY of this runner executed from a directory without the sibling (the
@@ -5767,7 +5762,17 @@ def park_gate(run, run_id, gate, byid, consume_markers):
                 return "released"
             attempt += 1
             try:
-                cp = _aux_run(w["until_argv"], timeout=min(every, 300), cwd=str(run))
+                # PR #243 (zap 6017431934): the probe is bound to the run that
+                # OWNS the gate. A nested runner inherits its caller agent's
+                # HERMES_WF_RUN_DIR (__init__.py passes os.environ through), so
+                # a probe that prefers the env var would read the ANCESTOR's
+                # handoff. Apply the agent-spawn law (bake the absolute run dir)
+                # to the gate's own spawn: re-pin BOTH run-identity pins to this
+                # run — never delete (a probe preferring the env still gets the
+                # RIGHT dir), never inherit.
+                cp = _aux_run(w["until_argv"], timeout=min(every, 300), cwd=str(run),
+                              env={**os.environ, "HERMES_WF_RUN_DIR": str(run),
+                                   "HERMES_WF_RUN_ID": run.name})
                 last = {"last_exit": cp.returncode, "stdout_tail": cp.stdout[-400:], "stderr_tail": cp.stderr[-400:]}
             except subprocess.TimeoutExpired:
                 last = {"last_exit": None, "stdout_tail": "", "stderr_tail": f"check timed out after {min(every, 300)}s"}
