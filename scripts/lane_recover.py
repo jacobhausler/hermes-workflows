@@ -196,9 +196,18 @@ def crashed_no_exit_signature(r):
             return True                  # falsely-claimed child = unfinished work
         if isinstance(agg, dict) and agg.get("status") in ("done", "partial", "failed",
                                                            "skipped"):
-            if wc is not None and "efp" in agg:
-                # THE ONE validity rule: stale (efp mismatch after an amend) ==
-                # pending — a pre-amend commit must never hide re-driven work.
+            if wc is not None and ("efp" in agg or "def_hash" in agg):
+                # THE ONE validity rule, applied to every FINGERPRINTED
+                # terminal aggregate — efp-era AND legacy def_hash-only alike
+                # (#237 r4, zap): a genuinely amended legacy done commit reads
+                # pending in the read model (stale def_hash fails the
+                # legacy-chain rule; error_class=cancelled reads pending) and
+                # must surface here too — skipping no-efp records hid
+                # unfinished work from the watchdog. node_rec validates both
+                # eras through the SAME primitive the read model uses, so a
+                # valid legacy commit stays not-a-signature. A record with NO
+                # fingerprint at all is the documented weaker shape (the
+                # aggregate is the commit, pinned by r1 test C) — untouched.
                 st, _rec = wc.node_rec(r, node, byid)
                 if st == "pending":
                     return True
