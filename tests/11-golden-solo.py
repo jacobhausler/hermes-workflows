@@ -55,6 +55,10 @@ def normalize(value, paths):
         return {k: normalize(v, paths) for k,v in sorted(value.items()) if k not in
                 {'ts','started','ended','at','saved_at','ms','pid','run_id','started_at','last_activity','last_event_ts',
                  'last_activity_at','elapsed_s','elapsed_ms','last_heartbeat','created_at','duration_s',
+                 'committed_at',        # est-2ek.1.765: per-item commit wall-clock (volatile stamp;
+                                        # the est-2ek.1.765 fanout law COMMITTED the per-item records,
+                                        # so their commit moment rides the record — volatile, like every
+                                        # other wall clock in this set)
                  'session_id','ui_session_id'}}   # harness session stamp = owner provenance, volatile
     if isinstance(value, list):
         return [normalize(v, paths) for v in value]

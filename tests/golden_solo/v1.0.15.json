@@ -1099,11 +1099,19 @@
       },
       "nodes/b.0.json": {
         "attempt": 0,
+        "attempts": 1,
+        "attempts_log": [],
+        "committed_at": "2026-10-06T22:44:44+00:00",
         "efp": "5db8f3eef87eb252",
         "fp_rule_version": 2,
         "log_path": "<TEMP>/home/workflows/<RUN>/logs/b.0.a0.log",
+        "output": {
+          "goal": "item a",
+          "result": "ok"
+        },
         "prompt_path": "<TEMP>/home/workflows/<RUN>/logs/b.0.a0.prompt.md",
         "skey": "wf:<RUN>:b:0:5db8f3ee.<NONCE>",
+        "spawn": 0,
         "spawn_cmd": [
           "<REPO>/tests/fixtures/11-golden-fake.py",
           "chat",
@@ -1119,15 +1127,23 @@
           "--max-turns",
           "65"
         ],
-        "status": "running"
+        "status": "done"
       },
       "nodes/b.1.json": {
         "attempt": 0,
+        "attempts": 1,
+        "attempts_log": [],
+        "committed_at": "2026-10-06T22:44:44+00:00",
         "efp": "5db8f3eef87eb252",
         "fp_rule_version": 2,
         "log_path": "<TEMP>/home/workflows/<RUN>/logs/b.1.a0.log",
+        "output": {
+          "goal": "item b",
+          "result": "ok"
+        },
         "prompt_path": "<TEMP>/home/workflows/<RUN>/logs/b.1.a0.prompt.md",
         "skey": "wf:<RUN>:b:1:5db8f3ee.<NONCE>",
+        "spawn": 0,
         "spawn_cmd": [
           "<REPO>/tests/fixtures/11-golden-fake.py",
           "chat",
@@ -1143,15 +1159,23 @@
           "--max-turns",
           "65"
         ],
-        "status": "running"
+        "status": "done"
       },
       "nodes/b.2.json": {
         "attempt": 0,
+        "attempts": 1,
+        "attempts_log": [],
+        "committed_at": "2026-10-06T22:44:44+00:00",
         "efp": "5db8f3eef87eb252",
         "fp_rule_version": 2,
         "log_path": "<TEMP>/home/workflows/<RUN>/logs/b.2.a0.log",
+        "output": {
+          "goal": "item c",
+          "result": "ok"
+        },
         "prompt_path": "<TEMP>/home/workflows/<RUN>/logs/b.2.a0.prompt.md",
         "skey": "wf:<RUN>:b:2:5db8f3ee.<NONCE>",
+        "spawn": 0,
         "spawn_cmd": [
           "<REPO>/tests/fixtures/11-golden-fake.py",
           "chat",
@@ -1167,7 +1191,7 @@
           "--max-turns",
           "65"
         ],
-        "status": "running"
+        "status": "done"
       },
       "nodes/b.json": {
         "efp": "5db8f3eef87eb252",
