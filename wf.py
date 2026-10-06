@@ -15,10 +15,10 @@ against the current graph (own def + all ancestors' defs). An amend upstream mak
 downstream result stale — downstream nodes re-run or re-hold; unchanged chains replay.
 """
 import json, os, random, re, signal, socket, subprocess, sys, threading, time
-import difflib
 import fcntl
 import hashlib
 from contextlib import nullcontext as _nullcontext
+import importlib.util
 import urllib.error
 import urllib.request
 import uuid
@@ -26,19 +26,64 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-import wfcommon
-from wfcommon import (efp, graph_fingerprint, jload, validate_graph, node_rec, gate_answer_valid,
-                      when_true, child_metrics, prune_states, dep_satisfied, active_child,
-                      admission_ledger_errors,   # #85: artifact-admission guard at runner re-validation
-                      FP_RULE_VERSION, record_efp_valid, seat_forbidden_models, runs_root,
-                      hermes_root, profile_home, find_run, blocked_legibility, residue,
-                      release_law,
-                      publisher_gate_check, suite_proof_token_path,
-                      confidence_substrate, strip_engine_disclosure,
-                      substrate_disclosure_text, SUBSTRATE_DISCLOSURE_KEY,
-                      hermes_home as _wfcommon_hermes_home,
-                      kind)
+# Import hygiene (outbound review NousResearch/hermes-agent#133387 ask #1): the
+# OLD top of this module did `sys.path.insert(0, str(Path(__file__).resolve().parent))`
+# before importing wfcommon. The door spec-loads wf.py to reach
+# bake_route_receipts, and an unprefixed `wfcommon` joined sys.modules of the
+# HERMES process — so a run or an amend permanently poisoned the host's import
+# path and its generic `wfcommon` name. Now: wfcommon is spec-loaded PRIVATELY
+# (same law the door already follows for its own copy), and the module still
+# runs as a script (`python wf.py run <id>`): __file__ is authoritative, so the
+# sibling binds by path without touching sys.path at all.
+_COMMON_PATH = Path(__file__).resolve().parent / "wfcommon.py"
+_common_spec = importlib.util.spec_from_file_location("_hermes_workflows_wfcommon_runner", _COMMON_PATH)
+assert _common_spec is not None and _common_spec.loader is not None
+wfcommon = importlib.util.module_from_spec(_common_spec)
+_common_spec.loader.exec_module(wfcommon)
+# Bind every name OFF the private instance above. A `from wfcommon import ...`
+# statement is an import of the GENERIC top-level name — it re-executes the
+# sibling into sys.modules as bare 'wfcommon' (the exact leak this module's
+# purity law forbids; the probe in tests/test_import_purity_133387.py pins it).
+efp = wfcommon.efp
+graph_fingerprint = wfcommon.graph_fingerprint
+jload = wfcommon.jload
+validate_graph = wfcommon.validate_graph
+node_rec = wfcommon.node_rec
+gate_answer_valid = wfcommon.gate_answer_valid
+when_true = wfcommon.when_true
+child_metrics = wfcommon.child_metrics
+prune_states = wfcommon.prune_states
+dep_satisfied = wfcommon.dep_satisfied
+active_child = wfcommon.active_child
+admission_ledger_errors = wfcommon.admission_ledger_errors   # #85: artifact-admission guard at runner re-validation
+FP_RULE_VERSION = wfcommon.FP_RULE_VERSION
+record_efp_valid = wfcommon.record_efp_valid
+seat_forbidden_models = wfcommon.seat_forbidden_models
+runs_root = wfcommon.runs_root
+hermes_root = wfcommon.hermes_root
+profile_home = wfcommon.profile_home
+find_run = wfcommon.find_run
+blocked_legibility = wfcommon.blocked_legibility
+residue = wfcommon.residue
+release_law = wfcommon.release_law
+publisher_gate_check = wfcommon.publisher_gate_check
+suite_proof_token_path = wfcommon.suite_proof_token_path
+confidence_substrate = wfcommon.confidence_substrate
+strip_engine_disclosure = wfcommon.strip_engine_disclosure
+substrate_disclosure_text = wfcommon.substrate_disclosure_text
+SUBSTRATE_DISCLOSURE_KEY = wfcommon.SUBSTRATE_DISCLOSURE_KEY
+_wfcommon_hermes_home = wfcommon.hermes_home
+kind = wfcommon.kind
+# est-2ek.1.641 (ask #1, option A): the receipts trio lives in wfcommon (the
+# door bakes through its private copy, never through this runner module); the
+# forgiving validator moved there too (ask #2). Re-bound here so every
+# runner-side call, helper, and test that reaches wf.bake_route_receipts /
+# wf.validate keeps resolving byte-identically.
+ROUTE_RECEPTS_NAME = wfcommon.ROUTE_RECEPTS_NAME
+bake_route_receipts = wfcommon.bake_route_receipts
+_route_receipts_path = wfcommon._route_receipts_path
+_route_receipt_load = wfcommon._route_receipt_load
+validate = wfcommon.validate
 def _route_home(result):
     """The target owns the child's session DB; absent routing preserves legacy home."""
     return result.get("profile_home") or hermes_home()
@@ -58,44 +103,9 @@ def _route_home(result):
 # engine-decided AT SUBMIT (the receipt is written for whatever route the door
 # certified and baked), so a served rung re-pings as its own route.
 
-ROUTE_RECEPTS_NAME = "route_receipts.json"
-
-def _route_receipts_path(run):
-    return Path(run) / ROUTE_RECEPTS_NAME
-
-def _route_receipt_load(run):
-    return jload(_route_receipts_path(run), {}) or {}
-
-def bake_route_receipts(run, graph):
-    """Door-side admission write (est-2ek.1.641): every agent node the door's
-    ping PROVED alive at THIS submit (route_verified baked by
-    _route_enforcement) records its proved-alive receipt into the run dir,
-    merged over what earlier submits proved. Durable in the LANE (survives
-    runner respawn); the runner refuses any later spawn that would bill a
-    different model. No proof baked = no receipt written = legacy shape."""
-    run = Path(run)
-    wrote = False
-    p = _route_receipts_path(run)
-    try:
-        rec = _route_receipt_load(run)
-        for n in (graph or {}).get("nodes", []) or []:
-            if n.get("type") != "agent" or not n.get("id"):
-                continue
-            verified = n.get("route_verified")
-            route = f"{n.get('provider') or ''}/{n.get('model') or ''}".strip("/")
-            if not verified or not route or route == "/":
-                continue
-            if rec.get(n["id"]) != str(verified):
-                rec[n["id"]] = str(verified)
-                wrote = True
-        if wrote:
-            run.mkdir(parents=True, exist_ok=True)
-            tmp = p.with_name(f"{p.name}.{os.getpid()}.tmp")
-            tmp.write_text(json.dumps(rec, ensure_ascii=False, indent=2))
-            os.replace(tmp, p)
-    except OSError:
-        pass                                   # receipt write best-effort; the HOLD is strict
-    return wrote
+# (route-receipt path/load/bake live in wfcommon — moved out of this module per
+# the outbound review ask #1; re-bound at the import block above so runner-side
+# uses and `wf.bake_route_receipts` keep resolving byte-identically.)
 
 def _route_receipt_bake(meta, node):
     """Post-spawn receipt write (the door's proof, executed by the runner): a
@@ -1148,108 +1158,9 @@ def last_balanced_object(text):
             i = text.find("{", i + 1)
     return last
 
-def _value_type_ok(val, prop):
-    """est-2ek.1.62: does `val` satisfy the declared type in schema fragment
-    `prop` ({} when nothing is declared — an undeclared type leaves nothing
-    left to contradict)? Same predicates as chk() below; bool is never a
-    number (#113), and 'integer' means an integral value. The suggestion
-    gate uses this to REFUSE a rename that would pass `required` and then die
-    on the type check."""
-    if not prop:
-        return True
-    t = prop.get("type")
-    if t == "object":  return isinstance(val, dict)
-    if t == "array":   return isinstance(val, list)
-    if t == "string":  return isinstance(val, str)
-    if t == "boolean": return isinstance(val, bool)
-    if t in ("number", "integer"):
-        if isinstance(val, bool) or not isinstance(val, (int, float)):
-            return False
-        return not (t == "integer" and isinstance(val, float) and not val.is_integer())
-    return True                       # untyped fragment: nothing to contradict
-
-def _rename_hint(r, v, s):
-    """est-2ek.1.62: when a required key is MISSING but the object carries an
-    extra key the schema doesn't name that is CLOSE to it and type-consistent
-    with it, the child most likely RE-USED A SIBLING KEY NAME (mean_ranking
-    for mean_rank, proposal for id) — a complete, correct answer that died
-    error_class=schema because the bare "missing required" gave the retry
-    nothing to correct. Name the rename explicitly so the typed-correction
-    retry converges instead of re-emitting the same shape. The enriched
-    string flows verbatim into the existing retry prompt (validate's callers
-    pass errors through unchanged). Closeness is difflib.get_close_matches
-    (n=1, cutoff 0.6) PLUS a short-name rule: the worked example from the report
-    id/proposal has difflib ratio 0.0 (no shared characters), so similarity
-    is meaningless at that length — when the required name is <=2 chars and
-    EXACTLY ONE unnamed sibling carries a type-consistent value, that single
-    candidate is named. A required name >=3 chars that is a substring of an
-    extra key also counts. Non-suggestion paths return "" so every other
-    error stays byte-identical (the #107 law)."""
-    named = set((s.get("properties") or {}).keys())
-    extra = [k for k in v if k not in named]
-    if not extra:
-        return ""
-    prop = (s.get("properties") or {}).get(r) or {}
-    cand = difflib.get_close_matches(r, extra, n=1, cutoff=0.6)
-    hit = cand[0] if cand else None
-    if hit is None and len(r) <= 2:
-        # 'id'-class names are too short for any similarity signal to fire
-        # (ratio 0.0 against 'proposal'); guess ONLY when exactly one extra
-        # key is type-consistent, so the suggestion is never ambiguous.
-        typed = [k for k in extra if _value_type_ok(v[k], prop)]
-        if len(typed) == 1:
-            hit = typed[0]
-    if hit is None and len(r) >= 3:
-        contained = [k for k in extra if r in k]
-        if contained:
-            hit = min(contained, key=lambda k: (len(k), extra.index(k)))
-    if hit is None:
-        return ""
-    if not _value_type_ok(v[hit], prop):
-        return ""                     # never recommend a rename that still fails
-    return f" (you wrote '{hit}'? the schema needs '{r}')"
-
-def validate(out, schema):
-    """Tiny forgiving validator: type / required / properties / items / enum.
-    #107: `enum` membership is ENFORCED here — a str value against a
-    string-membered enum (exactly what the door's schema_check admits: a
-    non-empty list of non-empty strings on type:'string'), so a misspelled
-    verdict takes the same typed-correction-retry path as a `type` violation
-    and the error string names the allowed set for the retry prompt."""
-    errs = []
-    if not schema:
-        return errs
-    def chk(v, s, path):
-        t = s.get("type")
-        if t == "object" and not isinstance(v, dict): errs.append(f"{path}: expected object")
-        elif t == "array" and not isinstance(v, list): errs.append(f"{path}: expected array")
-        elif t == "string" and not isinstance(v, str): errs.append(f"{path}: expected string")
-        elif t == "boolean" and not isinstance(v, bool): errs.append(f"{path}: expected boolean")
-        elif t in ("number", "integer") and (
-                isinstance(v, bool)
-                or not isinstance(v, (int, float))
-                or (t == "integer" and isinstance(v, float) and not v.is_integer())):
-            # #113: the two admitted numeric types are DISTINCT contracts.
-            # bool is never a number (Python bool subclasses int — the old
-            # isinstance(v, (int, float)) let True/False through both).
-            # integer accepts integral-valued floats (1.0 is an integer, the
-            # modern JSON Schema contract) but rejects fractional ones.
-            errs.append(f"{path}: expected number")
-        en = s.get("enum")
-        if (isinstance(v, str) and isinstance(en, list) and en
-                and all(isinstance(x, str) for x in en) and v not in en):
-            errs.append(f"{path}: not an allowed value (allowed: "
-                        + ", ".join(repr(x) for x in en) + ")")
-        if isinstance(v, dict):
-            for r in s.get("required", []):
-                if r not in v:
-                    errs.append(f"{path}: missing required '{r}'" + _rename_hint(r, v, s))
-            for k, sub in (s.get("properties") or {}).items():
-                if k in v: chk(v[k], sub, f"{path}.{k}")
-        if isinstance(v, list) and s.get("items"):
-            for i, it in enumerate(v): chk(it, s["items"], f"{path}[{i}]")
-    chk(out, schema, "$")
-    return errs
+# (_value_type_ok / _rename_hint / validate live in wfcommon — moved out of
+# this module per the outbound review ask #2; re-bound at the import block
+# above so `wf.validate` and the rename-hint path keep resolving identically.)
 
 def fmt_goal(text, item, idx):
     class D(dict):

@@ -2734,11 +2734,9 @@ def _create_run(args, graph, lib_name, models, routes, _liveness_notes, lane_pat
     # a different model, before submit). Best-effort: a receipt write failure
     # never blocks the launch (the runner-side bake re-covers at first spawn).
     try:
-        _wf_mod = importlib.util.spec_from_file_location(
-            "_hermes_workflows_wf", Path(__file__).resolve().parent / "wf.py")
-        _wf_m = importlib.util.module_from_spec(_wf_mod)
-        _wf_mod.loader.exec_module(_wf_m)
-        _wf_m.bake_route_receipts(r, graph)
+        _common.bake_route_receipts(r, graph)   # lives in the privately-bound
+        # wfcommon (outbound review ask #1): baking through a spec-load of
+        # wf.py mutated the HOST sys.path and leaked a generic `wfcommon`.
     except Exception:
         pass
     meta = {"name": graph.get("name", "workflow"), "hermes_bin": _hermes_bin(),
@@ -3350,11 +3348,7 @@ def act_amend(args):
     # ping — bake the proved-alive receipts for the NEW defs (frozen replay-skip
     # nodes keep their committed receipt: the file is merged, never rewritten).
     try:
-        _wf_spec = importlib.util.spec_from_file_location(
-            "_hermes_workflows_wf", Path(__file__).resolve().parent / "wf.py")
-        _wf_m = importlib.util.module_from_spec(_wf_spec)
-        _wf_spec.loader.exec_module(_wf_m)
-        _wf_m.bake_route_receipts(r, new)
+        _common.bake_route_receipts(r, new)     # private wfcommon, never wf.py
     except Exception:
         pass
     meta = jload(r / "run.json", {}) or {}

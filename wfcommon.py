@@ -2501,9 +2501,12 @@ def _answer_harvest_valid(n, rec):
     `harvest` stamp only when the fenced block parsed to a dict and validated) reads
     done without re-driving finished work. Qualification is strict: harvest evidence
     stamped by the runner, a dict output that re-validates, and a child-declared
-    terminal status (e.g. 'BLOCKED') never reads as done. The validator lives in
-    wf.py; it is imported lazily so door/dashboard never pay runner import cost and
-    the wf <-> wfcommon cycle stays import-time-free."""
+    terminal status (e.g. 'BLOCKED') never reads as done. The validator lives
+    HERE (moved out of wf.py, outbound review NousResearch/hermes-agent#133387
+    ask #2): the old lazy generic import of the runner's validate raised an
+    uncaught ImportError — or imported a FOREIGN top-level runner module —
+    whenever a door/dashboard process reached this read path. The binding is
+    private; no generic top-level token is ever imported here."""
     hv = rec.get("harvest")
     if not isinstance(hv, dict):
         return False
@@ -2513,7 +2516,6 @@ def _answer_harvest_valid(n, rec):
     out = rec.get("output")
     if not isinstance(out, dict):
         return False
-    from wf import validate   # lazy: shared validator, no module-level cycle
     schema = n.get("schema") or (n.get("fanout") or {}).get("schema")
     return not validate(out, schema)
 
@@ -3717,3 +3719,164 @@ def current_attempt(cm, spawns):
               for title, row in live.items() if row.get("last_activity") is not None]
     last, _, desc = max(recent) if recent else (None, None, None)
     return {"live": len(live), "last_activity": last, "last_desc": desc}
+
+
+# ---------- est-2ek.1.641 route receipts (moved out of wf.py, outbound review
+# NousResearch/hermes-agent#133387 ask #1, option A): the DOOR writes the
+# admission bake through this privately-bound module — the door already
+# spec-loads wfcommon by path, and it must never spec-load the runner wf.py,
+# whose old module-level `sys.path.insert(0, plugin-dir)` then poisoned the
+# HOST process's import path. wf.py binds these names back (import aliases) so
+# every existing runner-side call site keeps resolving byte-identically. ------
+
+ROUTE_RECEPTS_NAME = "route_receipts.json"
+
+def _route_receipts_path(run):
+    return Path(run) / ROUTE_RECEPTS_NAME
+
+def _route_receipt_load(run):
+    return jload(_route_receipts_path(run), {}) or {}
+
+def bake_route_receipts(run, graph):
+    """Door-side admission write (est-2ek.1.641): every agent node the door's
+    ping PROVED alive at THIS submit (route_verified baked by
+    _route_enforcement) records its proved-alive receipt into the run dir,
+    merged over what earlier submits proved. Durable in the LANE (survives
+    runner respawn); the runner refuses any later spawn that would bill a
+    different model. No proof baked = no receipt written = legacy shape."""
+    run = Path(run)
+    wrote = False
+    p = _route_receipts_path(run)
+    try:
+        rec = _route_receipt_load(run)
+        for n in (graph or {}).get("nodes", []) or []:
+            if n.get("type") != "agent" or not n.get("id"):
+                continue
+            verified = n.get("route_verified")
+            route = f"{n.get('provider') or ''}/{n.get('model') or ''}".strip("/")
+            if not verified or not route or route == "/":
+                continue
+            if rec.get(n["id"]) != str(verified):
+                rec[n["id"]] = str(verified)
+                wrote = True
+        if wrote:
+            run.mkdir(parents=True, exist_ok=True)
+            tmp = p.with_name(f"{p.name}.{os.getpid()}.tmp")
+            tmp.write_text(json.dumps(rec, ensure_ascii=False, indent=2))
+            os.replace(tmp, p)
+    except OSError:
+        pass                                   # receipt write best-effort; the HOLD is strict
+    return wrote
+
+
+# ---------- the tiny forgiving schema validator (moved out of wf.py, outbound
+# review ask #2): the harvest read path needs it WITHOUT the old generic
+# `from wf import validate`, which — reached from the door or the dashboard —
+# raised an uncaught ImportError or imported a FOREIGN top-level `wf`. It now
+# lives here, privately bound; wf.py re-exports it for the runner's spawn-time
+# checks so `wf.validate` keeps resolving for every existing caller. ---------
+
+import difflib as _difflib
+
+def _value_type_ok(val, prop):
+    """est-2ek.1.62: does `val` satisfy the declared type in schema fragment
+    `prop` ({} when nothing is declared — an undeclared type leaves nothing
+    left to contradict)? Same predicates as chk() below; bool is never a
+    number (#113), and 'integer' means an integral value. The suggestion
+    gate uses this to REFUSE a rename that would pass `required` and then die
+    on the type check."""
+    if not prop:
+        return True
+    t = prop.get("type")
+    if t == "object":  return isinstance(val, dict)
+    if t == "array":   return isinstance(val, list)
+    if t == "string":  return isinstance(val, str)
+    if t == "boolean": return isinstance(val, bool)
+    if t in ("number", "integer"):
+        if isinstance(val, bool) or not isinstance(val, (int, float)):
+            return False
+        return not (t == "integer" and isinstance(val, float) and not val.is_integer())
+    return True                       # untyped fragment: nothing to contradict
+
+def _rename_hint(r, v, s):
+    """est-2ek.1.62: when a required key is MISSING but the object carries an
+    extra key the schema doesn't name that is CLOSE to it and type-consistent
+    with it, the child most likely RE-USED A SIBLING KEY NAME (mean_ranking
+    for mean_rank, proposal for id) — a complete, correct answer that died
+    error_class=schema because the bare "missing required" gave the retry
+    nothing to correct. Name the rename explicitly so the typed-correction
+    retry converges instead of re-emitting the same shape. The enriched
+    string flows verbatim into the existing retry prompt (validate's callers
+    pass errors through unchanged). Closeness is difflib.get_close_matches
+    (n=1, cutoff 0.6) PLUS a short-name rule: the worked example from the report
+    id/proposal has difflib ratio 0.0 (no shared characters), so similarity
+    is meaningless at that length — when the required name is <=2 chars and
+    EXACTLY ONE unnamed sibling carries a type-consistent value, that single
+    candidate is named. A required name >=3 chars that is a substring of an
+    extra key also counts. Non-suggestion paths return "" so every other
+    error stays byte-identical (the #107 law)."""
+    named = set((s.get("properties") or {}).keys())
+    extra = [k for k in v if k not in named]
+    if not extra:
+        return ""
+    prop = (s.get("properties") or {}).get(r) or {}
+    cand = _difflib.get_close_matches(r, extra, n=1, cutoff=0.6)
+    hit = cand[0] if cand else None
+    if hit is None and len(r) <= 2:
+        # 'id'-class names are too short for any similarity signal to fire
+        # (ratio 0.0 against 'proposal'); guess ONLY when exactly one extra
+        # key is type-consistent, so the suggestion is never ambiguous.
+        typed = [k for k in extra if _value_type_ok(v[k], prop)]
+        if len(typed) == 1:
+            hit = typed[0]
+    if hit is None and len(r) >= 3:
+        contained = [k for k in extra if r in k]
+        if contained:
+            hit = min(contained, key=lambda k: (len(k), extra.index(k)))
+    if hit is None:
+        return ""
+    if not _value_type_ok(v[hit], prop):
+        return ""                     # never recommend a rename that still fails
+    return f" (you wrote '{hit}'? the schema needs '{r}')"
+
+def validate(out, schema):
+    """Tiny forgiving validator: type / required / properties / items / enum.
+    #107: `enum` membership is ENFORCED here — a str value against a
+    string-membered enum (exactly what the door's schema_check admits: a
+    non-empty list of non-empty strings on type:'string'), so a misspelled
+    verdict takes the same typed-correction-retry path as a `type` violation
+    and the error string names the allowed set for the retry prompt."""
+    errs = []
+    if not schema:
+        return errs
+    def chk(v, s, path):
+        t = s.get("type")
+        if t == "object" and not isinstance(v, dict): errs.append(f"{path}: expected object")
+        elif t == "array" and not isinstance(v, list): errs.append(f"{path}: expected array")
+        elif t == "string" and not isinstance(v, str): errs.append(f"{path}: expected string")
+        elif t == "boolean" and not isinstance(v, bool): errs.append(f"{path}: expected boolean")
+        elif t in ("number", "integer") and (
+                isinstance(v, bool)
+                or not isinstance(v, (int, float))
+                or (t == "integer" and isinstance(v, float) and not v.is_integer())):
+            # #113: the two admitted numeric types are DISTINCT contracts.
+            # bool is never a number (Python bool subclasses int — the old
+            # isinstance(v, (int, float)) let True/False through both).
+            # integer accepts integral-valued floats (1.0 is an integer, the
+            # modern JSON Schema contract) but rejects fractional ones.
+            errs.append(f"{path}: expected number")
+        en = s.get("enum")
+        if (isinstance(v, str) and isinstance(en, list) and en
+                and all(isinstance(x, str) for x in en) and v not in en):
+            errs.append(f"{path}: not an allowed value (allowed: "
+                        + ", ".join(repr(x) for x in en) + ")")
+        if isinstance(v, dict):
+            for r in s.get("required", []):
+                if r not in v:
+                    errs.append(f"{path}: missing required '{r}'" + _rename_hint(r, v, s))
+            for k, sub in (s.get("properties") or {}).items():
+                if k in v: chk(v[k], sub, f"{path}.{k}")
+        if isinstance(v, list) and s.get("items"):
+            for i, it in enumerate(v): chk(it, s["items"], f"{path}[{i}]")
+    chk(out, schema, "$")
+    return errs
