@@ -137,7 +137,7 @@ def spawn_record(r):
         return None
 
 
-with tempfile.TemporaryDirectory(prefix="gwsig6226-", dir=HERE,
+with tempfile.TemporaryDirectory(prefix=".tmp-gwsig6226-", dir=HERE,
                                  ignore_cleanup_errors=True) as td:
     home = Path(td) / "home"
     runs = home / "workflows"
