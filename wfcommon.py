@@ -3771,7 +3771,8 @@ def bake_route_receipts(run, graph):
 
 # ---------- the tiny forgiving schema validator (moved out of wf.py, outbound
 # review ask #2): the harvest read path needs it WITHOUT the old generic
-# `from wf import validate`, which — reached from the door or the dashboard —
+# generic lazy import of the runner's validate, which — reached from the door
+# or the dashboard —
 # raised an uncaught ImportError or imported a FOREIGN top-level `wf`. It now
 # lives here, privately bound; wf.py re-exports it for the runner's spawn-time
 # checks so `wf.validate` keeps resolving for every existing caller. ---------

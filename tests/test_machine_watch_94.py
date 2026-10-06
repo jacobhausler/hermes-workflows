@@ -15,9 +15,10 @@ GRAPH = json.loads((ROOT / 'examples/release/machine-watch.workflow.json').read_
 
 
 def argv(root):
-    a = list(GRAPH['nodes'][1]['wait']['until_argv'])
-    a[2] = a[2].replace('/tmp/machine-watch-example', str(root))
-    return a
+    # 133387 ask #3: the shipped probe roots itself under $HERMES_HOME by
+    # default; tests steer the root with the MW_STATE_ROOT override (the
+    # probe reads it FIRST), so the executed bytes are the shipped bytes.
+    return list(GRAPH['nodes'][1]['wait']['until_argv'])
 
 
 def check(root, cmd):
@@ -27,7 +28,8 @@ def check(root, cmd):
         file.unlink(missing_ok=True)
     else:
         file.write_text(cmd)
-    p = subprocess.run(argv(root), capture_output=True, text=True, timeout=5)
+    p = subprocess.run(argv(root), capture_output=True, text=True, timeout=5,
+                     env=dict(os.environ, MW_STATE_ROOT=str(root)))
     return p.returncode, (root / 'probe_broken').exists(), p.stderr
 
 
@@ -95,7 +97,8 @@ print('```json\\n'+json.dumps(out)+'\\n```',flush=True)
     state = tmp / 'state'
     state.mkdir()
     def spawn(run):
-        env = dict(os.environ, MW_STATE=str(state), MW_ROOT=str(tmp), MW_ACK='1')
+        env = dict(os.environ, MW_STATE=str(state), MW_ROOT=str(tmp), MW_ACK='1',
+                 MW_STATE_ROOT=str(state))
         f = (run / 'native-runner.log').open('w')
         streams.append(f)
         procs[run.name] = subprocess.Popen(
@@ -105,7 +108,7 @@ print('```json\\n'+json.dumps(out)+'\\n```',flush=True)
     g = copy.deepcopy(GRAPH)
     for n in g['nodes']:
         if 'goal' in n:
-            n['goal'] = n['goal'].replace('/tmp/machine-watch-example', str(state))
+            n['goal'] = n['goal'].replace('$HERMES_HOME/machine-watch-example', str(state))
     g['nodes'][1]['wait'].update(until_argv=argv(state), every_s=.15, timeout_s=1.5)
     args = {'graph':g, 'name':'native-machine-watch',
             'run_context':{'watch_name':'test-watch','check_cmd':'true'},
