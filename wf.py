@@ -1082,16 +1082,35 @@ def extract_json(text):
         try:
             return json.loads(text.strip()), None
         except Exception:
+            if _scan_skipped(text):   # est-gg96: oversized + no decodable fence
+                return {"result": text.strip()}, None  # honest unstructured fallback
             obj = last_balanced_object(text)   # sprint101 #9: tolerate prose around the object
             if obj is not None:
                 return obj, None
             return {"result": text.strip()}, None  # unstructured but usable
+    if text and text.strip():
+        if _scan_skipped(text):
+            return None, (f"{err}; fallback scan skipped: {len(text.encode('utf-8', 'replace'))} "
+                          f"bytes > WF_HARVEST_SCAN_MAX_BYTES={HARVEST_SCAN_MAX_BYTES}")
     obj = last_balanced_object(text) if text and text.strip() else None
     if obj is not None:   # #9: a fence that won't parse must not hide a valid trailing object
         return obj, None
     return None, err
 
 _DECODER = json.JSONDecoder()   # #111: stdlib decoder replaces the hand-written scanner
+
+# est-gg96: the fallback scan is O(bytes × candidates); #111's removal of the
+# [-200:] cap was correct (the cap dropped parents, #111) but it left scan cost
+# unbounded — 906 KB of pseudo-JSON with no object measured ~14 s, 400 KB of
+# braces ~53 s, and node timeout wraps communicate() not parse. Guard: above
+# this byte size the scan is skipped when no fence can be parsed, and the
+# caller gets the honest fallback / honest error naming the limit. Tune per
+# seat with WF_HARVEST_SCAN_MAX_BYTES. NEVER reintroduce a candidate-count cap.
+HARVEST_SCAN_MAX_BYTES = int(os.environ.get("WF_HARVEST_SCAN_MAX_BYTES") or (256 * 1024))
+
+def _scan_skipped(text):
+    """True when the fallback scan must not run on `text` (est-gg96)."""
+    return len((text or "").encode("utf-8", "replace")) > HARVEST_SCAN_MAX_BYTES
 
 def last_balanced_object(text):
     """Sprint101 #9: the LAST top-level balanced {...} in stdout that json
