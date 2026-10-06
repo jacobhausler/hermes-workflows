@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+Discipline / docs:
+- docs: #134 partial-rescue law (jam-g1, epic #40) — AGENTS.md 3d states the
+  recovery discipline explicitly: the committed `nodes/*.json` done-set parsed
+  against the CURRENT graph is the ONLY saved recovery state (efp re-validation
+  makes amend-via-efp the sanctioned path; a rerun follows the edited graph,
+  contrasting DAGMan's rescue-DAG pattern), and the plugin carries no
+  rescue-snapshot file BY DESIGN — none may be added. No behavior change to
+  wf.py/wfcommon.py. Test: `tests/test_partial_rescue_law_134.py` (4 contracts;
+  pins amended-ancestor demotion of untouched descendants + by-design absence
+  of any graph-snapshot file by name).
+
 Read-model / DX:
 - feat(door,dashboard): est-2ek.1.280 — an EMPTY `list`/`_list_runs` scan now
   emits `roots:` the resolved runs_root first, then the legacy launch root when

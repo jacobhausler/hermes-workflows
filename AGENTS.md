@@ -306,6 +306,18 @@ Author-run receipt: [receipts/exchange-run/author-run.json](receipts/exchange-ru
   log when the wall fires gets one 50 % extension (`node.extended`), then dies.
 - A run with unfinished work and no live runner is `interrupted`. Inspect committed
   outputs, then `wait` to resume — finished nodes replay-skip by fingerprint.
+- **Partial-rescue law (#134):** the sole recovery state of a run is the committed
+  `nodes/*.json` done-set parsed against the CURRENT `graph.json` — validity is
+  the `efp` each record carries recomputed against the live defs, so editing the
+  submitted graph changes exactly what a rerun does (`amend`-via-efp is the
+  sanctioned recovery path; a done node stays replay-skip until its own def or
+  an ancestor's def moves). The plugin therefore carries **no rescue-snapshot
+  file by design**: there is no second copy of the graph for a rerun to fall
+  back to, and none may be added — a "rescue graph" snapshot would recreate the
+  stale-recovery failure mode this law forbids. Contrast DAGMan, whose rescue
+  DAG stores only which nodes were done and lets the rerun follow the edited
+  `.dag`: same outcome, one fewer artifact to keep true. Enforced by
+  `tests/test_partial_rescue_law_134.py`.
 - To change the graph mid-flight: `amend` with the **whole** replacement graph.
   `dry_run:true` previews `{added, removed, changed, will_rerun, unchanged}`.
   Amending a `pending` node changes what spawns next; amending a `done` node
