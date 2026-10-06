@@ -91,6 +91,151 @@ def resolve_plugin_dir(plugins_root=None):
     raise PluginResolutionError(detail)
 
 
+# ---------- est-2ek.1.718: crashed-no-exit watchdog (respawn on sight, once) ----------
+# The incident: runner crashed mid-fanout; the run sat interrupted / runner_live=false
+# for 20+ min until a manual wait respawned it. The crashed-no-exit signature
+# (dead pid + absent runner_exit.json + unfinished node claims) is unambiguous:
+# the watchdog respawns WITHOUT waiting for an owner wait call — exactly once per
+# run fingerprint (guard file) — and appends one `runner_respawn` event as receipt.
+# A VALID recorded exit is a verdict, never a crash; a held flock is alive, period
+# (the ONE liveness law, wfcommon.runner_alive's first clause, mirrored here so
+# this module stays stdlib-only when wfcommon is unimportable).
+
+def _jload(p):
+    try:
+        return json.loads(Path(p).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
+def _run_fingerprint(r):
+    """Stable crash fingerprint: graph.json + run.json digests. Same content =
+    same crash scene = the guard's key; an amend changes it and re-arms."""
+    import hashlib
+    h = hashlib.sha256()
+    for name in ("graph.json", "run.json"):
+        try:
+            h.update((Path(r) / name).read_bytes())
+        except OSError:
+            h.update(b"\x00")
+    return h.hexdigest()[:16]
+
+
+def _flock_held(r):
+    """Mirror of wfcommon.runner_lock_held: HELD => live, unconditionally."""
+    import fcntl
+    path = Path(r) / "runner.lock"
+    try:
+        fd = os.open(str(path), os.O_RDWR | os.O_CREAT)
+    except OSError:
+        return False
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        os.close(fd)
+        return True                      # another fd holds it: live
+    try:                                 # we hold it — not held before; release
+        fcntl.flock(fd, fcntl.LOCK_UN)
+    finally:
+        os.close(fd)
+    return False
+
+
+def _pid_is_our_runner(pid, run):
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    try:
+        cmd = Path(f"/proc/{pid}/cmdline").read_bytes().decode(errors="replace")
+    except OSError:
+        return False                     # unverifiable identity is not liveness
+    return "wf.py" in cmd and str(Path(run).name) in cmd
+
+
+def crashed_no_exit_signature(r):
+    """True iff the run carries the crashed-no-exit signature: a previous pid,
+    that pid provably dead (flock NOT held + pid identity failed), NO recorded
+    runner_exit verdict, and unfinished work (a record still claiming running, or
+    a graph node with no committed record). None/falsy otherwise."""
+    r = Path(r)
+    rec = _jload(r / "runner_exit.json")
+    if isinstance(rec, dict) and rec.get("reason"):
+        return False                     # a verdict — the wait path owns it
+    pid_file = r / "wf.pid"
+    try:
+        pid = int(pid_file.read_text().strip())
+    except (OSError, ValueError):
+        return False                     # no pid file = fresh, never-spawned run
+    if _flock_held(r) or _pid_is_our_runner(pid, r):
+        return False                     # live: nothing to revive
+    graph = _jload(r / "graph.json") or {}
+    nodes = graph.get("nodes")
+    if not isinstance(nodes, list) or not nodes:
+        return False
+    for n in nodes:
+        nid = n.get("id") if isinstance(n, dict) else None
+        if not nid:
+            continue
+        recs = [r / "nodes" / f"{nid}.json"]
+        if isinstance(n.get("fanout"), dict):
+            recs.extend(sorted((r / "nodes").glob(f"{nid}.[0-9]*.json")))
+        claimed = False
+        for p in recs:
+            rc = _jload(p)
+            if isinstance(rc, dict) and rc.get("status") == "running":
+                return True              # falsely-claimed child = unfinished work
+            if isinstance(rc, dict) and rc.get("status") in ("done", "partial", "failed"):
+                claimed = True
+        if not claimed:
+            return True                  # node with no committed record = pending
+    return False
+
+
+def recover_crashed_runner(r, spawn=None):
+    """Watchdog entry: on the crashed-no-exit signature, respawn the runner
+    ONCE per run fingerprint and append one `runner_respawn` receipt. `spawn`
+    is injectable for tests; the production default revives in-place through
+    the door at the LIVE plugin dir (resolve_plugin_dir — so a respawn can
+    never boot an .old-* archive). Returns {respawned, reason/prev_pid/fp}."""
+    r = Path(r)
+    fp = _run_fingerprint(r)
+    guard = r / "respawn_guard.json"
+    g = _jload(guard)
+    if isinstance(g, dict) and g.get("fp") == fp:
+        return {"respawned": False,
+                "reason": f"guard: signature already respawned once for fp={fp}"}
+    if not crashed_no_exit_signature(r):
+        return {"respawned": False, "reason": "no crashed-no-exit signature"}
+    try:
+        prev_pid = int((r / "wf.pid").read_text().strip())
+    except (OSError, ValueError):
+        prev_pid = None
+    if spawn is None:
+        def _production_revive(run):                 # revive in-place via the door
+            plugin = resolve_plugin_dir()            # est-ujtf law: LIVE copy only
+            import importlib.util
+            spec = importlib.util.spec_from_file_location(
+                "wfdoor_watchdog", str(plugin / "__init__.py"))
+            m = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(m)
+            m.act_wait({"run_id": Path(run).name, "timeout": 1})
+            return None
+        spawn = _production_revive
+    pid = spawn(r)
+    from datetime import datetime, timezone
+    ts = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    with open(r / "events.jsonl", "a") as f:
+        f.write(json.dumps({"ts": ts, "event": "runner_respawn", "prev_pid": prev_pid,
+                            "fp": fp, "by": "lane_recover.watchdog"},
+                           ensure_ascii=False) + "\n")
+    tmp = guard.with_name(f"respawn_guard.json.{os.getpid()}.tmp")
+    tmp.write_text(json.dumps({"fp": fp, "at": ts, "prev_pid": prev_pid,
+                               "spawned_pid": pid}) + "\n", encoding="utf-8")
+    os.replace(tmp, guard)
+    return {"respawned": True, "prev_pid": prev_pid, "fp": fp, "spawned_pid": pid}
+
+
 class Bail(Exception):
     """A typed early exit: message + process exit code (2 = no session/run/db)."""
     def __init__(self, msg, code=2):
@@ -439,7 +584,23 @@ def main(argv=None):
     ap.add_argument("--out", help="restore dir; omit for the triage view")
     ap.add_argument("--seed", help="tree to seed patched-but-never-written files from "
                                    "(e.g. the lane's committed base checkout)")
+    ap.add_argument("--watchdog", metavar="RUN_ID",
+                    help="est-2ek.1.718: check RUN_ID for the crashed-no-exit signature "
+                         "(dead pid + no runner_exit.json + unfinished claims) and respawn "
+                         "the runner ONCE per fingerprint; prints the verdict JSON")
     args = ap.parse_args(argv)
+    if args.watchdog:
+        wc = _wfcommon()
+        if wc is not None:
+            wd_run = Path(wc.find_run(args.watchdog))
+        else:
+            root = os.environ.get("WF_RUNS_ROOT") or str(_hermes_home() / "workflows")
+            wd_run = Path(root) / args.watchdog
+        if not (wd_run / "graph.json").exists():
+            print(f"no run dir for {args.watchdog!r} at {wd_run}", file=sys.stderr)
+            return 2
+        print(json.dumps(recover_crashed_runner(wd_run)))
+        return 0
     if args.home:   # the read model resolves runs/profiles from HERMES_HOME; honor the flag
         os.environ["HERMES_HOME"] = str(Path(args.home).expanduser())
 
