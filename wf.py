@@ -2417,7 +2417,13 @@ RUNNER_PID_ENV = "HERMES_WF_RUNNER_PID"      # spawn pin: the runner's own pid
 # est-6226: the ONE reason string for an external signal death (see
 # _install_runner_term_cleanup). wfcommon.is_external_kill is its single
 # classifier; the reaper/dispatcher must never re-derive it from prose.
-EXTERNAL_SIGTERM_REASON = "terminated: SIGTERM (external: gateway restart)"
+# The tag states SIGNAL + CLASS only, never the sender: a handler cannot see
+# who fired (adversary probe 2026-10-06: a plain os.kill, no gateway restart,
+# was recorded as "gateway restart" — false provenance). The ONLY evidence
+# that the death window actually matches a gateway restart is the reaper's
+# log-correlated "; gw-restart window match" suffix (__init__.py
+# _reap_silent_death) — that clause is earned from files, never asserted here.
+EXTERNAL_SIGTERM_REASON = "terminated: SIGTERM (external: source unknown)"
 CHILD_BELT_GRACE_S = 5.0   # replacement-runner (adoption) window before belt self-exit
 CHILD_BELT_POLL_S = 0.25
 
@@ -2570,7 +2576,11 @@ def _install_runner_term_cleanup(meta):
                 # (2026-10-06 10:06Z: runner + pre-b64 watcher pair killed, the
                 # death logged as if it were a lane death, feeding ALERT storms
                 # and wrong re-dispatch). Tag the record so classification can
-                # tell an external kill from a lane failure.
+                # tell an external kill from a lane failure — but tag ONLY the
+                # class: "gateway restart" as sender is NOT established from in
+                # here (any os.kill lands the same), so the constant says
+                # source unknown; gateway-correlation is the reaper's separate,
+                # file-evidenced clause.
                 write_runner_exit(meta["_run"], EXTERNAL_SIGTERM_REASON)
         except Exception: pass
         signal.signal(signal.SIGTERM, signal.SIG_DFL)

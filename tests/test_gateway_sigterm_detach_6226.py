@@ -21,8 +21,12 @@ Law pinned here:
      caller but NOT the runner; the runner lives on and records its own later
      exit itself.
   C. HONEST ATTRIBUTION: a runner that IS signal-killed externally records
-     reason="terminated: SIGTERM (external: gateway restart)" — with the
-     external tag — the door reaper makes the death loud with that observed
+     reason="terminated: SIGTERM (external: source unknown)" — the external
+     tag states the CLASS only, never the sender (a handler cannot see who
+     fired; naming "gateway restart" from os.kill alone is false provenance —
+     adversary probe 2026-10-06). Gateway-restart correlation is the reaper's
+     separate file-evidenced "; gw-restart window match" clause. The door
+     reaper makes the death loud with that observed
      reason, the read model keeps the run 'interrupted' (never 'failed'),
      the classification says respawn-eligible / death_class=external_kill,
      and NO node.failed event or verdict pollution is produced. The phantom
@@ -280,6 +284,13 @@ with tempfile.TemporaryDirectory(prefix=".tmp-gwsig6226-", dir=HERE,
           json.dumps(rx_c)[:250] if rx_c else "no runner_exit.json")
     check("C: the name is distinguishable from the bare lane-death vocabulary",
           reason_c != "terminated: SIGTERM", repr(reason_c))
+    # honesty pin: the probe here IS a plain os.kill — no gateway was touched.
+    # The handler cannot see the sender, so the tag must not NAME one: the
+    # bare string claiming "gateway restart" was the adversary's false-
+    # provenance finding (signal_probe.py, 2026-10-06).
+    check("C: the reason states the class, never an unproven sender",
+          "gateway restart" not in reason_c and "source unknown" in reason_c,
+          repr(reason_c))
     # classification helper (the reaper/dispatcher's view): external kill =>
     # respawn-eligible, NOT a node failure.
     is_ext = getattr(wfcommon, "is_external_kill", None)
