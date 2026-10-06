@@ -448,6 +448,28 @@ if _FAKE_MODE == "poll_steer":     # B1: child pulls baked steering through the 
     print("REPULL:" + json.dumps(_res2.get("steering", [])))
     print("```json\n" + json.dumps({"pulled": _res.get("steering", []), "repull": _res2.get("steering", [])}) + "\n```")
     sys.exit(0)
+# ---- est-g2xx modes (appended; no behavior change without the env) ----
+if _FAKE_MODE == "buffered_child":
+    # The proven re-fire shape: the child WORKS but block-buffers stdout — its
+    # spawn log stays 0 bytes past the silence window while a live tool child
+    # runs in its subtree; only later does it answer.
+    import subprocess as _sp2
+    _tc = _sp2.Popen([sys.executable, "-c",
+                      "import time; time.sleep(float(__import__('os').environ.get('FAKE_BUFFERED_SLEEP','5')) * 0.6)"])
+    _t.sleep(float(os.environ.get("FAKE_BUFFERED_SLEEP", "5")))
+    _tc.wait(timeout=30)
+    print("```json\n" + json.dumps({"result": "ok", "buffered": True}) + "\n```", flush=True)
+    sys.exit(0)
+if _FAKE_MODE == "seat_timing":       # one span row per child: [start, end] of its run
+    _s0 = time.time()
+    _dur = float(os.environ.get("FAKE_SEAT_HOLD", "2"))
+    _t.sleep(_dur)
+    _sm = os.environ.get("SEAT_MARK")
+    if _sm:
+        with open(_sm, "a") as _f:
+            _f.write(json.dumps({"start": round(_s0, 6), "end": round(time.time(), 6)}) + "\n")
+    print("```json\n" + json.dumps({"result": "ok", "held": _dur}) + "\n```", flush=True)
+    sys.exit(0)
 if _FAKE_MODE == "hang":
     _t.sleep(float(os.environ.get("FAKE_HANG_SEC", "60")))
     sys.exit(0)
