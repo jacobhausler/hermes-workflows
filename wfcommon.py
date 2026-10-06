@@ -3412,13 +3412,19 @@ def amend_preview(r, new_nodes):
                if isinstance(n, dict) and isinstance(n.get("id"), str)
                and n["id"] not in new_ids]
     kids = _downstream(byid)
-    status, committed_mismatch = {}, set()
+    status, committed_mismatch, def_drift = {}, set(), set()
     for n in new_nodes:
         st, rec = node_rec(r, n, byid)
         status[n["id"]] = st
         if st == "pending" and (rec or {}).get("status") in ("done", "partial", "failed", "skipped"):
             committed_mismatch.add(n["id"])  # committed but efp-stale
-    changed = sorted(committed_mismatch)
+        elif st == "pending" and rec is None:
+            # never committed (pending/running): compare the def against the frozen
+            # graph so a model/provider-only edit isn't previewed as no-work (est-c9is)
+            old = next((o for o in old_nodes if isinstance(o, dict) and o.get("id") == n["id"]), None)
+            if isinstance(old, dict) and def_hash(old) != def_hash(n):
+                def_drift.add(n["id"])
+    changed = sorted(committed_mismatch | def_drift)
     will = set()
     stack = changed + added
     while stack:
