@@ -1959,6 +1959,19 @@ def act_save(args):
                                  "(corrupt JSON): repair or delete the file, then "
                                  "resave with explicit tags/description"}
             prev = _common.library_entry(prev_raw)
+            # #146 item 1 (est-yzoy): the WIPE class was the whole invalid IMAGE,
+            # not just unparseable bytes. A valid-JSON-but-invalid-shape prev
+            # (ambiguous envelope+bare, neither-shape, empty nodes[]) returned
+            # {invalid: ...} here, meta fell back to {}, the branch concluded
+            # "no previous envelope", and the save SUCCEEDED — collapsing the
+            # entry to bare bytes and dropping tags/description exactly when the
+            # stored image is damaged. Same law as the corrupt read: refuse until
+            # repaired or deleted; an EXPLICIT save naming tags+description stays
+            # the documented repair route (this branch never runs for it).
+            if "invalid" in prev:
+                return {"error": f"cannot retain from unreadable entry '{p.stem}' "
+                                 f"({prev['invalid']}): repair or delete the file, "
+                                 "then resave with explicit tags/description"}
             pm = prev.get("meta") or {}
             # description: library_entry merged meta-over-graph, so this also picks
             # up a BARE entry's top-level description when the entry is re-shelved
@@ -2123,7 +2136,31 @@ def act_library(args):
         # (SKILL.md / grammar.md: "an empty result's tag_match_counts says which
         # term starved"). The golden-bytes law is untouched: an UNFILTERED tagless
         # response still grows neither key.
-        out["tag_match_counts"] = {t: vocab.get(t, 0) for t in want}
+        counts = {t: vocab.get(t, 0) for t in want}
+        out["tag_match_counts"] = counts
+        # #146 item 2 (est-yzoy): the counts let a reader INFER the cause;
+        # an empty result must NAME it — and the cause is promised by the
+        # FILTER, not earned by the vocabulary (zap r4): an empty vocab set —
+        # empty, tagless/bare, erased-to-[], or quarantined-only shelf — still
+        # owes it. spelling_miss lists the queried terms present nowhere in the
+        # library (fixable by re-spelling); with no zero term, the kill is
+        # CO-OCCURRENCE — every term exists and none ever appear together — and
+        # the hint points at the rarest term to drop. Golden-bytes law: the key
+        # lands on EMPTY filtered results only; a non-empty response and every
+        # unfiltered call keep their exact pre-#146 key-set.
+        if not rows:
+            misses = [t for t in want if not counts[t]]
+            cause = {"spelling_miss": misses, "co_occurrence_starved": not misses}
+            out["empty_cause"] = cause
+            if misses:
+                hinted += ("; empty result — killer term(s) at 0 library-wide: "
+                           + ", ".join(misses) + " (spelling miss — re-check against tag_vocab)")
+            else:
+                rarest = min(want, key=lambda t: counts[t])
+                hinted += ("; empty result — every term exists but they never "
+                           "co-occur; drop the rarest term (" + rarest
+                           + ") or union with two calls")
+            out["hint"] = hinted   # out was built pre-diagnosis; refresh it
     if skipped:
         out["skipped"] = skipped
     if quarantined:   # F-2 (#62): every refused entry is named WITH its typed reason;
