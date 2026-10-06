@@ -209,6 +209,10 @@ def main():
         (r5 / "wf.pid").write_text(str(DEAD_PID))
         fake = types.SimpleNamespace(act_wait=lambda a: {"error": "unknown run_id"})
         lr._load_door = lambda plugin: fake
+        # CI runs under an empty HERMES_HOME (scripts/suite.py): pin the plugin
+        # dir to this checkout; live-plugin resolution is covered by
+        # tests/test_plugin_resolution_live_not_old.py.
+        lr.resolve_plugin_dir = lambda plugins_root=None: ROOT
         res5 = recover(r5)                                 # production path, failing door
         check("F5: door error -> not respawned, no receipt, no guard",
               isinstance(res5, dict) and not res5.get("respawned")
