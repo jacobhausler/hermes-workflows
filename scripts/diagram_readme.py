@@ -15,6 +15,38 @@ def sha(path):
     return hashlib.sha256(open(path, "rb").read()).hexdigest()[:16]
 
 
+QA_FIELDS = ("clipped", "legible", "chrome_free", "browser")
+
+
+def qa_gates(dia, stem, cand):
+    """Derive the gates column from the QA receipt body — never string memory.
+
+    Twin of the census law: a row may claim `browser-check done` only if
+    qa/<stem>.qa.json exists AND its expected_nodes equals the candidate's
+    node count AND its verdicts are all true. Missing receipt -> honest
+    `not-run`; lying receipt -> named red.
+    """
+    expected = len(cand["nodes"])
+    qp = os.path.join(dia, "qa", stem + ".qa.json")
+    base = "derived + rendered via vendored archify"
+    if not os.path.exists(qp):
+        return base + "; browser-check not-run — visual QA lap per diagram before edits land"
+    qa = json.load(open(qp))
+    missing = [f for f in QA_FIELDS if f not in qa]
+    if missing or qa.get("expected_nodes") != expected:
+        why = (f"missing fields {missing}" if missing else
+               f"expected_nodes {qa.get('expected_nodes')} != candidate nodes {expected}")
+        raise SystemExit(f"QA RED {stem}.qa.json: {why} — receipt disagrees with the"
+                         " candidate; re-run the QA lap (named defendant: the receipt)")
+    verdicts = ("clipped" if qa["clipped"] else "no-clip",
+                "legible" if qa["legible"] else "ILLEGIBLE",
+                "chrome-free" if qa["chrome_free"] else "CHROME-PRESENT")
+    ok = (not qa["clipped"]) and qa["legible"] and qa["chrome_free"]
+    tag = "browser-check done" if ok else "browser-check FAILED"
+    return (f"{base}; {tag} ({qa['browser']}, {', '.join(verdicts)});"
+            " receipts in qa/ (generator + renderer version-stamped)")
+
+
 def main():
     here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     ex = os.path.join(here, "examples")
@@ -33,8 +65,7 @@ def main():
             continue
         c = json.load(open(cand))
         q = c["meta"].get("quality_profile", "standard")
-        gates = ("derived + rendered via archify; browser-check not-run "
-                 "(authoring-env block) — visual QA lap per diagram before edits land")
+        gates = qa_gates(dia, stem, c)
         rel = os.path.relpath(g, here)
         rows.append((f"examples/{os.path.relpath(g, ex)}",
                      f"[{stem}.png]({stem}.png)",
@@ -52,10 +83,16 @@ def main():
            "",
            "```sh",
            "python3 scripts/graph_diagram.py --all        # candidates (stdlib, deterministic)",
-           "# render + shoot with archify (any machine with node + a chrome-headless-shell):",
-           "#   node bin/archify.mjs finalize workflow examples/diagrams/<name>.candidate.json examples/diagrams/<name>.html --quality standard",
-           "#   chrome-headless-shell --headless --no-sandbox --virtual-time-budget=12000 \\",
-           "#     --window-size=1500,1500 --screenshot=examples/diagrams/<name>.png examples/diagrams/<name>.html",
+           "# render + shoot with the VENDORED archify (scripts/vendor/archify/, version in",
+           "# ARCHIFY_VERSION — the only oven the repo owns; any machine with node >= 18:",
+           "#   node scripts/vendor/archify/renderers/workflow/render-workflow.mjs \\",
+           "#     examples/diagrams/<name>.candidate.json examples/diagrams/<name>.html",
+           "#   # then screenshot examples/diagrams/<name>.html with any headless chromium",
+           "#   # (chrome-headless-shell --headless --no-sandbox --screenshot=... works;",
+           "#   #  strip the viewer chrome before saving the records png)",
+           "#   # and record a QA lap per diagram at examples/diagrams/qa/<name>.qa.json:",
+           "#   #  {browser, expected_nodes (= candidate nodes length), clipped, legible,",
+           "#   #   chrome_free} — this table DERIVES the gates column from those receipts,",
            "python3 scripts/diagram_readme.py             # rebuild this table (derived)",
            "python3 scripts/graph_diagram.py --check --all # CI freshness gate: exit 1 on drift",
            "```",

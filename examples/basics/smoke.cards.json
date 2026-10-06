@@ -4,7 +4,7 @@
       "dot": "cyan",
       "title": "Why it works",
       "items": [
-        "Provider smoke test in three nodes: agent -> two-way fan-out -> agent",
+        "Provider smoke test, shortest legal path: agent -> fan-out -> agent",
         "Fastest path to prove a route answers before trusting a real graph with it",
         "Fan-out children ride the same seat defaults as the parent"
       ]
