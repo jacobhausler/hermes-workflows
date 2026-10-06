@@ -229,7 +229,7 @@ def _outstanding(session_id, now):
         try:
             if not root.is_dir():
                 continue
-            entries = sorted(root.iterdir())
+            entries = _COMMON.iter_run_dirs(root)
         except OSError:
             continue
         for r in entries:

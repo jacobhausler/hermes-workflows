@@ -3416,7 +3416,7 @@ def act_list(_args):
     for root in roots:
         if not root.exists():
             continue
-        for r in sorted(root.iterdir(), reverse=True):
+        for r in _common.iter_run_dirs(root, reverse=True):
             st = run_state(r)
             if st and st["run_id"] not in seen:
                 seen.add(st["run_id"])

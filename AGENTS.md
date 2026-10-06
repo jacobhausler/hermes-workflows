@@ -234,10 +234,11 @@ Author-run receipt: [receipts/exchange-run/author-run.json](receipts/exchange-ru
   fanout_empty | fatal_quota | forbidden_model | graph_invalid | incomplete_work |
   inputs | lane_wreckage | left_live_descendants | malformed_turn | precondition | provider_400 | quorum |
   ratelimit |
-  route_substitution_denied | route_unavailable | schema | spawn | timeout | transport | transport_exhausted |
+  route_substitution_denied | route_unavailable | schema | seat_wait | spawn | timeout | transport | transport_exhausted |
   unresolved_model`, plus `unknown` as the harvest-time default when nothing matches —
   plus `attempts`. Read the class, not the prose. `cancelled` (a `stop`, or a fan-out
   straggler at quorum) is never a failure: the run reads `stopped`, and a `wait` re-drives it.
+  `seat_wait` (est-g2xx): no global agent seat (`WORKFLOW_MAX_SEATS`) freed within the node wall — the spawn never happened.
   `left_live_descendants` (#61): the runner is process-tree aware — an exit-0 spawn is
   believed only when its own process group is empty (the /proc walk behind liveness). A
   child that BACKGROUNDED the real work (detached suite) and printed progress chatter is
