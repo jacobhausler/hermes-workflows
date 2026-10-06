@@ -453,7 +453,8 @@ dated backups. `.graphifyignore` excludes `graphify-out/` and `.github/` from th
 11. **Changed an example graph? Its diagram is derived, never drawn.** Edit the
     graph, re-run `python3 scripts/graph_diagram.py --all` + the render/shoot
     loop, and let CI's freshness gate refuse a stale commit. One rule, one
-    file: [examples/diagrams/README.md](examples/diagrams/README.md) (DIAGRAM LAW v1;\n    the examples/ map keeps a pointer here).
+    file: [examples/diagrams/README.md](examples/diagrams/README.md) (DIAGRAM LAW v1).
+    The examples/ map keeps a pointer here.
 
 ### 4d. Release
 
