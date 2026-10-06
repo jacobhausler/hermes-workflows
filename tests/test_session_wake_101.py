@@ -82,10 +82,24 @@ SINK_PORT = _sink_srv.server_address[1]
 tmp = Path(tempfile.mkdtemp(prefix="wf-wake-"))
 
 def env():
-    # HERMES_HOME scopes the runs root (wfcommon.runs_root); WF_WAKE_SINK_PORT stubs
-    # the delivery endpoint the same way a gateway's api_server binds it.
-    return dict(os.environ, HERMES_HOME=str(tmp), WF_WAKE_SINK_PORT=str(SINK_PORT),
-                FAKE_LOG=str(tmp / "fake.log"))
+    # HERMES_HOME alone is NOT a sandbox — the resolver precedence (#42) is
+    # settings.runs_root > WF_RUNS_ROOT > <hermes_home>/workflows, so a
+    # WF_RUNS_ROOT or API_SERVER_* variable inherited from the invoking
+    # process outranks the test's home and every child runner writes elsewhere
+    # (the suite then fails "no graph.json" while a clean-CI-shape run passes —
+    # repro: env WF_RUNS_ROOT=/tmp/hostile API_SERVER_KEY=SYNTH python
+    # tests/test_session_wake_101.py). Pin our own root and strip the inherited
+    # one, exactly the way the sibling wake suites (matrix_101 base_env,
+    # lost_handoff ENV) already do. The API_SERVER_* strip is the same
+    # hermeticity rule: the sink-less sections (6/11/12/13) fall back to the
+    # env endpoint, and an inherited key would send wake deliveries to a real
+    # API server instead of the test's local sink.
+    e = dict(os.environ)
+    for k in ("WF_RUNS_ROOT", "API_SERVER_KEY", "API_SERVER_HOST", "API_SERVER_PORT"):
+        e.pop(k, None)
+    e.update(HERMES_HOME=str(tmp), WF_RUNS_ROOT=str(RUNS),
+             WF_WAKE_SINK_PORT=str(SINK_PORT), FAKE_LOG=str(tmp / "fake.log"))
+    return e
 
 (tmp / "fake.log").write_text("")
 RUNS = tmp / "workflows"
