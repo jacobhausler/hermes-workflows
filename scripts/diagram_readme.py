@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Build examples/README.md diagram table from committed artifacts (DIAGRAM LAW 5).
+"""Build examples/diagrams/README.md — the derived diagram table.
+
+Owns that file wholesale (it lives beside the artifacts it describes; the
+hand-authored map at examples/README.md is NOT touched — it carries jsonc
+invocations other tests gate).
 
 Stdlib-only. The table is derived: every row is computed from files on disk at
 generation time — never hand-edited. Run after graph_diagram.py + render step.
@@ -33,10 +37,10 @@ def main():
                  "(authoring-env block) — visual QA lap per diagram before edits land")
         rel = os.path.relpath(g, here)
         rows.append((f"examples/{os.path.relpath(g, ex)}",
-                     f"[{stem}.png](diagrams/{stem}.png)",
+                     f"[{stem}.png]({stem}.png)",
                      f"`{sha(cand)}`", f"`{sha(stem_png) if os.path.exists(stem_png) else '—'}`",
                      q, gates, rel))
-    out = ["# examples/ — shipped workflow templates",
+    out = ["# examples/diagrams/ — derived diagram table",
            "",
            "Every template below ships with a diagram that is **derived from its",
            "graph bytes**, never drawn by hand (DIAGRAM LAW v1). The layout rule",
@@ -71,7 +75,7 @@ def main():
     out.append(r"`git ls-tree -r --name-only HEAD | grep '\.json$' | grep -v '^graphify-out/'")
     out.append(r" | grep -v '^examples/diagrams/' | grep -v '\.cards\.json$'` —")
     out.append("every file whose parsed JSON has a non-empty `nodes` array must have a")
-    out.append(f"table row or queue row above (receipt at build: examples/ {len(rows)+len(pending_rows)}")
+    out.append(f"table row or queue row in this table (receipt at build: examples/ {len(rows)+len(pending_rows)}")
     out.append(f"= {len(rows)} table + {len(pending_rows)} queue).")
     if pending_rows:
         out.append("")
@@ -80,7 +84,7 @@ def main():
         for p in sorted(pending_rows):
             out.append(f"- [ ] `{p}` — needs `<name>.cards.json`, then `--all` derives the row")
     out.append("")
-    p = os.path.join(ex, "README.md")
+    p = os.path.join(dia, "README.md")
     old = open(p).read() if os.path.exists(p) else ""
     if old != "\n".join(out) + "\n":
         open(p, "w").write("\n".join(out) + "\n")
