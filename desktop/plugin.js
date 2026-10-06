@@ -682,6 +682,19 @@ export function ownedRuns(runs, sid, uiSid = '') {
     (sid && r?.owner?.session_id === sid) || (uiSid && r?.owner?.ui_session_id === uiSid))
 }
 
+/** Feature-detected composer mount for the session strip (#230 item 0):
+ *  tray ?? underside ?? top. COMPOSER_AREAS is an SDK const map — a key EXISTS
+ *  ONLY on cores that mount that area, so a missing key reads undefined and ??
+ *  falls through: exactly one mount, never two. `composer.tray` is the tray
+ *  accumulation slot (subagents / background scripts / task lists — core's
+ *  ComposerStatusStack, internal as of hermes-agent@8b66a51036); the upstream
+ *  SDK-surface ask is filed (esc key wf230-composer-tray-area, issue #230), so
+ *  the day core exposes it the strip rides the real tray with no plugin change.
+ *  Today no shipped key is `tray` ⇒ underside (core >= v2026.7.30) ⇒ top. */
+export function sessionStripArea(composerAreas) {
+  return composerAreas?.tray ?? composerAreas?.underside ?? composerAreas?.top
+}
+
 /** Model split of one chat's runs: held first, then running by started desc,
  *  active capped at 3 with the rest as an overflow count; terminal runs fold
  *  into at most 5 lines (most recently updated first). */
@@ -2529,13 +2542,20 @@ export default {
       render: () => jsx(WorkflowsPane, {})
     })
 
-    // Feature-detected composer slot (issue #22 item 3): `composer.underside` is
-    // the floating strip BELOW the composer dock on core >= v2026.7.30 —
-    // bottom-anchored, grows upward over the thread, and it is NOT inside the
-    // composer-fade div, so it does not dim when the thread scrolls up
-    // (composer/index.tsx:1558-1560). COMPOSER_AREAS is an SDK const map, so the
-    // key EXISTS ONLY on cores that mount the area — missing key ⇒ undefined ⇒
-    // ?? falls back to today's composer.top on older shells. One mount, never both.
-    ctx.register({ id: 'session-strip', area: COMPOSER_AREAS.underside ?? COMPOSER_AREAS.top, render: () => jsx(SessionStrip, {}) })
+    // Feature-detected composer slot (#22 item 3, chain head added by #230 item 0):
+    // sessionStripArea = COMPOSER_AREAS.tray ?? COMPOSER_AREAS.underside ??
+    // COMPOSER_AREAS.top. `composer.tray` is the tray accumulation slot (subagents
+    // / background scripts / task lists) — NOT SDK-exposed as of
+    // hermes-agent@8b66a51036 (the native bar is the internal ComposerStatusStack,
+    // composer/index.tsx:1344), so the ask is filed upstream and the head is
+    // inert until core adds the key; the day it lands the strip rides the real
+    // tray with zero plugin change. `composer.underside` is the floating strip
+    // BELOW the composer dock on core >= v2026.7.30 — bottom-anchored, grows
+    // upward over the thread, and it is NOT inside the composer-fade div, so it
+    // does not dim when the thread scrolls up (composer/index.tsx:1558-1560).
+    // COMPOSER_AREAS is an SDK const map, so a key EXISTS ONLY on cores that
+    // mount the area — missing key ⇒ undefined ⇒ ?? falls back to today's
+    // composer.top on older shells. One mount, never both.
+    ctx.register({ id: 'session-strip', area: sessionStripArea(COMPOSER_AREAS), render: () => jsx(SessionStrip, {}) })
   }
 }
