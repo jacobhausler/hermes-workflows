@@ -39,7 +39,11 @@ def main():
     out = ["# examples/ — shipped workflow templates",
            "",
            "Every template below ships with a diagram that is **derived from its",
-           "graph bytes**, never drawn by hand (DIAGRAM LAW v1).",
+           "graph bytes**, never drawn by hand (DIAGRAM LAW v1). The layout rule",
+           "(lane/col/stack, compared bytes) is the **LAYOUT RULE paragraph in",
+           "`scripts/graph_diagram.py`'s docstring** — one-source law: that",
+           "paragraph is the spec, this README cites it, a contradiction between",
+           "diagram and graph is a bug in that file (named defendant).",
            "Regenerate everything after editing any example:",
            "",
            "```sh",
@@ -60,6 +64,15 @@ def main():
     out.append("Cards (the two panels inside each diagram) are the ONLY hand-authored")
     out.append("diagram input; they live in `<name>.cards.json` beside the graph. Every")
     out.append("number in a card must be recomputable from the graph bytes it describes.")
+    out.append("")
+    out.append("Scope: every graph under `examples/` carries a conforming diagram.")
+    out.append("Test fixtures (`tests/fixtures/`) are engine inputs consumed by test")
+    out.append("code, not docs — no diagram (rung zero). Census command for the scope:")
+    out.append(r"`git ls-tree -r --name-only HEAD | grep '\.json$' | grep -v '^graphify-out/'")
+    out.append(r" | grep -v '^examples/diagrams/' | grep -v '\.cards\.json$'` —")
+    out.append("every file whose parsed JSON has a non-empty `nodes` array must have a")
+    out.append(f"table row or queue row above (receipt at build: examples/ {len(rows)+len(pending_rows)}")
+    out.append(f"= {len(rows)} table + {len(pending_rows)} queue).")
     if pending_rows:
         out.append("")
         out.append("## Diagram queue (cards pending — generator skips, CI stays green)")

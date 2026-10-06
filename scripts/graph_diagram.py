@@ -13,8 +13,21 @@ Usage (from repo root):
 
 Each graph <name>.json needs a sibling <name>.cards.json — the ONLY human-authored
 input — holding exactly two cards: {"cards":[{"dot":"cyan","title":...,"items":[...]},
-{"dot":"rose","title":...,"items":[...]}]}. Every number in a card item that comes
-from the graph must be recomputable from it (count-sweep law); otherwise delete it.
+{"dot":"rose","title":...,"items":[...]}]}. Card counts are INJECTED via {{tokens}}
+only (§3/A3): a bare digit or unknown token fails the generator closed.
+
+LAYOUT RULE (§2 as amended in-thread 2026-10-06; this paragraph IS the spec — the
+diagram lying about its graph is a bug in THIS file, named defendant):
+  lane  = actor class from the node's `type` key: agent -> "work" (Agents),
+          gate -> "gates" (Gates), echo -> "room" (Deterministic).
+          Model pins are NEVER consulted (they ride the seat and change more often
+          than the shape; a pin edit must not re-draw a diagram).
+  col   = longest-path depth from roots, capped at 5.
+  stack = nodes sharing (lane, col) get yOffset = tier * STACK.
+Edges emit one per (dep, node) `after` pair — no bundle idiom exists in archify;
+branch edges carry variant "security". The compared bytes are candidate.json
+(canonical: json.dumps sort_keys, indent 2, trailing newline); png is a stamp
+record in the README table, never re-rastered in CI (§4 as amended).
 """
 import argparse, hashlib, json, os, re, sys
 

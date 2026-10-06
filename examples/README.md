@@ -1,7 +1,11 @@
 # examples/ — shipped workflow templates
 
 Every template below ships with a diagram that is **derived from its
-graph bytes**, never drawn by hand (DIAGRAM LAW v1).
+graph bytes**, never drawn by hand (DIAGRAM LAW v1). The layout rule
+(lane/col/stack, compared bytes) is the **LAYOUT RULE paragraph in
+`scripts/graph_diagram.py`'s docstring** — one-source law: that
+paragraph is the spec, this README cites it, a contradiction between
+diagram and graph is a bug in that file (named defendant).
 Regenerate everything after editing any example:
 
 ```sh
@@ -28,6 +32,15 @@ python3 scripts/graph_diagram.py --check --all # CI freshness gate: exit 1 on dr
 Cards (the two panels inside each diagram) are the ONLY hand-authored
 diagram input; they live in `<name>.cards.json` beside the graph. Every
 number in a card must be recomputable from the graph bytes it describes.
+
+Scope: every graph under `examples/` carries a conforming diagram.
+Test fixtures (`tests/fixtures/`) are engine inputs consumed by test
+code, not docs — no diagram (rung zero). Census command for the scope:
+`git ls-tree -r --name-only HEAD | grep '\.json$' | grep -v '^graphify-out/'
+ | grep -v '^examples/diagrams/' | grep -v '\.cards\.json$'` —
+every file whose parsed JSON has a non-empty `nodes` array must have a
+table row or queue row above (receipt at build: examples/ 17
+= 8 table + 9 queue).
 
 ## Diagram queue (cards pending — generator skips, CI stays green)
 
