@@ -56,7 +56,7 @@ Read-model / DX:
   three #47 tag sites in README rewritten to current truth — #47 closed
   unmerged, so the `release_lock` row and the `liveness-unknown` run state are
   removed and wedged-lock recovery describes the shipped kernel-flock
-  admission. `pr_tag_audit.py --repo jacobhausler/hermes-workflows` exits 0.
+  admission. `pr_tag_audit.py --repo <owner>/hermes-workflows` exits 0.
 
 ## 1.3.0 — 2026-10-05
 

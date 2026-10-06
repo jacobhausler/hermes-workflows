@@ -98,10 +98,13 @@ def resolve_repo(argv_repo: str | None) -> str | None:
 
 def main() -> int:
     argv_repo = sys.argv[2] if len(sys.argv) > 2 and sys.argv[1] == "--repo" else None
-    repo = resolve_repo(argv_repo)
-    if repo is None:
-        print("pr_tag_audit: cannot resolve the GitHub repo (pass --repo owner/name)", file=sys.stderr)
-        return 2
+    # OFFLINE-decidable phases FIRST (adversary R8 @ bd5ed44): a shipped-row lie
+    # and the tag inventory are decidable without repo resolution or gh, so they
+    # must run BEFORE resolve_repo — otherwise a bare invocation (no --repo, no
+    # git) returned the generic exit-2 "cannot resolve the GitHub repo" while an
+    # unconditional FAIL sat below it (reproduced at bd5ed44: shipped `run` row
+    # tagged (open PR #47), PATH=, bare -> exit 2 naming only repo resolution;
+    # the identical fixture with --repo -> exit 1 naming README.md:line).
     hits = []  # (file, line_no, pr_numbers)
     for rel in SCAN:
         path = ROOT / rel
@@ -112,10 +115,11 @@ def main() -> int:
                 nums = [int(n) for n in NUM_RE.findall(m.group(1))]
                 if nums:
                     hits.append((rel, i, nums))
-    # INVERSE direction first (offline-decidable): a dispatched action whose
+    # INVERSE direction (offline-decidable): a dispatched action whose
     # README row claims unshipped is a lie the executed door proves, whether or
-    # not gh exists. Proven red on base f83e5d0: shipped `run` + (open PR #47)
-    # printed `OK — 8 tagged line(s)` / exit 0.
+    # not gh exists and whether or not the repo resolves. Proven red on base
+    # f83e5d0: shipped `run` + (open PR #47) printed `OK — 8 tagged line(s)` /
+    # exit 0.
     try:
         shipped = shipped_tagged_rows()
     except Exception as exc:  # noqa: BLE001 — fail closed: an unauditable surface is a dirty surface
@@ -130,6 +134,19 @@ def main() -> int:
     if not hits:
         print("pr_tag_audit: no open-PR doc tags — nothing to age")
         return 0
+
+    def print_unverifiable(why: str) -> None:
+        for rel, line_no, nums in hits:
+            tag = "/".join(f"#{n}" for n in nums)
+            print(f"{rel}:{line_no}: tag says open, PR {tag} — cannot verify state ({why}) — fail closed")
+        print(f"pr_tag_audit: FAIL-CLOSED — {len(hits)} unverifiable tag(s)")
+
+    repo = resolve_repo(argv_repo)
+    if repo is None:
+        # same diagnostics promise as no-gh (finding 3): name every tagged
+        # file:line, never just a generic resolution error
+        print_unverifiable("repo unresolved: no --repo and no git remote; pass --repo owner/name")
+        return 2
     state_cache: dict[int, str | None] = {}
     gh_missing = False
 

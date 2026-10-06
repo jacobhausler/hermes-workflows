@@ -109,9 +109,9 @@ def make_fake_gh(tmp: Path, states: dict) -> Path:
     return bindir
 
 
-def run_audit(tree: Path, env: dict):
-    r = subprocess.run([sys.executable, str(tree / "scripts" / "pr_tag_audit.py"),
-                        "--repo", REPO],
+def run_audit(tree: Path, env: dict, extra_argv: list | None = None):
+    argv = extra_argv if extra_argv is not None else ["--repo", REPO]
+    r = subprocess.run([sys.executable, str(tree / "scripts" / "pr_tag_audit.py"), *argv],
                        capture_output=True, text=True, env=env, timeout=60)
     return r
 
@@ -211,7 +211,39 @@ with tempfile.TemporaryDirectory(prefix=".tmp-prtag-", dir=ROOT / "tests") as td
     r = run_audit(tree, {**NO_GH, "PATH": str(bindir)})
     check("D unshipped (doc-only) tagged rows are the sanctioned green shape",
           r.returncode == 0 and "OK" in r.stdout,
-          f"exit={r.returncode} out={r.stdout!r}")
+          f"exit={r.returncode} out={r.stdout!r} err={r.stderr!r}")
+
+    # ---- E: BARE invocation (no --repo) + no git (PATH=): the offline-decidable
+    # shipped-row FAIL must OUTRANK repo-resolution unverifiability (adversary R8
+    # @ bd5ed44: bare shipped-tagged tree returned exit 2 with only a generic
+    # "cannot resolve the GitHub repo" while the --repo twin exited 1 naming the
+    # README line — the unconditional FAIL was silenced by the resolvable-only
+    # gate, exactly the A1 class of bug on a sibling code path).
+    tree = make_tree(tdp / "e1", lambda s: s.replace(
+        "| `run` | Launch a graph from", tag_line, 1))
+    r = run_audit(tree, NO_GH, extra_argv=[])
+    check("E1 bare invocation: shipped-row lie outranks repo-resolution exit 2",
+          r.returncode == 1 and "README.md:" in r.stdout and "`run`" in r.stdout,
+          f"exit={r.returncode} out={r.stdout!r} err={r.stderr!r}")
+    # E2: bare + only doc-only-tagged rows (state needed, undecidable offline):
+    # still exit 2, and the diagnostics name every tagged file:line — the same
+    # promise the no-gh path makes, never just a generic resolution error.
+    tree = make_tree(tdp / "e2", add_doc_only_tag)
+    r = run_audit(tree, NO_GH, extra_argv=[])
+    _tag_re2 = re.compile(r"open PRs?\s+((?:#\d+)(?:[/:,\s-]*#\d+)*)")
+    expected2 = []
+    for rel in _scan:
+        fp = tree / rel
+        if not fp.is_file():
+            continue
+        for i, line in enumerate(fp.read_text(encoding="utf-8").splitlines(), 1):
+            if _tag_re2.search(line):
+                expected2.append(f"{rel}:{i}:")
+    diag2 = r.stdout + r.stderr
+    check("E2 bare invocation names every tagged file:line in the unresolved-repo diagnostics",
+          r.returncode == 2 and bool(expected2) and all(e in diag2 for e in expected2)
+          and "Traceback" not in r.stderr,
+          f"exit={r.returncode} expected={expected2} out={r.stdout[:300]!r} err={r.stderr[:300]!r}")
 
 print(f"TOTAL {count_pass} PASS {count_fail} FAIL")
 sys.exit(0 if ok else 1)
