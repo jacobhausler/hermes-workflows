@@ -450,6 +450,10 @@ dated backups. `.graphifyignore` excludes `graphify-out/` and `.github/` from th
     in), only save-from-*file* carries the template's own `source_digest`. The
     door writes `source` only when passed explicitly — a null-source row is a
     bare save, not a broken shelf.
+11. **Changed an example graph? Its diagram is derived, never drawn.** Edit the
+    graph, re-run `python3 scripts/graph_diagram.py --all` + the render/shoot
+    loop, and let CI's freshness gate refuse a stale commit. One rule, one
+    file: [examples/diagrams/README.md](examples/diagrams/README.md) (DIAGRAM LAW v1;\n    the examples/ map keeps a pointer here).
 
 ### 4d. Release
 
