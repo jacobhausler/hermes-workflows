@@ -148,13 +148,27 @@ assert.equal(typeof flipChevron, 'function', 'flipChevron is the pure chevron tr
   assert.equal(trayRunningLabel([]).line, '0 running workflows', 'empty live set reads 0 running workflows (never fabricated)')
   // No 60 s recap window on the tray: finished-only ledgers are hidden AT ONCE
   // at any wall clock (trayRecap remains a pure pane-side model, untouched).
-  const T = Date.parse('2026-10-05T06:00:00Z')
+  // est-z717: trayShouldShow's SECOND arg is now the settings gate (the old
+  // #22 wall-clock parity arg is retired — #230 ignored it anyway, there is
+  // no recap window). A live ledger shows ONLY under gate === true.
   const doneRuns = [mk('d1', 'done', 'S1', { nodes_done: 4, nodes_total: 4, updated: '2026-10-05T05:59:59Z' })]
-  assert.equal(mod.trayShouldShow(trayLiveModel(mod.trayScoping(doneRuns, 'S1')), T), false,
+  assert.equal(mod.trayShouldShow(trayLiveModel(mod.trayScoping(doneRuns, 'S1')), true), false,
     'terminal-only ledger -> tray hidden IMMEDIATELY (no 60 s recap window)')
-  assert.equal(mod.trayShouldShow(trayLiveModel(mod.trayScoping([mk('b', 'running', 'S1')], 'S1')), T), true,
-    'a live run keeps the tray visible')
-  assert.equal(mod.trayShouldShow(trayLiveModel([]), T), false, 'zero live rows -> tray hidden')
+  assert.equal(mod.trayShouldShow(trayLiveModel(mod.trayScoping([mk('b', 'running', 'S1')], 'S1')), true), true,
+    'a live run keeps the tray visible (gate true)')
+  assert.equal(mod.trayShouldShow(trayLiveModel([]), true), false, 'zero live rows -> tray hidden')
+  // z717 SETTINGS GATE pure-model pins: absent/false/non-true => NO tray even
+  // with live runs (default OFF until #133724 lands the native tray area).
+  assert.equal(mod.trayShouldShow(trayLiveModel(mod.trayScoping([mk('b', 'running', 'S1')], 'S1'))), false,
+    'z717: gate absent -> hidden even with a live run (default OFF)')
+  assert.equal(mod.trayShouldShow(trayLiveModel(mod.trayScoping([mk('b', 'running', 'S1')], 'S1')), false), false,
+    'z717: gate false -> hidden even with a live run')
+  assert.equal(mod.trayShouldShow(trayLiveModel(mod.trayScoping([mk('b', 'running', 'S1')], 'S1')), 1), false,
+    'z717: only literal true opens the gate — truthy non-boolean stays closed')
+  assert.equal(mirror.trayShouldShow(mirror.trayRunModel([mk('b', 'running', 'S1')]), true), true,
+    'mirror honors the gate too (true -> visible)')
+  assert.equal(mirror.trayShouldShow(mirror.trayRunModel([mk('b', 'running', 'S1')])), false,
+    'mirror defaults OFF identically')
 }
 
 // -- 4. collapsed default: ONE slim row [chevron] + label, chevron from flipChevron --
@@ -187,7 +201,7 @@ assert.equal(typeof flipChevron, 'function', 'flipChevron is the pure chevron tr
     mk('b1', 'running', 'S1', { nodes_done: 2, nodes_total: 5, nodes: { a: { status: 'done' }, b: { status: 'done' }, c: { status: 'running' }, d: { status: 'pending' }, e: { status: 'pending' } } }),
     mk('d1', 'done', 'S1', { nodes_done: 3, nodes_total: 3 }),
   ]
-  globalThis.__stubOverrides = new Map([[mod.$trayOpen, { expanded: true, openRun: 'b1' }]])
+  globalThis.__stubOverrides = new Map([[mod.$trayOpen, { expanded: true, openRun: 'b1' }], [mod.$trayGate, true]])
   globalThis.__stubDetail = { id: 'b1', name: 'b1', status: 'running', nodes: { a: { status: 'done' }, b: { status: 'done' }, c: { status: 'running' }, d: { status: 'pending' }, e: { status: 'pending' } } }
   const open = SessionStrip()
   assert.ok(open, 'tray renders with live runs')
@@ -231,7 +245,7 @@ assert.equal(typeof flipChevron, 'function', 'flipChevron is the pure chevron tr
       mk('b1', 'running', 'S1'),
     ]
     globalThis.__stubRuns = runs
-    globalThis.__stubOverrides = new Map([[mod.$trayOpen, { expanded: true, openRun: null }]])
+    globalThis.__stubOverrides = new Map([[mod.$trayOpen, { expanded: true, openRun: null }], [mod.$trayGate, true]])
     const tree = SessionStrip()
     const ga = findBy(tree, n => typeof n.type === 'function' && n.type.name === 'GateActions')
     assert.equal(ga.length, 2, 'exactly ONE GateActions per held run (2 held runs -> 2 release surfaces, no dupes)')

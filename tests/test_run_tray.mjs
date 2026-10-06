@@ -193,11 +193,25 @@ assert.equal(typeof RunTrayRow, 'function', 'RunTrayRow is exported')
 
 // -- 5. visibility: zero rows -> false / null render --------------------------------
 {
-  assert.equal(trayShouldShow(trayRunModel([])), false, 'zero rows -> trayShouldShow false')
-  assert.equal(trayShouldShow(trayRunModel([mk('b1', 'running', 'S1')])), true, 'a live row -> visible')
-  assert.equal(trayShouldShow(trayRunModel([mk('d1', 'done', 'S1'), mk('f1', 'failed', 'S1'), mk('s1', 'stopped', 'S1')])),
+  assert.equal(trayShouldShow(trayRunModel([]), true), false, 'zero rows -> trayShouldShow false')
+  assert.equal(trayShouldShow(trayRunModel([mk('b1', 'running', 'S1')]), true), true, 'a live row -> visible')
+  assert.equal(trayShouldShow(trayRunModel([mk('d1', 'done', 'S1'), mk('f1', 'failed', 'S1'), mk('s1', 'stopped', 'S1')]), true),
     false, 'a ledger of ONLY terminal runs is a zero-row tray (terminal runs LEAVE — no recap linger)')
-  assert.equal(trayShouldShow({ rows: [] }), false, 'a bare zero-row model hides')
+  assert.equal(trayShouldShow({ rows: [] }, true), false, 'a bare zero-row model hides')
+  // est-z717 SETTINGS GATE (pure model): the tray renders ONLY when the
+  // owner's settings opt in — default OFF (native tray SDK area #133724 not
+  // landed; when it lands, default-on rides that mount). absent/false/null/
+  // non-true gate => hidden EVEN WITH live runs; true => today's behavior.
+  assert.equal(trayShouldShow(trayRunModel([mk('b1', 'running', 'S1')])), false,
+    'z717: gate ABSENT -> no tray even with live runs (default OFF)')
+  assert.equal(trayShouldShow(trayRunModel([mk('b1', 'running', 'S1')]), false), false,
+    'z717: gate false -> no tray even with live runs')
+  assert.equal(trayShouldShow(trayRunModel([mk('b1', 'running', 'S1')]), null), false,
+    'z717: gate null (settings fetch never answered) -> fail-closed hidden')
+  assert.equal(trayShouldShow(trayRunModel([mk('b1', 'running', 'S1')]), 'true'), false,
+    'z717: only literal true enables — a truthy non-boolean does not')
+  assert.equal(trayShouldShow(trayRunModel([mk('b1', 'running', 'S1')]), undefined), false,
+    'z717: undefined gate -> hidden (default OFF)')
 }
 
 // -- 6. toggleTray: the tray row + in-tray row accordion (unchanged laws) ----------
@@ -254,13 +268,28 @@ assert.equal(typeof RunTrayRow, 'function', 'RunTrayRow is exported')
 
   // live runs -> collapsed row is the SLIM 'N running workflows' (terminal
   // rows do NOT count into N — d1 is in the ledger but leaves the tray)
+  // est-z717: gate OFF (atom null = unanswered / settings say no) -> the
+  // STRIP still mounts for its owned runs (PillRail is the always-on
+  // surface), but the tray row renders NOTHING — no slim 'N running
+  // workflows' line anywhere.
+  globalThis.__stubRuns = [
+    mk('b1', 'running', 'S1', { nodes_done: 2, nodes_total: 5 }),
+  ]
+  globalThis.__stubOverrides = new Map([[mod.$trayGate, false]])
+  const gated = SessionStrip()
+  assert.ok(gated, 'z717: gate off -> the strip stays mounted (rail untouched)')
+  assert.ok(!textOf(gated).includes('running workflows'),
+    'z717: gate off -> NO tray row even with a live run (default OFF)')
+  assert.equal(findBy(gated, n => typeof n.type === 'function' && n.type.name === 'PillRail').length, 1,
+    'z717: the PillRail is UNTOUCHED by the gate — always-on surface')
   globalThis.__stubRuns = [
     mk('h1', 'held', 'S1', { started: '2026-10-05T03:50:00Z', held_gate: { id: 'go', question: 'Ship?', options: ['ship', 'hold'] } }),
     mk('b1', 'running', 'S1', { nodes_done: 2, nodes_total: 5 }),
     mk('d1', 'done', 'S1', { nodes_done: 3, nodes_total: 3, updated: '2026-10-05T04:04:50Z' }),
   ]
+  globalThis.__stubOverrides = new Map([[mod.$trayGate, true]])
   const tree = SessionStrip()
-  assert.ok(tree, 'live runs -> tray renders')
+  assert.ok(tree, 'live runs + gate ON -> tray renders')
   const txt = textOf(tree)
   assert.match(txt, /2 running workflows/, 'collapsed row reads N over RUNNING-only (terminal excluded)')
   assert.ok(/▾|▴/.test(txt), 'the row has the disclosure chevron')
@@ -271,7 +300,7 @@ assert.equal(typeof RunTrayRow, 'function', 'RunTrayRow is exported')
   // gate release reuses the existing GateActions surface, and the steer/stop
   // buttons are ABSENT (the plugin ships no steer/stop action surface today —
   // graceful degrade, recorded as a gap in the PR body, no new server endpoint).
-  globalThis.__stubOverrides = new Map([[mod.$trayOpen, { expanded: true, openRun: 'b1' }]])
+  globalThis.__stubOverrides = new Map([[mod.$trayOpen, { expanded: true, openRun: 'b1' }], [mod.$trayGate, true]])
   globalThis.__stubDetail = { id: 'b1', name: 'b1', status: 'running', nodes: { a: { status: 'done' }, b: { status: 'running' }, c: { status: 'pending' } } }
   const open = SessionStrip()
   const openTxt = textOf(open)
@@ -288,7 +317,7 @@ assert.equal(typeof RunTrayRow, 'function', 'RunTrayRow is exported')
     'steer/stop buttons are ABSENT — no such plugin surface exists today (degrade, do not invent one)')
   // a stale openRun from a collapsed tray never leaks a MiniGraph into the
   // collapsed state (RunTray gates the accordion on trayOpen.expanded)
-  globalThis.__stubOverrides = new Map([[mod.$trayOpen, { expanded: false, openRun: 'b1' }]])
+  globalThis.__stubOverrides = new Map([[mod.$trayOpen, { expanded: false, openRun: 'b1' }], [mod.$trayGate, true]])
   const staleClosed = SessionStrip()
   assert.equal(findBy(staleClosed, n => typeof n.type === 'function' && n.type.name === 'MiniGraph').length, 0,
     'expanded:false with a stale openRun renders NO MiniGraph')
