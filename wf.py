@@ -1414,6 +1414,15 @@ def write_spawn_record(run, node, byid, index, spawn_no, argv, lp, pid, skey, st
 # the record only ever carries the runner's real harvest result.
 
 _ITEM_COMMITTED_FACTS = ("done", "partial", "failed", "skipped")
+# 790c6ad no-re-adoption window: an ADOPTED item retires its canonical record to
+# status=adopted (matching the item.adopted event path), never to done — the
+# spawn-verification law keys on status=running, and a respawned runner must
+# never find a finished adopted child re-adoptable. `adopted` is not in
+# node_rec's committed vocabulary and not in active_child's `running`, so it
+# reads pending everywhere and fails the adoption verification. The harvested
+# output still travels in the record (result carried it), so the aggregate gate
+# (item_records_certified) still byte-checks the claimed completion.
+_ITEM_ADOPTED_RETIRE = "adopted"
 
 def commit_item_record(run, node, byid, index, result):
     """Finalize the canonical per-item record with the item's real outcome,
@@ -1422,9 +1431,13 @@ def commit_item_record(run, node, byid, index, result):
     committed fact; efp-stamped like save_node so record_efp_valid certifies it.
     Status vocabulary is node_rec's committed set; a cancelled straggler stays
     failed+error_class=cancelled (node_rec reads that as pending — a resume
-    re-drives it, #7 law preserved)."""
+    re-drives it, #7 law preserved). An ADOPTED item (result.adopted — the
+    live-orphan path) retires to status=adopted instead, carrying the harvested
+    output: no re-adoption window, and spawn-path items commit done exactly as
+    the 765 law pins."""
     st = result.get("status")
-    rec_status = st if st in ("done", "partial") else "failed"
+    adopted = bool(result.get("adopted"))
+    rec_status = _ITEM_ADOPTED_RETIRE if adopted else (st if st in ("done", "partial") else "failed")
     np = run / "nodes" / f"{_node_file(node, index)}.json"
     try:
         rec = jload(np) or {}
@@ -1472,7 +1485,14 @@ def item_records_certified(run, node, byid, results):
         if not isinstance(rec, dict):
             problems.append({"index": i, "problem": "no per-item record on disk"})
             continue
-        if rec.get("status") not in _ITEM_COMMITTED_FACTS:
+        # 790c6ad: an adopted item's retired record carries status=adopted with
+        # its harvested output — a committed fact ONLY when the aggregate row
+        # itself claims an adopted harvest; an adopted-stamped record backing a
+        # NON-adopted claim is divergence, same as an unfinalized spawn record.
+        _committed = (rec.get("status") in _ITEM_COMMITTED_FACTS
+                      or (rec.get("status") == _ITEM_ADOPTED_RETIRE
+                          and isinstance(r, dict) and r.get("adopted")))
+        if not _committed:
             problems.append({"index": i,
                              "problem": f"record status={rec.get('status')!r} is not a committed fact "
                                         "(spawn-time record never finalized)"})
