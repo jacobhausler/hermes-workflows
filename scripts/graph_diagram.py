@@ -184,8 +184,52 @@ def cards_for(graph_path):
 # A3 (DIAGRAM LAW 3 amendment): counts are INJECTED, not typed. Card items may
 # reference computed values only via {{tokens}}; any bare digit is a drift vector
 # and fails the gate. Allowed tokens are computed by counts_for().
+# Spelled numerals are the same crime in the other alphabet: a prose "three
+# nodes" survives every mutation of the graph it describes (peer cold-read
+# receipt at 6454b50: a mutant 4-node smoke kept saying "three nodes", exit
+# 0). Vocabulary lines carry SHAPE, never counts, in either
+# script — the word list is the small closed set; deletion beats tokenizing.
+def example_graphs(examples_dir, out_dir):
+    """The ONE walker for shipped example graphs — shared by --all here and
+    diagram_readme.py's table (one-source law; the README builder imports it).
+
+    Everything under out_dir is an ARTIFACT, never a graph: candidates, pngs,
+    the derived README, and qa/ receipts. Receipts are *.json too, and the
+    original basename-only exclusion let qa/<stem>.qa.json walk in as phantom
+    pending graphs (the queue contradicted the tree with CI green — austin's
+    finding at 364ecf8). Exclusion is therefore by PATH PREFIX, and the
+    artifact set is fail-closed: any other .json under out_dir names itself
+    and fails, so an unknown artifact can never masquerade as a graph.
+    """
+    ex, out = os.path.abspath(examples_dir), os.path.abspath(out_dir)
+    files = []
+    for dp, _, fs in os.walk(ex):
+        dp = os.path.abspath(dp)
+        if dp == out or dp.startswith(out + os.sep):
+            for f in fs:
+                artifact = (f.endswith(".candidate.json")
+                            or (os.path.basename(dp) == "qa"
+                                and f.endswith(".qa.json")))
+                if f.endswith(".json") and not artifact:
+                    raise SystemExit(f"unknown artifact under {out}: {f} —"
+                                     " artifacts are *.candidate.json or"
+                                     " qa/*.qa.json; graphs live OUTSIDE the"
+                                     " out dir (DIAGRAM LAW: derived files"
+                                     " cannot pose as inputs)")
+            continue
+        for f in fs:
+            if f.endswith(".json") and not f.endswith(".cards.json"):
+                files.append(os.path.join(dp, f))
+    return sorted(files)
+
+
 COUNT_TOKEN = re.compile(r"\{\{(\w+)\}\}")
 BARE_DIGIT = re.compile(r"(?<!\{)\d(?!\})")
+SPELLED_NUM = re.compile(
+    r"(?<![A-Za-z])(zero|one|two|three|four|five|six|seven|eight|nine|ten"
+    r"|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen"
+    r"|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred)(?![A-Za-z])",
+    re.IGNORECASE)
 
 
 def counts_for(graph):
@@ -207,6 +251,11 @@ def inject(cards, counts):
         if bad:
             raise SystemExit(f"DIAGRAM LAW 3/A3: typed number in card item "
                              f"(use {{{{token}}}}): ...{s[max(0,bad.start()-25):bad.start()+15]}...")
+        spelled = SPELLED_NUM.search(s)
+        if spelled:
+            raise SystemExit(f"DIAGRAM LAW 3/A3: spelled number '{spelled.group(0)}' in card item "
+                             f"— shape vocabulary, no counts in either script: "
+                             f"...{s[max(0,spelled.start()-25):spelled.start()+15]}...")
         unknown = [t for t in COUNT_TOKEN.findall(s) if t not in counts]
         if unknown:
             raise SystemExit(f"DIAGRAM LAW 3/A3: unknown token(s) {unknown} in card item: {s[:60]}")
@@ -229,11 +278,8 @@ def main():
         return 0
     files = list(a.graphs)
     if a.all:
-        d = os.path.join(here, "examples")
-        out_name = os.path.basename(a.out.rstrip("/"))
-        files = sorted(os.path.join(dp, f) for dp, _, fs in os.walk(d) for f in fs
-                       if f.endswith(".json") and not f.endswith(".cards.json")
-                       and os.path.basename(dp) != out_name)
+        files = example_graphs(os.path.join(here, "examples"),
+                               os.path.join(here, a.out))
     bad = 0
     pending = []
     for f in files:

@@ -4,7 +4,7 @@
       "dot": "cyan",
       "title": "Why it works",
       "items": [
-        "Two folded fan-out modes, one launch: quorum-raced probe beside a no-quorum barrier",
+        "Folded fan-out modes, single launch: quorum-raced probe beside a no-quorum barrier",
         "The probe must name its cancelled stragglers honestly; the barrier prints coverage gaps loudly",
         "Sibling nodes, no branch gates \u2014 every lap walks both modes"
       ]

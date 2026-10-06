@@ -113,5 +113,132 @@ r2 = subprocess.run([sys.executable, os.path.join(ROOT, "scripts", "diagram_read
                     cwd=ROOT, capture_output=True, text=True)
 check("L5 README rebuild idempotent", "UNCHANGED" in r2.stdout, r2.stdout)
 
+
+# --- PR-3 contracts: vendored oven, spelled-numeral ban, QA-receipt-derived table
+GEN_DIR = os.path.join(ROOT, "scripts", "vendor", "archify")
+
+check("V1 vendored oven exists (recipe names no estate path)",
+      os.path.isfile(os.path.join(GEN_DIR, "renderers", "workflow", "render-workflow.mjs"))
+      and os.path.isfile(os.path.join(GEN_DIR, "assets", "template.html"))
+      and os.path.isfile(os.path.join(GEN_DIR, "ARCHIFY_VERSION")))
+
+import tempfile as _tf
+with _tf.TemporaryDirectory() as _td:
+    _rp = subprocess.run([shutil.which("node") or "node",
+                          os.path.join(GEN_DIR, "renderers", "workflow", "render-workflow.mjs"),
+                          os.path.join(ROOT, "examples", "diagrams", "smoke.candidate.json"),
+                          os.path.join(_td, "a.html")],
+                         capture_output=True, text=True, cwd=ROOT)
+    _rp2 = subprocess.run([shutil.which("node") or "node",
+                           os.path.join(GEN_DIR, "renderers", "workflow", "render-workflow.mjs"),
+                           os.path.join(ROOT, "examples", "diagrams", "smoke.candidate.json"),
+                           os.path.join(_td, "b.html")],
+                          capture_output=True, text=True, cwd=ROOT)
+    same = (_rp.returncode == 0 == _rp2.returncode
+            and open(os.path.join(_td, "a.html"), "rb").read()
+            == open(os.path.join(_td, "b.html"), "rb").read())
+    check("V2 vendored renderer runs bare and is byte-deterministic", same,
+          (_rp.stderr + _rp2.stderr)[:200])
+
+# A3 spelled-numeral ban: word-count card refused, shape vocabulary accepted
+with _tf.TemporaryDirectory() as _td:
+    _g = json.loads(json.dumps(G))
+    _c = json.loads(json.dumps(CARDS))
+    _gp = os.path.join(_td, "w.json"); _cp = os.path.join(_td, "w.cards.json")
+    json.dump(_g, open(_gp, "w"))
+    _c["cards"][0]["items"][0] = "Smoke test in three nodes"
+    json.dump(_c, open(_cp, "w"))
+    r = run([_gp, "--out", _td])
+    check("A3 spelled numeral refused like a digit",
+          r.returncode != 0 and "spelled number" in (r.stderr + r.stdout), r.stderr)
+    _c["cards"][0]["items"][0] = "Every one of the seats votes"
+    json.dump(_c, open(_cp, "w"))
+    r = run([_gp, "--out", _td])
+    check("A3 'one' refused too (closed set, word-boundary)",
+          r.returncode != 0 and "spelled number" in (r.stderr + r.stdout), r.stderr)
+    _c["cards"][0]["items"][0] = "Seed fans out, lanes run, final joins"
+    json.dump(_c, open(_cp, "w"))
+    r = run([_gp, "--out", _td])
+    check("A3 shape vocabulary still accepted", r.returncode == 0, r.stderr)
+
+# shipped cards carry zero spelled counts (the enumeration is the receipt)
+import re as _re
+SPELL = _re.compile(r"(?<![A-Za-z])(zero|one|two|three|four|five|six|seven|eight|nine|ten"
+                    r"|eleven|twelve|thirteen|fourteen|fifteen|twenty|thirty|forty|fifty|hundred)(?![A-Za-z])",
+                    _re.IGNORECASE)
+offenders = [os.path.relpath(p, ROOT)
+             for dp, _, fs in os.walk(os.path.join(ROOT, "examples"))
+             for f in fs if f.endswith(".cards.json")
+             for p in [os.path.join(dp, f)] if SPELL.search(open(p, encoding="utf-8").read())]
+check("A3 shipped cards enumerate zero spelled counts", not offenders, str(offenders))
+
+# THE WALKER CONTRACT (born from austin's finding at 364ecf8: both walkers
+# pruned the artifact dir by basename, so examples/diagrams/qa/*.qa.json walked
+# in as phantom graphs — the queue contradicted the tree with CI green).
+# Law: queue rows == graphs lacking a sidecar, by census; and no derived
+# artifact (candidate, qa receipt, stray json) is ever counted as a graph.
+import importlib.util as _ilu
+_wspec = _ilu.spec_from_file_location(
+    "graph_diagram_walker", os.path.join(ROOT, "scripts", "graph_diagram.py"))
+_walk_mod = _ilu.module_from_spec(_wspec)
+_wspec.loader.exec_module(_walk_mod)
+_walk = _walk_mod.example_graphs
+_dia = os.path.join(ROOT, "examples", "diagrams")
+_walked = _walk(os.path.join(ROOT, "examples"), _dia)
+check("WK1 walker counts no derived artifact as a graph",
+      all(not os.path.abspath(f).startswith(os.path.abspath(_dia) + os.sep)
+          for f in _walked),
+      str([f for f in _walked if os.path.abspath(_dia) in os.path.abspath(f)][:3]))
+_sidecar_less = [f for f in _walked
+                 if not os.path.exists(_re.sub(r"\.json$", ".cards.json", f))
+                 and not os.path.exists(os.path.join(
+                     _dia, os.path.basename(f)[:-5] + ".candidate.json"))]
+_tbl = open(os.path.join(_dia, "README.md")).read()
+_queue = [ln for ln in _tbl.splitlines() if ln.startswith("- [ ] `")]
+check("WK2 queue rows == sidecar-less graphs, by census",
+      len(_queue) == len(_sidecar_less),
+      f"queue {len(_queue)} vs census {len(_sidecar_less)}")
+check("WK3 queue names no qa receipt or candidate",
+      not [q for q in _queue if ".qa.json" in q or ".candidate.json" in q],
+      str([q[:60] for q in _queue if ".qa.json" in q][:3]))
+_stray = os.path.join(_dia, "decoy.json")
+open(_stray, "w").write("{}")
+try:
+    _walk(os.path.join(ROOT, "examples"), _dia)
+    check("WK4 unknown artifact under the out dir fails closed", False,
+          "decoy.json walked in silently")
+except SystemExit as e:
+    check("WK4 unknown artifact under the out dir fails closed",
+          "decoy.json" in str(e), str(e)[:120])
+finally:
+    os.remove(_stray)
+
+# QA-receipt-derived gates: lying receipt -> named red; missing -> honest not-run
+_readme_py = os.path.join(ROOT, "scripts", "diagram_readme.py")
+_dia = os.path.join(ROOT, "examples", "diagrams")
+_qa_dir = os.path.join(_dia, "qa")
+_real = {f: open(os.path.join(_qa_dir, f), "rb").read()
+         for f in os.listdir(_qa_dir) if f.endswith(".qa.json")}
+try:
+    _sp = os.path.join(_qa_dir, "smoke.qa.json")
+    _lie = json.loads(_real["smoke.qa.json"]); _lie["expected_nodes"] = 99
+    json.dump(_lie, open(_sp, "w"))
+    r = subprocess.run([sys.executable, _readme_py], cwd=ROOT, capture_output=True, text=True)
+    check("QR1 lying receipt (expected_nodes) refuses the rebuild, named",
+          r.returncode != 0 and "QA RED smoke.qa.json" in (r.stderr + r.stdout),
+          (r.stdout + r.stderr)[:200])
+    os.remove(_sp)
+    r = subprocess.run([sys.executable, _readme_py], cwd=ROOT, capture_output=True, text=True)
+    _tbl = open(os.path.join(_dia, "README.md")).read()
+    _smoke_row = next((ln for ln in _tbl.splitlines() if "smoke.png" in ln), "")
+    check("QR2 missing receipt cannot claim receipted (honest not-run)",
+          r.returncode == 0 and "WROTE" in r.stdout
+          and "browser-check done" not in _smoke_row and "not-run" in _smoke_row,
+          (r.stdout + r.stderr)[:200])
+finally:
+    for f, blob in _real.items():
+        open(os.path.join(_qa_dir, f), "wb").write(blob)
+    subprocess.run([sys.executable, _readme_py], cwd=ROOT, capture_output=True, text=True)
+
 print(f"{'ALL PASS' if ok else 'FAILURES PRESENT'} ({_n} diagram-law contracts)")
 sys.exit(0 if ok else 1)

@@ -3,8 +3,8 @@
     {
       "dot": "cyan",
       "items": [
-        "Portable file walk-in: recon -> two-way review fan-out -> three-line summary",
-        "run_context seeds (ALL required): target_dir = absolute path to a directory with at least two readable files",
+        "Portable file walk-in: recon -> review fan-out -> short summary",
+        "run_context seeds (ALL required): target_dir = absolute path to a readable directory (empty target starves the fan-out)",
         "Missing seeds fail at spawn, not mid-run"
       ],
       "title": "Why it works"

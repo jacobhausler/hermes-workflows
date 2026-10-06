@@ -104,6 +104,8 @@ INCLUDE_FILES = (
     "plugin.yaml",
     "CHANGELOG.md",
     "scripts/graph_check.py",
+    "scripts/graph_diagram.py",
+    "scripts/diagram_readme.py",
     "scripts/pack.py",
     "scripts/suite.py",
     "graphify-out/GRAPH_REPORT.md",

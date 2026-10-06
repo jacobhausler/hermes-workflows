@@ -4,8 +4,8 @@
       "dot": "cyan",
       "title": "Why it works",
       "items": [
-        "Two-arm branch on one schema'd verdict \u2014 the branch is the gate grammar, not agent discretion",
-        "Complementary `when` predicates + on_skip:prune: exactly one arm can live",
+        "Armed branch on a schema'd verdict — the split is the gate grammar, not agent discretion",
+        "Complementary `when` predicates + on_skip:prune: arms are mutually exclusive by grammar",
         "The dead arm is pruned (skipped, never run) \u2014 join sees only the live arm"
       ]
     },
