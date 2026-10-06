@@ -319,6 +319,130 @@ def recover_crashed_runner(r, spawn=None):
                                    "spawned_pid": handle}) + "\n", encoding="utf-8")
         os.replace(tmp, guard)
         return {"respawned": True, "prev_pid": prev_pid, "fp": fp, "spawned_pid": handle}
+# ---------- #733 dead-on-arrival finalize (reaper-callable, explicit act) ----------
+# The census shape (2026-10-06, 63 stale records): the runner + its children were
+# SIGKILLed out-of-band; the door's silent-death reaper made the death loud (its
+# law: event-only, records byte-intact — "a reaper must not erase the crime
+# scene") but when no replacement runner ever arrives, node records claim
+# status="running" with a dead pid forever and the run reads non-terminal on
+# every watcher. The finalize is the missing CLOSE step, invoked explicitly by
+# the reaper-caller (never a passive read, never inside the door's respawn
+# reaper whose bytes its own tests pin): non-terminal claims whose spawn record
+# fails the ONE verification law are closed as failed/dead-on-arrival, and the
+# run gets a terminal blocked verdict only if no authoritative one stands.
+DOA_FINALIZED = "dead-on-arrival"
+DOA_REASON_PREFIX = "blocked by dead-on-arrival"
+
+
+def _now_iso():
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def _atomic_json(p: Path, obj):
+    tmp = p.with_name(f"{p.name}.{os.getpid()}.tmp")
+    tmp.write_text(json.dumps(obj, ensure_ascii=False, default=str))
+    os.replace(tmp, p)
+
+
+def finalize_run(run_dir):
+    """Close a dead lane's falsely-claimed running records. Returns the process
+    exit code (0 finalized something or nothing left to do; 2 unknown run / no
+    pid file — a fresh run nobody ever claimed; 3 runner alive — leave alone).
+
+    Law: only status=="running" records whose spawn fails wfcommon._verify_spawn_rec
+    (a verifiably-live child is ADOPTED, never finalized) are written:
+      status="failed", finalized="dead-on-arrival", death_cause, finished_at,
+      error_class="dead_on_arrival"; efp/fp_rule_version carried over from the
+      spawn record so node_rec reads it as the terminal commit the dead runner
+      never wrote. Committed statuses and absent records are untouched. A run
+      with no authoritative exit verdict (runner_exit_read None or the
+      crashed-no-record probe) gets one terminal blocked verdict, fingerprinted
+      against the current graph; a verifiable recorded verdict — fresh or
+      amend-staled — is never overwritten. Idempotent: a second pass changes
+      zero bytes. Best-effort per record: one unreadable record never aborts
+      the pass."""
+    wc = _wfcommon()
+    if wc is None:
+        print("finalize needs wfcommon importable beside this script", file=sys.stderr)
+        return 2
+    r = Path(run_dir)
+    graph = wc.jload(r / "graph.json")
+    if not isinstance(graph, dict) or not graph.get("nodes"):
+        print(f"no usable graph.json under {r}", file=sys.stderr)
+        return 2
+    if not (r / "wf.pid").exists():
+        print(f"{r}: no wf.pid — a fresh/never-spawned run is not stuck", file=sys.stderr)
+        return 2
+    if wc.runner_alive(r):
+        print(f"{r}: runner alive — nothing to finalize", file=sys.stderr)
+        return 3
+    byid = {n["id"]: n for n in graph["nodes"] if isinstance(n, dict) and n.get("id")}
+    finalized = []                                   # (record-path, node id)
+    for p in sorted((r / "nodes").glob("*.json")):
+        try:
+            rec = wc.jload(p)
+        except Exception:
+            continue                                   # torn record: never a fact, never fatal
+        if not isinstance(rec, dict) or rec.get("status") != "running":
+            continue                                   # committed/absent truth is never rewritten
+        if rec.get("finalized") == DOA_FINALIZED:
+            continue                                   # already closed: idempotent
+        stem = p.stem
+        nid = stem.split(".", 1)[0] if "." in stem else stem
+        n = byid.get(nid)
+        if n is None:
+            continue                                   # orphan record (amended-away node): not ours
+        if wc._verify_spawn_rec(r, n, byid, rec):
+            continue                                   # ONE verification law: live child => adopt
+        closed = dict(rec)
+        closed.update(
+            status="failed",
+            finalized=DOA_FINALIZED,
+            error_class="dead_on_arrival",
+            death_cause=f"runner dead (pid {closed.get('pid')} unverifiable), child never "
+                        f"finalized — closed by lane_recover --finalize",
+            finished_at=_now_iso(),
+        )
+        if "efp" not in closed:                        # stamp from the spawn claim so
+            try:                                       # node_rec reads a terminal commit
+                closed["efp"] = wc.efp(byid, n)
+                closed.setdefault("fp_rule_version", wc.FP_RULE_VERSION)
+            except Exception:
+                pass
+        try:
+            _atomic_json(p, closed)
+            finalized.append((p, nid))
+        except OSError:
+            continue
+    if not finalized:
+        return 0
+    ids = sorted({nid for _p, nid in finalized})
+    try:
+        with open(r / "events.jsonl", "a") as f:
+            f.write(json.dumps({"ts": _now_iso(), "event": "run.finalized_doa",
+                                "nodes": ids, "count": len(finalized)},
+                               ensure_ascii=False) + "\n")
+    except OSError:
+        pass
+    # terminal verdict for the run ONLY if no authoritative one stands. A
+    # verifiable recorded exit (fresh OR amend-staled — a verdict is a verdict)
+    # is never overwritten; a finalize-authored one counts (idempotency).
+    rx = wc.jload(r / "runner_exit.json")
+    verdict = wc.runner_exit_read(r) or {}
+    keep = bool(verdict.get("reason")) and verdict.get("reason") != "crashed (no exit record)"
+    if (isinstance(rx, dict) and rx.get("finalized") == DOA_FINALIZED) or keep:
+        return 0
+    snapshot = graph
+    try:
+        rec = {"reason": f"{DOA_REASON_PREFIX}: {', '.join(ids)}", "at": _now_iso(),
+               "graph_fingerprint": wc.graph_fingerprint(snapshot),
+               "fp_rule_version": wc.FP_RULE_VERSION,
+               "finalized": DOA_FINALIZED}
+        _atomic_json(r / "runner_exit.json", rec)
+    except OSError:
+        pass
+    return 0
 
 
 class Bail(Exception):
@@ -673,6 +797,15 @@ def main(argv=None):
                     help="est-2ek.1.718: check RUN_ID for the crashed-no-exit signature "
                          "(dead pid + no runner_exit.json + unfinished claims) and respawn "
                          "the runner ONCE per fingerprint; prints the verdict JSON")
+    fin = ap.add_argument_group("#733 dead-on-arrival finalize (mutually exclusive with replay)")
+    fin.add_argument("--finalize", metavar="RUN_DIR",
+                     help="close a dead lane's falsely-claimed running node records "
+                          "(runner verified dead): each unverifiable status=running "
+                          "record -> failed + finalized=dead-on-arrival + death_cause + "
+                          "finished_at; the run gets a terminal blocked verdict only if "
+                          "no authoritative exit record stands. Idempotent; a live "
+                          "child is adopted, never finalized (exit 3 when the runner "
+                          "is alive, 2 for an unknown/fresh run, 0 when done).")
     args = ap.parse_args(argv)
     if args.home:   # the read model resolves runs/profiles from HERMES_HOME; honor the flag
         os.environ["HERMES_HOME"] = str(Path(args.home).expanduser())   # (before --watchdog too)
@@ -688,6 +821,23 @@ def main(argv=None):
             return 2
         print(json.dumps(recover_crashed_runner(wd_run)))
         return 0
+
+    if args.finalize:
+        # #733: an explicit close act, never entangled with the replay path.
+        # A bare run id resolves the way the read model does (WF_RUNS_ROOT /
+        # --home, else wfcommon.find_run); a path is taken verbatim.
+        cand = Path(args.finalize)
+        if not cand.is_dir():
+            root = os.environ.get("WF_RUNS_ROOT") or str(_hermes_home() / "workflows")
+            cand = Path(root) / args.finalize
+            if not cand.is_dir():
+                wc = _wfcommon()
+                if wc is not None:
+                    try:
+                        cand = Path(wc.find_run(args.finalize))
+                    except SystemExit:
+                        pass
+        return finalize_run(cand)
 
     if args.run:
         skey, db = run_lookup(args.run, args.node, args.index, args.home)

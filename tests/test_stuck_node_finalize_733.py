@@ -203,7 +203,7 @@ with tempfile.TemporaryDirectory() as td:
     # ---- 4. verifiably-live child is NEVER finalized (the ONE verification law)
     sp = "wf:syn:live:abcd.0003"
     proc = subprocess.Popen([sys.executable, "-c",
-                             "import time; time.sleep(120)", sp])
+                             "import time; time.sleep(120)", sp + "#a0"])
     try:
         r5 = mk_run(runs, "live-5", GRAPH, {
             "build": {"status": "running", "pid": proc.pid, "skey": sp, "attempt": 0},
@@ -253,14 +253,16 @@ with tempfile.TemporaryDirectory() as td:
     check("claims still finalized under a kept verdict",
           rec7.get("finalized") == "dead-on-arrival", rec7)
 
-    # ---- 7. a stale exit record (fingerprint mismatch) is replaced
+    # ---- 7. an amend-staled exit record is a VERDICT, never overwritten
+    # (PR #82 review, F2 law: fingerprint staleness alone is not evidence of an
+    # unrecorded death; only "crashed (no exit record)" proves the scene unwritten).
     r8 = mk_run(runs, "stale-8", GRAPH, base_nodes(dp))
     (r8 / "wf.pid").write_text(str(dp) + "\n")
     seed_exit_reason(r8, "done", valid=False)
     lr.finalize_run(r8)
     rx8 = json.loads((r8 / "runner_exit.json").read_text())
-    check("stale exit replaced by the blocked verdict",
-          str(rx8.get("reason", "")).startswith("blocked by dead-on-arrival"), rx8)
+    check("amend-staled exit kept, never overwritten",
+          rx8.get("reason") == "done", rx8)
 
     # ---- 8. no wf.pid = fresh run => zero writes, exit 2
     r9 = mk_run(runs, "fresh-9", GRAPH, base_nodes(dp))
@@ -278,14 +280,14 @@ with tempfile.TemporaryDirectory() as td:
     ]}
     byid = {n["id"]: n for n in FO["nodes"]}
     r10 = mk_run(runs, "fan-10", FO, {
-        "lanes:a": {"status": "done", "output": {"ok": True}},
-        "lanes:b": {"status": "running", "pid": dp, "skey": "wf:syn:lanes:abcd.0005",
+        "lanes:0": {"status": "done", "output": {"ok": True}},
+        "lanes:1": {"status": "running", "pid": dp, "skey": "wf:syn:lanes:abcd.0005",
                     "attempt": 0},
     })
     (r10 / "wf.pid").write_text(str(dp) + "\n")
     lr.finalize_run(r10)
-    rec_a10 = json.loads((r10 / "nodes" / "lanes.a.json").read_text())
-    rec_b10 = json.loads((r10 / "nodes" / "lanes.b.json").read_text())
+    rec_a10 = json.loads((r10 / "nodes" / "lanes.0.json").read_text())
+    rec_b10 = json.loads((r10 / "nodes" / "lanes.1.json").read_text())
     check("fan-out done item untouched", rec_a10.get("status") == "done" and "finalized" not in rec_a10, rec_a10)
     check("fan-out dead item finalized",
           rec_b10.get("status") == "failed" and rec_b10.get("finalized") == "dead-on-arrival", rec_b10)
