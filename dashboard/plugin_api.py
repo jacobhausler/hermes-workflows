@@ -219,6 +219,23 @@ if router is not None:
     async def list_runs():
         return _list_runs()
 
+    @router.get("/settings")
+    async def get_settings():
+        """est-z717: the desktop's tray-gate bootstrap read. Answers ONLY the
+        keys the desktop consumes — {tray: bool}. owner_setting('tray') is THE
+        established settings shape (wfcommon: the door's plugin ctx reader when
+        it has one, else the raw config of the resolved home; settings subtree
+        wins over the legacy config subtree). EVERYTHING other than literal
+        True — absent key, false, malformed, unreadable config — answers False:
+        the tray gate is FAIL-CLOSED, default OFF, until NousResearch/hermes-
+        agent#133724 lands the native tray SDK area (when it lands, default-
+        on rides that mount). Read-only; never exposes any other setting."""
+        try:
+            v = _workflow_common().owner_setting("tray")
+        except Exception:
+            v = None
+        return {"tray": v is True}
+
     @router.get("/runs/{run_id}")
     async def get_run(run_id: str):
         r = _safe_run(run_id)

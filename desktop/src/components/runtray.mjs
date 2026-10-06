@@ -155,9 +155,15 @@ export function ackFinished(runs, acked = []) {
 /** Pure visibility rule: zero rows (an empty ledger, a null ledger, a bare
  *  {rows:[]} model, or a ledger of ONLY terminal runs — they all produce
  *  zero rows) hides the tray entirely: the collapsed row renders nothing.
- *  Accepts the trayRunModel model OR a plain live-set array; the optional
- *  wall-clock arg is #22 API parity — #230 ignores it (no recap window). */
-export function trayShouldShow(model) {
+ *  Accepts the trayRunModel model OR a plain live-set array.
+ *  est-z717 SETTINGS GATE (2nd arg, mirrors plugin.js): the tray renders ONLY
+ *  under the owner's explicit opt-in `gate === true` (plugins.entries.
+ *  hermes-workflows.settings.tray via GET /settings). Absent/null/false/
+ *  truthy-non-boolean all stay HIDDEN — default OFF until the native tray SDK
+ *  area (hermes-agent#133724) lands; the PillRail is never gated. (The
+ *  retired #22 wall-clock parity arg is replaced — no recap window exists.) */
+export function trayShouldShow(model, gate) {
+  if (gate !== true) return false
   const rows = Array.isArray(model) ? model : ((model && model.rows) || [])
   return !!rows.length
 }
@@ -296,10 +302,12 @@ export function RunTrayRunRow({ run, open, band, onToggleRow, onOpenPane, gateSl
  *  MiniGraph accordion body is the caller's (plugin.js owns the shared
  *  component); this root only signals which row is open. Mounts beside
  *  PillRail inside the SessionStrip composer registration. */
-export function RunTray({ runs, sid, trayOpen, trayRef, onToggleHeader, onToggleRow, onOpenPane }) {
+export function RunTray({ runs, sid, trayOpen, trayRef, onToggleHeader, onToggleRow, onOpenPane, trayEnabled }) {
   const scoped = trayScoping(runs, sid)
   const model = trayRunModel(scoped)
-  if (!trayShouldShow(model)) return null
+  // est-z717: settings gate rides as a prop (mirror parity with plugin.js);
+  // default OFF — only literal true renders the tray.
+  if (!trayShouldShow(model, trayEnabled)) return null
   const openRun = trayOpen && trayOpen.expanded && trayOpen.openRun ? trayOpen.openRun : null
   return jsxs('div', {
     ref: trayRef,

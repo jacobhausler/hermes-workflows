@@ -653,6 +653,14 @@ const $railOpen = atom(null)
 // atom instrumentation); component bodies live beside the models below.
 // (test_register_surface locks the 'session-strip' registration.)
 export const $trayOpen = atom(null)
+// est-z717 SETTINGS GATE: the live-run tray is OPTIONAL until the native tray
+// SDK area lands (NousResearch/hermes-agent#133724). Tri-state atom:
+// null = not yet answered (renders HIDDEN — default OFF), true/false = the
+// answer of GET /settings (the door's owner_settings shape, plugins.entries.
+// hermes-workflows.settings.tray). In-memory plugin atom — never localStorage.
+// The PillRail is UNTOUCHED by this gate: it stays the always-on surface.
+// When #133724 lands, default-on rides that mount (one line in register()).
+export const $trayGate = atom(null)
 
 /** Pure pill-toggle (exported so node can test the transition table without a
  *  DOM): null → open {sid, runId}; clicking the OPEN pill (same sid AND same
@@ -985,10 +993,17 @@ export function flipChevron(current) {
  *  {rows:[]} model, or a ledger of ONLY terminal runs — they all produce
  *  zero rows) hides the tray entirely: the collapsed row renders nothing.
  *  Accepts the trayRunModel model OR a plain live-set array (the
- *  trayLiveModel shape) — both are zero when nothing lives. An optional
- *  wall-clock arg exists for API parity with the retired #22 recap model;
- *  #230 ignores it: terminal runs leave AT ONCE, there is no 60 s window. */
-export function trayShouldShow(model) {
+ *  trayLiveModel shape) — both are zero when nothing lives.
+ *  est-z717 SETTINGS GATE (2nd arg): the tray renders ONLY under the owner's
+ *  explicit opt-in — `gate === true`, the answer of GET /settings (the door's
+ *  owner_setting('tray'), plugins.entries.hermes-workflows.settings.tray).
+ *  Anything else — absent, null (never fetched / backend down), false, a
+ *  truthy non-boolean — stays HIDDEN: default OFF while the native tray SDK
+ *  area (hermes-agent#133724) is unlanded; when it lands, default-on rides
+ *  that mount. (The retired #22 wall-clock parity arg is replaced here —
+ *  #230 already ignored it, there is no recap window.) */
+export function trayShouldShow(model, gate) {
+  if (gate !== true) return false
   const rows = Array.isArray(model) ? model : ((model && model.rows) || [])
   return !!rows.length
 }
@@ -1151,14 +1166,18 @@ function TrayPanel({ runId }) {
  *  component's hooks never sit behind a return). The collapse affordances
  *  ride SessionStrip's wiring (Esc onKeyDown, click-away via trayRef); row
  *  handlers stopPropagation so tray clicks never look like click-away. */
-export function RunTray({ runs, sid, trayOpen, trayRef, onToggleHeader, onToggleRow, onOpenPane }) {
+export function RunTray({ runs, sid, trayOpen, trayRef, onToggleHeader, onToggleRow, onOpenPane, trayEnabled }) {
   // sid blank = the mount owner pre-scoped under the focus-degraded law
   // (SessionStrip): trust the given live set (running-only still applies).
   const scoped = sid
     ? trayScoping(runs, sid)
     : (runs || []).filter(r => r && !TERMINAL.has(runStatusOf(r)))
   const model = trayRunModel(scoped)
-  const show = trayShouldShow(model)
+  // est-z717: the settings gate rides as a PROP from the mount owner (the
+  // $trayGate atom value resolved by SessionStrip via useValue — F2 law,
+  // never an atom .get inside a component). Default OFF: only literal true
+  // shows the tray; the PillRail below is never gated.
+  const show = trayShouldShow(model, trayEnabled)
   useTick(show)
   if (!show) return null
   // The accordion only ever renders while the TRAY itself is expanded — a
@@ -1228,6 +1247,10 @@ export function SessionStrip() {
   const trayExpanded = !!(trayState && trayState.expanded)
   const railRef = useRef(null)
   const trayRef = useRef(null)
+  // est-z717 settings gate (in-memory atom, hook order unconditional): null =
+  // unanswered => HIDDEN (default OFF); register()'s bootstrap fills it from
+  // GET /settings. PillRail stays mounted regardless (always-on surface).
+  const trayGate = useValue($trayGate)
   // Hooks run UNCONDITIONALLY (fixed order across renders); the bodies guard
   // themselves. Switching focused chat collapses the expanded panel.
   useEffect(() => { $railOpen.set(null) }, [pairKey])
@@ -1283,7 +1306,7 @@ export function SessionStrip() {
       // GateActions in the strip). Handlers close over this render's
       // trayState (F2 law: no atom .get in handlers, open state rides props).
       jsx(RunTray, {
-        runs: owned, sid: pairKey, trayOpen: trayState, trayRef,
+        runs: owned, sid: pairKey, trayOpen: trayState, trayRef, trayEnabled: trayGate,
         onToggleHeader: () => $trayOpen.set(trayState && trayState.expanded ? null : toggleTray(trayState, null)),
         onToggleRow: id => $trayOpen.set(toggleTray(trayState, id)),
         onOpenPane: openRun
@@ -2472,6 +2495,13 @@ export default {
   name: 'Workflows',
   register(ctx) {
     ctxRest = (path, opts) => ctx.rest(path, opts)   // keep the api() error wrapper — never reassign api
+
+    // est-z717 tray settings gate: ONE bootstrap read of the door's owner
+    // settings (GET /settings -> {tray}) resolved into $trayGate. FAIL-CLOSED
+    // by construction: until the answer arrives $trayGate stays null and the
+    // tray hides; a backend error leaves it null (hidden) forever — the
+    // default-OFF law (the native tray SDK area #133724 is unlanded).
+    api('/settings').then(s => { $trayGate.set(s?.tray === true) }).catch(() => {})
 
     ctx.register({
       id: 'directive',

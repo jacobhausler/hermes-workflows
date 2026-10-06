@@ -2168,6 +2168,34 @@ def _session_env(name):
         return os.environ.get(name, "")
     return get_session_env(name, "")
 
+def _owner_stamp():
+    """est-z717 ESTATE-SHAPE LAW: who the run's owner is, honestly.
+
+    Interactive chats: unchanged — owner.session_id inherits HERMES_SESSION_ID
+    (gateway session context first, else process env), the chat's own rail
+    picks the run up at invocation with ZERO directive strings.
+
+    Estate/dispatcher-launched runs are the gap: the door process carries the
+    DISPATCHER's HERMES_SESSION_ID, so an inherited stamp would impersonate the
+    dispatcher's chat — the run would surface in a rail its launching chat never
+    owned. The honest rule (owner ruling 10-06): launchers that know they are
+    NOT the chat set WF_OWNER_SESSION explicitly. An EMPTY WF_OWNER_SESSION
+    means "no chat owns this run": owner keys land null -> the run is
+    pane-only (the blank-owner honest-absent law the rail already enforces).
+    A NON-EMPTY WF_OWNER_SESSION stamps that session id verbatim (a launcher
+    launching ON BEHALF of a known chat), and ui_session_id/platform go null
+    with it — the surrounding env ids belong to the launcher process, not to
+    the stamped owner, so they would be unverifiable impersonation residue.
+    UNSET (interactive chats) = today's behavior byte-identical.
+    """
+    override = os.environ.get("WF_OWNER_SESSION")
+    if override is not None:
+        sid = override.strip() or None
+        return {"session_id": sid, "ui_session_id": None, "platform": None}
+    return {"session_id": _session_env("HERMES_SESSION_ID") or None,
+            "ui_session_id": _session_env("HERMES_UI_SESSION_ID") or None,
+            "platform": _session_env("HERMES_SESSION_PLATFORM") or None}
+
 def _card(rid):
     return f'::workflow{{id="{rid}"}}'
 
@@ -2741,9 +2769,11 @@ def _create_run(args, graph, lib_name, models, routes, _liveness_notes, lane_pat
             # OWNER = the agent session that spawned the run. The desktop uses it to
             # send a visible SDK composer turn to THIS chat, never the active chat.
             # Absent (tests, CLI) => no owner => UI asks for manual resume.
-            "owner": {"session_id": _session_env("HERMES_SESSION_ID") or None,
-                      "ui_session_id": _session_env("HERMES_UI_SESSION_ID") or None,
-                      "platform": _session_env("HERMES_SESSION_PLATFORM") or None}}
+            # est-z717: the estate-shape law lives in _owner_stamp() —
+            # WF_OWNER_SESSION set by an estate launcher overrides (or nulls)
+            # the inherited dispatcher env; interactive chats ride today's
+            # HERMES_SESSION_ID inheritance untouched.
+            "owner": _owner_stamp()}
     if concurrency_meta:
         meta.update(concurrency_meta)
     meta.update(_identity_stamps(args, graph, lib_name))   # 1.1: only derivable keys land
