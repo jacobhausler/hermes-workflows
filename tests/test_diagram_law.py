@@ -177,8 +177,12 @@ check("A3 shipped cards enumerate zero spelled counts", not offenders, str(offen
 # in as phantom graphs — the queue contradicted the tree with CI green).
 # Law: queue rows == graphs lacking a sidecar, by census; and no derived
 # artifact (candidate, qa receipt, stray json) is ever counted as a graph.
-sys.path.insert(0, os.path.join(ROOT, "scripts"))
-from graph_diagram import example_graphs as _walk
+import importlib.util as _ilu
+_wspec = _ilu.spec_from_file_location(
+    "graph_diagram_walker", os.path.join(ROOT, "scripts", "graph_diagram.py"))
+_walk_mod = _ilu.module_from_spec(_wspec)
+_wspec.loader.exec_module(_walk_mod)
+_walk = _walk_mod.example_graphs
 _dia = os.path.join(ROOT, "examples", "diagrams")
 _walked = _walk(os.path.join(ROOT, "examples"), _dia)
 check("WK1 walker counts no derived artifact as a graph",
