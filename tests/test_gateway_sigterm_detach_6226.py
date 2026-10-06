@@ -360,8 +360,16 @@ with tempfile.TemporaryDirectory(prefix=".tmp-gwsig6226-", dir=HERE,
     runner_d = int((rd / "wf.pid").read_text().strip()) if (rd / "wf.pid").exists() else None
     os.kill(runner_d, signal.SIGKILL)      # no handler can run — no record
     died_d = wait_for(lambda: not alive(runner_d))
+    # The crash read asserts through runner_alive's ONE liveness law
+    # (runner_lock flock HELD => live). The kernel releases the flock
+    # ASYNCHRONOUSLY on death (delayed fput), so a raw os.kill(0)-dead pid can
+    # still momentarily read as alive — the CI flake (run 37465629705):
+    # runner_exit_read raced that window and returned None ("null"), not a
+    # code defect. Wait on the SAME law the read consults before asserting.
+    settled_d = wait_for(lambda: not wfcommon.runner_alive(rd), timeout=15)
     check("D setup: SIGKILLed runner recorded NOTHING",
-          bool(died_d) and not (rd / "runner_exit.json").exists())
+          bool(died_d) and bool(settled_d)
+          and not (rd / "runner_exit.json").exists())
     rx_d = wfcommon.runner_exit_read(rd)
     check("D: the phantom gate still reads the unrecorded death as a crash",
           (rx_d or {}).get("reason") == "crashed (no exit record)",
