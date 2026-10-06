@@ -665,6 +665,8 @@ def main(argv=None):
                          "(dead pid + no runner_exit.json + unfinished claims) and respawn "
                          "the runner ONCE per fingerprint; prints the verdict JSON")
     args = ap.parse_args(argv)
+    if args.home:   # the read model resolves runs/profiles from HERMES_HOME; honor the flag
+        os.environ["HERMES_HOME"] = str(Path(args.home).expanduser())   # (before --watchdog too)
     if args.watchdog:
         wc = _wfcommon()
         if wc is not None:
@@ -677,8 +679,6 @@ def main(argv=None):
             return 2
         print(json.dumps(recover_crashed_runner(wd_run)))
         return 0
-    if args.home:   # the read model resolves runs/profiles from HERMES_HOME; honor the flag
-        os.environ["HERMES_HOME"] = str(Path(args.home).expanduser())
 
     if args.run:
         skey, db = run_lookup(args.run, args.node, args.index, args.home)
@@ -735,6 +735,6 @@ def main(argv=None):
 if __name__ == "__main__":
     try:
         sys.exit(main())
-    except Bail as e:
+    except (Bail, PluginResolutionError) as e:   # both carry the documented exit code
         print(str(e), file=sys.stderr)
         sys.exit(e.code)
