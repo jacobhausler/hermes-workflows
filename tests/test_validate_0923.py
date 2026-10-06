@@ -310,7 +310,7 @@ Gadd2 = {"name": "add-impact", "nodes": [
 ]}
 padd = call(action="amend", run_id=radd.name, graph=Gadd2, dry_run=True)
 check(padd.get("ok") and padd.get("added") == ["new"] and padd.get("removed") == ["gone"]
-      and padd["changed"] == [] and padd["will_rerun"] == ["new", "p", "q"]
+      and padd["changed"] == ["p"] and padd["will_rerun"] == ["new", "p", "q"]  # est-c9is: p re-parented a->new = def drift
       and padd["unchanged"] == ["a", "d"] and "never" not in padd["will_rerun"],
       "dry_run reports added/removed ids, new downstream work, and excludes unaffected never-started node", padd)
 check(json.loads((radd / "graph.json").read_text()) == Gadd
