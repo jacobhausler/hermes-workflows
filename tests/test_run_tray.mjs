@@ -272,5 +272,33 @@ assert.equal(typeof toggleTray, 'function', 'toggleTray is exported')
   globalThis.__stubOverrides = null
 }
 
+// -- 9. visibility rule + collapse laws ('states at a glance' + item 4 parity) ----
+{
+  // Pure mount/hide rule: hidden at zero rows; visible while ANY row is live;
+  // finished-only shows inside the 60 s recap window, hidden past it.
+  const T = Date.parse('2026-10-05T06:00:00Z')
+  const liveRuns = [mk('b1', 'running', 'S1')]
+  const doneRuns = [mk('d1', 'done', 'S1', { nodes_done: 4, nodes_total: 4, updated: '2026-10-05T05:59:30Z' })]
+  assert.equal(mod.trayShouldShow(trayModel([], []), T), false, 'zero rows -> tray hidden')
+  assert.equal(mod.trayShouldShow(trayModel(liveRuns, []), T), true, 'live rows -> tray visible')
+  assert.equal(mod.trayShouldShow(trayModel(doneRuns, []), T), true, 'the last completion keeps the row through the recap window')
+  assert.equal(mod.trayShouldShow(trayModel(doneRuns, []), T + 61_000), false, '60 s after the last run ends the tray retracts')
+  assert.equal(mod.trayShouldShow(trayModel(doneRuns, ['d1']), T), false, 'acking the recap run empties the ledger -> hidden immediately')
+  // Scoping guards: no session -> nothing; the tray never leaks another chat's runs.
+  assert.deepEqual(mod.trayScoping([mk('a', 'running', 'S1')], ''), [], 'no focused session -> no tray rows')
+  assert.deepEqual(mod.trayScoping(null, 'S1'), [], 'null ledger is a clean empty, never a throw')
+}
+// Click-away / Esc collapse (scoped-listener laws, asserted at source per
+// precedent): Esc collapses the tray FIRST ($trayOpen -> null), the rail
+// panel only after; click-away excludes clicks inside the tray via trayRef
+// (never a DOM-node listener, the window listener stays the plugin's ONE —
+// test_tab_polish_48 locks the budget).
+assert.match(src, /if \(e\.key === 'Escape'\)\s*\{\s*if \(trayExpanded\) \$trayOpen\.set\(null\)/,
+  "Esc collapses the expanded tray to the collapsed-row state BEFORE the rail panel")
+assert.match(src, /trayExpanded && trayRef\.current && trayRef\.current\.contains\(e\.target\)/,
+  'click-away excludes clicks inside the open tray (trayRef contains check)')
+assert.match(src, /window\.addEventListener\('click', onDocClick\)/,
+  'click-away rides the single window-level listener (no DOM-node listeners)')
+
 rmSync(tmp, { recursive: true, force: true })
-console.log('ALL PASS test_run_tray (trayScoping, trayModel ordering/bands, aggregate label, ack cap 10, 60s recap, toggleTray, SessionStrip mount/hide)')
+console.log('ALL PASS test_run_tray (trayScoping, trayModel ordering/bands, aggregate label, ack cap 10, 60s recap, toggleTray, SessionStrip mount/hide, visibility rule, collapse laws)')

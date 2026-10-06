@@ -36,6 +36,15 @@
  *    the file also parses/loads clean under plain node until the build lane
  *    grows real bodies (the moment jsx is needed it comes from
  *    react/jsx-runtime, the repo's baseline).
+ *
+ * STATUS (build lane, #22): the REAL implementation landed IN PLACE in
+ * desktop/plugin.js — trayScoping/trayModel/trayAggregateLabel/trayRecap/
+ * trayShouldShow/ackFinished/toggleTray + RunTrayRow/RunTrayRunRow/RunTray
+ * are exported there (test_11_ui_imports freezes plugin.js imports at the
+ * three SDK sources, so plugin.js may never import-reexport from this file).
+ * The shells below are kept as DESIGN DOCUMENTATION only: the contract
+ * tests/test_run_tray.mjs asserts, in shell shape. They throw on call so any
+ * accidental live use is loud, never silently divergent.
  */
 
 /**
