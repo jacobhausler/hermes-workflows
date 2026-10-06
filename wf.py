@@ -5641,10 +5641,24 @@ def main(run_id):
             # next generation.
             try: _sweep_orphans(meta, "stop")
             except Exception: pass      # never mask the stop verdict
-            try: (run / "stop.request").unlink()
-            except OSError: pass
+            # #152 T3 TOCTOU: publish the stop verdict BEFORE consuming the
+            # marker. The door's release refusal is
+            # `stop.request.exists() or run_state == "stopped"`; consuming
+            # (unlinking) the marker first opened a window where a release saw
+            # NEITHER proof — no marker, no run.stopped event — wrote the
+            # answer, and auto-respawned the run the owner had just stopped
+            # (ok/auto_resumed where a byte-identical refusal is test-locked;
+            # reproduced under CI suite load, clean-room alone: flake class).
+            # Append-then-unlink closes it: any release that reads the marker
+            # GONE necessarily sees run.stopped as the last event (the append
+            # is durable before the unlink), so it refuses. A SIGKILL between
+            # the two leaves the marker for the next admitted runner to
+            # re-consume — the duplicate-run.stopped shape is unchanged from
+            # the old kill-after-unlink window.
             log(run, "run.stopped")
             emit(f"WORKFLOW_STOPPED {run_id}")
+            try: (run / "stop.request").unlink()
+            except OSError: pass
             return "stopped"
         return None
 
