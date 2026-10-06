@@ -80,12 +80,12 @@ try:
     own = wf._seat_acquire(seats, "OWN", 4, 0.3)
     row = json.loads(own.read_text()) if own else {}
     check("an acquired ticket records the holder's boot identity (pid + start time)",
-          isinstance(row.get("pstart"), int) and row["pstart"] > 0, json.dumps(row))
+          isinstance(row.get("boottime"), int) and row["boottime"] > 0, json.dumps(row))
     if own:
         wf._seat_bind(own, kid.pid)
         row = json.loads(own.read_text())
         check("binding the child records the child's boot identity too",
-              isinstance(row.get("child_pstart"), int) and row["child_pstart"] > 0,
+              isinstance(row.get("child_boottime"), int) and row["child_boottime"] > 0,
               json.dumps(row))
         wf._seat_release(own)
 
@@ -94,7 +94,7 @@ try:
     # pids were recycled. The identity primitive disproves the seat: pruned,
     # capacity freed (a reused pid must never hold a seat forever).
     (seats / "reused.json").write_text(json.dumps(
-        {"pid": kid.pid, "child": kid.pid, "pstart": 1, "child_pstart": 1,
+        {"pid": kid.pid, "child": kid.pid, "boottime": 1, "child_boottime": 1,
          "name": "n", "ts": round(time.time(), 3)}))
     t = wf._seat_acquire(seats, "X", 1, 0.5)
     check("a ticket whose recorded boot identity contradicts the live pid (reuse) is "
@@ -112,7 +112,7 @@ try:
     check("heartbeat ts=0 (never stamped by a real observation) does NOT prove life",
           wf._proof_of_life(lp0, _P(os.getpid()), hb, set()) is False,
           "ts=0 synthetic heartbeat proved life")
-    hb.write_text(json.dumps({"pid": kid.pid, "ts": round(time.time(), 3), "pstart": 1}))
+    hb.write_text(json.dumps({"pid": kid.pid, "ts": round(time.time(), 3), "boottime": 1}))
     check("heartbeat whose recorded boot identity contradicts the live pid (reuse) "
           "does NOT prove life", wf._proof_of_life(lp0, _P(os.getpid()), hb, set()) is False,
           "recycled-pid heartbeat proved life")
