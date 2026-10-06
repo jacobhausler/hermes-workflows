@@ -2870,7 +2870,7 @@ def _prove_run_dir(r):
     crash). Then VERIFY the dir still exists under the resolved durable root —
     the stub-door postmortem shape is a run_id whose dir is not under the root
     the estate census walks. Any failure raises RuntimeError naming the ATTEMPTED
-    PATH (loud, per the bead: never a phantom run_id). handle() turns the raise
+    PATH (loud, per the postmortem ticket: never a phantom run_id). handle() turns the raise
     into the tool's error payload; act_run callers inside the plugin never see a
     half-proved run advertised as launched.
     """
