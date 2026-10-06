@@ -42,18 +42,19 @@ import os
 import re
 import sqlite3
 import sys
+import threading
 from pathlib import Path
 
 REPLAY_TOOLS = ("write_file", "patch")
 
 # ---------- est-ujtf: ONE live-plugin resolver (respawn must never boot an archive) ----------
-# The incident (run 20261006-041852-fb-fix-fb609): s6-svscan (ppid 1) respawned the
-# runner 07:27:11Z from `plugins/hermes-workflows.old-1.1.2-9073584/wf.py` — an
-# archived pre-update copy — instead of the live plugin. A discovery path that
-# globs the plugins root for wf.py can land on the archive and silently boot a
-# stale engine. Law: the exact-name dir (plain or symlink) carrying wf.py is the
-# ONLY answer; a `*.old-*` sibling is never a match; a missing/broken live dir
-# REFUSES with a message naming every archive it is refusing.
+# Law: the exact-name dir (plain or symlink) carrying wf.py is the ONLY answer;
+# a `*.old-*` sibling is never a discovery match; a missing/broken live dir
+# REFUSES with a message naming every archive it is refusing. Canonical
+# symlink policy: an exact-name symlink is an operator-owned pointer and IS
+# followed even if its target is an .old-* dir (refusing it would remove the
+# only sanctioned symlink-deploy channel); what this refuses is DISCOVERY
+# choosing an archive, which is why archives are never globbed, only named.
 PLUGIN_NAME = "hermes-workflows"
 
 
@@ -92,14 +93,23 @@ def resolve_plugin_dir(plugins_root=None):
 
 
 # ---------- est-2ek.1.718: crashed-no-exit watchdog (respawn on sight, once) ----------
-# The incident: runner crashed mid-fanout; the run sat interrupted / runner_live=false
-# for 20+ min until a manual wait respawned it. The crashed-no-exit signature
-# (dead pid + absent runner_exit.json + unfinished node claims) is unambiguous:
-# the watchdog respawns WITHOUT waiting for an owner wait call — exactly once per
-# run fingerprint (guard file) — and appends one `runner_respawn` event as receipt.
-# A VALID recorded exit is a verdict, never a crash; a held flock is alive, period
-# (the ONE liveness law, wfcommon.runner_alive's first clause, mirrored here so
-# this module stays stdlib-only when wfcommon is unimportable).
+# The crashed-no-exit signature (dead pid + absent runner_exit.json + unfinished
+# node claims) is unambiguous: the watchdog respawns WITHOUT waiting for an owner
+# wait call — exactly once per run fingerprint (guard file) — and appends one
+# `runner_respawn` event as receipt. A VALID recorded exit is a verdict, never a
+# crash. Three hard laws (zap review on #237):
+#   * RECEIPT ON CONFIRMED SPAWN ONLY: the door's act_wait answer is propagated —
+#     an error / unproven liveness writes NO receipt and NO guard, so retries
+#     stay open. Confirmation reads the ONE liveness law back (HELD flock =>
+#     live, else /proc pid identity); a spawn is never trusted by receipt alone.
+#   * SERIALIZED ADMISSION: an exclusive flock is held across guard-check +
+#     spawn + receipt + guard write; atomic replace alone is not exactly-once.
+#   * THE ONE VALIDITY RULE: when wfcommon is importable, unfinished work is
+#     read through wfcommon.node_rec (stale efp after an amend == pending,
+#     cancelled == pending), and for fan-out nodes the AGGREGATE record is the
+#     commit — committed item records never mask a missing aggregate. The
+#     raw-status stdlib branch is the documented WEAKER fallback for when
+#     wfcommon is unimportable.
 
 def _jload(p):
     try:
@@ -173,67 +183,133 @@ def crashed_no_exit_signature(r):
     nodes = graph.get("nodes")
     if not isinstance(nodes, list) or not nodes:
         return False
+    wc = _wfcommon()
+    byid = {n["id"]: n for n in nodes
+            if isinstance(n, dict) and isinstance(n.get("id"), str)}
     for n in nodes:
         nid = n.get("id") if isinstance(n, dict) else None
-        if not nid:
+        if not nid or nid not in byid:
             continue
-        recs = [r / "nodes" / f"{nid}.json"]
-        if isinstance(n.get("fanout"), dict):
-            recs.extend(sorted((r / "nodes").glob(f"{nid}.[0-9]*.json")))
-        claimed = False
-        for p in recs:
-            rc = _jload(p)
-            if isinstance(rc, dict) and rc.get("status") == "running":
-                return True              # falsely-claimed child = unfinished work
-            if isinstance(rc, dict) and rc.get("status") in ("done", "partial", "failed"):
-                claimed = True
-        if not claimed:
-            return True                  # node with no committed record = pending
+        node = byid[nid]
+        agg = _jload(r / "nodes" / f"{nid}.json")
+        if isinstance(agg, dict) and agg.get("status") == "running":
+            return True                  # falsely-claimed child = unfinished work
+        if isinstance(agg, dict) and agg.get("status") in ("done", "partial", "failed",
+                                                           "skipped"):
+            if wc is not None and "efp" in agg:
+                # THE ONE validity rule: stale (efp mismatch after an amend) ==
+                # pending — a pre-amend commit must never hide re-driven work.
+                st, _rec = wc.node_rec(r, node, byid)
+                if st == "pending":
+                    return True
+            continue                     # the AGGREGATE record is the commit
+        return True                      # no aggregate commit = pending (items don't count)
     return False
+
+
+def _load_door(plugin):
+    """Import the door module from the LIVE plugin dir (test seam: monkeypatch
+    THIS, not the importlib mechanics)."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("wfdoor_watchdog",
+                                                  str(Path(plugin) / "__init__.py"))
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    return m
+
+
+def _spawn_confirmed(r, waited):
+    """Confirmation of a production revive: the door answered WITHOUT an error
+    key AND the ONE liveness law reads a runner live (HELD flock => live, else
+    the wf.pid /proc identity). Never trust a receipt the door never proved."""
+    if isinstance(waited, dict) and waited.get("error"):
+        return False
+    if _flock_held(r):
+        return True
+    try:
+        pid = int((Path(r) / "wf.pid").read_text().strip())
+    except (OSError, ValueError):
+        return False
+    return _pid_is_our_runner(pid, r)
+
+
+class _admission:
+    """SERIALIZED ADMISSION (blocker 4): exclusive flock on <run>/respawn.admission
+    held across guard-check + spawn + receipt + guard write. An atomic replace is
+    not exactly-once; two concurrent callers must serialize here or both spawn."""
+
+    def __init__(self, r):
+        self.path = Path(r) / "respawn.admission"
+        self.fd = None
+
+    def __enter__(self):
+        import fcntl
+        self.fd = os.open(str(self.path), os.O_RDWR | os.O_CREAT)
+        fcntl.flock(self.fd, fcntl.LOCK_EX)
+        return self
+
+    def __exit__(self, *exc):
+        import fcntl
+        try:
+            fcntl.flock(self.fd, fcntl.LOCK_UN)
+        finally:
+            os.close(self.fd)
+        return False
 
 
 def recover_crashed_runner(r, spawn=None):
     """Watchdog entry: on the crashed-no-exit signature, respawn the runner
-    ONCE per run fingerprint and append one `runner_respawn` receipt. `spawn`
-    is injectable for tests; the production default revives in-place through
-    the door at the LIVE plugin dir (resolve_plugin_dir — so a respawn can
-    never boot an .old-* archive). Returns {respawned, reason/prev_pid/fp}."""
+    ONCE per run fingerprint and append one `runner_respawn` receipt — only on
+    a CONFIRMED spawn (blocker 1: an unconfirmed revive writes no receipt and
+    no guard, so later attempts may retry). Admission is serialized by flock
+    (blocker 4). `spawn` is injectable for tests (truthy return = confirmed
+    spawn, falsy = nothing spawned); the production default revives in-place
+    through the door at the LIVE plugin dir (resolve_plugin_dir — so a respawn
+    can never boot an .old-* archive) and confirms via _spawn_confirmed.
+    Returns {respawned, reason/prev_pid/fp}."""
     r = Path(r)
     fp = _run_fingerprint(r)
     guard = r / "respawn_guard.json"
-    g = _jload(guard)
-    if isinstance(g, dict) and g.get("fp") == fp:
-        return {"respawned": False,
-                "reason": f"guard: signature already respawned once for fp={fp}"}
-    if not crashed_no_exit_signature(r):
-        return {"respawned": False, "reason": "no crashed-no-exit signature"}
-    try:
-        prev_pid = int((r / "wf.pid").read_text().strip())
-    except (OSError, ValueError):
-        prev_pid = None
-    if spawn is None:
-        def _production_revive(run):                 # revive in-place via the door
-            plugin = resolve_plugin_dir()            # est-ujtf law: LIVE copy only
-            import importlib.util
-            spec = importlib.util.spec_from_file_location(
-                "wfdoor_watchdog", str(plugin / "__init__.py"))
-            m = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(m)
-            m.act_wait({"run_id": Path(run).name, "timeout": 1})
-            return None
-        spawn = _production_revive
-    pid = spawn(r)
-    from datetime import datetime, timezone
-    ts = datetime.now(timezone.utc).isoformat(timespec="seconds")
-    with open(r / "events.jsonl", "a") as f:
-        f.write(json.dumps({"ts": ts, "event": "runner_respawn", "prev_pid": prev_pid,
-                            "fp": fp, "by": "lane_recover.watchdog"},
-                           ensure_ascii=False) + "\n")
-    tmp = guard.with_name(f"respawn_guard.json.{os.getpid()}.tmp")
-    tmp.write_text(json.dumps({"fp": fp, "at": ts, "prev_pid": prev_pid,
-                               "spawned_pid": pid}) + "\n", encoding="utf-8")
-    os.replace(tmp, guard)
-    return {"respawned": True, "prev_pid": prev_pid, "fp": fp, "spawned_pid": pid}
+    with _admission(r):
+        g = _jload(guard)
+        if isinstance(g, dict) and g.get("fp") == fp:
+            return {"respawned": False,
+                    "reason": f"guard: signature already respawned once for fp={fp}"}
+        if not crashed_no_exit_signature(r):
+            return {"respawned": False, "reason": "no crashed-no-exit signature"}
+        try:
+            prev_pid = int((r / "wf.pid").read_text().strip())
+        except (OSError, ValueError):
+            prev_pid = None
+        if spawn is None:
+            def _production_revive(run):             # revive in-place via the door
+                plugin = resolve_plugin_dir()        # est-ujtf law: LIVE copy only
+                waited = _load_door(plugin).act_wait({"run_id": Path(run).name,
+                                                      "timeout": 1})
+                if not _spawn_confirmed(run, waited):
+                    return None                      # door error / no proved liveness
+                try:                                 # the respawned runner's own pid
+                    return int((Path(run) / "wf.pid").read_text().strip())
+                except (OSError, ValueError):
+                    return waited
+            spawn = _production_revive
+        handle = spawn(r)
+        if not handle:
+            return {"respawned": False, "prev_pid": prev_pid, "fp": fp,
+                    "reason": "spawn unconfirmed (door error or liveness not proved) "
+                              "— no receipt written; retries stay open"}
+        from datetime import datetime, timezone
+        ts = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        with open(r / "events.jsonl", "a") as f:
+            f.write(json.dumps({"ts": ts, "event": "runner_respawn", "prev_pid": prev_pid,
+                                "fp": fp, "by": "lane_recover.watchdog"},
+                               ensure_ascii=False) + "\n")
+        tmp = guard.with_name(
+            f"respawn_guard.json.{os.getpid()}.{threading.get_ident()}.tmp")
+        tmp.write_text(json.dumps({"fp": fp, "at": ts, "prev_pid": prev_pid,
+                                   "spawned_pid": handle}) + "\n", encoding="utf-8")
+        os.replace(tmp, guard)
+        return {"respawned": True, "prev_pid": prev_pid, "fp": fp, "spawned_pid": handle}
 
 
 class Bail(Exception):

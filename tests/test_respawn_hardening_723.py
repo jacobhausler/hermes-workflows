@@ -19,6 +19,11 @@ zap ran through the real door:
   F5 (production revive): the door's act_wait return is propagated (error ->
      no receipt), and liveness confirmation reads the runner lock / /proc.
 
+Injectable `spawn` contract: a truthy return means the spawn is CONFIRMED, a
+falsy return means nothing spawned (no receipt, no guard, retries stay open).
+The production revive path is tested by monkeypatching the module's _load_door
+seam (the door import).
+
 Plain script, no pytest: exits non-zero on the first red.
 """
 import importlib.util
@@ -180,11 +185,12 @@ def main():
         spawns_lock = threading.Lock()
 
         def slow_spawn(rd):
+            # hold the spawn window wide so a check-then-spawn race window is real
             with spawns_lock:
                 spawns4.append(rd)
             import time
             time.sleep(0.4)
-            return "spawned"
+            return "spawned"                     # truthy = confirmed spawn
 
         threads = [threading.Thread(target=lambda: recover(r4, spawn=slow_spawn))
                    for _ in range(2)]
@@ -208,14 +214,21 @@ def main():
               isinstance(res5, dict) and not res5.get("respawned")
               and not respawn_events(r5) and not (r5 / "respawn_guard.json").exists(),
               res5)
-        # confirmed revive: the respawned runner is live — the ONE liveness law:
-        # HELD flock => live (authoritative half of the confirmation).
+        # confirmed revive: the fake door "spawns" by taking runner.lock inside
+        # act_wait, exactly as a live runner does — the ONE liveness law then
+        # reads HELD => live at confirmation time (the scene was dead before
+        # the door call, so the signature still fires).
         import fcntl
-        hold = os.open(str(r5 / "runner.lock"), os.O_RDWR | os.O_CREAT)
-        fcntl.flock(hold, fcntl.LOCK_EX)
+        holder = {}
+
+        def ok_spawn_and_wait(a):
+            fd = os.open(str(r5 / "runner.lock"), os.O_RDWR | os.O_CREAT)
+            fcntl.flock(fd, fcntl.LOCK_EX)
+            holder["fd"] = fd
+            return {"status": "running", "runner_live": True}
+
         try:
-            fake_ok = types.SimpleNamespace(
-                act_wait=lambda a: {"status": "running", "runner_live": True})
+            fake_ok = types.SimpleNamespace(act_wait=ok_spawn_and_wait)
             lr._load_door = lambda plugin: fake_ok
             res6 = recover(r5)
             check("F5: door success + live runner -> respawned, receipt + guard",
@@ -224,8 +237,9 @@ def main():
                   and (r5 / "respawn_guard.json").exists(),
                   (res6, respawn_events(r5)))
         finally:
-            fcntl.flock(hold, fcntl.LOCK_UN)
-            os.close(hold)
+            if holder.get("fd") is not None:
+                fcntl.flock(holder["fd"], fcntl.LOCK_UN)
+                os.close(holder["fd"])
 
     print(("ALL PASS" if not FAILS else f"FAILED: {FAILS}"))
     sys.exit(1 if FAILS else 0)
