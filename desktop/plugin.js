@@ -960,11 +960,40 @@ export function trayRunModel(runs) {
   return { rows: [...held, ...rest].map(r => ({ id: r.id, status: runStatusOf(r), run: r })) }
 }
 
-/** Pure visibility rule: zero rows (an empty ledger, a null ledger, or a
- *  ledger of ONLY terminal runs — they all produce zero rows) hides the tray
- *  entirely: the collapsed row renders nothing. */
+/** The live set as a PLAIN run array (#230 spec): the running-only ledger
+ *  (status ∉ TERMINAL) in THE SAME comparator as splitRuns — held first,
+ *  then the rest by started desc, uncapped. Terminal runs leave outright
+ *  (no ack-away ledger, no 60 s recap window — the tray never renders one). */
+export function trayLiveModel(runs) {
+  return trayRunModel(runs).rows.map(r => r.run)
+}
+
+/** Pictured density label (#230): the collapsed row's whole glance is
+ *  `N running workflows` over the LIVE set — numeral + words, never a
+ *  fabricated count (empty ledger reads '0 running workflows'). Pure. */
+export function trayRunningLabel(runs) {
+  const count = trayLiveModel(runs).length
+  return { count, line: `${count} running workflows` }
+}
+
+/** Pure chevron transition (item 2): given the current glyph or the
+ *  expanded flag, answer the OTHER state's glyph. ▾ collapsed, ▴ expanded. */
+export function flipChevron(current) {
+  if (current === '▴') return '▾'
+  if (current === '▾') return '▴'
+  return current ? '▴' : '▾'
+}
+
+/** Pure visibility rule: zero rows (an empty ledger, a null ledger, a bare
+ *  {rows:[]} model, or a ledger of ONLY terminal runs — they all produce
+ *  zero rows) hides the tray entirely: the collapsed row renders nothing.
+ *  Accepts the trayRunModel model OR a plain live-set array (the
+ *  trayLiveModel shape) — both are zero when nothing lives. An optional
+ *  wall-clock arg exists for API parity with the retired #22 recap model;
+ *  #230 ignores it: terminal runs leave AT ONCE, there is no 60 s window. */
 export function trayShouldShow(model) {
-  return !!((model && model.rows) || []).length
+  const rows = Array.isArray(model) ? model : ((model && model.rows) || [])
+  return !!rows.length
 }
 
 /** Pure tray/accordion transition table (exported so node can drive it
