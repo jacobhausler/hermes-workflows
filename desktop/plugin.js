@@ -968,9 +968,6 @@ export function trayLiveModel(runs) {
   return trayRunModel(runs).rows.map(r => r.run)
 }
 
-/** Pictured density label (#230): the collapsed row's whole glance is
- *  `N running workflows` over the LIVE set — numeral + words, never a
- *  fabricated count (empty ledger reads '0 running workflows'). Pure. */
 export function trayRunningLabel(runs) {
   const count = trayLiveModel(runs).length
   return { count, line: `${count} running workflows` }
@@ -1017,8 +1014,14 @@ export function toggleTray(state, runId) {
  *  forked palette. Click / Enter / Space expands (the row click also clears
  *  the accordion row via the owner's handler). `count` is ALWAYS the
  *  running-only count — terminal runs are already out of the model. */
-export function RunTrayRow({ count, expanded, onExpand }) {
-  const n = Number.isFinite(count) && count > 0 ? Math.trunc(count) : 0
+export function RunTrayRow({ runs, count, expanded, onExpand }) {
+  // #230 spec shape: pass the scoped ledger via `runs` and the row computes
+  // its own count over the live set (never fabricates: empty reads 0). The
+  // legacy {count} call shape stays accepted (test_run_tray precedent).
+  const n = runs !== undefined ? trayRunningLabel(runs).count
+    : (Number.isFinite(count) && count > 0 ? Math.trunc(count) : 0)
+  // Chevron is the PURE transition fn's answer for the current state.
+  const chev = flipChevron(!!expanded)
   return jsxs('div', {
     role: 'button',
     tabIndex: 0,
@@ -1040,7 +1043,7 @@ export function RunTrayRow({ count, expanded, onExpand }) {
       jsx('span', {
         'aria-hidden': true,
         style: { color: 'var(--ui-text-tertiary)' },
-        children: expanded ? '▴' : '▾'
+        children: chev
       }, 'chev'),
       jsx('span', {
         style: { fontVariantNumeric: 'tabular-nums' },
@@ -1051,10 +1054,15 @@ export function RunTrayRow({ count, expanded, onExpand }) {
 }
 
 function trayElapsed(r) {
+  // Wall-clock elapsed since the run started (useTick re-renders the live
+  // tray every second, so the figure ages honestly; 'updated' is a node
+  // commit time, not "now" — a held run's elapsed must keep counting).
   const start = parseTime(r.started)
-  const end = parseTime(r.updated)
-  return start && end > start ? fmtDur(end - start) : ''
+  return start ? fmtDur(Math.max(0, Date.now() - start)) : ''
 }
+
+const trayBarPct = r => (r?.nodes_done != null && r?.nodes_total != null && r.nodes_total > 0)
+  ? `${Math.floor((r.nodes_done / r.nodes_total) * 100)}%` : '0%'
 
 /** Per-run chip (design row anatomy). lane_key and token totals have NO
  *  read-model surface today (the door's lane ledger and per-run token rollup
@@ -1073,6 +1081,9 @@ export function RunTrayRunRow({ run, open, onToggleRow, onOpenPane }) {
   const ti = r.tokens_in, to = r.tokens_out
   const gate = r.status === 'held' && r.held_gate ? r.held_gate : null
   // div (never <button>): GateActions carries SDK Buttons (F6 law).
+  // Key 'rr-<id>' rides the ROOT div (the RunTray call-site keys the
+  // component element 'rrc-<id>'): the acceptance spec locates the clickable
+  // thick row by key and calls its onClick directly.
   return jsxs('div', {
     style: {
       display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.6875rem',
@@ -1088,7 +1099,12 @@ export function RunTrayRunRow({ run, open, onToggleRow, onOpenPane }) {
       r.lane_key ? jsx('span', { style: { opacity: 0.7 }, children: r.lane_key }, 'lane') : null,
       // Node dots are MiniGraph's visual language at row density; the x/y
       // count rides the read model's counts, '?' when absent — never 0/N.
+      // The mini bar (key 'bar') beside it SPEAKS the ratio as its width.
       jsx('span', { style: { fontVariantNumeric: 'tabular-nums', opacity: 0.8 }, children: pillProgress(r) }, 'xy'),
+      jsx('span', {
+        'aria-hidden': true,
+        style: { width: trayBarPct(r), minWidth: 24, height: 4, borderRadius: 2, background: tone.color, opacity: 0.6 }
+      }, 'bar'),
       current ? jsx('span', { style: { opacity: 0.7 }, children: `→ ${current}` }, 'current') : null,
       trayElapsed(r) ? jsx('span', { style: { opacity: 0.6 }, children: trayElapsed(r) }, 'elapsed') : null,
       (ti != null || to != null)
@@ -1107,7 +1123,7 @@ export function RunTrayRunRow({ run, open, onToggleRow, onOpenPane }) {
         children: 'open ↗'
       }, 'open')
     ]
-  }, r.id)
+  }, `rr-${r.id}`)
 }
 
 /** Accordion body: the SHARED MiniGraph (#28 visual language, same
@@ -1136,7 +1152,11 @@ function TrayPanel({ runId }) {
  *  ride SessionStrip's wiring (Esc onKeyDown, click-away via trayRef); row
  *  handlers stopPropagation so tray clicks never look like click-away. */
 export function RunTray({ runs, sid, trayOpen, trayRef, onToggleHeader, onToggleRow, onOpenPane }) {
-  const scoped = trayScoping(runs, sid)
+  // sid blank = the mount owner pre-scoped under the focus-degraded law
+  // (SessionStrip): trust the given live set (running-only still applies).
+  const scoped = sid
+    ? trayScoping(runs, sid)
+    : (runs || []).filter(r => r && !TERMINAL.has(runStatusOf(r)))
   const model = trayRunModel(scoped)
   const show = trayShouldShow(model)
   useTick(show)
@@ -1150,7 +1170,7 @@ export function RunTray({ runs, sid, trayOpen, trayRef, onToggleHeader, onToggle
     style: { display: 'flex', flexDirection: 'column', gap: 2 },
     children: [
       jsx(RunTrayRow, {
-        count: model.rows.length,
+        runs: scoped,
         expanded: !!(trayOpen && trayOpen.expanded),
         onExpand: () => onToggleHeader?.()
       }, 'row'),
@@ -1163,7 +1183,7 @@ export function RunTray({ runs, sid, trayOpen, trayRef, onToggleHeader, onToggle
                 jsx(RunTrayRunRow, {
                   run: r.run, open: openRun === r.id,
                   onToggleRow, onOpenPane
-                }, `rr-${r.id}`),
+                }, `rrc-${r.id}`),
                 openRun === r.id ? jsx(TrayPanel, { runId: r.id }, `tp-${r.id}`) : null
               ])
             })
@@ -1189,8 +1209,21 @@ export function SessionStrip() {
   const foldOpen = useValue($stripFold)
   const railOpen = useValue($railOpen)
   const trayState = useValue($trayOpen)
-  const owned = ownedRuns(data?.runs || [], runtimeSid || '', storedSid || '')
-  const pairKey = runtimeSid || storedSid || ''
+  const owned0 = ownedRuns(data?.runs || [], runtimeSid || '', storedSid || '')
+  // #230 focus-degradation law: the tray accumulates by the run's OWN
+  // ownership stamp. On packaged apps / SDK shapes where neither focused-chat
+  // atom answers (both read null/blank) an owned live run would render
+  // nothing forever — fall back to the first LIVE run's own
+  // owner.session_id so the pictured density still ships. Honest absence is
+  // preserved: a blank ledger, an all-terminal ledger, or blank-owner
+  // (cron) runs still derive nothing and the strip stays hidden.
+  const degradedSid = runtimeSid || storedSid ? ''
+    : ((data?.runs || []).find(r => r && !TERMINAL.has(runStatusOf(r)) && r?.owner?.session_id)
+        ?.owner?.session_id || '')
+  const owned = (owned0.length || !degradedSid)
+    ? owned0
+    : ownedRuns(data?.runs || [], degradedSid, '')
+  const pairKey = runtimeSid || storedSid || degradedSid
   const expanded = railOpen && railOpen.sid === pairKey ? railOpen.runId : null
   const trayExpanded = !!(trayState && trayState.expanded)
   const railRef = useRef(null)

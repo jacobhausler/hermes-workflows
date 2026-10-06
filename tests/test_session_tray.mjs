@@ -254,8 +254,18 @@ assert.match(src, /\$trayOpen\.set\(null\) \}, \[pairKey\]/,
   'sid-change collapses the tray (in-memory atom reset on pairKey change)')
 assert.match(src, /window\.addEventListener\('click', onDocClick\)/,
   'click-away rides the single window-level listener (no DOM-node listeners)')
-assert.match(src, /register\(\{ id: 'session-strip', area: COMPOSER_AREAS\.underside \?\? COMPOSER_AREAS\.top/,
+// #230 spec 5 (feature-detect idiom, corrected on harvest): the issue body's
+// item 6 demands the strip "rides the real tray area when core exposes it —
+// same feature-detect idiom as COMPOSER_AREAS.underside ?? COMPOSER_AREAS.top",
+// so the single-mount chain is tray ?? underside ?? top (test_register_surface
+// 1b′ locks the tray head at the registration site). The harvested literal
+// `underside ?? top` regex contradicted the issue body and the merged item-0
+// test — widened to the real feature-detected mount: the inline ?? chain OR
+// the sessionStripArea helper that carries it.
+assert.match(src, /register\(\{[^}]*id: 'session-strip'[^}]*area: (sessionStripArea\(COMPOSER_AREAS\)|COMPOSER_AREAS\.underside \?\? COMPOSER_AREAS\.top)/,
   'the tray rides the feature-detected composer mount (no duplicate surface — spec 5)')
+assert.match(src, /composerAreas\?\.tray \?\? composerAreas\?\.underside \?\? composerAreas\?\.top/,
+  'the feature-detect chain carries the tray head — rides the real tray area when core exposes it (#230 item 6)')
 
 // -- 8. the runtray.mjs mirror grows REAL bodies (item 6) ---------------------------
 {
