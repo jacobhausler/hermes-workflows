@@ -57,6 +57,10 @@ shutil.rmtree(HOME, ignore_errors=True)
 HOME.mkdir(parents=True)
 RUNS = HOME / "workflows"
 RUNS.mkdir()
+# #71 harness law (same as asks166): the in-process door resolves runs through the
+# ONE resolver — pin WF_RUNS_ROOT to the scratch root so act_status reads the very
+# dir the runner wrote (assertions unchanged; 166 arms through the same door).
+os.environ["WF_RUNS_ROOT"] = str(RUNS)
 
 # ---- (1) RED: harvested partial with a declared Remaining block ----
 r = mk("asks165-rem", [{"id": "close", "type": "agent",

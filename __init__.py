@@ -2887,6 +2887,12 @@ def act_status(args):
     _inotes = jload(r / "run.json", {}) or {}
     if _inotes.get("include_notes"):
         out["include_notes"] = _inotes["include_notes"]
+    # est-2ek.1.166: a run armed with requires_plugin reports the arming door's
+    # plugin_version back on every status read — a stale seat is visible WITHOUT
+    # opening a run dir (derive-only: the bytes are the stamp this run.json
+    # already carries; an armed-less run never gains the key).
+    if _inotes.get("plugin_version"):
+        out["plugin_version"] = _inotes["plugin_version"]
     # Tier self-report (2026-09-24): a failed child's core -Q turn report carried
     # its typed verdict key ("typed") or not ("untyped"); absent = never noted.
     tier_rec = jload(r / "turn_report.tier")
@@ -2957,6 +2963,12 @@ def act_status(args):
             if v["status"] == "partial":
                 out["nodes"][nid]["error"] = rec.get("error")
                 out["nodes"][nid]["harvest"] = rec.get("harvest")
+                # est-2ek.1.165: the harvest's DECLARED unfinished tail rides
+                # verbatim — structured steps the scheduler/read model ride,
+                # never prose (passthrough through the ONE node-truth read;
+                # honest absence: a record without the key gains no key here).
+                if "remaining" in rec:
+                    out["nodes"][nid]["remaining"] = rec.get("remaining")
         elif rec and v["status"] == "failed":
             out["nodes"][nid]["error"] = rec.get("error")
             out["nodes"][nid]["output"] = rec.get("output") if show_out else _output_pointer(rec)
