@@ -2,11 +2,11 @@
 
 ## 1.3.1 — 2026-10-07
 
-Patch line, 43 commits since v1.3.0 (merge order #214 → #215 → #218 → #217 → #219
+Patch line, 45 commits since v1.3.0 (merge order #214 → #215 → #218 → #217 → #219
 → #220 → #223 → #221 → #216 → #213 → #226 → #225 → #228 → #229 → #79 → #166 → #177
 → #180 → #232 → #236 → #240 → #242 → #247 → #165 → #234 → #244 → #246 → #250 → #249
 → #237 → #254 → #255 → #251 → #260 → #243 → #258 → #252 → #261 → #262 → #263 → #259
-→ #264 → #267): the respawn/SIGTERM-wave hardening batch (runner spawn detach,
+→ #264 → #267 → #265 → #266): the respawn/SIGTERM-wave hardening batch (runner spawn detach,
 liveness past buffered child, crashed-no-exit watchdog), the DIAGRAM LAW wave
 (diagrams derive from shipped graph bytes), the hermetic-suite contract sweep
 (isolated WF_RUNS_ROOT everywhere), asks 164–166, and the partial-rescue law.
@@ -23,16 +23,19 @@ Earlier merges since the tag, in brief:
 - fabcedf #221 — fix(door,runner): artifact-admission guard enforces 1:1 ledger-to-source mapping (#85, est-mmx0)
 - 836bd1e #216 — fix(door): sibling-root scan for status/wait with resolved_version (#58, est-fwdx)
 - 4cbcad3 #213 — fix(door,runner): gate answer never consumed by an un-honored resume + provenance-keyed duplicate-consumer gate (#152, est-pzuz)
+- 4d6233b #226 — chore(graph): refresh at 4cbcad3362d (est-t4w5, closes #224)
 - b161274 #225 — docs(events): event-driven wake pattern — push spine replaces cron polls
 - 141b555 #228 — test(dialect-33): courtesy node gate never holds the refuse verdict — tolerant across node minors (#227, est-exmo)
-- c648bfe #— — fix(door): status/wait fold child metrics through the routed channel (#79, est-6b65)
+- ac9bbb7 #229 — chore(graph): refresh at 141b5555d96 (est-t4w5, closes #224)
+- c648bfe #79 — fix(door): status/wait fold child metrics through the routed channel (est-6b65)
 - 0f17cf6 #166 — fix(runner,scrub): adopted-child malformed_turn class
-- d36760b #— — docs: close conformance gaps — SECURITY.md + issue templates (#177, est-rdjq)
-- d4e68b4 #— — docs: point at ratified joint-eng-protocol SSOT (1-line pointer) (#180, est-nztk)
+- d36760b #177 — docs: close conformance gaps — SECURITY.md + issue templates (est-rdjq)
+- d4e68b4 #180 — docs: point at ratified joint-eng-protocol SSOT (1-line pointer) (est-nztk)
 - 66857e8 #232 — DIAGRAM LAW v1: example diagrams derive from shipped graph bytes (diagrams half of owner split)
 - 8f6a92b #236 — DIAGRAM LAW PR-3: vendored archify + spelled-numeral ban (A3 closes) + QA receipts derive the gates column
 - fa9e900 #240 @atbrace — docs(diagrams): AUSTIN half — cards + derived candidates + receipted shots for 9 examples (PR-2 of owner split)
 - a1a1eec #242 — fix(diagrams): one shared walker — qa receipts can no longer pose as graphs
+- 2d024da #247 — chore(graph): refresh at a1a1eec
 - e68b3d5 #165 — fix(guards): actual-dispatch docs pin, inverse PR-tag audit, packaging pins
 - 045cf62 #234 — chore(receipts): drop stale peer-clean-run receipts
 - d41f004 #244 — fix: amend-preview def drift + b2b exit contract + bounded harvest scan
@@ -53,7 +56,8 @@ Earlier merges since the tag, in brief:
 - b413983 #259 — test(suite): pin every spawned-runner test to an isolated WF_RUNS_ROOT (est-2ek.1.762)
 - f2df20a #264 — test(7ps8): realpath dedupe, executed landing-rows accounting, suite temp cleanup
 - d58e9b2 #267 — test(proctree): wait for parseable pid markers, not mere existence (est-gzmm)
-
+- db26151 #265 — fix(runs): find_run resolves the listed VALID twin, not the torn first-root dir (est-t1kk)
+- 9fc82fe #266 — docs(test): trim routing narration from measured-zero docstring, fix provenance (est-2ek.1.797)
 
 Discipline / docs:
 - docs: #134 partial-rescue law (jam-g1, epic #40) — AGENTS.md 3d states the
