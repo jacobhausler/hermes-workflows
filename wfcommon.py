@@ -1287,6 +1287,16 @@ def validate_graph_errors(nodes):
                                                     "'<node_id>.<dotted.path>' string")
                     if fo.get("items") is not None and not isinstance(fo["items"], list):
                         E(nid, "fanout.items", "fanout.items must be a list")
+                    # est-wr0p (vacuous-replay class of est-077y): a baked literal
+                    # items:[] passed the door and replayed with ZERO children —
+                    # a vacuous pass, not a fan-out. The runtime fails it typed
+                    # fanout_empty; the door must refuse the shape at submit so
+                    # every consumer is safe, not just the QM admission gate.
+                    # items_from stays the dynamic path — its count is unknown
+                    # at admit and is never tripped here.
+                    if isinstance(fo.get("items"), list) and not fo["items"]:
+                        E(nid, "fanout.items",
+                          "fanout.items must be a non-empty literal or use items_from")
                     items = fo.get("items") if isinstance(fo.get("items"), list) else []
                     for i, it in enumerate(items):
                         if isinstance(it, dict) and "goal" in it and not (isinstance(it["goal"], str) and it["goal"].strip()):
