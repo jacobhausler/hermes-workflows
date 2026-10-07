@@ -30,8 +30,12 @@ from pathlib import Path
 BUILD = Path(os.environ.get("WF_TEST_BUILD") or Path(__file__).parent)
 ROOT = BUILD.parent
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(Path(__file__).parent / "fixtures"))
+from wf_spawn_isolation_762 import pin_env  # est-2ek.1.762 (shared launch-env pin helper)
 HOME = BUILD / "home_164"
-env = dict(os.environ, HERMES_HOME=str(HOME), FAKE_LOG=str(BUILD / "fake_164.log"))
+env = pin_env(dict(os.environ, HERMES_HOME=str(HOME),
+                   FAKE_LOG=str(BUILD / "fake_164.log")),
+              HOME / "workflows", home=HOME)
 FAKE = str(BUILD / "fake")
 
 fails = 0
