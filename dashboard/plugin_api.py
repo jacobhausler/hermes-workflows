@@ -128,7 +128,11 @@ def _view(r, full=False):
     if full:
         import time
         common = _workflow_common()
-        cm = common.child_metrics(st["run_id"])
+        # est-la8m: fold each node's children through its OWN child-DB home
+        # (wfcommon.run_child_metrics, the fb-904f seam the door uses) — a bare
+        # caller-home fold reads only the launcher's state.db and false-zeros
+        # every profile-routed child in the dashboard's full view (issue #81).
+        cm = common.run_child_metrics(r)
         nodes = {}
         for nid, v in st["nodes"].items():
             nodes[nid] = dict(v)
