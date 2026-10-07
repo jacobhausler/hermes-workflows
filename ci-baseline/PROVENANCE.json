@@ -1,0 +1,24 @@
+{
+  "captured_from": {
+    "workflow_run_id": 37624338057,
+    "job": "gates",
+    "step": "Serial suite",
+    "commit": "f0e6935e6",
+    "captured_at": "2026-10-07",
+    "totals": {
+      "cases": 232,
+      "red": 0
+    }
+  },
+  "rows_added_outside_ci": [
+    {
+      "test": "test_baseline_guard_9yl2.py",
+      "exit": 0,
+      "measured": "2026-10-07 local serial run of scripts/suite.py; the row can only ever make CI red, never green",
+      "supersede_by": "next green-CI refresh (replace with the CI-captured row)"
+    }
+  ],
+  "contract": "Green CI ledgers only (every exit == 0); rows not captured by CI are listed in rows_added_outside_ci with how they were measured. Refresh from the tip of main after each main move; see README.md.",
+  "bead": "est-9yl2",
+  "source_issue": 75
+}
