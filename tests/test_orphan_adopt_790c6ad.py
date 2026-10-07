@@ -43,7 +43,7 @@ def check(label, cond, detail=""):
     ok = ok and bool(cond)
 
 def env_for(fake_log):
-    e = env0 = dict(os.environ, HERMES_HOME=str(HOME), FAKE_LOG=str(fake_log),
+    e = env0 = dict(os.environ, HERMES_HOME=str(HOME), WF_RUNS_ROOT=str(RUNS), FAKE_LOG=str(fake_log),
                     PYTHONDONTWRITEBYTECODE="1")
     # the generic fake_hermes.py keys off FAKE_MODE/FAKE_* — an inherited value
     # would hijack our stub (which ignores them, but the runner env is shared):

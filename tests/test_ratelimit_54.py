@@ -28,6 +28,7 @@ BUILD = HERE.parent
 HOME = HERE / "home-rl54"
 RUNS = HOME / "workflows"
 os.environ["HERMES_HOME"] = str(HOME)
+os.environ["WF_RUNS_ROOT"] = str(Path(os.environ["HERMES_HOME"]) / "workflows")  # est-2ek.1.762 pin: HERMES_HOME alone is not a sandbox
 os.environ.pop("WF_RUNS_ROOT", None)   # hermetic: runs live under HOME/workflows
 sys.path.insert(0, str(BUILD))
 import wf  # noqa: E402
@@ -84,7 +85,7 @@ def mk(run_id, nodes, **meta):
     return r
 
 def run_rl(run_id, extra_env=None, timeout=120):
-    env = dict(os.environ, HERMES_HOME=str(HOME), FAKE_LOG=str(HOME / "fake.log"),
+    env = dict(os.environ, HERMES_HOME=str(HOME), WF_RUNS_ROOT=str(RUNS), FAKE_LOG=str(HOME / "fake.log"),
                FAKE_MODE="ratelimit")
     env.update(extra_env or {})
     env.pop("WF_RUNS_ROOT", None)
@@ -171,7 +172,7 @@ check("tight budget: verbatim give-up anyway (honest error either way)",
 (HOME / "fake.log").write_text("")
 r = mk("rl-transport", [{"id": "a", "type": "agent", "goal": "GO rl-transport"}],
        retry_backoff=[0.05, 0.05], retry_budget=6)
-env = dict(os.environ, HERMES_HOME=str(HOME), FAKE_LOG=str(HOME / "fake.log"),
+env = dict(os.environ, HERMES_HOME=str(HOME), WF_RUNS_ROOT=str(RUNS), FAKE_LOG=str(HOME / "fake.log"),
            FAKE_MODE="transport", FAKE_API_CALLS="0")
 env.pop("WF_RUNS_ROOT", None)
 subprocess.run([sys.executable, str(BUILD / "wf.py"), "run", "rl-transport"],

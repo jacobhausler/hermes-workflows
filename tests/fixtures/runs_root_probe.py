@@ -41,9 +41,12 @@ def _call_window(lines, i):
     return buf
 
 
+ROOT = Path(__file__).resolve().parents[2]
+
+
 def spawn_sites(src: str):
-    """1-based line numbers in `src` where a subprocess call spawns the
-    runner (`wf.py ... run ...`)."""
+    """1-based line numbers of each subprocess call that spawns the runner
+    (`wf.py ... run ...`)."""
     lines = src.splitlines()
     out = []
     for i, l in enumerate(lines):
@@ -54,20 +57,25 @@ def spawn_sites(src: str):
     return out
 
 
+_CODE_PIN = re.compile(
+    # real code pins, not docstring prose: quoted-key dict entries, item
+    # assignment, kwargs, or the shared helper calls.
+    r'"WF_RUNS_ROOT"\s*[=:\]]|\'WF_RUNS_ROOT\'[=:\]]|\bWF_RUNS_ROOT\s*='
+    r'|\bpin_env\(|\blaunch_env\(')
+
+
 def unpinned_spawn_files(root: Path | None = None):
     """tests/*.py that spawn `wf.py run` but carry no WF_RUNS_ROOT pin in
-    source (the (A)-leg audit, shared with test_suite_runs_root_762.py)."""
+    CODE (the (A)-leg audit, shared with test_suite_runs_root_762.py). The
+    pin must be code-level — a docstring that merely DISCUSSES WF_RUNS_ROOT
+    does not sandbox anyone (wake family #250 established this rule)."""
     root = Path(root) if root else ROOT
     offenders = []
     for p in sorted((root / "tests").glob("*.py")):
         src = p.read_text(encoding="utf-8", errors="replace")
-        sites = spawn_sites(src)
-        if not sites:
+        if not spawn_sites(src):
             continue
-        lines = src.splitlines()
-        pinned = any("WF_RUNS_ROOT" in "\n".join(lines[max(0, s - 12):s + 10])
-                     for s in sites)
-        if not pinned:
+        if not _CODE_PIN.search(src):
             offenders.append(str(p.relative_to(root)))
     return offenders
 

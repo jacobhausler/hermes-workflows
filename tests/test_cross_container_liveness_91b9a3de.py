@@ -22,6 +22,7 @@ if home.exists():
     shutil.rmtree(home)
 home.mkdir()
 os.environ["HERMES_HOME"] = str(home)
+os.environ["WF_RUNS_ROOT"] = str(Path(os.environ["HERMES_HOME"]) / "workflows")  # est-2ek.1.762 pin: HERMES_HOME alone is not a sandbox
 sys.path.insert(0, str(BUILD))
 import wfcommon  # noqa: E402
 
@@ -104,7 +105,7 @@ r5 = mkrun("xreal", seed_graph=True)
                                          "started": "2099-01-01T00:00:00+00:00"}))
 proc = subprocess.Popen([sys.executable, str(BUILD / "wf.py"), "run", "xreal"],
                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-                        env={**os.environ, "HERMES_HOME": str(home), "FAKE_LOG": "/dev/null"})
+                        env={**os.environ, "HERMES_HOME": str(home), "WF_RUNS_ROOT": str(runs), "FAKE_LOG": "/dev/null"})
 live_seen = dead_seen = False
 for _ in range(120):
     if wfcommon.runner_alive(r5):

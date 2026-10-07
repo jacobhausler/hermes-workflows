@@ -58,7 +58,7 @@ def run_graph(tmp, name, graph, safe_root):
     (run / "graph.json").write_text(json.dumps(graph))
     (run / "run.json").write_text(json.dumps({"hermes_bin": str(fake_bin), "concurrency": 4}))
     fake_log = tmp / (name + ".fake.log")
-    env = dict(os.environ, HERMES_HOME=str(home), FAKE_LOG=str(fake_log))
+    env = dict(os.environ, HERMES_HOME=str(home), WF_RUNS_ROOT=str(home / "workflows"), FAKE_LOG=str(fake_log))
     env.pop("HERMES_WRITE_SAFE_ROOT", None)
     if safe_root is not UNSET:
         env["HERMES_WRITE_SAFE_ROOT"] = safe_root

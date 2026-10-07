@@ -196,22 +196,27 @@ def _list_runs():
     # F1 #14: merge the legacy launch root the way the door's act_list does — a
     # pre-fix run opens by URL via _safe_run's find_run fallback and must also
     # appear in the list. Resolved root wins on id collision.
+    # est-2ek.1.762 census hygiene: enumerate through wfcommon.iter_run_dirs
+    # (unique by run-dir NAME across every scanned root — symlinked profile
+    # roots multiply hits), and report how many of the enumerated dirs were
+    # actually EXECUTED (logs present) so a zero-log fixture population is
+    # visible instead of silent.
     common = _workflow_common()
     roots = [_root()]
     legacy = common.launch_runs_root()
     if legacy != roots[0]:
         roots.append(legacy)
     runs, seen = [], set()
-    for root in roots:
-        if not root.exists():
-            continue
-        for r in common.iter_run_dirs(root, reverse=True):
-            v = _view(r)
-            if v and v["id"] not in seen:
-                seen.add(v["id"])
-                runs.append(v)
+    executed = 0
+    for r in common.iter_run_dirs(roots, reverse=True):
+        if common.run_executed(r):
+            executed += 1
+        v = _view(r)
+        if v and v["id"] not in seen:
+            seen.add(v["id"])
+            runs.append(v)
     return {**({"roots": [str(x) for x in roots]} if not runs else {}),
-            "runs": runs[:100], **_workflow_common().run_summary(runs)}
+            "runs": runs[:100], **common.run_summary(runs, executed=executed)}
 
 
 if router is not None:

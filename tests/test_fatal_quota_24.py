@@ -138,6 +138,7 @@ check("A2: a foreign home reads ITS config.yaml (target owns the aliases)",
     "model:\n  default: qwen38-next\n  aliases:\n    runneronly: openai/runner-1\n"
     "    sol: openai-codex/gpt-6-sol\n")   # the (c)/(d2) quota model must resolve
 os.environ["HERMES_HOME"] = str(HOME)      # hermes_home() now == HOME
+os.environ["WF_RUNS_ROOT"] = str(Path(os.environ["HERMES_HOME"]) / "workflows")  # est-2ek.1.762 pin: HERMES_HOME alone is not a sandbox
 os.environ["WF_RUNS_ROOT"] = str(HOME / "workflows")  # #71 shelf pin
 own = wfmod2._seat_alias_map(HOME)
 foreign = wfmod2._seat_alias_map(fh)

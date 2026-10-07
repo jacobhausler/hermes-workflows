@@ -428,16 +428,35 @@ def find_run(rid):
     return root / rid
 
 
-def iter_run_dirs(root, reverse=False):
-    """Every run dir under a runs root, sorted by name. Skips non-dirs and
+def iter_run_dirs(roots, reverse=False):
+    """Every run dir under one or more runs roots, unique by run-dir NAME.
+
+    Accepts a single root (str/Path) or a sequence of roots. Skips non-dirs and
     dot-dirs (<runs_root>/.seats is the global seat-ticket dir, est-g2xx — never
-    a run). The ONE enumeration every list/read-model/scan routes through."""
-    root = Path(root)
-    try:
-        entries = sorted(root.iterdir(), reverse=reverse)
-    except OSError:
-        return []
-    return [p for p in entries if not p.name.startswith(".") and p.is_dir()]
+    a run). Census hygiene (est-2ek.1.762): symlinked/profile-scoped roots
+    multiply hits — the same run appears under the resolved root, the legacy
+    launch root, and every profile home that mirrors it — so one run counts
+    once; first-seen wins, callers pass the resolved root first. The ONE
+    enumeration every list/read-model/scan routes through, never raw
+    `root.iterdir()`. Sorted by name (newest-first when reverse=True) within
+    each root, roots taken in order."""
+    if isinstance(roots, (str, Path)):
+        roots = [roots]
+    seen, out = set(), []
+    for root in roots:
+        try:
+            entries = sorted(Path(root).iterdir(), reverse=reverse)
+        except OSError:
+            continue
+        for r in entries:
+            try:
+                if r.name.startswith(".") or not r.is_dir() or r.name in seen:
+                    continue
+            except OSError:
+                continue
+            seen.add(r.name)
+            out.append(r)
+    return out
 
 
 def runs_root():
@@ -3464,12 +3483,29 @@ def _steer_state(r, nid):
         return None
     return {"queued": addressed, "baked": baked, "consumed": delivered}
 
-def run_summary(runs):
-    """Counts cover the complete census, even when a caller returns a recent page."""
+def run_executed(r):
+    """Was this run dir actually EXECUTED? A run that ever spawned work has
+    logs under <run>/logs; a zero-log dir is a fixture, not an executed run
+    (the 774-dir production leak was entirely zero-log fixtures — est-2ek.1.762
+    census). Read-only, never raises."""
+    try:
+        logs = r / "logs"
+        return logs.is_dir() and any(logs.iterdir())
+    except OSError:
+        return False
+
+
+def run_summary(runs, executed=None):
+    """Counts cover the complete census, even when a caller returns a recent page.
+    `executed` (est-2ek.1.762): when a listing tool supplies the logs-present
+    count, it rides inside `counts` as `executed` — total-minus-executed is the
+    fixture/stub population. Absent stays absent (v1.0.15 key set untouched)."""
     counts = {"running": 0}
     for run in runs:
         status = run["status"]
         counts[status] = counts.get(status, 0) + 1
+    if executed is not None:
+        counts["executed"] = executed
     return {"total": len(runs), "counts": counts}
 
 # ---------- amend preview (the replay-skip law the runner applies, computed ahead) ----------

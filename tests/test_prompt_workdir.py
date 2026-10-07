@@ -72,7 +72,7 @@ def mk_run(home, name, graph, fake_bin):
 
 
 def step(home, run_id, cwd, fake_log, expected="WORKFLOW_DONE"):
-    env = dict(os.environ, HERMES_HOME=str(home), FAKE_LOG=str(fake_log))
+    env = dict(os.environ, HERMES_HOME=str(home), WF_RUNS_ROOT=str(home / "workflows"), FAKE_LOG=str(fake_log))
     p = subprocess.run([sys.executable, str(ROOT / "wf.py"), "run", run_id],
                        env=env, text=True, capture_output=True, timeout=90, cwd=str(cwd))
     out = p.stdout + p.stderr
@@ -152,7 +152,7 @@ def main():
         graph = {"name": "a4", "nodes": [{"id": "n1", "type": "agent", "goal": "PRINTCWD"}]}
         run = mk_run(home, "a4", graph, fake_bin)
         fake_log = tmp / "fake.log"
-        env = dict(os.environ, HERMES_HOME=str(home), FAKE_LOG=str(fake_log))
+        env = dict(os.environ, HERMES_HOME=str(home), WF_RUNS_ROOT=str(home / "workflows"), FAKE_LOG=str(fake_log))
         proc = subprocess.Popen([sys.executable, str(install / "wf.py"), "run", run.name],
                                 env=env, text=True, stdout=subprocess.PIPE,
                                 stderr=subprocess.STDOUT, cwd=str(install))

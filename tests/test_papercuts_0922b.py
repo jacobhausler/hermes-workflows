@@ -13,8 +13,9 @@ BUILD = Path(os.environ.get("WF_TEST_BUILD") or Path(__file__).parent)
 sys.path.insert(0, str(BUILD.parent))
 HOME = BUILD / "home6"
 os.environ["HERMES_HOME"] = str(HOME)  # door's run_dir()/act_wait() resolve home in-process
+os.environ["WF_RUNS_ROOT"] = str(Path(os.environ["HERMES_HOME"]) / "workflows")  # est-2ek.1.762 pin: HERMES_HOME alone is not a sandbox
 RUNS = HOME / "workflows"
-env = dict(os.environ, HERMES_HOME=str(HOME), FAKE_LOG=str(BUILD / "fake6.log"))
+env = dict(os.environ, HERMES_HOME=str(HOME), WF_RUNS_ROOT=str(RUNS), FAKE_LOG=str(BUILD / "fake6.log"))
 FAKE = str(BUILD / "fake")
 
 fails = 0

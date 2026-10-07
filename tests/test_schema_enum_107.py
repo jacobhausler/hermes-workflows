@@ -162,7 +162,7 @@ def mk(run_id, nodes, **meta):
     return r
 
 def wf_run(run_id, extra_env=None, timeout=180):
-    env = dict(os.environ, HERMES_HOME=str(HOME), FAKE_LOG=str(HOME / "fake.log"),
+    env = dict(os.environ, HERMES_HOME=str(HOME), WF_RUNS_ROOT=str(RUNS), FAKE_LOG=str(HOME / "fake.log"),
                **(extra_env or {}))
     return subprocess.run([sys.executable, str(BUILD / "wf.py"), "run", run_id],
                           env=env, capture_output=True, text=True, timeout=timeout).stdout.strip()
