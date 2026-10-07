@@ -1476,9 +1476,11 @@ def item_records_certified(run, node, byid, results):
     """Validate an aggregate candidate against the CANONICAL per-item records on
     disk, re-read now (never trusted from memory). Returns (ok, problems): every
     item must have an efp-valid committed fact, and for every done/partial row
-    the committed output must equal the aggregate's claimed output — byte-for-byte
-    after stable serialization. A missing/uncommitted/diverging record means the
-    aggregate may NOT commit done with claimed-complete results."""
+    the record's committed status must match the claim AND its committed output
+    must equal the aggregate's claimed output — byte-for-byte after stable
+    serialization. A missing/uncommitted/diverging record — including a
+    committed failure (failed+crashed, failed+cancelled) under a done claim —
+    means the aggregate may NOT commit done with claimed-complete results."""
     problems = []
     for i, r in enumerate(results):
         rec = jload(run / "nodes" / f"{_node_file(node, i)}.json")
@@ -1501,6 +1503,21 @@ def item_records_certified(run, node, byid, results):
             problems.append({"index": i, "problem": "committed record is not efp-valid"})
             continue
         if r is not None and r.get("status") in ("done", "partial"):
+            # PR #258 zap r4: a committed FAILURE (failed+crashed, failed+
+            # cancelled, skipped) can never back a done/partial claim, even
+            # when its output bytes match the claim — matching outputs under a
+            # failed record ARE the divergence. Status compatibility is
+            # required row by row; the ONLY blessed exception is the
+            # 790c6ad adopted-retirement pairing (record status=adopted + a
+            # row that itself claims an adopted harvest).
+            rec_st = rec.get("status")
+            compatible = (rec_st == r["status"]
+                          or (rec_st == _ITEM_ADOPTED_RETIRE and r.get("adopted")))
+            if not compatible:
+                problems.append({"index": i,
+                                 "problem": f"aggregate claims a {r['status']} item whose committed "
+                                            f"record is status={rec_st!r} (incompatible status)"})
+                continue
             want, have = r.get("output"), rec.get("output")
             if want is None or have is None or \
                     json.dumps(want, sort_keys=True, default=str) != \
@@ -5661,11 +5678,12 @@ def run_agent_node(run, meta, byid, node, outputs, steering):
                     # est-2ek.1.765: aggregate done is DERIVED from the committed
                     # per-item records, re-read from disk — never from the
                     # in-memory results alone. If ANY item's canonical record is
-                    # missing, uncommitted, efp-invalid, or diverges from the
-                    # claimed output, the aggregate commits failed, naming each
-                    # problem. An aggregate `done` with claimed-complete results
-                    # over a still-running individual record is structurally
-                    # impossible now.
+                    # missing, uncommitted, efp-invalid, status-incompatible, or
+                    # diverges from the claimed output, the aggregate commits
+                    # failed, naming each problem. For aggregates produced by
+                    # THIS gate, a `done` with claimed-complete results over a
+                    # still-running or committed-failed individual record is
+                    # structurally impossible.
                     ok, problems = item_records_certified(run, node, byid, results)
                     if not ok:
                         merged_rec = {"status": "failed",
