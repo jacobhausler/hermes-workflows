@@ -2505,9 +2505,17 @@ def _seat_acquire(seats, name, cap, bounded_s, on_wait=None, abort=None,
     contention — the registry lock is taken by a non-blocking poll that checks
     deadline/abort between tries, and both are rechecked after the lock is
     held, immediately before a ticket is written. When admit_lock is supplied
-    it is taken (ordering: admit_lock -> .lock flock) and abort() is RECHECKED
-    under both, atomically with ticket creation — a cancel that lands at any
-    earlier moment is decided against at the ticket-creation instant."""
+    it is taken with a TIMEOUTED acquisition (ordering: admit_lock -> .lock
+    flock) so contention on the mutex itself stays bounded and cancellable:
+    deadline/abort are rechecked between timed tries, and abort() is RECHECKED
+    under both locks, atomically with ticket creation — a cancel that lands at
+    any earlier moment is decided against at the ticket-creation instant. A
+    wait that expires or aborts while the mutex is contended returns None
+    (no ticket), the same contract as the flock path.
+    est-g255 r3 (zap probes: parent-admit-lock-probes.json): a bare
+    `with admit_lock:` blocked on Lock.acquire() past bounded_s and past an
+    abort; the acquisition is now a poll of admit_lock.acquire(timeout=...)
+    that checks _out() between tries, mirroring the non-blocking flock poll."""
     seats = Path(seats)
     seats.mkdir(parents=True, exist_ok=True)
     if cap is None or cap <= 0:
@@ -2525,9 +2533,29 @@ def _seat_acquire(seats, name, cap, bounded_s, on_wait=None, abort=None,
         # makes ticket creation atomic against a cancel landing at any earlier
         # moment: either the setter won (abort True under our recheck -> no
         # ticket) or the ticket exists and the setter's scan sees this holder.
-        al_cm = admit_lock if admit_lock is not None \
-            else _nullcontext()
-        with al_cm:
+        # est-g255 r3: the acquisition itself must honor the same bounded
+        # contract — a bare `with admit_lock:` blocked on Lock.acquire() past
+        # bounded_s and past an abort (zap probes parent-admit-lock-probes-
+        # json). Poll admit_lock.acquire(timeout=...) and check _out() between
+        # tries; a bounded wait that expires or aborts while the mutex is
+        # contended returns None exactly like the flock path. When no mutex
+        # is supplied the spawn path keeps its nullcontext (unchanged).
+        if admit_lock is None:
+            al_acquired = False
+        else:
+            al_acquired = False
+            while not al_acquired:
+                if _out():
+                    return None
+                remaining = t_end - time.time()
+                al_acquired = admit_lock.acquire(
+                    timeout=SEAT_LOCK_POLL_S if remaining == float("inf")
+                    else max(0.0, min(SEAT_LOCK_POLL_S, remaining)))
+                if al_acquired:
+                    break
+                if _out():
+                    return None
+        try:
             fd = os.open(str(seats / ".lock"), os.O_RDWR | os.O_CREAT, 0o644)
             try:
                 while True:
@@ -2558,6 +2586,9 @@ def _seat_acquire(seats, name, cap, bounded_s, on_wait=None, abort=None,
                     fcntl.flock(fd, fcntl.LOCK_UN)
             finally:
                 os.close(fd)
+        finally:
+            if al_acquired:
+                admit_lock.release()
         if not waited and on_wait:
             waited = True
             on_wait()
