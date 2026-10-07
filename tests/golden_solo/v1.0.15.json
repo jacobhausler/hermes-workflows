@@ -2716,6 +2716,7 @@
           "result": "harvested"
         },
         "prompt_path": "<TEMP>/home/workflows/<RUN>/logs/a.a0.prompt.md",
+        "remaining": [],
         "served_billing_provider": null,
         "served_model": null,
         "skey": "wf:<RUN>:a:dc04c6dd.<NONCE>",
@@ -2998,6 +2999,7 @@
           "output": {
             "result": "harvested"
           },
+          "remaining": [],
           "status": "partial",
           "type": "agent"
         }
@@ -3045,6 +3047,7 @@
           "output": {
             "result": "harvested"
           },
+          "remaining": [],
           "status": "partial",
           "type": "agent"
         }
