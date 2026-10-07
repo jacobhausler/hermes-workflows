@@ -29,7 +29,7 @@ Earlier merges since the tag, in brief:
 - 0f17cf6 #166 — fix(runner,scrub): adopted-child malformed_turn class
 - d36760b #— — docs: close conformance gaps — SECURITY.md + issue templates (#177, est-rdjq)
 - d4e68b4 #— — docs: point at ratified joint-eng-protocol SSOT (1-line pointer) (#180, est-nztk)
-- 66857e8 #232 — DIAGRAM LAW v1: example diagrams derive from shipped graph bytes (HAUS half of owner split)
+- 66857e8 #232 — DIAGRAM LAW v1: example diagrams derive from shipped graph bytes (diagrams half of owner split)
 - 8f6a92b #236 — DIAGRAM LAW PR-3: vendored archify + spelled-numeral ban (A3 closes) + QA receipts derive the gates column
 - fa9e900 #240 @atbrace — docs(diagrams): AUSTIN half — cards + derived candidates + receipted shots for 9 examples (PR-2 of owner split)
 - a1a1eec #242 — fix(diagrams): one shared walker — qa receipts can no longer pose as graphs
