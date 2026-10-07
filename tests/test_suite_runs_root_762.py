@@ -37,6 +37,7 @@ Red discipline: with the 29 unpinned spawn files unmodified, leg (A) names
 them and leg (B) goes red on the steering/engine/v4 reps under the hostile
 root. usage: python3 tests/test_suite_runs_root_762.py
 """
+import importlib.util
 import json
 import os
 import subprocess
@@ -46,9 +47,16 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
-sys.path.insert(0, str(HERE / "fixtures"))
 
-import runs_root_probe as _probe  # noqa: E402  (shared detector + clean probe)
+# est-2ek.1.762: the shared detector/probe is exec-loaded by FILE PATH, not
+# imported bare — a top-level import of a tests/fixtures module is outside the
+# shipped import closure (test_packaging #105 probe resolves only
+# root/tests/dashboard) and REDs the unpacked-package gate.
+_spec_probe = importlib.util.spec_from_file_location(
+    "runs_root_probe", HERE / "fixtures" / "runs_root_probe.py")
+assert _spec_probe and _spec_probe.loader
+_probe = importlib.util.module_from_spec(_spec_probe)
+_spec_probe.loader.exec_module(_probe)  # noqa: E402  (shared detector + clean probe)
 
 checks = 0
 fails = []

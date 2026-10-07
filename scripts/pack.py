@@ -133,6 +133,13 @@ INCLUDE_FILES = (
     "tests/graph_gate_dep.py",  # shared fail-closed dep guard for the graph-gate tests (sys-hvd5gl)
     "tests/fixtures/mac-source.txt",
     "tests/fixtures/seat_acquire_driver.py",   # est-g2xx: seat-semaphore driver
+    # est-2ek.1.762: the spawn-isolation law's shared helpers — SHIPPED because
+    # the shipped tests exec-load them by file path from the package root
+    # (test_suite_runs_root_762 imports runs_root_probe; the pinned spawned-
+    # runner tests load wf_spawn_isolation_762), the exact est-4vnq finding-4
+    # shape: a shipped test that executes an unpackaged helper dies there.
+    "tests/fixtures/runs_root_probe.py",
+    "tests/fixtures/wf_spawn_isolation_762.py",
     "tests/test_fanout_ui.mjs",
     "wf.py",
     "wf_dialect.py",
