@@ -1618,13 +1618,21 @@ def version_handshake_error(required, runner_version):
     None. Both versions are NAMED in the message — the whole point of the
     handshake is that a stale seat reads exactly what to upgrade. An
     un-parseable/un-stated runner_version with a stated requirement fails
-    closed (cannot prove new enough = refuse); no requirement = always None."""
+    closed (cannot prove new enough = refuse); no requirement = always None.
+    Mixed-length spellings of the SAME release ('1.2.0' vs '1.2') compare
+    equal: tuples are padded to equal length first, so the refusal never
+    fires on trailing zeros alone (#261 follow-up: raw tuple compare made
+    (1,2,0) < (1,2) and refused the plugin's own version spelled longer)."""
     req = version_tuple(required) if isinstance(required, str) else None
     if req is None:
         return None                             # absent/invalid handled at validation
     have = version_tuple(runner_version)
-    if have is not None and have >= req:
-        return None
+    if have is not None:
+        n = max(len(have), len(req))
+        have = have + (0,) * (n - len(have))
+        req = req + (0,) * (n - len(req))
+        if have >= req:
+            return None
     return (f"plugin version handshake failed: this graph declares "
             f"requires_plugin {required!r} but the installed hermes-workflows "
             f"runner-version is {(runner_version or 'unknown')!r} — update the plugin "

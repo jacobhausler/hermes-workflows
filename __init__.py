@@ -3368,6 +3368,17 @@ def act_amend(args):
     bad = _validation_error(new, run_dir=r) or _profile_error(new)
     if bad:
         return bad
+    # est-2ek.1.166 (door run/amend, as the suite docstring claims): the SAME
+    # arm-time handshake act_run enforces, mirrored here — an amend is a graph
+    # submit, and without this a run armed clean could smuggle a future
+    # requires_plugin in via amend, trading a typed refusal for the 03:00 boot
+    # death the handshake exists to prevent. Refusal lands BEFORE graph.json /
+    # amends.jsonl are touched, naming both versions. Absent key = no check.
+    if new.get("requires_plugin") is not None:
+        _vh = _common.version_handshake_error(new.get("requires_plugin"),
+                                              _common.plugin_version())
+        if _vh:
+            return {"error": _vh}
     old = jload(r / "graph.json") or {}
     new = dict(new, name=new.get("name", old.get("name", "workflow")))
     # Same resolved-truth rule as run: bake defaults/shape before the write, so
