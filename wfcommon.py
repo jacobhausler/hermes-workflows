@@ -3351,6 +3351,85 @@ def _active_spawns(r, n, byid):
             active.append(v)
     return active
 
+def _progress_for(r, n):
+    """#128 artifact-mtime progress channel: the write-first file IS the heartbeat.
+    The child work dir <run>/work/<node>[.<i>]/ (child_work_dir, wf.py — the dir
+    WORK_DIR_NOTE already mandates) is scanned at QUERY time for the most recently
+    modified regular file across the node's item dirs (fan-out: latest activity
+    wins). Pure read, no writes, NEVER raises: absent/unreadable artifact or a
+    stat/decode failure means an ABSENT `progress` field, never a fabricated one
+    (R2/when_error law), and absence draws no stall inference. last_line is the
+    last NEWLINE-TERMINATED line — a trailing partial line is dropped so the
+    reader never sees a torn line mid-append."""
+    try:
+        import stat as _stat
+        import time
+        base = re.sub(r"[^A-Za-z0-9_.-]", "_", str(n.get("id")))
+        work = Path(r) / "work"
+        if not base or not work.is_dir():
+            return None
+        dirs = []
+        if (work / base).is_dir():
+            dirs.append(work / base)
+        try:  # fan-out siblings <base>.<i> (runner names them via child_work_dir)
+            dirs.extend(p for p in sorted(work.iterdir())
+                        if p.is_dir() and p.name.startswith(base + "."))
+        except OSError:
+            pass
+        if not dirs:
+            return None
+        best = None  # (mtime, size, absolute path)
+        seen = 0
+        for d in dirs:
+            for dirpath, _sub, files in os.walk(d):
+                for fn in files:
+                    seen += 1
+                    if seen > 2000:  # a pathological tree never stalls status
+                        break
+                    p = Path(dirpath) / fn
+                    try:
+                        st_ = p.stat()
+                    except OSError:
+                        continue
+                    if not _stat.S_ISREG(st_.st_mode):
+                        continue
+                    if best is None or st_.st_mtime > best[0]:
+                        best = (st_.st_mtime, st_.st_size, p)
+                    if seen > 2000:
+                        break
+                if seen > 2000:
+                    break
+        if best is None:
+            return None
+        mtime, size, p = best
+        try:  # tail-read only: a growing artifact is never fully re-read
+            with open(p, "rb") as fh:
+                if size > 65536:
+                    fh.seek(-65536, os.SEEK_END)
+                    fh.readline()  # drop the window's own head: it may itself be torn
+                    data = fh.read()
+                else:
+                    data = fh.read()
+        except OSError:
+            return None
+        try:
+            text = data.decode("utf-8")
+        except UnicodeDecodeError:
+            return None  # a binary/unreadable artifact yields no key, no error
+        prog = {"artifact": str(p.relative_to(Path(r))),
+                "size": size,
+                "mtime_age_s": max(0.0, time.time() - mtime)}
+        if text.endswith("\n"):
+            lines = text[:-1].split("\n")
+            if text[:-1]:
+                prog["last_line"] = lines[-1]
+        elif "\n" in text:  # trailing PARTIAL line: drop it, last whole line wins
+            prog["last_line"] = text.rsplit("\n", 1)[0].rsplit("\n", 1)[-1]
+        # a file with NO newline-terminated line yet: honest absence of last_line
+        return prog
+    except Exception:
+        return None  # fail-safe read model: this NEVER raises into status/wait/list
+
 def active_child(r, n, byid, index=None):
     """Per-item entry point to the verification law (790c6ad): the runner's
     fan-out branch calls this BEFORE Popen on a resumed runner — a verified live
@@ -3462,6 +3541,11 @@ def run_state(r):
         if active:
             nodes[n["id"]]["active_spawn"] = active[0]
             nodes[n["id"]]["active_spawns"] = active
+            # #128: the write-first artifact under the node's child work dir is the
+            # heartbeat — derive-only, honest absence (no key when no file is visible).
+            prog = _progress_for(r, n)
+            if prog:
+                nodes[n["id"]]["progress"] = prog
     # est-2ek.1.833: a live runner blocked on the global seat cap says so per node.
     if live:
         for nid, per in open_seat_waits(r).items():
