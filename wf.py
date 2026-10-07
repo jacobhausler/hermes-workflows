@@ -394,8 +394,10 @@ def _wake_safe(value):
 # actionable: inspect status/gates once, act, stop, never poll.
 _WAKE_TEMPLATES = {
     "gate.held": "Your workflow run is HELD at a human gate and needs your answer. "
-                 "Inspect its status or gates view once, then answer with ONE workflow "
-                 "release action and stop. The run resumes on its own.",
+                 "Inspect its status or gates view once, relay the gate's question and "
+                 "options verbatim to the human (clarify) and NEVER choose an option "
+                 "yourself, then answer with ONE workflow release action carrying the "
+                 "human's decision and stop. The run resumes on its own.",
     "run.failed": "Your workflow run FAILED. Inspect its status once (failed nodes, "
                   "exit records and error details are there), apply ONE corrective "
                   "amend/repair/resume action, then stop. Do not poll or wait: the "
