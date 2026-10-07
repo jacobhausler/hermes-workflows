@@ -45,6 +45,7 @@ sys.path.insert(0, str(BUILD))
 spec = importlib.util.spec_from_file_location("hwpo", BUILD / "__init__.py")
 hw = importlib.util.module_from_spec(spec); spec.loader.exec_module(hw)
 import wf_test_isolation as _iso71; _iso71.install(hw)  # #71 r5: pin settings.runs_root alongside WF_RUNS_ROOT
+from wf_test_markers import read_pid_marker   # est-jue3: one parseable-content wait family (the #267 shape, shared)
 runs = Path(os.environ["WF_RUNS_ROOT"])
 
 ok = True
@@ -141,10 +142,11 @@ try:
 
     # Wait until door A has OBSERVED admitted runner A on the ready pipe and is
     # parked at the post-observation seam (buggy head: its second write pending).
-    t0 = time.time()
-    while not _seen.exists() and time.time() - t0 < 20:
-        time.sleep(0.05)
-    aPid = int(_seen.read_text()) if _seen.exists() else -1
+    # est-jue3: _seen is published by door A's thread with a non-atomic
+    # write_text — existence precedes bytes; wait for the parseable pid, not
+    # for mere existence (the #267 read_pid_marker shape). Honest timeout
+    # raises into the harness's except below, same as the old -1 read did.
+    aPid = read_pid_marker(_seen, timeout=20)[0]
     check("W1 seam: door A observed admitted runner A and is parked post-observation",
           aPid > 0 and alive(aPid) and ta.is_alive() and wfpid_of(ridR) == aPid,
           f"aPid={aPid} parked={ta.is_alive()} wf.pid={wfpid_of(ridR)}")

@@ -130,6 +130,7 @@ INCLUDE_FILES = (
     "tests/fake",
     "tests/fake_hermes.py",
     "tests/wf_test_isolation.py",
+    "tests/wf_test_markers.py",  # est-jue3: shared parseable-content marker waits, imported by the shipped tests (est-4vnq finding-4 shape: an unshipped helper kills the suite)
     "tests/graph_gate_dep.py",  # shared fail-closed dep guard for the graph-gate tests (sys-hvd5gl)
     "tests/fixtures/mac-source.txt",
     "tests/fixtures/seat_acquire_driver.py",   # est-g2xx: seat-semaphore driver

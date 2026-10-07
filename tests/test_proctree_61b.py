@@ -44,6 +44,7 @@ HERE = Path(__file__).resolve().parent
 BUILD = Path(os.environ.get("WF_TEST_BUILD") or HERE.parent)
 sys.path.insert(0, str(BUILD))
 import wf  # noqa: E402
+from wf_test_markers import read_pid_marker   # est-jue3: one parseable-content wait family (the #267 shape, shared)
 
 ok = True
 def check(label, cond, detail=""):
@@ -76,26 +77,9 @@ def alive(pid):
 def remember(pids):
     ALL_GC.extend([p for p in pids if isinstance(p, int)])
 
-# est-gzmm: a marker file becomes visible at OPEN, before its buffered bytes
-# reach it, so `while not p.exists()` can exit on an EMPTY file and the very
-# next read raises IndexError (fixture-only race, seen as the lone red in a
-# serial suite run — 20261003-074008 ra-pr-deep-wf158). The writers live in
-# embedded child scripts (write_text / append-open), so the gate goes on the
-# reader side: wait for PARSEABLE content, never mere existence.
-def read_pid_marker(path, timeout=10.0):
-    """Wait until `path` holds parseable ints; return them all. Honest timeout."""
-    t = time.time() + timeout
-    while True:
-        try:
-            vals = [int(l) for l in Path(path).read_text().splitlines() if l.strip()]
-            if vals:
-                return vals
-        except (OSError, ValueError):
-            pass
-        if time.time() >= t:
-            raise AssertionError(f"pid marker {path} never held parseable pids within {timeout}s")
-        time.sleep(0.02)
-
+# est-gzmm (#267): the parseable-content gate now lives in wf_test_markers.py
+# (est-jue3) so sibling fixtures (#61 U2, wfpid_owner_8, failures_0923) reuse
+# THIS shape instead of hand-rolling existence-only waits. Import above.
 def cleanup():
     for p in ALL_GC:
         if alive(p):
