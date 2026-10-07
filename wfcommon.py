@@ -740,6 +740,66 @@ PROVENANCE_KEYS = {"owner", "source", "saved_at", "source_digest"}
 # the typo nudge, or /wf down with it). Returns {meta, graph, description, tags,
 # envelope} for a usable entry, or {"invalid": "invalid: <why>"} for a refused one —
 # always a dict, callers key on the "invalid" marker / the presence of "graph".
+# ---- Library tag grammar (#50/#70; est-qeul: SINGLE SOURCE for save AND read) ----
+# The grammar moved here from the door so the SHARED read model can fold stored
+# bytes through the exact grammar the save API enforced at write time; the door's
+# _norm_tags delegates. Behavioral pins live in tests/test_library.py (L8x).
+TAG_OK = re.compile(r"^[a-z0-9][a-z0-9_.-]{0,31}$")
+TAGS_MAX = 10
+# #70 faceted tags: one colon, both sides non-empty charset-safe; the facet set is
+# CLOSED (the only hard check in the feature); `note:` is the sanctioned escape hatch.
+TAG_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*:[a-z0-9][a-z0-9._-]*$")
+TAG_FACETS = ("domain", "note", "repo", "risk", "use_case")
+TAG_LEN = 48
+DESC_MAX = 200
+
+def norm_tags(tags):
+    """#50/#70: `tags` is a list of 1..TAGS_MAX tokens, each a legacy FLAT token
+    (library-name grammar) or a FACETED `facet:value` tag — hard facet namespace
+    {use_case,repo,domain,risk,note}. Returns (normalized, error): lowercase-
+    trimmed, dups collapsed, exactly one ':' with [a-z0-9._-] both sides.
+    Fail-closed: anything else is an error, never a silent drop."""
+    if not isinstance(tags, list) or not 1 <= len(tags) <= TAGS_MAX:
+        return None, f"tags must be a list of 1-{TAGS_MAX} tokens (flat or facet:value)"
+    out = []
+    for t in tags:
+        if not isinstance(t, str):
+            return None, f"invalid tag {t!r} (want a string)"
+        t = t.strip().lower()
+        if ":" in t:
+            if len(t) > TAG_LEN or not TAG_RE.match(t):
+                return None, (f"invalid tag {t[:60]!r} (facet:value — one ':', non-empty "
+                              "both sides, [a-z0-9._-], <=48 chars)")
+            if t.split(":", 1)[0] not in TAG_FACETS:
+                return None, f"unknown facet in {t!r}; allowed facets: {list(TAG_FACETS)}"
+        elif not TAG_OK.match(t):
+            return None, f"invalid tag {t!r} (flat: lowercase alnum [-_.] <=32; or facet:value)"
+        if t not in out:
+            out.append(t)
+    return out, None
+
+def _normalize_tags_read(tags):
+    """est-qeul: canonical READ fold for meta.tags. Each stored token goes through
+    the save grammar (norm_tags, ONE ':' and all); a token invalid there is dropped
+    from the read, never an error — quarantine (F-2 #62) is for whole-entry shape,
+    and a single junk element must not poison the entry's discovery coverage any
+    more than the old isinstance filter silently did. Empty list (or the deliberate
+    erase `meta.tags: []`) survives untouched — the retain branch keys on presence
+    and must still SEE the [] state (see act_save's #146 item 3)."""
+    if not isinstance(tags, list):
+        return []
+    out, seen = [], set()
+    for t in tags:
+        if not isinstance(t, str):
+            continue
+        one, err = norm_tags([t])
+        if err or not one:
+            continue
+        if one[0] not in seen:
+            seen.add(one[0])
+            out.append(one[0])
+    return out
+
 def library_entry(data):
     if not isinstance(data, dict):
         return {"invalid": "invalid: not a JSON object"}
@@ -764,9 +824,20 @@ def library_entry(data):
     description = meta.get("description")
     if not isinstance(description, str) or not description.strip():
         description = graph.get("description")
-    tags = meta.get("tags")
-    tags = [t for t in tags if isinstance(t, str) and t.strip()] \
-        if isinstance(tags, list) else []
+    # est-qeul: CANONICAL READ NORMALIZER. meta.tags may carry raw bytes the save
+    # API itself would never accept (pre-normalizer writes, file editors, other
+    # publishers): duplicates, surrounding whitespace/newlines, uppercase. Those
+    # raw shapes silently break every reader — tag_vocab counts a duplicate twice
+    # for one entry, and a newline-suffixed row cannot be selected even by passing
+    # its echoed token verbatim (query goes through the save grammar, stored side
+    # never did). Fold each stored token through the SAME grammar save enforces;
+    # a token that is invalid there is DROPPED from the read (never an error —
+    # quarantine is for whole-entry shape, F-2 #62 — and the vocabulary/filter/
+    # replay readers all read the normalized list). Deterministic order: the
+    # normalizer dedups preserving first-seen order. The tag grammar lives in the
+    # door (__init__.py); readers get it through the injectable hook below so the
+    # shared module keeps zero dependency on the door's import graph.
+    tags = _normalize_tags_read(meta.get("tags"))
     return {"meta": meta, "graph": graph, "description": description,
             "tags": tags, "envelope": envelope}
 # #32 (publish-as-file): top-level `grammar` names the dialect a shared file was written

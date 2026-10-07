@@ -1572,42 +1572,22 @@ def _library_roots():
 
 LIB_OK = re.compile(r"^[a-z0-9][a-z0-9_.-]{0,63}$")
 _GENERAL_PREFIX = "general/"
-TAG_OK = re.compile(r"^[a-z0-9][a-z0-9_.-]{0,31}$")
-TAGS_MAX = 10
-# #70 faceted tags: one colon, both sides non-empty charset-safe; the facet set is
-# CLOSED (the only hard check in the feature); `note:` is the sanctioned escape hatch.
-TAG_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*:[a-z0-9][a-z0-9._-]*$")
-TAG_FACETS = ("domain", "note", "repo", "risk", "use_case")
-TAG_LEN = 48
-DESC_MAX = 200
+# est-qeul: the tag grammar is ONE source (wfcommon) — save validated writes and
+# the canonical read fold in library_entry can never drift apart again. These
+# stay as the door's own names (schema text/docs reference them); they alias the
+# shared module's values, no copies.
+TAG_OK = _common.TAG_OK
+TAGS_MAX = _common.TAGS_MAX
+TAG_RE = _common.TAG_RE
+TAG_FACETS = _common.TAG_FACETS
+TAG_LEN = _common.TAG_LEN
+DESC_MAX = _common.DESC_MAX
 
 def _norm_tags(tags):
-    """#50/#70: `tags` is a list of 1..TAGS_MAX tokens, each a legacy FLAT token
-    (library-name grammar) or a FACETED `facet:value` tag — hard facet namespace
-    {use_case,repo,domain,risk,note} (the k8s well-known-labels split: the facet axis
-    is the one drift class a consolidate agent cannot repair, so it is the only
-    enforced check; values stay open and drift is handled by the tag_vocab echo + the
-    seed list in references/grammar.md). Returns (normalized, error): lowercase-
-    trimmed, dups collapsed, exactly one ':' with [a-z0-9._-] both sides.
-    Fail-closed: anything else is an error, never a silent drop."""
-    if not isinstance(tags, list) or not 1 <= len(tags) <= TAGS_MAX:
-        return None, f"tags must be a list of 1-{TAGS_MAX} tokens (flat or facet:value)"
-    out = []
-    for t in tags:
-        if not isinstance(t, str):
-            return None, f"invalid tag {t!r} (want a string)"
-        t = t.strip().lower()
-        if ":" in t:
-            if len(t) > TAG_LEN or not TAG_RE.match(t):
-                return None, (f"invalid tag {t[:60]!r} (facet:value — one ':', non-empty "
-                              "both sides, [a-z0-9._-], <=48 chars)")
-            if t.split(":", 1)[0] not in TAG_FACETS:
-                return None, f"unknown facet in {t!r}; allowed facets: {list(TAG_FACETS)}"
-        elif not TAG_OK.match(t):
-            return None, f"invalid tag {t!r} (flat: lowercase alnum [-_.] <=32; or facet:value)"
-        if t not in out:
-            out.append(t)
-    return out, None
+    """#50/#70: delegates to wfcommon.norm_tags — see there for the law
+    (1..TAGS_MAX flat or facet:value tokens, lowercase-trimmed, dups collapsed,
+    fail-closed). Kept as the door's name so save/query call sites are unchanged."""
+    return _common.norm_tags(tags)
 
 def _lib_path(name):
     """WRITE resolver: always the resolved root (current best version lands there).
