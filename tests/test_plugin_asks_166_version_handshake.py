@@ -118,5 +118,72 @@ check("(5) boot refusal names BOTH versions",
 check("(5) refused with ZERO children spawned",
       fake_log5.read_text().strip() == "", fake_log5.read_text()[:120])
 
+# ---- (6) zap #261-followups probe A: mixed-length versions are the SAME
+# ---- release written two ways — '1.2.0' vs runner '1.2' must NOT refuse.
+# ---- Raw tuple compare said (1,2,0) < (1,2); pad to equal length first.
+import wfcommon as _wc6
+check("(6a) version_tuple('1.2.0') vs '1.2' padded: no refusal",
+      _wc6.version_handshake_error("1.2.0", "1.2") is None,
+      repr(_wc6.version_handshake_error("1.2.0", "1.2")))
+check("(6a) the symmetric direction passes too",
+      _wc6.version_handshake_error("1.2", "1.2.0") is None,
+      repr(_wc6.version_handshake_error("1.2", "1.2.0")))
+check("(6a) padding stays honest: '1.2.1' > '1.2' still refuses",
+      _wc6.version_handshake_error("1.2.1", "1.2") is not None,
+      repr(_wc6.version_handshake_error("1.2.1", "1.2")))
+check("(6a) trailing zeros equal: '1.2.0' vs '1.2.0.0' passes",
+      _wc6.version_handshake_error("1.2.0", "1.2.0.0") is None,
+      repr(_wc6.version_handshake_error("1.2.0", "1.2.0.0")))
+# door-side, the way an operator writes it: the current plugin version spelled
+# with an extra .0 must arm exactly like the plugin.yaml spelling.
+bad6 = door.act_run({"graph": dict(G, name="asks166-mixed",
+                                   requires_plugin=RUNNER_V + ".0")})
+# armed above; refuse path would carry "error"
+check("(6b) door arms when requires_plugin is runner version + a trailing .0",
+      isinstance(bad6, dict) and "run_id" in bad6, json.dumps(bad6)[:200])
+# (the boot re-check must agree with the door on the padded spelling)
+r6 = HOME / "workflows" / "asks166-mixed-boot"
+if r6.exists():
+    shutil.rmtree(r6)
+(r6 / "nodes").mkdir(parents=True)
+(r6 / "gates").mkdir()
+(r6 / "graph.json").write_text(json.dumps(
+    {"name": "asks166-mixed-boot", "requires_plugin": RUNNER_V + ".0",
+     "nodes": [{"id": "a", "type": "agent", "goal": "GO asks166-mixed-boot"}]}))
+(r6 / "run.json").write_text(json.dumps({"hermes_bin": FAKE, "node_timeout": 30}))
+fake_log6 = BUILD / "fake_166_mixed.log"
+fake_log6.write_text("")
+p6 = subprocess.run([sys.executable, str(ROOT / "wf.py"), "run", "asks166-mixed-boot"],
+                    env=dict(env, FAKE_LOG=str(fake_log6), WF_RUNS_ROOT=str(HOME / "workflows")),
+                    capture_output=True, text=True, timeout=120)
+check("(6c) boot accepts the same release spelled longer (no WORKFLOW_FAILED)",
+      "WORKFLOW_FAILED" not in p6.stdout, p6.stdout[:250])
+check("(6c) boot actually ran the node (one child)",
+      fake_log6.read_text().strip() != "", fake_log6.read_text()[:120])
+
+# ---- (7) zap #261-followups probe B: the docstring claims "door run/amend",
+# ---- so amend enforces the handshake the same way run does: a replacement
+# ---- graph demanding a future plugin is REFUSED before graph.json/amends.
+# ---- A run armed without requires_plugin must not smuggle one in via amend.
+rid7 = door.act_run({"graph": dict(G, name="asks166-amend")}).get("run_id")
+check("(7) base run armed for the amend probe", bool(rid7), rid7)
+if rid7:
+    g7_before = (HOME / "workflows" / rid7 / "graph.json").read_text()
+    bad7 = door.act_amend({"run_id": rid7,
+                           "graph": dict(G, name="asks166-amend", requires_plugin="99.0.0")})
+    err7 = bad7.get("error", "")
+    check("(7) amend with requires_plugin=99.0.0 refuses immediately",
+          "error" in bad7, json.dumps(bad7)[:200])
+    check("(7) amend refusal names BOTH versions",
+          RUNNER_V in err7 and "99.0.0" in err7 and "requires_plugin" in err7, err7[:300])
+    check("(7) refused BEFORE graph.json or amends.jsonl were touched",
+          (HOME / "workflows" / rid7 / "graph.json").read_text() == g7_before
+          and not (HOME / "workflows" / rid7 / "amends.jsonl").exists(),
+          json.dumps(bad7)[:200])
+    ok7 = door.act_amend({"run_id": rid7, "dry_run": True,
+                          "graph": dict(G, name="asks166-amend", requires_plugin="0.1.0")})
+    check("(7) satisfied requires_plugin passes the amend gate (dry_run ok)",
+          ok7.get("ok") is True, json.dumps(ok7)[:200])
+
 print("FAILURES:", fails)
 sys.exit(1 if fails else 0)
