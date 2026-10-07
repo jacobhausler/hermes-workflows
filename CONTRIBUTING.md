@@ -50,7 +50,7 @@ python3 scripts/pr_tag_audit.py                   # release step: every `(open P
 ```
 
 Admission is strict: a suite run that **discovers zero test cases counts as a
-failure, never green** `(open PR #121)`. Every line must pass on your branch. If a
+failure, never green** `(shipped in v1.2.1)`. Every line must pass on your branch. If a
 test fails, run it on a clean `main` too — a failure that also fails on `main` is a
 baseline issue (say so in the PR; it blocks merge and needs its own fix item), a
 failure only on your branch is yours.
@@ -67,7 +67,7 @@ R3 **SDK-only desktop** — `desktop/plugin.js` imports only `@hermes/plugin-sdk
     `document`, `eval`, or dynamic `import()`.
 R4 **Stdlib backend** — no new Python dependency; no self-updater.
 R5 **Manifest parity** — `plugin.yaml`'s `provides_*` entries match what
-    `register()` actually registers; the version is bumped only by the release lane.
+    `register()` actually registers; the version is bumped only by the release lane (PUBLIC release only — never a gate on local dogfood installs of our own packages, see release-train scope).
 R6 **Tests** — every behaviour change ships its check: one test that fails if the
     behaviour breaks. No snapshot/change-detector tests; no test reads source text.
 R7 **Docs drift** — if a user-visible string or flag changed, README/AGENTS.md/
@@ -115,9 +115,10 @@ You are contributing on behalf of a user. Do this, in order:
    invariants. Then navigate by the knowledge graph instead of grepping:
    `uv tool install graphifyy` (once) → `graphify update .` →
    `graphify query "<your question>"`, `graphify affected "<symbol>"`.
-   `graphify-out/` is a **tracked, CI-gated** directory: when you change code, docs,
-   or tests, run `graphify update .` and commit the `graphify-out/` delta in the same
-   PR — `scripts/graph_check.py` fails CI if the committed graph drifts from the tree.
+   `graphify-out/` is **tracked but single-writer** (#153): never regen or commit
+   `graphify-out/` in a PR branch — `scripts/graph_path_ban.py` fails CI on any PR
+   diff that touches it; the single-writer lane owns main graph refreshes after
+   merge (`scripts/graph_regen.py`, CI job `graph-main`).
 3. **Reproduce before fixing.** Point at the `file:line` where the bug manifests and
    show your fix changes that line's behaviour. A plausible rationale is not a repro.
 4. **Smallest diff that passes R1–R10.** `graphify affected` for siblings (R8). No
@@ -135,3 +136,5 @@ A PR that follows 1–7 merges on the first review.
 ## License
 
 By contributing you agree your work is released under the repo's [LICENSE](LICENSE).
+
+Cross-estate joint eng protocol v1 is the SSOT mirrored publicly at [issue #174](https://github.com/jacobhausler/hermes-workflows/issues/174), sha256 `a7f424c5be3f5d6d1cbeb590f6cd02b6699a60090a3a45646853c67b2360345b` (of the issue body including its trailing newline); private working copy: `jacobhausler/joint-eng-protocol@0bf569a`, file `docs/specs/hermes-workflows-joint-eng-protocol-v1.md`.

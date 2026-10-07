@@ -634,6 +634,9 @@ AGENT_KEYS = {"id", "type", "after", "goal", "context", "schema", "model", "prov
               # producer: on commit done the runner mints the durable token
               # nodes/<id>.suite-proof.json (node id + committed efp).
               "publishes", "suite_proof",
+              # jam-h23: on-death catch. 'skip' commits the failed node `skipped`
+              # (join-tolerant); '<fallback-node-id>' additionally lets that agent run.
+              "on_fail",
               # est-2ek.1.164: transport fallback rungs — tried IN ORDER, only
               # when the same-model Q4 ladder exhausted with
               # error_class=transport_exhausted. List of non-empty strings
@@ -653,10 +656,15 @@ ECHO_KEYS = {"id", "type", "after", "output",
              # est-2ek.1.603: an echo commits at the wave boundary WITHOUT a spawn, so
              # the publisher gate covers the echo commit path too.
              "publishes"}
+JOIN_KEYS = {"id", "type", "after", "keys", "wait"}
 # ONE table for node kinds: closed key-set + the schedule hook. `spawns` is True
 # (agent: spawn a child when ready), False (gate: hold at the wave boundary), None
 # (echo: commit `output` verbatim at the boundary, zero tokens). Scheduling and
-# validation consult NODE_TYPES, never a hardcoded type-literal tuple.
+# validation consult NODE_TYPES, never a hardcoded type-literal tuple. The join
+# kind (jam-h25, est-6ksu) is deliberately NOT a table row — it is the fourth
+# boundary-commit kind with its own dedicated block (JOIN_KEYS closed set at the
+# validator, join loop in wf.py); kind() gives it the non-spawning fallback, so
+# it matches none of the True/False/None schedule branches.
 NodeKind = namedtuple("NodeKind", "keys spawns")
 NODE_TYPES = {"agent": NodeKind(AGENT_KEYS, True),
               "gate": NodeKind(GATE_KEYS, False),
@@ -729,7 +737,7 @@ def grammar_errors(graph):
                         + json.dumps(list(GRAMMAR_SUPPORTED))
                         + f" (absent = {GRAMMAR_DEFAULT!r})"}]
     return []
-FANOUT_KEYS = {"items", "items_from", "goal", "schema", "quorum"}
+FANOUT_KEYS = {"items", "items_from", "goal", "schema", "quorum", "ledger"}
 DEFAULTS_KEYS = {"schema", "timeout", "max_turns", "reasoning", "provider", "model", "context",
                  "require_route",   # #25: bool — fail-closed pinned routes (see AGENT_KEYS)
                  # est-2ek.1.164: the transport fallback rungs fill from graph
@@ -939,7 +947,8 @@ def validate_graph_errors(nodes):
     if not all(ids):
         E(None, "nodes", "missing node ids")
     if len(set(ids)) != len(ids):
-        E(None, "nodes", "duplicate node ids")
+        dupes = sorted({i for i in ids if ids.count(i) > 1}, key=str)
+        E(None, "nodes", f"duplicate node ids: {dupes}")
     if not all(ids):
         return errs  # per-node checks below need real ids
     for i in ids:
@@ -949,24 +958,33 @@ def validate_graph_errors(nodes):
             return errs  # non-string ids cannot key the ancestry maps safely
     idset = set(ids)
     parents = {n["id"]: [a for a in n.get("after", []) if a in idset] for n in nodes}
+    byid_of = {n["id"]: n for n in nodes if isinstance(n.get("id"), str)}   # jam-h23: on_fail target lookup
     for n in nodes:
         nid = n["id"]
-        if n.get("type") not in NODE_TYPES:
+        t = n.get("type")
+        if t == "join":                                  # jam-h25: dedicated kind
+            _type_keys = JOIN_KEYS
+        elif t in NODE_TYPES:
+            _type_keys = NODE_TYPES[t].keys  # the ONE table (est-voip); no second dict
+        else:
+            _type_keys = None
             E(nid, "type", "type must be agent|gate|echo")
-            continue  # per-type key grammar is undefined without a type
-        _type_keys = NODE_TYPES[n["type"]].keys
-        for k in sorted(set(n) - _type_keys):
-            # dedicated errors below own these keys (clearer messages, no double-report)
-            if n["type"] == "agent" and k == "wait":
-                continue
-            if n["type"] == "gate" and k == "inputs":
-                continue
-            if n["type"] == "agent" and k == "when":
-                E(nid, "when", "only gate nodes take when; use a gate with on_skip:prune to branch")
-                continue
-            if k in ("after_partial", "order_only"):
-                continue  # the dedicated blocks below name the key (echo-meaningless / type)
-            E(nid, k, "unknown key; allowed: " + json.dumps(sorted(_type_keys)))
+            # NO continue: type-INDEPENDENT defects (after refs, numeric bounds,
+            # ids) still surface below in one pass; only the per-type key grammar
+            # (undefined without a type) is skipped via _type_keys below.
+        if _type_keys is not None:
+            for k in sorted(set(n) - _type_keys):
+                # dedicated errors below own these keys (clearer messages, no double-report)
+                if t == "agent" and k == "wait":
+                    continue
+                if t == "gate" and k == "inputs":
+                    continue
+                if t == "agent" and k == "when":
+                    E(nid, "when", "only gate nodes take when; use a gate with on_skip:prune to branch")
+                    continue
+                if k in ("after_partial", "order_only"):
+                    continue  # the dedicated blocks below name the key (echo-meaningless / type)
+                E(nid, k, "unknown key; allowed: " + json.dumps(sorted(_type_keys)))
         for a in n.get("after", []):
             if a not in idset:
                 E(nid, "after", f"references unknown 'after': {a}")
@@ -1006,7 +1024,7 @@ def validate_graph_errors(nodes):
             # truthy is never enough to open a harvest edge. Echo rejects it
             # explicitly (its closed set also flags it unknown) so the error
             # NAMES the key, per the issue's validation contract.
-            if n["type"] == "echo":
+            if t == "echo":
                 E(nid, "after_partial", "after_partial is meaningless on echo "
                                         "nodes (agent/gate only)")
             elif not isinstance(n["after_partial"], bool):
@@ -1016,7 +1034,7 @@ def validate_graph_errors(nodes):
             # est-ij0: ordering-only edges are a declared SUBSET of after — the cycle,
             # topo and downstream machinery keep reading `after` unchanged.
             oo = n["order_only"]
-            if n["type"] == "echo":
+            if t == "echo":
                 E(nid, "order_only", "order_only is meaningless on echo nodes (agent/gate only)")
             elif not isinstance(oo, list) or not all(isinstance(x, str) for x in oo):
                 E(nid, "order_only", "order_only must be a list of node ids (a subset of after)")
@@ -1028,7 +1046,7 @@ def validate_graph_errors(nodes):
             # est-2ek.1.603: publisher capability is an EXPLICIT declaration — the
             # validator never infers side effects from prose. agent/echo only (a gate
             # can never publish); bool only — an unvalidated truthy never opens the gate.
-            if n["type"] == "gate":
+            if t == "gate":
                 E(nid, "publishes", "publishes is meaningless on gate nodes "
                                    "(agent/echo only — a gate has no side effects to declare)")
             elif not isinstance(n["publishes"], bool):
@@ -1038,7 +1056,7 @@ def validate_graph_errors(nodes):
         if "suite_proof" in n:
             # est-2ek.1.603: recognized suite-PROOF producer (agent/gate only; echo
             # rejects it). On commit done the runner mints nodes/<id>.suite-proof.json.
-            if n["type"] == "echo":
+            if t == "echo":
                 E(nid, "suite_proof", "suite_proof is meaningless on echo nodes "
                                       "(agent/gate only — an echo proves nothing)")
             elif not isinstance(n["suite_proof"], bool):
@@ -1055,13 +1073,13 @@ def validate_graph_errors(nodes):
             if lv not in reasoning_levels():
                 E(nid, "reasoning", f"reasoning {lv!r} invalid; allowed: "
                                     f"{list(reasoning_levels())}")
-        if n["type"] == "gate" and n.get("options") is not None:
+        if t == "gate" and n.get("options") is not None:
             opts = n["options"]
             if not isinstance(opts, list) or not opts \
                     or not all(isinstance(o, str) and o.strip() for o in opts):
                 E(nid, "options", "gate options must be a non-empty list of non-empty strings "
                                   "(or omit the key for a free-form answer)")
-        if n["type"] == "gate":
+        if t == "gate":
             # sprint101 #14: gate defaults are validated at the door, never discovered at the wall.
             dopt = n.get("default_option")
             if dopt is not None:
@@ -1086,7 +1104,7 @@ def validate_graph_errors(nodes):
                 E(nid, "question", f"question {n['question']!r} must be a string")
             if "context" in n and not isinstance(n["context"], str):
                 E(nid, "context", f"context {n['context']!r} must be a string")
-        if n["type"] == "agent":
+        if t == "agent":
             # #59 (fb-fix ledger 97e90c2205f17fb0): the string-typed agent keys
             # are TYPE-checked at submit — a list/dict `context` or non-str `goal`
             # passed the truthy-only check and died at FIRST spawn in run_child's
@@ -1172,6 +1190,17 @@ def validate_graph_errors(nodes):
                     q = fo.get("quorum")
                     if q is not None and (not isinstance(q, int) or isinstance(q, bool) or q < 1):
                         E(nid, "fanout.quorum", "fanout.quorum must be a positive int")
+                    # #85: the input LEDGER is a list of per-item declarations; row
+                    # CONTENT (source/artifact shape) is measured by the admission
+                    # guard below the door — here only the container shape is a
+                    # validator defect, so an undeclared-input graph stays
+                    # VALIDATOR-CLEAN and the refusal can only come from the guard.
+                    led = fo.get("ledger")
+                    if led is not None and not isinstance(led, list):
+                        E(nid, "fanout.ledger", "fanout.ledger must be a list of input-ledger "
+                                                "rows (one per fan-out item: a '<node_id>.<dotted.path>' "
+                                                "string or {\"source\": ..., \"artifact\": {\"file\": ..., "
+                                                "\"sha256\": <hex>?}})")
                     if fo.get("items") is None and isinstance(fo.get("items_from"), str):
                         head = fo["items_from"].split(".")[0]
                         if head == nid or head not in idset or head not in n.get("after", []):
@@ -1200,7 +1229,7 @@ def validate_graph_errors(nodes):
                     E(nid, "schema", "schema must be an object")
                 else:
                     schema_check(nid, "schema", n["schema"])
-        if n["type"] == "echo":
+        if t == "echo":
             # #59: echo commits `output` VERBATIM (the documented contract). The
             # shapes downstream consumes are JSON values (fixtures and examples
             # author dicts/lists — a str-only law would kill the feature), so the
@@ -1220,16 +1249,35 @@ def validate_graph_errors(nodes):
                 E(nid, "on_skip", f"on_skip {osk!r} invalid; allowed: ['pass', 'prune']")
             elif n.get("when") is None:
                 E(nid, "on_skip", "on_skip needs a `when` (nothing else can skip a gate)")
+        ofk = n.get("on_fail")   # jam-h23: agent-only (closed key set rejected others);
+        if ofk is not None:      # non-'skip' value must name an existing, non-ancestor AGENT
+            anc, stack = set(), list(n.get("after", []))
+            while stack:
+                a = stack.pop()
+                if a in anc or a not in idset:
+                    continue
+                anc.add(a); stack.extend(parents[a])
+            if ofk != "skip":
+                tgt = byid_of.get(ofk) if isinstance(ofk, str) else None
+                if not isinstance(ofk, str) or tgt is None:
+                    E(nid, "on_fail", f"on_fail {ofk!r} must be 'skip' or an existing node id")
+                elif tgt.get("type") != "agent":
+                    E(nid, "on_fail", f"on_fail target {ofk!r} must be an agent node")
+                elif ofk in anc or ofk == nid:
+                    E(nid, "on_fail", f"on_fail target {ofk!r} must not be an ancestor of {nid}")
         w = n.get("wait")
         if w is not None:
-            if n["type"] != "gate":
-                E(nid, "wait", "only gate nodes take wait")
-            else:
+            if t == "join":                              # jam-h25: join wait
+                if w not in ("terminal", "any"):
+                    E(nid, "wait", f"join wait {w!r} invalid; allowed: ['terminal', 'any']")
+            elif t == "gate":
                 for e in wait_spec_ok(w):
                     field = "wait" if e["field"] is None else f"wait.{e['field']}"
                     E(nid, field, f"gate node wait: {e['msg']}")
+            else:
+                E(nid, "wait", "only gate nodes take wait")   # agent: dedicated error pinned by test_validate_0923
         anc = set()
-        if (n.get("when") is not None and n["type"] == "gate") or n.get("inputs") is not None:
+        if (n.get("when") is not None and t == "gate") or n.get("inputs") is not None:
             stack = list(n.get("after", []))
             while stack:
                 a = stack.pop()
@@ -1237,7 +1285,33 @@ def validate_graph_errors(nodes):
                     continue
                 anc.add(a)
                 stack.extend(parents[a])
-        if n.get("when") is not None and n["type"] == "gate":
+        ks = n.get("keys")
+        if ks is None and t == "join":
+            E(nid, "keys", "join node needs keys: {label: '<node_id>.<dotted.path>', ...}")
+        if ks is not None:   # join-only (closed key set rejected it elsewhere)
+            if t != "join":
+                E(nid, "keys", "only join nodes take keys")
+            elif not isinstance(ks, dict) or not ks:
+                E(nid, "keys", "join keys must be a non-empty object {label: '<node_id>.<dotted.path>'}")
+            else:
+                anc = set(); stack = list(n.get("after", []))
+                while stack:
+                    a = stack.pop()
+                    if a in anc or a not in idset:
+                        continue
+                    anc.add(a); stack.extend(parents[a])
+                for label, ref in ks.items():
+                    if not isinstance(label, str) or not label.strip():
+                        E(nid, "keys", f"join key label {label!r} must be a non-empty string")
+                    if not isinstance(ref, str) or not ref.strip():
+                        E(nid, f"keys.{label}", "join key ref must be a non-empty '<node_id>.<dotted.path>' string")
+                        continue
+                    head = ref.split(".")[0]
+                    if head not in anc:
+                        E(nid, f"keys.{label}", f"join key ref {ref!r} head {head!r} is not an "
+                                                f"existing node in its `after` ancestry")
+
+        if n.get("when") is not None and t == "gate":
             err = when_expr_ok(n["when"])
             if err:
                 E(nid, "when", err)   # parse-only (syntax mode is total): NO head check on a broken expr
@@ -1256,7 +1330,7 @@ def validate_graph_errors(nodes):
                                            f"node in its `after` ancestry (when must descend from it)")
         ins = n.get("inputs")
         if ins is not None:
-            if n["type"] == "gate":
+            if t == "gate":
                 E(nid, "inputs", "gates cannot have inputs")
             elif not isinstance(ins, list) or not all(isinstance(x, str) and x.strip() for x in ins):
                 E(nid, "inputs", "inputs must be a list of non-empty ref strings")
@@ -1286,7 +1360,8 @@ def validate_graph_errors(nodes):
             if indeg[k] == 0:
                 queue.append(k)
     if seen != len(idset):
-        E(None, "after", "cycle in graph")
+        stuck = sorted(i for i in idset if indeg[i] > 0)
+        E(None, "after", f"cycle in graph (nodes still waiting on each other: {stuck})")
     return errs
 
 def validate_graph(nodes):
@@ -1297,6 +1372,166 @@ def validate_graph(nodes):
         return None
     e = errs[0]
     return (e["msg"] if e["node"] is None else f"node {e['node']}: {e['msg']}")
+
+# ---------- #85: artifact-admission guard — input ledgers map 1:1 to sources ----------
+# The class (WOFS W1f evidence-loss, cluster spool aaca9fe5a15f5f2b): a fan-out item
+# consumed an artifact another item's source actually covered — a disposition ledger
+# had silently lost 85/95 rationales and nothing at admission could tell the runner.
+# `fanout.ledger` is the ITEM-INDEXED input ledger: one row per item, positionally
+# aligned; a row is a plain '<node_id>.<dotted.path>' input-ref string or
+# {"source": "<node_id>.<dotted.path>", "artifact": {"file": rel/path, "sha256"?}}
+# naming the on-disk artifact the item will consume. This guard runs at the door
+# BEFORE any write/spawn and refuses, fail-closed, unless rows map 1:1 to items:
+#   * a row without an item ("row N has no item"), or an item (by position) whose
+#     row is absent ("item N is missing ledger source ...");
+#   * two items sharing one source (sources are consumed at most once);
+#   * a source head outside the node's transitive `after` ancestry (same data-edge
+#     law as `inputs` refs — only committed upstream outputs may feed the fan-out);
+#   * a declared artifact whose run-dir file is absent or whose sha256 disagrees
+#     (measured ONLY when run_dir is given — run creation has no run dir yet;
+#     amend/validate-with-dir measure the bytes).
+# Graphs WITHOUT a ledger declaration are byte-unchanged (no ledger, no guard;
+# golden-solo EMPTY-diff law). Row CONTAINER shape (non-list ledger) is a
+# validator defect; everything else about a row is measured here, so the RED
+# graph (an item with no ledger row) stays VALIDATOR-CLEAN and can only be
+# refused by this guard — that split is pinned by tests/test_admission_ledger_85.py.
+
+_SHA_OK = re.compile(r"\A[0-9a-fA-F]{64}\Z")
+
+def _ledger_item_label(item, i):
+    if isinstance(item, dict):
+        for k in ("key", "id", "name", "file", "source"):
+            v = item.get(k)
+            if isinstance(v, str) and v.strip():
+                return repr(v)
+        return f"{json.dumps(item, ensure_ascii=False)[:80]}"
+    return f"(index {i})"
+
+def admission_ledger_errors(graph, run_dir=None):
+    """[{node, field:'fanout.ledger', msg}] — see the #85 block comment. Structural
+    laws always; artifact file/sha laws only when run_dir is provided (the bytes
+    must exist at MEASUREMENT time; run creation has none yet)."""
+    errs = []
+    def E(nid, msg):
+        errs.append({"node": nid, "field": "fanout.ledger", "msg": msg})
+    if not isinstance(graph, dict):
+        return errs
+    nodes = [n for n in (graph.get("nodes") or []) if isinstance(n, dict)]
+    idset = {n.get("id") for n in nodes if isinstance(n.get("id"), str)}
+    # The guard runs BEFORE the node validator, so malformed `after` values (int,
+    # dict, str...) must never crash ancestry building — the validator reports the
+    # defect; we treat a non-list `after` as no known parents (same law as the
+    # ledger container shape above).
+    def _after_list(n):
+        a = n.get("after")
+        return a if isinstance(a, list) else []
+    parents = {n["id"]: [a for a in _after_list(n) if isinstance(a, str) and a in idset]
+               for n in nodes if isinstance(n.get("id"), str)}
+    for n in nodes:
+        nid = n.get("id")
+        fo = n.get("fanout")
+        if not isinstance(fo, dict):
+            continue
+        led = fo.get("ledger")
+        if led is None:
+            continue                       # no ledger, no guard (scope law)
+        if not isinstance(led, list):
+            continue                       # container shape is the validator's defect
+        items = fo.get("items")
+        static = isinstance(items, list)   # items_from: count unknown at admit
+        if static:
+            for i in range(len(led) - 1, len(items) - 1, -1) if len(led) > len(items) else ():
+                E(nid, f"ledger row {i} has no item — rows must map 1:1 to "
+                       f"fanout.items ({len(items)} items, {len(led)} rows)")
+            for i, item in enumerate(items):
+                if isinstance(item, dict) and i >= len(led):
+                    E(nid, f"item {i} {_ledger_item_label(item, i)} is missing ledger source "
+                           f"(fanout.ledger row {i} is absent — every item's declared input "
+                           f"must have exactly one ledger row)")
+        seen = {}                          # source ref -> first row index
+        for i, row in enumerate(led):
+            if isinstance(row, str):
+                src = row
+                art = None
+            elif isinstance(row, dict):
+                src = row.get("source")
+                art = row.get("artifact")
+            else:
+                E(nid, f"ledger row {i} {json.dumps(row, ensure_ascii=False)[:80]} must be a "
+                       f"'<node_id>.<dotted.path>' string or an object "
+                       f'{{"source": ..., "artifact": {{"file": ..., "sha256"?}}}}')
+                continue
+            if not isinstance(src, str) or not src.strip() or src.strip() != src \
+                    or "." not in src or not src.split(".", 1)[0] or not src.split(".", 1)[1]:
+                E(nid, f"ledger row {i} has an empty or malformed source "
+                       f"{src!r}: a source is '<node_id>.<dotted.path>'")
+                continue
+            head = src.split(".", 1)[0]
+            closure, stack = set(), list(parents.get(nid) or _after_list(n))
+            while stack:
+                a = stack.pop()
+                if a in closure or a not in idset:
+                    continue
+                closure.add(a)
+                stack.extend(parents.get(a, []))
+            if head not in closure:
+                E(nid, f"ledger row {i} source {src!r} head {head!r} is not an ancestor of "
+                       f"node {nid!r} (not in its `after` ancestry — only committed "
+                       f"upstream outputs may feed the fan-out)")
+                continue
+            if src in seen:
+                E(nid, f"item {i} is missing ledger source: {src!r} is already declared by "
+                       f"ledger row {seen[src]} — sources must map 1:1, an item may not "
+                       f"consume another item's source")
+                continue
+            seen[src] = i
+            if art is None:
+                continue
+            if not isinstance(art, dict) or not art:
+                E(nid, f"ledger row {i} artifact must be an object "
+                       f'{{"file": rel/path, "sha256"?}}, got {json.dumps(art, ensure_ascii=False)[:80]}')
+                continue
+            bad_keys = sorted(set(art) - {"file", "sha256"})
+            if bad_keys:
+                E(nid, f"ledger row {i} artifact has unknown key(s) {bad_keys}; "
+                       f"allowed: [file, sha256]")
+            f_, sha_ = art.get("file"), art.get("sha256")
+            if not isinstance(f_, str) or not f_.strip() or os.path.isabs(f_):
+                E(nid, f"ledger row {i} artifact.file {f_!r} must be a non-empty relative "
+                       f"path under the run dir")
+                continue
+            if sha_ is not None and (not isinstance(sha_, str) or not _SHA_OK.match(sha_)):
+                E(nid, f"ledger row {i} artifact.sha256 {sha_!r} must be a 64-char hex digest")
+                sha_ = None
+            if run_dir is None:
+                continue                   # bytes unmeasurable without a run dir
+            base = Path(run_dir).resolve()
+            target = (base / f_).resolve()
+            try:
+                inside = target != base and str(target).startswith(str(base) + os.sep)
+            except (OSError, ValueError):
+                inside = False
+            if not inside:
+                E(nid, f"ledger row {i} artifact.file {f_!r} escapes the run dir")
+                continue
+            if not target.is_file():
+                E(nid, f"item {i} is missing source artifact '{f_}': the declared input "
+                       f"file does not exist in the run dir")
+                continue
+            if sha_ is not None:
+                h = hashlib.sha256()
+                try:
+                    with target.open("rb") as fh:
+                        for chunk in iter(lambda: fh.read(1 << 20), b""):
+                            h.update(chunk)
+                except OSError as exc:
+                    E(nid, f"ledger row {i} artifact '{f_}' cannot be read: {exc}")
+                    continue
+                if h.hexdigest().lower() != sha_.lower():
+                    E(nid, f"ledger row {i} artifact '{f_}' sha256 mismatch: on disk "
+                           f"{h.hexdigest()}, declared {sha_} — the declared bytes and the "
+                           f"run-dir bytes are not the same artifact")
+    return errs
 
 # ---------- full structural graph validation (shared: door + include door) ----------
 # PR#84 review F-2: the door's `_validation_error` and the include resolver's
@@ -1662,6 +1897,21 @@ def _include_scratch_paths(node):
     return found
 
 
+def _ledger_ref_rewrite(row, map_head):
+    """#85: a fanout.ledger row is an id-ref surface like `inputs` — rewrite the
+    source HEAD through `map_head` (string rows and {source, artifact?} rows; any
+    other shape passes through untouched — row shape is the guard's named defect).
+    Used by BOTH include passes so shelf refs and parent refs namespace in
+    lockstep with after/inputs/items_from (the five-surface law, grammar.md)."""
+    def _r(ref):
+        head, sep, rest = ref.partition(".")
+        return map_head(head) + (sep + rest if sep else "")
+    if isinstance(row, str):
+        return _r(row)
+    if isinstance(row, dict) and isinstance(row.get("source"), str):
+        return dict(row, source=_r(row["source"]))
+    return row
+
 def _rewrite_child_head(h, ns):
     """Map one ref head inside the included subtree: internal -> namespaced,
     anything else kept (child-standalone validation rejects true danglers first)."""
@@ -1740,6 +1990,12 @@ def _include_namespace_child(child, alias, library_name):
         if isinstance(n.get("requires"), dict):
             n["requires"] = {ns.get(k, k): v for k, v in n["requires"].items()}
         fo = n.get("fanout")
+        if isinstance(fo, dict) and isinstance(fo.get("ledger"), list):
+            # #85: ledger rows carry '<node_id>.<path>' source refs — the sixth
+            # id-ref surface, namespaced in lockstep with after/inputs/requires.
+            n["fanout"] = dict(fo, ledger=[_ledger_ref_rewrite(r, lambda h: ns.get(h, h))
+                                           for r in fo["ledger"]])
+            fo = n["fanout"]
         if isinstance(fo, dict) and isinstance(fo.get("items_from"), str) \
                 and fo.get("items") is None:
             head, _, rest = fo["items_from"].partition(".")
@@ -2033,6 +2289,12 @@ def _expand_include_pass(graph, library_reader, notes, chain, depth):
                              for k, v in n["requires"].items()}
         fo = n.get("fanout")
         new_item_head = None
+        if isinstance(fo, dict) and isinstance(fo.get("ledger"), list):
+            # #85: ledger source heads are parent refs at the include boundary —
+            # mapped like inputs/requires (the sixth id-ref surface, in lockstep).
+            fo = dict(fo, ledger=[_ledger_ref_rewrite(r, lambda h: map_site(nid, "fanout.ledger", h))
+                                  for r in fo["ledger"]])
+            n["fanout"] = fo
         if isinstance(fo, dict) and isinstance(fo.get("items_from"), str) \
                 and fo.get("items") is None:
             head, _, rest = fo["items_from"].partition(".")
@@ -2323,6 +2585,20 @@ def runner_exit_read(r, pid_path=None):
         return None
     return None if runner_alive(r, path) else {"reason": "crashed (no exit record)"}
 
+# est-6226: the ONE external-kill classifier. A runner NEVER SIGTERMs itself
+# (stop rides the cooperative stop.request boundary -> "stopped"), so a
+# "terminated: SIGTERM (external: ...)" verdict — the tag wf.py's signal
+# handler writes — is an out-of-band signal death (witnessed shape: the
+# gateway-restart wave propagating beyond the gateway, 2026-10-06 10:06Z).
+# Reaper/dispatcher/read model all classify through THIS function — nobody
+# re-derives external-ness from prose. Strict by design: the bare pre-fix
+# string and every lane-failure shape ("crashed: ...", "crashed (no exit
+# record)", "done", "stopped") are NOT external kills.
+def is_external_kill(reason):
+    return (isinstance(reason, str)
+            and reason.startswith("terminated: SIGTERM")
+            and "(external:" in reason)
+
 # ---------- node state (the ONE validity rule: stored efp == current efp) ----------
 
 def _legacy_chain_unchanged(r, n, byid):
@@ -2568,11 +2844,6 @@ def _tok_when(s):
         toks.append(m.group(1)); i = m.end()
     return toks
 
-def _when_expr(toks, pos, outputs, allow_or=True):
-    """Tiny recursive-descent evaluator: or > and > not > comparison > value.
-    Values: out.<node>.dotted.path | string/number/bool/None literals."""
-    val, pos = _when_or(toks, pos, outputs) if allow_or else _when_cmp(toks, pos, outputs)
-    return val, pos
 
 def _when_or(toks, pos, outputs):
     val, pos = _when_and(toks, pos, outputs)
@@ -2661,21 +2932,23 @@ def when_expr_ok(expr):
     so a value TypeError can never short-circuit the structural pass and mask a
     trailing token. Malformed syntax is REJECTED at submit and at runner startup;
     value errors against live data surface at fire time as a HOLD (fail-safe)."""
+    GRAMMAR = ("grammar: out.<node>.<dotted.path> compared (== != > >= < <=) with "
+               "literals, joined by and/or/not, parentheses allowed")
     toks = None
     try:
         toks = _tok_when(expr)
     except ValueError as e:
-        return f"when: {e}"
+        return f"when: {e} ({GRAMMAR})"
     if not toks:
-        return "empty when expression"
+        return f"empty when expression ({GRAMMAR})"
     try:
         _, pos = _when_or(toks, 0, _SYNTAX)
     except ValueError as e:
-        return f"when: {e}"
+        return f"when: {e} ({GRAMMAR})"
     except Exception as e:  # syntax mode must be total: ANY raise = malformed
-        return f"when: {type(e).__name__}: {e}"
+        return f"when: {type(e).__name__}: {e} ({GRAMMAR})"
     if pos != len(toks):
-        return f"when: unexpected token {toks[pos]!r}"
+        return f"when: unexpected token {toks[pos]!r} ({GRAMMAR})"
     return None
 
 def when_true(gate, outputs):
@@ -2758,11 +3031,17 @@ def prune_states(nodes, states):
     skipped deps count as satisfied. Mutates `states`; returns ids newly derived skipped
     (pending before) so the runner can commit them as efp-stamped facts."""
     derived, changed = set(), True
+    by_map = {n["id"]: n for n in nodes}
     while changed:
         changed = False
         for n in nodes:
             deps = n.get("after", [])
             if states.get(n["id"]) == "pending" and deps and all(states.get(a) == "skipped" for a in deps):
+                # jam-h23: ONE exception — a fallback survives the pruner. If a
+                # skipped dep died FAILED and its on_fail names THIS node, that
+                # death is the node's reason to run, not a reason to prune it.
+                if any((by_map.get(a) or {}).get("on_fail") == n["id"] for a in deps):
+                    continue
                 states[n["id"]] = "skipped"; derived.add(n["id"]); changed = True
     return derived
 
@@ -2884,9 +3163,6 @@ def active_child(r, n, byid, index=None):
     fname = f"{n['id']}" + (f".{index}" if index is not None else "")
     return _verify_spawn_rec(r, n, byid, jload(r / "nodes" / f"{fname}.json"))
 
-def _active_spawn(r, n, byid):
-    """Compatibility: first verified spawn for existing blocked-by consumers."""
-    return next(iter(_active_spawns(r, n, byid)), None)
 
 def run_state(r):
     """Derived truth of a run dir: status, per-node status, held gate meta.
@@ -3054,15 +3330,56 @@ def node_child_home(r, nid, index=None):
         return profile_home(prof)
     return None
 
-def node_child_metrics(r, nid, index=None):
-    """Profile-aware per-node child_metrics (1.1 RATIFY F2): the SAME fold as
-    child_metrics, read from the node's OWN child DB home (the target profile's state.db
-    for profile-routed nodes — the launcher's DB never holds a teammate's sessions rows).
-    Committed coordination seam for the runner's harvest/retry/metric sites: it is the
-    one place home resolution lives (wf.py must not re-derive it). Unreadable target DB →
-    {} via child_metrics — the api_calls_known:false UNKNOWN path, never zero."""
-    home = node_child_home(r, nid, index)
-    return child_metrics(Path(r).name, home=home)
+def run_child_metrics(r):
+    """fb 904f5101496be8c1: the run-wide fold the STATUS/WAIT views use — per node
+    record through its OWN child DB home (node_child_home), NOT a single query against
+    the caller's state.db. A profile-routed node's sessions rows live in the TARGET
+    profile's DB; folding only the launcher home returned {} for those nodes and the
+    view rendered api_calls/tool_calls 0 + idle_s null for demonstrably-live children
+    (false-stall). Solo runs are byte-identical: records with no profile keys all take
+    the None home = child_metrics(default). Rows fold per skey; distinct homes can
+    never collide because a title embeds the run id and the item index."""
+    r = Path(r)
+    nodes = r / "nodes"
+    out = {}
+    seen_skeys = set()
+    try:
+        names = sorted(p.name for p in nodes.glob("*.json"))
+    except OSError:
+        names = []
+    iterated = set()                      # each distinct home folded exactly once
+    for name in names:
+        stem = name[:-5]
+        nid, _, index = stem.partition(".")
+        home = node_child_home(r, nid, index or None)
+        if home is None:
+            continue                      # solo path: folded once, below, from default home
+        mkey = str(home)
+        if mkey in iterated:
+            continue
+        iterated.add(mkey)
+        for k, v in child_metrics(Path(r).name, home=home).items():
+            prev = out.get(k)
+            if prev is None:
+                out[k] = v
+            else:                         # the SAME skey in a genuinely different home:
+                seen_skeys.add(k)         # merge additively, never drop counters.
+                for kk in ("tokens_in", "tokens_out", "cache_read", "reasoning",
+                           "api_calls", "tool_calls", "attempts"):
+                    prev[kk] += v.get(kk) or 0
+                prev["cost"] += v.get("cost") or 0.0
+                for kk in ("model", "billing_provider", "last_activity", "last_desc"):
+                    prev[kk] = prev.get(kk) or v.get(kk)
+                prev["api_calls_known"] = prev.get("api_calls_known", True) and v.get("api_calls_known", True)
+                prev["sessions"].update(v.get("sessions") or {})
+    # Any node record without a profile home (and the whole-run case where NONE exist)
+    # folds from the caller's home — but at most once.
+    unowned = [p.name[:-5] for p in (nodes.glob("*.json") if nodes.is_dir() else [])
+               if (lambda s: node_child_home(r, s.partition(".")[0], s.partition(".")[2] or None))(p.name[:-5]) is None]
+    if unowned or not seen_skeys:
+        for k, v in child_metrics(Path(r).name).items():
+            out.setdefault(k, v)
+    return out
 
 def node_facts(r, nid, index=None):
     """Record facts for one node (fan-out item via `index`), plus its steer truth.
@@ -3223,13 +3540,19 @@ def amend_preview(r, new_nodes):
                if isinstance(n, dict) and isinstance(n.get("id"), str)
                and n["id"] not in new_ids]
     kids = _downstream(byid)
-    status, committed_mismatch = {}, set()
+    status, committed_mismatch, def_drift = {}, set(), set()
     for n in new_nodes:
         st, rec = node_rec(r, n, byid)
         status[n["id"]] = st
         if st == "pending" and (rec or {}).get("status") in ("done", "partial", "failed", "skipped"):
             committed_mismatch.add(n["id"])  # committed but efp-stale
-    changed = sorted(committed_mismatch)
+        elif st == "pending" and rec is None:
+            # never committed (pending/running): compare the def against the frozen
+            # graph so a model/provider-only edit isn't previewed as no-work (est-c9is)
+            old = next((o for o in old_nodes if isinstance(o, dict) and o.get("id") == n["id"]), None)
+            if isinstance(old, dict) and def_hash(old) != def_hash(n):
+                def_drift.add(n["id"])
+    changed = sorted(committed_mismatch | def_drift)
     will = set()
     stack = changed + added
     while stack:

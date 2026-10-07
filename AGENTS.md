@@ -38,8 +38,12 @@ hermes plugins enable hermes-workflows
 hermes plugins validate ~/.hermes/plugins/hermes-workflows
 ```
 
-Then restart the backend (`hermes serve`) — tools and dashboard routes mount only at
-serve start. **Proof it loaded:** this line in the gateway's `~/.hermes/logs/gui.log`:
+Then restart the process that SERVES the plugin API — tools and dashboard routes
+mount only at serve/dashboard start. `hermes plugins enable` alone hot-loads gateway
+*commands* only; on rigs where the dashboard is a separate systemd unit
+(`hermes-dashboard` vs `hermes-gateway`), restart whichever unit hosts `hermes serve`
+— restarting the wrong one leaves every run reading `unknown` while the plugin looks
+enabled. **Proof it loaded:** this line in the gateway's `~/.hermes/logs/gui.log`:
 
 ```
 Mounted plugin API routes: /api/plugins/hermes-workflows/
@@ -227,7 +231,7 @@ Author-run receipt: [receipts/exchange-run/author-run.json](receipts/exchange-ru
 
 - `node.failed` events carry `error_class` from the closed set defined in code
   (`wf.py ERROR_CLASSES`) — `cancelled | cap_exhausted | config_input | crashed | early_death |
-  fanout_empty | fatal_quota | forbidden_model | graph_invalid | incomplete_work |
+  fanout_empty | fatal_quota | forbidden_model | incomplete_work |
   inputs | lane_wreckage | left_live_descendants | malformed_turn | precondition | provider_400 | quorum |
   ratelimit |
   route_substitution_denied | route_unavailable | schema | spawn | timeout | transport | transport_exhausted |
@@ -302,6 +306,18 @@ Author-run receipt: [receipts/exchange-run/author-run.json](receipts/exchange-ru
   log when the wall fires gets one 50 % extension (`node.extended`), then dies.
 - A run with unfinished work and no live runner is `interrupted`. Inspect committed
   outputs, then `wait` to resume — finished nodes replay-skip by fingerprint.
+- **Partial-rescue law (#134):** the sole recovery state of a run is the committed
+  `nodes/*.json` done-set parsed against the CURRENT `graph.json` — validity is
+  the `efp` each record carries recomputed against the live defs, so editing the
+  submitted graph changes exactly what a rerun does (`amend`-via-efp is the
+  sanctioned recovery path; a done node stays replay-skip until its own def or
+  an ancestor's def moves). The plugin therefore carries **no rescue-snapshot
+  file by design**: there is no second copy of the graph for a rerun to fall
+  back to, and none may be added — a "rescue graph" snapshot would recreate the
+  stale-recovery failure mode this law forbids. Contrast DAGMan, whose rescue
+  DAG stores only which nodes were done and lets the rerun follow the edited
+  `.dag`: same outcome, one fewer artifact to keep true. Enforced by
+  `tests/test_partial_rescue_law_134.py`.
 - To change the graph mid-flight: `amend` with the **whole** replacement graph.
   `dry_run:true` previews `{added, removed, changed, will_rerun, unchanged}`.
   Amending a `pending` node changes what spawns next; amending a `done` node
@@ -373,7 +389,7 @@ A change is done when: its targeted test is green, the full suite is green, vali
 prints `Validation passed.`, the scrub audit prints `0 scrub hits`, and the path-ban
 prints `OK`. CI runs the same gates ([.github/workflows/ci.yml](.github/workflows/ci.yml));
 the knowledge-graph honesty gate (`scripts/graph_check.py`) runs there only as the
-push-on-main `graph-freshness` job — the regen lane owns the graph (#153).
+push-on-main `graph-main` job — the regen lane owns the graph (#153).
 
 ### 4b′. Navigate with the knowledge graph
 
@@ -446,6 +462,11 @@ dated backups. `.graphifyignore` excludes `graphify-out/` and `.github/` from th
     in), only save-from-*file* carries the template's own `source_digest`. The
     door writes `source` only when passed explicitly — a null-source row is a
     bare save, not a broken shelf.
+11. **Changed an example graph? Its diagram is derived, never drawn.** Edit the
+    graph, re-run `python3 scripts/graph_diagram.py --all` + the render/shoot
+    loop, and let CI's freshness gate refuse a stale commit. One rule, one
+    file: [examples/diagrams/README.md](examples/diagrams/README.md) (DIAGRAM LAW v1).
+    The examples/ map keeps a pointer here.
 
 ### 4d. Release
 
@@ -459,6 +480,8 @@ git tag v<version> && git push --tags
 The catalog entry pins a full 40-char commit SHA
 ([docs/catalog/entry.yaml](docs/catalog/entry.yaml)); bump it in a PR to
 `NousResearch/hermes-agent` → `plugin-catalog/hermes-workflows.yaml`.
+
+Cross-estate joint eng protocol v1 is the SSOT mirrored publicly at [issue #174](https://github.com/jacobhausler/hermes-workflows/issues/174), sha256 `a7f424c5be3f5d6d1cbeb590f6cd02b6699a60090a3a45646853c67b2360345b` (of the issue body including its trailing newline); private working copy: `jacobhausler/joint-eng-protocol@0bf569a`, file `docs/specs/hermes-workflows-joint-eng-protocol-v1.md`.
 
 ---
 

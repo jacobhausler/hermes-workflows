@@ -18,6 +18,7 @@ _spec.loader.exec_module(_common)
 run_state = _common.run_state
 validate_graph = _common.validate_graph
 validate_graph_errors = _common.validate_graph_errors
+admission_ledger_errors = _common.admission_ledger_errors   # #85: the artifact-admission guard
 efp = _common.efp
 jload = _common.jload
 amend_preview = _common.amend_preview
@@ -67,8 +68,6 @@ GRAPH_KEYS = {"name", "nodes", "description", "defaults", "model_policy",
                               # expand, so a committed graph.json never carries it (only the
                               # library author form does)
 
-def _model_names_valid(names):
-    return isinstance(names, list) and all(isinstance(n, str) and n.strip() for n in names)
 
 def _model_policy_error(graph):
     """Validate effective node routes after defaults and resolution, before graph.json."""
@@ -79,7 +78,7 @@ def _model_policy_error(graph):
     tiers = model_tiers()
     known = set(seat["aliases"]) | ({seat["default"]} - {None}) | set(tiers.values())
     for node in graph["nodes"]:
-        if kind(node).spawns is not True:   # non-agent (gate/echo): no model route
+        if kind(node).spawns is not True:   # non-agent (gate/echo/join): no model route
             continue
         nid, requested = node["id"], node.get("model")
         if policy.get("require_model") and not requested:
@@ -141,7 +140,7 @@ def _input_graph(args, *, run_id=False, library=False):
         return graph, None
     return None, None
 
-def _validation_error(graph):
+def _validation_error(graph, run_dir=None):
     """Return graph-level and node-level defects together, before any write/spawn.
 
     PR#84 review F-2: the structural (graph-level) half is delegated to
@@ -149,7 +148,14 @@ def _validation_error(graph):
     every expanded shelf with — so submitted graphs and included graphs can
     never diverge in strictness again. This side keeps the door-specific node
     normalization (author-forged route_verified stripping) and composes it with
-    the shared node-level validator."""
+    the shared node-level validator.
+
+    #85: composes the ARTIFACT-ADMISSION guard too (wfcommon.admission_ledger_errors):
+    a fan-out node's declared `fanout.ledger` must map 1:1 to its items' sources or
+    admission is REFUSED with a named error — a mis-declared item silently getting
+    another item's artifacts (WOFS W1f) becomes impossible-by-construction for
+    admitted graphs. `run_dir` (amend; validate given a run dir) additionally measures
+    the declared artifact bytes; run creation passes None — the dir does not exist yet."""
     errs = list(_common.structural_graph_errors(graph))
     nodes = graph.get("nodes")
     # The shared validator assumes hashable ids and iterable dependency lists.
@@ -191,6 +197,12 @@ def _validation_error(graph):
                 item["after"] = []
             safe.append(item)
     errs.extend(validate_graph_errors(safe))
+    # #85: the artifact-admission guard composes with the validator here, so EVERY
+    # door admission path (run/amend/submit/save/validate) measures ledgers before
+    # any write/spawn. Artifact BYTES are measured only when a run dir exists to
+    # measure them in (amend, and validate given run_id); the 1:1 structural law
+    # always runs.
+    errs.extend(admission_ledger_errors(graph, run_dir=run_dir))
     if not errs:
         return None
     first = errs[0]
@@ -271,6 +283,61 @@ def _hermes_bin():
 
 runner_alive = _common.runner_alive
 
+def _gw_restart_window_match(r, anchor_iso):
+    """#8 (P0, remaining half): observed gw-restart reason. The incident shape
+    is the gateway itself being SIGTERMed for a restart while the sweep takes
+    the runner down — the death window then shows a `Received SIGTERM` line in
+    <hermes_home>/logs/gateway.log. Match it from FILES ONLY: any such line
+    whose stamp falls within +/-120 s of `anchor_iso` (the death anchor).
+    Never fatal: an absent/unreadable log, an unparseable anchor, or any read
+    error answers False — the reap keeps today's bare reason. The host log is
+    the gateway's own file; the plugin only reads it, never writes."""
+    try:
+        anchor = datetime.fromisoformat(anchor_iso)
+    except (TypeError, ValueError):
+        return False
+    if anchor.tzinfo is None:
+        anchor = anchor.replace(tzinfo=timezone.utc)
+    try:
+        lines = (_common.hermes_home() / "logs" / "gateway.log").read_text(
+            errors="replace").splitlines()
+    except (OSError, ValueError):
+        return False
+    for line in lines:
+        if "Received SIGTERM" not in line:
+            continue
+        for tok in line.replace("[", " ").replace("]", " ").split():
+            try:
+                stamp = datetime.fromisoformat(tok)
+            except ValueError:
+                continue
+            if stamp.tzinfo is None:
+                stamp = stamp.replace(tzinfo=timezone.utc)
+            if abs((stamp - anchor).total_seconds()) <= 120:
+                return True
+    return False
+
+
+def _death_anchor(r):
+    """The death window anchor: the last event ts on the record (the dead
+    runner's last heartbeat), else the wf.pid file's mtime. Files only."""
+    try:
+        for line in reversed((r / "events.jsonl").read_text().splitlines()):
+            try:
+                ts = json.loads(line).get("ts")
+            except ValueError:
+                continue
+            if isinstance(ts, str) and ts:
+                return ts
+    except OSError:
+        pass
+    try:
+        m = (r / "wf.pid").stat().st_mtime
+        return datetime.fromtimestamp(m, tz=timezone.utc).isoformat(timespec="seconds")
+    except OSError:
+        return None
+
+
 def _reap_silent_death(r):
     """#8 fix-law item 2 (crash-visibility): make a silent runner death loud
     BEFORE a door respawn replaces it. The incident shape: runner + children die
@@ -307,7 +374,16 @@ def _reap_silent_death(r):
         # verdict, and act_wait's rx gate owns it, no reaping.
         rx = _common.runner_exit_read(r) or {}
         reason = rx.get("reason")
-        if reason != "crashed (no exit record)":
+        # est-6226: a RECORDED external kill (the runner's own SIGTERM handler
+        # wrote the external tag before re-raising) is equally a silent death
+        # needing a loud reap — the wave shape records the verdict but no
+        # node.interrupted and no reaped line, leaving watchers staring at
+        # silence while act_wait quietly replaces the runner. The phantom
+        # gate ("crashed (no exit record)") and the external tag are the only
+        # accepted shapes; every other recorded verdict is a lane verdict and
+        # the rx gate in act_wait owns it.
+        _external = _common.is_external_kill(reason)
+        if reason != "crashed (no exit record)" and not _external:
             return
         # Event-level once-per-record dedup (PR #82 review, F3), content-aware:
         # scan the events after the LAST run.resumed (a replacement that
@@ -320,6 +396,13 @@ def _reap_silent_death(r):
         # door's own admission path (only one respawn proceeds), so the retry
         # window this pins is sequential.
         now_iso = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        # #8 (P0, remaining half): the observed-reason clause. When the death
+        # window matches a gateway restart (a `Received SIGTERM` line in the
+        # host gateway log within +/-120 s of the last event ts / wf.pid mtime),
+        # the event says so. Never fatal: an absent/unreadable log keeps the
+        # bare reason byte-identical (S2-S4 pins in tests/test_reaper_reason_8).
+        if _gw_restart_window_match(r, _death_anchor(r)):
+            reason = reason + "; gw-restart window match"
         events = [{"ts": now_iso, "event": "runner.reaped", "prev_pid": pid, "reason": reason}]
         for n in graph.get("nodes", []):
             paths = [(r / "nodes" / f"{n['id']}.json", None)]
@@ -437,6 +520,11 @@ _DAEMON_INTERMEDIATE = (
 
 _READY_WAIT_S = 5.0
 
+# #152 T3 spawn-provenance key: door-spawned runners get this env stamp (value =
+# run id) at _spawn_runner; the runner pops it at main() entry — same inherit-
+# then-pop pattern as wf.READY_FD_ENV. Direct CLI boots never carry it.
+_SPAWNED_BY_ENV = "HERMES_WF_SPAWNED_BY"
+
 def _ready_pid(rd):
     """One newline-terminated pid off the ready pipe, <= _READY_WAIT_S. None on
     EOF or timeout: a WORKFLOW_BUSY loser closes the write end without a line."""
@@ -505,38 +593,57 @@ def _spawn_runner(r):
     log = open(r / "runner.log", "a")
     env = ({**os.environ, "HERMES_HOME": str(_common.hermes_home())}
            if r.parent == _common.runs_root() else None)
-    argv = [sys.executable, str(HERE / "wf.py"), "run", r.name]
-    pid = None
-    if hasattr(os, "fork"):                # POSIX: daemonize through a transient hop
-        rd = wd = None
-        try:
-            rd, wd = os.pipe()
-            proc = subprocess.Popen(
-                [sys.executable, "-c", _DAEMON_INTERMEDIATE,
-                 str(HERE / "wf.py"), r.name, str(wd)],
-                stdout=log, stderr=log, stdin=subprocess.DEVNULL,
-                env=env, pass_fds=(wd,), start_new_session=True, cwd=str(HERE))
-            os.close(wd); wd = None        # the transient parent must not hold the write end
-            pid = _ready_pid(rd)
+    # #152 T3 spawn-provenance stamp: every process that leaves _spawn_runner is
+    # DOOR-spawned (fresh launch, crash-reaper revival, explicit wait-resume,
+    # release/amend respawn). The runner pops this at main() entry (never into a
+    # child env) and the admission duplicate-consumer gate ONLY retires a boot
+    # that proves door provenance — a direct CLI resume (`wf.py run <id>`, the
+    # test-locked stopped-run resume shape) carries no stamp and always runs.
+    # Bound to the run id so a stray leak into an unrelated shell can only ever
+    # affect that one run.
+    # The stamp rides BOTH channels: an explicit env dict when the door builds
+    # one, and the live os.environ (inherited) for legacy-location spawns. The
+    # finally-pop guarantees the door's own process never keeps provenance
+    # beyond this spawn — an in-process test door that later Popen's wf.py
+    # directly (the B1 direct-resume shape) must NOT hand it the stamp.
+    if env is not None:
+        env[_SPAWNED_BY_ENV] = r.name
+    os.environ[_SPAWNED_BY_ENV] = r.name
+    try:
+        argv = [sys.executable, str(HERE / "wf.py"), "run", r.name]
+        pid = None
+        if hasattr(os, "fork"):                # POSIX: daemonize through a transient hop
+            rd = wd = None
             try:
-                rc = proc.wait(timeout=5)
+                rd, wd = os.pipe()
+                proc = subprocess.Popen(
+                    [sys.executable, "-c", _DAEMON_INTERMEDIATE,
+                     str(HERE / "wf.py"), r.name, str(wd)],
+                    stdout=log, stderr=log, stdin=subprocess.DEVNULL,
+                    env=env, pass_fds=(wd,), start_new_session=True, cwd=str(HERE))
+                os.close(wd); wd = None        # the transient parent must not hold the write end
+                pid = _ready_pid(rd)
+                try:
+                    rc = proc.wait(timeout=5)
+                except Exception:
+                    rc = 0                     # hung transient: trust the ready line
+                if pid is None and rc not in (0, None):
+                    pid = _spawn_runner_legacy(argv, env, log)   # fork refused pre-fork: direct spawn
             except Exception:
-                rc = 0                     # hung transient: trust the ready line
-            if pid is None and rc not in (0, None):
-                pid = _spawn_runner_legacy(argv, env, log)   # fork refused pre-fork: direct spawn
-        except Exception:
-            pid = _spawn_runner_legacy(argv, env, log)   # daemonize path died pre-exec
-                                                       # (no runner alive): direct spawn;
-                                                       # the flock makes a race harmless
-        finally:
-            for fd in (rd, wd):
-                if fd is not None:
-                    try:
-                        os.close(fd)
-                    except OSError:
-                        pass
-    else:                                  # no-fork platform: today's behavior
-        pid = _spawn_runner_legacy(argv, env, log)
+                pid = _spawn_runner_legacy(argv, env, log)   # daemonize path died pre-exec
+                                                           # (no runner alive): direct spawn;
+                                                           # the flock makes a race harmless
+            finally:
+                for fd in (rd, wd):
+                    if fd is not None:
+                        try:
+                            os.close(fd)
+                        except OSError:
+                            pass
+        else:                                  # no-fork platform: today's behavior
+            pid = _spawn_runner_legacy(argv, env, log)
+    finally:
+        os.environ.pop(_SPAWNED_BY_ENV, None)
     # #8 review (findings 3+4): NO door write of wf.pid — the admitted runner is
     # its sole owner (self-stamp at admission, wf.py ready_stamp). `pid` here is
     # only returned to the caller as the observed pid; on the legacy path the
@@ -565,8 +672,8 @@ WORKFLOW_PARAMS = {
     "properties": {
         "action": {
             "type": "string",
-            "enum": ["run", "status", "wait", "release", "steer", "inbox", "amend", "stop", "list", "save", "submit", "library", "doctor_version"],
-            "description": "run=launch a graph; wait=read state, RESPAWNING an idle runner if work is pending (blocks to the next boundary when one is live); status=read-model of a run; release=answer a held human gate; steer=queue steering text for a node; inbox=(child-side, cooperative) pull late steering lines baked for THIS spawn — call once at a natural seam; amend=replace the graph (invalidates changed nodes + all downstream by fingerprint); stop=request stop; list=all runs; save=shelve a graph in the library under a name (from run_id or inline graph); library=list shelved graphs richly (name, description, tags, provenance, path-relative id). run from=<name> replays a shelved graph. submit=quarantine a hand-rolled graph for study (requires why_not_library >=80 chars; never joins the library — the quartermaster's human-gated loop decides); inbox kind=submissions lists them newest-first. doctor_version=read-only version truth for THIS install: {live_version, newest_packaged, source_commit, drift} comparing plugin.yaml against the install.json provenance that pack.py stamps at build time \u2014 one read, no network.",
+            "enum": ["run", "status", "wait", "release", "steer", "inbox", "amend", "stop", "list", "save", "submit", "library", "doctor_version", "validate"],
+            "description": "run=launch a graph; wait=read state, RESPAWNING an idle runner if work is pending (blocks to the next boundary when one is live); status=read-model of a run; release=answer a held human gate; steer=queue steering text for a node; inbox=(child-side, cooperative) pull late steering lines baked for THIS spawn — call once at a natural seam; amend=replace the graph (invalidates changed nodes + all downstream by fingerprint); stop=request stop; list=all runs; save=shelve a graph in the library under a name (from run_id or inline graph); library=list shelved graphs richly (name, description, tags, provenance, path-relative id). validate=dry-run the door's validation pipeline (defaults fill + defect collection + model/route policy) with no ping and no writes; returns {ok, errors:[{node,field,msg}], resolved_routes}. run from=<name> replays a shelved graph. submit=quarantine a hand-rolled graph for study (requires why_not_library >=80 chars; never joins the library — the quartermaster's human-gated loop decides); inbox kind=submissions lists them newest-first. doctor_version=read-only version truth for THIS install: {live_version, newest_packaged, source_commit, drift} comparing plugin.yaml against the install.json provenance that pack.py stamps at build time \u2014 one read, no network.",
         },
         "run_id": {"type": "string", "description": "Run id (required for every action except run/list)."},
         "name": {"type": "string", "description": "run: overrides graph.name (default workflow); save: library name overrides graph.name (lowercase, [-_.]). amend: set graph.name in the replacement graph; omitting it retains the run name."},
@@ -580,11 +687,11 @@ WORKFLOW_PARAMS = {
         "team": {"type": "string", "description": "run (optional, <=64 chars): team label stamped into run.json and shown by list; no effect on scheduling."},
         "lane_key": {"type": "string", "description": "run (optional, <=128 chars): in-flight registry key — a second run with the same key while the incumbent is unfinished is deduped (no spawn; returns the incumbent's run_id); status lane_key=<key> reads the incumbent instead of run_id. Keys are global per runs root; prefix with <team>/ yourself."},
         "source": {"type": "string", "description": "save (optional, <=200 chars): where this graph came from (repo path, URL, skill) — records opt-in provenance {owner, source, saved_at, source_digest} in the library entry."},
-        "graph_path": {"type": "string", "description": "run/save/amend: absolute path to a caller-supplied local regular UTF-8 JSON graph file (max 1 MiB, no final symlink). Choose exactly one of graph, graph_path, or run's from / save's run_id. Validated before any write or spawn."},
+        "graph_path": {"type": "string", "description": "run/save/amend/validate: absolute path to a caller-supplied local regular UTF-8 JSON graph file (max 1 MiB, no final symlink). Choose exactly one of graph, graph_path, or run's from / save's run_id. Validated before any write or spawn."},
         "graph": {
             "type": "object",
             "description": (
-            "For run/amend: {name, nodes:[...], defaults:{schema, timeout, max_turns, reasoning, provider, model, context, require_route}} where `defaults` fills agent node keys the author left unset (explicit node keys always win; defaults.context is the shared preamble prepended once to each agent's own context) and where node = {id, type:'agent'|'gate'|'echo', after:[node ids], goal, context, "
+            "For run/amend: {name, nodes:[...], defaults:{schema, timeout, max_turns, reasoning, provider, model, context, require_route}} where `defaults` fills agent node keys the author left unset (explicit node keys always win; defaults.context is the shared preamble prepended once to each agent's own context) and where node = {id, type:'agent'|'gate'|'echo'|'join', after:[node ids], goal, context, "
             "schema (json-schema for child output), model, provider (optional explicit Hermes provider paired with model; passed as --provider; when unset it is INHERITED from a provider-qualified model alias/tier), toolsets, max_turns, timeout (s wall-clock kill, default 900), shape (recon|build|review|publish \u2014 fills max_turns/timeout from the measured p95 census presets when the author left them unset; "
             "explicit keys win), repo (optional path \u2014 absolute, or run-dir-relative \u2014 of the git lane this node owns: a done/partial whose lane still has uncommitted TRACKED changes commits as failed error_class incomplete_work instead of a false hand-off (the dad50be0 shape: fix green but uncommitted, downstream verifies the mutant); commit in the lane, then amend/re-run re-drives), run_budget (s, "
             "child's own budget), reasoning (a hermes reasoning effort: none|minimal|low|medium|high|xhigh|max|ultra \u2014 passed to the child as --reasoning; levels are validated PER ROUTE at the door against the resolved (provider, model) route's supported set, with the supported list and nearest level in the error \u2014 no silent downgrade), require_route (bool, "
@@ -593,7 +700,11 @@ WORKFLOW_PARAMS = {
             "engine-stamped substitution with a machine-injected result-schema disclosure (#116); no config = the refusal, verbatim; the sibling `route_verified` proof annotation is DOOR-BAKED only \u2014 never author-writable, "
             "an author value is dropped at resolve and re-proved by this submit's ping), inputs:['<ancestor>' | '<ancestor>.<dotted.path>', ...] (inject a committed upstream output into the prompt as a labelled json block under '## Inputs'; unresolvable ref fails the node at spawn; "
             "DIRECT parents from `after` are auto-injected capped at 8KB with a truncation marker \u2014 use inputs only to pick a dotted path or a non-parent ancestor; a parent listed in both appears once), fanout:{items | items_from:'<node_id>.<dotted.path>', goal (OPTIONAL template; an item's own `goal` key overrides it \u2014 when items carry their own goals the shared node goal prefixes each item prompt, "
-            "so no placeholder template is ever needed), schema, quorum (OPTIONAL positive int; ONLY when set: once quorum items have committed, the still-running stragglers are cancelled with error_class 'cancelled' and excluded from the failure math; when unset there is NO default \u2014 the fan-out waits for every item)}} \u2014 agent node. A provider requires a non-empty model; "
+            "so no placeholder template is ever needed), schema, quorum (OPTIONAL positive int; ONLY when set: once quorum items have committed, the still-running stragglers are cancelled with error_class 'cancelled' and excluded from the failure math; when unset there is NO default \u2014 the fan-out waits for every item), ledger (OPTIONAL item-indexed INPUT LEDGER: one row per item, "
+            "positionally aligned; a row is a '<node_id>.<dotted.path>' input-ref string or {source:'<node_id>.<dotted.path>', artifact?:{file:rel/path under the run dir, sha256?:64-hex}} naming the on-disk artifact the item consumes. Admission refuses the graph fail-closed unless rows map 1:1 to items: a missing/extra row, two items sharing one source, a source head outside the node's after ancestry, "
+            "or (when run-dir bytes are measurable \u2014 amend/validate) an absent artifact file or sha256 mismatch are each refused with an error naming the item and the missing/extra source \u2014 an item can never silently consume another item's artifacts (#85))}, "
+            "on_fail ('skip' | '<fallback-agent-node-id>' \u2014 on this node's failure commit it `skipped` (join-tolerant, run continues; a join with one live dep still runs), and with a fallback id ALSO let that agent node run; validated at run time: fallback must exist, be an agent, not be an ancestor; cancelled deaths are never caught"
+            ")} \u2014 agent node. A provider requires a non-empty model; "
             "model aliases and literal IDs are preserved (tiers resolve explicitly, and a matching provider/model prefix is removed for the CLI). Run/amend responses include requested/resolved provider/model routes. Gate node: {id, type:'gate', after, question, options, context, when (bounded expr: out.<node>.<dotted.path> with == != > >= < <=, and/or/not, parens; "
             "malformed when is rejected at run/amend validation and holds the gate at fire \u2014 never a silent skip), wait:{wait_s, until_argv:[fixed argv, no shell], every_s (default 60), timeout_s (default 3600)} (machine-answered gate: parks the run at zero tokens \u2014 wait_s alone = timer; until_argv re-runs until exit 0; timeout \u2192 gate fails; its last stdout/stderr tail is the gate's output, "
             "usable via inputs). A human release pre-empts a park), on_skip:'pass'|'prune' (with when: prune commits the gate `skipped` and every node whose deps are ALL skipped is skipped too \u2014 terminal, not a failure; a join with one live dep runs; default pass = the arm still runs)}. Echo node: {id, type:'echo', after, "
@@ -603,6 +714,13 @@ WORKFLOW_PARAMS = {
             "include (null, object, empty list) is refused; an included graph's model_policy.forbidden_models unions into the parent (noted in include_notes); the committed graph.json is "
             "the EXPANDED, include-STRIPPED truth (amend edits the expanded form; save shelves the author form with the include key — save(run_id) of a composite run refuses, save the author graph inline). Every guard refusal — unknown library entry, include cycle, alias/id collision, unbound seed, oversized merge — returns the same "
             "errors:[{node:'include:<alias>', field, msg}] envelope before any write or spawn; non-fatal resolver warnings (e.g. a shared fixed scratch path) echo as include_notes on run/status and run.json records provenance `includes:[{alias, name, source_digest}]`. "
+            "Full grammar and worked examples: references/grammar.md in the `workflow` skill — read it before authoring your first graph. "
+            "Join node: {id, type:'join', after:[ids], keys:{label:'<node_id>.<dotted.path>', ...}, wait:'terminal'|'any'} "
+            "— commits a deterministic json object {label: resolved parent output} at the wave boundary with zero tokens "
+            "and no child spawn (keys committed sorted by label); wait:'terminal' (default) waits for every `after` parent "
+            "to settle and fails the join if any failed; wait:'any' fires once one parent is done/partial and drops the "
+            "keys of failed/skipped legs (fan-out-quorum flavour); a key whose committed parent lacks the dotted path "
+            "fails the node as an author typo. "
             "Any key outside these closed sets is rejected at run/amend with errors:[{node, field, msg}] for EVERY defect."
             ),
         },
@@ -809,7 +927,7 @@ def _resolve_models(nodes, committed=None, keep=()) -> tuple[str | None, dict | 
     committed = committed or {}
     requests = []
     for n in nodes:
-        if kind(n).spawns is not True:   # non-agent (gate/echo): no model route
+        if kind(n).spawns is not True:   # non-agent (gate/echo/join): no model route
             continue
         c = committed.get(n.get("id")) or {}
         frozen = bool(c) and n.get("id") in keep
@@ -1393,6 +1511,49 @@ def run_dir(run_id):
         raise ValueError(f"invalid run_id {run_id!r}")
     return _common.find_run(rid)
 
+_SIBLING_RID_BAD = re.compile(r"^\.\.?$|[\\/]")   # traversal is off-limits on the scan too
+
+def _find_run_sibling_scan(rid):
+    """#58 (READ paths only): resolve a run dir across the sibling known roots before
+    answering unknown. The consumer's env may resolve a different home than the
+    dispatcher's (profile-scoped seat vs estate shared root), stranding a demonstrably
+    live run outside resolved-root + legacy launch root (all find_run covers). Known
+    roots, from each base home (resolved and launch): the estate root and every
+    profile under it when the base sits under a `profiles/` parent; every seat under
+    `<base>/profiles/` when the base IS the estate; the base itself. First directory
+    holding a graph.json wins. Returns the dir or None. READ-ONLY convenience: write
+    verbs (amend/release/steer/stop/save) keep the strict resolved-root law."""
+    if not rid or _SIBLING_RID_BAD.search(rid):
+        return None
+    resolved = _common.runs_root()
+    homes = []
+    for base in (_common.hermes_home(), _common.launch_runs_root().parent):
+        homes.append(base)
+        if base.parent.name == "profiles":                  # a profile -> estate + seats
+            homes.append(base.parent.parent)
+            try:
+                homes.extend(p for p in sorted(base.parent.iterdir()) if p.is_dir())
+            except OSError:
+                pass
+        try:                                                # an estate -> its seats
+            homes.extend(p for p in sorted((base / "profiles").iterdir()) if p.is_dir())
+        except OSError:
+            pass
+    seen = set()
+    for h in homes:
+        if str(h) in seen:
+            continue
+        seen.add(str(h))
+        d = h / "workflows" / rid
+        if d == resolved / rid:                             # the strict path's own turf
+            continue
+        try:
+            if (d / "graph.json").exists():
+                return d
+        except OSError:
+            continue
+    return None
+
 # ---------- graph library (named, re-runnable graphs) ----------
 
 def library_root():
@@ -1447,11 +1608,6 @@ def _norm_tags(tags):
         if t not in out:
             out.append(t)
     return out, None
-
-
-def _tags_error(tags):
-    bad = _norm_tags(tags)
-    return {"error": bad[1]} if bad[1] else None
 
 def _lib_path(name):
     """WRITE resolver: always the resolved root (current best version lands there).
@@ -1673,6 +1829,61 @@ def _expand_includes_at_door(graph):
         return None, [], None, _include_error_from_valueerror(e)
     return expanded, notes, provenance, None
 
+# est-2ek.1.245 — stale-literal detector for library saves.
+# A reusable graph replays its committed text verbatim on every `run from=<name>`.
+# When that text hard-codes launch-varying values (ledger keys, branch names,
+# per-lane scratch paths) AND the graph carries ZERO {run.KEY} binding points,
+# the entry silently replays the launch that froze it — 1.0.13's run_context
+# exists but nothing made authors add binding points. Warn-and-surface at the
+# save (never block): the author hears "this will go stale" at the exact moment
+# they shelve it, and can either add {run.KEY} bindings or accept the freeze.
+_STALE_LITERAL_PATTERNS = (
+    # (label, pattern) — mirrors dag_lint s11's operative-surface law:
+    # provenance/meta cold bytes are exempt; operative goal/context text counts.
+    ("ledger key", re.compile(r"\bfb[0-9a-f]{8,}\b")),
+    ("estate id", re.compile(r"\best-[a-z0-9]{3,}(?:\.\d+)?\b")),
+    ("branch name", re.compile(r"\b(?:fix|feat|chore|est2ek1|wofs|docs)/[A-Za-z0-9._/-]{3,}\b")),
+    ("lane/scratch path", re.compile(r"/home/[\w.-]+/\.hermes(?:/[\w.~+-]+)+")),
+    ("dated literal", re.compile(r"\b2026-\d{2}-\d{2}\b")),
+)
+_RUN_REF_RE = re.compile(r"\{run\.[A-Za-z_][A-Za-z0-9_]*\}")
+
+def _operative_texts(obj, path=""):
+    """Yield (path, text) for every string in the OPERATIVE subtree (goal,
+    context, question, argv-style lists) — never provenance/meta/description."""
+    if isinstance(obj, str):
+        yield path, obj
+    elif isinstance(obj, dict):
+        for k, v in obj.items():
+            if k in ("provenance", "meta", "description", "source", "saved_at",
+                     "source_digest", "owner", "name"):
+                continue
+            yield from _operative_texts(v, f"{path}.{k}" if path else str(k))
+    elif isinstance(obj, (list, tuple)):
+        for i, v in enumerate(obj):
+            yield from _operative_texts(v, f"{path}[{i}]")
+
+def _stale_literal_warnings(graph):
+    """[] when the graph binds or is literal-free; else one warning string per
+    offending literal, each naming where it lives and the run_context fix."""
+    if _RUN_REF_RE.search(json.dumps(graph.get("nodes") or [], ensure_ascii=False)):
+        return []   # author uses binding points — replay-safe by design
+    hits, seen = [], set()
+    for path, text in _operative_texts({"nodes": graph.get("nodes") or []}):
+        for label, pat in _STALE_LITERAL_PATTERNS:
+            for lit in pat.findall(text):
+                key = (label, lit)
+                if key in seen:
+                    continue
+                seen.add(key)
+                hits.append(
+                    f"stale_literal ({label}): {lit!r} is hard-coded in {path} with no "
+                    f"{{run.KEY}} binding — `run from=` will replay this launch's value; "
+                    f"pass it via run_context and write it as {{run.KEY}} in the goal, "
+                    f"or accept the freeze")
+    return hits
+
+
 def act_save(args):
     """Shelve a graph under a name: from an existing run (`run_id`) or an inline `graph`.
     Overwrites — a library entry is the CURRENT best version of that graph.
@@ -1808,8 +2019,17 @@ def act_save(args):
     tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2))
     os.replace(tmp, p)
     saved = _lib_rel_name(p)   # #50: a general/<name> save must echo the replayable name
-    return {"saved": saved, "nodes": len(graph["nodes"]),
-            "hint": f"re-run any time: workflow run from={saved}  |  /wf {saved}"}
+    out = {"saved": saved, "nodes": len(graph["nodes"]),
+           "hint": f"re-run any time: workflow run from={saved}  |  /wf {saved}"}
+    # est-2ek.1.245: warn-and-surface on a shelved graph that hard-codes
+    # launch-varying literals while carrying ZERO {run.KEY} binding points —
+    # such entries silently replay the launch that froze them. NON-FATAL by
+    # law: the save lands; only a warning key rides the response, and a clean
+    # save's response stays byte-identical (no empty key — golden bytes).
+    _warn = _stale_literal_warnings(graph)
+    if _warn:
+        out["save_warnings"] = _warn
+    return out
 
 def _library_rows():
     """#50: THE discovery read for the library — rich rows + honest skips. One walk
@@ -1906,6 +2126,40 @@ def act_library(args):
     if quarantined:   # F-2 (#62): every refused entry is named WITH its typed reason;
         out["quarantined"] = quarantined   # a clean library never grows this key (golden bytes)
     return out
+
+def act_validate(args):
+    """Dry-run the door's validation pipeline WITHOUT liveness ping or any write:
+    the same defaults fill, defect collection, and model/route policy run/amend do,
+    in the same order, returning {ok, errors:[{node,field,msg}], resolved_routes}.
+    #85: given run_id, the #85 artifact-admission guard additionally measures the
+    declared artifact bytes against that run dir (the same law amend applies)."""
+    graph, bad = _input_graph(args)
+    if bad:
+        return bad
+    if graph is None:
+        return {"error": "validate needs graph or graph_path"}
+    _rd = None
+    if args.get("run_id"):
+        _rd = run_dir(args["run_id"])
+        if not (_rd / "graph.json").exists():
+            return {"error": "unknown run_id"}
+    bad = _validation_error(graph, run_dir=_rd)
+    if bad:
+        return dict(bad, ok=False)
+    try:
+        graph = _common.apply_graph_defaults(graph)
+    except ValueError as e:
+        return {"ok": False, "error": f"graph invalid: defaults/shape: {e}",
+                "errors": json.loads(str(e))}
+    bad = _profile_error(graph) or _model_policy_error(graph)
+    if bad:
+        return dict(bad, ok=False)
+    err, _models, routes = _resolve_models(graph["nodes"])
+    if err:
+        return {"ok": False, "error": err,
+                "errors": [{"node": None, "field": "model", "msg": err}]}
+    return {"ok": True, "errors": [], "resolved_routes": routes,
+            "hint": "validated only — nothing pinged or written; run it: workflow run graph=..."}
 
 # ---------- actions ----------
 
@@ -2560,6 +2814,21 @@ def _output_pointer(rec):
         [f"items:{len(out)}"] if isinstance(out, list) else [type(out).__name__])
     return {"output_ptr": "nodes (detail=\"full\")", "output_keys": keys, "output_bytes": size}
 
+def _resolve_read_run(rid):
+    """#58: ONE run-dir resolution for the READ verbs (status/wait): strict resolved
+    path first (find_run), sibling-root scan as fallback. Returns (dir, run_state,
+    resolved_via_or_None). run_state is None when no root holds the run."""
+    r = run_dir(rid)
+    st = run_state(r)
+    if st:
+        return r, st, None
+    sib = _find_run_sibling_scan((rid or "").strip())
+    if sib is not None:
+        st = run_state(sib)
+        if st:
+            return sib, st, str(sib)
+    return r, None, None
+
 def act_status(args):
     if args.get("lane_key") is not None:
         key = args["lane_key"]
@@ -2574,8 +2843,7 @@ def act_status(args):
         if not entry:
             return {"lane_key": key, "run_id": None, "unfinished": False}
         return _lane_state(key, entry)
-    r = run_dir(args.get("run_id"))
-    st = run_state(r)
+    r, st, resolved_via = _resolve_read_run(args.get("run_id"))
     if not st:
         return {"error": f"no run at {r}"}
     full = str(args.get("detail") or "").lower() == "full"
@@ -2589,6 +2857,10 @@ def act_status(args):
            # O1: the card to paste into the report rides on EVERY status (and via
            # act_wait, every wait) — the inducement never depends on the agent recalling it.
            "card": _card(st["run_id"])}
+    if resolved_via:   # #58: the run lives outside the caller's resolved root — loud, not silent
+        out["resolved_via"] = resolved_via
+        out["resolved_via_note"] = ("run resolved under a sibling root (dispatch-time home "
+                                    "differs from this consumer's); write verbs stay refused here")
     # Composite runs surface their resolver notes (scratch-collision warnings) on
     # every status read, read straight from the run.json the door stamped.
     _inotes = jload(r / "run.json", {}) or {}
@@ -2621,6 +2893,15 @@ def act_status(args):
             stop_reason["kind"] = "budget"
     if st.get("runner_exit"):
         out["runner_exit"] = st["runner_exit"]  # <run>/runner_exit.json or the dead-pid crash note
+        # est-6226: an EXTERNAL signal death (gateway-restart wave) is
+        # respawn-eligible, not a lane failure — the reaper/dispatcher reads
+        # the classification here instead of re-deriving it from prose
+        # (derive-only, A3 law: the verdict bytes + the ONE classifier).
+        _rxr = (st["runner_exit"] or {}).get("reason")
+        if _common.is_external_kill(_rxr):
+            out["runner_exit"] = {**st["runner_exit"],
+                                  "death_class": "external_kill",
+                                  "respawn_eligible": True}
     if st["held_gate"]:
         out["gate"] = st["held_gate"]
     for nid, v in st["nodes"].items():
@@ -2678,7 +2959,7 @@ def act_status(args):
     # Cumulative spend is independent of heartbeat. Only a verified spawn's exact
     # session title can supply current activity; historical unended rows are not live.
     try:
-        cm = _common.child_metrics(st["run_id"])
+        cm = _common.run_child_metrics(r)
     except Exception:
         cm = {}
     if cm or any(v.get("active_spawn") for v in st["nodes"].values()):
@@ -2728,13 +3009,38 @@ def act_status(args):
         out["next"] = []
     return out
 
+def _wait_foreign(args, r, st, resolved_via):
+    """#58: wait on a run resolved OUTSIDE the caller's resolved root. Read-only
+    watch: follow to a terminal/attention state, never spawn (the runner belongs to
+    the owner's root; _spawn_runner from here would stamp the wrong HERMES_HOME and
+    the runner_alive root-compare would reject it anyway). Answers carry the same
+    resolved_via warning as the sibling status read."""
+    note = ("run lives under a sibling root — this wait is read-only: resume/write "
+            "verbs (wait-resume, release, amend, stop) must be issued from the owning home")
+    cap = min(float(args.get("timeout", 600)), 1800)
+    t0 = time.time()
+    while st["status"] in ("running", "pending") and st.get("runner_live"):
+        if time.time() - t0 > cap:
+            return {**act_status(args), "resolved_via": resolved_via,
+                    "note": f"still running after {int(time.time()-t0)}s (wait again) — {note}"}
+        time.sleep(2)
+        _r, st, _via = _resolve_read_run(args.get("run_id"))
+        if not st:
+            return {"error": "unknown run_id"}
+    out = act_status(args)
+    if isinstance(out, dict) and "error" not in out:
+        out["resolved_via"] = resolved_via
+        out["resolved_via_note"] = note
+    return out
+
 def act_wait(args):
     """Explicit resume/watch verb. Read-only status/list never spawn; wait may
     resume pending or interrupted work, then block while a verified runner lives."""
-    r = run_dir(args.get("run_id"))
-    st = run_state(r)
+    r, st, resolved_via = _resolve_read_run(args.get("run_id"))
     if not st:
         return {"error": "unknown run_id"}
+    if resolved_via:   # #58: read convenience only — never spawn a runner from a foreign root
+        return _wait_foreign(args, r, st, resolved_via)
     top_alive = None
     if st["status"] in ("running", "pending", "interrupted"):
         top_alive = bool(st.get("runner_live"))   # A2 one-read law: THE ONE read
@@ -2811,6 +3117,21 @@ def _release_core(r, gate_id, answer, ui=False):
     old = jload(r / "gates" / f"{gate_id}.json")
     if old is not None and _common.gate_answer_valid(r, gate, byid) is not None:
         return {"ok": False, "error": "gate already answered (current graph)"}
+    # #152 fail-closed compat check (mixed-version door/runner skew): the respawn
+    # this release may trigger runs THIS door's bundled wf.py — so this door's
+    # validator IS the respawner's admission validator. If it refuses the
+    # committed graph, writing the answer would consume it into a doomed
+    # 'crashed: graph invalid' death: the answer becomes unrecoverable
+    # ('gate already answered') and the lap must be re-walked. Refuse instead,
+    # write NOTHING, leave the hold intact for a door that can honor it.
+    # One-pass defect reporting (c01b4a0 style); zero cost when it passes.
+    _errs = validate_graph_errors(graph["nodes"])  # the respawner validates exactly this
+    if _errs:
+        _off = "; ".join(f"node {e['node']}: {e['field']} — {e['msg']}" for e in _errs[:5])
+        if len(_errs) > 5:
+            _off += f"; (+{len(_errs) - 5} more)"
+        return {"ok": False,
+                "error": f"this door cannot drive this graph — drive it from its own tree ({_off})"}
     rec = {"answer": answer, "_def": efp(byid, gate),
            "fp_rule_version": _common.FP_RULE_VERSION,
            "at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
@@ -2976,7 +3297,7 @@ def act_amend(args):
         bad = _unbound_include_refs(new, _includes)
         if bad:
             return bad
-    bad = _validation_error(new) or _profile_error(new)
+    bad = _validation_error(new, run_dir=r) or _profile_error(new)
     if bad:
         return bad
     old = jload(r / "graph.json") or {}
@@ -3108,6 +3429,13 @@ def act_list(_args):
                         row[key] = meta[key]
                 runs.append(row)
     out = {"runs": runs[:50], **_common.run_summary(runs)}
+    # est-2ek.1.280: an EMPTY scan is the silent case the multi-profile papercut
+    # burned 10h on (profile-scoped tool writes profiles/<p>/workflows while the
+    # API globs the canonical root — both answer []). Emit the scanned roots,
+    # resolved-first, ONLY when nothing was found; a non-empty payload keeps the
+    # golden-solo key set {runs, total, counts(, provenance)} byte-identical.
+    if not runs:
+        out["roots"] = [str(x) for x in roots]
     # Emitted ONLY when derivable (the F1 identity law): a solo root where no run carries
     # dispatched_by keeps the v1.0.15 key set {runs, total, counts} exactly (golden-solo
     # EMPTY). A root with stamped runs gets provenance:{dispatched_by_set,total}.
@@ -3146,7 +3474,7 @@ def act_doctor_version(args):
 ACTIONS = {"run": act_run, "status": act_status, "wait": act_wait, "release": act_release,
            "steer": act_steer, "inbox": act_inbox, "amend": act_amend, "stop": act_stop, "list": act_list,
            "save": act_save, "submit": act_submit, "library": act_library,
-           "doctor_version": act_doctor_version}
+           "doctor_version": act_doctor_version, "validate": act_validate}
 
 def handle(args, **kwargs):
     try:

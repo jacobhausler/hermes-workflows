@@ -21,7 +21,7 @@ your local result matches CI. `node --check desktop/plugin.js` remains the quick
 syntax-only gate for the desktop half. Record each command's real exit code; never
 convert failed tests into a passing aggregate. Admission is strict — a red on the
 base counts against the merge gate too, and a run that discovers zero test cases is
-a failure, not a green `(open PR #121)`. The release integrator owns the complete
+a failure, not a green `(shipped in v1.2.1)`. The release integrator owns the complete
 clean-copy sweep and package validation, not the skill.
 
 ## RED before green

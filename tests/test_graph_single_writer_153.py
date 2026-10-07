@@ -14,6 +14,8 @@ fails (missing script). Green requires all four.
 import os, shutil, subprocess, sys, tempfile
 from pathlib import Path
 
+from graph_gate_dep import graphify_dep_guard
+
 ROOT = Path(__file__).resolve().parent.parent
 # Load the script as a module by path — the shipped-package import-closure gate
 # (#105) probes top-level imports from the unpacked root, where scripts/ is not
@@ -174,10 +176,12 @@ with tempfile.TemporaryDirectory(prefix="pb-test-") as td:
           f"rc={r.returncode} out={(r.stdout + r.stderr).strip()[-200:]} (branch clean vs its fork point {base_tip[:7]})")
 
 # --- graph_regen smoke: NO_CHANGES on an already-honest tree ----------------------
-# Needs the real graphify binary; skip (exit 0) on a bare runner, same posture as
-# tests/test_graph_gate.py's guard.
-if not shutil.which("graphify"):
-    print("SKIP graph_regen smoke — graphify CLI not installed (uv tool install graphifyy)")
+# Needs the graphify CLI — a DECLARED test dep (CI installs graphifyy==0.9.67):
+# absent CLI FAILS naming the dep (same law as tests/test_graph_gate.py), and only
+# SKIPs under the explicit opt-out HERMES_ALLOW_SKIP_GRAPH_GATE=1.
+_guard = graphify_dep_guard("graph_regen smoke")
+if _guard is not None:
+    fails += _guard  # fail-closed: a missing declared dep is a red, not a silent skip
 else:
     _rspec = importlib.util.spec_from_file_location(
         "graph_regen_under_test", ROOT / "scripts" / "graph_regen.py")

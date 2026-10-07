@@ -13,6 +13,10 @@ whose failure path has never fired is a decoration). The rows without a receipts
 dir are validated cold (structural tests + `validate`), not smoke-run — treat
 them as blueprints, not proofs.
 
+Every example ships with a derived diagram — table, queue, and the
+DIAGRAM LAW v1 layout spec live in [diagrams/README.md](diagrams/README.md) — the
+repo docs tree; the runtime zip ships maps and graphs, not art.
+
 ## basics/ — one idea each, read these first
 
 | File | Shape | Teaches |

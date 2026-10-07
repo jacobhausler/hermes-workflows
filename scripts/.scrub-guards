@@ -15,6 +15,11 @@ scripts/.scrub-guards
 regex:"author": "(Jacob Hausler|jacobhausler)"
 # Public PR-author credit only; anchored line excludes the change description.
 regex:^- #[0-9]+ — (Hermes Agent; )?@jacobhausler\.$
+# MIT license identity: the copyright-holder line is load-bearing by design
+# (renaming it would mislicense the package); the audit reaching it is a
+# feature of content-based text detection, not a regression. Anchored so the
+# guard covers ONLY the copyright line of LICENSE.
+regex:^Copyright \(c\) \d{4} (Jacob Hausler|jacobhausler)$
 
 # ---- Core-10 committed scrub list (2026-10-01): GUARD rows for the merged audit ----
 # Classification discipline per docs/PUBLISH-SCRUB.md: GUARD = load-bearing absence
@@ -81,3 +86,29 @@ tests/test_route_substitution_641.py
 # billed on the evidence runs — kept verbatim, line-anchored by regex (not file) so a
 # future stray model name in wf.py still fires.
 regex:# a proved-alive pinned route whose later spawn billed
+
+
+# ---- committee wf166c A1 (suffix widening .yml/.txt): rows newly SEEN by the audit ----
+# The audit's own input: every line of scripts/scrub-list.txt IS a forbidden-pattern
+# regex by role — guarding it is the contract (the audit must read it verbatim; the
+# ban is on LEAKING the vocabulary into shipped docs/code, not on the input naming it).
+scripts/scrub-list.txt
+# Suffix-blind-spot pin: the FORBIDDEN_LINE constant is fixture identity — the probe
+# asserts the AUDITOR refuses this exact token in .yml/.txt; neutralizing it would
+# pin nothing (same GUARD class as the model-route fixtures above).
+tests/test_scrub_yml_166b.py
+# ---- committee wf166d (r2): tests/fake-b1 model-alias line newly SEEN by the audit ----
+# The ratelimit-mode banner the fake child prints carries the model token verbatim
+# because the runner's give-up error must quote the banner back byte-for-byte — the
+# SAME fixture-identity GUARD class as tests/fake_hermes.py's banner (line-guarded,
+# not file-guarded: a future stray model name elsewhere in fake-b1 must still fire).
+tests/fake-b1:137
+# SECURITY.md advisories URL (issue #43 conformance): the private-vulnerability-reporting
+# URL is the documented reporter handle and must ship verbatim; guarded.
+regex:github\.com/jacobhausler/hermes-workflows/security/advisories
+
+# Joint-eng-protocol SSOT pointer (AGENTS.md §4d / CONTRIBUTING.md footer): the
+# citation must name the governing repo, file, digest, and public check mirror
+# verbatim — the pointer IS the verification handle a cold reader checks; guarded.
+regex:^Cross-estate joint eng protocol v1 is the SSOT
+scripts/vendor/archify/renderers/shared/generated-brand-marks.mjs

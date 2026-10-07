@@ -1,4 +1,4 @@
-# Manual installation — Hermes Workflows 1.2.1
+# Manual installation — Hermes Workflows 1.3.0
 
 The catalog path (`hermes plugins install hermes-workflows`) is the recommended install; see [README.md](README.md). This file covers installing from a release zip, or by hand from a checkout. Backend and desktop app may be on different machines.
 
@@ -7,10 +7,10 @@ The catalog path (`hermes plugins install hermes-workflows`) is the recommended 
 Place the ZIP and `.zip.sha256` sidecar together. Use `python3` (or an explicit Python 3 interpreter path) and `unzip`; on macOS `shasum -a 256` substitutes for `sha256sum`:
 
     cd "$HOME"
-    if command -v sha256sum >/dev/null; then sha256sum -c hermes-workflows-1.2.1.zip.sha256; else shasum -a 256 -c hermes-workflows-1.2.1.zip.sha256; fi
+    if command -v sha256sum >/dev/null; then sha256sum -c hermes-workflows-1.3.0.zip.sha256; else shasum -a 256 -c hermes-workflows-1.3.0.zip.sha256; fi
     PACKAGE_STAGE="$(mktemp -d "$HOME/hermes-workflows.XXXXXX")"
-    unzip -q "$HOME/hermes-workflows-1.2.1.zip" -d "$PACKAGE_STAGE"
-    PACKAGE_DIR="$PACKAGE_STAGE/hermes-workflows-1.2.1"
+    unzip -q "$HOME/hermes-workflows-1.3.0.zip" -d "$PACKAGE_STAGE"
+    PACKAGE_DIR="$PACKAGE_STAGE/hermes-workflows-1.3.0"
     (cd "$PACKAGE_DIR" && if command -v sha256sum >/dev/null; then sha256sum -c SHA256SUMS; else shasum -a 256 -c SHA256SUMS; fi)
 
 Use `unzip` rather than Python `ZipFile.extractall` when running the tests: the archive stores executable modes, but Python extraction may discard them. In particular, `tests/fake` — the fake Hermes launcher the hermetic tests use in place of a real install — must stay executable. Keep the staging tree until verification completes.
@@ -36,7 +36,7 @@ The bundled skill is registered by the plugin as `hermes-workflows:workflow`; th
 
 If a symlink is impossible on the host, copy instead — but then re-copy after every plugin update, and treat drift as a bug. If a copied or hand-edited skill already exists where the link would go, stop and reconcile it with the package before linking; never silently discard local edits, upstream them (issue on the plugin repo) so the package can carry them.
 
-Enablement and copied source are not proof the running gateway loaded them. Restart the backend after applying the verified plugin, then verify plugin admission, mounted API and tool registration in the new process. Dashboard registration is API-only with a hidden tab.
+Enablement and copied source are not proof the running gateway loaded them. Restart the process that hosts `hermes serve` after applying the verified plugin (on rigs with separate systemd units, that is the serve/dashboard unit — `hermes plugins enable` hot-loads gateway commands only), then verify plugin admission, mounted API and tool registration in the new process. Dashboard registration is API-only with a hidden tab.
 
 ## Desktop app machine
 

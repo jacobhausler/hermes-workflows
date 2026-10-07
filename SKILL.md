@@ -1,13 +1,13 @@
 ---
 name: workflow
 description: "Workflow fan-out audit and census: run agent graphs"
-version: 1.2.1
+version: 1.3.0
 metadata:
   hermes:
     tags: [workflows, fan-out, audit, census, orchestration]
 ---
 
-# Workflow authoring (1.2.1)
+# Workflow authoring (1.3.0)
 
 Requires Hermes Agent v2026.9.21 or newer (package >=0.21.4). A Desktop gate answer sends a visible resume turn to the run owner's chat via the composer SDK; on older Desktop builds it may only insert draft text for the user to send. If no owner/composer is available, type the resume line in that owner chat. Before disabling the plugin, list runs and stop each live run with `workflow{action:"stop",run_id:<id>}`.
 
@@ -31,7 +31,8 @@ For a decision, a `gate` with `question` and `options` holds; present it to the 
 - A poller or supervisor that must not double-dispatch: `run` with `lane_key:<key>` — while an UNFINISHED incumbent holds the key, a second `run` on it is deduped (returns the incumbent, spawns nothing; `needs_resume` means `wait` it, never replace it; `stop` is the explicit abandonment). `status` with `lane_key:<key>` reads the incumbent without spawning anything. Optional `team:<label>` stamps run.json and `list` rows. Keys are global per runs root; prefix `<team>/` yourself. Details: [operations](references/operations.md).
 - Report a finished run by its vanity numbers from the read model's metrics: token in | token out | api calls | tool calls (per node and run total). Don't lead with the dollar figure: it is core's `estimated_cost_usd`, a price-table estimate (subscription routes report `included`, not `actual`), and it freaks humans out when quoted as spend.
 - Put the `card` line alone on its own line in the reply that launches a run and in the one that reports it — in plain prose, never inside backticks or a code fence: a code-blocked directive renders as dead text, not a card (quoting the raw syntax in code is fine only to document the syntax itself). The desktop shows every run of this chat in the strip below the composer regardless (older cores: above it).
-- Use `graph_path` on run/save/amend for a caller-authorized absolute local JSON file instead of embedding a large graph. Choose exactly one graph source. See [grammar](references/grammar.md). To share a graph as a file (`<name>.workflow.json`, `grammar:"wf/1"`, provenance, pinned digest), follow [portable](references/portable.md); the same page covers `wf_dialect.py` (import/export of Anthropic-style `.js` workflow files: constrained subset in, lossy-loud out).
+- Use `graph_path` on run/save/amend/validate for a caller-authorized absolute local JSON file instead of embedding a large graph. Choose exactly one graph source. See [grammar](references/grammar.md). To share a graph as a file (`<name>.workflow.json`, `grammar:"wf/1"`, provenance, pinned digest), follow [portable](references/portable.md); the same page covers `wf_dialect.py` (import/export of Anthropic-style `.js` workflow files: constrained subset in, lossy-loud out).
+- Before launching an authored graph, `workflow{action:"validate", graph:…}` dry-runs the door's whole validation (defaults fill, defects, model/route policy) with zero writes and no liveness ping: `{ok, errors:[{node,field,msg}], resolved_routes}`.
 - Leave node budgets unset and name a `shape`; see [budgets](references/budgets.md).
 
 The graph vocabulary, boundaries and examples live in [grammar](references/grammar.md); read-model/recovery in [operations](references/operations.md). For parallel build lanes, fleet children, and babysitting long runs, use the measured [operator playbook](references/operator-playbook.md) (lane walls/banking, write-first children, cgroup-sized fan-out, staleness via efp). [Development checks](references/development.md) are for contributors, not ordinary-user prerequisites.

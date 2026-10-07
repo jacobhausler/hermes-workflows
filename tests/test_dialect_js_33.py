@@ -42,13 +42,35 @@ def check(cond, msg, detail=""):
     print("PASS", msg)
 
 
+# --- courtesy-gate feature detection (#227) -------------------------------------------
+# `node --check` is a COURTESY gate (see section (5) below and the docstring of the
+# node-absent test): the python-side scanner verdict is the authoritative one and the
+# node gate must never flip it. Measured node families on this corpus (issue #227
+# matrix, official nodejs.org linux-x64 builds):
+#   PASS --check on every fixture: 22.11, 22.21, 23.11, 24.0-24.20, 25.2, 26.7
+#   FAIL --check on the refuse fixtures: 24.21.0+ (tightened ESM top-level-return
+#     detection: a file containing `export` parses as ESM and the dialect's top-level
+#     `return` became a hard SyntaxError)
+# Rather than hard-coding versions, feature-detect: `node --check` a canonical
+# dialect-valid script (export meta + one agent + bare return — the exact shape the
+# exporter emits). If this node build rejects even THAT, its verdict cannot be the
+# gate for dialect-shaped files, and refuse-fixture assertions defer to the scanner
+# (node_check=False) with a WARN. On builds whose --check accepts the canonical script,
+# the original assertion stands unchanged — a TRUE syntax error in a refuse fixture
+# (one node sees but the canonical script passes) stays RED.
+_CANON_VALID = "export const meta = { name: 'probe' }\nconst a = await agent('p')\nreturn a\n"
+NODE_COURTESY_TRUSTED = d.node_check(_CANON_VALID)["status"] != "error"
+
 fixtures = sorted(FIX.glob("*.js"))
 check(len(fixtures) == 13, "corpus has 13 .js fixtures", str(len(fixtures)))
 imported = {}
+if not NODE_COURTESY_TRUSTED:
+    print("WARN node --check rejects the canonical dialect-valid script — courtesy gate "
+          "distrusted for the corpus loop; the python scanner is the verdict (#227)")
 for js in fixtures:
     exp = json.loads(js.with_suffix(".expected.json").read_text(encoding="utf-8"))
     src = js.read_text(encoding="utf-8")
-    r = d.js_import(src)
+    r = d.js_import(src, node_check=NODE_COURTESY_TRUSTED)
     name = js.stem
     if exp["verdict"] == "importable":
         check(r["ok"], f"{name}: importable fixture imports", json.dumps(r)[:300])

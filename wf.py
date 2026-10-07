@@ -29,6 +29,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import wfcommon
 from wfcommon import (efp, graph_fingerprint, jload, validate_graph, node_rec, gate_answer_valid,
                       when_true, child_metrics, prune_states, dep_satisfied, active_child,
+                      admission_ledger_errors,   # #85: artifact-admission guard at runner re-validation
                       FP_RULE_VERSION, record_efp_valid, seat_forbidden_models, runs_root,
                       hermes_root, profile_home, find_run, blocked_legibility, residue,
                       release_law,
@@ -305,6 +306,31 @@ def log(run, ev, **kw):
 def emit(line):
     print(line, flush=True)
 
+# ---------- #8 (P0, remaining half): the spawn-ledger (issue item 1's legibility half) ----------
+# <run>/spawn-ledger.jsonl rows {ts,pid,role,node,index,skey,purpose:'workflow-runner'}
+# make the runner's spawn tree LEGIBLE to an EXTERNAL reaper (core's
+# process_registry lives outside this repo — the plugin cannot change core; it
+# can only publish the exemption hint). SOLE-OWNER law: the ADMITTED runner
+# writes this file and NOTHING else ownership-shaped — the door appends to it
+# NEVER (same law as wf.pid, ready_stamp above). Append-only, best-effort: a
+# ledger failure never touches a spawn (never-fatal law, same as the reaper's
+# gateway-log match).
+SPAWN_LEDGER_PURPOSE = "workflow-runner"
+
+def ledger_row(meta_or_run, role, pid, node=None, index=None, skey=None):
+    run = meta_or_run.get("_run") if isinstance(meta_or_run, dict) else meta_or_run
+    row = {"ts": now(), "pid": pid, "role": role,
+           "node": node, "index": index, "skey": skey,
+           "purpose": SPAWN_LEDGER_PURPOSE}
+    try:
+        with open(Path(run) / "spawn-ledger.jsonl", "a") as f:
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+    except Exception as e:
+        try:
+            log(run, "spawn.ledger.error", role=role, error=f"{type(e).__name__}: {e}")
+        except Exception:
+            pass   # legibility is diagnostics, never a reason to lose a spawn
+
 # ---------- owner-session wake (lifecycle TRANSITIONS only) ----------
 # The WORKFLOW_* stdout lines above are the runner's log voice and stay exactly as
 # they are (runner.log is the door's redirect). This path is the ADDITIVE push: the
@@ -395,7 +421,6 @@ _CRASH_GEN: list = [None, None]  # [run_path, generation] for this runner proces
 EFFECTS_NAME = "side_effects.jsonl"
 EFFECTS_FILE_ENV = "HERMES_WF_EFFECTS_FILE"
 EFFECTS_EFP_ENV = "HERMES_WF_NODE_EFP"
-EFFECTS_PREAMBLE_TOKEN = "Already committed side effects"
 
 def _effects_path(run):
     return Path(run) / EFFECTS_NAME
@@ -952,6 +977,9 @@ def ready_stamp(run):
     fd (direct spawn, resume, in-process tests): stamp only, as before."""
     fd = os.environ.pop(_READY_FD_ENV, None)   # first reader wins; gone for children
     (run / "wf.pid").write_text(str(os.getpid()))
+    # #8 spawn-ledger: register the admitted runner right after the stamp —
+    # same sole-owner moment, so the door can never be seen writing ownership.
+    ledger_row(run, "runner", os.getpid())
     if fd is None:
         return
     try:
@@ -1053,16 +1081,35 @@ def extract_json(text):
         try:
             return json.loads(text.strip()), None
         except Exception:
+            if _scan_skipped(text):   # est-gg96: oversized + no decodable fence
+                return {"result": text.strip()}, None  # honest unstructured fallback
             obj = last_balanced_object(text)   # sprint101 #9: tolerate prose around the object
             if obj is not None:
                 return obj, None
             return {"result": text.strip()}, None  # unstructured but usable
+    if text and text.strip():
+        if _scan_skipped(text):
+            return None, (f"{err}; fallback scan skipped: {len(text.encode('utf-8', 'replace'))} "
+                          f"bytes > WF_HARVEST_SCAN_MAX_BYTES={HARVEST_SCAN_MAX_BYTES}")
     obj = last_balanced_object(text) if text and text.strip() else None
     if obj is not None:   # #9: a fence that won't parse must not hide a valid trailing object
         return obj, None
     return None, err
 
 _DECODER = json.JSONDecoder()   # #111: stdlib decoder replaces the hand-written scanner
+
+# est-gg96: the fallback scan is O(bytes × candidates); #111's removal of the
+# [-200:] cap was correct (the cap dropped parents, #111) but it left scan cost
+# unbounded — 906 KB of pseudo-JSON with no object measured ~14 s, 400 KB of
+# braces ~53 s, and node timeout wraps communicate() not parse. Guard: above
+# this byte size the scan is skipped when no fence can be parsed, and the
+# caller gets the honest fallback / honest error naming the limit. Tune per
+# seat with WF_HARVEST_SCAN_MAX_BYTES. NEVER reintroduce a candidate-count cap.
+HARVEST_SCAN_MAX_BYTES = int(os.environ.get("WF_HARVEST_SCAN_MAX_BYTES") or (256 * 1024))
+
+def _scan_skipped(text):
+    """True when the fallback scan must not run on `text` (est-gg96)."""
+    return len((text or "").encode("utf-8", "replace")) > HARVEST_SCAN_MAX_BYTES
 
 def last_balanced_object(text):
     """Sprint101 #9: the LAST top-level balanced {...} in stdout that json
@@ -1361,7 +1408,7 @@ DEFAULT_RETRY_BUDGET = 6
 # transport / early_death / cap_exhausted / timeout (the latter two land with
 # B1's renames; plain strings, the integrator reconciles). The never-retry list
 # below is documentary law — membership in _BOUNDED_RETRY_CLASSES is the gate:
-# provider_400, unresolved_model, graph_invalid, schema/no_json, cancelled,
+# provider_400, unresolved_model, schema/no_json, cancelled,
 # spawn (3 real runs retried a permfail byte-identically 3x).
 _BOUNDED_RETRY_CLASSES = ("transport", "early_death", "cap_exhausted", "timeout",
                           # est-2ek.1.541: a malformed turn (final reply IS serialized
@@ -1502,7 +1549,7 @@ ERROR_CLASSES = frozenset(("provider_400", "unresolved_model", "cap_exhausted",
                            "timeout", "transport", "transport_exhausted",
                            "fatal_quota", "ratelimit", "route_unavailable",
                            "incomplete_work", "early_death", "cancelled",
-                           "schema", "spawn", "graph_invalid", "inputs",
+                           "schema", "spawn", "inputs",
                            "quorum", "fanout_empty", "crashed", "unknown",
                            # est-2ek.1.660: a (re-)drive refused at startup because a
                            # declared lane still carries the dead attempt's
@@ -1578,8 +1625,6 @@ def _note_turn_tier(run, node_id, report_path):
         os.replace(tmp, tier_path)
     except Exception:
         pass
-
-
 
 # ---------- est-bbfy: pre-cap persist/finish budget cue ----------
 # A capped lane that dies at EXACT max_turns leaves useful work unpersisted and
@@ -2366,6 +2411,16 @@ def _kill_adopted(pid):
 # on that path, which is why it is pinned here.
 
 RUNNER_PID_ENV = "HERMES_WF_RUNNER_PID"      # spawn pin: the runner's own pid
+# est-6226: the ONE reason string for an external signal death (see
+# _install_runner_term_cleanup). wfcommon.is_external_kill is its single
+# classifier; the reaper/dispatcher must never re-derive it from prose.
+# The tag states SIGNAL + CLASS only, never the sender: a handler cannot see
+# who fired (adversary probe 2026-10-06: a plain os.kill, no gateway restart,
+# was recorded as "gateway restart" — false provenance). The ONLY evidence
+# that the death window actually matches a gateway restart is the reaper's
+# log-correlated "; gw-restart window match" suffix (__init__.py
+# _reap_silent_death) — that clause is earned from files, never asserted here.
+EXTERNAL_SIGTERM_REASON = "terminated: SIGTERM (external: source unknown)"
 CHILD_BELT_GRACE_S = 5.0   # replacement-runner (adoption) window before belt self-exit
 CHILD_BELT_POLL_S = 0.25
 
@@ -2510,7 +2565,20 @@ def _install_runner_term_cleanup(meta):
         except Exception: pass
         try:
             if not _EXIT_WRITTEN[0]:
-                write_runner_exit(meta["_run"], "terminated: SIGTERM")
+                # est-6226 honest attribution: the runner NEVER SIGTERMs itself
+                # (stop rides the cooperative stop.request boundary, exits
+                # "stopped"; the timeout kill targets child groups). A SIGTERM
+                # landing HERE is external by construction — the witnessed shape
+                # is the gateway-restart wave propagating beyond the gateway
+                # (2026-10-06 10:06Z: runner + pre-b64 watcher pair killed, the
+                # death logged as if it were a lane death, feeding ALERT storms
+                # and wrong re-dispatch). Tag the record so classification can
+                # tell an external kill from a lane failure — but tag ONLY the
+                # class: "gateway restart" as sender is NOT established from in
+                # here (any os.kill lands the same), so the constant says
+                # source unknown; gateway-correlation is the reaper's separate,
+                # file-evidenced clause.
+                write_runner_exit(meta["_run"], EXTERNAL_SIGTERM_REASON)
         except Exception: pass
         signal.signal(signal.SIGTERM, signal.SIG_DFL)
         os.kill(os.getpid(), signal.SIGTERM)     # re-raise the default
@@ -3210,27 +3278,6 @@ def _register_survivor(sidecar_path, token, pid):
     except OSError:
         return False
 
-def _register_self_if_detached():
-    """Child-side helper implementing the registration contract: a detached
-    descendant (double-fork + setsid: it forks AFTER import and execs nothing)
-    registers THIS pid against the inherited spawn token when its PPid no
-    longer carries that token (orphaned / setsid family). Bounded, never fatal.
-    Opportunistic by design — #61c never depends on child discipline."""
-    try:
-        path = os.environ.get(SIDECAR_ENV_PATH)
-        token = os.environ.get(SIDECAR_ENV_SPAWN)
-        if not path or not token:
-            return
-        try:
-            stat = Path(f"/proc/{os.getpid()}/stat").read_text()
-            my_ppid = int(stat.rsplit(")", 1)[1].split()[1])
-        except (OSError, IndexError, ValueError):
-            return
-        if my_ppid and _proc_envv(my_ppid).get(SIDECAR_ENV_SPAWN) == token:
-            return                               # still attached to our spawner
-        _register_survivor(path, token, os.getpid())
-    except Exception:
-        pass
 
 def _boot_sweep(meta):
     """#61c: before a (re)spawned runner launches anything, reap the survivors
@@ -3706,6 +3753,19 @@ def _adopt_child(meta, node, byid, index, child, schema, fo_cancel=None):
     eclass, marker = _classify_rc_output(out)
     if eclass == "fatal_quota":   # #24: adopted death caches the horizon too
         _quota_note(node.get("model") or node.get("provider") or "seat default", marker)
+    if eclass == "unknown" and _tool_call_as_text(final_reply or out or ""):
+        # est-2ek.1.541 R8 (sibling coverage): the adopted-death path must classify
+        # the malformed-turn shape exactly like the fresh-head path — same reply,
+        # same class, whatever path the runner reaches it by. The bounded ladder
+        # may not be available here (the attempt already committed its spend and
+        # the rc is unobservable); the classification law itself is path-invariant.
+        verdict = _verdict_lines(final_reply or out)
+        return {"status": "failed",
+                "error": "adopted child died with a malformed turn: reply is a "
+                        "serialized tool call rendered as text (tool-call-as-text; "
+                        f"typed malformed turn; not harvestable). Verdict: {verdict}",
+                "error_class": "malformed_turn", "raw": (out or "")[-2000:], "ms": ms,
+                "final": final_reply, **evd}
     verdict = _verdict_lines(marker if marker else out)
     rec = {"status": "failed", "error": f"adopted child died (rc unobservable — runner was "
             f"respawned): {verdict}", "error_class": eclass, "raw": (out or "")[-2000:],
@@ -3927,6 +3987,8 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
                            started_iso, prompt_path=str(pp))
     except Exception as e:
         log(run, "spawn.record.error", node=node["id"], error=f"{type(e).__name__}: {e}")
+    # #8 spawn-ledger: the child is legible from the moment its spawn record is.
+    ledger_row(meta, "child", proc.pid, node=node["id"], index=index, skey=skey)
     evd = {"log_path": str(lp), "prompt_path": str(pp), "pid": proc.pid,
            "spawn_cmd": spawn_cmd, "started": started_iso, "spawn": spawn_no, **route}
     timed_out = False
@@ -4015,6 +4077,10 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
             meta["_procs"].pop(f"{node['id']}:{id(proc)}", None)
         try: logf.close()
         except Exception: pass
+        # #8 spawn-ledger: close the row for every spawn that reached judgment
+        # (idempotent per pid; a runner dying mid-spawn simply leaves the row
+        # open — the exemption hint errs on the side of not-killing).
+        ledger_row(meta, "child_end", proc.pid, node=node["id"], index=index, skey=skey)
         # Tier self-report BEFORE the report is unlinked: failed children only
         # (timeout or non-zero exit); success leaves no trace (honest absence).
         if timed_out or early_death or (rc is not None and rc != 0):
@@ -4588,7 +4654,7 @@ def _bounded_retry(meta, r, respawn, ev, ev_kw, node=None, index=None):
     made tool progress gets EXACTLY ONE resume re-drive with a machine-
     generated preamble — never a loop, never a second bounded retry (a retry
     of a retry would need the class tuple to widen, which it does not).
-    Never retried: provider_400 / unresolved_model / graph_invalid /
+    Never retried: provider_400 / unresolved_model /
     schema(no_json) / cancelled / spawn — permfails redrive byte-identically —
     and never a `partial` harvest (#4: harvested, so not retried). The
     re-drive is a fresh spawn: steer rides it via _steer_bake, the fresh
@@ -5110,11 +5176,6 @@ PUBLISHER_REFUSAL = ("publisher_ungated: {nid} declares publication side effects
                      "{missing} (a node earns the token only by declaring "
                      "suite_proof: true and committing done)")
 
-def _publisher_refusal(run, n, byid, missing):
-    why = PUBLISHER_REFUSAL.format(nid=n["id"],
-                                   missing=", ".join(missing) if missing
-                                   else "no suite_proof node in this node's after-ancestry")
-    _fail_precondition(run, n, byid, [why])
 
 def _mint_suite_proof(run, node, rec, byid):
     """est-2ek.1.603: a declared proof producer that committed done writes its
@@ -5131,6 +5192,50 @@ def _mint_suite_proof(run, node, rec, byid):
     tmp = p.with_name(f"{node['id']}.suite-proof.json.{os.getpid()}.tmp")
     tmp.write_text(json.dumps(tok))
     os.replace(tmp, p)   # atomic: a token is a committed fact like a node record
+
+def _on_fail_catch(run, rs, states):
+    """jam-h23 on_fail: a caught agent death becomes the join-tolerant `skipped`
+    terminal commit instead of blocking the run. ONE interception point at the
+    wave boundary covers every failure kind (inputs, quorum, precondition,
+    crashed) uniformly; `cancelled` never lands here (node_rec demotes it to
+    pending). 'skip' catches the node alone; '<fallback-id>' additionally lets
+    that agent run (its dep on the now-skipped node satisfies). Runtime guard:
+    the fallback must exist, be an agent, and not be an ancestor — invalid is
+    LOUD (node.on_fail_invalid) and uncached: the failure stands, run blocks.
+    The failed commit is replaced; its error/error_class are mirrored into the
+    skipped record so the death stays readable. Returns True iff anything was
+    caught — the caller re-makes states so the fallback/join schedules."""
+    caught = False
+    for n in rs.nodes:
+        if states.get(n["id"]) != "failed" or n.get("type") != "agent":
+            continue
+        of = n.get("on_fail")
+        if of is None:
+            continue
+        if of != "skip":
+            fb = rs.byid.get(of)
+            anc, stack = set(), list(n.get("after", []))
+            while stack:
+                a = stack.pop()
+                if a in anc or a not in rs.byid:
+                    continue
+                anc.add(a); stack.extend(rs.byid[a].get("after", []))
+            if fb is None or fb.get("type") != "agent" or of in anc or of == n["id"]:
+                log(run, "node.on_fail_invalid", node=n["id"], on_fail=of,
+                    reason="fallback must exist, be an agent, and not be an ancestor")
+                continue
+        _, rec = node_rec(run, n, rs.byid)
+        save_node(run, n, rs.byid,
+                  {"status": "skipped",
+                   "output": {"skipped": "on_fail", "caught_error": (rec or {}).get("error"),
+                              "caught_error_class": (rec or {}).get("error_class")},
+                   "caught_error": (rec or {}).get("error"),
+                   "caught_error_class": (rec or {}).get("error_class")})
+        log(run, "node.on_fail", node=n["id"], on_fail=of,
+            caught_error_class=(rec or {}).get("error_class"))
+        states[n["id"]] = "skipped"
+        caught = True
+    return caught
 
 INPUTS_CAP = 12000
 AUTO_INPUTS_CAP = 8000   # #9/#10 lane: per-parent byte cap for auto-injected parents
@@ -5315,6 +5420,43 @@ def _boot_lane_assert(run, nodes):
                           "bank_cmd": f"git -C {rp} stash push -m redrive:{Path(run).name}:{n['id']}"})
     return offenders
 
+def _unconsume_pending_gate_answers(run):
+    """#152 (runner leg of the mixed-version skew fix): an ADMISSION graph-invalid
+    death (an old bundled wf.py refusing a newer grammar) must never leave a
+    human's gate answer CONSUMED. The answer is durable state; its consumption
+    must not be the last thing a doomed process saw. For every gate whose answer
+    file is currently VALID (gate_answer_valid — the efp law owns the rest) but
+    whose node record never committed done/skipped, rename gates/<id>.json ->
+    gates/<id>.json.unconsumed (never delete — evidence) and log
+    gate.answer_unconsumed with the prior answer's 'at'. The gate returns to
+    pending; the next release from ANY door that can honor the graph re-lands
+    the answer. An already-committed answer (node done/skipped — consumed at a
+    real boundary) NEVER un-consumes. Returns the list of un-consumed gate ids."""
+    out = []
+    try:
+        graph = jload(run / "graph.json") or {}
+        byid = {n["id"]: n for n in graph.get("nodes", [])}
+    except Exception:
+        return out
+    for nid, n in byid.items():
+        if n.get("type") != "gate":
+            continue
+        p = run / "gates" / f"{nid}.json"
+        ans = jload(p)
+        if ans is None or gate_answer_valid(run, n, byid) is None:
+            continue   # no answer on record, or a stale one that never blocked a release
+        rec = jload(run / "nodes" / f"{nid}.json", {}) or {}
+        if rec.get("status") in ("done", "skipped"):
+            continue   # consumed at a real boundary — the committed-answer law
+        try:
+            os.replace(p, p.with_name(p.name + ".unconsumed"))
+        except OSError:
+            continue
+        log(run, "gate.answer_unconsumed", gate=nid, answer_at=ans.get("at"),
+            why="runner admission refused the committed graph; answer returned to pending")
+        out.append(nid)
+    return out
+
 def write_runner_exit(run, reason, detail=None, graph=None):
     """Write one verdict per runner process, tied to the graph snapshot it ran.
     An amended graph makes this record visibly stale until a fresh runner exits."""
@@ -5346,6 +5488,12 @@ class Run:
 
 def main(run_id):
     run = find_run(run_id)   # resolved runs_root first; a pre-fix run stays resumable from the launch root
+    # #152 T3 provenance read (first reader wins — the key NEVER rides into a
+    # child env; spawn envs are dict(os.environ, ...), same law as READY_FD):
+    # a stamped boot came through the door's _spawn_runner (fresh launch,
+    # crash-respawn, wait-resume, release/amend respawn); an unstamped boot is
+    # a direct CLI invocation — the owner-resume shape, always allowed to run.
+    _spawned_by = os.environ.pop("HERMES_WF_SPAWNED_BY", None)
     meta = jload(run / "run.json", {}) or {}
     if not jload(run / "graph.json", {}):
         emit(f"WORKFLOW_FAILED {run_id} (no graph.json)")
@@ -5353,15 +5501,66 @@ def main(run_id):
         write_runner_exit(run, "crashed: no graph.json"); sys.exit(2)
     err = validate_graph(jload(run / "graph.json")["nodes"])
     if err:
+        # #152: an admission death must never CONSUME a pending gate answer —
+        # the answer is durable state and its consumption must not be the last
+        # thing a doomed process saw. Un-consume any answer whose gate node
+        # never committed done/skipped (evidence kept as .unconsumed, never
+        # deleted) so the gate returns to pending and the next release from ANY
+        # capable door re-lands it; the run stays 'interrupted'-resumeable.
+        _uc152 = _unconsume_pending_gate_answers(run)
         emit(f"WORKFLOW_FAILED {run_id} (graph invalid: {err})")
         notify(run, "run.failed", key="pre-start: graph invalid")
-        write_runner_exit(run, "crashed: graph invalid", err); return
+        write_runner_exit(run, "interrupted: admission graph invalid" if _uc152
+                          else "crashed: graph invalid", err); return
+    # #85: re-measure the artifact-admission guard against the RUN DIR at runner
+    # start (the door proved the 1:1 structural law; only here can the declared
+    # bytes be measured — an orchestrator may have pre-seeded them between admit
+    # and spawn). Fail-closed: a missing/mismatched artifact is a named refusal,
+    # never an item silently reading nothing / another item's artifact.
+    _led = admission_ledger_errors(jload(run / "graph.json"), run_dir=run)
+    if _led:
+        _e0 = _led[0]
+        emit(f"WORKFLOW_FAILED {run_id} (graph invalid: "
+             f"{'node ' + str(_e0['node']) + ': ' if _e0.get('node') else ''}{_e0['msg']})")
+        notify(run, "run.failed", key="pre-start: ledger admission")
+        write_runner_exit(run, "crashed: ledger admission", _e0["msg"]); return
     if not meta.get("hermes_bin"):
         import shutil as _sh
         meta["hermes_bin"] = _sh.which("hermes") or "hermes"
     (run / "nodes").mkdir(exist_ok=True)
     (run / "gates").mkdir(exist_ok=True)
     acquire_lock(run)
+    # #152 T3 (stop/release TOCTOU class, admission cut): a stop landing while a
+    # held runner sits in its terminal-handoff fence races the door's
+    # spawn-to-consume. The fence sees the marker, re-acquires, and consumes it
+    # (run.stopped appended, runner_exit "stopped") in the same instant the door —
+    # seeing liveness false across the fence's deliberately-released flock — has
+    # already respawned a consumer. That consumer boots, finds the marker GONE,
+    # and pre-guard deleted runner_exit.json, logged run.resumed, and re-ran the
+    # graph: the stopped run re-held, and a release then saw neither proof (no
+    # marker, run.stopped no longer the last event) and landed the answer with
+    # auto_resumed where the byte-identical refusal is test-locked (reproduced
+    # 10/10 under suite timing; the CI flake class). Admission law now: a DOOR
+    # -spawned runner (proven via the HERMES_WF_SPAWNED_BY stamp the door sets
+    # at _spawn_runner and this boot popped — value must equal THIS run id, so
+    # a stray leak can only ever name its own run) whose run dir ALREADY
+    # carries the durable stop verdict with no marker left to consume is a
+    # duplicate consumer — retire the spawn, verdict and evidence intact, no
+    # writes, no wf.pid, no runner_exit delete. A direct CLI boot carries no
+    # stamp: the owner-resume of a stopped run (`wf.py run <stopped-id>` — the
+    # test-locked B1 #7 shape, which re-drives cancelled nodes as pending) is
+    # exactly what it looks like and always runs. A legitimate door-side resume
+    # of a stopped run enters only through amend, which appends graph.amended
+    # (last event no longer run.stopped) AND writes restart.request AND
+    # re-fingerprints the graph (the runner_exit record goes stale) — all three
+    # clear this gate regardless of provenance. run_state is THE read model;
+    # the door's release refusal consults the same derivation (one truth, one
+    # read).
+    if _spawned_by == run_id and \
+            not (run / "stop.request").exists() and \
+            (wfcommon.run_state(run) or {}).get("status") == "stopped":
+        emit(f"WORKFLOW_STOPPED {run_id} (stop already consumed)")
+        return "stopped"
     # #61c: become the subreaper of this subtree FIRST — every orphan a child
     # leaves behind (double-fork+setsid, PPid would otherwise go to 1) then
     # reparents HERE, where _runner_orphans/_survivors can enumerate and kill
@@ -5481,7 +5680,10 @@ def main(run_id):
         Stop is re-checked after the wave and before every terminal decision."""
         if (run / "restart.request").exists():
             g2 = jload(run / "graph.json")
-            ok = g2 and g2.get("nodes") and not validate_graph(g2["nodes"])
+            ok = (g2 and g2.get("nodes") and not validate_graph(g2["nodes"])
+                  # #85: a hot-reloaded graph re-passes the artifact-admission
+                  # guard against the live run dir before it is accepted.
+                  and not admission_ledger_errors(g2, run_dir=run))
             try: (run / "restart.request").unlink()  # consume AFTER parsing, always
             except OSError: pass
             if ok:
@@ -5502,10 +5704,24 @@ def main(run_id):
             # next generation.
             try: _sweep_orphans(meta, "stop")
             except Exception: pass      # never mask the stop verdict
-            try: (run / "stop.request").unlink()
-            except OSError: pass
+            # #152 T3 TOCTOU: publish the stop verdict BEFORE consuming the
+            # marker. The door's release refusal is
+            # `stop.request.exists() or run_state == "stopped"`; consuming
+            # (unlinking) the marker first opened a window where a release saw
+            # NEITHER proof — no marker, no run.stopped event — wrote the
+            # answer, and auto-respawned the run the owner had just stopped
+            # (ok/auto_resumed where a byte-identical refusal is test-locked;
+            # reproduced under CI suite load, clean-room alone: flake class).
+            # Append-then-unlink closes it: any release that reads the marker
+            # GONE necessarily sees run.stopped as the last event (the append
+            # is durable before the unlink), so it refuses. A SIGKILL between
+            # the two leaves the marker for the next admitted runner to
+            # re-consume — the duplicate-run.stopped shape is unchanged from
+            # the old kill-after-unlink window.
             log(run, "run.stopped")
             emit(f"WORKFLOW_STOPPED {run_id}")
+            try: (run / "stop.request").unlink()
+            except OSError: pass
             return "stopped"
         return None
 
@@ -5577,6 +5793,58 @@ def main(run_id):
                 save_node(run, n, rs.byid, {"status": "done", "output": n.get("output"), "ms": 0})
                 log(run, "node.done", node=n["id"], echo=True)
                 states[n["id"]] = "done"; outputs[n["id"]] = n.get("output")
+
+        # join nodes (jam-h25, est-6ksu): commit a deterministic json object of named
+        # parent outputs at the wave boundary — zero spawn, zero tokens, same replay-skip
+        # law as echo (state() == pending only when the stored efp matches). The fourth
+        # boundary-commit kind with a dedicated block: kind(n) for a join is the
+        # non-spawning fallback (spawns matches none of the True/False/None branches),
+        # so NODE_TYPES stays the ONE agent/gate/echo schedule table untouched.
+        # keys = {label: '<node_id>.<dotted.path>'}; committed sorted by label so the
+        # object is byte-stable for a given set of committed parent outputs.
+        # wait:'terminal' (default) fires when every `after` parent has settled and
+        # FAILS the join if any failed (a missing leg is a hole in the merged object
+        # — loud, not a silent null). wait:'any' fires as soon as one parent is
+        # done/partial (fan-out-quorum flavour) and DROPS keys of unsettled/failed/
+        # skipped legs. A key whose parent COMMITTED but whose dotted path is absent
+        # is an author typo and FAILS the node (same law as unresolvable `inputs`).
+        for n in rs.nodes:
+            if n["type"] != "join" or states[n["id"]] != "pending":
+                continue
+            aft = n.get("after", [])
+            settled_all = all(states.get(a) in ("done", "partial", "failed", "skipped") for a in aft)
+            any_done = any(states.get(a) in ("done", "partial") for a in aft)
+            wait = n.get("wait", "terminal")
+            if wait == "terminal":
+                if not settled_all:
+                    continue
+                if any(states.get(a) == "failed" for a in aft):
+                    save_node(run, n, rs.byid, {"status": "failed", "error_class": "precondition",
+                                                "error": "join parent failed: "
+                                                + ",".join(a for a in aft if states.get(a) == "failed"), "ms": 0})
+                    log(run, "node.failed", node=n["id"], error="join parent failed", error_class="precondition")
+                    states[n["id"]] = "failed"; continue
+            else:  # 'any'
+                if not any_done:
+                    continue   # nothing resolvable yet; failed legs trip the run's fail check
+            out, typo = {}, None
+            for label, ref in sorted((n.get("keys") or {}).items()):
+                head = str(ref).split(".")[0]
+                v = resolve_ref(outputs, str(ref), _MISSING)
+                if v is _MISSING:
+                    if states.get(head) in ("done", "partial"):
+                        typo = f"{label}<-{ref}: no such path in committed output"
+                        break
+                    continue                             # unsettled/failed/skipped leg: drop
+                out[label] = v
+            if typo:
+                save_node(run, n, rs.byid, {"status": "failed", "error_class": "precondition",
+                                            "error": f"join key {typo}", "ms": 0})
+                log(run, "node.failed", node=n["id"], error=f"join key {typo}", error_class="precondition")
+                states[n["id"]] = "failed"; continue
+            save_node(run, n, rs.byid, {"status": "done", "output": out, "ms": 0})
+            log(run, "node.done", node=n["id"], join=True)
+            states[n["id"]] = "done"; outputs[n["id"]] = out
 
         ready = [n for n in rs.nodes if kind(n).spawns is True and states[n["id"]] == "pending"
                  and deps_ok(n) and deps_res(n)]
@@ -5715,6 +5983,11 @@ def main(run_id):
             continue   # top of loop: the answer reads exactly like a human release
         failed = [n for n in rs.nodes if states[n["id"]] == "failed"]
         if failed:
+            # jam-h23: give every on_fail catch one chance at this quiescent
+            # boundary BEFORE blocking; a caught node re-flows the graph (the
+            # fallback/join schedules at the fresh states at the top of loop).
+            if _on_fail_catch(run, rs, states):
+                continue
             blocked = [n["id"] for n in rs.nodes if states[n["id"]] == "pending" and not deps_ok(n)]
             unconverged, blockers = blocked_legibility(rs.nodes, states, blocked)
             log(run, "run.blocked", failed=[n["id"] for n in failed], blocked=blocked,

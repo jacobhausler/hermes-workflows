@@ -210,7 +210,8 @@ def _list_runs():
             if v and v["id"] not in seen:
                 seen.add(v["id"])
                 runs.append(v)
-    return {"runs": runs[:100], **_workflow_common().run_summary(runs)}
+    return {**({"roots": [str(x) for x in roots]} if not runs else {}),
+            "runs": runs[:100], **_workflow_common().run_summary(runs)}
 
 
 if router is not None:

@@ -12,9 +12,13 @@ edges the fresh build already held, and the SET comparison could not see it. Thi
   3. dedupe does not blind the gate: an edge removed from the committed copy is still STALE, and
      a committed file that is not its own normal form is STALE even when the sets match.
 
-Standalone (no pytest). Parts 2/3b skip with one SKIP line when the graphify CLI is absent."""
+Standalone (no pytest). Parts 2/3b need the graphify CLI, a DECLARED test dep
+(CI installs graphifyy==0.9.67): absent CLI FAILS naming the dep — it only SKIPs
+under the explicit opt-out HERMES_ALLOW_SKIP_GRAPH_GATE=1."""
 import importlib.util, json, os, shutil, subprocess, sys, tempfile
 from pathlib import Path
+
+from graph_gate_dep import graphify_dep_guard
 
 ROOT = Path(__file__).resolve().parent.parent
 PY = sys.executable
@@ -66,8 +70,9 @@ check("committed graphify-out/graph.json is its own normal form (no duplicate tr
       f"{len(gc.normalize(shipped_raw)['nodes'])} / {len(gc.normalize(shipped_raw)['links'])} normalised")
 
 # --- 2/3b. the pinned extractor path, hermetic repo ------------------------------------------
-if not shutil.which("graphify"):
-    print("SKIP extractor idempotency + gate round-trip — graphify CLI not installed (uv tool install graphifyy)")
+_guard = graphify_dep_guard("extractor idempotency + gate round-trip")
+if _guard is not None:
+    fails += _guard  # fail-closed: a missing declared dep is a red, not a silent skip
     print("ALL PASS" if not fails else f"FAIL {fails}")
     sys.exit(1 if fails else 0)
 

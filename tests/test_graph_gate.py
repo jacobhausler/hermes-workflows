@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """graph_check.py contract: committed graph ⇔ tree, both directions, plus the shipped
-graph's shape. Hermetic: builds a throwaway git repo. Skips (exit 0, one SKIP line)
-when the graphify CLI is absent so the serial suite stays green on a bare runner."""
+graph's shape. Hermetic: builds a throwaway git repo. The graphify CLI is a DECLARED
+test dep (CI installs graphifyy==0.9.67): absent CLI FAILS the gate naming the dep —
+it only SKIPs (exit 0) under the explicit operator opt-out HERMES_ALLOW_SKIP_GRAPH_GATE=1."""
 import json, os, shutil, subprocess, sys, tempfile
 from pathlib import Path
+
+from graph_gate_dep import graphify_dep_guard
 
 ROOT = Path(__file__).resolve().parent.parent
 PY = sys.executable
@@ -37,8 +40,9 @@ check(".gitignore keeps viz/cache/cost out of the repo",
       all(k in ignored for k in ("graphify-out/graph.html", "graphify-out/cache/", "graphify-out/cost.json")))
 
 # --- the gate itself ---------------------------------------------------------------
-if not shutil.which("graphify"):
-    print("SKIP graph_check round-trip — graphify CLI not installed (uv tool install graphifyy)")
+_guard = graphify_dep_guard("graph_check round-trip")
+if _guard is not None:
+    fails += _guard  # fail-closed: a missing declared dep is a red, not a silent skip
     print("ALL PASS" if not fails else f"FAIL {fails}")
     sys.exit(1 if fails else 0)
 

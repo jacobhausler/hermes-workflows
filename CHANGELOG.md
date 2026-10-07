@@ -1,5 +1,135 @@
 # Changelog
 
+## Unreleased
+
+Discipline / docs:
+- docs: #134 partial-rescue law (jam-g1, epic #40) — AGENTS.md 3d states the
+  recovery discipline explicitly: the committed `nodes/*.json` done-set parsed
+  against the CURRENT graph is the ONLY saved recovery state (efp re-validation
+  makes amend-via-efp the sanctioned path; a rerun follows the edited graph,
+  contrasting DAGMan's rescue-DAG pattern), and the plugin carries no
+  rescue-snapshot file BY DESIGN — none may be added. No behavior change to
+  wf.py/wfcommon.py. Test: `tests/test_partial_rescue_law_134.py` (4 contracts;
+  pins amended-ancestor demotion of untouched descendants + by-design absence
+  of any graph-snapshot file by name).
+
+Read-model / DX:
+- feat(door,dashboard): est-2ek.1.280 — an EMPTY `list`/`_list_runs` scan now
+  emits `roots:` the resolved runs_root first, then the legacy launch root when
+  different. The multi-profile papercut was a profile-scoped tool writing
+  `profiles/<p>/workflows/` while the API globbed the canonical dir: BOTH
+  answered a silent `[]` and a peer lost ~10h chasing auth instead of the
+  stale root. Non-empty payloads keep the golden-solo key set
+  `{runs, total, counts(, provenance)}` byte-identical (F1 identity law).
+  Test: `tests/test_list_root_280.py` (6 contracts, RED first).
+- #58 door sibling-root scan (status/wait): a run dispatched under one home (profile
+  seat) and read from a consumer whose env resolves another (estate shared root,
+  sibling profile) answered `unknown run_id` while its runner and events were alive
+  next door — find_run covers only resolved-root + legacy launch root. The READ verbs
+  now scan the sibling known roots (estate + every profile under it, both directions
+  from the resolved and launch homes) before answering unknown, and the answer from a
+  hit carries a `resolved_via` warning naming the foreign dir. Read-only convenience:
+  foreign-root `wait` never spawns a runner (the owning root does; the root-compare in
+  `_runner_pid_alive` would reject a foreign spawn anyway), and write verbs
+  (amend/release/steer/stop/save) stay fail-closed on the resolved root. Same-root
+  behavior is byte-identical (no `resolved_via` field on a resolved-root read).
+  Test: `tests/test_door_sibling_root_58.py` (5 red at base → all green at head;
+  hermetic two-root sandbox, fake launcher).
+- #est-tmuu — deterministic provider/alias config deaths are never respawned. A
+  node pinning a provider the seat does not define made the CLI exit rc!=0 in
+  ~0.1s (`Unknown provider 'x'. Check 'hermes model' …`); the runner surfaced
+  that death as the transient classes and the Q4 ladder respawned the WHOLE
+  recovery sequence on a deterministic input error, landing
+  `transport_exhausted` with the budget burned (operator-verified report,
+  2026-10-02). The runner now types it `config_input`: a child that dies rc!=0
+  within ~1 s of spawn AND whose capture carries the config-error marker line
+  fails on the FIRST attempt — the class sits outside both retry ladders (the
+  #24 fatal_quota law), the respawn budget is never decremented, and the error
+  names the fix (the node's provider pin or the seat config). The window is the
+  precision guard: the same capture dying late keeps its existing
+  classification; `unknown model` stays `unresolved_model` territory. Pin:
+  `tests/test_config_input_tmuu.py` (fake mode `cfgtypos`).
+- Docs-surface guard hardening (PR #155 follow-up) — four adversary-confirmed
+  blind spots closed, test-first. The drift pin now executes the door and
+  compares ACTUAL `ACTIONS` dispatch keys against the README action table
+  (regex-scanning source stayed green while an unlisted callable lived in the
+  dispatch dict; mutation self-proofs 7a-7d run every pass). `pr_tag_audit.py`
+  gained the INVERSE assertion — an `(open PR #NN)` tag on a row whose action
+  is dispatched fails even while the PR is open — and missing `gh` now exits 2
+  with file:line diagnostics instead of an uncaught traceback. The audit helper
+  joins the pack list beside `graph_path_ban.py`/`graph_regen.py`
+  (`scripts/pack.py`), and `test_packaging.py` pins the
+  exact packed `scripts/` set plus a packed-or-declared-source-only contract,
+  so a helper can never again sit outside the ZIP while its test ships green.
+  Stale doc tags aged in the same commit (red-on-base rule): the #121 tags in
+  CONTRIBUTING.md + references/development.md → `(shipped in v1.2.1)`, the #84
+  tags in README + references/portable.md → `(shipped in v1.3.0)`, and the
+  three #47 tag sites in README rewritten to current truth — #47 closed
+  unmerged, so the `release_lock` row and the `liveness-unknown` run state are
+  removed and wedged-lock recovery describes the shipped kernel-flock
+  admission. `pr_tag_audit.py --repo <owner>/hermes-workflows` exits 0.
+
+## 1.3.0 — 2026-10-05
+
+Minor line, 29 commits since v1.2.1: the join/on_fail wave (deterministic merged
+join objects at the wave boundary, caught agent death becomes join-tolerant), the
+read-model honesty batch (honest status, `stale_because`), and the contributor-DX
+sweep. Merge order #168 → #178 → #184 → #185 → #188 → #179 → #193 → #195 → #197 →
+#198 → #199 → #200 → #202 → #203 → #204 → #205 → #206 → #207 → #208 → #209 → #210
+(+ composite include #84; graph refreshes in between).
+
+Runner features — join / on_fail / join-object semantics:
+- 4f5f359 #209 — feat(runner): join nodes — deterministic merged object of named
+  parent outputs at the wave boundary.
+- f8a5956 #207 — feat(runner): on_fail — a caught agent death becomes join-tolerant
+  skipped or a fallback agent.
+- e13a347 #208 — refactor(runner,door): NODE_TYPES is the ONE node-kind table —
+  schedule + validation consult kind(n).
+- 16e705f #206 — feat(runner): full-jitter retry sleeps for rate-limited transport
+  deaths.
+- acc5bc0 #202 — feat(runner): pre-cap persist/finish budget cue + stop_reason
+  kind=budget.
+- 5d89502 #178 — feat(runner): convoy splice (order_only) + run.blocked residue
+  classes + dead-letter ledger.
+- 7bec849 #184 — feat(runner): boot-time clean-lane assert for re-drives.
+- ca456f6 #185 — feat(runner): attempt-N preamble + reconcile-don't-redo on
+  crash-respawn.
+- 9bf28de #168 — feat(plugin): card enforcement — transform_llm_output ships the
+  ::workflow card unasked.
+
+Registry & read-model:
+- 27b2ec4 #210 — feat(read-model): stale_because — the read model says WHY a
+  committed node will rerun.
+- 87306e4 #203 — feat(read-model): honest status — harvest-proven records read
+  done; runner_exit verdict outranks pid-liveness.
+- 967b486 #205 — feat(door): validate action — dry-run the door's whole validation
+  with zero writes and no liveness ping.
+- afcba7f #198 — fix(pack,door): install.json provenance in the ZIP +
+  doctor_version drift check.
+
+DX & fixes:
+- c01b4a0 #204 — fix(dx): error-polish + grammar-pointer — errors name their
+  offender; one-pass defect reporting; when-grammar quoted.
+- d93eef0 #195 — fix(runner): never orphan the agent child; never bill a
+  substituted route.
+- e7f416f #200 — fix(schema): validate() names the fuzzy sibling-key rename on
+  missing-required.
+- 3ed07ed #199 — fix(door): status/wait surface a structured stop_reason for
+  budget deaths.
+- 50234d8 #197 — fix(lane-hygiene): the ONE verified reload form per deployment
+  joins LANE_HYGIENE_LINES.
+- e14f85e #193 — fix(include): malformed parent node id + graph-level include ->
+  named errors[] envelope (issue #192).
+- e7cf7e3 #84 — feat(include): composite graphs — expand shelved library graphs
+  into a run at materialize time.
+- 45e1228 #188 — feat(runner): publisher capability gate — typed refusal until
+  verified suite proof.
+- 1c8ddad #179 — fix(door): lane children cannot publish run graphs onto the
+  shared shelf.
+
+Graph refresh: graphify-out rebuilt at each merge; current refresh at 4f5f359 (#211),
+settled GREEN at tip e1c16ae.
+
 ## 1.2.1 — 2026-10-04
 
 Patch line, 26 commits since v1.2.0 (merge order #136 → #147 → #97 → #148 → #149 →
@@ -74,6 +204,22 @@ Detailed entries (Unreleased work folded in):
   never eaten. The model's paste stays the primary path; `desktop/plugin.js`
   is untouched (no tool-result render slot exists in the plugin SDK — the
   render-from-record half of #157-A is desktop/core work).
+
+- #166c — the scrub audit's suffix set covers every shipped text shape: .yml and
+  .txt joined AUDIT_SUFFIXES (the shipped ci.yml exported forbidden lines with
+  '0 scrub hits' under the old set, NUL or not). New text types join the set,
+  never the skip path.
+- est-n58i — the adopted-child death path shares the malformed-turn law: an
+  adopted orphan whose reply IS serialized tool-call markup now classifies
+  `malformed_turn` (verbatim diagnostic carried), not generic `unknown` — the
+  class no longer varies by which path (fresh vs adopted) reached the same
+  death; the bounded ladder still may not re-drive the adopted path (its spend
+  is committed). Pin: `tests/test_malformed_turn_adopted_541.py` drives the
+  REAL runner on both paths and asserts `item.adopted` actually happened.
+  The scrub audit's text-ness is content-based (null-byte sniff, the git
+  heuristic): the shipped `.sig` and extensionless text (`tests/fake-b1`) are
+  audited too — a file name can no longer hide text from the gate; the
+  LICENSE copyright hit is guarded by an anchored exemption.
 - #116 — confidence_substrate: engine-stamped fallback when a pinned confidence
   route is quota-dead. The owner declares a sanctioned fallback substrate once
   (`plugins.entries.hermes-workflows.settings.confidence_substrate`, top-level

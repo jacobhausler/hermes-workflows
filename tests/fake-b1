@@ -166,8 +166,8 @@ if _FAKE_MODE == "toolcall_text_541" and "TOOLCALL541" in q:
     # est-2ek.1.541: the agent child whose FINAL REPLY is serialized tool-call markup
     # ('<invoke name=...>'-shape rendered as text, turn_exit_reason unknown, exit 1).
     # The markup is json-quoted so this file stays free of raw open-tag sequences
-    # (6st law). FAKE_RC selects the exit code (0 = the exit-0 shape, 1 = the bead);
-    # FAKE_TERN is the turn report's turn_exit_reason (bead: "unknown"). The dead
+    # (6st law). FAKE_RC selects the exit code (0 = the exit-0 shape, 1 = the death);
+    # FAKE_TERN is the turn report's turn_exit_reason (the death: "unknown"). The dead
     # attempt registers a state.db row with api_calls/tool_calls > 0 — the shape IS a
     # turn that really called tools and rendered the call as its answer; that is also
     # the positive tool-progress evidence the #5 bounded retry gate reads.
