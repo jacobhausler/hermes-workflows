@@ -2611,6 +2611,17 @@ def act_run(args):
     bad = _validation_error(graph) or _team_args_error(args)
     if bad:
         return bad
+    # est-2ek.1.166: the version handshake AT ARM TIME — a graph that declares
+    # requires_plugin above this plugin's own version (plugin.yaml, the single
+    # source) is REFUSED here, naming both versions, before any write or spawn
+    # (spool e6e55416cd78c9bd: a stale seat must read exactly what to upgrade,
+    # never a 03:00 mystery death on a grammar the door never had). Absent key
+    # = no check: a plain run stays byte-identical (solo golden law).
+    if graph.get("requires_plugin") is not None:
+        _vh = _common.version_handshake_error(graph.get("requires_plugin"),
+                                              _common.plugin_version())
+        if _vh:
+            return {"error": _vh}
     concurrency_meta, bad = _concurrency_bake(graph)
     if bad:
         return bad
@@ -2750,6 +2761,12 @@ def _create_run(args, graph, lib_name, models, routes, _liveness_notes, lane_pat
     if concurrency_meta:
         meta.update(concurrency_meta)
     meta.update(_identity_stamps(args, graph, lib_name))   # 1.1: only derivable keys land
+    # est-2ek.1.166: a run that DECLARED a version requirement also reports the
+    # arming door's own truth (plugin.yaml via wfcommon.plugin_version), so a
+    # stale seat is visible from status without opening a run dir. Plain runs
+    # never gain the key (solo byte-identity law — the golden key set holds).
+    if graph.get("requires_plugin") is not None:
+        meta["plugin_version"] = _common.plugin_version()
     # Composite runs record which shelf bytes they expanded from (author-form
     # provenance) and any non-fatal resolver notes (scratch collisions). Empty =
     # key omitted: a plain run keeps the exact pre-include run.json key set.
