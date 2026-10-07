@@ -35,7 +35,7 @@ BASE.mkdir(parents=True)
 RESOLVED = BASE / "resolved"     # the settings/root-pinned runs root (scanned FIRST)
 LEGACY = BASE / "legacy"         # the legacy launch root (scanned SECOND)
 MIRROR = BASE / "mirror"         # a symlinked mirror of LEGACY (multiply-hit case)
-for d in (RESOLVED, LEGACY):
+for d in (RESOLVED, LEGACY, MIRROR):
     d.mkdir(parents=True)
 os.symlink(str(LEGACY), str(MIRROR / "alias"))
 MIRROR_ROOT = MIRROR / "alias"
@@ -125,12 +125,17 @@ check("(B2) dashboard _list_runs lists the valid twin too",
       dids == sorted([HID, NOLOGS]), json.dumps(dids))
 
 # ---------------------------------------------------------------- (D) executed
+# Post-fix the landed rows are HID (valid twin, logs -> executed) and NOLOGS
+# (valid, no logs -> NOT executed). TORNLOGS never lands (run_state None) but
+# HAS a logs/ dir: counting it is the probe's inflation bug — negative
+# assertion executed <= total (and executed == the executed count AMONG rows).
 counts = lst.get("counts", {})
-check("(D) executed counts ONLY rows that land in runs (torn+logs dirs excluded)",
-      counts.get("executed") == 1 and counts.get("total") == 2,
-      json.dumps(counts))
-check("(D-) executed never exceeds total (negative: the hider+stray-logs must not inflate)",
-      counts.get("executed", 0) <= counts.get("total", 0), json.dumps(counts))
+check("(D) executed counts ONLY rows that land in runs (torn+logs dir excluded)",
+      counts.get("executed") == 1 and lst.get("total") == 2,
+      json.dumps({**counts, "total": lst.get("total")}))
+check("(D-) executed never exceeds total (negative: the non-landing stray-logs dir must not inflate)",
+      counts.get("executed", 0) <= lst.get("total", 0),
+      json.dumps({**counts, "total": lst.get("total")}))
 
 print("ALL PASS" if ok else "FAILURES PRESENT")
 sys.exit(0 if ok else 1)

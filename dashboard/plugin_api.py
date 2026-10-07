@@ -216,6 +216,9 @@ def _list_runs():
         v = _view(r)
         if v and v["id"] not in seen:
             seen.add(v["id"])
+            # est-7ps8 (note 2): count EXECUTED only for rows that land in
+            # `runs` — a torn dir that never reaches the list must not
+            # inflate the counter (executed > total was the probe).
             if common.run_executed(r):
                 executed += 1
             runs.append(v)

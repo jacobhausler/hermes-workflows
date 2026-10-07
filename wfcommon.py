@@ -429,17 +429,23 @@ def find_run(rid):
 
 
 def iter_run_dirs(roots, reverse=False):
-    """Every run dir under one or more runs roots, unique by run-dir NAME.
+    """Every run dir under one or more runs roots, unique by REALPATH.
 
     Accepts a single root (str/Path) or a sequence of roots. Skips non-dirs and
     dot-dirs (<runs_root>/.seats is the global seat-ticket dir, est-g2xx — never
     a run). Census hygiene (est-2ek.1.762): symlinked/profile-scoped roots
     multiply hits — the same run appears under the resolved root, the legacy
     launch root, and every profile home that mirrors it — so one run counts
-    once; first-seen wins, callers pass the resolved root first. The ONE
-    enumeration every list/read-model/scan routes through, never raw
-    `root.iterdir()`. Sorted by name (newest-first when reverse=True) within
-    each root, roots taken in order."""
+    once; first-seen wins, callers pass the resolved root first.
+    est-7ps8 (zap probe, PR#259 6030355791): the dedupe key is the RESOLVED
+    path, not the bare NAME — two physically-distinct dirs that merely share a
+    name (a torn partial under the resolved root + the valid run under the
+    legacy root) are BOTH enumerated; name-dedupe let the torn first-root stub
+    hide the valid twin from every read model. Same-physical-dir mirrors still
+    collapse because they resolve to one path. The ONE enumeration every
+    list/read-model/scan routes through, never raw `root.iterdir()`. Sorted by
+    name (newest-first when reverse=True) within each root, roots taken in
+    order."""
     if isinstance(roots, (str, Path)):
         roots = [roots]
     seen, out = set(), []
@@ -450,11 +456,14 @@ def iter_run_dirs(roots, reverse=False):
             continue
         for r in entries:
             try:
-                if r.name.startswith(".") or not r.is_dir() or r.name in seen:
+                if r.name.startswith(".") or not r.is_dir():
                     continue
+                key = r.resolve()
             except OSError:
                 continue
-            seen.add(r.name)
+            if key in seen:
+                continue
+            seen.add(key)
             out.append(r)
     return out
 

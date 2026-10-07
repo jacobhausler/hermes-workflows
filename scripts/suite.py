@@ -136,8 +136,14 @@ cases = [[sys.executable, str(p)] for p in py] + [['node', '--experimental-strip
 # (774/1227 zero-log fixture dirs were leaked exactly this way; census spool
 # key 9cfe87a0199e5e1b). An inherited hostile root is replaced; tests that
 # self-pin (the law) overwrite it in their own child envs and are unaffected.
+import atexit as _atexit
+import shutil as _shutil
 import tempfile as _tempfile
 _suite_runs_root = Path(_tempfile.mkdtemp(prefix='wf-suite-runs-'))
+# est-7ps8 (note 3): the temp root is the suite's own scratch — remove it when
+# the process ends (normal exit, SystemExit, or crash). mkdir'd lazily by an
+# unpinned test's child, so cleanup is best-effort and never raises.
+_atexit.register(_shutil.rmtree, _suite_runs_root, ignore_errors=True)
 for argv in cases:
     name = Path(argv[-1]).name
     log = out / (name + '.log')
