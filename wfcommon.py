@@ -420,9 +420,21 @@ def launch_runs_root():
 
 def find_run(rid):
     """Locate a run dir by id: resolved runs_root() first; legacy launch root only
-    for an EXISTING run (pre-fix ids stay resumable, new ids never land there)."""
+    for an EXISTING run (pre-fix ids stay resumable, new ids never land there).
+    est-t1kk (zap cert 6033425646 sibling): the est-7ps8 realpath dedupe lets
+    iter_run_dirs LIST a same-named valid twin under the legacy root while the
+    resolved-root copy is a torn partial (no readable graph — run_state None);
+    the old exists-only check then resolved the torn dir and the listed id
+    opened as 'unknown run'. Selection now mirrors the listing: among the
+    same-id dirs across the roots, the first that YIELDS A VIEW wins (resolved
+    first, so an intact resolved dir is untouched — the legacy probe below is
+    exactly that same rule in the legacy-only shape). Unknown ids still answer
+    the resolved path (the create/resume shape callers rely on)."""
     root = runs_root()
     legacy = launch_runs_root()
+    for cand in iter_run_dirs([root, legacy] if legacy != root else [root]):
+        if cand.name == rid and run_state(cand):
+            return cand
     if legacy != root and (legacy / rid).is_dir() and not (root / rid).exists():
         return legacy / rid
     return root / rid
