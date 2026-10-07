@@ -122,7 +122,7 @@ def dispatch(run, reason, *, launchctl="/bin/launchctl", poll_seconds=3):
             receipt["error"] = "runner did not complete"
             return save("held")
         argv = ["/bin/bash", str(script), *order["args"]]
-        label = "cc.haus.workflow-post-exit-" + str(os.getpid())
+        label = "cc.hermes.workflow-post-exit-" + str(os.getpid())
         out = script.parent / "runner-hook.log"
         plist = script.parent / "runner-hook.plist"
         plist.write_bytes(plistlib.dumps({"Label": label, "ProgramArguments": argv,

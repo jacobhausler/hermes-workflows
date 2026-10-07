@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """est-2ek.1.166: version handshake — the plugin reports its OWN version
 (plugin.yaml) and an optional graph key `requires_plugin` fails a STALE runner
-LOUDLY AT ARM TIME, naming both versions (spool key e6e55416cd78c9bd: the
-callindor seat ran hermes-workflows 0.8.0 and a 1.0.x graph died at 03:00 on a
+LOUDLY AT ARM TIME, naming both versions (spool key e6e55416cd78c9bd: a stale
+seat ran hermes-workflows 0.8.0 and a 1.0.x graph died at 03:00 on a
 boolean schema the old door never saw coming).
 
 Three surfaces:

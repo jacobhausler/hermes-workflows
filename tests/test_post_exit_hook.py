@@ -14,7 +14,8 @@ sys.path.insert(0, str(REPO))
 import post_exit_hook as hook
 
 # All fixture writes stay on durable work ground, never the platform scratch dir.
-FIXTURES = Path(os.environ.get("WF_HOOK_TEST_ROOT", "/home/hermes/.hermes/work/haus-keeper/hook-fixtures"))
+FIXTURES = Path(os.environ.get("WF_HOOK_TEST_ROOT",
+                               str(Path.home() / ".hermes" / "work" / "post-exit-hook-fixtures")))
 
 
 class PostExitHookTest(unittest.TestCase):

@@ -170,7 +170,7 @@ if _FAKE_MODE == "fallback_ladder":      # est-2ek.1.164: transport death on any
 if _FAKE_MODE == "partial_remaining":    # est-2ek.1.165: harvest death WITH a declared Remaining block
     print("did the head of the tail, then the cap took me")
     print("## Remaining")
-    print("- roll callindor plugin")
+    print("- roll seat plugin")
     print("- CLI bake")
     print("")
     print("```json\n" + json.dumps({"result": "half done"}) + "\n```")

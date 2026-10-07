@@ -70,7 +70,7 @@ rec = json.loads((r / "nodes" / "close.json").read_text())
 check("(1) harvest committed status partial", rec.get("status") == "partial",
       json.dumps({k: rec.get(k) for k in ("status", "error_class")}))
 check("(1) record carries structured remaining (declared steps, in order)",
-      rec.get("remaining") == ["roll callindor plugin", "CLI bake"],
+      rec.get("remaining") == ["roll seat plugin", "CLI bake"],
       json.dumps(rec.get("remaining")))
 
 # door status must pass the structured list through (wait shares act_status)
@@ -82,7 +82,7 @@ wf_test_isolation.install(door)
 st = door.act_status({"run_id": "asks165-rem"})
 node_st = (st.get("nodes") or {}).get("close") or {}
 check("(1) status surfaces structured remaining",
-      node_st.get("remaining") == ["roll callindor plugin", "CLI bake"],
+      node_st.get("remaining") == ["roll seat plugin", "CLI bake"],
       json.dumps({k: node_st.get(k) for k in ("status", "remaining")}))
 
 # ---- (2) honest absence: harvested partial with NO declared block -> [] ----
