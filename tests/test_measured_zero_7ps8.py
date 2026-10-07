@@ -1,15 +1,9 @@
 #!/usr/bin/env python3
-"""est-7ps8 (zap CHANGES 6033425646) — the dashboard must report its MEASURED
-executed count, INCLUDING a measured zero.
+"""The dashboard reports its MEASURED executed count, INCLUDING a measured zero.
 
-Failure mode pinned: dashboard _list_runs passed `executed=executed or None`
-to wfcommon.run_summary, so a census where no run ever executed dropped the
-key entirely — the reader could not tell "measured zero" from "listing never
-measured executed". run_summary's declared contract (wfcommon.py:3507-3518)
-already distinguishes the two: a SUPPLIED count rides inside `counts` (even
-0), an omitted argument leaves the key absent. The dashboard always measures,
-so it must always supply (est-7ps8 acceptance slice; folded in from the closed
-duplicate est-2ek.1.762 routing).
+wfcommon.run_summary's declared contract distinguishes a SUPPLIED count
+(runs inside `counts`, even 0) from an omitted argument (key absent). The
+dashboard's census always measures, so it always supplies (est-7ps8).
 
 Cases (all through an isolated REAL _list_runs() invocation — fresh private
 WF_RUNS_ROOT per process, no shared root):
