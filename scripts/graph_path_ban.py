@@ -7,8 +7,10 @@ chore(graph): PR). Every other PR is forbidden from the path: an author-side reg
 was the r10 pattern that made every two open PRs collide on cosmetic graph churn.
 
 The ban: base = `git merge-base origin/<base-ref> HEAD` (default main; CI passes
-the event's base_ref), changed = `git diff --name-only base..HEAD -- graphify-out/`.
-Non-empty changed → exit 1 printing the offending files, UNLESS the head branch
+the event's base_ref), changed = `git diff -z --name-status base..HEAD` parsed
+into every path the diff touches (est-gbim: BOTH endpoints of renames/copies,
+NUL-split so quoting and embedded newlines cannot hide an entry). Non-empty
+graphify-out/ slice → exit 1 printing the offending files, UNLESS the head branch
 matches ^chore/graph- AND every changed file lives under graphify-out/ — the regen
 lane's own PR shape (branch chore/graph-<sha7>, ONLY graphify-out/ files). A
 mixed PR that claims the exempt branch prefix but also edits source is not a
@@ -77,13 +79,58 @@ def head_branch(repo_dir, env=None):
     return r.stdout.strip() if r.returncode == 0 else ""
 
 
+_STATUS_RE = re.compile(r"^[A-Z]{1,2}[0-9]{0,3}!?$")  # git name-status: A M D T U X B, R100/C75, optional ! (unmerged)
+
+
 def changed_files(repo_dir, base, head="HEAD"):
     """All paths changed base..head (full diff — the exemption check needs to see
-    whether ANY non-graph file moved, not only the offending slice)."""
-    r = _git(repo_dir, "diff", "--name-only", f"{base}..{head}")
+    whether ANY non-graph file moved, not only the offending slice).
+
+    est-gbim: `-z --name-status`, not `--name-only`. Three holes in the old
+    form, all ban-dodging (a graphify-out/ change invisible to the ban):
+      * rename/collapse: `--name-only` prints only the POST image of a rename —
+        R100 graphify-out/graph.json -> x.json printed x.json alone, so emptying
+        the single-writer path sailed; the inverse (source -> graphify-out/)
+        printed only the source. Parsing name-status takes BOTH endpoints of
+        R (rename) and C (copy).
+      * quoting: default output octal-escapes and quotes exotic paths
+        ("graphify-out/evil\\n.json") — the quote itself broke prefix matching.
+        -z mode is raw bytes, never quoted.
+      * newline split: with quoting disabled by -z, an embedded newline in a
+        path can no longer forge a fake entry; fields split on NUL.
+
+    Fail-closed: if we could not run git or could not parse its output into
+    well-formed records, return None — main() must exit 2, never green."""
+    r = _git_bytes(repo_dir, "diff", "-z", "--name-status", f"{base}..{head}")
     if r.returncode != 0:
         return None
-    return [f for f in r.stdout.splitlines() if f]
+    fields = r.stdout.split(b"\0")
+    if fields and fields[-1] == b"":
+        fields.pop()  # trailing NUL terminator
+    paths = []
+    i = 0
+    while i < len(fields):
+        status = fields[i].decode("utf-8", "surrogateescape")
+        if not _STATUS_RE.match(status):
+            return None  # output shape we cannot trust → fail closed
+        i += 1
+        if status[0] in "RC":
+            if i + 1 >= len(fields):
+                return None  # truncated rename record → fail closed
+            paths.append(fields[i].decode("utf-8", "surrogateescape"))      # pre-image
+            paths.append(fields[i + 1].decode("utf-8", "surrogateescape"))  # post-image
+            i += 2
+        else:
+            if i >= len(fields):
+                return None
+            paths.append(fields[i].decode("utf-8", "surrogateescape"))
+            i += 1
+    return paths
+
+
+def _git_bytes(repo_dir, *args):
+    return subprocess.run(["git", "-C", str(repo_dir), *args],
+                          capture_output=True)
 
 
 def build_parser():

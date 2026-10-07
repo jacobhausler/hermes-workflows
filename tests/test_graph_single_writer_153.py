@@ -175,6 +175,90 @@ with tempfile.TemporaryDirectory(prefix="pb-test-") as td:
           r.returncode == 0,
           f"rc={r.returncode} out={(r.stdout + r.stderr).strip()[-200:]} (branch clean vs its fork point {base_tip[:7]})")
 
+    # case 4b (est-gbim): the shapes --name-only used to hide. A rename is
+    # reported by --name-only as its POST image only, so R100 out of (or into)
+    # graphify-out/ dodged the ban; quoting octal-escaped exotic names so the
+    # prefix match failed; an embedded newline forged a fake entry. All must
+    # now fail closed at exit 1 naming the graph path (or its former home).
+    _, work = make_case(td, "rout")
+    git(work, "checkout", "-qb", "feature/rename-out")
+    git(work, "mv", "graphify-out/graph.json", "docs-graph.json")
+    (work / "a.py").write_text("def a():\n    return 9\n")
+    commit_all(work, "rename graph file out + source change")
+    r = run_ban(work)
+    check("integration: pure rename OUT of graphify-out/ is caught (pre-image)",
+          r.returncode == 1 and "graphify-out/graph.json" in r.stdout,
+          f"rc={r.returncode} out={(r.stdout + r.stderr).strip()[-160:]}")
+
+    _, work = make_case(td, "rin")
+    git(work, "checkout", "-qb", "feature/rename-in")
+    git(work, "mv", "a.py", "graphify-out/a.py")
+    commit_all(work, "rename source into the single-writer path")
+    r = run_ban(work)
+    check("integration: rename INTO graphify-out/ is caught (post-image)",
+          r.returncode == 1 and "graphify-out/a.py" in r.stdout,
+          f"rc={r.returncode} out={(r.stdout + r.stderr).strip()[-160:]}")
+
+    _, work = make_case(td, "del")
+    git(work, "checkout", "-qb", "feature/delete-graph")
+    git(work, "rm", "-q", "graphify-out/graph.json")
+    commit_all(work, "delete the graph file")
+    r = run_ban(work)
+    check("integration: deletion of a graphify-out/ file is caught",
+          r.returncode == 1 and "graphify-out/graph.json" in r.stdout,
+          f"rc={r.returncode} out={(r.stdout + r.stderr).strip()[-160:]}")
+
+    _, work = make_case(td, "odd")
+    git(work, "checkout", "-qb", "feature/odd-names")
+    (work / "graphify-out" / "evil\n.json").write_text('{"x": 1}\n')
+    (work / "graphify-out" / "spaces in name.json").write_text('{"x": 2}\n')
+    commit_all(work, "newline- and space-named graph files")
+    r = run_ban(work)
+    check("integration: quoted / embedded-newline graph paths cannot dodge the prefix match",
+          r.returncode == 1 and "evil" in r.stdout and "spaces in name.json" in r.stdout,
+          f"rc={r.returncode} out={(r.stdout + r.stderr).strip()[-160:]}")
+
+    # case 5 (est-gbim): exit-2 fail-closed — an unknown base-ref must never
+    # read as green, and the parser must not guess on an unparsable diff.
+    _, work = make_case(td, "badsbase")
+    git(work, "checkout", "-qb", "feature/odd-names")
+    (work / "b2.py").write_text("def b2():\n    return 1\n")
+    commit_all(work, "source-only change")
+    r = run_ban(work, base_ref="no-such-branch")
+    check("integration: unknown base-ref → exit 2 (fail closed, never green)",
+          r.returncode == 2, f"rc={r.returncode} out={(r.stdout + r.stderr).strip()[-160:]}")
+
+# core unit: the parser consumes rename/copy records as BOTH endpoints — feed it
+# synthetic name-status fields through a stubbed git to pin the record walker
+# independent of git's own rename detection heuristics.
+_orig_git_bytes = gpb._git_bytes
+
+
+class _R:
+    def __init__(self, rc, out):
+        self.returncode, self.stdout = rc, out
+
+
+try:
+    gpb._git_bytes = lambda rd, *a: _R(0, b"R100\0graphify-out/graph.json\0moved.json\0M\0a.py\0")
+    got = gpb.changed_files(".", "base")
+    check("parser: rename record yields BOTH endpoints",
+          got == ["graphify-out/graph.json", "moved.json", "a.py"], str(got))
+    gpb._git_bytes = lambda rd, *a: _R(0, b"D\0graphify-out/graph.json\0")
+    check("parser: deletion yields the removed path",
+          gpb.changed_files(".", "base") == ["graphify-out/graph.json"])
+    gpb._git_bytes = lambda rd, *a: _R(0, b"R100\0graphify-out/graph.json\0")  # truncated pair
+    check("parser: truncated rename record → None (fail closed)",
+          gpb.changed_files(".", "base") is None)
+    gpb._git_bytes = lambda rd, *a: _R(0, b"nonsense\0x\0")
+    check("parser: unrecognized status field → None (fail closed)",
+          gpb.changed_files(".", "base") is None)
+    gpb._git_bytes = lambda rd, *a: _R(128, b"")
+    check("parser: git failure → None (fail closed)",
+          gpb.changed_files(".", "base") is None)
+finally:
+    gpb._git_bytes = _orig_git_bytes
+
 # --- graph_regen smoke: NO_CHANGES on an already-honest tree ----------------------
 # Needs the graphify CLI — a DECLARED test dep (CI installs graphifyy==0.9.67):
 # absent CLI FAILS naming the dep (same law as tests/test_graph_gate.py), and only
