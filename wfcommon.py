@@ -633,7 +633,14 @@ AGENT_KEYS = {"id", "type", "after", "goal", "context", "schema", "model", "prov
               # `suite_proof` (bool, agent/gate) declares a recognized suite-PROOF
               # producer: on commit done the runner mints the durable token
               # nodes/<id>.suite-proof.json (node id + committed efp).
-              "publishes", "suite_proof"}
+              "publishes", "suite_proof",
+              # est-2ek.1.164: transport fallback rungs — tried IN ORDER, only
+              # when the same-model Q4 ladder exhausted with
+              # error_class=transport_exhausted. List of non-empty strings
+              # (<=8 rungs, billing guard); every other error class never
+              # falls back. Validated by shape below; honored by
+              # wf._fallback_ladder.
+              "fallback_models"}
 GATE_KEYS = {"id", "type", "after", "question", "options", "context", "when", "wait", "on_skip",
              "default_option", "hold_timeout",
              # 1.1 (RATIFY F4): gates take output preconditions too; gates obey the same
@@ -724,7 +731,10 @@ def grammar_errors(graph):
     return []
 FANOUT_KEYS = {"items", "items_from", "goal", "schema", "quorum"}
 DEFAULTS_KEYS = {"schema", "timeout", "max_turns", "reasoning", "provider", "model", "context",
-                 "require_route"}   # #25: bool — fail-closed pinned routes (see AGENT_KEYS)
+                 "require_route",   # #25: bool — fail-closed pinned routes (see AGENT_KEYS)
+                 # est-2ek.1.164: the transport fallback rungs fill from graph
+                 # defaults like any defaults key (per-node key wins).
+                 "fallback_models"}
 # Shape presets (sprint101 #11): max_turns/timeout per rough node shape = the p95 of
 # SUCCESSFUL agent nodes per shape, measured 2026-09-25 over the run dirs behind
 # census.json (80 runs, 219 committed-success agent nodes; shape classified from
@@ -777,6 +787,19 @@ def _defaults_errors(d):
             E("defaults.provider", "provider requires a non-empty model")
     if d.get("context") is not None and not isinstance(d["context"], str):
         E("defaults.context", "context must be a string")
+    if "fallback_models" in d:
+        # est-2ek.1.164: same closed shape as the node key — list of non-empty
+        # strings, <=8 rungs — so a bad defaults value is named at the door,
+        # never discovered at spawn.
+        fm = d["fallback_models"]
+        if not isinstance(fm, list) or not fm or not all(
+                isinstance(x, str) and x.strip() for x in fm):
+            E("defaults.fallback_models", "fallback_models must be a non-empty list "
+                                          "of non-empty model-id strings")
+        elif len(fm) > 8:
+            E("defaults.fallback_models", f"fallback_models has {len(fm)} rungs; the "
+                                          "billing cap is 8 (every rung is one extra "
+                                          "spawn)")
     return errs
 
 def apply_graph_defaults(graph):
@@ -815,6 +838,10 @@ def apply_graph_defaults(graph):
             for k in ("schema", "reasoning", "provider", "model"):
                 if n.get(k) is None and defaults.get(k) is not None:
                     n[k] = defaults[k]
+            # est-2ek.1.164: the fallback rungs fill like any defaults key
+            # (per-node key wins; a COPY so mutation never touches defaults).
+            if n.get("fallback_models") is None and defaults.get("fallback_models") is not None:
+                n["fallback_models"] = list(defaults["fallback_models"])
             # #25: `require_route` fills from defaults like any defaults key, but is
             # NEVER baked when both author and defaults left it unset — the runner
             # treats absent as the effective default (True on pinned nodes). Baking
@@ -943,6 +970,37 @@ def validate_graph_errors(nodes):
         for a in n.get("after", []):
             if a not in idset:
                 E(nid, "after", f"references unknown 'after': {a}")
+        if "fallback_models" in n:
+            # est-2ek.1.164: closed shape — a list of non-empty strings, <=8
+            # (billing guard: every rung is ONE extra spawn sharing the run's
+            # retry budget; an unbounded list is an unbounded bill). A bare
+            # string or a non-string element is refused HERE, never discovered
+            # at spawn.
+            fm = n["fallback_models"]
+            if not isinstance(fm, list) or not fm or not all(
+                    isinstance(x, str) and x.strip() for x in fm):
+                E(nid, "fallback_models", "fallback_models must be a non-empty list "
+                                          "of non-empty model-id strings")
+            elif len(fm) > 8:
+                E(nid, "fallback_models", f"fallback_models has {len(fm)} rungs; the "
+                                          "billing cap is 8 (every rung is one extra "
+                                          "spawn)")
+        if "toolsets" in n:
+            # spool key c258f0730346b426 (from est-2ek.1.142): the field passed
+            # the closed-set validator with NO shape check, so a dict/int/nested
+            # element survived to spawn and detonated inside _filter_child_toolsets
+            # (the reported PathLike/TypeError death). Refuse every non-List[str]
+            # / comma-string shape at the door, naming node+key+value; the
+            # honored shapes stay exactly the runner's (list of strings,
+            # comma-string, and the empty list = the author's own ask).
+            ts = n["toolsets"]
+            shape_ok = (isinstance(ts, str)
+                        or (isinstance(ts, list)
+                            and all(isinstance(x, str) and x.strip() for x in ts)))
+            if not shape_ok:
+                E(nid, "toolsets", f"toolsets {ts!r} invalid: must be a list of "
+                                    "non-empty toolset-name strings (or a comma-"
+                                    "separated string)")
         if "after_partial" in n:
             # e68544a37be37657: agent/gate-only key; bool only — an unvalidated
             # truthy is never enough to open a harvest edge. Echo rejects it
@@ -1253,7 +1311,77 @@ def validate_graph(nodes):
 
 STRUCTURAL_GRAPH_KEYS = {"name", "nodes", "description", "defaults", "model_policy",
                          "provenance", "grammar", "include",
-                         "concurrency", "item_concurrency"}  # #100: optional run-level limits
+                         "concurrency", "item_concurrency",  # #100: optional run-level limits
+                         # est-2ek.1.166: the version handshake — an author may
+                         # declare the minimum plugin version the graph needs;
+                         # a stale runner refuses LOUDLY at arm time, naming both.
+                         "requires_plugin"}
+
+# ---------- est-2ek.1.166: the version handshake (shared: door + runner boot) ----------
+# spool key e6e55416cd78c9bd: a 1.0.x graph died at 03:00 on a schema the seat's
+# 0.8.0 door never had — a grammar mismatch across plugin versions surfaced as a
+# mystery runner death. The handshake makes it a NAMED refusal BEFORE anything
+# spawns: the plugin reports its OWN version (plugin.yaml, single source) on
+# run.json/status, and an optional graph key `requires_plugin` (coarse dot-
+# integer >= comparison) refuses at the door AND at runner boot, naming both
+# versions. Absent key = no check, byte-identical old behavior.
+
+def plugin_version():
+    """This plugin's own version — the version: line of plugin.yaml beside this
+    module (stdlib scan, no YAML dep). '' when unreadable: an unknown runner
+    version NEVER blocks an armed run (absence is not a death), but the
+    requires_plugin check against a stated requirement then REFUSES (a stale
+    seat cannot prove it is new enough)."""
+    try:
+        text = (Path(__file__).resolve().parent / "plugin.yaml").read_text()
+    except OSError:
+        return ""
+    m = re.search(r"(?m)^version:\s*(\S+)\s*$", text)
+    return m.group(1) if m else ""
+
+def version_tuple(v):
+    """Dot-integer tuple for coarse >= comparison; None when not parseable
+    ('99.0.0' -> (99, 0, 0); 'latest' -> None)."""
+    if not isinstance(v, str) or not v.strip():
+        return None
+    parts = v.strip().split(".")
+    out = []
+    for p in parts:
+        if not p.isdigit():
+            return None
+        out.append(int(p))
+    return tuple(out) or None
+
+def requires_plugin_errors(graph):
+    """Graph-level defects for the optional `requires_plugin` key: a coarse
+    dot-integer version string (absent = no check). A malformed value is a
+    NAMED validation error, never a crash. The STALENESS refusal itself is
+    _version_handshake_error (it needs the runner's own version)."""
+    if not isinstance(graph, dict) or "requires_plugin" not in graph:
+        return []
+    v = graph["requires_plugin"]
+    if version_tuple(v) is None:
+        return [{"node": None, "field": "requires_plugin",
+                 "msg": f"requires_plugin {v!r} invalid: must be a dot-integer version "
+                        f"string like '1.2.0' (coarse >= comparison)"}]
+    return []
+
+def version_handshake_error(required, runner_version):
+    """The typed refusal text when `required` exceeds `runner_version`, else
+    None. Both versions are NAMED in the message — the whole point of the
+    handshake is that a stale seat reads exactly what to upgrade. An
+    un-parseable/un-stated runner_version with a stated requirement fails
+    closed (cannot prove new enough = refuse); no requirement = always None."""
+    req = version_tuple(required) if isinstance(required, str) else None
+    if req is None:
+        return None                             # absent/invalid handled at validation
+    have = version_tuple(runner_version)
+    if have is not None and have >= req:
+        return None
+    return (f"plugin version handshake failed: this graph declares "
+            f"requires_plugin {required!r} but the installed hermes-workflows "
+            f"runner-version is {(runner_version or 'unknown')!r} — update the plugin "
+            f"(hermes plugins update hermes-workflows) before arming this run")
 
 def model_names_valid(names):
     return isinstance(names, list) and all(isinstance(n, str) and n.strip() for n in names)
@@ -1299,6 +1427,11 @@ def structural_graph_errors(graph, extra_keys=()):
     for key in ("concurrency", "item_concurrency"):
         if key in graph and (type(graph[key]) is not int or graph[key] <= 0):
             E(key, f"{key} must be a positive integer")
+    # est-2ek.1.166: shape-only here (dot-integer string); the staleness
+    # refusal itself belongs at the arm/launch seams so it names the runner's
+    # own version — same message the door and the boot guard both use.
+    for e_ in requires_plugin_errors(graph):
+        E(e_["field"], e_["msg"])
     if "defaults" in graph:
         errs.extend(_defaults_errors(graph["defaults"]))
     if "model_policy" in graph:
