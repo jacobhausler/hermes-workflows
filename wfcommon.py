@@ -428,6 +428,18 @@ def find_run(rid):
     return root / rid
 
 
+def iter_run_dirs(root, reverse=False):
+    """Every run dir under a runs root, sorted by name. Skips non-dirs and
+    dot-dirs (<runs_root>/.seats is the global seat-ticket dir, est-g2xx — never
+    a run). The ONE enumeration every list/read-model/scan routes through."""
+    root = Path(root)
+    try:
+        entries = sorted(root.iterdir(), reverse=reverse)
+    except OSError:
+        return []
+    return [p for p in entries if not p.name.startswith(".") and p.is_dir()]
+
+
 def runs_root():
     """ONE resolver. Precedence (#42): `settings.runs_root` (owner, validated,
     fail-closed) > `WF_RUNS_ROOT` env (non-empty) > `<hermes_home>/workflows`

@@ -2116,11 +2116,15 @@ def act_library(args):
     out = {"library": rows, "hint": hinted}
     if vocab:
         out["tag_vocab"] = vocab
-        if want:
-            # A filtered response — especially an EMPTY one — must DIAGNOSE itself:
-            # per-tag whole-library counts say whether a term starved on spelling
-            # (0 in vocab) or on sparse co-occurrence (exists, never together).
-            out["tag_match_counts"] = {t: vocab.get(t, 0) for t in want}
+    if want:
+        # est-bvg0: the self-diagnosis is promised by the FILTER, not earned by the
+        # vocab — an explicit tags query on an EMPTY or fully-tagless shelf must
+        # still name each starved term (all at 0 = the shelf itself starves every
+        # term), or the agent cannot tell a spelling miss from an empty library
+        # (SKILL.md / grammar.md: "an empty result's tag_match_counts says which
+        # term starved"). The golden-bytes law is untouched: an UNFILTERED tagless
+        # response still grows neither key.
+        out["tag_match_counts"] = {t: vocab.get(t, 0) for t in want}
     if skipped:
         out["skipped"] = skipped
     if quarantined:   # F-2 (#62): every refused entry is named WITH its typed reason;
@@ -3427,7 +3431,7 @@ def act_list(_args):
     for root in roots:
         if not root.exists():
             continue
-        for r in sorted(root.iterdir(), reverse=True):
+        for r in _common.iter_run_dirs(root, reverse=True):
             st = run_state(r)
             if st and st["run_id"] not in seen:
                 seen.add(st["run_id"])

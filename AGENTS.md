@@ -234,10 +234,16 @@ Author-run receipt: [receipts/exchange-run/author-run.json](receipts/exchange-ru
   fanout_empty | fatal_quota | forbidden_model | incomplete_work |
   inputs | lane_wreckage | left_live_descendants | malformed_turn | precondition | provider_400 | quorum |
   ratelimit |
-  route_substitution_denied | route_unavailable | schema | spawn | timeout | transport | transport_exhausted |
+  route_substitution_denied | route_unavailable | schema | seat_unsupported | seat_wait | spawn | timeout | transport | transport_exhausted |
   unresolved_model`, plus `unknown` as the harvest-time default when nothing matches —
   plus `attempts`. Read the class, not the prose. `cancelled` (a `stop`, or a fan-out
   straggler at quorum) is never a failure: the run reads `stopped`, and a `wait` re-drives it.
+  `seat_wait` (est-g2xx): no global agent seat (`WORKFLOW_MAX_SEATS`) freed within the node wall — the spawn never happened.
+  `seat_unsupported` (est-g255): the semaphore was full and the host exposes no process-ancestry
+  channel (neither `/proc` nor `ps`), so a nested runner cannot prove which held seat is its own
+  lending ancestor — refused at once instead of deadlocking to `seat_wait`; nested runners on such
+  a host are unsupported (set `WORKFLOW_MAX_SEATS=0` there). A fan-out item waiting on a seat when
+  `quorum` is met ends `cancelled` and never spawns.
   `left_live_descendants` (#61): the runner is process-tree aware — an exit-0 spawn is
   believed only when its own process group is empty (the /proc walk behind liveness). A
   child that BACKGROUNDED the real work (detached suite) and printed progress chatter is

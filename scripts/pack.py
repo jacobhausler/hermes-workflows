@@ -132,6 +132,7 @@ INCLUDE_FILES = (
     "tests/wf_test_isolation.py",
     "tests/graph_gate_dep.py",  # shared fail-closed dep guard for the graph-gate tests (sys-hvd5gl)
     "tests/fixtures/mac-source.txt",
+    "tests/fixtures/seat_acquire_driver.py",   # est-g2xx: seat-semaphore driver
     "tests/test_fanout_ui.mjs",
     "wf.py",
     "wf_dialect.py",

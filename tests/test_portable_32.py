@@ -95,7 +95,7 @@ check(wfcommon.graph_fingerprint(plain) == wfcommon.graph_fingerprint(tagged),
 check(wfcommon.source_digest(plain) == wfcommon.source_digest(tagged),
       "source_digest equal with and without grammar")
 # and the committed node defs the runner hashed are byte-equal across the two runs
-runs_sorted = sorted(p for p in runs.iterdir() if p.is_dir())
+runs_sorted = wfcommon.iter_run_dirs(runs)  # .seats (est-g2xx) is never a run
 defs = [json.dumps(json.load(open(p / "graph.json"))["nodes"], sort_keys=True) for p in runs_sorted]
 check(len(defs) == 2 and defs[0] == defs[1], "committed node defs byte-equal across absent/wf/1 runs")
 

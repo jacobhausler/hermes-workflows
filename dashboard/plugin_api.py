@@ -205,7 +205,7 @@ def _list_runs():
     for root in roots:
         if not root.exists():
             continue
-        for r in sorted(root.iterdir(), reverse=True):
+        for r in common.iter_run_dirs(root, reverse=True):
             v = _view(r)
             if v and v["id"] not in seen:
                 seen.add(v["id"])
