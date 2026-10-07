@@ -87,9 +87,16 @@ class PostExitHookTest(unittest.TestCase):
         self.assertEqual(rec["state"], "dispatched", rec)
         self.assertEqual(rec["author"], "workflow_runner")
         deadline = time.monotonic() + 4
-        while time.monotonic() < deadline and not (self.outside / "state").exists():
+        final = ""
+        while time.monotonic() < deadline:
+            try:
+                final = (self.outside / "state").read_text().strip()
+            except OSError:
+                final = ""
+            if final == "all_done":
+                break
             time.sleep(0.1)
-        self.assertEqual((self.outside / "state").read_text().strip(), "all_done")
+        self.assertEqual(final, "all_done", "state marker never reached all_done")
         self.assertEqual(json.loads((self.run_dir / "runner_exit.json").read_text())["reason"], "done")
 
 

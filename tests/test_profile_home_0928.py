@@ -112,9 +112,16 @@ check("new run dir under the OWNER's home, not the launch root",
       rid and (PROF / "workflows" / rid).is_dir() and not (BASE / "workflows" / rid).exists(), rid)
 
 deadline = time.time() + 30
-while time.time() < deadline and not OUT.exists():
+lines: list[str] = []
+while time.time() < deadline:
+    try:
+        lines = [l for l in OUT.read_text().splitlines() if l.strip()]
+    except OSError:
+        lines = []
+    if lines:
+        break
     time.sleep(0.2)
-child_home = OUT.read_text().splitlines()[0] if OUT.exists() else "<no child spawn observed>"
+child_home = lines[0] if lines else "<no child spawn observed>"
 check("child inherits the OWNER's home (profile provider config visible to it)",
       child_home == str(PROF), child_home)
 
