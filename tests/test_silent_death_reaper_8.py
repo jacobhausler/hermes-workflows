@@ -135,6 +135,7 @@ with tempfile.TemporaryDirectory(prefix="reaper8-", dir=HERE,
     runs = home / "workflows"
     runs.mkdir(parents=True)
     os.environ["HERMES_HOME"] = str(home)
+    os.environ["WF_RUNS_ROOT"] = str(Path(os.environ["HERMES_HOME"]) / "workflows")  # est-2ek.1.762 pin: HERMES_HOME alone is not a sandbox
     os.environ["FAKE_LOG"] = str(Path(td) / "fake.log")
     os.environ["FAKE_MODE"] = "hang"
     os.environ["FAKE_HANG_SEC"] = "120"

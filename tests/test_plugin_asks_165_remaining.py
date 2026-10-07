@@ -24,8 +24,22 @@ from pathlib import Path
 BUILD = Path(os.environ.get("WF_TEST_BUILD") or Path(__file__).parent)
 ROOT = BUILD.parent
 sys.path.insert(0, str(ROOT))
+
+def _load_iso762():
+    # est-2ek.1.762: shared launch-env pin helper, exec-loaded by file path
+    # (repo convention — a top-level import of a tests/fixtures module would
+    # break the test_packaging import-closure from the unpacked package root).
+    spec = importlib.util.spec_from_file_location(
+        "wf_spawn_isolation_762", Path(__file__).parent / "fixtures" / "wf_spawn_isolation_762.py")
+    assert spec and spec.loader
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+pin_env = _load_iso762().pin_env
+
 HOME = BUILD / "home_165"
-env = dict(os.environ, HERMES_HOME=str(HOME), FAKE_LOG=str(BUILD / "fake_165.log"))
+env = pin_env(dict(os.environ, HERMES_HOME=str(HOME), FAKE_LOG=str(BUILD / "fake_165.log")),
+              HOME / "workflows", home=HOME)
 FAKE = str(BUILD / "fake")
 
 fails = 0

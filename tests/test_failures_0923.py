@@ -30,6 +30,7 @@ HOME = HERE / "home9"
 RUNS = HOME / "workflows"
 FAKE = str(HERE / "fake")
 os.environ["HERMES_HOME"] = str(HOME)
+os.environ["WF_RUNS_ROOT"] = str(Path(os.environ["HERMES_HOME"]) / "workflows")  # est-2ek.1.762 pin: HERMES_HOME alone is not a sandbox
 sys.path.insert(0, str(BUILD))
 import wfcommon  # noqa: E402
 
@@ -49,7 +50,7 @@ def mk(run_id, nodes, **meta):
     return r
 
 def wf(run_id, extra_env=None, timeout=180):
-    env = dict(os.environ, HERMES_HOME=str(HOME), FAKE_LOG=str(HOME / "fake.log"),
+    env = dict(os.environ, HERMES_HOME=str(HOME), WF_RUNS_ROOT=str(RUNS), FAKE_LOG=str(HOME / "fake.log"),
                **(extra_env or {}))
     return subprocess.run([sys.executable, str(BUILD / "wf.py"), "run", run_id],
                           env=env, capture_output=True, text=True, timeout=timeout).stdout.strip()
@@ -70,7 +71,7 @@ HOME.mkdir(parents=True); RUNS.mkdir()
 r = mk("q1-live", [{"id": "live", "type": "agent", "goal": "LIVE q1-live",
                     "model": "sol", "toolsets": "web"}])
 argv_log = HOME / "argv_q1.log"; pid_log = HOME / "pid_q1.log"
-env = dict(os.environ, HERMES_HOME=str(HOME), FAKE_LOG=str(HOME / "fake.log"),
+env = dict(os.environ, HERMES_HOME=str(HOME), WF_RUNS_ROOT=str(RUNS), FAKE_LOG=str(HOME / "fake.log"),
            FAKE_MODE="early", FAKE_EARLY_SLEEP="4",
            FAKE_ARGV_LOG=str(argv_log), FAKE_PID_LOG=str(pid_log))
 proc = subprocess.Popen([sys.executable, str(BUILD / "wf.py"), "run", "q1-live"],
@@ -145,7 +146,7 @@ check("class spawn: Popen OSError", out.startswith("WORKFLOW_FAILED") and rec["e
 
 # cancelled: stop mid-flight (runner SIGKILLs the group; negative rc + stop set)
 r = mk("q1-cancel", [{"id": "a", "type": "agent", "goal": "SLEEP 30 q1-cancel"}], concurrency=1)
-env = dict(os.environ, HERMES_HOME=str(HOME), FAKE_LOG=str(HOME / "fake.log"))
+env = dict(os.environ, HERMES_HOME=str(HOME), WF_RUNS_ROOT=str(RUNS), FAKE_LOG=str(HOME / "fake.log"))
 proc = subprocess.Popen([sys.executable, str(BUILD / "wf.py"), "run", "q1-cancel"],
                         env=env, stdout=subprocess.PIPE, text=True)
 while not (r / "nodes" / "a.json").exists():
@@ -304,7 +305,7 @@ check("budget-exhausted finals are transport_exhausted with attempts_log",
 r = mk("q1-stopretry", [{"id": "a", "type": "agent", "goal": "SLEEP 1 q1-stopretry"}],
        concurrency=1, retry_backoff=[20.0, 20.0])
 (HOME / "fake.log").write_text("")
-env = dict(os.environ, HERMES_HOME=str(HOME), FAKE_LOG=str(HOME / "fake.log"),
+env = dict(os.environ, HERMES_HOME=str(HOME), WF_RUNS_ROOT=str(RUNS), FAKE_LOG=str(HOME / "fake.log"),
            FAKE_MODE="unknown", FAKE_API_CALLS="0")
 proc = subprocess.Popen([sys.executable, str(BUILD / "wf.py"), "run", "q1-stopretry"],
                         env=env, stdout=subprocess.PIPE, text=True)
@@ -365,7 +366,7 @@ check("runner_exit crashed: exception one-liner recorded, exception re-raised",
 
 # SIGKILL path: dead pid + NO exit record ⇒ Lane B's reader says so
 r = mk("exit-kill", [{"id": "a", "type": "agent", "goal": "SLEEP 60 exit-kill"}])
-env = dict(os.environ, HERMES_HOME=str(HOME), FAKE_LOG=str(HOME / "fake.log"))
+env = dict(os.environ, HERMES_HOME=str(HOME), WF_RUNS_ROOT=str(RUNS), FAKE_LOG=str(HOME / "fake.log"))
 proc = subprocess.Popen([sys.executable, str(BUILD / "wf.py"), "run", "exit-kill"],
                         env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 while not (r / "nodes" / "a.json").exists():

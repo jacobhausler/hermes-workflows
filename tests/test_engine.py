@@ -6,7 +6,7 @@ from pathlib import Path
 BUILD = Path(os.environ.get("WF_TEST_BUILD") or Path(__file__).parent)
 HOME = BUILD / "home"
 RUNS = HOME / "workflows"
-env = dict(os.environ, HERMES_HOME=str(HOME), FAKE_LOG=str(BUILD / "fake.log"))
+env = dict(os.environ, HERMES_HOME=str(HOME), WF_RUNS_ROOT=str(RUNS), FAKE_LOG=str(BUILD / "fake.log"))
 FAKE = str(BUILD / "fake")
 ok = True
 

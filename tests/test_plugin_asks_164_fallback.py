@@ -20,6 +20,7 @@ Engine-driven with the fake hermes (FAKE_MODE=fallback_ladder): a child whose -m
 is not $FAKE_OK_MODEL dies with the transport marker and 0 api calls (the Q4
 replay-safe shape); the ok model answers with a fenced json block, exit 0.
 """
+import importlib.util
 import json
 import os
 import shutil
@@ -30,8 +31,20 @@ from pathlib import Path
 BUILD = Path(os.environ.get("WF_TEST_BUILD") or Path(__file__).parent)
 ROOT = BUILD.parent
 sys.path.insert(0, str(ROOT))
+# est-2ek.1.762 (zap CHANGES 6030355791): the shared launch-env pin helper is
+# exec-loaded by file path — a top-level import of a tests/fixtures module is
+# NOT in the shipped import closure (test_packaging #105 probe resolves only
+# root/tests/dashboard) and REDs the unpacked-package gate.
+_spec_iso762 = importlib.util.spec_from_file_location(
+    "wf_spawn_isolation_762", Path(__file__).parent / "fixtures" / "wf_spawn_isolation_762.py")
+assert _spec_iso762 and _spec_iso762.loader
+_iso762 = importlib.util.module_from_spec(_spec_iso762)
+_spec_iso762.loader.exec_module(_iso762)
+pin_env = _iso762.pin_env
 HOME = BUILD / "home_164"
-env = dict(os.environ, HERMES_HOME=str(HOME), FAKE_LOG=str(BUILD / "fake_164.log"))
+env = pin_env(dict(os.environ, HERMES_HOME=str(HOME),
+                   FAKE_LOG=str(BUILD / "fake_164.log")),
+              HOME / "workflows", home=HOME)
 FAKE = str(BUILD / "fake")
 
 fails = 0

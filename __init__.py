@@ -3482,27 +3482,28 @@ def act_list(_args):
         roots.append(legacy)   # pre-fix runs under the launch root stay listed
     runs, seen = [], set()
     dispatched_by_set = 0
-    for root in roots:
-        if not root.exists():
-            continue
-        for r in _common.iter_run_dirs(root, reverse=True):
-            st = run_state(r)
-            if st and st["run_id"] not in seen:
-                seen.add(st["run_id"])
-                row = {"run_id": st["run_id"], "name": st["name"], "status": st["status"],
-                       "gate": (st["held_gate"] or {}).get("id"),
-                       "nodes_done": st["done"], "nodes_skipped": st["skipped"], "nodes_total": st["total"],
-                       "runner_live": st.get("runner_live", False)}  # A2 one-read law
-                meta = jload(r / "run.json", {}) or {}
-                # #57 census fold (QM digest, #52 pinned vocab — no renames): one field read
-                # on the run.json this loop ALREADY loads (zero extra scans). Absent key or
-                # null = pre-identity run: counts toward total only.
-                if meta.get("dispatched_by"):
-                    dispatched_by_set += 1
-                for key in ("lane_key", "team"):
-                    if key in meta:
-                        row[key] = meta[key]
-                runs.append(row)
+    # est-2ek.1.762 census hygiene: enumerate through wfcommon.iter_run_dirs —
+    # unique by RUN-DIR NAME across every scanned root (symlinked/profile
+    # roots multiply hits), never raw per-root iterdir.
+    scanned = _common.iter_run_dirs(roots, reverse=True)
+    for r in scanned:
+        st = run_state(r)
+        if st and st["run_id"] not in seen:
+            seen.add(st["run_id"])
+            row = {"run_id": st["run_id"], "name": st["name"], "status": st["status"],
+                   "gate": (st["held_gate"] or {}).get("id"),
+                   "nodes_done": st["done"], "nodes_skipped": st["skipped"], "nodes_total": st["total"],
+                   "runner_live": st.get("runner_live", False)}  # A2 one-read law
+            meta = jload(r / "run.json", {}) or {}
+            # #57 census fold (QM digest, #52 pinned vocab — no renames): one field read
+            # on the run.json this loop ALREADY loads (zero extra scans). Absent key or
+            # null = pre-identity run: counts toward total only.
+            if meta.get("dispatched_by"):
+                dispatched_by_set += 1
+            for key in ("lane_key", "team"):
+                if key in meta:
+                    row[key] = meta[key]
+            runs.append(row)
     out = {"runs": runs[:50], **_common.run_summary(runs)}
     # est-2ek.1.280: an EMPTY scan is the silent case the multi-profile papercut
     # burned 10h on (profile-scoped tool writes profiles/<p>/workflows while the

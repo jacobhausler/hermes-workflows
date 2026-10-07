@@ -40,6 +40,7 @@ BUILD = HERE.parent
 HOME = HERE / "home-159c"
 RUNS = HOME / "workflows"
 os.environ["HERMES_HOME"] = str(HOME)
+os.environ["WF_RUNS_ROOT"] = str(Path(os.environ["HERMES_HOME"]) / "workflows")  # est-2ek.1.762 pin: HERMES_HOME alone is not a sandbox
 os.environ.pop("WF_RUNS_ROOT", None)
 sys.path.insert(0, str(BUILD))
 import wf  # noqa: E402
@@ -64,7 +65,7 @@ def mk(run_id, nodes, **meta):
     return r
 
 def runx(run_id, extra_env=None, timeout=120):
-    env = dict(os.environ, HERMES_HOME=str(HOME), FAKE_LOG=str(HOME / "fake.log"))
+    env = dict(os.environ, HERMES_HOME=str(HOME), WF_RUNS_ROOT=str(RUNS), FAKE_LOG=str(HOME / "fake.log"))
     env.update(extra_env or {})
     env.pop("WF_RUNS_ROOT", None)
     return subprocess.run([sys.executable, str(BUILD / "wf.py"), "run", run_id],

@@ -420,24 +420,64 @@ def launch_runs_root():
 
 def find_run(rid):
     """Locate a run dir by id: resolved runs_root() first; legacy launch root only
-    for an EXISTING run (pre-fix ids stay resumable, new ids never land there)."""
+    for an EXISTING run (pre-fix ids stay resumable, new ids never land there).
+    est-t1kk (zap cert 6033425646 sibling): the est-7ps8 realpath dedupe lets
+    iter_run_dirs LIST a same-named valid twin under the legacy root while the
+    resolved-root copy is a torn partial (no readable graph — run_state None);
+    the old exists-only check then resolved the torn dir and the listed id
+    opened as 'unknown run'. Selection now mirrors the listing: among the
+    same-id dirs across the roots, the first that YIELDS A VIEW wins (resolved
+    first, so an intact resolved dir is untouched — the legacy probe below is
+    exactly that same rule in the legacy-only shape). Unknown ids still answer
+    the resolved path (the create/resume shape callers rely on)."""
     root = runs_root()
     legacy = launch_runs_root()
+    for cand in iter_run_dirs([root, legacy] if legacy != root else [root]):
+        if cand.name == rid and run_state(cand):
+            return cand
     if legacy != root and (legacy / rid).is_dir() and not (root / rid).exists():
         return legacy / rid
     return root / rid
 
 
-def iter_run_dirs(root, reverse=False):
-    """Every run dir under a runs root, sorted by name. Skips non-dirs and
+def iter_run_dirs(roots, reverse=False):
+    """Every run dir under one or more runs roots, unique by REALPATH.
+
+    Accepts a single root (str/Path) or a sequence of roots. Skips non-dirs and
     dot-dirs (<runs_root>/.seats is the global seat-ticket dir, est-g2xx — never
-    a run). The ONE enumeration every list/read-model/scan routes through."""
-    root = Path(root)
-    try:
-        entries = sorted(root.iterdir(), reverse=reverse)
-    except OSError:
-        return []
-    return [p for p in entries if not p.name.startswith(".") and p.is_dir()]
+    a run). Census hygiene (est-2ek.1.762): symlinked/profile-scoped roots
+    multiply hits — the same run appears under the resolved root, the legacy
+    launch root, and every profile home that mirrors it — so one run counts
+    once; first-seen wins, callers pass the resolved root first.
+    est-7ps8 (zap probe, PR#259 6030355791): the dedupe key is the RESOLVED
+    path, not the bare NAME — two physically-distinct dirs that merely share a
+    name (a torn partial under the resolved root + the valid run under the
+    legacy root) are BOTH enumerated; name-dedupe let the torn first-root stub
+    hide the valid twin from every read model. Same-physical-dir mirrors still
+    collapse because they resolve to one path. The ONE enumeration every
+    list/read-model/scan routes through, never raw `root.iterdir()`. Sorted by
+    name (newest-first when reverse=True) within each root, roots taken in
+    order."""
+    if isinstance(roots, (str, Path)):
+        roots = [roots]
+    seen, out = set(), []
+    for root in roots:
+        try:
+            entries = sorted(Path(root).iterdir(), reverse=reverse)
+        except OSError:
+            continue
+        for r in entries:
+            try:
+                if r.name.startswith(".") or not r.is_dir():
+                    continue
+                key = r.resolve()
+            except OSError:
+                continue
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(r)
+    return out
 
 
 def runs_root():
@@ -3464,12 +3504,29 @@ def _steer_state(r, nid):
         return None
     return {"queued": addressed, "baked": baked, "consumed": delivered}
 
-def run_summary(runs):
-    """Counts cover the complete census, even when a caller returns a recent page."""
+def run_executed(r):
+    """Was this run dir actually EXECUTED? A run that ever spawned work has
+    logs under <run>/logs; a zero-log dir is a fixture, not an executed run
+    (the 774-dir production leak was entirely zero-log fixtures — est-2ek.1.762
+    census). Read-only, never raises."""
+    try:
+        logs = r / "logs"
+        return logs.is_dir() and any(logs.iterdir())
+    except OSError:
+        return False
+
+
+def run_summary(runs, executed=None):
+    """Counts cover the complete census, even when a caller returns a recent page.
+    `executed` (est-2ek.1.762): when a listing tool supplies the logs-present
+    count, it rides inside `counts` as `executed` — total-minus-executed is the
+    fixture/stub population. Absent stays absent (v1.0.15 key set untouched)."""
     counts = {"running": 0}
     for run in runs:
         status = run["status"]
         counts[status] = counts.get(status, 0) + 1
+    if executed is not None:
+        counts["executed"] = executed
     return {"total": len(runs), "counts": counts}
 
 # ---------- amend preview (the replay-skip law the runner applies, computed ahead) ----------

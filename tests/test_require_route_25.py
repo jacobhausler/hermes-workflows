@@ -26,6 +26,7 @@ atexit.register(tmp_dir.cleanup)
 # override outranks the env in lane processes; WF_RUNS_ROOT is checked first and
 # pins runs/library wherever the door resolves. Without it, saves pollute prod.
 os.environ["HERMES_HOME"] = tmp_dir.name
+os.environ["WF_RUNS_ROOT"] = str(Path(os.environ["HERMES_HOME"]) / "workflows")  # est-2ek.1.762 pin: HERMES_HOME alone is not a sandbox
 os.environ["WF_RUNS_ROOT"] = str(Path(tmp_dir.name) / "workflows")
 os.environ["HERMES_WF_HERMES_BIN"] = "offline"
 

@@ -196,22 +196,36 @@ def _list_runs():
     # F1 #14: merge the legacy launch root the way the door's act_list does — a
     # pre-fix run opens by URL via _safe_run's find_run fallback and must also
     # appear in the list. Resolved root wins on id collision.
+    # est-2ek.1.762 census hygiene: enumerate through wfcommon.iter_run_dirs
+    # (unique by REALPATH across every scanned root — a same-named torn stub
+    # in one root no longer hides the valid run in another; est-7ps8), and
+    # report how many rows EXECUTED (logs present).
+    # executed counts ONLY rows that land in `runs` (a valid, de-duplicated
+    # row) — dirs _view rejects never become rows, so they must not inflate
+    # the counter (zap non-blocking note 2). This listing ALWAYS measures:
+    # the actual count — including a measured zero — is supplied to
+    # run_summary, which renders an omitted count as the absent key
+    # (wfcommon.run_summary's supplied-versus-unmeasured contract).
     common = _workflow_common()
     roots = [_root()]
     legacy = common.launch_runs_root()
     if legacy != roots[0]:
         roots.append(legacy)
     runs, seen = [], set()
-    for root in roots:
-        if not root.exists():
-            continue
-        for r in common.iter_run_dirs(root, reverse=True):
-            v = _view(r)
-            if v and v["id"] not in seen:
-                seen.add(v["id"])
-                runs.append(v)
+    executed = 0
+    for r in common.iter_run_dirs(roots, reverse=True):
+        v = _view(r)
+        if v and v["id"] not in seen:
+            seen.add(v["id"])
+            # est-7ps8 (note 2): count EXECUTED only for rows that land in
+            # `runs` — a torn dir that never reaches the list must not
+            # inflate the counter (executed > total was the probe).
+            if common.run_executed(r):
+                executed += 1
+            runs.append(v)
+    summary = common.run_summary(runs, executed=executed)
     return {**({"roots": [str(x) for x in roots]} if not runs else {}),
-            "runs": runs[:100], **_workflow_common().run_summary(runs)}
+            "runs": runs[:100], **summary}
 
 
 if router is not None:

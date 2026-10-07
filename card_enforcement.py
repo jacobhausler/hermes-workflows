@@ -225,33 +225,30 @@ def _outstanding(session_id, now):
     except Exception:
         pass
     hits = []
-    for root in _roots():
+    # est-2ek.1.762 census hygiene: one pass through wfcommon.iter_run_dirs —
+    # unique by run-dir NAME across every root this session could have hit
+    # (symlinked profile roots multiply hits; the same launch must not be
+    # proposed three times).
+    for r in _COMMON.iter_run_dirs(_roots()):
         try:
-            if not root.is_dir():
+            meta = _COMMON.jload(r / "run.json")
+            if not isinstance(meta, dict):
                 continue
-            entries = _COMMON.iter_run_dirs(root)
-        except OSError:
-            continue
-        for r in entries:
-            try:
-                meta = _COMMON.jload(r / "run.json")
-                if not isinstance(meta, dict):
-                    continue
-                owner = meta.get("owner") or {}
-                if not isinstance(owner, dict) or owner.get("session_id") != session_id:
-                    continue
-                age = _age_minutes(meta.get("started") or meta.get("started_at"), now)
-                if age is None or age < 0 or age > window:
-                    continue
-                if any(e.get("event") == "card.echoed" for e in _events(r)):
-                    continue
-                if (session_id, r.name) in _RETIRED or (session_id, r.name) in _PENDING:
-                    continue          # pasted (retired) or a live proposal covers it
-                if _terminal_stale(r, now):
-                    continue
-                hits.append((age, r.name, r))
-            except Exception:
-                continue        # a torn run dir is invisible, never an exception upward
+            owner = meta.get("owner") or {}
+            if not isinstance(owner, dict) or owner.get("session_id") != session_id:
+                continue
+            age = _age_minutes(meta.get("started") or meta.get("started_at"), now)
+            if age is None or age < 0 or age > window:
+                continue
+            if any(e.get("event") == "card.echoed" for e in _events(r)):
+                continue
+            if (session_id, r.name) in _RETIRED or (session_id, r.name) in _PENDING:
+                continue          # pasted (retired) or a live proposal covers it
+            if _terminal_stale(r, now):
+                continue
+            hits.append((age, r.name, r))
+        except Exception:
+            continue        # a torn run dir is invisible, never an exception upward
     hits.sort(key=lambda t: (t[0], t[1]))   # ascending age = newest launch first
     return [(rid, r) for _, rid, r in hits]
 

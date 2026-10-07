@@ -68,6 +68,7 @@ class EngineNextCut(unittest.TestCase):
         original = os.environ.get("HERMES_HOME")
         original_runs = os.environ.get("WF_RUNS_ROOT")
         os.environ["HERMES_HOME"] = str(self.home)
+        os.environ["WF_RUNS_ROOT"] = str(Path(os.environ["HERMES_HOME"]) / "workflows")  # est-2ek.1.762 pin: HERMES_HOME alone is not a sandbox
         os.environ["WF_RUNS_ROOT"] = str(self.home / "workflows")  # #71 shelf pin
         try:
             res = door.act_run({"graph": {"name": "reject", "nodes": [
@@ -77,6 +78,7 @@ class EngineNextCut(unittest.TestCase):
                 os.environ.pop("HERMES_HOME", None)
             else:
                 os.environ["HERMES_HOME"] = original
+                os.environ["WF_RUNS_ROOT"] = str(Path(os.environ["HERMES_HOME"]) / "workflows")  # est-2ek.1.762 pin: HERMES_HOME alone is not a sandbox
             if original_runs is None:
                 os.environ.pop("WF_RUNS_ROOT", None)
             else:

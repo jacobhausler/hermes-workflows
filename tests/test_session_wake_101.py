@@ -436,6 +436,7 @@ try:
         _saved_home = os.environ.get("HERMES_HOME")
         _saved_sink = os.environ.pop("WF_WAKE_SINK_PORT", None)   # force the config path
         os.environ["HERMES_HOME"] = str(tmp)
+        os.environ["WF_RUNS_ROOT"] = str(Path(os.environ["HERMES_HOME"]) / "workflows")  # est-2ek.1.762 pin: HERMES_HOME alone is not a sandbox
         try:
             ep = _wf2._wake_endpoint()
         finally:
@@ -443,6 +444,7 @@ try:
                 os.environ["WF_WAKE_SINK_PORT"] = _saved_sink
             if _saved_home is not None:
                 os.environ["HERMES_HOME"] = _saved_home
+                os.environ["WF_RUNS_ROOT"] = str(Path(os.environ["HERMES_HOME"]) / "workflows")  # est-2ek.1.762 pin: HERMES_HOME alone is not a sandbox
         check("endpoint expands ${VAR} refs and brackets IPv6 (core parity)",
               bool(ep) and ep[0] == "http://[::1]:8642/v1/chat/completions"
               and ep[1] == "expanded-key", str(ep))

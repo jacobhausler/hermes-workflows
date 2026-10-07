@@ -233,6 +233,10 @@ try:
               content[:400])
         check("wake points at the gate view (runner protocol text)",
               "needs your answer" in msg["content"], msg["content"])
+        check("wake forbids the agent from answering the gate itself (relay-only, "
+              "upstream 133387 ask 2)",
+              "clarify" in msg["content"] and "NEVER choose an option" in msg["content"],
+              msg["content"])
     r = RUNS / rid if rid else None
     if r:
         ev = events(r, "gate.held")

@@ -21,6 +21,7 @@ RUNS = HOME / "workflows"
 # override outranks the env in lane processes; WF_RUNS_ROOT is checked first and
 # pins runs/library wherever the door resolves. Without it, saves pollute prod.
 os.environ["HERMES_HOME"] = str(HOME)
+os.environ["WF_RUNS_ROOT"] = str(Path(os.environ["HERMES_HOME"]) / "workflows")  # est-2ek.1.762 pin: HERMES_HOME alone is not a sandbox
 os.environ["WF_RUNS_ROOT"] = str(HOME / "workflows")
 sys.path.insert(0, str(BUILD.parent))
 import wfcommon as W

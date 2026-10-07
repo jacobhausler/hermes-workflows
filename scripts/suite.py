@@ -131,12 +131,28 @@ os.replace(tmp, ledger)
 py = sorted((root / 'tests').glob('test_*.py'))
 js = sorted((root / 'tests').glob('test_*.mjs'))
 cases = [[sys.executable, str(p)] for p in py] + [['node', '--experimental-strip-types', str(p)] for p in js]
+# est-2ek.1.762: the serial run exports a TEMPORARY WF_RUNS_ROOT so a test that
+# forgets its own pin can never land fixture runs in the PRODUCTION runs root
+# (774/1227 zero-log fixture dirs were leaked exactly this way; census spool
+# key 9cfe87a0199e5e1b). An inherited hostile root is replaced; tests that
+# self-pin (the law) overwrite it in their own child envs and are unaffected.
+import atexit as _atexit
+import shutil as _shutil
+import tempfile as _tempfile
+_suite_runs_root = Path(_tempfile.mkdtemp(prefix='wf-suite-runs-'))
+# est-7ps8 (note 3): the temp root is the suite's own scratch — best-effort
+# removal at process end via atexit, which runs on normal exit, SystemExit,
+# and handled exceptions; it is NOT a guarantee under SIGKILL or a native
+# crash (no handler runs there). mkdir'd lazily by an unpinned test's child,
+# so cleanup is best-effort and never raises.
+_atexit.register(_shutil.rmtree, _suite_runs_root, ignore_errors=True)
 for argv in cases:
     name = Path(argv[-1]).name
     log = out / (name + '.log')
     try:
         with log.open('w') as fh:
-            result = subprocess.run(argv, cwd=root, env={**os.environ, 'HERMES_HOME': str(root / 'tests' / '.suite-home')},
+            result = subprocess.run(argv, cwd=root, env={**os.environ, 'HERMES_HOME': str(root / 'tests' / '.suite-home'),
+                                                         'WF_RUNS_ROOT': str(_suite_runs_root)},
                                     stdout=fh, stderr=subprocess.STDOUT, timeout=90)
         rc = result.returncode
     except subprocess.TimeoutExpired:

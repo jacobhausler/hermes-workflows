@@ -17,7 +17,7 @@ from pathlib import Path
 BUILD = Path(os.environ.get("WF_TEST_BUILD") or Path(__file__).parent)
 HOME = BUILD / "home-c3"
 RUNS = HOME / "workflows"
-env = dict(os.environ, HERMES_HOME=str(HOME), FAKE_LOG=str(BUILD / "fake-c3.log"),
+env = dict(os.environ, HERMES_HOME=str(HOME), WF_RUNS_ROOT=str(RUNS), FAKE_LOG=str(BUILD / "fake-c3.log"),
            FAKE_PROMPT_LOG=str(BUILD / "prompt-c3.log"))
 FAKE = str(BUILD / "fake-c3")
 sys.path.insert(0, str(BUILD.parent))
