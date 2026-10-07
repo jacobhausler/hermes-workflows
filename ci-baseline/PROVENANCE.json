@@ -19,6 +19,6 @@
     }
   ],
   "contract": "Green CI ledgers only (every exit == 0); rows not captured by CI are listed in rows_added_outside_ci with how they were measured. Refresh from the tip of main after each main move; see README.md.",
-  "bead": "est-9yl2",
+  "tracking_item": "est-9yl2",
   "source_issue": 75
 }
