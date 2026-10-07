@@ -4102,6 +4102,41 @@ def current_attempt(cm, spawns):
     last, _, desc = max(recent) if recent else (None, None, None)
     return {"live": len(live), "last_activity": last, "last_desc": desc}
 
+# R8 (graphify @ 2d97807): the complete fold call set is __init__.py act_status
+# (node lines + run total; act_status itself reached only from act_wait and
+# _wait_foreign — no fold there, they delegate here) and dashboard/plugin_api.py
+# _view's three _fold_metrics sites (node line, fanout item, rollup) — no third
+# fold; scripts/ grep for api_calls|child_metrics|_fold is empty.
+def fold_child_metrics(rows):
+    """#114 (WF-04): THE ONE numeric fold + known/unknown policy for child metric
+    rows (the dicts child_metrics/run_child_metrics return). Counters sum exactly
+    as the projections always have; api_calls is OMITTED from the result whenever
+    ANY contributing row says api_calls_known: false — an unknown count is absent
+    (the existing omission convention, R2: absent reads unknown, never invented),
+    never a zero and never a partial sum advertised as exact. Pure over
+    already-read rows: no IO, no new field, persisted shapes unchanged (R10).
+    Both projection adapters (door act_status, dashboard _view) route EVERY
+    aggregation level — node line, fanout item, run total/rollup — through here
+    so the surfaces can never diverge on which levels hide an unknown.
+    Returns None for no rows (the callers' existing "no metrics" sentinel)."""
+    rows = list(rows)
+    if not rows:
+        return None
+    f = {"tokens_in": 0, "tokens_out": 0, "cache_read": 0, "reasoning": 0, "api_calls": 0,
+         "tool_calls": 0, "cost": 0.0, "attempts": 0, "children": len(rows), "live": 0,
+         "last_activity": None, "last_desc": None, "models": []}
+    known = True
+    for m in rows:
+        for k in ("tokens_in", "tokens_out", "cache_read", "reasoning", "api_calls", "tool_calls", "cost", "attempts"):
+            f[k] += m.get(k) or 0
+        if not m.get("api_calls_known", True):
+            known = False
+        if m.get("model") and m["model"] not in f["models"]:
+            f["models"].append(m["model"])
+    if not known:
+        f.pop("api_calls")
+    return f
+
 
 # ---------- est-2ek.1.641 route receipts (moved out of wf.py, outbound review
 # NousResearch/hermes-agent#133387 ask #1, option A): the DOOR writes the
