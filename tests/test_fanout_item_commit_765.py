@@ -316,6 +316,41 @@ def test_forged_complete_aggregate_cannot_commit_done():
     ok2, problems2 = wf.item_records_certified(r, node, byid, fake_results)
     check("est765-forged: honest commits certify clean", ok2 is True, str(problems2))
 
+def _status_mismatch_control(run_id, error_class):
+    """Real-seam control (zap r4, PR #258): the canonical record is committed
+    failed+<error_class> via the shipped producer, while the aggregate row
+    claims done with the SAME output bytes. item_records_certified must refuse:
+    a committed failure never certifies a done claim, matched outputs or not."""
+    graph = fan_graph([{"n": i} for i in range(2)])
+    CURRENT_GRAPH["graph"] = graph
+    r = mk(run_id, graph)
+    byid = {n["id"]: n for n in graph["nodes"]}
+    node = graph["nodes"][0]
+    out = {"result": "ok"}
+    wf.commit_item_record(r, node, byid, 0, {"status": "done", "output": out})
+    wf.commit_item_record(r, node, byid, 1, {"status": "failed", "output": out,
+                                             "error": f"child {error_class}",
+                                             "error_class": error_class})
+    rec1 = json.loads((r / "nodes" / "fan.1.json").read_text())
+    check(f"{run_id}: setup — committed failed/{error_class} record carries the "
+          "matching output",
+          rec1.get("status") == "failed" and rec1.get("error_class") == error_class
+          and rec1.get("output") == out, json.dumps(rec1)[:200])
+    results = [{"status": "done", "output": out}, {"status": "done", "output": out}]
+    ok, problems = wf.item_records_certified(r, node, byid, results)
+    check(f"{run_id}: aggregate done is REFUSED over a failed/{error_class} record "
+          "whose output matches the claim",
+          ok is False and any(p.get("index") == 1 for p in problems),
+          f"ok={ok} problems={problems}")
+
+def test_failed_crashed_record_cannot_certify_done_row():
+    """(a) failed+crashed per-item record must block a done aggregate row."""
+    _status_mismatch_control("est765-st-crashed", "crashed")
+
+def test_failed_cancelled_record_cannot_certify_done_row():
+    """(b) failed+cancelled per-item record must block a done aggregate row."""
+    _status_mismatch_control("est765-st-cancelled", "cancelled")
+
 def test_quorum_straggler_cancel_keeps_invariant():
     """quorum=2 of 3 with a QSLEEP straggler cancelled at quorum: the aggregate
     commits done on the two survivors; the cancelled item's record must still be
@@ -341,6 +376,8 @@ def main():
                test_crash_between_harvest_and_commit_never_leaves_done_with_running_item,
                test_single_writer_ordering_commit_precedes_item_finished,
                test_forged_complete_aggregate_cannot_commit_done,
+               test_failed_crashed_record_cannot_certify_done_row,
+               test_failed_cancelled_record_cannot_certify_done_row,
                test_quorum_straggler_cancel_keeps_invariant):
         try:
             fn()
