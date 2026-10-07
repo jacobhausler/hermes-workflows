@@ -197,14 +197,15 @@ def _list_runs():
     # pre-fix run opens by URL via _safe_run's find_run fallback and must also
     # appear in the list. Resolved root wins on id collision.
     # est-2ek.1.762 census hygiene: enumerate through wfcommon.iter_run_dirs
-    # (unique by run-dir NAME across every scanned root — symlinked profile
-    # roots multiply hits), and report how many rows EXECUTED (logs present).
+    # (unique by REALPATH across every scanned root — a same-named torn stub
+    # in one root no longer hides the valid run in another; est-7ps8), and
+    # report how many rows EXECUTED (logs present).
     # executed counts ONLY rows that land in `runs` (a valid, de-duplicated
     # row) — dirs _view rejects never become rows, so they must not inflate
-    # the counter (zap non-blocking note 2). A zero count is indistinguishable
-    # from an unmeasured listing at the consumer (test_live_truth compares the
-    # dashboard counts to act_list's, whose census never measures executed),
-    # so the key rides only when >0 — honesty over decoration.
+    # the counter (zap non-blocking note 2). This listing ALWAYS measures:
+    # the actual count — including a measured zero — is supplied to
+    # run_summary, which renders an omitted count as the absent key
+    # (wfcommon.run_summary's supplied-versus-unmeasured contract).
     common = _workflow_common()
     roots = [_root()]
     legacy = common.launch_runs_root()
@@ -222,7 +223,7 @@ def _list_runs():
             if common.run_executed(r):
                 executed += 1
             runs.append(v)
-    summary = common.run_summary(runs, executed=executed or None)
+    summary = common.run_summary(runs, executed=executed)
     return {**({"roots": [str(x) for x in roots]} if not runs else {}),
             "runs": runs[:100], **summary}
 

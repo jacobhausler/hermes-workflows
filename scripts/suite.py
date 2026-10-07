@@ -140,9 +140,11 @@ import atexit as _atexit
 import shutil as _shutil
 import tempfile as _tempfile
 _suite_runs_root = Path(_tempfile.mkdtemp(prefix='wf-suite-runs-'))
-# est-7ps8 (note 3): the temp root is the suite's own scratch — remove it when
-# the process ends (normal exit, SystemExit, or crash). mkdir'd lazily by an
-# unpinned test's child, so cleanup is best-effort and never raises.
+# est-7ps8 (note 3): the temp root is the suite's own scratch — best-effort
+# removal at process end via atexit, which runs on normal exit, SystemExit,
+# and handled exceptions; it is NOT a guarantee under SIGKILL or a native
+# crash (no handler runs there). mkdir'd lazily by an unpinned test's child,
+# so cleanup is best-effort and never raises.
 _atexit.register(_shutil.rmtree, _suite_runs_root, ignore_errors=True)
 for argv in cases:
     name = Path(argv[-1]).name
