@@ -158,7 +158,14 @@ class LiveTruth(unittest.TestCase):
         self.assertEqual(tool.get('total'), 106)
         self.assertEqual(len(tool['runs']), 50)
         view = api._list_runs()
-        self.assertEqual(view['counts'], tool['counts'])
+        # est-7ps8 repair (zap CHANGES 6033425646): the dashboard MEASURES
+        # executed and now always reports it, including a measured zero;
+        # act_list's census never measures it. Compare the COMMON status-count
+        # portion — whole-dict equality here once forced the dashboard to
+        # DROP a real measurement to satisfy the door's key set.
+        self.assertEqual({k: v for k, v in view['counts'].items() if k != 'executed'},
+                         {k: v for k, v in tool['counts'].items() if k != 'executed'})
+        self.assertEqual(view['counts'].get('executed'), 0)  # measured zero rides
         self.assertEqual(view['total'], tool['total'])
         self.assertEqual(len(view['runs']), 100)
 
