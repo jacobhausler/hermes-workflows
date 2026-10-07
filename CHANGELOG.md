@@ -2,14 +2,15 @@
 
 ## 1.3.1 — 2026-10-07
 
-Patch line, 45 commits since v1.3.0 (merge order #214 → #215 → #218 → #217 → #219
+Patch line, 46 commits since v1.3.0 (merge order #214 → #215 → #218 → #217 → #219
 → #220 → #223 → #221 → #216 → #213 → #226 → #225 → #228 → #229 → #79 → #166 → #177
 → #180 → #232 → #236 → #240 → #242 → #247 → #165 → #234 → #244 → #246 → #250 → #249
 → #237 → #254 → #255 → #251 → #260 → #243 → #258 → #252 → #261 → #262 → #263 → #259
-→ #264 → #267 → #265 → #266): the respawn/SIGTERM-wave hardening batch (runner spawn detach,
+→ #264 → #267 → #265 → #266 → #269): the respawn/SIGTERM-wave hardening batch (runner spawn detach,
 liveness past buffered child, crashed-no-exit watchdog), the DIAGRAM LAW wave
 (diagrams derive from shipped graph bytes), the hermetic-suite contract sweep
-(isolated WF_RUNS_ROOT everywhere), asks 164–166, and the partial-rescue law.
+(isolated WF_RUNS_ROOT everywhere), asks 164–166, the partial-rescue law, and the
+relay-only gate.held wake (upstream 133387 ask 2).
 No new tool surface.
 
 Earlier merges since the tag, in brief:
@@ -58,6 +59,7 @@ Earlier merges since the tag, in brief:
 - d58e9b2 #267 — test(proctree): wait for parseable pid markers, not mere existence (est-gzmm)
 - db26151 #265 — fix(runs): find_run resolves the listed VALID twin, not the torn first-root dir (est-t1kk)
 - 9fc82fe #266 — docs(test): trim routing narration from measured-zero docstring, fix provenance (est-2ek.1.797)
+- f0e6935 #269 — fix(runner): gate.held wake is relay-only — agent relays the human gate, never answers it (upstream 133387 ask 2)
 
 Discipline / docs:
 - docs: #134 partial-rescue law (jam-g1, epic #40) — AGENTS.md 3d states the
