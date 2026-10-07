@@ -1,6 +1,59 @@
 # Changelog
 
-## Unreleased
+## 1.3.1 — 2026-10-07
+
+Patch line, 43 commits since v1.3.0 (merge order #214 → #215 → #218 → #217 → #219
+→ #220 → #223 → #221 → #216 → #213 → #226 → #225 → #228 → #229 → #79 → #166 → #177
+→ #180 → #232 → #236 → #240 → #242 → #247 → #165 → #234 → #244 → #246 → #250 → #249
+→ #237 → #254 → #255 → #251 → #260 → #243 → #258 → #252 → #261 → #262 → #263 → #259
+→ #264 → #267): the respawn/SIGTERM-wave hardening batch (runner spawn detach,
+liveness past buffered child, crashed-no-exit watchdog), the DIAGRAM LAW wave
+(diagrams derive from shipped graph bytes), the hermetic-suite contract sweep
+(isolated WF_RUNS_ROOT everywhere), asks 164–166, and the partial-rescue law.
+No new tool surface.
+
+Earlier merges since the tag, in brief:
+- 4e39f23 #214 — fix(runner,door): gw-restart-window reap reason + runner-owned spawn ledger (#8 half, WF bugq b2)
+- 98e209b #215 — docs(contributing): R5 PUBLIC-release-only carve-out (skills house 58ff35f)
+- 399d9ea #218 @atbrace — test(gates): fail closed on missing declared test deps — no silent graph-gate skips
+- 91f4f48 #217 — triage(runner-lifecycle): docs name the serve unit that must restart after enable (est-2ek.1.279)
+- b35f26e #219 — triage(docs-ux-misc): list surfaces name their scanned roots on empty (est-2ek.1.280)
+- 4712d4f #220 — triage(suite-contract): save warns on stale launch-literals in unbound library graphs (est-2ek.1.245 wave-2)
+- 39d50d8 #223 — feat(desktop): collapsible live-run tray above the chat window (#22, est-8ppm)
+- fabcedf #221 — fix(door,runner): artifact-admission guard enforces 1:1 ledger-to-source mapping (#85, est-mmx0)
+- 836bd1e #216 — fix(door): sibling-root scan for status/wait with resolved_version (#58, est-fwdx)
+- 4cbcad3 #213 — fix(door,runner): gate answer never consumed by an un-honored resume + provenance-keyed duplicate-consumer gate (#152, est-pzuz)
+- b161274 #225 — docs(events): event-driven wake pattern — push spine replaces cron polls
+- 141b555 #228 — test(dialect-33): courtesy node gate never holds the refuse verdict — tolerant across node minors (#227, est-exmo)
+- c648bfe #— — fix(door): status/wait fold child metrics through the routed channel (#79, est-6b65)
+- 0f17cf6 #166 — fix(runner,scrub): adopted-child malformed_turn class
+- d36760b #— — docs: close conformance gaps — SECURITY.md + issue templates (#177, est-rdjq)
+- d4e68b4 #— — docs: point at ratified joint-eng-protocol SSOT (1-line pointer) (#180, est-nztk)
+- 66857e8 #232 — DIAGRAM LAW v1: example diagrams derive from shipped graph bytes (HAUS half of owner split)
+- 8f6a92b #236 — DIAGRAM LAW PR-3: vendored archify + spelled-numeral ban (A3 closes) + QA receipts derive the gates column
+- fa9e900 #240 @atbrace — docs(diagrams): AUSTIN half — cards + derived candidates + receipted shots for 9 examples (PR-2 of owner split)
+- a1a1eec #242 — fix(diagrams): one shared walker — qa receipts can no longer pose as graphs
+- e68b3d5 #165 — fix(guards): actual-dispatch docs pin, inverse PR-tag audit, packaging pins
+- 045cf62 #234 — chore(receipts): drop stale peer-clean-run receipts
+- d41f004 #244 — fix: amend-preview def drift + b2b exit contract + bounded harvest scan
+- 63b37bc #246 — fix(est-6226): gateway SIGTERM wave — runner spawn detach pin, honest kill attribution
+- 8d42313 #250 @atbrace — test(wake): make wake_101 hermetic against inherited WF_RUNS_ROOT
+- 743afd2 #249 — chore(cleanup): zap-verified dead-code cut, complete (est-2ek.1.730)
+- 14bc40c #237 — fix(respawn): live-plugin resolution + crashed-no-exit watchdog respawn (est-ujtf, est-2ek.1.718, est-c481)
+- 3c0b401 #254 — docs: codify the partial-rescue law — done-set against the CURRENT graph is the only saved state (#134)
+- 6f1f0b9 #255 — fix(runner): heartbeat liveness past buffered child + global seat cap (est-g2xx)
+- 29eb0a6 #251 — fix(library): est-bvg0 — filtered query on empty/tagless shelf returns the promised tag_match_counts diagnosis
+- d3fd5f7 #260 — test(seat): scrub WF_* from child spawn env — test_seat_live hermetic (est-aywd)
+- d0a0017 #243 — fix(133387): machine-gate probes bind to the run that owns the gate; import hygiene (est-vuqr)
+- 8502536 #258 — fix(runner): fanout aggregate derives from committed per-item records with status-compatibility certification (est-2ek.1.765)
+- 66142b7 #252 — fix(library): est-yzoy — corrupt-prev retain protection + empty-result cause naming + erase-path pins (#146)
+- a4dbd51 #261 — feat(plugin-asks): asks 164-166 + toolsets slice — est-rqmn nightly landing
+- 0497444 #262 — fix(asks166): padded version handshake compare + amend-time enforcement (#261 follow-ups)
+- a690c04 #263 — test(integration_080): hermetic runs-root pin — passes cold, not just in serial order (est-hk0z)
+- b413983 #259 — test(suite): pin every spawned-runner test to an isolated WF_RUNS_ROOT (est-2ek.1.762)
+- f2df20a #264 — test(7ps8): realpath dedupe, executed landing-rows accounting, suite temp cleanup
+- d58e9b2 #267 — test(proctree): wait for parseable pid markers, not mere existence (est-gzmm)
+
 
 Discipline / docs:
 - docs: #134 partial-rescue law (jam-g1, epic #40) — AGENTS.md 3d states the

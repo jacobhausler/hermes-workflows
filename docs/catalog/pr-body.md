@@ -21,7 +21,7 @@ screenshots, `AGENTS.md` (agent front door: install / operate / contribute),
 
 | Rule | Evidence |
 |---|---|
-| 2 — exact pin | at release, `sha` will be the 40-char commit of tag `v1.3.0`; `image`/`screenshots` are raw URLs pinned to the same SHA |
+| 2 — exact pin | at release, `sha` will be the 40-char commit of tag `v1.3.1`; `image`/`screenshots` are raw URLs pinned to the same SHA |
 | 3 — no self-updater | No update checks and no remote fetches anywhere: zero `fetch(` in `desktop/plugin.js`, zero `urlopen` outside `tests/`; the plugin never loads code it did not ship |
 | 6 — capabilities match | `provides_tools: [workflow]`; no hooks; no middleware; `requires_env: []` — the runner's `HERMES_WF_STEER_*` vars are plugin-internal IPC set by the runner for its own children, never user-provided (`docs/manifest-decisions.md`) |
 | 7 — install scanner | `hermes plugins validate .` → `Validation passed.`, security scan `safe`, zero `caution` findings |
