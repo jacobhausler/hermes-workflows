@@ -18,7 +18,7 @@ Desktop:
   `::workflow` output. Tests: `tests/test_settings_route_z717.py`,
   `tests/test_owner_session_override_z717.py`,
   `tests/test_z717_zero_directive_capture.mjs`, gate pins in
-  `test_run_tray`/`test_session_tray` (RED-first; GATES.md).
+  `test_run_tray`/`test_session_tray`.
 
 - feat(desktop): session workflow tray above the composer (#230) — the
   running-only accumulator stacks beside the pill rail on the

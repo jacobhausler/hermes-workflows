@@ -16,7 +16,7 @@ is byte-identical today (interactive chats inherit HERMES_SESSION_ID).
 RED-first (house law): the whole file is RED on base — base __init__.py has
 no _owner_stamp(): WF_OWNER_SESSION is ignored, the override tests fail, the
 inheritance test passes on base AND head (it is the unchanged-default guard).
-Mutation proof for the override wiring lives beside it (see GATES.md).
+(The override wiring was mutation-checked RED-first when added.)
 """
 import importlib.util, json, os, sys, tempfile, unittest
 from pathlib import Path

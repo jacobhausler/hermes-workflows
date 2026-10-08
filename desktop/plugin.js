@@ -1312,7 +1312,11 @@ export function SessionStrip() {
         onOpenPane: openRun
       }, 'run-tray'),
       jsx(PillRail, {
-        runs: owned, sid: pairKey, railOpen, suppressGates: true,
+        // The rail yields its gate controls ONLY while the tray actually
+        // renders them (enabled + expanded with live rows); disabled,
+        // unanswered settings, or a collapsed tray keep the rail release.
+        runs: owned, sid: pairKey, railOpen,
+        suppressGates: trayExpanded && trayShouldShow(trayRunModel(trayScoping(owned, pairKey)), trayGate),
         onPill: id => $railOpen.set(toggleRail(railOpen, pairKey, id)),
       }),
       terminalTotal

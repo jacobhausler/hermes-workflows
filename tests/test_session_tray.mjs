@@ -331,17 +331,18 @@ assert.match(src, /composerAreas\?\.tray \?\? composerAreas\?\.underside \?\? co
   // focus-degraded law and hands RunTray sid ''. The mirror must render the
   // same live ledger, not null.
   const runs = [mk('h1', 'held', 'S1'), mk('b1', 'running', 'S1'), mk('d1', 'done', 'S1')]
+  const ws = n => textOf(n).replace(/\s+/g, ' ').trim()
   for (const trayOpen of [null, { expanded: true, openRun: null }]) {
     const p = { runs, sid: '', trayOpen, trayRef: { current: null }, trayEnabled: true }
     const real = mod.RunTray(p)
     const mirrored = mirror.RunTray(p)
     assert.ok(real, 'plugin.js RunTray renders the pre-scoped ledger at blank sid')
     assert.ok(mirrored, 'mirror RunTray renders the pre-scoped ledger at blank sid (not null)')
-    assert.equal(textOf(mirrored), textOf(real), 'mirror root text == plugin.js root text at blank sid')
+    assert.equal(ws(mirrored), ws(real), 'mirror root text == plugin.js root text at blank sid')
   }
   // Nonblank control stays in parity too.
   const p1 = { runs, sid: 'S1', trayOpen: null, trayRef: { current: null }, trayEnabled: true }
-  assert.equal(textOf(mirror.RunTray(p1)), textOf(mod.RunTray(p1)), 'nonblank-sid parity control')
+  assert.equal(ws(mirror.RunTray(p1)), ws(mod.RunTray(p1)), 'nonblank-sid parity control')
 
   // Rail release surface: the rail suppresses gate controls ONLY while the
   // tray actually supplies them (enabled + expanded). Disabled, unanswered

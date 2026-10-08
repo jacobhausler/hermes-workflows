@@ -12,8 +12,8 @@
 // pin) and dumps {run.json, the dashboard /runs view} as JSON; this file
 // loads the REAL plugin.js against stub SDK/react (test_session_tray idiom)
 // and asserts the pure rail models against the real artifacts.
-// RED-first is proven via a mutated model (ownedRuns capture removed) — see
-// GATES.md; the mutation is reverted the same commit pass.
+// RED-first was proven via a mutated model (ownedRuns capture removed);
+// the mutation was reverted the same commit pass.
 import assert from 'node:assert/strict'
 import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'

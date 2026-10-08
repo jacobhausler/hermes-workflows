@@ -303,7 +303,11 @@ export function RunTrayRunRow({ run, open, band, onToggleRow, onOpenPane, gateSl
  *  component); this root only signals which row is open. Mounts beside
  *  PillRail inside the SessionStrip composer registration. */
 export function RunTray({ runs, sid, trayOpen, trayRef, onToggleHeader, onToggleRow, onOpenPane, trayEnabled }) {
-  const scoped = trayScoping(runs, sid)
+  // sid blank = the mount owner pre-scoped (focus-degraded law): trust the
+  // given live set — same contract as plugin.js RunTray.
+  const scoped = sid
+    ? trayScoping(runs, sid)
+    : (runs || []).filter(r => r && !TERMINAL.has(runStatusOf(r)))
   const model = trayRunModel(scoped)
   // est-z717: settings gate rides as a prop (mirror parity with plugin.js);
   // default OFF — only literal true renders the tray.
