@@ -331,7 +331,10 @@ def recover_crashed_runner(r, spawn=None):
 # fails the ONE verification law are closed as failed/dead-on-arrival, and the
 # run gets a terminal blocked verdict only if no authoritative one stands.
 DOA_FINALIZED = "dead-on-arrival"
-DOA_REASON_PREFIX = "blocked by dead-on-arrival"
+# #235 review F5: reuse a member of the closed wf.ERROR_CLASSES set — the
+# runner died, so its children were never finalized; `finalized` carries the
+# dead-on-arrival provenance, the class stays read-model vocabulary.
+DOA_ERROR_CLASS = "crashed"
 
 
 def _now_iso():
@@ -341,27 +344,56 @@ def _now_iso():
 
 def _atomic_json(p: Path, obj):
     tmp = p.with_name(f"{p.name}.{os.getpid()}.tmp")
-    tmp.write_text(json.dumps(obj, ensure_ascii=False, default=str))
-    os.replace(tmp, p)
+    try:
+        tmp.write_text(json.dumps(obj, ensure_ascii=False, default=str))
+        os.replace(tmp, p)
+    except OSError:
+        tmp.unlink(missing_ok=True)                    # never leave tmp litter behind
+        raise
+
+
+def _take_runner_flock(r):
+    """#235 review F2: the runner's OWN admission flock (wf.py acquire_lock:
+    LOCK_EX on <run>/runner.lock, same bounded 3 x 10ms LOCK_NB retry so a
+    liveness PROBE's microsecond hold is not mistaken for a runner). Held
+    across the whole check-and-write, so no runner can be admitted and commit
+    between our liveness read and our write. Returns the fd, or None when a
+    holder exists (= runner live)."""
+    import fcntl
+    import time
+    fd = os.open(str(Path(r) / "runner.lock"), os.O_RDWR | os.O_CREAT, 0o644)
+    for _ in range(3):
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return fd
+        except OSError:
+            time.sleep(0.01)
+    os.close(fd)
+    return None
 
 
 def finalize_run(run_dir):
     """Close a dead lane's falsely-claimed running records. Returns the process
-    exit code (0 finalized something or nothing left to do; 2 unknown run / no
-    pid file — a fresh run nobody ever claimed; 3 runner alive — leave alone).
+    exit code: 0 done (or nothing left to do); 2 unknown run / no pid file — a
+    fresh run nobody ever claimed; 3 runner alive — leave alone; 4 a write
+    failed (record or runner_exit) — rerun once writable, the pass repairs.
 
-    Law: only status=="running" records whose spawn fails wfcommon._verify_spawn_rec
-    (a verifiably-live child is ADOPTED, never finalized) are written:
-      status="failed", finalized="dead-on-arrival", death_cause, finished_at,
-      error_class="dead_on_arrival"; efp/fp_rule_version carried over from the
-      spawn record so node_rec reads it as the terminal commit the dead runner
-      never wrote. Committed statuses and absent records are untouched. A run
-      with no authoritative exit verdict (runner_exit_read None or the
-      crashed-no-record probe) gets one terminal blocked verdict, fingerprinted
-      against the current graph; a verifiable recorded verdict — fresh or
-      amend-staled — is never overwritten. Idempotent: a second pass changes
-      zero bytes. Best-effort per record: one unreadable record never aborts
-      the pass."""
+    Law: the whole pass runs UNDER the runner's own flock (F2). Only
+    status=="running" records whose spawn fails wfcommon._verify_spawn_rec (a
+    verifiably-live child is ADOPTED, never finalized) are written:
+      status="failed", finalized="dead-on-arrival", error_class="crashed",
+      death_cause, finished_at. The record's OWN fingerprint is kept verbatim —
+      never stamped from the current graph (F3: a legacy/stale claim must stay
+      stale, not become a current failed commit for a node it never ran).
+    A fan-out node whose current-efp item claims were closed and which has NO
+    aggregate record gets a failed aggregate (F1: node_rec reads only the
+    aggregate — without it the parent read pending and the run `interrupted`).
+    The run gets ONE terminal verdict in the runner's own read-model vocabulary
+    ("blocked by failed <ids>", detail names dead-on-arrival) only when no
+    authoritative verdict stands; a recorded exit — fresh or amend-staled — is
+    never overwritten. Verdict + aggregates derive from ALL dead-on-arrival
+    records, so a retry repairs a write the previous pass lost (F4).
+    Idempotent: a second pass changes zero bytes."""
     wc = _wfcommon()
     if wc is None:
         print("finalize needs wfcommon importable beside this script", file=sys.stderr)
@@ -374,75 +406,111 @@ def finalize_run(run_dir):
     if not (r / "wf.pid").exists():
         print(f"{r}: no wf.pid — a fresh/never-spawned run is not stuck", file=sys.stderr)
         return 2
-    if wc.runner_alive(r):
-        print(f"{r}: runner alive — nothing to finalize", file=sys.stderr)
+    lock = _take_runner_flock(r)
+    if lock is None:
+        print(f"{r}: runner alive (runner.lock held) — nothing to finalize", file=sys.stderr)
         return 3
+    try:
+        # pid half of the ONE liveness law (runner_alive minus the flock probe,
+        # which would read OUR held lock as a live runner).
+        if wc._runner_pid_alive(r):
+            print(f"{r}: runner alive — nothing to finalize", file=sys.stderr)
+            return 3
+        return _finalize_locked(wc, r, graph)
+    finally:
+        os.close(lock)                                 # kernel releases the flock
+
+
+def _finalize_locked(wc, r, graph):
     byid = {n["id"]: n for n in graph["nodes"] if isinstance(n, dict) and n.get("id")}
-    finalized = []                                   # (record-path, node id)
+    errors = 0
+    newly = []                                         # node ids closed THIS pass
+    doa = []                                           # (nid, is_item, rec): every DOA record
     for p in sorted((r / "nodes").glob("*.json")):
         try:
             rec = wc.jload(p)
         except Exception:
             continue                                   # torn record: never a fact, never fatal
-        if not isinstance(rec, dict) or rec.get("status") != "running":
-            continue                                   # committed/absent truth is never rewritten
-        if rec.get("finalized") == DOA_FINALIZED:
-            continue                                   # already closed: idempotent
         stem = p.stem
-        nid = stem.split(".", 1)[0] if "." in stem else stem
+        nid, _, idx = stem.partition(".")
         n = byid.get(nid)
-        if n is None:
+        if n is None or not isinstance(rec, dict):
             continue                                   # orphan record (amended-away node): not ours
+        if rec.get("finalized") == DOA_FINALIZED:
+            doa.append((nid, bool(idx), rec))          # already closed: idempotent
+            continue
+        if rec.get("status") != "running":
+            continue                                   # committed/absent truth is never rewritten
         if wc._verify_spawn_rec(r, n, byid, rec):
             continue                                   # ONE verification law: live child => adopt
-        closed = dict(rec)
+        closed = dict(rec)                             # own efp/def_hash kept verbatim (F3)
         closed.update(
             status="failed",
             finalized=DOA_FINALIZED,
-            error_class="dead_on_arrival",
+            error_class=DOA_ERROR_CLASS,
             death_cause=f"runner dead (pid {closed.get('pid')} unverifiable), child never "
                         f"finalized — closed by lane_recover --finalize",
             finished_at=_now_iso(),
         )
-        if "efp" not in closed:                        # stamp from the spawn claim so
-            try:                                       # node_rec reads a terminal commit
-                closed["efp"] = wc.efp(byid, n)
-                closed.setdefault("fp_rule_version", wc.FP_RULE_VERSION)
-            except Exception:
-                pass
         try:
             _atomic_json(p, closed)
-            finalized.append((p, nid))
-        except OSError:
+        except OSError as e:
+            print(f"{p}: finalize write failed: {e}", file=sys.stderr)
+            errors += 1
             continue
-    if not finalized:
-        return 0
-    ids = sorted({nid for _p, nid in finalized})
-    try:
-        with open(r / "events.jsonl", "a") as f:
-            f.write(json.dumps({"ts": _now_iso(), "event": "run.finalized_doa",
-                                "nodes": ids, "count": len(finalized)},
-                               ensure_ascii=False) + "\n")
-    except OSError:
-        pass
-    # terminal verdict for the run ONLY if no authoritative one stands. A
-    # verifiable recorded exit (fresh OR amend-staled — a verdict is a verdict)
-    # is never overwritten; a finalize-authored one counts (idempotency).
+        newly.append(nid)
+        doa.append((nid, bool(idx), closed))
+    if newly:
+        try:
+            with open(r / "events.jsonl", "a") as f:
+                f.write(json.dumps({"ts": _now_iso(), "event": "run.finalized_doa",
+                                    "nodes": sorted(set(newly)), "count": len(newly)},
+                                   ensure_ascii=False) + "\n")
+        except OSError:
+            pass
+    # F1: a fan-out parent with closed CURRENT item claims and no aggregate
+    # gets the terminal aggregate the dead runner never wrote.
+    for nid in sorted({nid for nid, is_item, rec in doa
+                       if is_item and wc.record_efp_valid(rec, byid, byid[nid])}):
+        agg = r / "nodes" / f"{nid}.json"
+        if agg.exists():
+            continue                                   # an aggregate is a fact: never rewritten
+        items = sorted(int(q.stem.split(".", 1)[1]) for q in (r / "nodes").glob(f"{nid}.[0-9]*.json")
+                       if (wc.jload(q) or {}).get("finalized") == DOA_FINALIZED)
+        try:
+            _atomic_json(agg, {
+                "status": "failed", "finalized": DOA_FINALIZED, "error_class": DOA_ERROR_CLASS,
+                "death_cause": f"fan-out item(s) {items} closed dead-on-arrival — runner dead "
+                               f"before the aggregate commit; closed by lane_recover --finalize",
+                "items_finalized": items, "finished_at": _now_iso(),
+                "efp": wc.efp(byid, byid[nid]), "fp_rule_version": wc.FP_RULE_VERSION})
+        except OSError as e:
+            print(f"{agg}: aggregate write failed: {e}", file=sys.stderr)
+            errors += 1
+    ids = sorted({nid for nid, _i, _rec in doa})
+    if not ids:
+        return 4 if errors else 0
+    # terminal verdict ONLY if no authoritative one stands. A recorded exit
+    # (fresh OR amend-staled — a verdict is a verdict) is never overwritten; a
+    # finalize-authored one counts (idempotency).
     rx = wc.jload(r / "runner_exit.json")
     verdict = wc.runner_exit_read(r) or {}
     keep = bool(verdict.get("reason")) and verdict.get("reason") != "crashed (no exit record)"
     if (isinstance(rx, dict) and rx.get("finalized") == DOA_FINALIZED) or keep:
-        return 0
-    snapshot = graph
+        return 4 if errors else 0
     try:
-        rec = {"reason": f"{DOA_REASON_PREFIX}: {', '.join(ids)}", "at": _now_iso(),
-               "graph_fingerprint": wc.graph_fingerprint(snapshot),
-               "fp_rule_version": wc.FP_RULE_VERSION,
-               "finalized": DOA_FINALIZED}
-        _atomic_json(r / "runner_exit.json", rec)
-    except OSError:
-        pass
-    return 0
+        _atomic_json(r / "runner_exit.json", {
+            # the runner's own verdict vocabulary — run_state classifies it failed
+            "reason": "blocked by failed " + ",".join(ids), "at": _now_iso(),
+            "detail": f"dead-on-arrival: runner dead, {len(ids)} node(s) closed by "
+                      f"lane_recover --finalize",
+            "graph_fingerprint": wc.graph_fingerprint(graph),
+            "fp_rule_version": wc.FP_RULE_VERSION,
+            "finalized": DOA_FINALIZED})
+    except OSError as e:
+        print(f"{r}: runner_exit write failed: {e} — rerun --finalize to repair", file=sys.stderr)
+        errors += 1
+    return 4 if errors else 0
 
 
 class Bail(Exception):
@@ -805,7 +873,8 @@ def main(argv=None):
                           "finished_at; the run gets a terminal blocked verdict only if "
                           "no authoritative exit record stands. Idempotent; a live "
                           "child is adopted, never finalized (exit 3 when the runner "
-                          "is alive, 2 for an unknown/fresh run, 0 when done).")
+                          "is alive, 2 for an unknown/fresh run, 4 when a write failed "
+                          "— rerun to repair, 0 when done).")
     args = ap.parse_args(argv)
     if args.home:   # the read model resolves runs/profiles from HERMES_HOME; honor the flag
         os.environ["HERMES_HOME"] = str(Path(args.home).expanduser())   # (before --watchdog too)

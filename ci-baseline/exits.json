@@ -1075,6 +1075,11 @@
     "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_string_type_validation_59.py.log"
   },
   {
+    "test": "test_stuck_node_finalize_733.py",
+    "exit": 0,
+    "log": "rows_added_outside_ci in PROVENANCE.json"
+  },
+  {
     "test": "test_suite_admission_17.py",
     "exit": 0,
     "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_suite_admission_17.py.log"
