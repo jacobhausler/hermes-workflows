@@ -84,6 +84,18 @@
       "supersede_by": "next green-CI refresh (replace with the CI-captured row)"
     },
     {
+      "test": "test_alias_route_ping_318.py",
+      "exit": 0,
+      "measured": "2026-10-08 local foreground run at rebased head: 12 checks, 0 FAIL, rc=0; new regression test for est-2ek.1.318 (alias-pinned route ping target)",
+      "supersede_by": "next green-CI refresh (replace with the CI-captured row)"
+    },
+    {
+      "test": "test_alias_receipt_respawn_318.py",
+      "exit": 0,
+      "measured": "2026-10-08 local foreground run on fix/alias-ping-target-318 after rebase onto f45b79a: RESULT GREEN, 9 PASS / 0 FAIL rc=0; RED at cc088db (A2 legs fail route_substitution_denied before submit, the false-death the fix removes); the PR adds this test without a CI row",
+      "supersede_by": "next green-CI refresh (replace with the CI-captured row)"
+    },
+    {
       "test": "test_progress_channel_128.py",
       "exit": 0,
       "measured": "2026-10-07 local serial run of scripts/suite.py (#128 branch); re-run 2026-10-08 after rebase onto main aca313d; the row can only ever make CI red, never green",
@@ -97,7 +109,7 @@
     }
   ],
   "totals": {
-    "cases": 245,
+    "cases": 247,
     "red": 0
   },
   "contract": "Green CI ledgers only (every exit == 0); rows not captured by CI are listed in rows_added_outside_ci with how they were measured. Refresh from the tip of main after each main move; see README.md.",
