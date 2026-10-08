@@ -1335,5 +1335,9 @@
     "test": "test_effects_receipt_pygyy.py",
     "exit": 0,
     "log": "Local foreground run on PR #346 rebased head (fresh WF_RUNS_ROOT, outside run dirs): Ran 10 tests OK, rc=0; the PR adds this test without a CI row"
+  },
+  {
+    "test": "test_graph_regen_z_parser_h3yi.py",
+    "exit": 0
   }
 ]

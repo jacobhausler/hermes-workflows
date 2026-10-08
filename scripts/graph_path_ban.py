@@ -82,31 +82,21 @@ def head_branch(repo_dir, env=None):
 _STATUS_RE = re.compile(r"^[A-Z]{1,2}[0-9]{0,3}!?$")  # git name-status: A M D T U X B, R100/C75, optional ! (unmerged)
 
 
-def changed_files(repo_dir, base, head="HEAD"):
-    """All paths changed base..head (full diff — the exemption check needs to see
-    whether ANY non-graph file moved, not only the offending slice).
+def _name_status_paths(fields):
+    """Parse the NUL-split fields of `git diff -z --name-status` into every path
+    the diff touches: BOTH endpoints of R (rename) and C (copy) records, raw
+    bytes decoded with surrogateescape (never quoted, never newline-split).
 
-    est-gbim: `-z --name-status`, not `--name-only`. Three holes in the old
-    form, all ban-dodging (a graphify-out/ change invisible to the ban):
-      * rename/collapse: `--name-only` prints only the POST image of a rename —
-        R100 graphify-out/graph.json -> x.json printed x.json alone, so emptying
-        the single-writer path sailed; the inverse (source -> graphify-out/)
-        printed only the source. Parsing name-status takes BOTH endpoints of
-        R (rename) and C (copy).
-      * quoting: default output octal-escapes and quotes exotic paths
-        ("graphify-out/evil\\n.json") — the quote itself broke prefix matching.
-        -z mode is raw bytes, never quoted.
-      * newline split: with quoting disabled by -z, an embedded newline in a
-        path can no longer forge a fake entry; fields split on NUL.
+    est-gbim: this replaced `--name-only` parsing, which had three ban-dodging
+    holes — rename/collapse (post-image only), octal quoting of exotic paths
+    (the quote broke prefix matching), and newline splitting (an embedded
+    newline forged a fake entry). -z mode closes all three; fields here are
+    already split on NUL.
 
-    Fail-closed: if we could not run git or could not parse its output into
-    well-formed records, return None — main() must exit 2, never green."""
-    r = _git_bytes(repo_dir, "diff", "-z", "--name-status", f"{base}..{head}")
-    if r.returncode != 0:
-        return None
-    fields = r.stdout.split(b"\0")
-    if fields and fields[-1] == b"":
-        fields.pop()  # trailing NUL terminator
+    Fail-closed (returns None) on any output shape we cannot trust: a status
+    token outside the name-status grammar, or a record missing its path
+    field(s). The callers must treat None as their hard-error path, never green.
+    """
     paths = []
     i = 0
     while i < len(fields):
@@ -126,6 +116,39 @@ def changed_files(repo_dir, base, head="HEAD"):
             paths.append(fields[i].decode("utf-8", "surrogateescape"))
             i += 1
     return paths
+
+
+def diff_name_status_paths(repo_dir, revs=None, pathspec=None):
+    """Shared -z --name-status parser (est-h3yi): every path a diff touches,
+    both rename/copy endpoints, NUL-split so quoting and embedded newlines
+    cannot hide or forge an entry. `revs` is a git rev or rev range (None =
+    the working tree vs the index); `pathspec` optionally limits the diff.
+
+    This is the ONE parser: scripts/graph_path_ban.py (the ban) and
+    scripts/graph_regen.py (the regen decision) both answer their path
+    questions through it — the est-h3yi finding was exactly that the regen
+    kept an old `--name-only` + splitlines read with the same three holes the
+    ban had already closed. Fail-closed: None on git failure or unparseable
+    output; callers must fail, never proceed green."""
+    argv = ["diff", "-z", "--name-status"]
+    if revs:
+        argv.append(revs)
+    if pathspec:
+        argv += ["--", pathspec]
+    r = _git_bytes(repo_dir, *argv)
+    if r.returncode != 0:
+        return None
+    fields = r.stdout.split(b"\0")
+    if fields and fields[-1] == b"":
+        fields.pop()  # trailing NUL terminator
+    return _name_status_paths(fields)
+
+
+def changed_files(repo_dir, base, head="HEAD"):
+    """All paths changed base..head (full diff — the exemption check needs to see
+    whether ANY non-graph file moved, not only the offending slice). See
+    diff_name_status_paths for the parsing law; fail-closed to None."""
+    return diff_name_status_paths(repo_dir, f"{base}..{head}")
 
 
 def _git_bytes(repo_dir, *args):

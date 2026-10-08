@@ -228,10 +228,14 @@
       "exit": 0,
       "measured": "2026-10-09 local foreground run on PR #346 rebased onto 57058c9 (clean parity env, fresh WF_RUNS_ROOT, outside run dirs): Ran 10 tests OK, rc=0; the PR adds this test without a CI row",
       "supersede_by": "next green-CI refresh (replace with the CI-captured row)"
+    },
+    {
+      "test": "test_graph_regen_z_parser_h3yi.py",
+      "added_by": "est-h3yi PR lane (author CI-pending; refreshed only from a green Serial suite job)"
     }
   ],
   "totals": {
-    "cases": 268,
+    "cases": 269,
     "red": 0
   },
   "contract": "Green CI ledgers only (every exit == 0); rows not captured by CI are listed in rows_added_outside_ci with how they were measured. Refresh from the tip of main after each main move; see README.md.",
