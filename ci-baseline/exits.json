@@ -1209,6 +1209,11 @@
     "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_tool_call_text_6st.py.log"
   },
   {
+    "test": "test_tree_quiesce_reap.py",
+    "exit": 0,
+    "log": "Local foreground tests/test_tree_quiesce_reap.py: RESULT PASS, exit 0"
+  },
+  {
     "test": "test_v3_fixes.py",
     "exit": 0,
     "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_v3_fixes.py.log"
