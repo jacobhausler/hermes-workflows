@@ -80,7 +80,7 @@ class SeatAdmission(unittest.TestCase):
         (self.run_dir / 'gates').mkdir()
         self.amend(graph, restart=False)
         (self.run_dir / 'run.json').write_text(json.dumps({
-            'hermes_bin': str(self.launcher), 'max_seats': 2, 'concurrency': 2,
+            'hermes_bin': str(self.launcher), 'max_seats': 2, 'concurrency': 2, 'item_concurrency': 2,
             'node_timeout': 10, 'first_message_s': 0, 'retry_budget': 0,
         }))
         self.log = (self.home / 'runner.log').open('w')
