@@ -4417,6 +4417,12 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
                   or (seat_cancel is not None and seat_cancel.is_set()))
     while seat_hold:                       # a prior attempt's deferred seat
         _seat_release(seat_hold.pop())
+    def stale_admission():
+        current = {n["id"]: n for n in (jload(run / "graph.json", {}) or {}).get("nodes", [])}
+        return (node["id"] not in current
+                or efp(current, current[node["id"]]) != efp(byid, node))
+    withdrawn = {"status": "failed", "error": "cancelled: queued definition changed before admission",
+                 "error_class": "cancelled", "ms": 0, "attempts": 0, **route}
     seat = _seat_acquire(
         _seats_dir(), f"{run.name}.{node['id']}", _max_seats(meta),
         _seat_wall if isinstance(_seat_wall, (int, float)) else None,
@@ -4544,6 +4550,12 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
                     return {"status": "failed", "error": "cancelled at launch instant"
                             + ("" if meta["_stop"].is_set() else " (quorum already met)"),
                             "error_class": "cancelled", "ms": 0, **route}
+                # A queued prompt is only a snapshot. After a seat wait, compare
+                # the whole ancestry before launch; the next wave reloads and
+                # schedules the replacement. The no-Popen finally frees its ticket.
+                if stale_admission():
+                    logf.close()
+                    return withdrawn
                 tokens.append(token)     # registered BEFORE Popen — a spawn that
                                          # dies mid-launch still owns its survivors
                 proc = subprocess.Popen(cmd, stdout=logf, stderr=subprocess.STDOUT,
