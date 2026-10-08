@@ -46,9 +46,15 @@
       "exit": 0,
       "measured": "2026-10-08 local run (16/16 PASS) on feat/bank-the-corpse-131; the row can only ever make CI red, never green",
       "supersede_by": "next green-CI refresh (replace with the CI-captured row)"
+    },
+    {
+      "test": "test_stale_seat_admission.py",
+      "exit": 0,
+      "measured": "Local foreground Python 3.12 on edfc7e2494f4d6a94fb1a16faae60026dcaa359a: 10 tests OK, exit 0; clean pre-fix test-only SHA 5e83271 exits 1 with 8 behavioral failures and 2 passing controls",
+      "supersede_by": "next green-CI refresh (replace with the CI-captured row)"
     }
   ],
-  "totals": {"cases": 237, "red": 0},
+  "totals": {"cases": 238, "red": 0},
   "contract": "Green CI ledgers only (every exit == 0); rows not captured by CI are listed in rows_added_outside_ci with how they were measured. Refresh from the tip of main after each main move; see README.md.",
   "tracking_item": "est-9yl2",
   "source_issue": 75
