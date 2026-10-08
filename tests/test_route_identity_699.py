@@ -56,6 +56,8 @@ OTHER = "claude-other-8"
 UNDER = "claude-model-5_1"
 BEDROCK_DOT, BEDROCK_HY = "us.anthropic.claude-model-5-1", "us-anthropic-claude-model-5-1"
 FALLBACK = "seat-fallback-9"
+SUF_OFF, SUF_ON = "model-1", "model-1(extra)"
+OAI_PRE = "openai-codex"
 
 # ---- 0. the ONE canonical normalizer exists and is the shared contract ---------
 check("canonical_model_id exported by wfcommon (the shared contract)",
@@ -69,9 +71,17 @@ if callable(getattr(wc, "canonical_model_id", None)):
           f"{cm('anthropic/' + DOT)!r} vs {cm(HY)!r}")
     check("different models stay DIFFERENT (no fuzzy equality)",
           cm(OTHER) != cm(DOT) and cm(FALLBACK) != cm(DOT))
-    check("core's labeled route shape 'name(provider)' normalizes",
-          cm(f"main-agent({DOT})".replace("main-agent", DOT)) == cm(HY) or
-          cm(DOT + "(anthropic)") == cm(HY), cm(DOT + "(anthropic)"))
+    # review of #296 (P1, required repair): stock core PRESERVES a literal
+    # '(suffix)' and records the concrete model verbatim — the contract must NOT
+    # peel it for any provider. Refusal in both directions, any provider.
+    check("literal suffix preserved (unit): model-1(extra) != model-1 [openai-codex]",
+          wc.canonical_model_id(SUF_ON, OAI_PRE) != wc.canonical_model_id(SUF_OFF, OAI_PRE),
+          wc.canonical_model_id(SUF_ON, OAI_PRE))
+    check("literal suffix preserved (unit): model-1 != model-1(extra) [openai-codex]",
+          wc.canonical_model_id(SUF_OFF, OAI_PRE) != wc.canonical_model_id(SUF_ON, OAI_PRE))
+    check("literal suffix preserved (unit): claude dotted+sfx != hyphen-bare [anthropic]",
+          not wc.route_ids_equal(DOT + "(extra)", HY, "anthropic"),
+          wc.canonical_model_id(DOT + "(extra)", "anthropic"))
     check("case/whitespace insensitive",
           cm("  Anthropic/" + DOT.upper() + " ") == cm(HY))
     # provider boundary: the dot/hyphen equivalence is Anthropic's alone, and a vendor
@@ -190,9 +200,6 @@ check("door same-route law: different model on the pin is NOT same-route",
       not door._same_ping_route({"provider": "anthropic", "model": OTHER}, "anthropic", DOT))
 check("door same-route law: provider mismatch is NOT same-route (gate intact)",
       not door._same_ping_route({"provider": "other", "model": DOT}, "anthropic", DOT))
-check("door same-route law: labeled 'model(anthropic)' shape still normalizes",
-      door._same_ping_route({"provider": "anthropic", "model": f"{HY}(anthropic)"},
-                            "anthropic", DOT))
 
 def set_ping(behavior):
     if behavior is None:
@@ -295,5 +302,46 @@ check("route_provider: receipt provider governs; a node/receipt provider split f
       wc.route_provider({"provider": "anthropic"}, f"{OAI}/{OAI_DOT}") == ""
       and wc.route_provider({"provider": "anthropic"}, f"anthropic/{DOT}") == "anthropic"
       and wc.route_provider({}, f"anthropic/{DOT}") == "anthropic")
+
+# ---- 7. review of #296 (P1 required repair): a literal '(suffix)' is NEVER peeled
+# Stock core preserves literal model suffixes and records the concrete model
+# verbatim; suffix peeling is unsupported display-label normalization. Both
+# directions, through submit, commit hold, durable receipt and quota recovery.
+check("P1 submit: openai-codex pin 'model-1' vs recorded 'model-1(extra)' is NOT same-route",
+      not door._same_ping_route({"provider": OAI_PRE, "model": SUF_ON}, OAI_PRE, SUF_OFF))
+check("P1 submit: openai-codex pin 'model-1(extra)' vs recorded 'model-1' is NOT same-route",
+      not door._same_ping_route({"provider": OAI_PRE, "model": SUF_OFF}, OAI_PRE, SUF_ON))
+before = len(_spawned)
+set_ping({"record": {"provider": OAI_PRE, "model": SUF_ON}})
+out = door.act_run({"graph": {"name": "p699s", "nodes": [{"id": "plans", "type": "agent", "goal": "x",
+                                                         "provider": OAI_PRE, "model": SUF_OFF}]}})
+check("P1 submit end-to-end: suffixed ping answer for a bare pin is REFUSED, nothing spawned",
+      "error" in out and "FALLBACK LADDER" in out.get("error", "").upper()
+      and len(_spawned) == before, out)
+for served, pin, prov in ((SUF_ON, SUF_OFF, OAI_PRE),
+                          (SUF_OFF, SUF_ON, OAI_PRE),
+                          (DOT + "(extra)", HY, "anthropic")):
+    out = wfmod._route_hold(meta, {"status": "done", "served_model": served},
+                            {"model": pin, "provider": prov,
+                             "route_verified": f"{prov}/{pin}"})
+    check(f"P1 commit hold: {served!r} billed vs {pin!r} proved -> route_unavailable",
+          out.get("status") == "failed" and out.get("error_class") == "route_unavailable", out)
+run699s = Path(tmp_dir.name) / "run699s"; (run699s / "nodes").mkdir(parents=True)
+(run699s / "route_receipts.json").write_text(json.dumps({"plans": f"{OAI_PRE}/{SUF_ON}"}))
+r = wfmod._route_substitution_refusal({"_run": run699s}, {"id": "plans", "type": "agent",
+                                                         "provider": OAI_PRE, "model": SUF_OFF}, 7)
+check("P1 durable receipt: bare re-spawn under a suffixed receipt is DENIED",
+      isinstance(r, dict) and r.get("error_class") == "route_substitution_denied", r)
+(run699s / "route_receipts.json").write_text(json.dumps({"plans": f"{OAI_PRE}/{SUF_OFF}"}))
+r = wfmod._route_substitution_refusal({"_run": run699s}, {"id": "plans", "type": "agent",
+                                                         "provider": OAI_PRE, "model": SUF_ON}, 8)
+check("P1 durable receipt: suffixed re-spawn under a bare receipt is DENIED",
+      isinstance(r, dict) and r.get("error_class") == "route_substitution_denied", r)
+set_ping({"record": {"provider": OAI_PRE, "model": SUF_ON}})
+check("P1 quota recovery: a suffixed answer for a bare stamp is NOT a recovery",
+      door._ping_reachable(f"{OAI_PRE}/{SUF_OFF}") is False)
+set_ping({"record": {"provider": OAI_PRE, "model": SUF_OFF}})
+check("P1 quota recovery: a bare answer for a suffixed stamp is NOT a recovery",
+      door._ping_reachable(f"{OAI_PRE}/{SUF_ON}") is False)
 
 sys.exit(1 if fails else 0)
