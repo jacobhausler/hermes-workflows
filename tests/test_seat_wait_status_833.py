@@ -57,67 +57,67 @@ def mk(rid, nodes, events, ledger=(), live=True):
 T0 = "2026-10-08T05:34:51+00:00"
 RUNNER = {"ts": T0, "pid": 1, "role": "runner", "node": None, "index": None,
           "skey": None, "purpose": "workflow-runner"}
-A = {"id": "callindor", "type": "agent", "goal": "probe callindor"}
-B = {"id": "rhuidean", "type": "agent", "goal": "probe rhuidean"}
+A = {"id": "node_a", "type": "agent", "goal": "probe node_a"}
+B = {"id": "node_b", "type": "agent", "goal": "probe node_b"}
 
 try:
     # ---- S1: the incident shape — node.started then seat.wait cap=4, nothing else
     ev = [{"ts": T0, "event": "run.started"},
-          {"ts": T0, "event": "node.started", "node": "callindor", "skey": "wf:x:callindor:1"},
-          {"ts": T0, "event": "steer.baked", "node": "callindor", "spawn_no": 0, "n_lines": 0},
-          {"ts": T0, "event": "seat.wait", "node": "callindor", "index": None, "spawn": 0, "cap": 4}]
+          {"ts": T0, "event": "node.started", "node": "node_a", "skey": "wf:x:node_a:1"},
+          {"ts": T0, "event": "steer.baked", "node": "node_a", "spawn_no": 0, "n_lines": 0},
+          {"ts": T0, "event": "seat.wait", "node": "node_a", "index": None, "spawn": 0, "cap": 4}]
     mk("sw-incident", [A, B], ev, [RUNNER])
     st = wfcommon.run_state(HOME / "workflows" / "sw-incident")
     check(st["runner_live"] is True and st["status"] == "running", "S1 fixture reads live/running",
           f"{st['runner_live']} {st['status']}")
-    sw = st["nodes"]["callindor"].get("seat_wait")
-    check(isinstance(sw, dict), "S1 run_state: pending node carries seat_wait", repr(st["nodes"]["callindor"]))
+    sw = st["nodes"]["node_a"].get("seat_wait")
+    check(isinstance(sw, dict), "S1 run_state: pending node carries seat_wait", repr(st["nodes"]["node_a"]))
     check(sw and sw.get("cap") == 4 and sw.get("since") == T0 and sw.get("spawn") == 0,
           "S1 seat_wait names cap=4, since, spawn", repr(sw))
     check(sw and isinstance(sw.get("age_s"), int) and sw["age_s"] > 0, "S1 seat_wait carries wait age_s", repr(sw))
-    check("seat_wait" not in st["nodes"]["rhuidean"], "S1 a node that never waited gains no key")
+    check("seat_wait" not in st["nodes"]["node_b"], "S1 a node that never waited gains no key")
     p = door.act_status({"run_id": "sw-incident"})
-    check(p["nodes"]["callindor"].get("seat_wait") == sw, "S1 act_status passes seat_wait through",
-          repr(p["nodes"]["callindor"]))
+    check(p["nodes"]["node_a"].get("seat_wait") == sw, "S1 act_status passes seat_wait through",
+          repr(p["nodes"]["node_a"]))
     nx = (p.get("next") or [{}])[0]
     check(nx.get("action") == "wait" and nx.get("reason") == "seat_wait",
           "S1 next wait row names reason=seat_wait", repr(p.get("next")))
-    check(nx.get("cap") == 4 and nx.get("nodes") == ["callindor"] and isinstance(nx.get("age_s"), int),
+    check(nx.get("cap") == 4 and nx.get("nodes") == ["node_a"] and isinstance(nx.get("age_s"), int),
           "S1 next row carries cap, waiting nodes and oldest age", repr(nx))
 
     # ---- S2: the wait closed by a child spawn (ledger child row) -> no seat_wait
-    led = [RUNNER, {"ts": "2026-10-08T05:35:10+00:00", "pid": 9, "role": "child", "node": "callindor",
-                    "index": None, "skey": "wf:x:callindor:1", "purpose": "workflow-runner"}]
+    led = [RUNNER, {"ts": "2026-10-08T05:35:10+00:00", "pid": 9, "role": "child", "node": "node_a",
+                    "index": None, "skey": "wf:x:node_a:1", "purpose": "workflow-runner"}]
     mk("sw-spawned", [A], ev, led)
     st = wfcommon.run_state(HOME / "workflows" / "sw-spawned")
-    check("seat_wait" not in st["nodes"]["callindor"], "S2 a later child spawn closes the wait",
-          repr(st["nodes"]["callindor"]))
+    check("seat_wait" not in st["nodes"]["node_a"], "S2 a later child spawn closes the wait",
+          repr(st["nodes"]["node_a"]))
     p = door.act_status({"run_id": "sw-spawned"})
     check(p.get("next") == [{"action": "wait"}], "S2 next stays the plain wait row", repr(p.get("next")))
 
     # ---- S3: retry attempt waits AGAIN after an earlier spawn -> open again
-    ev3 = ev + [{"ts": "2026-10-08T05:40:00+00:00", "event": "seat.wait", "node": "callindor",
+    ev3 = ev + [{"ts": "2026-10-08T05:40:00+00:00", "event": "seat.wait", "node": "node_a",
                  "index": None, "spawn": 1, "cap": 4}]
     mk("sw-rewait", [A], ev3, led)
     st = wfcommon.run_state(HOME / "workflows" / "sw-rewait")
-    sw = st["nodes"]["callindor"].get("seat_wait")
+    sw = st["nodes"]["node_a"].get("seat_wait")
     check(sw and sw.get("spawn") == 1 and sw.get("since") == "2026-10-08T05:40:00+00:00",
           "S3 a fresh wait after a spawn reopens with the newer since/spawn", repr(sw))
 
     # ---- S4: dead runner -> interrupted, no seat_wait (nobody is waiting)
     mk("sw-dead", [A], ev, [RUNNER], live=False)
     st = wfcommon.run_state(HOME / "workflows" / "sw-dead")
-    check(st["status"] != "running" and "seat_wait" not in st["nodes"]["callindor"],
-          "S4 no live runner -> no seat_wait", repr(st["nodes"]["callindor"]))
+    check(st["status"] != "running" and "seat_wait" not in st["nodes"]["node_a"],
+          "S4 no live runner -> no seat_wait", repr(st["nodes"]["node_a"]))
 
     # ---- S5: the incident's end — cancelled while waiting -> failed, no seat_wait
-    ev5 = ev + [{"ts": "2026-10-08T05:44:01+00:00", "event": "node.failed", "node": "callindor", "ms": 0,
+    ev5 = ev + [{"ts": "2026-10-08T05:44:01+00:00", "event": "node.failed", "node": "node_a", "ms": 0,
                  "error": "cancelled while waiting for an agent seat", "error_class": "cancelled"},
                 {"ts": "2026-10-08T05:44:01+00:00", "event": "run.stopped"}]
     mk("sw-stopped", [A], ev5, [RUNNER])
     st = wfcommon.run_state(HOME / "workflows" / "sw-stopped")
-    check("seat_wait" not in st["nodes"]["callindor"], "S5 terminal node event closes the wait",
-          repr(st["nodes"]["callindor"]))
+    check("seat_wait" not in st["nodes"]["node_a"], "S5 terminal node event closes the wait",
+          repr(st["nodes"]["node_a"]))
 
     # ---- S6: fan-out items waiting; wait buried under >20 later events still read
     F = {"id": "fan", "type": "agent", "goal": "item {{item}}", "fanout": {"items": [1, 2, 3]}}
