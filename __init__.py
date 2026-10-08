@@ -3645,6 +3645,15 @@ def _wf_command(raw_args):
             + ", emit `::workflow{id=\"<run_id>\"}` on its own line, then `wait` and answer gates via clarify.")
 
 def register(ctx):
+    # Core v0.21.5 runs import + register() on a deadline worker
+    # (plugins.load_timeout_seconds, default 10s); on overrun it calls
+    # ctx._abandon_load() and every later register_* is silently ignored.
+    # Keep this body cheap and non-blocking: measured ~0.1s import, register()
+    # < 1ms — one cached config read (model_tiers) and in-memory registrations,
+    # no subprocess/network/run-dir scan (card_enforcement's module exec is
+    # defs only; its I/O runs at hook time). Never pass override=True to
+    # register_tool: it is operator-gated (PluginToolOverrideError). Pinned by
+    # tests/test_hook_abandon_safety.py.
     global _CTX
     _CTX = ctx
     ctx.register_skill("workflow", HERE / "SKILL.md", description="Run and orchestrate agent workflows.")

@@ -43,6 +43,16 @@ Design notes:
   ``::workflow{id="<run_id>"}`` with run_id matching [A-Za-z0-9._-]+, OUTSIDE any
   ``` fence or `inline code` span — a code-blocked directive is dead text to the
   renderer, so it does NOT count as shipped (the paste hint says the same).
+* ABANDON-SAFE (core v0.21.5): plugins_dispatch bounds this hook by
+  ``plugins.hook_callback_timeout`` and, on overrun, ABANDONS the worker
+  without joining it ("do not join") — the result is dropped, the thread keeps
+  running, and a fresh call id may start a new worker after the suppression
+  window. So two workers can race on one run's claim. Three rules hold the
+  one-ship law across that: (1) a live claim in _PENDING is never replaced
+  (setdefault) and a dying text only drops ITS OWN claim; (2) selection is
+  proof of delivery, so a selected text ledgers its own cards even if a racing
+  worker moved the claim; (3) the marker is appended BEFORE the claim is
+  released, so at every instant a run is covered by the marker or the claim.
 * FAIL-OPEN: every path is guarded; any exception means "ship nothing, change
   nothing". A broken ledger must never eat the user's reply.
 * The unknown surface (falsy platform) is never guessed: no surface, no append.
@@ -267,12 +277,18 @@ def _mark(r, session_id, turn_id):
         _LOG.debug("card.echoed marker failed for %s: %s", r, exc)
 
 
-def _confirm(session_id, run_id, entry):
-    """Write the card.echoed marker for a proposal proven SELECTED and clear the
-    pending entry. Marker-write failure still clears: the fail-open law says a
-    dead ledger must not suppress forever — the card re-ships next turn."""
-    _PENDING.pop((session_id, run_id), None)
-    _mark(entry["dir"], session_id, entry["turn_id"])
+def _confirm(session_id, run_id, run_dir, turn_id):
+    """Write the card.echoed marker for a proposal proven SELECTED, THEN release
+    the in-memory claim. Order is deliberate (ABANDON-SAFE rule 3): the core may
+    have abandoned a worker that is still scanning _outstanding concurrently;
+    releasing first opens a window where neither the claim nor the marker covers
+    the run and that worker re-proposes it — a double-ship. Marker-write failure
+    still clears: a dead ledger must not suppress forever (re-ships next turn)."""
+    key = (session_id, run_id)
+    _mark(run_dir, session_id, turn_id)
+    entry = _PENDING.get(key)
+    if entry is not None and entry.get("dir") == run_dir:
+        _PENDING.pop(key, None)
 
 
 def _reconcile(session_id, turn_id):
@@ -283,8 +299,8 @@ def _reconcile(session_id, turn_id):
     probe answers instead (durable-row truth, same shape as the reconcile probe
     for #161's notice belt)."""
     for key in [k for k in _PENDING if k[0] == session_id]:
-        entry = _PENDING[key]
-        if entry.get("turn_id") == turn_id:
+        entry = _PENDING.get(key)            # an abandoned worker may race us here
+        if entry is None or entry.get("turn_id") == turn_id:
             continue                        # this turn proposed it; selection hasn't run
         rid = key[1]
         try:
@@ -295,12 +311,19 @@ def _reconcile(session_id, turn_id):
                 ref = entry.get("ref")
                 ok = bool(ref) and ref() is not None
             if ok:
-                _confirm(session_id, rid, entry)
+                _confirm(session_id, rid, entry["dir"], entry.get("turn_id", ""))
             else:
                 _PENDING.pop(key, None)     # never selected: replayable, not lost
         except Exception as exc:
             _LOG.debug("card pending reconcile skipped for %s (fail-open): %s", rid, exc)
             _PENDING.pop(key, None)
+
+
+def _drop_own(key, wr):
+    """weakref callback: drop the claim only if it is still the one this text made."""
+    entry = _PENDING.get(key)
+    if entry is not None and entry.get("ref") is wr:
+        _PENDING.pop(key, None)
 
 
 class _CardText(str):
@@ -327,10 +350,11 @@ class _CardText(str):
         sid = object.__getattribute__(self, "_ce_session")
         turn = object.__getattribute__(self, "_ce_turn")
         object.__setattr__(self, "_ce_done", True)
+        # Selection IS delivery (ABANDON-SAFE rule 2): ledger our own cards from
+        # what this text carries, never from _PENDING — a racing abandoned
+        # worker may own the claim now, and skipping the marker would re-ship.
         for rid, r in entries:
-            entry = _PENDING.get((sid, rid))
-            if entry is not None and entry.get("dir") == r:
-                _confirm(sid, rid, entry)
+            _confirm(sid, rid, r, turn)
 
     def __bool__(self):
         try:
@@ -361,9 +385,11 @@ def _propose(response_text, take, session_id, turn_id):
     keys = []
     for rid, r in take:
         key = (session_id, rid)
-        _PENDING[key] = {"dir": r, "turn_id": turn_id,
-                         "ref": weakref.ref(obj,
-                                            lambda _r, k=key: _PENDING.pop(k, None))}
+        # ABANDON-SAFE rule 1: never replace a live claim (an abandoned worker
+        # resuming late must not evict the fresh call's), and the dying text
+        # drops only the claim it owns.
+        _PENDING.setdefault(key, {"dir": r, "turn_id": turn_id,
+                                  "ref": weakref.ref(obj, lambda wr, k=key: _drop_own(k, wr))})
         keys.append(key)
     _PROPOSED[(session_id, turn_id)] = True
     if len(_PROPOSED) > 4096:
