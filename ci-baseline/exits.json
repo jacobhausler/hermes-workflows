@@ -315,6 +315,11 @@
     "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_fanout_expand.mjs.log"
   },
   {
+    "test": "test_fanout_empty_items_0p.py",
+    "exit": 0,
+    "log": "rows_added_outside_ci in PROVENANCE.json"
+  },
+  {
     "test": "test_fanout_item_commit_765.py",
     "exit": 0,
     "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_fanout_item_commit_765.py.log"
