@@ -35,6 +35,8 @@ tests/golden_solo/v1.0.15.json
 tests/test_amend_rebake_034849a2.py
 tests/test_sprint101_A-door.py
 tests/test_routing_routes.py
+# Alias-versus-literal routing fixture; the mocked route tokens are asserted verbatim.
+tests/test_literal_provider_prefix_46.py
 tests/test_require_route_25.py
 tests/test_metrics_0923.py
 tests/test_route_efforts_b3c98b2a.py
