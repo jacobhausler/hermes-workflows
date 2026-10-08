@@ -340,6 +340,12 @@ for name, data in bad_diff_shapes.items():
     with patch.object(grg.subprocess, "run", side_effect=diff_reply(data)):
         got = grg.graph_diff_files(".")
     check(f"regen diff: {name} fails closed at the real call site", got is None, repr(got))
+    with patch.object(gpb, "_git_bytes", return_value=_R(0, data)):
+        check(f"path ban: {name} fails closed through the shared parser",
+              gpb.changed_files(".", "base") is None)
+for unsafe in (b"graphify-out/evil\ngraphify-out/forged\0", b"graphify-out/evil\rforged\0"):
+    with patch.object(grg.subprocess, "run", side_effect=diff_reply(b"", untracked=unsafe)):
+        check("regen diff: untracked line-break filename fails closed", grg.graph_diff_files(".") is None)
 with patch.object(grg.subprocess, "run", side_effect=diff_reply(b"", rc=128)):
     check("regen diff: git failure is a hard error, not an empty list",
           grg.graph_diff_files(".") is None)
