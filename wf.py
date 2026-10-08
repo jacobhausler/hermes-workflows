@@ -1052,7 +1052,10 @@ CONTRACT = ("Finish your answer with ONE fenced ```json block holding your resul
 # When a safe root is in force (HERMES_WRITE_SAFE_ROOT non-empty), run_child makes
 # this dir writable: it appends the child's OWN work dir, nothing wider (fb 625a3241).
 WORK_DIR_NOTE = ("Your working directory {WORK_DIR} is durable; write your artifact "
-                 "there first and append as you go.")
+                 "there first and append as you go.\n"
+                 "Single-query approvals may refuse inline interpreters (python -c/-e, "
+                 "heredoc scripts) and execute_code; write a script file in your work "
+                 "directory and run it instead, within the same approval and write boundaries.")
 
 JSON_FENCE = re.compile(r"```json\s*\n(.*?)\n```", re.S)
 
