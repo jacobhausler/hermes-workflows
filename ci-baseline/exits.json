@@ -65,6 +65,11 @@
     "log": "rows_added_outside_ci in PROVENANCE.json"
   },
   {
+    "test": "test_amend_bound_preamble_838.py",
+    "exit": 0,
+    "log": "Local foreground python3 tests/test_amend_bound_preamble_838.py: ALL PASS, exit 0"
+  },
+  {
     "test": "test_amend_preview_defdiff.py",
     "exit": 0,
     "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_amend_preview_defdiff.py.log"
@@ -675,6 +680,11 @@
     "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_orphan_adopt_790c6ad.py.log"
   },
   {
+    "test": "test_package_source_only_756.py",
+    "exit": 0,
+    "log": "CI run 37722866724 Serial suite: exit 0"
+  },
+  {
     "test": "test_packaging.py",
     "exit": 0,
     "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_packaging.py.log"
@@ -713,6 +723,11 @@
     "test": "test_partial_rescue_law_134.py",
     "exit": 0,
     "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_partial_rescue_law_134.py.log"
+  },
+  {
+    "test": "test_personal_path_scrub_867.py",
+    "exit": 0,
+    "log": "Local foreground python3 tests/test_personal_path_scrub_867.py on rebased #248 @ main 3b45625: DONE personal_path_scrub_867 OK, exit 0"
   },
   {
     "test": "test_pill_rail.mjs",
@@ -875,6 +890,11 @@
     "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_route_efforts_b3c98b2a.py.log"
   },
   {
+    "test": "test_route_identity_699.py",
+    "exit": 0,
+    "log": "CI run 37779459550 at 2b7804a Serial suite: exit 0"
+  },
+  {
     "test": "test_route_substitution_641.py",
     "exit": 0,
     "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_route_substitution_641.py.log"
@@ -893,6 +913,11 @@
     "test": "test_run_context_seed_guard.py",
     "exit": 0,
     "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_run_context_seed_guard.py.log"
+  },
+  {
+    "test": "test_run_dir_proof_199.py",
+    "exit": 0,
+    "log": "Local foreground python3 tests/test_run_dir_proof_199.py on rebased #248 @ main 3b45625: Ran 11 tests OK, exit 0"
   },
   {
     "test": "test_run_dry_run.py",
@@ -1237,25 +1262,5 @@
     "test": "test_when_ancestry_0930.py",
     "exit": 0,
     "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_when_ancestry_0930.py.log"
-  },
-  {
-    "test": "test_route_identity_699.py",
-    "exit": 0,
-    "log": "CI run 37779459550 at 2b7804a Serial suite: exit 0"
-  },
-  {
-    "test": "test_package_source_only_756.py",
-    "exit": 0,
-    "log": "CI run 37722866724 Serial suite: exit 0"
-  },
-  {
-    "test": "test_run_dir_proof_199.py",
-    "exit": 0,
-    "log": "Local foreground python3 tests/test_run_dir_proof_199.py on rebased #248 @ main 3b45625: Ran 11 tests OK, exit 0"
-  },
-  {
-    "test": "test_personal_path_scrub_867.py",
-    "exit": 0,
-    "log": "Local foreground python3 tests/test_personal_path_scrub_867.py on rebased #248 @ main 3b45625: DONE personal_path_scrub_867 OK, exit 0"
   }
 ]
