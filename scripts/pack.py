@@ -125,6 +125,11 @@ INCLUDE_FILES = (
     # graph helpers above, so the ZIP side stays honest.
     "scripts/diagram_readme.py",
     "scripts/graph_diagram.py",
+    # est-2ek.1.866 (PR #323 CI red, run 37842073930 admission introduced=1):
+    # tests/test_self_review_422_1866.py exec-modules this at import
+    # (spec_from_file_location) — the exact est-4vnq finding-4 shape. Stdlib-only,
+    # so the ZIP side stays honest.
+    "scripts/pr_formal_review.py",
     "scripts/suite.py",
     "graphify-out/GRAPH_REPORT.md",
     "graphify-out/graph.json",
