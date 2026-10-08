@@ -995,11 +995,23 @@ def _resolve_models(nodes, committed=None, keep=()) -> tuple[str | None, dict | 
         # author never writes the provider the alias already names. The model string
         # itself stays verbatim (house contract: aliases are preserved); only the
         # provider is baked so the runner's --provider matches the alias's own route.
-        ip = im = None
+        ip = im = lit_provider = None
         if m and not provider and not frozen and (tier or m in known):
             ip, im = _alias_provider_pair(requested_model, _seat_model_cfg(), tiers, known)
             if ip:
                 n["provider"] = ip
+        if (m and not provider and not frozen and not ip and not tier
+                and "/" in m and m not in _seat_aliases()):
+            # est-2ek.1.46: a literal 'provider/model' with no node.provider used to reach the
+            # child as a bare `-m provider/model` (seat default route + prefixed id -> HTTP 400)
+            # while the alias for the same model worked. Bake the provider the same way aliases
+            # do, but ONLY for a provider the seat itself routes through: an aggregator's
+            # 'vendor/model' namespace is not a provider claim. `requested` below keeps the
+            # author's literal (provider None).
+            lp, _, lm = m.partition("/")
+            if lp.strip() and lm.strip() and lp in _seat_provider_ids(tiers):
+                ip = lit_provider = n["provider"] = lp
+                n["model"] = m = lm
         eff_provider = provider or ip
         if m and provider:
             prefix, sep, remainder = m.partition("/")
@@ -1008,7 +1020,7 @@ def _resolve_models(nodes, committed=None, keep=()) -> tuple[str | None, dict | 
         if m:
             # display: author-explicit provider names the route (base semantics);
             # an inherited provider shows in `routes` only.
-            display = f"{provider}/{m}" if provider else str(m)
+            display = f"{provider or lit_provider}/{m}" if (provider or lit_provider) else str(m)
             if tier:
                 display += f"  ({tier})"
         table[n["id"]] = display
@@ -1496,6 +1508,24 @@ def _seat_model_cfg():
                     out["default"] = val.strip().strip("'\"")
             elif indent > 2 and in_aliases and val.strip():
                 out["aliases"][key.strip()] = val.strip().strip("'\"")
+    except Exception:
+        pass
+    return out
+
+def _seat_provider_ids(tiers=None):
+    """Provider ids the SEAT itself routes through: the 'provider/' prefix of every seat
+    alias and tier target, plus the configured `providers:` keys when hermes_cli is
+    importable (stdlib-only hosts fall back to the alias/tier prefixes). Deliberately not
+    the core's whole provider catalogue: an aggregator route's 'vendor/model' namespace
+    must not be mistaken for a provider claim (est-2ek.1.46)."""
+    out = set()
+    for target in [*_seat_aliases().values(), *(tiers or {}).values()]:
+        p, sep, rest = str(target).partition("/")
+        if sep and p.strip() and rest.strip():
+            out.add(p.strip())
+    try:
+        from hermes_cli.config import load_config_readonly
+        out |= {str(k) for k in ((load_config_readonly() or {}).get("providers") or {})}
     except Exception:
         pass
     return out
