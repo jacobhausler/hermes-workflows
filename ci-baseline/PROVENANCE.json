@@ -34,9 +34,15 @@
       "exit": 0,
       "measured": "2026-10-08 local foreground run on chore/wr0p-fanout-empty-items: ALL PASS (10 checks, 0 failures), rc=0; repairs the ledger gap left when this PR added tests/test_fanout_empty_items_0p.py without a row (CI job 113262344177 admission introduced=1)",
       "supersede_by": "next green-CI refresh (replace with the CI-captured row)"
+    },
+    {
+      "test": "test_dashboard_entry_77.mjs",
+      "exit": 0,
+      "measured": "Local foreground node tests/test_dashboard_entry_77.mjs on 8640d0de: ALL PASS, exit 0",
+      "supersede_by": "next green-CI refresh (replace with the CI-captured row)"
     }
   ],
-  "totals": {"cases": 235, "red": 0},
+  "totals": {"cases": 236, "red": 0},
   "contract": "Green CI ledgers only (every exit == 0); rows not captured by CI are listed in rows_added_outside_ci with how they were measured. Refresh from the tip of main after each main move; see README.md.",
   "tracking_item": "est-9yl2",
   "source_issue": 75

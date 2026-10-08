@@ -1173,5 +1173,10 @@
     "test": "test_graph_result_158.py",
     "exit": 0,
     "log": "CI run 37719805756 Serial suite: exit 0"
+  },
+  {
+    "test": "test_dashboard_entry_77.mjs",
+    "exit": 0,
+    "log": "Local node tests/test_dashboard_entry_77.mjs: ALL PASS, exit 0"
   }
 ]
