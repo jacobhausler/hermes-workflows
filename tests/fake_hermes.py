@@ -395,6 +395,18 @@ if _FAKE_MODE == "retry_progress" and "RESUME" in q:    # #5: transport death WI
         sys.exit(2)
     print("```json\n" + json.dumps({"result": "resumed"}) + "\n```")
     sys.exit(0)
+if _FAKE_MODE == "retry_hint":   # #130: transport death (0 api calls) that BANKED a work file;
+    # the transient respawn answers ONLY when its prompt carried the artifact inventory.
+    if "RESUME-HINT-ARTIFACT-130" in q and "size=" in q and "mtime=" in q:
+        print("```json\n" + json.dumps({"result": "resumed-hint-130"}) + "\n```")
+        sys.exit(0)
+    try:
+        with open("hint130.md", "w") as f:
+            f.write("RESUME-HINT-ARTIFACT-130 banked before the transport death\n")
+    except OSError:
+        pass
+    print("hermes -z: agent failed: openai.APIConnectionError. Connection error.")
+    sys.exit(2)
 if _FAKE_MODE == "dead_session_102" and "DEADSESS" in q:
     # #102: drive 1 dies on its wall leaving a session row with tool_call_count>0
     # (bounded-retry gate opens) and NO persisted messages when FAKE_MESSAGES=0;
