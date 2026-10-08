@@ -25,6 +25,7 @@ Run: python3 tests/test_bank_the_corpse_131.py
 import json, os, shutil, subprocess, sys, tempfile, threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest.mock import patch
 
 HERE = Path(__file__).resolve().parent
 BUILD = Path(os.environ.get("WF_TEST_BUILD") or HERE.parent)
@@ -147,18 +148,22 @@ try:
           and not [p for p in (r / "nodes").iterdir() if ".tmp" in p.name])
 
     # ============ U: OSError mid-copy never escapes the helper ============
+    # est-muob D1 made the snapshot a bounded read-loop, so the mid-copy seam
+    # is now shutil.copystat (inside the same protected region copy2 used to
+    # sit in) — the law under test is unchanged: OSError mid-copy => honest-
+    # empty, helper returns None and never raises.
     r = mk("b131-unit", [{"id": "u", "type": "agent", "goal": "x"}])
     (wf.child_work_dir(r, {"id": "u"}, None) / "f.txt").write_text("x")
-    real = shutil.copy2
+    real = shutil.copystat
     def _boom(*a, **k): raise PermissionError("injected")
-    shutil.copy2 = _boom
+    shutil.copystat = _boom
     try:
         got = wf._bank_the_corpse(r, {"id": "u"}, None, 0, "tail")
         raised = None
     except Exception as e:   # noqa: BLE001 — the law under test is "never raises"
         got, raised = None, e
     finally:
-        shutil.copy2 = real
+        shutil.copystat = real
     check("U helper returns None and never raises on a mid-copy OSError",
           got is None and raised is None and banked(r)[-1:] and "injected" in banked(r)[-1]["error"],
           repr(raised))
@@ -190,6 +195,128 @@ try:
     check("A one node.banked line (index=0, spawn=0)",
           len(bk) == 1 and bk[0].get("index") == 0 and bk[0].get("spawn") == 0
           and bk[0].get("files") == 1, str(bk)[:300])
+
+    # ============ D1 (est-muob): the cap is decided AT COPY TIME, honestly ============
+    # Deep-review/adversary probe: the 16 MiB budget is checked against a stat
+    # taken BEFORE the copy; an external writer that grows the file in that
+    # window lands 17+ MiB on disk while the manifest reports 1024 bytes. The
+    # snapshot copy must be byte-bounded (never more than the budget on disk)
+    # and the manifest must report the ACTUAL copied bytes + a truncated flag.
+    r = mk("b131-grow", [{"id": "g", "type": "agent", "goal": "x"}])
+    node = {"id": "g"}
+    wd = wf.child_work_dir(r, node, None)
+    wd.mkdir(parents=True, exist_ok=True)
+    gf = wd / "growing.bin"
+    gf.write_bytes(b"x" * 1024)
+    real_copy2 = shutil.copy2
+    grew = []
+    def grow_then_copy(src, dst, *a, **k):
+        # Deterministic interleaving: external writer lands after the bank's
+        # stat, before/inside the copy (mirrors the adversary probe both for
+        # the copy2 path and for a bounded open()/read loop).
+        if not grew:
+            grew.append(1)
+            with open(src, "ab") as h:
+                h.write(b"z" * (17 << 20))
+        return real_copy2(src, dst, *a, **k)
+    real_open = open
+    def grow_then_open(file, *a, **k):
+        if str(file).endswith("growing.bin") and not grew:
+            grew.append(1)
+            with open(file, "ab") as h:
+                h.write(b"z" * (17 << 20))
+        return real_open(file, *a, **k)
+    with patch.object(wf.shutil, "copy2", grow_then_copy), patch("builtins.open", grow_then_open):
+        bank = wf._bank_the_corpse(r, node, None, 0, "tail")
+    check("D1 bank succeeds despite post-stat growth", bank is not None, repr(bank))
+    if bank is not None:
+        on_disk = sum(f.stat().st_size for f in (Path(bank) / "work").rglob("*") if f.is_file())
+        man = json.loads((Path(bank) / "manifest.json").read_text())
+        check("D1 copy is byte-bounded: snapshot never exceeds the budget on disk",
+              on_disk <= man["budget"], f"on_disk={on_disk} budget={man['budget']}")
+        check("D1 manifest reports ACTUAL copied bytes (not the stale pre-copy stat)",
+              man["bytes"] == on_disk, f"manifest={man['bytes']} on_disk={on_disk}")
+        check("D1 growth that busts the budget is flagged truncated",
+              man.get("truncated") is True, json.dumps({k: man.get(k) for k in ("bytes", "budget", "truncated")}))
+        bk = banked(r)
+        check("D1 node.banked line carries the same honest bytes",
+              len(bk) == 1 and bk[0].get("bytes") == on_disk, str(bk)[:300])
+
+    # ============ D2 (est-muob): quarantine records keep the corpse pointer ============
+    # The quarantine builders carry log_path/prompt_path/... forward but DROP
+    # `banked` — a fail-closed record would point at no corpse although the
+    # dead attempt's work is banked. banked must survive like log_path does.
+    src_rec = {"status": "failed", "error_class": "timeout", "banked": "/tmp/x.corpus",
+               "log_path": "log", "prompt_path": "p", "spawn": 0, "raw": "progress",
+               "skey": "k"}
+    ll = wf._left_live_record(1, [2], "probe", src_rec)
+    check("D2 _left_live_record carries banked forward like log_path",
+          ll.get("banked") == "/tmp/x.corpus" and ll.get("log_path") == "log",
+          json.dumps({k: ll.get(k) for k in ("banked", "log_path")}))
+    ur = wf._proc_unreadable_record(1, "n", 0, src_rec)
+    check("D2 _proc_unreadable_record carries banked forward like log_path",
+          ur.get("banked") == "/tmp/x.corpus" and ur.get("log_path") == "log",
+          json.dumps({k: ur.get(k) for k in ("banked", "log_path")}))
+
+    # ============ D3 (est-muob): a wedged events.jsonl can never move the verdict ============
+    # AGENTS.md: the bank logs node.banked and NEVER raises. The success-path
+    # log() sits OUTSIDE the protected try: a real events.jsonl wedge
+    # (directory in its place -> IsADirectoryError) escapes as OSError into the
+    # timeout verdict path. Both the success log and the honest-empty error log
+    # must be unable to raise out of the helper.
+    r = mk("b131-wedge", [{"id": "k", "type": "agent", "goal": "x"}])
+    node = {"id": "k"}
+    (wf.child_work_dir(r, node, None) / "w.txt").write_text("banked despite the wedge\n")
+    er = r / "events.jsonl"
+    if er.exists():
+        er.unlink()
+    er.mkdir()
+    raised = None
+    try:
+        bank = wf._bank_the_corpse(r, node, None, 0, "tail")
+    except OSError as e:
+        bank, raised = None, e
+    check("D3 success-path log wedge (events.jsonl is a dir) never raises out of the helper",
+          raised is None, repr(raised))
+    # error-path: bank fails (squatter) AND the honest-empty log() wedges too.
+    r2 = mk("b131-wedge2", [{"id": "k", "type": "agent", "goal": "x"}])
+    (r2 / "nodes" / "k.corpus").write_text("not a dir")
+    er2 = r2 / "events.jsonl"
+    if er2.exists():
+        er2.unlink()
+    er2.mkdir()
+    raised2 = None
+    try:
+        bank2 = wf._bank_the_corpse(r2, {"id": "k"}, None, 1, "tail")
+    except OSError as e:
+        bank2, raised2 = None, e
+    check("D3 honest-empty error log wedge never raises out of the helper",
+          raised2 is None and bank2 is None, repr(raised2))
+
+    # ============ D4 (est-muob): bounded retry keeps the corpse reference ============
+    # The ordinary successful timeout -> retry re-drive drops `banked` from
+    # BOTH the merged final result and the dead attempt's attempts_log entry,
+    # so the winner record silently loses the pointer to the dead drive-1
+    # corpse. Probe-mirrored: only progress/budget/quarantine/counters patched.
+    r = mk("b131-retry", [{"id": "t", "type": "agent", "goal": "x"}])
+    meta = {"_run": r, "_stop": threading.Event(), "_procs_lock": threading.Lock(),
+            "_retries_left": 1}
+    dead_rec = {"status": "failed", "error_class": "timeout", "banked": "/tmp/dead1.corpus",
+                "log_path": "log", "spawn": 0, "raw": "progress", "skey": "k"}
+    with patch.object(wf, "_tool_progress", return_value=True), \
+         patch.object(wf, "_BOUNDED_RETRY_BACKOFF", 0), \
+         patch.object(wf, "_isolate_prior", return_value=None), \
+         patch.object(wf, "_attempt_counts", return_value={}):
+        retried = wf._bounded_retry(meta, dead_rec,
+                                    lambda **kw: {"status": "done", "output": {"ok": True}, "spawn": 1},
+                                    "node", {"node": "t"})
+    check("D4 successful re-drive keeps banked on the final result",
+          retried.get("status") == "done" and retried.get("banked") == "/tmp/dead1.corpus",
+          json.dumps({k: retried.get(k) for k in ("status", "banked")}))
+    al = retried.get("attempts_log") or []
+    check("D4 dead attempt's attempts_log entry keeps banked",
+          len(al) == 1 and al[0].get("error_class") == "timeout"
+          and al[0].get("banked") == "/tmp/dead1.corpus", str(al)[:300])
 finally:
     shutil.rmtree(HOME, ignore_errors=True)
 

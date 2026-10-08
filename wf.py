@@ -2341,30 +2341,67 @@ def _bank_the_corpse(run, node, index, spawn, out):
         wd, files = _work_files(run, node, index)
         shutil.rmtree(tmp, ignore_errors=True)
         (tmp / "work").mkdir(parents=True)
-        rows, n, nbytes = [], 0, 0
+        rows, n, nbytes, truncated = [], 0, 0, False
         for f in files:
             st, rel = f.stat(), f.relative_to(wd).as_posix()
-            copied = not f.is_symlink() and nbytes + st.st_size <= CORPUS_MAX_BYTES
+            copied = 0
+            if not f.is_symlink() and nbytes < CORPUS_MAX_BYTES:
+                # D1 (est-muob) byte-bounded copy: the cap is enforced AT COPY
+                # TIME against the bytes actually read, not a pre-copy stat an
+                # external writer can outgrow mid-copy. The manifest's
+                # `bytes` is the ACTUAL bytes on disk; anything clipped by the
+                # cap sets `truncated`.
+                dst = tmp / "work" / rel
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                src_f = open(f, "rb")
+                dst_f = open(dst, "wb")
+                try:
+                    while True:
+                        chunk = src_f.read(1 << 20)
+                        if not chunk:
+                            break                      # honest EOF
+                        room = CORPUS_MAX_BYTES - nbytes
+                        if len(chunk) > room:
+                            # D1: the cap clips the read — copy the remainder
+                            # of this chunk, flag it, and stop.
+                            dst_f.write(chunk[:room])
+                            nbytes += room
+                            truncated = True
+                            break
+                        dst_f.write(chunk)
+                        nbytes += len(chunk)
+                    shutil.copystat(f, dst)
+                finally:
+                    src_f.close()
+                    dst_f.close()
+                copied = 1
             if copied:
-                (tmp / "work" / rel).parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(f, tmp / "work" / rel)
-                n, nbytes = n + 1, nbytes + st.st_size
-            rows.append({"path": rel, "size": st.st_size, "mtime": st.st_mtime, "copied": copied})
+                n += 1
+            rows.append({"path": rel, "size": st.st_size, "mtime": st.st_mtime,
+                         "copied": bool(copied)})
         (tmp / "stdout_tail.txt").write_text((out or "")[-4000:], encoding="utf-8", errors="replace")
         (tmp / "manifest.json").write_text(json.dumps(
             {"node": node["id"], "index": index, "spawn": spawn, "work_dir": str(wd),
              "last_written": rows[0]["path"] if rows else None, "files": rows,
-             "bytes": nbytes, "budget": CORPUS_MAX_BYTES}, indent=1))
+             "bytes": nbytes, "budget": CORPUS_MAX_BYTES, "truncated": truncated}, indent=1))
         if corpus.is_dir() and not corpus.is_symlink():
             shutil.rmtree(corpus)
         os.rename(tmp, corpus)
     except Exception as e:
         shutil.rmtree(tmp, ignore_errors=True)
-        log(run, "node.banked", node=node["id"], index=index, spawn=spawn, files=0, bytes=0,
-            corpus=None, error=f"{type(e).__name__}: {e}")
+        # D3 (est-muob): the never-raises promise (AGENTS.md) covers the LOGS
+        # too — a wedged events.jsonl must never escape into the verdict path.
+        try:
+            log(run, "node.banked", node=node["id"], index=index, spawn=spawn, files=0, bytes=0,
+                corpus=None, error=f"{type(e).__name__}: {e}")
+        except Exception:
+            pass
         return None
-    log(run, "node.banked", node=node["id"], index=index, spawn=spawn, files=n, bytes=nbytes,
-        corpus=str(corpus))
+    try:
+        log(run, "node.banked", node=node["id"], index=index, spawn=spawn, files=n, bytes=nbytes,
+            corpus=str(corpus))
+    except Exception:
+        pass
     return str(corpus)
 
 def _banked_work(run, node, index):
@@ -3072,7 +3109,7 @@ def _left_live_record(pid, stuck, note, r=None):
     if r.get("attempts_log") is not None:
         rec["attempts_log"] = r["attempts_log"]
     for k in ("log_path", "prompt_path", "pid", "spawn", "skey", "final",
-              "tree_pids", "profile_home"):
+              "tree_pids", "profile_home", "banked"):
         if r.get(k) is not None:
             rec[k] = r[k]
     return rec
@@ -3770,7 +3807,8 @@ def _proc_unreadable_record(pid, node_id, spawn_no, r=None):
     # failed quarantine; the unreadable record must not erase it.
     if r.get("attempts_log") is not None:
         rec["attempts_log"] = r["attempts_log"]
-    for k in ("log_path", "prompt_path", "pid", "spawn", "skey", "profile_home"):
+    for k in ("log_path", "prompt_path", "pid", "spawn", "skey", "profile_home",
+              "banked"):
         if r.get(k) is not None:
             rec[k] = r[k]
     return rec
@@ -5405,6 +5443,11 @@ def _bounded_retry(meta, r, respawn, ev, ev_kw, node=None, index=None):
     al = list(r.get("attempts_log") or [])
     entry = {"attempt": len(al), "error_class": eclass, "at": now(), "resume": True,
              **_attempt_counts(run, r)}
+    # D4 (est-muob): the dead attempt's corpse pointer is the only witness of
+    # WHERE drive-1's banked work lives — the attempts_log entry and the
+    # merged winner record must both keep it.
+    if r.get("banked") is not None:
+        entry["banked"] = r["banked"]
     if dead:
         entry["fresh_session"] = True
     al.append(entry)
@@ -5413,6 +5456,8 @@ def _bounded_retry(meta, r, respawn, ev, ev_kw, node=None, index=None):
     r2 = respawn(resume_preamble=preamble)
     r2["attempts_log"] = al
     r2["attempts"] = (r2.get("spawn") + 1) if isinstance(r2.get("spawn"), int) else len(al) + 1
+    if r.get("banked") is not None and r2.get("banked") is None:
+        r2["banked"] = r["banked"]
     return r2
 
 def drain_inbox(run, consumed):
