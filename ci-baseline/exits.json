@@ -515,6 +515,11 @@
     "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_library_erase_path_yzoy.py.log"
   },
   {
+    "test": "test_library_tag_read_qeul.py",
+    "exit": 0,
+    "log": "rows_added_outside_ci in PROVENANCE.json"
+  },
+  {
     "test": "test_lifecycle_next_cut_0923.py",
     "exit": 0,
     "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_lifecycle_next_cut_0923.py.log"
