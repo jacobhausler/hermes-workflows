@@ -34,6 +34,23 @@ desc = hw.WORKFLOW_SCHEMA["parameters"]["properties"]["graph"]["description"]
 check("registered desc is the WORKFLOW_PARAMS constant",
       desc is hw.WORKFLOW_PARAMS["properties"]["graph"]["description"])
 
+# est-2ek.1.80: the model sees this registered description before loading a skill.
+class Ctx:
+    def __init__(self): self.tools = {}
+    def register_skill(self, *_, **__): pass
+    def register_hook(self, *_, **__): pass
+    def register_command(self, *_, **__): pass
+    def register_tool(self, **kw): self.tools[kw["name"]] = kw
+    def get_config(self, _key, default): return default
+ctx = Ctx()
+hw.register(ctx)
+selection = ctx.tools["workflow"]["schema"]["description"]
+check("registered selection names delegate_task", "delegate_task" in selection, selection)
+check("registered selection names independent lanes / human gate / resumable graph",
+      all(s in selection for s in ("independent lanes", "human gate", "resumable graph")), selection)
+check("registered selection avoids one or two independent calls",
+      "one or two independent calls" in selection, selection)
+
 # (1) quorum copy follows the runner: optional, cancellation only when set,
 #     no default majority anywhere.
 check("quorum copy says OPTIONAL", "quorum (OPTIONAL" in desc,
