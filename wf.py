@@ -2353,7 +2353,7 @@ def _resume_hint_block(run, node, index, attempts_log=None):
     a prior attempt's files. Prompt-side only (#37 law): never graph.json, node
     records or the def hash. Dead-session noise is stripped (_clean_capture)."""
     flag = (node or {}).get("resume_hint")
-    if node is None or flag is False:
+    if not (node or {}).get("id") or flag is False:
         return ""
     try:
         wd = child_work_dir(run, node, index)
@@ -5097,8 +5097,8 @@ def _ratelimit_park(meta, r, respawn, ev, ev_kw, node=None, cancel=None,
         # defect). #11's one-time extend still applies on top of the clamp —
         # that law was bought separately and stays intact.
         meta.setdefault("_rl_timeout_cap", {})[key] = park_deadline
-        r = respawn(resume_preamble=_resume_hint_block(run, node, ev_kw.get("index"),
-                                                       attempts_log))   # #130
+        hint = _resume_hint_block(run, node, ev_kw.get("index"), attempts_log)   # #130
+        r = respawn(resume_preamble=hint) if hint else respawn()
     if attempts_log:
         r["attempts_log"] = attempts_log
         last_spawn = r.get("spawn")
@@ -5171,8 +5171,8 @@ def _transient_retry(meta, r, respawn, ev, ev_kw, node=None, cancel=None):
         if iso is not None:
             iso["attempts_log"] = attempts_log
             return iso
-        r = respawn(resume_preamble=_resume_hint_block(run, node, ev_kw.get("index"),
-                                                       attempts_log))   # #130
+        hint = _resume_hint_block(run, node, ev_kw.get("index"), attempts_log)   # #130
+        r = respawn(resume_preamble=hint) if hint else respawn()
         # wf159c finding 2: a banner death that surfaces AFTER a ladder
         # respawn must reach the park too — the dispatcher contract (parks
         # while wall+budget allow, then verbatim banner + ratelimit_gave_up)
