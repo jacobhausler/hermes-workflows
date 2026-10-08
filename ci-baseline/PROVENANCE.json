@@ -99,10 +99,16 @@
       "test": "tests/test_route_identity_699.py",
       "added_by": "author lane (est-2ek.1.699, PR #296)",
       "measured": "2026-10-08 lane run: 240 cases, 0 red (65/65 checks in-file)"
+    },
+    {
+      "test": "test_schema_min_96.py",
+      "exit": 0,
+      "measured": "2026-10-08 local foreground run (ALL PASS) on build/workflows-96; the row can only ever make CI red, never green",
+      "supersede_by": "next green-CI refresh (replace with the CI-captured row)"
     }
   ],
   "totals": {
-    "cases": 246,
+    "cases": 247,
     "red": 0
   },
   "contract": "Green CI ledgers only (every exit == 0); rows not captured by CI are listed in rows_added_outside_ci with how they were measured. Refresh from the tip of main after each main move; see README.md.",

@@ -1071,9 +1071,13 @@ def validate_graph_errors(nodes, *, admission=False):
         # prompt-only annotation; enum is ENFORCED at harvest (#107 — the old
         # law "never accept a constraint that cannot be enforced" stays TRUE:
         # enum joined the subset only once wf.validate() checks membership).
+        # #96: minItems/minLength joined the SAME way — wf.validate() now
+        # enforces both (array length; non-blank char count via v.strip(),
+        # fail-closed: a whitespace-only probe is not a probe), so the door
+        # admits exactly what the harvester can enforce, nothing more.
         for k in sorted(set(schema) - {"type", "required", "properties", "items",
-                                       "description", "enum"}):
-            E(nid, f"{field}.{k}", "unsupported schema keyword; supported: type, required, properties, items, description, enum")
+                                       "description", "enum", "minItems", "minLength"}):
+            E(nid, f"{field}.{k}", "unsupported schema keyword; supported: type, required, properties, items, description, enum, minItems, minLength")
         if "type" in schema and schema["type"] not in ("object", "array", "string", "number", "integer", "boolean"):
             E(nid, f"{field}.type", "unsupported schema type")
         if "required" in schema and (not isinstance(schema["required"], list)
@@ -1093,6 +1097,17 @@ def validate_graph_errors(nodes, *, admission=False):
                 E(nid, f"{field}.enum", "enum members must be a list of non-empty strings")
             elif schema.get("type") != "string":
                 E(nid, f"{field}.enum", "enum is only legal on type:'string' (the harvester enforces string membership only)")
+        # #96: minItems/minLength — same enforceability law as enum. The door
+        # admits a floor ONLY where wf.validate() can actually enforce it:
+        # minItems on type:'array', minLength on type:'string', each a
+        # non-negative int (bool is never a count — same bool law as #113).
+        for _kw, _t in (("minItems", "array"), ("minLength", "string")):
+            if _kw in schema:
+                mv = schema[_kw]
+                if isinstance(mv, bool) or not isinstance(mv, int) or mv < 0:
+                    E(nid, f"{field}.{_kw}", f"{_kw} must be a non-negative integer")
+                elif schema.get("type") != _t:
+                    E(nid, f"{field}.{_kw}", f"{_kw} is only legal on type:'{_t}' (the harvester enforces it only there)")
         props = schema.get("properties")
         if props is not None:
             if not isinstance(props, dict):
@@ -4421,12 +4436,23 @@ def _rename_hint(r, v, s):
     return f" (you wrote '{hit}'? the schema needs '{r}')"
 
 def validate(out, schema):
-    """Tiny forgiving validator: type / required / properties / items / enum.
+    """Tiny forgiving validator: type / required / properties / items / enum
+    / minItems / minLength.
     #107: `enum` membership is ENFORCED here — a str value against a
     string-membered enum (exactly what the door's schema_check admits: a
     non-empty list of non-empty strings on type:'string'), so a misspelled
     verdict takes the same typed-correction-retry path as a `type` violation
-    and the error string names the allowed set for the retry prompt."""
+    and the error string names the allowed set for the retry prompt.
+    #96: `minItems` (array length) and `minLength` (string floor) are
+    ENFORCED here on exactly the placements the door admits — type:'array' /
+    type:'string' with a non-negative int — and only AFTER the value's type
+    checked (a wrong-typed value gets the type error, never a pile-on).
+    minLength counts NON-BLANK chars (`len(v.strip())`): a whitespace-only
+    probe is not a probe — a deliberate, fail-closed deviation from JSON
+    Schema, where minLength counts raw chars. Malformed floors (non-int) are
+    ignored here, never crash: the door is the enforcement point; a
+    hand-built schema must not take the runner down. An all-blank
+    verify_list-style array now fails closed like the rest of the law."""
     errs = []
     if not schema:
         return errs
@@ -4451,6 +4477,16 @@ def validate(out, schema):
                 and all(isinstance(x, str) for x in en) and v not in en):
             errs.append(f"{path}: not an allowed value (allowed: "
                         + ", ".join(repr(x) for x in en) + ")")
+        # #96: floors, enforced only where the door admits them (right value
+        # type, non-negative int floor). bool refused: True is not a count.
+        mi = s.get("minItems")
+        if (t == "array" and isinstance(v, list) and isinstance(mi, int)
+                and not isinstance(mi, bool) and mi >= 0 and len(v) < mi):
+            errs.append(f"{path}: expected at least {mi} item(s)")
+        ml = s.get("minLength")
+        if (t == "string" and isinstance(v, str) and isinstance(ml, int)
+                and not isinstance(ml, bool) and ml >= 0 and len(v.strip()) < ml):
+            errs.append(f"{path}: expected at least {ml} non-blank char(s)")
         if isinstance(v, dict):
             for r in s.get("required", []):
                 if r not in v:
