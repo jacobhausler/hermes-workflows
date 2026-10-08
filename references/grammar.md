@@ -58,7 +58,8 @@ with `required`, `desc`, and a nonempty string `default`; graph refs always rema
 required regardless of the metadata. Defaults are suggestions, never implicit
 bindings. A malformed params block is read as absent, not entry quarantine.
 `save params:{...}` writes the envelope; omission retains prior params and `{}`
-clears them. Missing/dead declarations yield named non-fatal `s12` save warnings.
+clears them. Missing/dead declarations on an ENVELOPE entry yield named non-fatal
+`s12` save warnings; a bare save's contract is wholly ref-derived and never warns s12.
 `wfcommon.run_context_contract` is the shared predicate for these sets.
 
 `run from:<library name>` refuses missing, empty, whitespace-only or non-string

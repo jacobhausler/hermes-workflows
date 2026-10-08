@@ -2062,11 +2062,16 @@ def act_save(args):
     # law: the save lands; only a warning key rides the response, and a clean
     # save's response stays byte-identical (no empty key — golden bytes).
     _warn = _stale_literal_warnings(graph)
-    contract = _common.run_context_contract(_expanded, params)
-    if contract["missing"]:
-        _warn.append("s12 uncontracted run_context refs: " + ", ".join(contract["missing"]))
-    if contract["dead"]:
-        _warn.append("s12 dead declared params: " + ", ".join(contract["dead"]))
+    # est-kg3y s12: only an ENVELOPE entry declares a contract (meta is where
+    # params live), so only it can disagree with its refs. A bare entry's
+    # contract is wholly derived from refs — a bound bare save stays warning-free
+    # (est-2ek.1.245 T2b: binding points are the cure, never a new warning).
+    if data is not graph:
+        contract = _common.run_context_contract(_expanded, params)
+        if contract["missing"]:
+            _warn.append("s12 uncontracted run_context refs: " + ", ".join(contract["missing"]))
+        if contract["dead"]:
+            _warn.append("s12 dead declared params: " + ", ".join(contract["dead"]))
     if _warn:
         out["save_warnings"] = _warn
     return out
@@ -2735,7 +2740,10 @@ def act_run(args):
     except ValueError as e:
         return {"error": f"graph invalid: defaults/shape: {e}"}
     if lib_name:
-        refs = _common.run_context_contract(graph)["refs"]
+        # Post-defaults: `defaults` is already baked into nodes, so the render
+        # surface the runner consumes is nodes[] alone (the retained `defaults`
+        # block is never rendered and must not read as a survivor).
+        refs = _common.run_context_contract({"nodes": graph["nodes"]})["refs"]
         binding = args.get("run_context")
         if refs and not isinstance(binding, dict):
             return {"error": "library run_context must bind non-empty string values for: "
@@ -2746,7 +2754,7 @@ def act_run(args):
         except ValueError as e:
             return {"error": str(e)}
     if lib_name:
-        refs = _common.run_context_contract(graph)["refs"]
+        refs = _common.run_context_contract({"nodes": graph["nodes"]})["refs"]
         if refs:
             return {"error": "library run_context has surviving {run.KEY} references: "
                              + ", ".join(refs) + "; refused before any write or spawn"}

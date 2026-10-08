@@ -77,7 +77,8 @@ Optional `save params:{KEY:{desc,default}}` stores descriptive `meta.params` in
 the envelope. Required keys derive from graph refs, not this declaration; defaults
 are suggestions in the instantiate command, never automatic launch bindings.
 Omission retains params on overwrite; `{}` clears them deliberately. Missing or
-dead declarations produce non-fatal `s12` save warnings naming the keys. Bare,
+dead declarations on an envelope save produce non-fatal `s12` save warnings
+naming the keys; a bare save's contract derives wholly from refs. Bare,
 ref-free library rows and clean save responses keep their previous key sets.
 
 ## Graph grammar in 30 seconds

@@ -232,7 +232,8 @@ Library templates: `workflow {"action":"library","name":"<name>"}` or
 Supply explicit nonempty string values with `run from:<name>`; the door binds
 all shared text fields and refuses any surviving ref before writing or spawning.
 Optional `save params:{KEY:{desc,default}}` describes those refs in `meta.params`;
-missing/dead declarations warn (non-fatal `s12`), omission retains prior params,
+missing/dead declarations on an envelope save warn (non-fatal `s12`; bare saves
+derive the contract from refs and never warn s12), omission retains prior params,
 and `{}` clears them. Defaults are suggestions, never automatic launch inputs.
 Inline unbound machine argv remains refused; ordinary inline text keeps its
 existing verbatim leniency.
