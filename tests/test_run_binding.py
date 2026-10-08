@@ -166,6 +166,8 @@ else:
     check("fan-out child prompt: node-goal template — door renders run.KEY, runner renders {item}, each once", False, r)
 # est-2ek.1.792: run_context never reaches a gate's wait.until_argv (exec'd as fixed argv), so a
 # surviving {run.KEY} there is refused at the door (run, dry_run, amend) before any run write.
+# These are admission/commit checks; never launch a runner (even on the red baseline).
+hw._spawn_runner = lambda *_args, **_kwargs: None
 def _run_dirs():
     root = HOME / "workflows"
     return {p.name for p in root.iterdir() if p.is_dir() and p.name != "library"} if root.is_dir() else set()
@@ -188,7 +190,7 @@ check("until_argv {run.KEY} refused on dry_run", "wait.until_argv[0]" in r.get("
 lit = _gate([sys.executable, "-c", "pass"], name="literal792")
 lit["nodes"].append({"id": "a", "type": "agent", "goal": "use {run.thing}"})
 r = run(graph=lit, binding={"thing": "bound"})
-check("literal until_argv + bound goal still launches", "run_id" in r, r)
+check("literal until_argv + bound goal still admits and commits", "run_id" in r, r)
 if "run_id" in r:
     snap = {n["id"]: n for n in snapshot(r)["nodes"]}
     check("literal until_argv committed byte-verbatim; goal binding unchanged",
