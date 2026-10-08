@@ -13,6 +13,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import wf
+import wfcommon
 
 
 class SeatAdmission(unittest.TestCase):
@@ -113,6 +114,16 @@ class SeatAdmission(unittest.TestCase):
         self.assertEqual(list(self.seats.glob('*.json')), [], 'admission leaked a ticket')
         return self.rows(self.capture)
 
+    def assert_current(self, children, graph, count):
+        self.assertFalse(any('OBSOLETE' in r['prompt'] for r in children), children)
+        self.assertEqual(len(children), count, children)
+        byid = {n['id']: n for n in graph['nodes']}
+        expected = wf.efp(byid, byid['work'])
+        self.assertTrue(all(r['efp'] == expected for r in children), children)
+        for path in (self.run_dir / 'nodes').glob('work*.json'):
+            rec = json.loads(path.read_text())
+            self.assertEqual((rec['status'], rec['efp']), ('done', expected), rec)
+
     def test_singleton_replacement(self):
         old = self.graph()
         self.start(old)
@@ -120,14 +131,88 @@ class SeatAdmission(unittest.TestCase):
         current['nodes'][-1]['goal'] = 'CURRENT'
         self.amend(current)
         children = self.finish()
-        self.assertFalse(any('OBSOLETE' in r['prompt'] for r in children), children)
-        self.assertEqual(len(children), 1, children)
+        self.assert_current(children, current, 1)
         self.assertIn('CURRENT', children[0]['prompt'])
-        byid = {n['id']: n for n in current['nodes']}
-        expected = wf.efp(byid, byid['work'])
-        self.assertEqual(children[0]['efp'], expected)
-        rec = json.loads((self.run_dir / 'nodes' / 'work.json').read_text())
-        self.assertEqual((rec['status'], rec['efp']), ('done', expected))
+
+    def test_fanout_replacement(self):
+        old = self.graph(fanout=True)
+        self.start(old, count=2)
+        current = copy.deepcopy(old)
+        current['nodes'][-1].update(goal='CURRENT', fanout={
+            'items': ['x', 'y', 'z'], 'goal': 'CURRENT {item}'})
+        self.amend(current)
+        children = self.finish()
+        self.assert_current(children, current, 3)
+        self.assertEqual({r['prompt'].splitlines()[0] for r in children},
+                         {'CURRENT x', 'CURRENT y', 'CURRENT z'})
+
+    def removed_node(self, fanout):
+        self.start(self.graph(fanout=fanout), count=2 if fanout else 1)
+        self.amend({'name': 'admission', 'nodes': [
+            {'id': 'survivor', 'type': 'echo', 'output': 'current'}]})
+        self.assertEqual(self.finish(), [])
+        self.assertFalse(any(r.get('kind') == 'child' for r in
+                             self.rows(self.run_dir / 'spawn-ledger.jsonl')))
+
+    def test_removed_singleton_never_spawns(self):
+        self.removed_node(False)
+
+    def test_removed_fanout_never_spawns(self):
+        self.removed_node(True)
+
+    def ancestor_amendment(self, fanout):
+        old = self.graph(fanout=fanout, ancestor=True)
+        self.start(old, count=2 if fanout else 1)
+        current = copy.deepcopy(old)
+        current['nodes'][0]['output'] = {'value': 'CURRENT'}
+        self.assertEqual(wfcommon.def_hash(old['nodes'][-1]),
+                         wfcommon.def_hash(current['nodes'][-1]))
+        self.amend(current)
+        self.assert_current(self.finish(), current, 2 if fanout else 1)
+
+    def test_singleton_transitive_ancestor_amendment(self):
+        self.ancestor_amendment(False)
+
+    def test_fanout_transitive_ancestor_amendment(self):
+        self.ancestor_amendment(True)
+
+    def test_removed_ancestor(self):
+        old = self.graph(fanout=True, ancestor=True)
+        self.start(old, count=2)
+        current = copy.deepcopy(old)
+        current['nodes'].pop(0)
+        current['nodes'][0]['after'] = []
+        self.assertEqual(old['nodes'][-1], current['nodes'][-1])
+        self.amend(current)
+        self.assert_current(self.finish(), current, 2)
+
+    def test_unchanged_fingerprint_admits_once_and_replay_skips(self):
+        old = self.graph(fanout=True)
+        old['nodes'][-1].update(goal='stable', fanout={
+            'items': ['a', 'b'], 'goal': 'stable {item}'})
+        self.start(old, count=2)
+        current = copy.deepcopy(old)
+        current['nodes'][-1]['timeout'] = 20  # budgets deliberately do not change efp
+        current['name'] = 'metadata-only-amend'
+        self.amend(current)
+        self.assert_current(self.finish(), current, 2)
+        self.proc = subprocess.Popen([sys.executable, str(ROOT / 'wf.py'), 'run', self.run_dir.name],
+                                     env=self.env, stdout=self.log, stderr=subprocess.STDOUT)
+        self.assertEqual(self.proc.wait(timeout=10), 0)
+        self.assertEqual(len(self.rows(self.capture)), 2, 'unchanged work replayed')
+        self.assertEqual(list(self.seats.glob('*.json')), [])
+
+    def test_stop_during_wait_never_spawns(self):
+        self.start(self.graph(fanout=True), count=2)
+        (self.run_dir / 'stop.request').touch()
+        # Keep every seat held until the cancellation has actually been consumed.
+        self.assertEqual(self.proc.wait(timeout=10), 0)
+        self.assertEqual(self.finish(), [])
+        rec = json.loads((self.run_dir / 'runner_exit.json').read_text())
+        self.assertEqual(rec['reason'], 'stopped')
+        items = [json.loads(p.read_text()) for p in (self.run_dir / 'nodes').glob('work.*.json')]
+        self.assertEqual(len(items), 2)
+        self.assertTrue(all(r.get('error_class') == 'cancelled' for r in items), items)
 
 
 if __name__ == '__main__':
