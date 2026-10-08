@@ -27,9 +27,10 @@ def check(label: str, condition: bool) -> None:
 
 def main() -> None:
     manifest = json.loads((ROOT / "dashboard/manifest.json").read_text(encoding="utf-8"))
-    check("dashboard backend manifest is API-only with a hidden tab",
+    check("dashboard backend keeps its API and hidden tab with a loadable web entry",
           manifest.get("api") == "plugin_api.py" and manifest.get("tab", {}).get("hidden") is True
-          and "entry" not in manifest)
+          and manifest.get("name") == "hermes-workflows" and manifest.get("version") == VERSION
+          and manifest.get("entry") == "index.js" and (ROOT / "dashboard/index.js").is_file())
 
     collision = types.ModuleType("wfcommon")
     sys.modules["wfcommon"] = collision
@@ -72,7 +73,7 @@ def main() -> None:
             check("archive includes runtime, docs, skill, examples, tests, and checksum manifest",
                   all(root + rel in members for rel in (
                       "plugin.yaml", "__init__.py", "wf.py", "wfcommon.py",
-                      "dashboard/manifest.json", "dashboard/plugin_api.py", "desktop/plugin.js",
+                      "dashboard/manifest.json", "dashboard/index.js", "dashboard/plugin_api.py", "desktop/plugin.js",
                       "README.md", "INSTALL.md", "SKILL.md", "examples/README.md", "examples/basics/smoke.json",
                       "examples/basics/approve-publish.json", "examples/review/blind-council.workflow.json",
                       "examples/basics/branch-on-verdict.json",

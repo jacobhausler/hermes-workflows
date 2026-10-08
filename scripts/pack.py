@@ -81,6 +81,7 @@ INCLUDE_FILES = (
     "__init__.py",
     "card_enforcement.py",  # #157: imported by __init__.py at bind time — a packaged plugin without it dies at import
     "dashboard/manifest.json",
+    "dashboard/index.js",  # hidden API plugin still needs the web host's script/registration contract
     "dashboard/plugin_api.py",
     "desktop/plugin.js",
     "examples/basics/approve-publish.json",
