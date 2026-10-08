@@ -1296,5 +1296,15 @@
     "test": "test_wall_meter_133.py",
     "exit": 0,
     "log": "Local foreground cd tests && PYTHONPATH=/opt/hermes:.. python3 test_wall_meter_133.py: RESULT GREEN (18 checks, 0 failed), exit 0"
+  },
+  {
+    "test": "test_self_review_422_1866.py",
+    "exit": 0,
+    "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_self_review_422_1866.py.log"
+  },
+  {
+    "test": "test_route_hold_optout_retry_w56.py",
+    "exit": 0,
+    "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_route_hold_optout_retry_w56.py.log"
   }
 ]

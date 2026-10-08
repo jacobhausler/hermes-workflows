@@ -182,10 +182,22 @@
       "exit": 0,
       "measured": "2026-10-09 local foreground run on fix/w33-spawn-enoent: RED at base 96ee587 (legs A+B reproduce the est-ulwpg typed spawn death ms=0 attempts=1 byte-for-byte; leg C green), GREEN at fix head: 11 PASS / 0 FAIL rc=0; spawn-family siblings seat_popen_exception/postpopen_cleanup/cancel_at_ticket/11_runner_profile/spawn_ledger/lane_hygiene all rc=0",
       "supersede_by": "next green-CI refresh (replace with the CI-captured row)"
+    },
+    {
+      "test": "test_self_review_422_1866.py",
+      "exit": 0,
+      "measured": "2026-10-08 foreground run in the fix worktree: DONE self_review_422_1866 OK (RC=0); RED-proof at base 8bc661c (module missing -> FAIL).",
+      "supersede_by": "next green-CI refresh (replace with the CI-captured row)"
+    },
+    {
+      "test": "test_route_hold_optout_retry_w56.py",
+      "exit": 0,
+      "measured": "2026-10-08 foreground run in the fix worktree: DONE route_hold_optout_retry OK (RC=0); RED-proof at base 8bc661c (H1/H2/R2 FAIL -> RC=1).",
+      "supersede_by": "next green-CI refresh (replace with the CI-captured row)"
     }
   ],
   "totals": {
-    "cases": 260,
+    "cases": 262,
     "red": 0
   },
   "contract": "Green CI ledgers only (every exit == 0); rows not captured by CI are listed in rows_added_outside_ci with how they were measured. Refresh from the tip of main after each main move; see README.md.",
