@@ -6056,9 +6056,19 @@ def _bounded_retry(meta, r, respawn, ev, ev_kw, node=None, index=None):
     never started has nothing to duplicate. lease_busy deaths therefore skip
     the progress gate, always take the harvest preamble (dead=True — never
     --continue the still-busy session), and log the machine-wait event
-    `node.retrying error_class=lease_busy` before the 5 s wait."""
+    `node.retrying error_class=lease_busy` before the 5 s wait.
+    est-ggqs (#256 claim 1): a harvest-on-death `partial` (_harvest_death: rc!=0 /
+    cap / wall AFTER a schema-valid fenced answer) whose death class is bounded
+    enters the SAME ladder under the SAME guards (class, positive tool progress,
+    stop, budget, #61 quarantine, #102) — the early return used to strand a
+    turn-capped node that did real work as `partial`, blocking every plain
+    descendant. The harvest is never traded away: a re-drive that dies WITHOUT
+    an answer keeps the harvested record (both deaths in attempts_log); only a
+    #61 terminal verdict on the re-drive replaces it. A FAILED record carrying a
+    harvest (the cancel-harvest shape) is still never re-driven."""
     run = meta["_run"]
-    if r.get("status") != "failed" or r.get("harvest"):
+    harvested = r.get("status") == "partial" and isinstance(r.get("harvest"), dict)
+    if not harvested and (r.get("status") != "failed" or r.get("harvest")):
         return r
     eclass = r.get("error_class")
     if eclass not in _BOUNDED_RETRY_CLASSES:
@@ -6129,16 +6139,69 @@ def _bounded_retry(meta, r, respawn, ev, ev_kw, node=None, index=None):
         entry["banked"] = r["banked"]
     if dead:
         entry["fresh_session"] = True
+    if harvested:
+        entry["harvested"] = True          # est-ggqs: the cap/death stays in the ledger
     al.append(entry)
     hint = _resume_hint_block(run, node, index if index is not None else ev_kw.get("index"), al)
     preamble = (_dead_session_harvest(r, eclass, run, node, index, inventory=hint) if dead
                 else "\n\n".join(p for p in (_resume_preamble(r), hint) if p))   # #130
     r2 = respawn(resume_preamble=preamble)
+    if harvested and r2.get("status") not in ("done", "partial") \
+            and r2.get("error_class") != "left_live_descendants":
+        # est-ggqs: an answer-less re-drive never discards the schema-valid
+        # harvest — keep it, and record the lost re-drive beside the original death.
+        al.append({"attempt": len(al), "error_class": r2.get("error_class"), "at": now(),
+                   "redrive_lost": True, **_attempt_counts(run, r2)})
+        kept = dict(r)
+        kept["attempts_log"] = al
+        kept["attempts"] = (r2.get("spawn") + 1) if isinstance(r2.get("spawn"), int) \
+            else len(al)
+        if r2.get("tree_pids"):            # #61: the re-drive's tree stays in the
+            kept["tree_pids"] = sorted(set(kept.get("tree_pids") or [])   # commit-edge
+                                       | set(r2["tree_pids"]))            # quiesce set
+        return kept
     r2["attempts_log"] = al
     r2["attempts"] = (r2.get("spawn") + 1) if isinstance(r2.get("spawn"), int) else len(al) + 1
     if r.get("banked") is not None and r2.get("banked") is None:
         r2["banked"] = r["banked"]
     return r2
+
+def _harvest_clamp(node, r):
+    """est-ggqs clamp policy, per node (`harvest_policy`, agent key; solo nodes —
+    a fan-out aggregate already merges harvest credit). Runs at the commit edge
+    AFTER both retry ladders, the #61 quiesce, the served-model stamp and the
+    lane gate, so a dirty lane / live tree / wrong route never reaches it.
+      strict (default, key absent): unchanged — a harvest-on-death `partial`
+        blocks plain after-edges (blocked_by_partial_ancestor, e68544a37be37657).
+      validate: the harvest commits `done` ONLY when ALL hold — the node DECLARES
+        a schema and the harvested output re-validates against it; the child
+        declared NO unfinished `## Remaining` steps (est-2ek.1.165) and no
+        non-done terminal status (the jam-aus read-time law); the death class is
+        not left_live_descendants (#61: work provably outlived the answer).
+    The death is never hidden: error_class / error / harvest stay on the record
+    and `clamped` names the policy and the verdict it replaced (turn cap stays
+    visible to node_facts, node.finished and metrics). Pure: returns r itself
+    when nothing clamps, a new dict when it does."""
+    if (node or {}).get("harvest_policy") != "validate" or r.get("status") != "partial":
+        return r
+    hv = r.get("harvest")
+    schema = (node or {}).get("schema")
+    if not isinstance(hv, dict) or not schema or r.get("error_class") == "left_live_descendants":
+        return r
+    declared = hv.get("declared_status")
+    if isinstance(declared, str) and declared.strip().lower() not in ("done", "ok", "success", "pass"):
+        return r
+    if r.get("remaining"):
+        return r
+    out = r.get("output")
+    if not isinstance(out, dict) or validate(
+            out, strip_engine_disclosure(schema, (node or {}).get("substrate_substituted"))):
+        return r
+    c = dict(r)
+    c["status"] = "done"
+    c["clamped"] = {"policy": "validate", "from_status": "partial",
+                    "error_class": r.get("error_class")}
+    return c
 
 def drain_inbox(run, consumed):
     """Return {node_id: [steering texts]} for un-consumed steering lines."""
@@ -6593,6 +6656,7 @@ def run_agent_node(run, meta, byid, node, outputs, steering):
             r = _final_quiesce(meta, r, "node", {"node": nid})   # #61: never commit over a live tree
             r = _stamp_served(meta, r, node)   # dad50be0: seat truth at the commit, never the alias
             r = _lane_gate(run, node, r)   # 64c6772b: a declared lane must be clean at commit
+            r = _harvest_clamp(node, r)    # est-ggqs: per-node clamp policy (default strict)
             r = _effect_gate(run, node, r)  # #56: declared effect receipts must be PROVEN at commit
             save_node(run, node, byid, r)
             if r["status"] in ("done", "partial"):   # #4: a harvested partial IS committed output
@@ -6605,6 +6669,9 @@ def run_agent_node(run, meta, byid, node, outputs, steering):
                         and r.get("error_class") == "left_live_descendants" \
                         and r.get("tree_descendants"):
                     extra_kv["error_class"] = r["error_class"]
+                if r.get("clamped"):       # est-ggqs: the clamped death stays visible
+                    extra_kv.update(harvested=True, clamped=r["clamped"]["policy"],
+                                    error_class=r.get("error_class"))
                 log(run, "node.finished", node=nid, ms=r.get("ms"), **extra_kv)
             else:
                 log(run, "node.failed", node=nid, ms=r.get("ms"), error=r.get("error"),
@@ -7427,7 +7494,9 @@ def main(run_id):
             st, rec = node_rec(run, n, rs.byid)
             states[n["id"]] = st
             if st in ("done", "partial"): outputs[n["id"]] = (rec or {}).get("output")  # #4: partial output IS output
-            prov[n["id"]] = bool((rec or {}).get("harvest"))                            # e68544a37be37657
+            # e68544a37be37657; est-ggqs: a validate-clamped harvest is the node's
+            # own vouched `done` — its declared schema already held the answer.
+            prov[n["id"]] = bool((rec or {}).get("harvest")) and not (rec or {}).get("clamped")
         # prune propagation: derived skips become efp-stamped facts (replay-skip law)
         for nid in prune_states(rs.nodes, states):
             save_node(run, rs.byid[nid], rs.byid, {"status": "skipped", "output": {"skipped": "all deps pruned"}})
