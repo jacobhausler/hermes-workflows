@@ -1,0 +1,166 @@
+{
+ "name": "ra-release-peer",
+ "description": "use when a release due on a repo whose release PR is authored by the owner seat: prepare(owner, PR+marker, no self-merge) -> peer_review(peer seat via profile:, verdict merge|changes) -> peer_gate(when verdict==merge, on_skip:prune — a changes verdict terminally skips publish; complementary peer_hold(verdict!=merge) -> peer_stamp(peer seat) PATCHes the live marker off pending to the terminal verdict with read-back; est-1bojj: peer_review/peer_stamp carry profile:{run.PEER_PROFILE} so the spawn is -p <peer seat>) -> publish(owner, fresh-GET merged==true AND peer-stamped merge marker before ANY tag/release/catalog PR/announce; SHIPPED-TELL receipts required). run_context bindings: REPO, VERSION, OWNER_PROFILE, PEER_PROFILE. promoted from study-queue ra-release-peer.parameterized.draft.json (door-ship-ready sha f26bab8d, wf-mechanic v1.1.3 door) via estate epic est-2ek.11 first-release lane (run 20260930-132948: beads-mechanic owner seat, gh-dispatch peer seat; v0.1.1 shipped, hermes-beads#4 squash a5059fe1, peer marker verdict=merge), promoted 2026-10-02 by dag-quartermaster. Dedupe: fresh vs shelf, max node-bytes ratio 0.157 (branch-on-verdict.json); conceptual nearest release-xbot-train.json:3 differs by peer_gate(when+on_skip:prune), SHIPPED-TELL R1-R3 receipts, proof-before-publish fresh-GET, first-release variant, REPO/VERSION/OWNER_PROFILE/PEER_PROFILE run_context bindings.",
+ "nodes": [
+  {
+   "id": "prepare",
+   "type": "agent",
+   "model": "qwen38-next",
+   "tier": "worker",
+   "timeout": 1500,
+   "max_turns": 30,
+   "goal": "You are the OWNER-seat release manager ({run.OWNER_PROFILE}) for {run.REPO}. WHO-YOU-ARE: repo-admin duties apply. Run the repo's real gates on a green base, cut/open the release PR for v{run.VERSION}, and post the PENDING peer-review marker (verdict=pending) per PEER-LAW. Do NOT self-merge, do NOT tag. Commit to your lane before finishing. Reply fenced JSON: {\"pr\": <number>, \"pr_url\": \"...\", \"base_green\": true|false}.",
+   "schema": {
+    "type": "object",
+    "required": [
+     "pr",
+     "pr_url",
+     "base_green"
+    ],
+    "properties": {
+     "pr": {
+      "type": "integer"
+     },
+     "pr_url": {
+      "type": "string"
+     },
+     "base_green": {
+      "type": "boolean"
+     }
+    }
+   }
+  },
+  {
+   "id": "peer_review",
+   "type": "agent",
+   "profile": "{run.PEER_PROFILE}",
+   "after": [
+    "prepare"
+   ],
+   "model": "gpt-6-sol",
+   "provider": "openai-codex",
+   "timeout": 1500,
+   "max_turns": 30,
+   "inputs": [
+    "prepare.pr_url"
+   ],
+   "goal": "You are the PEER reviewer seat ({run.PEER_PROFILE}) — NOT the PR author; author self-review is forbidden (PEER-LAW). WHO-YOU-ARE: repo-admin duties apply. Review PR for {run.REPO} at ## Inputs: re-run the gates yourself (fresh clone; do not trust the author's green claim), walk the R1-R10 review checklist, and PATCH the live marker comment to verdict=merge|changes|decision with reviewer={run.PEER_PROFILE} and an evidence table. Squash-merge ONLY on a fresh-GET verdict=merge with green gates. Reply fenced JSON: {\"verdict\": \"merge|changes|decision\", \"why\": \"one line\"}. The verdict value must be exactly one of the three.",
+   "schema": {
+    "type": "object",
+    "required": [
+     "verdict",
+     "why"
+    ],
+    "properties": {
+     "verdict": {
+      "type": "string",
+      "description": "Exactly merge, changes, or decision."
+     },
+     "why": {
+      "type": "string"
+     }
+    }
+   }
+  },
+  {
+   "id": "peer_gate",
+   "type": "gate",
+   "after": [
+    "peer_review"
+   ],
+   "when": "out.peer_review.verdict == 'merge'",
+   "on_skip": "prune"
+  },
+  {
+   "id": "peer_hold",
+   "type": "gate",
+   "after": [
+    "peer_review"
+   ],
+   "when": "out.peer_review.verdict != 'merge'",
+   "on_skip": "prune"
+  },
+  {
+   "id": "peer_stamp",
+   "type": "agent",
+   "profile": "{run.PEER_PROFILE}",
+   "after": [
+    "peer_hold"
+   ],
+   "model": "gpt-6-sol",
+   "provider": "openai-codex",
+   "timeout": 900,
+   "max_turns": 15,
+   "inputs": [
+    "prepare.pr_url",
+    "peer_review.verdict",
+    "peer_review.why"
+   ],
+   "goal": "You are the PEER reviewer seat ({run.PEER_PROFILE}) closing the non-merge arm for {run.REPO} v{run.VERSION}. The peer verdict in ## Inputs is NOT merge, so publish is pruned and the PR's live PEER-LAW marker comment must not be left at verdict=pending (a pending marker on a finished run is indistinguishable from a mid-flight lane). Fresh-GET the PR's marker comment. If it still reads verdict=pending, PATCH it to the terminal verdict from ## Inputs (changes|decision; anything else -> decision) with reviewer={run.PEER_PROFILE} and the one-line why. If it already carries a terminal verdict, leave it. Then fresh-GET it again (read-back) and report what it says. Never stamp merge, never merge, never tag. Reply fenced JSON: {\"marker_verdict\": \"changes|decision\", \"reviewer\": \"{run.PEER_PROFILE}\", \"marker_url\": \"...\", \"readback\": \"verbatim verdict/reviewer line from the fresh GET\"}.",
+   "schema": {
+    "type": "object",
+    "required": [
+     "marker_verdict",
+     "reviewer",
+     "marker_url",
+     "readback"
+    ],
+    "properties": {
+     "marker_verdict": {
+      "type": "string",
+      "description": "Exactly changes or decision (never pending)."
+     },
+     "reviewer": {
+      "type": "string"
+     },
+     "marker_url": {
+      "type": "string"
+     },
+     "readback": {
+      "type": "string"
+     }
+    }
+   }
+  },
+  {
+   "id": "publish",
+   "type": "agent",
+   "after": [
+    "peer_gate"
+   ],
+   "inputs": [
+    "prepare.pr",
+    "peer_review.verdict"
+   ],
+   "model": "qwen38-next",
+   "tier": "worker",
+   "timeout": 1500,
+   "max_turns": 30,
+   "goal": "You are the OWNER-seat publisher ({run.OWNER_PROFILE}) for {run.REPO}. PROOF BEFORE PUBLICATION (never trust an input claim): fresh-GET pulls/<pr> and require merged==true; fresh-GET the marker and require verdict=merge stamped by reviewer={run.PEER_PROFILE} (the peer, not you). Only then tag v{run.VERSION} (no gate on the tag), cut the GitHub release, open the catalog SHA PR yourself once the entry passes upstream scripts/validate_plugin_catalog.py on the green tag, and announce. SHIPPED-TELL: result=done requires receipts — R1 tag+release read-back on green main, R2 catalog PR number/state fresh GET, R3 acceptance matrix on a DISPOSABLE db (per-row pass|fail|unknown posted to the release PR). Any unmet leg returns status blocked with MISSING:<receipt> in why; never fabricate publication, never stamp a merge under a changes verdict. Reply fenced JSON: {\"status\": \"done|blocked\", \"tag\": \"v<version>|MISSING\", \"catalog_pr\": \"<url>|MISSING\", \"why\": \"one line\"}.",
+   "schema": {
+    "type": "object",
+    "required": [
+     "status",
+     "tag",
+     "catalog_pr",
+     "why"
+    ],
+    "properties": {
+     "status": {
+      "type": "string",
+      "description": "Exactly done or blocked."
+     },
+     "tag": {
+      "type": "string"
+     },
+     "catalog_pr": {
+      "type": "string"
+     },
+     "why": {
+      "type": "string"
+     }
+    }
+   }
+  }
+ ]
+}

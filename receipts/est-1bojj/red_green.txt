@@ -1,0 +1,26 @@
+== /home/hermes/.hermes/workflows/library/ra-release-peer.json
+CHECK FAIL peer_review.profile == '{run.PEER_PROFILE}' :: profile=None
+CHECK FAIL complementary gate when verdict != 'merge' :: gates=[]
+CHECK FAIL stamp agent after the non-merge gate :: agents=[]
+CHECK ok  workflow validate structural (unbound shelf form) :: null
+CHECK ok  workflow validate (bound PEER_PROFILE=zap) :: {"ok": true, "error": null, "errors": [], "resolved_routes": {"prepare": {"requested": {"provider": null, "model": "qwen38-next"}, "resolved": {"provider": null, "model": "qwen38-next"}}, "peer_review": {"requested": {"provider": "openai-codex", "model": "gpt-6-sol"}, "resolved": {"provider": "openai-codex", "model": "gpt-6-sol"}}, "publish": {"requested": {"provider": null, "model": "qwen38-next"}, "resolved": {"provider": null, "model": "qwen38-next"}}}}
+CHECK FAIL bound peer_review.profile == zap :: profile=None
+SPAWN argv[:3]= ['chat', '--query-file', '/home/hermes/.hermes/profiles/gh-dispatch/cache/scratch/tmp76bnp3sk/runs/r1/logs/peer_review.a0.prompt.md'] record.profile= None status= done
+CHECK FAIL resolved spawn_cmd carries -p zap :: argv=['chat', '--query-file', '/home/hermes/.hermes/profiles/gh-dispatch/cache/scratch/tmp76bnp3sk/runs/r1/logs/peer_review.a0.prompt.md']
+CHECK FAIL node record profile == zap
+FAIL 6: ["peer_review.profile == '{run.PEER_PROFILE}'", "complementary gate when verdict != 'merge'", 'stamp agent after the non-merge gate', 'bound peer_review.profile == zap', 'resolved spawn_cmd carries -p zap', 'node record profile == zap']
+exit=1
+== /home/hermes/.hermes/work/repo-admin/wt-fix-est-1bojj/ra-release-peer.fixed.json
+CHECK ok  peer_review.profile == '{run.PEER_PROFILE}' :: profile='{run.PEER_PROFILE}'
+CHECK ok  complementary gate when verdict != 'merge' :: gates=['peer_hold']
+CHECK ok  stamp agent after the non-merge gate :: agents=['peer_stamp']
+CHECK ok  stamp agent runs as {run.PEER_PROFILE} :: profile='{run.PEER_PROFILE}'
+CHECK ok  stamp goal forbids surviving pending + reads back
+CHECK ok  workflow validate structural (unbound shelf form) :: null
+CHECK ok  workflow validate (bound PEER_PROFILE=zap) :: {"ok": true, "error": null, "errors": [], "resolved_routes": {"prepare": {"requested": {"provider": null, "model": "qwen38-next"}, "resolved": {"provider": null, "model": "qwen38-next"}}, "peer_review": {"requested": {"provider": "openai-codex", "model": "gpt-6-sol"}, "resolved": {"provider": "openai-codex", "model": "gpt-6-sol"}}, "peer_stamp": {"requested": {"provider": "openai-codex", "model": "gpt-6-sol"}, "resolved": {"provider": "openai-codex", "model": "gpt-6-sol"}}, "publish": {"requested": {"provider": null, "model": "qwen38-next"}, "resolved": {"provider": null, "model": "qwen38-next
+CHECK ok  bound peer_review.profile == zap :: profile='zap'
+SPAWN argv[:3]= ['-p', 'zap', 'chat'] record.profile= zap status= done
+CHECK ok  resolved spawn_cmd carries -p zap :: argv=['-p', 'zap', 'chat']
+CHECK ok  node record profile == zap
+PASS
+exit=0
