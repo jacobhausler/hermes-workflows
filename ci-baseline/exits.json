@@ -989,6 +989,16 @@
     "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_seat_cancel_at_ticket_r2_g255.py.log"
   },
   {
+    "test": "test_seat_cap_override_856.py",
+    "exit": 0,
+    "log": "rows_added_outside_ci in PROVENANCE.json"
+  },
+  {
+    "test": "test_seat_fifo_856.py",
+    "exit": 0,
+    "log": "rows_added_outside_ci in PROVENANCE.json"
+  },
+  {
     "test": "test_seat_lending_identity_r2_g255.py",
     "exit": 0,
     "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_seat_lending_identity_r2_g255.py.log"
@@ -1002,6 +1012,11 @@
     "test": "test_seat_nesting_noprocs_g255.py",
     "exit": 0,
     "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_seat_nesting_noprocs_g255.py.log"
+  },
+  {
+    "test": "test_seat_overadmit_857.py",
+    "exit": 0,
+    "log": "rows_added_outside_ci in PROVENANCE.json"
   },
   {
     "test": "test_seat_popen_exception_g255.py",
