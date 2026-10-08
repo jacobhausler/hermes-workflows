@@ -1163,5 +1163,10 @@
     "test": "test_when_ancestry_0930.py",
     "exit": 0,
     "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_when_ancestry_0930.py.log"
+  },
+  {
+    "test": "test_graph_result_158.py",
+    "exit": 0,
+    "log": "CI run 37719805756 Serial suite: exit 0"
   }
 ]
