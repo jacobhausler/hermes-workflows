@@ -51,6 +51,16 @@ door._route_liveness_ping(routes or {})
 check("_route_liveness_ping is handed the TARGET id, not the bare alias",
       pinged == [("example-provider", "example-model-1")], pinged)
 
+# 1b. the proof receipt names what the ping PROVED (the target id), not the bare
+# alias (ra-review observation on the route_verified bake; runner _route_hold still
+# accepts the served model via its alias-map candidates).
+door._route_enforcement({"nodes": nodes}, routes)
+check("alive proof route_verified bakes the TARGET id the ping proved",
+      nodes[0].get("route_verified") == "example-provider/example-model-1",
+      nodes[0].get("route_verified"))
+check("node def STILL keeps model:'bigseat' after the bake",
+      nodes[0]["model"] == "bigseat", nodes[0])
+
 # 2. non-alias literal (explicit provider) is unchanged
 pinged.clear()
 nodes = [{"id": "b", "type": "agent", "goal": "x",
