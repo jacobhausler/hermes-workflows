@@ -176,25 +176,19 @@ def _view(r, full=False):
         if rollup is not None:
             rollup.update(common.current_attempt(cm, active))
             rollup["scope"] = "cumulative"
-            if any(not m.get("api_calls_known", True) for m in cm.values()):
-                rollup.pop("api_calls", None)
+            # #114: no local unknown-rule here — fold_child_metrics already
+            # omitted api_calls for any unknown row (was: a per-copy pop, the
+            # half of the divergence this fix removes).
         view.update({"graph": st["graph"], "nodes": nodes, "events": _events(r),
                      "gate": dict(st["held_gate"] or {}), "metrics": rollup})
     return view
 
 def _fold_metrics(ms):
-    ms = list(ms)
-    if not ms:
-        return None
-    f = {"tokens_in": 0, "tokens_out": 0, "cache_read": 0, "reasoning": 0, "api_calls": 0,
-         "tool_calls": 0, "cost": 0.0, "attempts": 0, "children": len(ms), "live": 0,
-         "last_activity": None, "last_desc": None, "models": []}
-    for m in ms:
-        for k in ("tokens_in", "tokens_out", "cache_read", "reasoning", "api_calls", "tool_calls", "cost", "attempts"):
-            f[k] += m.get(k) or 0
-        if m.get("model") and m["model"] not in f["models"]:
-            f["models"].append(m["model"])
-    return f
+    # #114 (WF-04): thin adapter — the ONE fold + known/unknown policy is
+    # wfcommon.fold_child_metrics (AGENTS.md: the metrics join belongs to
+    # wfcommon). Every level (node line, fanout item, rollup) omits api_calls
+    # on ANY unknown child — the door and this surface cannot diverge.
+    return _workflow_common().fold_child_metrics(ms)
 
 def _list_runs():
     # F1 #14: merge the legacy launch root the way the door's act_list does — a

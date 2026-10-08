@@ -3046,18 +3046,31 @@ def act_status(args):
         cm = {}
     if cm or any(v.get("active_spawn") for v in st["nodes"].values()):
         import time as _t
+        # #114 (WF-04): the numeric fold + known/unknown policy is the ONE helper
+        # wfcommon.fold_child_metrics (presentation — tokens string, children,
+        # scope, cost_usd, heartbeat splice — stays here). api_calls is absent
+        # from a fold whose rows include an unknown child, so the run total sums
+        # the folds that produced a number and omits api_calls itself whenever
+        # ANY node fold omitted it — never a partial sum advertised as exact.
         tot = {"tokens_in": 0, "tokens_out": 0, "api_calls": 0, "tool_calls": 0, "cost": 0.0}
+        api_calls_known = True
         for nid in out["nodes"]:
             mine = {k: m for k, m in cm.items() if k.startswith(f"wf:{st['run_id']}:{nid}:")}
             active = st["nodes"][nid].get("active_spawns", [])
             if not mine and not active:
                 continue
-            f = {k: sum((m.get(k) or 0) for m in mine.values()) for k in tot}
+            # a live-only node (verified spawn, no DB rows yet) folds as zeros,
+            # exactly as the pre-helper sum-over-empty-did: "0▸0", not a crash.
+            f = _common.fold_child_metrics(mine.values()) or {k: 0 for k in tot}
             current = _common.current_attempt(mine, active)
-            line = {"tokens": f"{f['tokens_in']}▸{f['tokens_out']}", "api_calls": f["api_calls"],
-                    "tool_calls": f["tool_calls"], "children": len(mine), "scope": "cumulative"}
-            if any(not m.get("api_calls_known", True) for m in mine.values()):
-                line.pop("api_calls")
+            line = {"tokens": f"{f['tokens_in']}▸{f['tokens_out']}"}
+            if "api_calls" in f:
+                line["api_calls"] = f["api_calls"]
+            else:
+                api_calls_known = False
+            line["tool_calls"] = f["tool_calls"]
+            line["children"] = len(mine)
+            line["scope"] = "cumulative"
             if f["cost"]:
                 line["cost_usd"] = round(f["cost"], 4)
             if current["live"]:
@@ -3067,8 +3080,9 @@ def act_status(args):
                 line["last"] = current["last_desc"]
                 line["last_tool_at"] = la  # #18: the epoch of the last verified activity
             out["nodes"][nid]["metrics"] = line
-            for k in tot: tot[k] += f[k]
-        out["metrics"] = {"tokens": f"{tot['tokens_in']}▸{tot['tokens_out']}", "api_calls": tot["api_calls"],
+            for k in tot: tot[k] += f.get(k) or 0
+        out["metrics"] = {"tokens": f"{tot['tokens_in']}▸{tot['tokens_out']}",
+                          **({"api_calls": tot["api_calls"]} if api_calls_known else {}),
                           "tool_calls": tot["tool_calls"], **({"cost_usd": round(tot["cost"], 4)} if tot["cost"] else {})}
     # est-2ek.1.158: a graph that declares `result: <node id>` names the node whose
     # output IS the run verdict; terminal status/wait report it (derive-only: the
