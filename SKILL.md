@@ -9,30 +9,99 @@ metadata:
 
 # Workflow authoring (1.3.1)
 
-Requires Hermes Agent v2026.9.21 or newer (package >=0.21.4). A Desktop gate answer sends a visible resume turn to the run owner's chat via the composer SDK; on older Desktop builds it may only insert draft text for the user to send. If no owner/composer is available, type the resume line in that owner chat. Before disabling the plugin, list runs and stop each live run with `workflow{action:"stop",run_id:<id>}`.
-
-Use the `workflow` tool when a task needs independent lanes, a human gate, or a resumable graph. For one or two independent calls, use ordinary delegation instead. The authoring agent owns the graph and its side effects; the dashboard is a reader, not an executor.
+Requires Hermes Agent v2026.9.21 or newer (package >=0.21.4). Use the `workflow`
+tool for independent lanes, a human gate, or a resumable graph; for one or two
+independent calls, delegate ordinarily. The authoring agent owns the graph and its
+side effects; the dashboard is a reader, not an executor. A held Desktop gate
+resumes the run owner's chat via the composer (older builds draft it instead).
+Before disabling the plugin, stop every live run:
+`workflow{action:"stop",run_id:<id>}`.
 
 ## Smallest working graph
 
-Build `{ "name": "check", "nodes": [{"id":"inspect","type":"agent","goal":"Inspect the specified target. Return one fenced JSON object."}] }`. Submit with `workflow{action:"run", graph:<object>}`, then use its returned `run_id` with `workflow{action:"wait", run_id:<id>}` until a boundary. An `after` edge orders nodes AND hands each direct parent's committed output to the child under `## Inputs` (8 KB per parent). Use `inputs:["inspect.key"]` only to pick a dotted path or a non-parent ancestor, or `fanout.items_from:"inspect.items"` where the upstream output has an `items` array. A missing input fails at spawn. Give a node a `schema` and the runner writes the reply contract into the prompt itself — no contract prose in goals.
+`{ "name": "check", "nodes": [{"id":"inspect","type":"agent","goal":"Inspect the
+specified target. Return one fenced JSON object."}] }`. Submit with
+`workflow{action:"run", graph:<object>}`, then `wait` on the returned `run_id` until
+a boundary. An `after` edge orders nodes AND injects each direct parent's committed
+output into the child's `## Inputs` (8 KB per parent); a missing input fails at
+spawn. `inputs:["a.key"]` picks a dotted path or non-parent ancestor;
+`fanout.items_from:"a.items"` reads an upstream `items` array. A node `schema` makes
+the runner write the reply contract itself — no contract prose in goals.
+Independent tasks: separate nodes, or one `fanout` with `items`; `quorum` races —
+once N succeed the rest cancel. Shared settings (schema, budgets, reasoning,
+provider/model, preamble) go in a graph-level `defaults` once; leave node budgets
+unset and name a `shape` (measured presets: [budgets](references/budgets.md)). A
+constant travels as an `echo` node, never an agent spawn. `concurrency` /
+`item_concurrency` are positive integers clamped to the owner's caps (4 / 8).
+Full syntax: [grammar](references/grammar.md).
 
-Independent tasks: put them in separate nodes or one `fanout` with `items` (per-item `goal` optional; the node goal prefixes each item). `quorum` (optional) races: once N succeed, the rest are cancelled. Put shared settings — schema, budgets, reasoning, provider/model, a context preamble — in a graph-level `defaults` block once, not on every node; `shape:recon|build|review|publish` sizes budgets from measured presets. A constant travels as an `echo` node, never an agent spawn. Set `model` per node only when needed: an unset model uses the seat default, including fan-outs. A configured tier, alias, or literal is a request, not a guarantee of provider availability. Inspect the returned routing table and check errors before trusting execution. Use an explicit `provider` with a nonempty `model` when routing is needed; do not change persistent model preferences just to make a graph work. A pinned model is fail-closed by default (`require_route`, node or `defaults`): a submit ping that proves the pin dead — or answered from the fallback ladder — REFUSES the launch (`route_unavailable`) instead of billing another model; set `require_route: false` on that node to opt into the ladder deliberately. A ping proving the pin alive bakes the door-only `route_verified` proof (author values for it are always dropped) and the runner then fails any node whose served model contradicts the proof.
-Optional graph-level `concurrency` / `item_concurrency` are positive integers clamped to the owner's caps (defaults 4 / 8); absent keys preserve the old run. See [grammar](references/grammar.md).
+## Model routing
 
-For a decision, a `gate` with `question` and `options` holds; present it to the owner and pass their answer with `release`. A decorative gate gets `hold_timeout` + `default_option` and releases itself; with `hold_timeout` alone it logs `gate.expired` and keeps holding. Machine waits use `gate.wait`. A false `gate.when` prunes the gate and its exclusively dependent arm by default, including machine-wait gates. Explicit `on_skip:"pass"` skips only the gate question and lets descendants run; use it only deliberately. For mutually exclusive arms, use two complementary gate predicates (the default prunes false arms); see [grammar](references/grammar.md). `when` belongs on gates: agent predicates and other unknown fields are rejected before write/spawn. The tested `approve-publish` and `branch-on-verdict` examples demonstrate branching.
+An unset `model` uses the seat default, including fan-outs — set it per node only
+when needed. A tier, alias, or literal is a request, not an availability guarantee:
+inspect the returned routing table and its errors before trusting execution; never
+rewrite persistent model preferences to make a graph work. A pinned model is
+fail-closed (`require_route`): a ping proving the pin dead — or answered from the
+fallback ladder — REFUSES the launch (`route_unavailable`) instead of billing
+another model; `require_route: false` opts into the ladder deliberately. A ping
+proving the pin alive bakes the door-only `route_verified` proof (author values are
+always dropped); the runner fails any node whose served model contradicts it.
 
-`profile` on an agent node runs it AS a named teammate profile (node-level only): DELEGATION, not isolation — the child carries the target's SOUL, memory, `.env` and tools, same UID; the target's owner-written `workflow_team.json` must list the launcher in `accept_from`, and `default` is never a target. `requires:{ancestor:["field",…]}` on an agent or gate fails the node with `error_class:"precondition"` and zero spawns when an ancestor's committed output lacks or nulls a listed path — the run FAILS, it never skips quietly; want skip-on-missing? use the `when` gate + `on_skip:"prune"`. A library save may record opt-in provenance (`save` +`source`): owner/source/digest attribution only, never an access control. After-edges block on a `partial` (harvest-on-death) ancestor by default — the descendant fails typed `blocked_by_partial_ancestor`, never spawns; set `after_partial: true` on that agent/gate to consume the harvest (its own leaf close-out and a node's own fanout partial-credit merge are unaffected). Details: [grammar](references/grammar.md).
+## Gates and branching
+
+A `gate` with `question` and `options` holds; present it to the owner, release with
+their answer. `hold_timeout` + `default_option` releases a decorative gate itself;
+`hold_timeout` alone logs `gate.expired` and keeps holding; machine waits use
+`gate.wait`. A false `gate.when` prunes the gate and its exclusively dependent arm —
+use two complementary predicates for mutually exclusive arms; `on_skip:"pass"` skips
+only the question and is deliberate. `when` belongs on gates only. Branching
+examples: `approve-publish`, `branch-on-verdict`.
+Details: [grammar](references/grammar.md).
+
+## Delegation, preconditions, partials
+
+`profile` runs a node AS a named teammate profile: DELEGATION, not isolation — the
+child carries that profile's SOUL, memory, `.env`, tools, same UID; its
+owner-written `workflow_team.json` must list the launcher in `accept_from`;
+`default` is never a target. `requires:{ancestor:["field",…]}` fails the node
+`error_class:"precondition"` with zero spawns when an ancestor's committed output
+lacks or nulls a path — the run FAILS, never skips quietly; skip-on-missing is
+`when` + `on_skip:"prune"`. A `partial` (harvest-on-death) ancestor blocks plain
+after-edges (`blocked_by_partial_ancestor`); the consumer opts in with
+`after_partial: true`. Shelf `source:` provenance is attribution — never access
+control. Details: [grammar](references/grammar.md).
 
 ## Run and handoff
 
-- `running` requires a verified live runner. `interrupted` means unfinished work without one; inspect surviving outputs before explicitly resuming with `wait`. Fatal recorded runner errors are `failed`, not automatic respawn loops. Held gates are not counted as running. `status` explains current nodes and every `status`/`wait` payload carries `next` — do what `next` says; `wait` again until it is empty. `next` is derived, never a guess. On a failed run, read the failed node's facts (`node_facts`: error_class — closed set; `cancelled` is never a failure; attempts, final words, log path — `partial` is a harvested answer a descendant consumes only with `after_partial`; retryable deaths already got one machine re-drive) and committed outputs before `amend` or stop. `amend` submits the WHOLE replacement graph; `dry_run:true` previews invalidation. `run` with `dry_run:true` runs every pre-launch gate and writes nothing — a side-effect-free graph lint. `stop` is terminal. Details: [operations](references/operations.md).
-- To save a reusable proven graph: `workflow{action:"save", run_id:<id>, name:<name>, description:<trigger>}`; add `tags:["facet:value",…]` (facets: use_case, repo, domain, risk, note) — call `library` first and reuse its `tag_vocab` values verbatim, never coin unseen tags; resaving without `tags` keeps them; `library` with `tags:[…]` filters ALL-match and an empty result's `tag_match_counts` says which term starved; add `source:<where it came from>` to record opt-in provenance (owner/source/digest — attribution, not access control). Composite exception: `save(run_id=...)` REFUSES a run whose `run.json` carries `includes` (its graph.json is the expanded, include-stripped form, and shelving it would freeze one expansion of the shelf) — save the AUTHOR graph instead: `workflow{action:"save", graph:<graph with its include annotation intact>, name:<name>}`.`library` lists it; `run` with `from:<name>` replays it. Do not save one-off graphs by default — a hand-rolled graph the library does not cover goes to `workflow{action:"submit", graph, why_not_library}` (the why is required, >=80 chars): it quarantines for the quartermaster's study loop and never joins the library; `inbox` lists submissions newest-first.
-- A poller or supervisor that must not double-dispatch: `run` with `lane_key:<key>` — while an UNFINISHED incumbent holds the key, a second `run` on it is deduped (returns the incumbent, spawns nothing; `needs_resume` means `wait` it, never replace it; `stop` is the explicit abandonment). `status` with `lane_key:<key>` reads the incumbent without spawning anything. Optional `team:<label>` stamps run.json and `list` rows. Keys are global per runs root; prefix `<team>/` yourself. Details: [operations](references/operations.md).
-- Report a finished run by its vanity numbers from the read model's metrics: token in | token out | api calls | tool calls (per node and run total). Don't lead with the dollar figure: it is core's `estimated_cost_usd`, a price-table estimate (subscription routes report `included`, not `actual`), and it freaks humans out when quoted as spend.
-- Put the `card` line alone on its own line in the reply that launches a run and in the one that reports it — in plain prose, never inside backticks or a code fence: a code-blocked directive renders as dead text, not a card (quoting the raw syntax in code is fine only to document the syntax itself). The desktop shows every run of this chat in the strip below the composer regardless (older cores: above it).
-- Use `graph_path` on run/save/amend/validate for a caller-authorized absolute local JSON file instead of embedding a large graph. Choose exactly one graph source. See [grammar](references/grammar.md). To share a graph as a file (`<name>.workflow.json`, `grammar:"wf/1"`, provenance, pinned digest), follow [portable](references/portable.md); the same page covers `wf_dialect.py` (import/export of Anthropic-style `.js` workflow files: constrained subset in, lossy-loud out).
-- Before launching an authored graph, `workflow{action:"validate", graph:…}` dry-runs the door's whole validation (defaults fill, defects, model/route policy) with zero writes and no liveness ping: `{ok, errors:[{node,field,msg}], resolved_routes}`.
-- Leave node budgets unset and name a `shape`; see [budgets](references/budgets.md).
+- `running` needs a verified live runner; `interrupted` is unfinished work without
+  one — inspect committed outputs, then `wait` to resume; held gates don't count as
+  running. Payloads carry `next` — do what it says; it is derived, never a guess.
+  On failure read `node_facts` first (`error_class` is a closed set; `cancelled` is
+  never a failure); retryable deaths already got one machine re-drive. `amend`
+  submits the WHOLE replacement graph; `run`/`amend` with `dry_run:true` preview
+  with zero writes; `stop` is terminal. Details:
+  [operations](references/operations.md).
+- Shelf proven graphs with `save` + `tags` (reuse `library`'s `tag_vocab` verbatim;
+  never coin tags). `save(run_id=...)` REFUSES a run whose `run.json` carries
+  `includes` — save the AUTHOR graph instead, or one expansion gets frozen.
+  Not library-worthy: `submit` with `why_not_library` (>=80 chars) quarantines for
+  study. Don't save one-offs by default.
+- Must not double-dispatch: `run` with `lane_key:<key>` — an UNFINISHED incumbent
+  holds the key; a second run returns it, spawns nothing; `needs_resume` means
+  `wait` it, never replace; `status` reads spawn-free. Keys are global per runs
+  root; prefix `<team>/` yourself.
+- Report finished runs by metrics (token in | out | api calls | tool calls), not
+  dollars: `estimated_cost_usd` is a price-table estimate.
+- The `card` line goes alone on its own line, in plain prose, never fenced or
+  backticked (a fenced card renders dead) — once in the launching reply, once in
+  the report. The composer strip shows this chat's runs regardless.
+- `graph_path` (run/save/amend/validate) reads a caller-authorized absolute JSON
+  file instead of an embedded graph — exactly one source. Sharing graphs as files:
+  [portable](references/portable.md).
+- Before launching an authored graph: `validate` dry-runs the door (defaults fill,
+  defects, model/route policy), zero writes, no liveness ping.
 
-The graph vocabulary, boundaries and examples live in [grammar](references/grammar.md); read-model/recovery in [operations](references/operations.md). For parallel build lanes, fleet children, and babysitting long runs, use the measured [operator playbook](references/operator-playbook.md) (lane walls/banking, write-first children, cgroup-sized fan-out, staleness via efp). [Development checks](references/development.md) are for contributors, not ordinary-user prerequisites.
+Vocabulary and boundaries: [grammar](references/grammar.md); read-model/recovery:
+[operations](references/operations.md); lanes and long runs:
+[operator playbook](references/operator-playbook.md); contributor checks:
+[development](references/development.md) (not ordinary-user setup).
