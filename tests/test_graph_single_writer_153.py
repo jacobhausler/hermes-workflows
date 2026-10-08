@@ -262,7 +262,10 @@ finally:
 # --- graph_regen diff call site: hostile names and rename endpoints ---------------
 # Import just as the CLI resolves sibling scripts; fixtures copy that dependency too.
 sys.path.insert(0, str(ROOT / "scripts"))
-import graph_regen as grg
+_rspec = importlib.util.spec_from_file_location(
+    "graph_regen_diff_under_test", ROOT / "scripts" / "graph_regen.py")
+grg = importlib.util.module_from_spec(_rspec)
+_rspec.loader.exec_module(grg)
 from unittest.mock import patch
 
 with tempfile.TemporaryDirectory(prefix="regen-diff-") as td:
