@@ -64,6 +64,7 @@ GRAPH_KEYS = {"name", "nodes", "description", "defaults", "model_policy",
               "grammar",      # #32: dialect tag of a shared file ("wf/1"; absent = wf/1)
               "concurrency", "item_concurrency",  # #100: optional run-level limits
               "requires_plugin",  # est-2ek.1.166: version handshake (coarse >=; stale => arm-time refusal)
+              "result",           # est-2ek.1.158: node id whose output is the run verdict
               "include"}      # composite graphs: shelved-DAG expansion annotation; STRIPPED on
                               # expand, so a committed graph.json never carries it (only the
                               # library author form does)
@@ -3036,6 +3037,13 @@ def act_status(args):
             for k in tot: tot[k] += f[k]
         out["metrics"] = {"tokens": f"{tot['tokens_in']}▸{tot['tokens_out']}", "api_calls": tot["api_calls"],
                           "tool_calls": tot["tool_calls"], **({"cost_usd": round(tot["cost"], 4)} if tot["cost"] else {})}
+    # est-2ek.1.158: a graph that declares `result: <node id>` names the node whose
+    # output IS the run verdict; terminal status/wait report it (derive-only: the
+    # node entry built above). Graphs without the key never gain the field.
+    _rid = (jload(r / "graph.json", {}) or {}).get("result")
+    if isinstance(_rid, str) and _rid in out["nodes"] and st["status"] in ("done", "failed", "stopped"):
+        out["result"] = {"node": _rid, "status": out["nodes"][_rid]["status"],
+                         "output": out["nodes"][_rid].get("output")}
     # A3: derived "what next?" — computed ONLY from the run_state fields already in
     # hand (derive-only, never a guess; an unreadable state yields no `next` at all).
     # The agent does what `next` says; an empty `next` means the run is terminal.

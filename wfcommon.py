@@ -1669,7 +1669,27 @@ STRUCTURAL_GRAPH_KEYS = {"name", "nodes", "description", "defaults", "model_poli
                          # est-2ek.1.166: the version handshake — an author may
                          # declare the minimum plugin version the graph needs;
                          # a stale runner refuses LOUDLY at arm time, naming both.
-                         "requires_plugin"}
+                         "requires_plugin",
+                         # est-2ek.1.158: the node whose output IS the run verdict.
+                         "result"}
+
+def result_errors(graph):
+    """Graph-level defects for the optional `result` key (est-2ek.1.158): it must
+    name an existing non-gate node (a gate commits an answer, not run output).
+    Absent key = no check. The field is `result` so the refusal names the key."""
+    if not isinstance(graph, dict) or "result" not in graph:
+        return []
+    rid = graph["result"]
+    nodes = graph.get("nodes")
+    byid = {n["id"]: n for n in nodes if isinstance(n, dict) and isinstance(n.get("id"), str)} \
+        if isinstance(nodes, list) else {}
+    if not isinstance(rid, str) or rid not in byid:
+        return [{"node": None, "field": "result",
+                 "msg": f"result {rid!r} must name an existing node id"}]
+    if byid[rid].get("type") == "gate":
+        return [{"node": None, "field": "result",
+                 "msg": f"result {rid!r} is a gate; name the agent, echo or join node whose output is the verdict"}]
+    return []
 
 # ---------- est-2ek.1.166: the version handshake (shared: door + runner boot) ----------
 # spool key e6e55416cd78c9bd: a 1.0.x graph died at 03:00 on a schema the seat's
@@ -1793,6 +1813,8 @@ def structural_graph_errors(graph, extra_keys=()):
     # refusal itself belongs at the arm/launch seams so it names the runner's
     # own version — same message the door and the boot guard both use.
     for e_ in requires_plugin_errors(graph):
+        E(e_["field"], e_["msg"])
+    for e_ in result_errors(graph):
         E(e_["field"], e_["msg"])
     if "defaults" in graph:
         errs.extend(_defaults_errors(graph["defaults"]))
