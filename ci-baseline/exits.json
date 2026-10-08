@@ -820,6 +820,11 @@
     "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_resume_fresh_session_102.py.log"
   },
   {
+    "test": "test_resume_hint_130.py",
+    "exit": 0,
+    "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_resume_hint_130.py.log"
+  },
+  {
     "test": "test_review_fixes.py",
     "exit": 0,
     "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_review_fixes.py.log"

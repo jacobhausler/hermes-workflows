@@ -1104,7 +1104,8 @@ def js_import(source, node_check=True):
 
 _AGENT_EXACT = {"id", "type", "after", "goal", "schema", "model", "inputs", "fanout", "context"}
 _LOSSY_AGENT = ("provider", "toolsets", "max_turns", "timeout", "run_budget", "reasoning", "tier",
-                "shape", "repo", "require_route", "route_verified", "profile", "requires")
+                "shape", "repo", "require_route", "route_verified", "profile", "requires",
+                "resume_hint")
 _LOSSY_GATE = ("hold_timeout", "on_skip", "requires", "context", "wait", "when")
 _LOSSY_FANOUT = ("schema",)   # only when per-item goals (parallel form carries schema per element anyway)
 
