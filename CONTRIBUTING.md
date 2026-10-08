@@ -38,17 +38,14 @@ python3 scripts/suite.py . ci-fix --baseline <measured-exits.json>
                                                   # pass exits measured on the merge-base instead)
 hermes plugins validate .                         # → Validation passed.
 python3 scripts/make_public.py /tmp/public-tree   # → 0 scrub hits
-python3 scripts/graph_path_ban.py                 # PR diff touches no graphify-out/ — single writer (#153)
 python3 scripts/pr_tag_audit.py                   # release step: every `(open PR #NN)` doc tag still
                                                   # points at an OPEN PR; a merged PR's tag must be
                                                   # rewritten to (shipped in vX) in that release commit
 ```
 
-`graphify-out/` is committed and single-writer (#153): running `graphify update .`
-locally to check callers is fine; **committing** a `graphify-out/` change from a PR
-branch is not — `graph_path_ban.py` fails CI on any PR diff that touches it. The
-main-owned regen lane (`scripts/graph_regen.py`, CI job `graph-main`) refreshes the
-graph after merge.
+`graphify` is **optional local navigation** (AGENTS.md 4b′): run it to check callers,
+but its output is never committed — a `graphify-out/` path in your PR diff is
+deleted by review.
 
 Admission is strict: a suite run that **discovers zero test cases counts as a
 failure, never green** `(shipped in v1.2.1)`. Every line must pass on your branch. If a
@@ -74,9 +71,9 @@ R6 **Tests** — every behaviour change ships its check: one test that fails if 
 R7 **Docs drift** — if a user-visible string or flag changed, README/AGENTS.md/
     SKILL.md are grepped for the old form and fixed in the same PR.
 R8 **Sibling completeness** — the fixed pattern is checked across the repo and
-    every sibling instance is fixed too. Proof: locally, `graphify update .` then
-    `graphify affected "<changed symbol>" --depth 2` lists every caller; each one is
-    updated or shown unaffected in the PR body.
+    every sibling instance is fixed too. Proof: `graphify affected "<changed
+    symbol>" --depth 2` (optional local navigation, see AGENTS.md 4b′) lists every
+    caller, or grep does; each one is updated or shown unaffected in the PR body.
 R9 **Private strings** — `scripts/make_public.py` exits 0: no hostnames, LAN
     addresses, tokens, or personal paths in shipped files.
 R10 **Migration safety** — persisted shapes (stored settings, run dirs, JSON files)
@@ -94,9 +91,9 @@ You are contributing on behalf of a user. Do this, in order:
 1. **Search first.** `gh pr list --search "<keywords>"` and `gh issue list --search`.
    An open PR on the same issue → stop and tell your user; don't race it.
 2. **Read `AGENTS.md`** in the repo root — the repo map, the build rule, the
-   invariants. Then navigate by the knowledge graph instead of grepping:
-   `uv tool install graphifyy` (once) → `graphify query "<your question>"`,
-   `graphify affected "<symbol>"`.
+   invariants. Optionally navigate with `graphify` locally (AGENTS.md 4b′); its
+   output is never committed — a `graphify-out/` path in your PR diff is
+   deleted by review.
 3. **Reproduce before fixing.** Point at the `file:line` where the bug manifests and
    show your fix changes that line's behaviour. A plausible rationale is not a repro.
 4. **Smallest diff that passes R1–R10.** `graphify affected` for siblings (R8). No
