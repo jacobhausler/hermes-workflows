@@ -17,6 +17,7 @@ Contracts pinned (prompt-side only; the def-hash law):
   D auto (flag absent): no prior attempt => zero hint bytes (spawn 0 prompt
     byte-identical to the plain goal); transient respawns stay blank (today's
     law, unchanged without the flag).
+  F the rate-limit park respawn (second blank site) carries the inventory too.
   E closed grammar: resume_hint registered in AGENT_KEYS; true/false accepted;
     a non-bool value and an echo-node use are REJECTED.
 
@@ -159,6 +160,19 @@ rec = rec_of(r, "a")
 check("D auto/absent keeps the transient re-drive BLANK today (unchanged)",
       rec["error_class"] == "transport_exhausted"
       and HEADER not in (r / "logs" / "a.a1.prompt.md").read_text(), str(rec)[:160])
+
+# ---- F: rate-limit park respawn (the second blank re-run site) carries it too ----
+r = mk("rh130-park", [{"id": "a", "type": "agent", "goal": "park rh130-park",
+                       "schema": SCHEMA, "resume_hint": True}],
+       ratelimit_interval=0.3, ratelimit_jitter=0.2, retry_budget=6)
+out = wf("rh130-park", {"FAKE_MODE": "rlhint130", "FAKE_API_CALLS": "0"})
+rec = rec_of(r, "a")
+pp = r / "logs" / "a.a1.prompt.md"
+check("F parked respawn recovers ONLY off the inventory (fake gate)",
+      rec["status"] == "done" and (rec.get("output") or {}).get("result") == "parked-hint-130",
+      str(rec)[:300])
+check("F parked respawn prompt carries the inventory",
+      pp.exists() and HEADER in pp.read_text() and MARK in pp.read_text())
 
 # ---- E: validator contract (closed grammar) ----
 check("resume_hint registered in AGENT_KEYS", "resume_hint" in wfcommon.AGENT_KEYS)

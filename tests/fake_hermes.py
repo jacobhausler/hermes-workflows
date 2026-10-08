@@ -201,6 +201,16 @@ if _FAKE_MODE == "quota":          # #24: subscription-quota 429 with a reset ho
     print('Provider said: HTTP 429: {"error": {"message": "ChatGPT or Codex '
           'Subscription usage limit reached, resets in ~109 hours"}}')
     sys.exit(1)
+if _FAKE_MODE == "rlhint130":   # #130: rate-limit park respawn — banks a work file, then the
+    # parked respawn answers ONLY when its prompt carried the artifact inventory.
+    if "RESUME-HINT-ARTIFACT-130" in q and "size=" in q and "mtime=" in q:
+        print("```json\n" + json.dumps({"result": "parked-hint-130"}) + "\n```")
+        sys.exit(0)
+    with open("hint130.md", "w") as f:
+        f.write("RESUME-HINT-ARTIFACT-130 banked before the rate-limit window\n")
+    print("hermes -z: agent failed: Anthropic credentials are rate-limited for "
+          "claude-fable-5-1; other Claude models remain available (see `hermes auth list`).")
+    sys.exit(1)
 # ---- committee wf159c pins. Placed ABOVE the est-t0vz block on purpose: both
 # ---- mode names start with "ratelimit" and would otherwise be hijacked by its
 # ---- startswith() dispatch; they carry their own counter, same file shape. ----
