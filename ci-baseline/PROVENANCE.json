@@ -170,10 +170,16 @@
       "measured": "CI run 37719797358 at 1a667de6: regression exit 0; the sole suite failure was test_baseline_guard_9yl2.py because this row was absent",
       "supersede_by": "next green-CI refresh (replace with the CI-captured row)",
       "test": "test_literal_provider_prefix_46.py"
+    },
+    {
+      "exit": 0,
+      "measured": "CI run 37720369252 at 60f3dfec: regression exit 0; the sole suite failure was test_baseline_guard_9yl2.py because this row was absent",
+      "supersede_by": "next green-CI refresh (replace with the CI-captured row)",
+      "test": "test_wall_extend_session_595.py"
     }
   ],
   "totals": {
-    "cases": 258,
+    "cases": 259,
     "red": 0
   },
   "contract": "Green CI ledgers only (every exit == 0); rows not captured by CI are listed in rows_added_outside_ci with how they were measured. Refresh from the tip of main after each main move; see README.md.",

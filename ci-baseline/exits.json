@@ -1248,6 +1248,11 @@
     "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_wake_hermetic_env.py.log"
   },
   {
+    "test": "test_wall_extend_session_595.py",
+    "exit": 0,
+    "log": "CI run 37720369252 Serial suite: exit 0"
+  },
+  {
     "test": "test_wfpid_owner_8.py",
     "exit": 0,
     "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_wfpid_owner_8.py.log"
