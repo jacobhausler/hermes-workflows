@@ -259,6 +259,122 @@ try:
 finally:
     gpb._git_bytes = _orig_git_bytes
 
+# --- graph_regen diff call site: hostile names and rename endpoints ---------------
+# Import just as the CLI resolves sibling scripts; fixtures copy that dependency too.
+sys.path.insert(0, str(ROOT / "scripts"))
+import graph_regen as grg
+from unittest.mock import patch
+
+with tempfile.TemporaryDirectory(prefix="regen-diff-") as td:
+    _, work = make_case(td, "regen-rin")
+    git(work, "mv", "a.py", "graphify-out/a.py")
+    got = grg.graph_diff_files(work)
+    check("regen diff: staged rename-in retains BOTH endpoints for scope rejection",
+          got == ["a.py", "graphify-out/a.py"], repr(got))
+
+    _, work = make_case(td, "regen-rout")
+    git(work, "mv", "graphify-out/graph.json", "moved.json")
+    got = grg.graph_diff_files(work)
+    check("regen diff: staged rename-out retains BOTH endpoints",
+          got == ["graphify-out/graph.json", "moved.json"], repr(got))
+
+    _, work = make_case(td, "regen-rwithin")
+    git(work, "mv", "graphify-out/graph.json", "graphify-out/moved.json")
+    check("regen diff: rename within graph reports old and new paths",
+          grg.graph_diff_files(work) == ["graphify-out/graph.json", "graphify-out/moved.json"])
+
+    _, work = make_case(td, "regen-quoted")
+    odd = 'graphify-out/quote"-\\-snowman-\u2603.json'
+    (work / odd).write_text("old\n")
+    commit_all(work, "seed exotic tracked path")
+    (work / odd).write_text("new\n")
+    got = grg.graph_diff_files(work)
+    check("regen diff: quoted/octal-escaped tracked path is returned literally",
+          got == [odd], repr(got))
+
+    _, work = make_case(td, "regen-untracked")
+    (work / odd).write_text("untracked\n")
+    check("regen diff: untracked exotic path is returned literally",
+          grg.graph_diff_files(work) == [odd])
+
+    _, work = make_case(td, "regen-forged")
+    forged = "graphify-out/evil\ngraphify-out/forged.json"
+    (work / "graphify-out" / "evil\ngraphify-out").mkdir()
+    (work / forged).write_text("old\n")
+    commit_all(work, "seed newline filename")
+    (work / forged).write_text("new\n")
+    got = grg.graph_diff_files(work)
+    check("regen diff: newline cannot forge a second FILES line (hard error)",
+          got is None, repr(got))
+
+    _, work = make_case(td, "regen-clean")
+    (work / "a.py").write_text("unrelated source dirt\n")
+    check("regen diff: unrelated source dirt stays outside the bounded graph scope",
+          grg.graph_diff_files(work) == [])
+    (work / "graphify-out" / "graph.json").unlink()
+    check("regen diff: deletion reports the removed graph path",
+          grg.graph_diff_files(work) == ["graphify-out/graph.json"])
+
+
+def diff_reply(data, rc=0, untracked=b"", untracked_rc=0):
+    """Fault-inject git's process boundary, not a new parser/helper API."""
+    def run(argv, **kw):
+        out, code = (data, rc) if "diff" in argv else (untracked, untracked_rc)
+        if kw.get("text"):
+            out = out.decode("utf-8", "surrogateescape")
+        return subprocess.CompletedProcess(argv, code, stdout=out, stderr="" if kw.get("text") else b"")
+    return run
+
+
+bad_diff_shapes = {
+    "legacy quoted line": b'M\t"graphify-out/evil\\n.json"\n',
+    "truncated rename": b"R100\0graphify-out/old.json\0",
+    "missing NUL terminator": b"M\0graphify-out/x.json",
+    "empty filename": b"M\0\0",
+    "unknown status": b"Q\0graphify-out/x.json\0",
+    "unknown uppercase status": b"ZZ\0graphify-out/x.json\0",
+    "rename without score": b"R\0graphify-out/old.json\0graphify-out/new.json\0",
+    "invalid similarity score": b"C101\0graphify-out/old.json\0graphify-out/new.json\0",
+}
+for name, data in bad_diff_shapes.items():
+    with patch.object(grg.subprocess, "run", side_effect=diff_reply(data)):
+        got = grg.graph_diff_files(".")
+    check(f"regen diff: {name} fails closed at the real call site", got is None, repr(got))
+with patch.object(grg.subprocess, "run", side_effect=diff_reply(b"", rc=128)):
+    check("regen diff: git failure is a hard error, not an empty list",
+          grg.graph_diff_files(".") is None)
+with patch.object(grg.subprocess, "run", side_effect=diff_reply(b"", untracked_rc=128)):
+    check("regen diff: ls-files failure is a hard error", grg.graph_diff_files(".") is None)
+with patch.object(grg.subprocess, "run", side_effect=diff_reply(b"", untracked=b"graphify-out/truncated")):
+    check("regen diff: truncated untracked output fails closed", grg.graph_diff_files(".") is None)
+with patch.object(grg.subprocess, "run", side_effect=diff_reply(b"C75\0a.py\0graphify-out/copied.py\0")):
+    check("regen diff: copy retains BOTH endpoints",
+          grg.graph_diff_files(".") == ["a.py", "graphify-out/copied.py"])
+
+# main's existing honesty/base gates must still run before the FILES decision.
+with tempfile.TemporaryDirectory(prefix="regen-main-") as td:
+    work = Path(td)
+    (work / ".git").mkdir()
+    (work / "scripts").mkdir()
+    (work / "scripts" / "graph_check.py").touch()
+    import contextlib, io
+    for honest in (False, True):
+        for name, data in {**bad_diff_shapes,
+                           "newline FILES injection": b"M\0graphify-out/x\ngraphify-out/forged\0",
+                           "rename-in outside scope": b"R100\0a.py\0graphify-out/a.py\0"}.items():
+            buf = io.StringIO()
+            with patch.object(grg.shutil, "which", return_value="graphify"), \
+                 patch.object(grg, "head_sha", return_value="abc"), \
+                 patch.object(grg, "regen", return_value=(True, "", honest)), \
+                 patch.object(grg, "graph_check", return_value=(0, "OK")), \
+                 patch.object(grg.subprocess, "run", side_effect=diff_reply(data)), \
+                 contextlib.redirect_stdout(buf):
+                rc = grg.main(["--repo-dir", str(work), "--base-sha", "abc"])
+            out = buf.getvalue()
+            check(f"regen main: {name}, was_honest={honest} aborts without a decision marker",
+                  rc == 1 and "\nFILES\n" not in out and "\nNO_CHANGES\n" not in out,
+                  f"rc={rc} out={out!r}")
+
 # --- graph_regen smoke: NO_CHANGES on an already-honest tree ----------------------
 # Needs the graphify CLI — a DECLARED test dep (CI installs graphifyy==0.9.67):
 # absent CLI FAILS naming the dep (same law as tests/test_graph_gate.py), and only
@@ -289,6 +405,7 @@ else:
         (repo / ".gitignore").write_text("graphify-out/graph.html\ngraphify-out/cache/\ngraphify-out/cost.json\n")
         shutil.copy(ROOT / "scripts" / "graph_check.py", repo / "scripts" / "graph_check.py")
         shutil.copy(ROOT / "scripts" / "graph_regen.py", repo / "scripts" / "graph_regen.py")
+        shutil.copy(ROOT / "scripts" / "graph_path_ban.py", repo / "scripts" / "graph_path_ban.py")
         git(repo, "init", "-q")
         commit_all(repo, "init")
         env = {**os.environ, "GRAPHIFY_NO_LLM": "1"}
