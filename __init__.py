@@ -1765,6 +1765,31 @@ def _unbound_include_refs(graph, provenance):
     return None
 
 
+def _unbound_gate_argv_refs(graph):
+    """est-2ek.1.792: a gate's wait.until_argv is exec'd as FIXED argv. run_context
+    renders {run.KEY} in goal/context/question/profile and fan-out goals only, so a
+    {run.KEY} surviving in an argv element reaches the machine gate as a literal
+    token (FileNotFoundError on '{run.python}', forever, no probe ever run). Refuse
+    it before any write or spawn, naming node, argv index and key. Applies to
+    parent-authored and included gates alike: an included gate's seeds were already
+    rendered by expansion, so anything left here is unbound."""
+    for node in graph.get("nodes") or []:
+        wait = node.get("wait") if isinstance(node, dict) else None
+        argv = wait.get("until_argv") if isinstance(wait, dict) else None
+        if not isinstance(argv, list):
+            continue
+        for i, el in enumerate(argv):
+            m = _RUN_REF.search(el) if isinstance(el, str) else None
+            if m:
+                return {"error": (
+                    f"run placeholder unbound: node {node.get('id')!r} wait.until_argv[{i}] "
+                    f"still references {{run.{m.group(1)}}} — run_context renders goals, "
+                    "contexts, questions and profile only, never command argv; write the "
+                    "value into the argv element literally (or hand it to the probe through "
+                    "a file); refused before any write or spawn")}
+    return None
+
+
 def _expand_includes_at_door(graph):
     """The single door choke point for composite graphs (design: expand BEFORE
     _validation_error, apply_graph_defaults and _bind_run_context, on run/amend/save).
@@ -2671,6 +2696,10 @@ def act_run(args):
         bad = _unbound_include_refs(graph, _includes)
         if bad:
             return bad
+    # est-2ek.1.792: run_context never reaches argv — refuse a surviving {run.KEY}.
+    bad = _unbound_gate_argv_refs(graph)
+    if bad:
+        return bad
     # 1.1 (RATIFY F2): profile validation runs on the RENDERED graph ({run.KEY} resolved).
     bad = _profile_error(graph)
     if bad:
@@ -3345,6 +3374,9 @@ def act_amend(args):
         bad = _unbound_include_refs(new, _includes)
         if bad:
             return bad
+    bad = _unbound_gate_argv_refs(new)    # est-2ek.1.792: same door law as run
+    if bad:
+        return bad
     bad = _validation_error(new, run_dir=r) or _profile_error(new)
     if bad:
         return bad
