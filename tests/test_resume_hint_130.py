@@ -96,7 +96,7 @@ check("A prompt-side only: the committed node record carries no resume_hint key"
 
 # ---- B: bounded re-drive — harvest block rides AND the inventory rides ----
 r = mk("rh130-bounded", [{"id": "build", "type": "agent", "goal": "DEADSESS rh130-bounded",
-                          "schema": SCHEMA, "resume_hint": True}])
+                          "schema": SCHEMA, "resume_hint": True}], node_timeout=6)
 out = wf("rh130-bounded", {"FAKE_MODE": "dead_session_102", "FAKE_MESSAGES": "0",
                            "FAKE_ATTEMPT_DIR": str(HOME / "att_bounded"),
                            "FAKE_HANG_SEC": "30"})
@@ -119,7 +119,7 @@ check("B dead-session noise stripped from every inventory excerpt (fixture law)"
 # pre-#130 runner sends (the full #102 harvest, no inventory), while the
 # flag-absent control (artifacts exist) DOES get the inventory.
 r = mk("rh130-off", [{"id": "build", "type": "agent", "goal": "DEADSESS COMMON-130",
-                      "schema": SCHEMA, "resume_hint": False}])
+                      "schema": SCHEMA, "resume_hint": False}], node_timeout=6)
 out = wf("rh130-off", {"FAKE_MODE": "dead_session_102", "FAKE_MESSAGES": "0",
                       "FAKE_ATTEMPT_DIR": str(HOME / "att_off"), "FAKE_HANG_SEC": "30"})
 rec = rec_of(r, "build")
@@ -136,7 +136,7 @@ check("C resume_hint:false adds NO inventory bytes (prompt byte-identical to pre
 check("C node record stays prompt-side clean (no resume_hint key in the record)",
       "resume_hint" not in json.dumps(rec), str(rec)[:200])
 r = mk("rh130-ctrl", [{"id": "build", "type": "agent", "goal": "DEADSESS COMMON-130",
-                       "schema": SCHEMA}])
+                       "schema": SCHEMA}], node_timeout=6)
 out = wf("rh130-ctrl", {"FAKE_MODE": "dead_session_102", "FAKE_MESSAGES": "0",
                         "FAKE_ATTEMPT_DIR": str(HOME / "att_ctrl"), "FAKE_HANG_SEC": "30"})
 p_ctrl = (r / "logs" / "build.a1.prompt.md").read_text()

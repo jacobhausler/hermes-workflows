@@ -669,6 +669,9 @@ AGENT_KEYS = {"id", "type", "after", "goal", "context", "schema", "model", "prov
               # harvest-on-death `partial` ancestor — a plain after-edge blocks on one
               # (typed fail at the wave boundary, never a silent release, never a spawn).
               "profile", "requires", "after_partial",
+              # #130: `resume_hint` (bool; absent = auto when the durable work dir holds a
+              # prior attempt's artifacts) — prompt-side dead-attempt inventory on re-runs.
+              "resume_hint",
               # est-ij0: `order_only` (list, subset of `after`) marks ORDERING-only
               # predecessors (a convoy chain): no data flows over them, and a dead one
               # (failed, or never-runnable behind a failed data edge) is SPLICED out —
@@ -1358,6 +1361,8 @@ def validate_graph_errors(nodes, *, admission=False):
                 # #25: boolean only — an unknown truthy value must not silently
                 # disable (or enable) the fail-closed route gate.
                 E(nid, "require_route", f"require_route {n['require_route']!r} must be a boolean")
+            if n.get("resume_hint") is not None and not isinstance(n.get("resume_hint"), bool):
+                E(nid, "resume_hint", f"resume_hint {n['resume_hint']!r} must be a boolean")   # #130
             if n.get("schema") is not None:
                 if not isinstance(n["schema"], dict):
                     E(nid, "schema", "schema must be an object")

@@ -2343,7 +2343,53 @@ def _banked_work(run, node, index):
         budget -= take
     return names, excerpts
 
-def _dead_session_harvest(r, eclass, run, node, index):
+def _resume_hint_block(run, node, index, attempts_log=None):
+    """#130: the dead-attempt artifact inventory for a re-run spawn — per artifact
+    {path, size, mtime, last 10 lines} from the durable work dir (newest-mtime
+    first), the prior spawn logs of this (node, index) and runner.log, plus the
+    attempts_log classes, capped at 6000 chars and ending in RESUME_LINE.
+    Tri-state node flag: resume_hint false => "" (prompt byte-identical);
+    true => always; absent => auto, only when the durable work dir already holds
+    a prior attempt's files. Prompt-side only (#37 law): never graph.json, node
+    records or the def hash. Dead-session noise is stripped (_clean_capture)."""
+    flag = (node or {}).get("resume_hint")
+    if node is None or flag is False:
+        return ""
+    try:
+        wd = child_work_dir(run, node, index)
+        work = sorted((f for f in wd.rglob("*") if f.is_file()),
+                      key=lambda f: f.stat().st_mtime, reverse=True)
+        stem = re.sub(r"[^A-Za-z0-9_.-]", "_", str(node["id"])) + \
+            (f".{index}" if index is not None else "")
+        logs = sorted((run / "logs").glob(stem + ".a*.log"),
+                      key=lambda f: f.stat().st_mtime, reverse=True)
+    except OSError:
+        work, logs = [], []
+    if flag is not True and not work:
+        return ""
+    lines = ["## Dead-attempt artifact inventory (machine preamble)",
+             "Your prior attempt left these artifacts (newest first). Verify them; never redo them."]
+    if attempts_log:
+        lines.append("Prior attempts: " + ", ".join(
+            f"#{a.get('attempt')} {a.get('error_class')}" for a in attempts_log))
+    budget = 6000
+    for f in work[:12] + logs[:3] + [run / "runner.log"]:
+        try:
+            st = f.stat()
+            body = _clean_capture(f.read_text(errors="replace")[-4000:])
+        except OSError:
+            continue
+        tail = [l[:200] for l in body.splitlines() if l.strip()][-10:]
+        mt = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(st.st_mtime))
+        entry = "\n".join([f"- {f} size={st.st_size} mtime={mt}"] + ["  > " + l for l in tail])
+        if len(entry) > budget:
+            break
+        lines.append(entry)
+        budget -= len(entry)
+    lines.append(RESUME_LINE)
+    return "\n".join(lines)
+
+def _dead_session_harvest(r, eclass, run, node, index, inventory=""):
     """The #102 harvest preamble for a re-drive whose prior session persisted NO
     messages: the dead attempt is NOT resumable, so the re-drive is a FRESH
     session and this block is the ONLY continuity — error_class, the node's
@@ -2357,7 +2403,9 @@ def _dead_session_harvest(r, eclass, run, node, index):
              f"exclusively the harvest below. Do NOT re-run discovery it already covers.",
              f"Prior attempt died: error_class={eclass}"]
     names, excerpts = _banked_work(run, node, index)
-    if names:
+    if inventory:   # #130: the per-artifact inventory REPLACES the names+excerpts block
+        lines.append(inventory.rsplit("\n", 1)[0])
+    elif names:
         lines.append("Banked files in your durable work dir (already produced; verify, never redo):")
         lines.extend("- " + n for n in names[:40])
         for name, body in excerpts:
@@ -5049,7 +5097,8 @@ def _ratelimit_park(meta, r, respawn, ev, ev_kw, node=None, cancel=None,
         # defect). #11's one-time extend still applies on top of the clamp —
         # that law was bought separately and stays intact.
         meta.setdefault("_rl_timeout_cap", {})[key] = park_deadline
-        r = respawn()
+        r = respawn(resume_preamble=_resume_hint_block(run, node, ev_kw.get("index"),
+                                                       attempts_log))   # #130
     if attempts_log:
         r["attempts_log"] = attempts_log
         last_spawn = r.get("spawn")
@@ -5122,7 +5171,8 @@ def _transient_retry(meta, r, respawn, ev, ev_kw, node=None, cancel=None):
         if iso is not None:
             iso["attempts_log"] = attempts_log
             return iso
-        r = respawn()
+        r = respawn(resume_preamble=_resume_hint_block(run, node, ev_kw.get("index"),
+                                                       attempts_log))   # #130
         # wf159c finding 2: a banner death that surfaces AFTER a ladder
         # respawn must reach the park too — the dispatcher contract (parks
         # while wall+budget allow, then verbatim banner + ratelimit_gave_up)
@@ -5353,8 +5403,9 @@ def _bounded_retry(meta, r, respawn, ev, ev_kw, node=None, index=None):
     if dead:
         entry["fresh_session"] = True
     al.append(entry)
-    preamble = (_dead_session_harvest(r, eclass, run, node, index) if dead
-                else _resume_preamble(r))
+    hint = _resume_hint_block(run, node, index if index is not None else ev_kw.get("index"), al)
+    preamble = (_dead_session_harvest(r, eclass, run, node, index, inventory=hint) if dead
+                else "\n\n".join(p for p in (_resume_preamble(r), hint) if p))   # #130
     r2 = respawn(resume_preamble=preamble)
     r2["attempts_log"] = al
     r2["attempts"] = (r2.get("spawn") + 1) if isinstance(r2.get("spawn"), int) else len(al) + 1
