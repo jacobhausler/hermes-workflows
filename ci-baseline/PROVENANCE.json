@@ -94,11 +94,15 @@
       "exit": 0,
       "measured": "2026-10-08 local foreground run on fix/est-p318w: TOTAL FAIL 0, rc=0 (RED before the finalize() fix: TOTAL FAIL 11, summary.md was the bare header line)",
       "supersede_by": "next green-CI refresh (replace with the CI-captured row)"
+    },
+    {
+      "test": "tests/test_route_identity_699.py",
+      "added_by": "gh-dispatch (est-2ek.1.699, PR #296)",
+      "measured": "2026-10-08 lane run: 240 cases, 0 red (65/65 checks in-file)"
     }
   ],
   "totals": {
-    "cases": 245,
-    "red": 0
+    "cases": 0,
   },
   "contract": "Green CI ledgers only (every exit == 0); rows not captured by CI are listed in rows_added_outside_ci with how they were measured. Refresh from the tip of main after each main move; see README.md.",
   "tracking_item": "est-9yl2",
