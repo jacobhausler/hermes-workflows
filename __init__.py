@@ -741,6 +741,8 @@ WORKFLOW_SCHEMA = {
     "description": (
         "Multi-agent workflow graphs: run a DAG of agent/gate nodes (fan-out, human gates, replay-skip resume, "
         "steering, amend, per-node model tiers) as a background runner owned by this session. "
+        "Use it for independent lanes, a human gate, or a resumable graph; for one or two "
+        "independent calls use delegate_task instead. "
         "Argument shapes are in parameters; the `workflow` skill has the grammar and examples."
     ),
     "parameters": WORKFLOW_PARAMS,
