@@ -13,6 +13,7 @@ mtime, newest first; `last_written` = the newest). One `node.banked` event, and 
   N  spawn path: a stub child writes two files, prints, then sleeps past its wall
      -> corpus contents, manifest last_written, one node.banked line, verdict
      unchanged (failed/timeout), record carries banked.
+  F  fan-out item: the committed per-item record carries the same pointer.
   H  healthy spawn: no corpus, no node.banked, no `banked` key (byte-identity law).
   E  OSError (a regular file squats on the corpus path): honest-empty — node.banked
      with error=, files=0, no pointer, verdict still failed/timeout, squatter intact.
@@ -108,6 +109,16 @@ try:
           and isinstance(bk[0].get("spawn"), int) and bk[0].get("files") == 2
           and bk[0].get("bytes") == 43 and bk[0].get("corpus") == str(corpus)
           and "error" not in bk[0], str(bk)[:300])
+
+    # ============ F: a fan-out item's committed record carries the pointer too ============
+    r = mk("b131-fan", [{"id": "fan", "type": "agent", "timeout": 2,
+                         "fanout": {"items": ["x"], "goal": "wall-kill item {index}"}}])
+    wfrun("b131-fan")
+    rec, corpus = rec_of(r, "fan.0"), r / "nodes" / "fan.0.corpus"
+    check("F item record: timeout verdict + banked pointer to fan.0.corpus",
+          rec.get("error_class") == "timeout" and rec.get("banked") == str(corpus)
+          and (corpus / "work" / "first.txt").is_file(),
+          json.dumps({k: rec.get(k) for k in ("status", "error_class", "banked")}))
 
     # ============ H: healthy spawn stays byte-identical ============
     r = mk("b131-ok", [{"id": "h", "type": "agent", "goal": "HEALTHY131 answer"}])
