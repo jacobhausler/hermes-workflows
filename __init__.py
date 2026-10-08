@@ -197,7 +197,7 @@ def _validation_error(graph, run_dir=None):
                              "field": "after", "msg": "after must be a list of node id strings"})
                 item["after"] = []
             safe.append(item)
-    errs.extend(validate_graph_errors(safe))
+    errs.extend(validate_graph_errors(safe, admission=True))  # R10: submit door only
     # #85: the artifact-admission guard composes with the validator here, so EVERY
     # door admission path (run/amend/submit/save/validate) measures ledgers before
     # any write/spawn. Artifact BYTES are measured only when a run dir exists to

@@ -1000,12 +1000,15 @@ def reasoning_levels():
               "fallback literal (keep it in sync with core).", file=sys.stderr)
     return allowed
 
-def validate_graph_errors(nodes):
+def validate_graph_errors(nodes, *, admission=False):
     """Return a LIST of {node, field, msg} — EVERY defect, not the first. Strict ids:
     node ids double as filenames.
     #32: accepts a whole graph object too — `{grammar?, nodes:[...]}` — in which case
     the top-level `grammar` tag is checked first (absent = wf/1; unknown = refused,
-    listing the supported values) and then its `nodes`. A bare node list is unchanged."""
+    listing the supported values) and then its `nodes`. A bare node list is unchanged.
+    admission=True: NEW-run admission rules (submit door only — _validation_error /
+    validate_graph_full). Persisted graphs re-validated at gate release or runner
+    restart pass the default False and are never stranded by them (PR #280 R10)."""
     errs = []
     if isinstance(nodes, dict):
         errs.extend(grammar_errors(nodes))
@@ -1294,7 +1297,9 @@ def validate_graph_errors(nodes):
                     # every consumer is safe, not just the QM admission gate.
                     # items_from stays the dynamic path — its count is unknown
                     # at admit and is never tripped here.
-                    if isinstance(fo.get("items"), list) and not fo["items"]:
+                    # R10: SUBMIT door only — a persisted graph whose empty node was
+                    # pruned/skipped must still release and restart.
+                    if admission and isinstance(fo.get("items"), list) and not fo["items"]:
                         E(nid, "fanout.items",
                           "fanout.items must be a non-empty literal or use items_from")
                     items = fo.get("items") if isinstance(fo.get("items"), list) else []
@@ -1874,7 +1879,7 @@ def validate_graph_full(graph):
                              "field": "after", "msg": "after must be a list of node id strings"})
                 item["after"] = []
             safe.append(item)
-    errs.extend(validate_graph_errors(safe))
+    errs.extend(validate_graph_errors(safe, admission=True))
     return errs
 
 # ---------- include-by-expansion (design 2026-09-30) ----------

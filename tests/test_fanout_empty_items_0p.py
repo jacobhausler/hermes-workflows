@@ -33,7 +33,8 @@ def check(name, cond, detail=""):
     if not cond:
         FAILS.append(name)
 
-V = wfcommon.validate_graph_errors
+def V(nodes):  # the SUBMIT-door rules (R10: admission=True is door-only)
+    return wfcommon.validate_graph_errors(nodes, admission=True)
 MSG = "fanout.items must be a non-empty literal or use items_from"
 
 # 1. baked-empty literal rejected (the est-077y class)
@@ -86,6 +87,35 @@ pvr = [{"id": n, "type": "agent", "goal": "g",
 named = {e["node"] for e in V(pvr) if MSG in e["msg"]}
 check("all three probe-verify-remediate nodes named",
       named == {"probe", "verify", "remediate"}, named)
+
+# 8. R10 (PR #280 review): the guard is SUBMIT-door only. A persisted, in-flight
+#    graph whose items:[] node was legitimately pruned must still be releasable
+#    (__init__._release_core) and restartable (wf.py validate_graph seam).
+#    Repro: echo go=false -> conditional gate on_skip=prune prunes the empty
+#    fanout agent; an independent human gate is held and gets released.
+import importlib.util, json, os, tempfile  # noqa: E402
+PERSISTED = {"nodes": [
+    {"id": "e", "type": "echo", "output": {"go": False}},
+    {"id": "cond", "type": "gate", "after": ["e"], "when": "out.e.go",
+     "on_skip": "prune", "wait": {"wait_s": 1}},
+    {"id": "empty", "type": "agent", "after": ["cond"],
+     "fanout": {"items": [], "goal": "work {item}"}},
+    {"id": "human", "type": "gate", "question": "ship?", "options": ["yes", "no"]}]}
+check("restart seam (wf.py validate_graph) accepts the persisted pruned graph",
+      wfcommon.validate_graph(PERSISTED["nodes"]) is None,
+      wfcommon.validate_graph(PERSISTED["nodes"]))
+os.environ.setdefault("WF_RUNS_ROOT", tempfile.mkdtemp(prefix="wr0p-r10-"))
+_spec = importlib.util.spec_from_file_location("door_wr0p", HERE.parent / "__init__.py")
+door = importlib.util.module_from_spec(_spec); _spec.loader.exec_module(door)
+import wf_test_isolation as _iso71; _iso71.install(door)  # noqa: E402  #71 pin
+rd = Path(tempfile.mkdtemp(prefix="wr0p-run-"))
+(rd / "graph.json").write_text(json.dumps(PERSISTED))
+rel = door._release_core(rd, "human", "yes")
+check("gate release on persisted pruned-empty run succeeds (R10)",
+      rel.get("ok") is True and (rd / "gates" / "human.json").exists(), rel)
+bad = door._validation_error(PERSISTED)
+check("submit door still refuses the same graph as a NEW run",
+      bool(bad) and MSG in json.dumps(bad), bad)
 
 def test_fanout_empty_items_reject():
     """pytest entry point: the est-077y core rejection, re-run standalone."""
