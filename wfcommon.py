@@ -28,7 +28,9 @@ _CONCURRENCY_KEYS = ("concurrency", "item_concurrency")
 # node must not un-freeze on replay. The node's real model/provider DO participate —
 # a substitution changes the work's route, and the hash sees it (unlike route_verified,
 # which annotates a route that never moved).
-_POLICY_KEYS = ("require_route", "route_verified", "substrate_substituted")
+# #130: `resume_hint` only shapes the RE-RUN prompt (prompt-side policy), never the
+# work — flipping it on an amend must not un-freeze committed nodes.
+_POLICY_KEYS = ("require_route", "route_verified", "substrate_substituted", "resume_hint")
 FP_RULE_LEGACY = 1  # before b79fa21: budgets participated in def_hash
 FP_RULE_VERSION = 2  # b79fa21: exclude budgets
 FP_RULES = (FP_RULE_LEGACY, FP_RULE_VERSION)

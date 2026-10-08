@@ -2361,7 +2361,8 @@ def _resume_hint_block(run, node, index, attempts_log=None):
                       key=lambda f: f.stat().st_mtime, reverse=True)
         stem = re.sub(r"[^A-Za-z0-9_.-]", "_", str(node["id"])) + \
             (f".{index}" if index is not None else "")
-        logs = sorted((run / "logs").glob(stem + ".a*.log"),
+        own = re.compile(re.escape(stem) + r"\.a\d+\.log")   # node-exact: x never takes x.audit.a0.log
+        logs = sorted((f for f in (run / "logs").glob(stem + ".a*.log") if own.fullmatch(f.name)),
                       key=lambda f: f.stat().st_mtime, reverse=True)
     except OSError:
         work, logs = [], []
@@ -2383,7 +2384,7 @@ def _resume_hint_block(run, node, index, attempts_log=None):
         mt = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(st.st_mtime))
         entry = "\n".join([f"- {f} size={st.st_size} mtime={mt}"] + ["  > " + l for l in tail])
         if len(entry) > budget:
-            break
+            continue   # skip an oversize entry; later small sources still fit
         lines.append(entry)
         budget -= len(entry)
     lines.append(RESUME_LINE)
