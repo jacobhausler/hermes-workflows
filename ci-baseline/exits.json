@@ -590,9 +590,19 @@
     "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_metrics_0923.py.log"
   },
   {
+    "test": "test_metrics_fold_parity_114.py",
+    "exit": 0,
+    "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_metrics_fold_parity_114.py.log"
+  },
+  {
     "test": "test_metrics_missing_ui.mjs",
     "exit": 0,
     "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_metrics_missing_ui.mjs.log"
+  },
+  {
+    "test": "test_metrics_unknown_fold_114.py",
+    "exit": 0,
+    "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_metrics_unknown_fold_114.py.log"
   },
   {
     "test": "test_model_law_dad50be0.py",

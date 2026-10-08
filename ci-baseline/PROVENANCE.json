@@ -64,10 +64,22 @@
       "exit": 0,
       "measured": "2026-10-08 local foreground run on fix/stuck-node-finalize-733 (PR #235): 55 checks, 0 failure(s), rc=0; the PR added this test without a ledger row (baseline guard: tests without rows)",
       "supersede_by": "next green-CI refresh (replace with the CI-captured row)"
+    },
+    {
+      "test": "test_metrics_fold_parity_114.py",
+      "exit": 0,
+      "measured": "2026-10-08 local foreground run on the rebased #281 head over main f3801c9 + fold fix fac89bd: Ran 4 tests OK (parity rc=0, unknown-fold rc=0)",
+      "supersede_by": "next green-CI refresh (replace with the CI-captured row)"
+    },
+    {
+      "test": "test_metrics_unknown_fold_114.py",
+      "exit": 0,
+      "measured": "2026-10-08 local foreground run on the rebased #281 head over main f3801c9 + fold fix fac89bd: Ran 4 tests OK (parity rc=0, unknown-fold rc=0)",
+      "supersede_by": "next green-CI refresh (replace with the CI-captured row)"
     }
   ],
   "totals": {
-    "cases": 240,
+    "cases": 242,
     "red": 0
   },
   "contract": "Green CI ledgers only (every exit == 0); rows not captured by CI are listed in rows_added_outside_ci with how they were measured. Refresh from the tip of main after each main move; see README.md.",
