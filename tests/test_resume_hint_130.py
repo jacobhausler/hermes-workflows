@@ -131,7 +131,7 @@ p_off = (r / "logs" / "build.a1.prompt.md").read_text()
 check("C resume_hint:false keeps the standard #102 harvest (names+excerpts ride)",
       "## Dead-session re-drive harvest (machine preamble)" in p_off
       and "progress.md" in p_off and "BANKED-WORKFILE-102" in p_off, p_off[:120])
-check("C resume_hint:false adds NO inventory bytes (prompt byte-identical to pre-#130)",
+check("C resume_hint:false adds NO inventory bytes (no header, no size= lines)",
       HEADER not in p_off and "size=" not in p_off,
       str([l for l in p_off.splitlines() if "size=" in l][:1]))
 check("C node record stays prompt-side clean (no resume_hint key in the record)",
@@ -190,6 +190,47 @@ errs = wfcommon.validate_graph_errors([{"id": "a", "type": "echo", "after": [],
                                         "output": {}, "resume_hint": True}])
 check("validator rejects resume_hint on an echo node",
       any(e["field"] == "resume_hint" for e in errs), str(errs)[:200])
+
+# ---- G (review B1): resume_hint is POLICY — never in def_hash / descendant efp ----
+base = {"id": "a", "type": "agent", "goal": "g"}
+kid = {"id": "b", "type": "agent", "goal": "g2", "after": ["a"]}
+h0 = wfcommon.def_hash(base)
+for v in (False, True):
+    check(f"G def_hash unchanged by resume_hint:{v} (amend opt-out never unfreezes)",
+          wfcommon.def_hash(dict(base, resume_hint=v)) == h0)
+    check(f"G descendant efp unchanged by ancestor resume_hint:{v}",
+          wfcommon.efp({"a": dict(base, resume_hint=v), "b": kid}, kid)
+          == wfcommon.efp({"a": base, "b": kid}, kid))
+
+# ---- H (review B2/N6): documented where agents look; JS export reports it lossy ----
+check("H references/grammar.md documents resume_hint",
+      "`resume_hint`" in (BUILD / "references" / "grammar.md").read_text())
+check("H agent-facing tool schema (__init__.py) names resume_hint",
+      "resume_hint" in (BUILD / "__init__.py").read_text())
+import wf_dialect  # noqa: E402
+check("H JS export lists resume_hint as lossy (no silent drop of an explicit false)",
+      "resume_hint" in wf_dialect._LOSSY_AGENT)
+
+# ---- J (review N2/N4): budget skips, never truncates; log glob is node-exact ----
+import time as _t  # noqa: E402
+import wf  # noqa: E402
+jr = RUNS / "rh130-unit"
+shutil.rmtree(jr, ignore_errors=True); (jr / "logs").mkdir(parents=True)
+wd = wf.child_work_dir(jr, {"id": "x"}, None)
+now = _t.time()
+for i in range(3):   # three long-line files, newest first: each entry ~2.1 KB
+    f = wd / f"big{i}.txt"; f.write_text(("L" * 300 + "\n") * 12); os.utime(f, (now - i, now - i))
+f = wd / "small.txt"; f.write_text("SMALL-130\n"); os.utime(f, (now - 10, now - 10))
+(jr / "logs" / "x.a0.log").write_text("OWNLOG-130\n")
+(jr / "logs" / "x.audit.a0.log").write_text("FOREIGNLOG-130\n")
+blk = wf._resume_hint_block(jr, {"id": "x", "resume_hint": True}, None, [])
+check("J budget overflow skips the big entry and keeps later small ones (continue, not break)",
+      "SMALL-130" in blk and "OWNLOG-130" in blk, blk[-300:])
+check("J spawn-log source pinned: own x.a0.log listed", "x.a0.log" in blk)
+check("J log glob is node-exact: x.audit.a0.log never rides node x's inventory",
+      "FOREIGNLOG-130" not in blk and "x.audit.a0.log" not in blk)
+check("J inventory stays within budget and ends in RESUME_LINE",
+      len(blk) < 6000 + 400 and blk.rstrip().endswith(wf.RESUME_LINE.strip()))
 
 print("ALL PASS" if ok else "FAILURES PRESENT")
 sys.exit(0 if ok else 1)
