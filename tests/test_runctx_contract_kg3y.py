@@ -148,6 +148,15 @@ check("C6 dry_run refuses unbound library refs, touches nothing",
 # byte law: the leniency stays for INLINE graphs (only from= gets the door).
 inline = json.loads(json.dumps(TEMPLATE))
 inline["name"] = "inline-tmpl"
+# #293 (est-2ek.1.792) refuses a surviving {run.KEY} in wait.until_argv for EVERY
+# graph (exec'd argv, not a render surface): pin that, then drop the argv ref so
+# C7 measures the leniency that remains on the other surfaces.
+before = (len(spawns), dirs())
+r = call(action="run", graph=inline)
+check("C7a inline argv survivor still refused by the #293 argv law",
+      "error" in r and "until_argv" in r.get("error", "") and (len(spawns), dirs()) == before,
+      json.dumps(r)[:160])
+inline["nodes"][2]["wait"]["until_argv"] = ["echo", "ship"]
 r = call(action="run", graph=inline)
 rid = r.get("run_id")
 check("C7 inline graph keeps documented verbatim leniency", bool(rid), json.dumps(r)[:160])

@@ -890,6 +890,11 @@
     "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_run_tray.mjs.log"
   },
   {
+    "test": "test_runctx_contract_kg3y.py",
+    "exit": 0,
+    "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_runctx_contract_kg3y.py.log"
+  },
+  {
     "test": "test_runner_orphan_666.py",
     "exit": 0,
     "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_runner_orphan_666.py.log"
