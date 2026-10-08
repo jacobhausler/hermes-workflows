@@ -188,6 +188,51 @@ def _route_substitution_refusal(meta, node, spawn_no):
             "error_class": "route_substitution_denied", "raw": "", "ms": 0,
             "attempts": 1, "spawn": spawn_no}
 
+def _stale_route_receipt_clear(meta, node, spawn_no):
+    """route-hold escalation (w56): a RE-DRIVE (spawn_no > 1) whose run already
+    died on the route family for THIS node (route_unavailable /
+    route_substitution_denied in events.jsonl) clears the node's durable receipt
+    — the proof that holds the re-drive is one reality already contradicted, and
+    the estate was deleting it by hand next to the node record. The clear is
+    loud (node.route_receipt_cleared) and scoped: only this node's row, only for
+    a re-drive, and only after route-family evidence. A first spawn NEVER clears
+    (the door re-bakes proofs at submit; the receipt guards that first spawn).
+    Returns True when a receipt row was removed."""
+    if not (meta.get("_run") and spawn_no and spawn_no > 1) or not (node or {}).get("id"):
+        return False
+    run = meta["_run"]
+    try:
+        lines = (run / "events.jsonl").read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return False
+    hit = False
+    for line in lines:
+        try:
+            ev = json.loads(line)
+        except Exception:
+            continue
+        if ev.get("node") != node["id"]:
+            continue
+        if ev.get("error_class") in ("route_unavailable", "route_substitution_denied"):
+            hit = True
+            break
+    if not hit:
+        return False
+    p = _route_receipts_path(run)
+    try:
+        rec = _route_receipt_load(run)
+        if node["id"] not in rec:
+            return False
+        old = rec.pop(node["id"])
+        tmp = p.with_name(f"{p.name}.{os.getpid()}.tmp")
+        tmp.write_text(json.dumps(rec, ensure_ascii=False, indent=2))
+        os.replace(tmp, p)
+    except OSError:
+        return False
+    log(run, "node.route_receipt_cleared", node=node["id"], cleared=old,
+        reason="re-drive after a route-family death (stale receipt, w56)")
+    return True
+
 def _profile_evidence(node):
     name = node.get("profile")
     return {"profile": name, "profile_home": str(profile_home(name))} if name else {}
@@ -4307,6 +4352,9 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
     # est-2ek.1.641: BEFORE submit — a lane with a proved-alive receipt may
     # never re-submit on a different model (post-admission substitution is a
     # denial, not a fallback). The seat is never touched: zero attempts.
+    # route-hold escalation (w56): a re-drive whose run already died on the
+    # route family clears the contradicted receipt at this same seam, first.
+    _stale_route_receipt_clear(meta, node, spawn_no)
     _rsd = _route_substitution_refusal(meta, node, spawn_no)
     if _rsd is not None:
         log(run, "node.route_substitution_denied", node=node["id"], index=index,
@@ -5406,11 +5454,29 @@ def _route_hold(meta, result, node=None, final_served=None):
     neither the verified route, an alias of it, nor the node's own resolved model
     means the child billed someone else: failed, error_class=route_unavailable.
     Unknown served (no state.db row) is NOT a mismatch — the runner never invents
-    'known' from absence (R2 law)."""
+    'known' from absence (R2 law).
+    route-hold escalation (w56): the opt-out this hold's OWN error text advertises
+    (`require_route: false`) is HONORED here — node key > graph `defaults` (same
+    precedence as the door's _require_route_effective). A node whose author
+    accepts fallback commits its completed output instead of losing it to
+    route_unavailable, and the contradicted proof is dropped from the def so no
+    later probe re-fires against it. Without the key: #25 behavior byte-identical."""
     node = node or {}
     verified = node.get("route_verified")
     if not verified or result.get("status") not in ("done", "partial"):
         return result       # never mask a genuine death with the hold
+    rq = node.get("require_route")
+    if rq is None:
+        try:
+            rq = (json.loads((meta.get("_run") / "graph.json").read_text())
+                  .get("defaults") or {}).get("require_route")
+        except Exception:
+            rq = None
+    if rq is None or rq is True:
+        pass
+    elif not rq:
+        node.pop("route_verified", None)      # the opted-out proof is void going forward
+        return result
     served = result.get("served_model")
     if not served:
         return result                                    # unknown: never counted
