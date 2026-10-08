@@ -1344,5 +1344,10 @@
     "test": "test_when_on_agent_engine.py",
     "exit": 0,
     "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_when_on_agent_engine.py.log"
+  },
+  {
+    "test": "test_foreign_ns_child_818.py",
+    "exit": 0,
+    "log": "rows_added_outside_ci in PROVENANCE.json"
   }
 ]

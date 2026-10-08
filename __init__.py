@@ -3279,7 +3279,7 @@ def act_status(args):
             sb = _common.explain_stale(r, nid)
             if sb:
                 out["nodes"][nid]["stale_because"] = sb
-    # Cumulative spend is independent of heartbeat. Only a verified spawn's exact
+    # Cumulative spend is independent of heartbeat. Only a live spawn's (verified, or ledger-marked foreign-ns) exact
     # session title can supply current activity; historical unended rows are not live.
     try:
         cm = _common.run_child_metrics(r)
