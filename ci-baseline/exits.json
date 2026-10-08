@@ -370,6 +370,11 @@
     "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_graph_gate.py.log"
   },
   {
+    "test": "test_graph_orphan_deletion_231.py",
+    "exit": 0,
+    "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_graph_orphan_deletion_231.py.log"
+  },
+  {
     "test": "test_graph_single_writer_153.py",
     "exit": 0,
     "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_graph_single_writer_153.py.log"
