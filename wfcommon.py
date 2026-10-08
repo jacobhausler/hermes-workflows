@@ -102,7 +102,7 @@ def source_digest(graph):
 # same-route ping law, the runner's #25 commit hold, the #641 receipt hold) goes
 # through route_ids_equal, so a proven-and-run item cannot die route_unavailable over
 # punctuation. Provider-aware and a mirror of stock core's normalize_model_name
-# (agent/anthropic_message_convert.py): only claude-prefixed Anthropic ids fold, each
+# (agent/anthropic_message_convert.py): only claude prefixed Anthropic ids fold, each
 # '.' to '-'; '_' is kept, Bedrock ids keep their namespace dots; every other
 # provider compares as spelled, and an aggregator's vendor namespace is part of the id.
 _BEDROCK_PREFIXES = ("global.", "us.", "eu.", "apac.", "ap.", "au.", "jp.", "ca.",
@@ -112,7 +112,7 @@ def canonical_model_id(model, provider=None):
     """Identity form of `model` on `provider`'s route; '' for absent input (absence
     proves nothing). Lowercase, strip, peel a trailing '(label)' (core's
     'name(provider)' route_info shape), peel a leading '<provider>/' only when it
-    names the route's OWN provider; Anthropic only, claude-prefixed, non-Bedrock: each
+    names the route's OWN provider; Anthropic only, claude prefixed, non-Bedrock: each
     '.' becomes '-' (as stock core bills it). Never rewrites what gets billed or
     relaxes a gate."""
     m = str(model or "").strip().lower()
