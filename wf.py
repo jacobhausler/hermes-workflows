@@ -299,8 +299,11 @@ def _stamp_served(meta, result, node=None):
                         (skey, len(skey) + 2, skey + "#a")).fetchall()
             except (sqlite3.Error, OSError):
                 rows = []                 # older core / offline DB: existing law
+            if rows:   # est-2ek.1.774: the record names every main-loop model billed
+                result["billed_models"] = [str(m) for (m,) in rows if m]
             for (observed,) in rows:
-                probe = _route_hold(meta, dict(result, served_model=observed), node)
+                probe = _route_hold(meta, dict(result, served_model=observed), node,
+                                    final_served=result.get("served_model"))
                 if probe.get("error_class") == "route_unavailable":
                     result.update(status="failed", error_class="route_unavailable",
                                   error=probe["error"])
@@ -1379,7 +1382,7 @@ def commit_item_record(run, node, byid, index, result):
     rec["committed_at"] = now()
     for k in ("output", "error", "error_class", "ms", "attempts", "attempts_log",
               "skey", "log_path", "prompt_path", "pid", "started", "spawn",
-              "served_model", "served_billing_provider", "adopted", "harvested",
+              "served_model", "served_billing_provider", "billed_models", "adopted", "harvested",
               "tree_descendants", "final"):
         v = result.get(k)
         if v is not None:
@@ -5229,7 +5232,7 @@ def _seat_alias_map(home):
                 amap[k.strip()] = v.strip().strip("'\"")
     return amap
 
-def _route_hold(meta, result, node=None):
+def _route_hold(meta, result, node=None, final_served=None):
     """#25: commit-time fail-closed hold (field report fb-fix-9c575645: pinned
     billed the seat's fallback model for 3 whole nodes while the submit ping had
     ALREADY reported the fallback-ladder surprise). When the door proved this node's
@@ -5260,8 +5263,10 @@ def _route_hold(meta, result, node=None):
     s = str(served).strip().lower()
     if s in candidates or s.rsplit("/", 1)[-1] in candidates:
         return result
+    lead = (f"final served_model {final_served!r}; a mid-session call billed {served!r}"
+            if final_served and final_served != served else f"node billed {served!r}")
     result.update(status="failed", error_class="route_unavailable",
-                  error=f"route_unavailable: node billed {served!r} but the door proved "
+                  error=f"route_unavailable: {lead} but the door proved "
                         f"{verified!r} alive at submit — core answered from another route. "
                         f"Delete the node record and wait to re-drive, or amend to a route "
                         f"you accept falling back on (require_route: false).")
