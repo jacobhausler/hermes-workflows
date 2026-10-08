@@ -23,9 +23,9 @@ Design notes:
   (1) the returned text is touched — core truth-tests each result at selection
       time (isinstance + bool) and str-manipulates the winner, so any attribute
       access or bool coercion of our return proves delivery;
-  (2) at the session's next hook call, a still-referenced proposal text is
-      treated as the persisted winner (a discarded text dies with the dispatch
-      results list);
+  (2) a proposal still referenced at the next hook call is NOT treated as
+      shipped: the dispatch results list retains losers too (#304 peer
+      review), so an unconfirmed entry is dropped and the card replays;
   (3) an optional module-level ``_witness`` callable (test seam / durable-row
       probe) vouches for the committed row directly and suppresses (1).
   An unconfirmed proposal is simply dropped — the card replays next turn
@@ -294,8 +294,10 @@ def _confirm(session_id, run_id, run_dir, turn_id):
 def _reconcile(session_id, turn_id):
     """Decide the fate of PROPOSALS FROM EARLIER TURNS at this session's next
     call. Confirmed (delivered) -> stamp card.echoed; denied -> drop the entry
-    so the card replays. A discarded text dies with the dispatch results list;
-    a still-referenced one is the persisted winner. With ``_witness`` bound the
+    so the card replays. Reference liveness settles nothing (#304 peer
+    review): the dispatch results list retains losers too, so an unconfirmed
+    entry is always denied here — only the selection witness on the text (or
+    a selection-proof ``_witness``) ever stamps. With ``_witness`` bound the
     probe answers instead (durable-row truth, same shape as the reconcile probe
     for #161's notice belt)."""
     for key in [k for k in _PENDING if k[0] == session_id]:
@@ -308,8 +310,13 @@ def _reconcile(session_id, turn_id):
                 ok = bool(_witness(session_id=session_id,
                                    turn_id=entry.get("turn_id", ""), run_id=rid))
             else:
-                ref = entry.get("ref")
-                ok = bool(ref) and ref() is not None
+                # #304 peer review: reference liveness is NOT delivery. The
+                # dispatch results list retains LOSING proposals until the
+                # call returns, and an abandoned worker's reconcile can run
+                # mid-dispatch — before winner selection. A text that never
+                # witnessed selection (bool coercion or str work, below) is
+                # unshipped: drop the claim so the card replays, never stamp.
+                ok = False
             if ok:
                 _confirm(session_id, rid, entry["dir"], entry.get("turn_id", ""))
             else:
@@ -329,9 +336,11 @@ def _drop_own(key, wr):
 class _CardText(str):
     """The augmented reply. A str in every respect, plus the #168 P1 witness:
     core selection (``isinstance(r, str) and r``) truth-tests and str-methods
-    the WINNER and only the winner, so the first attribute access or bool
-    coercion of this object proves it was selected -> stamp the ledger then.
-    A loser is never touched again after being appended to the results list."""
+    the WINNER and only the winner, so the first non-dunder attribute access
+    or bool coercion of this object proves it was selected -> stamp the ledger
+    then. A loser is never touched by selection; its only touches are the
+    resolver's pre-selection dunders (isawaitable -> __class__/__await__),
+    which confirm nothing (#304 peer review)."""
 
     def __new__(cls, text, entries, session_id, turn_id):
         self = str.__new__(cls, text)
@@ -364,7 +373,15 @@ class _CardText(str):
         return True                         # non-empty by construction
 
     def __getattribute__(self, name):
-        if not name.startswith("_ce_"):
+        # #304 peer review: stock core resolves EVERY dispatch result through
+        # resolve_plugin_command_result before selection, and its first move
+        # (inspect.isawaitable -> hasattr("__await__") + __class__ touches)
+        # lands on losers too. Dunder access is therefore NOT delivery proof;
+        # only real str work on the selected text (non-dunder attributes,
+        # bool coercion) confirms. A persisted winner always passes a truth
+        # check or a str operation on the way to the store/renderer.
+        if (not name.startswith("_ce_")
+                and not (name.startswith("__") and name.endswith("__"))):
             try:
                 object.__getattribute__(self, "_ce_confirm")()
             except Exception as exc:

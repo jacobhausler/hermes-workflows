@@ -70,10 +70,16 @@
       "exit": 0,
       "measured": "2026-10-08 local foreground run on harden/upstream-0.21.5-hook-contract (PR #304): Ran 4 tests, OK, rc=0 (also RED first at pre-fix base 8bc661c: 2 failures + 1 error, proving the pins bite); the PR added this test without a ledger row (baseline guard: tests without rows)",
       "supersede_by": "next green-CI refresh (replace with the CI-captured row)"
+    },
+    {
+      "test": "test_stock_dispatch_selection_304.py",
+      "exit": 0,
+      "measured": "2026-10-08 local foreground run on harden/upstream-0.21.5-hook-contract (PR #304): Ran 3 tests, OK, rc=0 (also RED first at pre-fix head 88f37b2: 3 failures, proving the pins bite); the PR added this test without a ledger row (baseline guard: tests without rows)",
+      "supersede_by": "next green-CI refresh (replace with the CI-captured row)"
     }
   ],
   "totals": {
-    "cases": 241,
+    "cases": 242,
     "red": 0
   },
   "contract": "Green CI ledgers only (every exit == 0); rows not captured by CI are listed in rows_added_outside_ci with how they were measured. Refresh from the tip of main after each main move; see README.md.",

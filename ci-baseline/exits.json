@@ -1070,6 +1070,11 @@
     "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_steer_truth_0924.py.log"
   },
   {
+    "test": "test_stock_dispatch_selection_304.py",
+    "exit": 0,
+    "log": "rows_added_outside_ci in PROVENANCE.json"
+  },
+  {
     "test": "test_stop_reason_status_95.py",
     "exit": 0,
     "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_stop_reason_status_95.py.log"
