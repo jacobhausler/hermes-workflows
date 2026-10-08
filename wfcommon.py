@@ -3330,6 +3330,79 @@ def active_child(r, n, byid, index=None):
     return _verify_spawn_rec(r, n, byid, jload(r / "nodes" / f"{fname}.json"))
 
 
+# est-2ek.1.833: the runner logs `seat.wait` when the GLOBAL agent-seat semaphore
+# is full (wf.py _seat_acquire on_wait) and writes a spawn-ledger child row the
+# moment it gets a seat and spawns. A wait with no later spawn/terminal event for
+# the same (node, index) is OPEN — status reads it instead of an unexplained
+# all-pending live run. Derive-only (A3): two files the runner already writes.
+_SEAT_WAIT_CLOSERS = frozenset(("node.done", "node.failed", "node.finished", "node.cancelled",
+                                "node.skipped", "node.spliced", "item.finished", "item.adopted",
+                                "item.harvested_at_cancel"))
+
+def open_seat_waits(r):
+    """{node_id: {(index): {since, cap, spawn}}} for seat waits not yet closed by a
+    later child spawn (spawn-ledger), node/item terminal event, or runner (re)start
+    / stop. Unreadable files are honest absence (empty), never a raise."""
+    from datetime import datetime
+    def ts(s):
+        try:
+            return datetime.fromisoformat(str(s)).timestamp()
+        except (TypeError, ValueError):
+            return None
+    rows = []
+    for fname, src in (("events.jsonl", "ev"), ("spawn-ledger.jsonl", "led")):
+        try:
+            text = (Path(r) / fname).read_text()
+        except OSError:
+            continue
+        for line in text.splitlines():
+            try:
+                e = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(e, dict) and ts(e.get("ts")) is not None:
+                rows.append((ts(e["ts"]), 0 if src == "ev" else 1, src, e))
+    rows.sort(key=lambda x: (x[0], x[1]))   # same second: the wait precedes its spawn
+    waits = {}
+    for _t, _o, src, e in rows:
+        if src == "led":
+            if e.get("role") == "child" and e.get("node"):
+                waits.pop((e["node"], e.get("index")), None)
+            continue
+        ev = e.get("event")
+        if ev in ("run.started", "run.resumed", "run.stopped"):
+            waits.clear()
+        elif ev == "seat.wait" and e.get("node"):
+            waits[(e["node"], e.get("index"))] = {"since": e.get("ts"), "cap": e.get("cap"),
+                                                  "spawn": e.get("spawn")}
+        elif ev in _SEAT_WAIT_CLOSERS and e.get("node"):
+            if ev.startswith("item.") and e.get("index") is not None:
+                waits.pop((e["node"], e.get("index")), None)
+            else:
+                for k in [k for k in waits if k[0] == e["node"]]:
+                    waits.pop(k)
+    out = {}
+    for (nid, idx), w in waits.items():
+        out.setdefault(nid, {})[idx] = w
+    return out
+
+def seat_wait_view(per_index, now_s=None):
+    """One node's open waits -> {since, age_s, cap, spawn[, waiting]} (oldest wait)."""
+    import time as _time
+    from datetime import datetime
+    oldest = min(per_index.items(), key=lambda kv: str(kv[1].get("since") or ""))[1]
+    try:
+        age = int((now_s if now_s is not None else _time.time())
+                  - datetime.fromisoformat(str(oldest.get("since"))).timestamp())
+    except (TypeError, ValueError):
+        age = None
+    view = {"since": oldest.get("since"), "age_s": age, "cap": oldest.get("cap"),
+            "spawn": oldest.get("spawn")}
+    idxs = sorted(i for i in per_index if isinstance(i, int))
+    if idxs:
+        view["waiting"] = idxs
+    return view
+
 def run_state(r):
     """Derived truth of a run dir: status, per-node status, held gate meta.
     status: pending|running|interrupted|held|done|failed|stopped.
@@ -3356,6 +3429,11 @@ def run_state(r):
         if active:
             nodes[n["id"]]["active_spawn"] = active[0]
             nodes[n["id"]]["active_spawns"] = active
+    # est-2ek.1.833: a live runner blocked on the global seat cap says so per node.
+    if live:
+        for nid, per in open_seat_waits(r).items():
+            if nid in nodes and states.get(nid) == "pending" and per:
+                nodes[nid]["seat_wait"] = seat_wait_view(per)
     # e68544a37be37657 + est-ij0: the runner's own release law (partial blocks a
     # plain edge; a dead order_only predecessor is spliced) — one function, two callers.
     deps_ok, _deps_res, _spliced = release_law(graph["nodes"], states)

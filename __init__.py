@@ -2997,6 +2997,8 @@ def act_status(args):
             out["nodes"][nid]["blocked_by"] = v["blocked_by"]
         if v.get("parked"):
             out["nodes"][nid]["parked"] = v["parked"]
+        if v.get("seat_wait"):   # est-2ek.1.833: global seat back-pressure, derive-only
+            out["nodes"][nid]["seat_wait"] = v["seat_wait"]
         sm = _steer_state(r, nid)
         if sm:
             out["nodes"][nid]["steer"] = sm
@@ -3084,7 +3086,16 @@ def act_status(args):
         out["next"] = [{"action": "release", "gate_id": hg.get("id"),
                        "options": hg.get("options") or []}]
     elif s in ("running", "pending", "interrupted"):
-        out["next"] = [{"action": "wait"}]
+        row = {"action": "wait"}
+        # est-2ek.1.833: a live run with no progress because the GLOBAL agent-seat
+        # cap is full names that reason, the cap and the oldest wait age.
+        sw = {nid: v["seat_wait"] for nid, v in st["nodes"].items() if v.get("seat_wait")}
+        if sw and st.get("runner_live"):
+            ages = [w["age_s"] for w in sw.values() if isinstance(w.get("age_s"), int)]
+            row.update({"reason": "seat_wait", "nodes": sorted(sw),
+                        "cap": next((w.get("cap") for w in sw.values() if w.get("cap") is not None), None),
+                        "age_s": max(ages) if ages else None})
+        out["next"] = [row]
     elif s == "failed":
         rows = [{"action": "amend", "node": nid, "error_class":
                  (out["nodes"][nid].get("node_facts")

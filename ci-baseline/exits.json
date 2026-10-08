@@ -965,6 +965,11 @@
     "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_seat_ticket_identity_g255.py.log"
   },
   {
+    "test": "test_seat_wait_status_833.py",
+    "exit": 0,
+    "log": "rows_added_outside_ci in PROVENANCE.json"
+  },
+  {
     "test": "test_seats_not_a_run_g2xx.py",
     "exit": 0,
     "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_seats_not_a_run_g2xx.py.log"
