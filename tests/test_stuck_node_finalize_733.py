@@ -150,7 +150,14 @@ with tempfile.TemporaryDirectory() as td:
         check(f"{name} has death_cause", bool(rec.get("death_cause")), rec)
         check(f"{name} has finished_at", bool(rec.get("finished_at")), rec)
     rx = json.loads((r / "runner_exit.json").read_text())
-    check("run terminal 'blocked' verdict", str(rx.get("reason", "")).startswith("blocked by dead-on-arrival"), rx)
+    # zap F1 (#235 review): the verdict must be one the read model already
+    # classifies — the runner's own "blocked by failed <ids>" vocabulary; the
+    # dead-on-arrival provenance rides in detail + the finalized marker.
+    check("run terminal 'blocked by failed' verdict (read-model vocabulary)",
+          str(rx.get("reason", "")).startswith("blocked by failed "), rx)
+    check("verdict detail names dead-on-arrival", "dead-on-arrival" in str(rx.get("detail", "")), rx)
+    check("run_state reads the finalized run as failed",
+          (wc.run_state(r) or {}).get("status") == "failed", (wc.run_state(r) or {}).get("status"))
     evs = [json.loads(l) for l in (r / "events.jsonl").read_text().splitlines() if l.strip()]
     check("run.finalized_doa event written",
           any(e.get("event") == "run.finalized_doa" for e in evs), evs)
@@ -291,8 +298,18 @@ with tempfile.TemporaryDirectory() as td:
     check("fan-out done item untouched", rec_a10.get("status") == "done" and "finalized" not in rec_a10, rec_a10)
     check("fan-out dead item finalized",
           rec_b10.get("status") == "failed" and rec_b10.get("finalized") == "dead-on-arrival", rec_b10)
-    check("fan-out parent (absent base record) untouched",
-          not (r10 / "nodes" / "lanes.json").exists())
+    # zap F1 (#235 review): a finalized item must leave the PARENT terminal —
+    # node_rec reads only the aggregate, so an absent aggregate read pending
+    # and the run stayed `interrupted`. The finalize commits a failed aggregate
+    # (current efp, items' own efp proven current) the read model reports.
+    agg10 = wc.jload(r10 / "nodes" / "lanes.json") or {}
+    check("fan-out parent gets a failed dead-on-arrival aggregate",
+          agg10.get("status") == "failed" and agg10.get("finalized") == "dead-on-arrival", agg10)
+    st10, _ = wc.node_rec(r10, FO["nodes"][0], byid)
+    check("fan-out parent reads failed in node_rec (not pending)", st10 == "failed", st10)
+    rs10 = wc.run_state(r10) or {}
+    check("fan-out run_state reads failed (not interrupted)", rs10.get("status") == "failed",
+          rs10.get("status"))
     rx10 = json.loads((r10 / "runner_exit.json").read_text())
     check("fan-out run blocked names the item", "lanes" in rx10.get("reason", ""), rx10)
 
@@ -314,6 +331,105 @@ with tempfile.TemporaryDirectory() as td:
     check("cli finalized both claims",
           all(json.loads((r12 / "nodes" / f).read_text()).get("finalized") == "dead-on-arrival"
               for f in ("build.json", "adversary.json")))
+
+# ======== #235 zap review (verdict=changes @21316e6dd): one behavioral scene per finding ========
+import wf  # noqa: E402  (closed ERROR_CLASSES set — F5)
+
+with tempfile.TemporaryDirectory() as td:
+    runs = Path(td) / "runs"
+    runs.mkdir()
+    dp = dead_pid()
+    gbyid = {n["id"]: n for n in GRAPH["nodes"]}
+
+    # ---- F5: error_class is a member of the closed wf.ERROR_CLASSES set
+    rf5 = mk_run(runs, "f5-class", GRAPH, base_nodes(dp))
+    (rf5 / "wf.pid").write_text(str(dp) + "\n")
+    lr.finalize_run(rf5)
+    ec = json.loads((rf5 / "nodes" / "build.json").read_text()).get("error_class")
+    check("F5 finalize error_class is in wf.ERROR_CLASSES", ec in wf.ERROR_CLASSES, ec)
+
+    # ---- F3: a LEGACY (pre-efp) claim on an AMENDED graph must never be
+    # stamped with the current graph's fingerprint (that fabricates a current
+    # failed commit for a node it never ran). It stays stale => pending.
+    OLD = {"name": "legacy", "nodes": [{"id": "build", "type": "agent", "goal": "OLD goal"}]}
+    NEW = {"name": "legacy", "nodes": [{"id": "build", "type": "agent", "goal": "AMENDED goal"}]}
+    rf3 = runs / "f3-legacy"
+    (rf3 / "nodes").mkdir(parents=True)
+    (rf3 / "graph.json").write_text(json.dumps(NEW))
+    (rf3 / "nodes" / "build.json").write_text(json.dumps({
+        "status": "running", "pid": dp, "skey": "wf:legacy:build:0000.0001", "attempt": 0,
+        "def_hash": wc.def_hash(OLD["nodes"][0])}))
+    (rf3 / "wf.pid").write_text(str(dp) + "\n")
+    lr.finalize_run(rf3)
+    rec3 = json.loads((rf3 / "nodes" / "build.json").read_text())
+    check("F3 legacy claim finalized", rec3.get("finalized") == "dead-on-arrival", rec3)
+    check("F3 legacy claim NOT stamped with the current efp", "efp" not in rec3, rec3)
+    nb = {n["id"]: n for n in NEW["nodes"]}
+    st3, _ = wc.node_rec(rf3, NEW["nodes"][0], nb)
+    check("F3 amended legacy claim reads pending (stale), never a current failed commit",
+          st3 == "pending", st3)
+    check("F3 run still reads terminal via the recognized verdict",
+          (wc.run_state(rf3) or {}).get("status") == "failed", (wc.run_state(rf3) or {}).get("status"))
+
+    # ---- F4: a failed runner_exit write is NOT swallowed (nonzero exit), and
+    # a retry once the dir is writable REPAIRS the missing verdict.
+    rf4 = mk_run(runs, "f4-exitfail", GRAPH, base_nodes(dp))
+    (rf4 / "wf.pid").write_text(str(dp) + "\n")
+    (rf4 / "runner_exit.json").mkdir()          # replace() onto a dir => OSError
+    rc4 = lr.finalize_run(rf4)
+    check("F4 unwritable runner_exit => nonzero exit", rc4 not in (0, None), f"rc={rc4}")
+    (rf4 / "runner_exit.json").rmdir()
+    rc4b = lr.finalize_run(rf4)
+    rx4 = wc.jload(rf4 / "runner_exit.json")
+    check("F4 retry exits 0", rc4b == 0, f"rc={rc4b}")
+    check("F4 retry repairs the missing verdict",
+          isinstance(rx4, dict) and str(rx4.get("reason", "")).startswith("blocked by failed "), rx4)
+    check("F4 no tmp litter left by the failed write",
+          not list(rf4.glob("runner_exit.json.*.tmp")), list(rf4.glob("runner_exit.json.*.tmp")))
+
+    # ---- F2: check-and-write runs UNDER the runner flock. A runner admitted
+    # between the liveness check and the write (simulated: a subprocess doing
+    # acquire_lock's LOCK_EX|LOCK_NB, then save_node-style done commit) must
+    # never have its done commit overwritten with failed.
+    rf2 = mk_run(runs, "f2-race", GRAPH, base_nodes(dp))
+    (rf2 / "wf.pid").write_text(str(dp) + "\n")
+    done_rec = {"status": "done", "output": {"result": "late commit"},
+                "efp": wc.efp(gbyid, gbyid["build"]), "fp_rule_version": wc.FP_RULE_VERSION}
+    racer = (
+        "import fcntl, json, os, sys\n"
+        "r = sys.argv[1]\n"
+        "fd = os.open(os.path.join(r, 'runner.lock'), os.O_CREAT | os.O_RDWR, 0o644)\n"
+        "try:\n"
+        "    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)\n"
+        "except OSError:\n"
+        "    print('BUSY'); sys.exit(0)\n"
+        "p = os.path.join(r, 'nodes', 'build.json')\n"
+        "open(p + '.racer.tmp', 'w').write(sys.argv[2])\n"
+        "os.replace(p + '.racer.tmp', p)\n"
+        "print('COMMITTED')\n")
+    outcome = {}
+    real_verify = wc._verify_spawn_rec
+
+    def racing_verify(r_, n_, byid_, rec_):
+        if n_.get("id") == "build" and "racer" not in outcome:
+            outcome["racer"] = subprocess.run(
+                [sys.executable, "-c", racer, str(r_), json.dumps(done_rec)],
+                capture_output=True, text=True, timeout=30).stdout.strip()
+        return real_verify(r_, n_, byid_, rec_)
+
+    wc._verify_spawn_rec = racing_verify
+    try:
+        rc2 = lr.finalize_run(rf2)
+    finally:
+        wc._verify_spawn_rec = real_verify
+    final2 = json.loads((rf2 / "nodes" / "build.json").read_text())
+    check("F2 racer ran inside the check-and-write window", outcome.get("racer") in ("BUSY", "COMMITTED"),
+          outcome)
+    check("F2 a runner's done commit is never overwritten with failed",
+          not (outcome.get("racer") == "COMMITTED" and final2.get("status") != "done"),
+          {"racer": outcome.get("racer"), "final": final2.get("status")})
+    check("F2 finalize holds runner.lock: a would-be runner is refused admission (BUSY)",
+          outcome.get("racer") == "BUSY", outcome)
 
 print()
 print(f"{checks} checks, {failures} failure(s)")
