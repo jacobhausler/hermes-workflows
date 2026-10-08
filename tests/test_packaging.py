@@ -91,6 +91,23 @@ def main() -> None:
                       "references/grammar.md", "references/operations.md", "SHA256SUMS")))
             check("fake child retains executable mode in ZIP",
                   (archive.getinfo(root + "tests/fake").external_attr >> 16) & 0o111 == 0o111)
+            # The packaged orphan test exec-loads the helper, subprocess-executes its
+            # CLI, and replays the packaged graph gate in a synthetic deletion PR.
+            unpacked_graph = temp / "graph-closure"
+            archive.extractall(unpacked_graph)
+            pkg_graph = unpacked_graph / root.rstrip("/")
+            graph_result = subprocess.run(
+                [sys.executable, "tests/test_graph_orphan_deletion_231.py"],
+                cwd=pkg_graph, capture_output=True, text=True,
+                env={**os.environ, "PYTHONPATH": str(pkg_graph) + os.pathsep + str(pkg_graph / "tests")},
+            )
+            if graph_result.returncode != 0:
+                raise AssertionError(
+                    f"unpacked graph-test closure exit {graph_result.returncode}:\n"
+                    f"{graph_result.stdout}\n{graph_result.stderr}"
+                )
+            check("unpacked graph tests import and execute the orphan helper and graph gate",
+                  "ALL PASS" in graph_result.stdout)
             # est-4vnq finding 4 (pack-list omission, made explicit — pack_choice=INCLUDED):
             # scripts/pr_tag_audit.py was outside INCLUDE_FILES/INCLUDE_PATTERNS while
             # tests/test_pr_tag_audit.py (shipped via the tests/test_*.py glob) executes
@@ -103,7 +120,7 @@ def main() -> None:
             check("audit helper ships: scripts/pr_tag_audit.py is in the ZIP (explicit include decision)",
                   "scripts/pr_tag_audit.py" in packed_scripts)
             check("pack-list contract: ZIP scripts/ set equals the exact declared packed set",
-                  packed_scripts == {"scripts/graph_check.py", "scripts/pack.py",
+                  packed_scripts == {"scripts/graph_check.py", "scripts/graph_orphans.py", "scripts/pack.py",
                                       "scripts/pr_tag_audit.py", "scripts/suite.py",
                                       "scripts/graph_path_ban.py", "scripts/graph_regen.py",
                                       # est-5p7x: the diagram-law generators — shipped
