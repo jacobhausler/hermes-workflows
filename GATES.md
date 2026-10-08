@@ -19,7 +19,7 @@ gate (adversary 231 counterfactual, est-i24i).
 `python3 tests/test_graphify_dedupe_27.py` → ALL PASS
 
 ## Gate 3 — suite
-`python3 scripts/suite.py . out` → see out/exits.json (result recorded below)
+No full-suite result was recorded in this historical lane receipt; use exact-head CI for current suite status.
 
 ## Gate 4 — push
 branch fix/graph-orphan-deletion-aware-i24i pushed to origin (first push before minute 25)
