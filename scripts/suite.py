@@ -102,20 +102,35 @@ def parse_args(argv):
 
 
 root, out, _baseline_path = parse_args(sys.argv)
+
+
+def invalidate_receipts():
+    """A refused invocation must never leave a PRIOR green receipt standing in a
+    reused out-dir (CI cache reuse, stale --baseline flows): a consumer reading
+    only admission.json would mistake yesterday's success for current proof.
+    Invalidate if the dir exists; never CREATE it."""
+    if out.exists():
+        (out / 'admission.json').unlink(missing_ok=True)
+        (out / 'exits.json').unlink(missing_ok=True)
+
+
 # #112: validate the invocation BEFORE any out-dir side effects — an invalid
 # root must never leave a green-looking ledger or admission behind.
 if not root.is_dir() or not (root / 'tests').is_dir():
     print(f'suite: invalid root: {root} (missing root or tests directory)', flush=True)
-    # review F4 (#112 §1 "none left green"): an invalid invocation must not leave a
-    # PRIOR green admission standing when the out-dir is reused (CI cache reuse,
-    # --baseline flows pointing at an old OUT would read a green admission for a
-    # run that never executed). Invalidate persisted artifacts if the dir already
-    # exists — but never CREATE out/ (fresh invalid invocations still create nothing).
-    if out.exists():
-        (out / 'admission.json').unlink(missing_ok=True)
-        (out / 'exits.json').unlink(missing_ok=True)
+    invalidate_receipts()
     raise SystemExit(2)
-base_reds = load_baseline(_baseline_path) if _baseline_path else None
+if _baseline_path:
+    try:
+        base_reds = load_baseline(_baseline_path)
+    except SystemExit:
+        # The refusal is right; the durable receipt must agree with it. A reused
+        # out-dir holding a prior green admission + ledger would otherwise still
+        # read as current proof after this exit-2 (#112 F4 law, baseline path).
+        invalidate_receipts()
+        raise
+else:
+    base_reds = None
 out.mkdir(parents=True, exist_ok=True)
 ledger = out / 'exits.json'
 # fb 3d2175e9cd75d2a1: a suite run reports the CURRENT pass only — reset the
