@@ -146,6 +146,16 @@ class SeatAdmission(unittest.TestCase):
         self.assertEqual({r['prompt'].splitlines()[0] for r in children},
                          {'CURRENT x', 'CURRENT y', 'CURRENT z'})
 
+    def test_fanout_worker_queued_behind_seat_waits(self):
+        old = self.graph(fanout=True)
+        old['nodes'][-1]['fanout']['items'] = ['a', 'b', 'c']
+        self.start(old, count=2)  # third worker has not reached seat admission yet
+        current = copy.deepcopy(old)
+        current['nodes'][-1].update(goal='CURRENT', fanout={
+            'items': ['x', 'y', 'z'], 'goal': 'CURRENT {item}'})
+        self.amend(current)
+        self.assert_current(self.finish(), current, 3)
+
     def removed_node(self, fanout):
         self.start(self.graph(fanout=fanout), count=2 if fanout else 1)
         self.amend({'name': 'admission', 'nodes': [
