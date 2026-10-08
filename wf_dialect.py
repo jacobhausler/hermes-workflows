@@ -14,7 +14,8 @@ Two functions, one contract (`references/dialect.md` §1-§3, fixture corpus
       as a `// LOSSY:` line at the node AND summarised in the header — never
       silently dropped. A graph whose SEMANTICS cannot be represented at all
       (fan-out `quorum` race, a human gate with no `default_option`, a `when`
-      gate that prunes an arm, an `inputs` ref into a fan-out's `all_results`)
+      gate that prunes an arm, an agent `when`, an `inputs` ref into a fan-out's
+      `all_results`)
       is REFUSED with a named reason (DialectRefusal), mirroring the importer.
       Byte-stable for equal input.
 
@@ -1253,6 +1254,11 @@ class _Exporter:
             if isinstance(fo, dict) and fo.get("quorum") is not None:
                 self.refuse(f"fanout.quorum on '{nid}': a first-N-wins race with straggler cancellation has "
                             f"no counterpart (parallel/pipeline are barriers) — remove quorum to export", nid)
+            if n["type"] == "agent" and n.get("when") is not None:
+                # est-l2ey (#132): a false agent `when` never spawns (prune OR pass);
+                # their runtime has no bounded branch, so export would run that arm.
+                self.refuse(f"agent '{nid}' has a `when` predicate: their runtime has no bounded "
+                            f"branch, so the export would run work the graph skips", nid)
             if n["type"] == "gate":
                 if n.get("when") is not None and kids[nid] and n.get("on_skip", "prune") != "pass":
                     self.refuse(f"gate '{nid}' has a `when` predicate that prunes descendants "

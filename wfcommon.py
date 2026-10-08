@@ -686,6 +686,12 @@ AGENT_KEYS = {"id", "type", "after", "goal", "context", "schema", "model", "prov
               # producer: on commit done the runner mints the durable token
               # nodes/<id>.suite-proof.json (node id + committed efp).
               "publishes", "suite_proof",
+              # est-l2ey (issue #132): agents take the SAME bounded `when` grammar and
+              # the SAME on_skip enum as gates — a false predicate is a TERMINAL SKIP
+              # with zero spawns (runner honors it; the validator refuses at the door
+              # anything the grammar rejects: malformed expr, non-ancestor head).
+              # Echo/join keep rejecting both keys via their closed sets.
+              "when", "on_skip",
               # jam-h23: on-death catch. 'skip' commits the failed node `skipped`
               # (join-tolerant); '<fallback-node-id>' additionally lets that agent run.
               "on_fail",
@@ -1102,9 +1108,6 @@ def validate_graph_errors(nodes):
                     continue
                 if t == "gate" and k == "inputs":
                     continue
-                if t == "agent" and k == "when":
-                    E(nid, "when", "only gate nodes take when; use a gate with on_skip:prune to branch")
-                    continue
                 if k in ("after_partial", "order_only"):
                     continue  # the dedicated blocks below name the key (echo-meaningless / type)
                 E(nid, k, "unknown key; allowed: " + json.dumps(sorted(_type_keys)))
@@ -1367,11 +1370,11 @@ def validate_graph_errors(nodes):
                 E(nid, "output", f"echo output {o!r} must be a JSON-serialisable "
                                  f"value ({type(o).__name__} cannot be committed verbatim)")
         osk = n.get("on_skip")
-        if osk is not None and n.get("type") == "gate":   # non-gate: closed-key check already rejected it
+        if osk is not None and n.get("type") in ("gate", "agent"):   # est-l2ey: gate|agent (echo/join: closed-key check already rejected it)
             if osk not in ("pass", "prune"):
                 E(nid, "on_skip", f"on_skip {osk!r} invalid; allowed: ['pass', 'prune']")
             elif n.get("when") is None:
-                E(nid, "on_skip", "on_skip needs a `when` (nothing else can skip a gate)")
+                E(nid, "on_skip", "on_skip needs a `when` (nothing else can skip the node)")
         ofk = n.get("on_fail")   # jam-h23: agent-only (closed key set rejected others);
         if ofk is not None:      # non-'skip' value must name an existing, non-ancestor AGENT
             anc, stack = set(), list(n.get("after", []))
@@ -1400,7 +1403,7 @@ def validate_graph_errors(nodes):
             else:
                 E(nid, "wait", "only gate nodes take wait")   # agent: dedicated error pinned by test_validate_0923
         anc = set()
-        if (n.get("when") is not None and t == "gate") or n.get("inputs") is not None:
+        if (n.get("when") is not None and t in ("gate", "agent")) or n.get("inputs") is not None:   # est-l2ey: agents take `when` too
             stack = list(n.get("after", []))
             while stack:
                 a = stack.pop()
@@ -1434,23 +1437,26 @@ def validate_graph_errors(nodes):
                         E(nid, f"keys.{label}", f"join key ref {ref!r} head {head!r} is not an "
                                                 f"existing node in its `after` ancestry")
 
-        if n.get("when") is not None and t == "gate":
-            err = when_expr_ok(n["when"])
-            if err:
-                E(nid, "when", err)   # parse-only (syntax mode is total): NO head check on a broken expr
+        if n.get("when") is not None and t in ("gate", "agent"):   # est-l2ey: gate|agent
+            if not isinstance(n["when"], str):   # a non-str when would crash the tokenizer — name it instead
+                E(nid, "when", "when must be a string (bounded expression)")
             else:
-                # `when` reads out.<ancestor>.<path> (references/grammar.md). Parse-only
-                # when_expr_ok cannot see heads (sentinel operands), so a non-ancestor
-                # head — sibling, typo, ghost — would validate clean and resolve to
-                # None at fire time: False ⇒ silent skip (default on_skip:prune = dead
-                # branch), True ⇒ holds, depending on unrelated commit order. Validate
-                # the ref heads against the SAME ancestry closure `inputs` uses below.
-                for tok in _tok_when(n["when"]):
-                    if tok.startswith("out."):
-                        head = tok.split(".")[1]
-                        if head not in anc:
-                            E(nid, "when", f"when ref {tok!r} head {head!r} is not an existing "
-                                           f"node in its `after` ancestry (when must descend from it)")
+                err = when_expr_ok(n["when"])
+                if err:
+                    E(nid, "when", err)   # parse-only (syntax mode is total): NO head check on a broken expr
+                else:
+                    # `when` reads out.<ancestor>.<path> (references/grammar.md). Parse-only
+                    # when_expr_ok cannot see heads (sentinel operands), so a non-ancestor
+                    # head — sibling, typo, ghost — would validate clean and resolve to
+                    # None at fire time: False ⇒ silent skip (default on_skip:prune = dead
+                    # branch), True ⇒ holds, depending on unrelated commit order. Validate
+                    # the ref heads against the SAME ancestry closure `inputs` uses below.
+                    for tok in _tok_when(n["when"]):
+                        if tok.startswith("out."):
+                            head = tok.split(".")[1]
+                            if head not in anc:
+                                E(nid, "when", f"when ref {tok!r} head {head!r} is not an existing "
+                                               f"node in its `after` ancestry (when must descend from it)")
         ins = n.get("inputs")
         if ins is not None:
             if t == "gate":

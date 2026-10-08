@@ -6,7 +6,7 @@
     "commit": "f0e6935e6",
     "captured_at": "2026-10-07",
     "totals": {
-      "cases": 232,
+      "cases": 234,
       "red": 0
     }
   },
@@ -15,6 +15,18 @@
       "test": "test_baseline_guard_9yl2.py",
       "exit": 0,
       "measured": "2026-10-07 local serial run of scripts/suite.py; the row can only ever make CI red, never green",
+      "supersede_by": "next green-CI refresh (replace with the CI-captured row)"
+    },
+    {
+      "test": "test_library_tag_read_qeul.py",
+      "exit": 0,
+      "measured": "est-qeul (#277) shipped this test without a ledger row \u2014 main tip CI run 37700407378 went red on the est-9yl2 missing-row check; row restored here, measured 2026-10-08 local serial run",
+      "supersede_by": "next green-CI refresh (replace with the CI-captured row)"
+    },
+    {
+      "test": "test_when_on_agent.py",
+      "exit": 0,
+      "measured": "est-l2ey (issue #132) new validator test; row added in-PR, measured 2026-10-08 local serial run",
       "supersede_by": "next green-CI refresh (replace with the CI-captured row)"
     }
   ],

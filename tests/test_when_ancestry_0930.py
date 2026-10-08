@@ -95,11 +95,20 @@ check(len(errs) == 1 and errs[0]["field"] == "when"
       and errs[0]["msg"] == wfcommon.when_expr_ok("out.judge.verdict == "),
       "malformed when reports the syntax error only", str(errs))
 
-# 10. the agent-`when` rule (closed key set) owns agents untouched
-agent_when = [{"id": "a", "type": "agent", "goal": "x", "when": "out.a.ok"}]
-errs = V(agent_when)
-check([e["field"] for e in errs] == ["when"] and "only gate" in errs[0]["msg"],
-      "agent when still rejected by the closed-key rule alone", str(errs))
+# 10. est-l2ey (issue #132): the agent-`when` law flipped — a well-formed agent when
+# is now ACCEPTED; the fail-closed refusals (non-ancestor head, malformed expr) carry
+# over to agents verbatim. See tests/test_when_on_agent.py for the full battery.
+agent_when_ok = [{"id": "a", "type": "agent", "goal": "x"},
+                 {"id": "b", "type": "agent", "after": ["a"], "goal": "y",
+                  "when": "out.a.ok"}]
+check(V(agent_when_ok) == [], "agent when accepted under the widened grammar", str(V(agent_when_ok)))
+agent_when_sib = [{"id": "p", "type": "agent", "goal": "x"},
+                  {"id": "q", "type": "agent", "goal": "x"},
+                  {"id": "b", "type": "agent", "after": ["p"], "goal": "y",
+                   "when": "out.q.ok"}]
+errs = V(agent_when_sib)
+check([e["field"] for e in errs] == ["when"] and "ancestry" in errs[0]["msg"],
+      "agent when sibling-head refused by the ancestry rule alone", str(errs))
 
 print(f"\nRESULT: {'ALL PASS' if not fails else str(len(fails)) + ' FAIL'}")
 raise SystemExit(1 if fails else 0)
