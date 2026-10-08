@@ -4106,6 +4106,10 @@ def _adopt_child(meta, node, byid, index, child, schema, fo_cancel=None):
             time.sleep(0.1)
     finally:
         with meta["_procs_lock"]:
+            # The stop watcher can set+kill after our stop check but before
+            # the liveness probe observes death. Classify at the same locked
+            # boundary where this child leaves the watcher's kill registry.
+            cancelled = cancelled or meta["_stop"].is_set()
             meta["_procs"].pop(key, None)
         if tree_seen:
             # #61b B1: persist the adopted spawn's tracked subtree across the
