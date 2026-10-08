@@ -140,9 +140,33 @@ def call_llm(*, task, provider, model, messages, max_tokens, timeout, route_info
                                "status": "done"}, baked)
     check("mid-turn fallback bills off-route => route_unavailable", result.get("status") == "failed"
           and result.get("error_class") == "route_unavailable", result)
+    # est-2ek.1.774: the record names every main-loop model billed (aux task excluded), and the
+    # error says which one was the final served model and which was billed mid-session.
+    check("record lists every main-loop model billed, not the aux task",
+          sorted(result.get("billed_models") or []) == ["aux-fallback", "m-1"], result.get("billed_models"))
+    check("error names the final served model and the mid-session model",
+          "final served_model 'm-1'" in result.get("error", "")
+          and "mid-session call billed 'aux-fallback'" in result.get("error", ""), result.get("error"))
+    wf.save_node(run, baked, {baked["id"]: baked}, result)
+    rec = json.loads((run / "nodes" / f"{baked['id']}.json").read_text())
+    check("committed node record carries billed_models",
+          sorted(rec.get("billed_models") or []) == ["aux-fallback", "m-1"], rec)
+    wf.commit_item_record(run, baked, {baked["id"]: baked}, 0, result)
+    item = json.loads((run / "nodes" / f"{baked['id']}.0.json").read_text())
+    check("fan-out item record carries billed_models too",
+          sorted(item.get("billed_models") or []) == ["aux-fallback", "m-1"], item)
     legacy = wf._stamp_served({"_run": run}, {"skey": title.split("#a", 1)[0],
                                "status": "done"}, saved["nodes"][0])
     check("no pin/proof: legacy hold remains disabled", legacy.get("status") == "done"
           and "route_unavailable" not in str(legacy), legacy)
+    check("no pin/proof: the runner invents no billed_models", "billed_models" not in legacy, legacy)
+    # est-2ek.1.774: a single-model child gets a one-item list and still passes.
+    db = sqlite3.connect(home / "state.db")
+    db.execute("delete from session_model_usage where model='aux-fallback'")
+    db.commit(); db.close()
+    single = wf._stamp_served({"_run": run}, {"skey": title.split("#a", 1)[0],
+                              "status": "done"}, baked)
+    check("single-model child still passes with a one-item billed_models",
+          single.get("status") == "done" and single.get("billed_models") == ["m-1"], single)
 print("ALL PASS" if not failures else f"FAILURES: {failures}")
 sys.exit(bool(failures))
