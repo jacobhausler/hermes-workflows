@@ -79,53 +79,57 @@ def head_branch(repo_dir, env=None):
     return r.stdout.strip() if r.returncode == 0 else ""
 
 
-_STATUS_RE = re.compile(r"^[A-Z]{1,2}[0-9]{0,3}!?$")  # git name-status: A M D T U X B, R100/C75, optional ! (unmerged)
+_STATUS_RE = re.compile(r"(?:[ADMTUB]|[MRC][0-9]{1,3})")
+
+
+def nul_fields(data):
+    """Raw git -z fields, or None for a truncated/empty-field stream."""
+    if not data:
+        return []
+    if not data.endswith(b"\0"):
+        return None
+    fields = data[:-1].split(b"\0")
+    if any(not field for field in fields):
+        return None
+    return [field.decode("utf-8", "surrogateescape") for field in fields]
+
+
+def parse_name_status(data):
+    """Parse git -z --name-status into path tuples (R/C keep BOTH endpoints).
+
+    Preserve record boundaries so a graph-scoped caller can retain an outside
+    endpoint of a rename/copy without including unrelated source edits. Unknown
+    statuses, invalid scores, empty paths and truncated records fail closed.
+    Quoted line-delimited output is not this protocol and must never be guessed.
+    """
+    fields = nul_fields(data)
+    if fields is None:
+        return None
+    records = []
+    i = 0
+    while i < len(fields):
+        status = fields[i]
+        if not _STATUS_RE.fullmatch(status):
+            return None
+        if len(status) > 1 and int(status[1:]) > 100:
+            return None
+        width = 2 if status[0] in "RC" else 1
+        i += 1
+        if i + width > len(fields):
+            return None
+        records.append(tuple(fields[i:i + width]))
+        i += width
+    return records
 
 
 def changed_files(repo_dir, base, head="HEAD"):
-    """All paths changed base..head (full diff — the exemption check needs to see
-    whether ANY non-graph file moved, not only the offending slice).
-
-    est-gbim: `-z --name-status`, not `--name-only`. Three holes in the old
-    form, all ban-dodging (a graphify-out/ change invisible to the ban):
-      * rename/collapse: `--name-only` prints only the POST image of a rename —
-        R100 graphify-out/graph.json -> x.json printed x.json alone, so emptying
-        the single-writer path sailed; the inverse (source -> graphify-out/)
-        printed only the source. Parsing name-status takes BOTH endpoints of
-        R (rename) and C (copy).
-      * quoting: default output octal-escapes and quotes exotic paths
-        ("graphify-out/evil\\n.json") — the quote itself broke prefix matching.
-        -z mode is raw bytes, never quoted.
-      * newline split: with quoting disabled by -z, an embedded newline in a
-        path can no longer forge a fake entry; fields split on NUL.
-
-    Fail-closed: if we could not run git or could not parse its output into
-    well-formed records, return None — main() must exit 2, never green."""
+    """All paths changed base..head; shared -z parser, fail closed on git/shape
+    errors. The exemption needs the full diff, including both R/C endpoints."""
     r = _git_bytes(repo_dir, "diff", "-z", "--name-status", f"{base}..{head}")
     if r.returncode != 0:
         return None
-    fields = r.stdout.split(b"\0")
-    if fields and fields[-1] == b"":
-        fields.pop()  # trailing NUL terminator
-    paths = []
-    i = 0
-    while i < len(fields):
-        status = fields[i].decode("utf-8", "surrogateescape")
-        if not _STATUS_RE.match(status):
-            return None  # output shape we cannot trust → fail closed
-        i += 1
-        if status[0] in "RC":
-            if i + 1 >= len(fields):
-                return None  # truncated rename record → fail closed
-            paths.append(fields[i].decode("utf-8", "surrogateescape"))      # pre-image
-            paths.append(fields[i + 1].decode("utf-8", "surrogateescape"))  # post-image
-            i += 2
-        else:
-            if i >= len(fields):
-                return None
-            paths.append(fields[i].decode("utf-8", "surrogateescape"))
-            i += 1
-    return paths
+    records = parse_name_status(r.stdout)
+    return None if records is None else [path for record in records for path in record]
 
 
 def _git_bytes(repo_dir, *args):

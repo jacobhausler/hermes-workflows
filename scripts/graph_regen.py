@@ -13,11 +13,14 @@ Contract:
   2. `graphify update <repo>` AST-only (GRAPHIFY_NO_LLM=1; no LLM, no network),
      then `scripts/graph_check.py --fix` rewrites graphify-out/ to the honest
      form (semantic memory carried per the graph_check policy);
-  3. decide from `git diff -- graphify-out/`:
+  3. decide from `git diff -z --name-status HEAD` (both rename/copy endpoints)
+     plus `git ls-files -z --others --exclude-standard -- graphify-out/`:
        empty diff  -> print NO_CHANGES, exit 0  (idempotent: no PR, self-healing);
        non-empty   -> print FILES + one path per line, exit 0 (the caller commits
                       the branch chore/graph-<sha7> with commit trailer
                       `graph-base: <sha>` and opens the ONE chore(graph): PR).
+     Malformed git output or line-break filenames abort; FILES cannot represent
+     them safely. A rename/copy crossing the graph boundary also aborts.
 
 Exit codes: 0 = decision made (NO_CHANGES or FILES); 1 = aborted (HEAD != base
 or the regen failed — caller must NOT open a PR); 2 = unusable inputs (no
@@ -29,6 +32,8 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+
+from graph_path_ban import _git_bytes, nul_fields, parse_name_status
 
 GRAPH_OUT = "graphify-out/"
 
@@ -54,18 +59,30 @@ def head_sha(repo_dir):
 
 
 def graph_diff_files(repo_dir):
-    """Tracked files under graphify-out/ with a working-tree diff vs HEAD, plus
-    any untracked new files there (a first regen on a tree without a committed
-    graph). Untracked dirs alone are not a diff, but graph_check gates that
-    case: no committed graph is its exit-2, caught by regen()'s post-check."""
-    r = _git(repo_dir, "diff", "--name-only", "--", GRAPH_OUT)
+    """Graph-touching records vs HEAD (index + worktree), plus new graph files.
+
+    Diff without a pathspec: filtering first would hide the outside endpoint of
+    a rename/copy across the graph boundary. Keep both endpoints of each graph
+    record; main's scope gate then aborts. FILES is line-delimited, so line breaks
+    in a filename are a hard error rather than a forged extra path. None is never clean.
+    """
+    r = _git_bytes(repo_dir, "diff", "-z", "--name-status", "--find-renames", "HEAD")
     if r.returncode != 0:
         return None
-    files = [f for f in r.stdout.splitlines() if f]
-    r = _git(repo_dir, "ls-files", "--others", "--exclude-standard", "--", GRAPH_OUT)
+    records = parse_name_status(r.stdout)
+    if records is None:
+        return None
+    files = [path for record in records if any(p.startswith(GRAPH_OUT) for p in record)
+             for path in record]
+    r = _git_bytes(repo_dir, "ls-files", "-z", "--others", "--exclude-standard", "--", GRAPH_OUT)
     if r.returncode != 0:
         return None
-    files += [f for f in r.stdout.splitlines() if f]
+    untracked = nul_fields(r.stdout)
+    if untracked is None:
+        return None
+    files += untracked
+    if any(path.splitlines() != [path] for path in files):
+        return None
     return sorted(set(files))
 
 
@@ -136,7 +153,11 @@ def main(argv=None, env=None):
 
     files = graph_diff_files(repo)
     if files is None:
-        print("graph_regen: ABORT — git diff failed"); return 1
+        print("graph_regen: ABORT — git diff/list failed or unsafe filename/output"); return 1
+    if any(not f.startswith(GRAPH_OUT) for f in files):
+        print(f"graph_regen: ABORT — regen dirtied files outside {GRAPH_OUT}: "
+              f"{[f for f in files if not f.startswith(GRAPH_OUT)][:5]}")
+        return 1
     if was_honest:
         # The committed graph was honest BEFORE the run: graph_check --fix
         # early-returned without writing, so any bytes the in-place
@@ -150,10 +171,6 @@ def main(argv=None, env=None):
         print(f"graph_regen: graphify-out/ already honest at {head[:7]} — no PR needed")
         print("NO_CHANGES")
         return 0
-    if any(not f.startswith(GRAPH_OUT) for f in files):
-        print(f"graph_regen: ABORT — regen dirtied files outside {GRAPH_OUT}: "
-              f"{[f for f in files if not f.startswith(GRAPH_OUT)][:5]}")
-        return 1
     print(f"graph_regen: {len(files)} files changed under {GRAPH_OUT} at {head[:7]}")
     print("FILES")
     for f in files:
