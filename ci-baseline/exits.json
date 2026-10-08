@@ -185,6 +185,11 @@
     "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_daemonize_8.py.log"
   },
   {
+    "test": "test_dashboard_entry_77.mjs",
+    "exit": 0,
+    "log": "Local node tests/test_dashboard_entry_77.mjs: ALL PASS, exit 0"
+  },
+  {
     "test": "test_deleted_cwd_resume_5c37b19.py",
     "exit": 0,
     "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_deleted_cwd_resume_5c37b19.py.log"
@@ -315,14 +320,14 @@
     "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_fakeb1_gitpin_954r.py.log"
   },
   {
-    "test": "test_fanout_expand.mjs",
-    "exit": 0,
-    "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_fanout_expand.mjs.log"
-  },
-  {
     "test": "test_fanout_empty_items_0p.py",
     "exit": 0,
     "log": "rows_added_outside_ci in PROVENANCE.json"
+  },
+  {
+    "test": "test_fanout_expand.mjs",
+    "exit": 0,
+    "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_fanout_expand.mjs.log"
   },
   {
     "test": "test_fanout_item_commit_765.py",
@@ -373,6 +378,11 @@
     "test": "test_graph_gate.py",
     "exit": 0,
     "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_graph_gate.py.log"
+  },
+  {
+    "test": "test_graph_result_158.py",
+    "exit": 0,
+    "log": "CI run 37719805756 Serial suite: exit 0"
   },
   {
     "test": "test_graph_single_writer_153.py",
@@ -1070,6 +1080,10 @@
     "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_suite_runs_root_762.py.log"
   },
   {
+    "test": "test_suite_stale_receipt_m11.py",
+    "exit": 0
+  },
+  {
     "test": "test_suite_tempdir_cleanup_7ps8.py",
     "exit": 0,
     "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_suite_tempdir_cleanup_7ps8.py.log"
@@ -1173,15 +1187,5 @@
     "test": "test_when_ancestry_0930.py",
     "exit": 0,
     "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_when_ancestry_0930.py.log"
-  },
-  {
-    "test": "test_graph_result_158.py",
-    "exit": 0,
-    "log": "CI run 37719805756 Serial suite: exit 0"
-  },
-  {
-    "test": "test_dashboard_entry_77.mjs",
-    "exit": 0,
-    "log": "Local node tests/test_dashboard_entry_77.mjs: ALL PASS, exit 0"
   }
 ]

@@ -46,9 +46,18 @@
       "exit": 0,
       "measured": "2026-10-08 local run (16/16 PASS) on feat/bank-the-corpse-131; the row can only ever make CI red, never green",
       "supersede_by": "next green-CI refresh (replace with the CI-captured row)"
+    },
+    {
+      "test": "test_suite_stale_receipt_m11.py",
+      "exit": 0,
+      "measured": "2026-10-08 local serial run in hermetic venv at CI's hermes pin (d337b736); 14/14 checks green",
+      "supersede_by": "next green-CI refresh (replace with the CI-captured row)"
     }
   ],
-  "totals": {"cases": 237, "red": 0},
+  "totals": {
+    "cases": 238,
+    "red": 0
+  },
   "contract": "Green CI ledgers only (every exit == 0); rows not captured by CI are listed in rows_added_outside_ci with how they were measured. Refresh from the tip of main after each main move; see README.md.",
   "tracking_item": "est-9yl2",
   "source_issue": 75
