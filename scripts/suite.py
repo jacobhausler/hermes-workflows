@@ -146,12 +146,17 @@ _suite_runs_root = Path(_tempfile.mkdtemp(prefix='wf-suite-runs-'))
 # crash (no handler runs there). mkdir'd lazily by an unpinned test's child,
 # so cleanup is best-effort and never raises.
 _atexit.register(_shutil.rmtree, _suite_runs_root, ignore_errors=True)
+# Tests own private shelves, not the caller's lane identity. Keep the operator
+# launcher override; leave the live shelf guard unchanged (est-2ek.1.808).
+_KEEP_WF_ENV = {'HERMES_WF_HERMES_BIN'}
+_base_env = {k: v for k, v in os.environ.items()
+             if not k.startswith('HERMES_WF_') or k in _KEEP_WF_ENV}
 for argv in cases:
     name = Path(argv[-1]).name
     log = out / (name + '.log')
     try:
         with log.open('w') as fh:
-            result = subprocess.run(argv, cwd=root, env={**os.environ, 'HERMES_HOME': str(root / 'tests' / '.suite-home'),
+            result = subprocess.run(argv, cwd=root, env={**_base_env, 'HERMES_HOME': str(root / 'tests' / '.suite-home'),
                                                          'WF_RUNS_ROOT': str(_suite_runs_root)},
                                     stdout=fh, stderr=subprocess.STDOUT, timeout=90)
         rc = result.returncode

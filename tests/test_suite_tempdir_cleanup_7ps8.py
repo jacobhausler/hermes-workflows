@@ -48,12 +48,29 @@ def leaked():
     return sorted(d.name for d in snap_base.glob("wf-suite-runs-*") if d.is_dir())
 
 before = set(leaked())
-env = {**os.environ, "TMPDIR": str(snap_base)}
+# est-2ek.1.808: the test subprocess must not inherit its caller's workflow lane.
+(fake / "tests" / "test_lane_env.py").write_text(
+    "import json, os\n"
+    "from pathlib import Path\n"
+    "Path(os.environ['LANE_ENV_OUT']).write_text(json.dumps({k:v for k,v in os.environ.items() if k.startswith('HERMES_WF_')}))\n")
+lane_vars = {"HERMES_WF_RUN_DIR": "/foreign/lane", "HERMES_WF_RUN_ID": "foreign",
+             "HERMES_WF_STEER_FILE": "/foreign/steer", "HERMES_WF_RUNNER_PID": "4242",
+             "HERMES_WF_PROCTREE_SIDECAR": "/foreign/sidecar",
+             "HERMES_WF_EFFECTS_FILE": "/foreign/effects"}
+env_out = out / "lane-env.json"
+env = {**os.environ, **lane_vars, "TMPDIR": str(snap_base),
+       "HERMES_WF_HERMES_BIN": "/operator/hermes", "LANE_ENV_OUT": str(env_out)}
 r = subprocess.run([sys.executable, str(ROOT / "scripts" / "suite.py"),
                     str(fake), str(out)],
                    capture_output=True, text=True, timeout=180, env=env)
 check("the minimal suite run itself is green",
       r.returncode == 0, f"rc={r.returncode}\n{r.stdout[-400:]}\n{r.stderr[-400:]}")
+
+import json
+seen = json.loads(env_out.read_text()) if env_out.exists() else None
+check("test child ran and reported its env", seen is not None)
+check("test child inherits no workflow lane identity",
+      seen == {"HERMES_WF_HERMES_BIN": "/operator/hermes"}, seen)
 
 new_leaks = [n for n in leaked() if n not in before]
 check("suite.py leaves NO wf-suite-runs-* temp dir behind",
