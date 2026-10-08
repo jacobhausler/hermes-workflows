@@ -1982,6 +1982,37 @@ def _include_text_fields(node):
                 yield f"fanout.items[{i}].goal", ("fanout", "items", i, "goal")
 
 
+def run_context_contract(graph, params=None):
+    """Refs are the binding contract; optional envelope metadata only describes it.
+
+    Read malformed params as absent, never quarantine an otherwise usable shelf.
+    Defaults are descriptive, not implicit launch bindings. All live refs remain
+    required even if a declaration attempts to mark one optional.
+    """
+    declared = params if isinstance(params, dict) else {}
+    refs = set()
+    nodes = list(graph.get("nodes") or [])
+    defaults = graph.get("defaults")
+    if isinstance(defaults, dict) and isinstance(defaults.get("context"), str):
+        nodes.append({"context": defaults["context"]})
+    for node in nodes:
+        if isinstance(node, dict):
+            for text in _include_texts(node):
+                refs.update(_INCLUDE_RUN_REF.findall(text))
+    derived = {}
+    for key in sorted(refs):
+        spec = declared.get(key)
+        spec = spec if isinstance(spec, dict) else {}
+        derived[key] = {"required": True}
+        if isinstance(spec.get("desc"), str):
+            derived[key]["desc"] = spec["desc"]
+        if isinstance(spec.get("default"), str) and spec["default"].strip():
+            derived[key]["default"] = spec["default"]
+    keys = {k for k in declared if isinstance(k, str)}
+    return {"refs": sorted(refs), "params": derived,
+            "missing": sorted(refs - keys), "dead": sorted(keys - refs)}
+
+
 def _include_get(node, path):
     """Read one authored string by path segments (str = dict key, int = list
     index). Companion of _include_set; both walk the same grammar

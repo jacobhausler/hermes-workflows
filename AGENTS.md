@@ -227,6 +227,17 @@ proves the hand-off only by re-reading both committed records from its `## Input
 never from chat memory. No node names a model; children ride seat defaults.
 Author-run receipt: [receipts/exchange-run/author-run.json](receipts/exchange-run/author-run.json).
 
+Library templates: `workflow {"action":"library","name":"<name>"}` or
+`/wf show <name>` lists required `{run.KEY}` inputs and an instantiate command.
+Supply explicit nonempty string values with `run from:<name>`; the door binds
+all shared text fields and refuses any surviving ref before writing or spawning.
+Optional `save params:{KEY:{desc,default}}` describes those refs in `meta.params`;
+missing/dead declarations on an envelope save warn (non-fatal `s12`; bare saves
+derive the contract from refs and never warn s12), omission retains prior params,
+and `{}` clears them. Defaults are suggestions, never automatic launch inputs.
+Inline unbound machine argv remains refused; ordinary inline text keeps its
+existing verbatim leniency.
+
 ### 3d. Failures, resume, amend
 
 - `node.failed` events carry `error_class` from the closed set defined in code

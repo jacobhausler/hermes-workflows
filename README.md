@@ -66,7 +66,20 @@ One tool, action-routed — the complete surface, with the flags that matter:
 | `doctor_version` | Read-only version truth for THIS install: `{live_version, newest_packaged, source_commit, drift}` — plugin.yaml vs the `install.json` provenance `pack.py` stamps at build time; one read, no network. |
 
 Plus a `/wf` slash command: bare `/wf` lists the library; `/wf <name> [note]`
-launches that graph with the note as its context seed.
+launches that graph with the note as its context seed. `/wf show <name>` (or
+`workflow {"action":"library","name":"<name>"}`) returns required inputs and
+an instantiate command. Library-sourced launches require nonempty string bindings
+for every `{run.KEY}` on the shared text surface, including echo output, gate
+options and machine argv; surviving refs refuse before any write. Inline graphs
+retain their existing behavior, including refusing unbound machine argv.
+
+Optional `save params:{KEY:{desc,default}}` stores descriptive `meta.params` in
+the envelope. Required keys derive from graph refs, not this declaration; defaults
+are suggestions in the instantiate command, never automatic launch bindings.
+Omission retains params on overwrite; `{}` clears them deliberately. Missing or
+dead declarations on an envelope save produce non-fatal `s12` save warnings
+naming the keys; a bare save's contract derives wholly from refs. Bare,
+ref-free library rows and clean save responses keep their previous key sets.
 
 ## Graph grammar in 30 seconds
 

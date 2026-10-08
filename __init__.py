@@ -677,10 +677,11 @@ WORKFLOW_PARAMS = {
             "description": "run=launch a graph; wait=read state, RESPAWNING an idle runner if work is pending (blocks to the next boundary when one is live); status=read-model of a run; release=answer a held human gate; steer=queue steering text for a node; inbox=(child-side, cooperative) pull late steering lines baked for THIS spawn — call once at a natural seam; amend=replace the graph (invalidates changed nodes + all downstream by fingerprint); stop=request stop; list=all runs; save=shelve a graph in the library under a name (from run_id or inline graph); library=list shelved graphs richly (name, description, tags, provenance, path-relative id). validate=dry-run the door's validation pipeline (defaults fill + defect collection + model/route policy) with no ping and no writes; returns {ok, errors:[{node,field,msg}], resolved_routes}. run from=<name> replays a shelved graph. submit=quarantine a hand-rolled graph for study (requires why_not_library >=80 chars; never joins the library — the quartermaster's human-gated loop decides); inbox kind=submissions lists them newest-first. doctor_version=read-only version truth for THIS install: {live_version, newest_packaged, source_commit, drift} comparing plugin.yaml against the install.json provenance that pack.py stamps at build time \u2014 one read, no network.",
         },
         "run_id": {"type": "string", "description": "Run id (required for every action except run/list)."},
-        "name": {"type": "string", "description": "run: overrides graph.name (default workflow); save: library name overrides graph.name (lowercase, [-_.]). amend: set graph.name in the replacement graph; omitting it retains the run name."},
+        "name": {"type": "string", "description": "run: overrides graph.name (default workflow); save: library name overrides graph.name (lowercase, [-_.]); library: return one entry with refs-derived required params and an instantiate command. amend: set graph.name in the replacement graph; omitting it retains the run name."},
         "from": {"type": "string", "description": "run: library graph name to replay (instead of graph or graph_path)."},
-        "run_context": {"type": ["string", "object"], "description": "run only: non-empty string seed appended to every first-wave agent (including agents behind gate-only paths), OR non-empty map of identifier keys to non-empty strings replacing only explicit {run.KEY} in node goals/contexts, fan-out goals/item goals and gate questions. Missing keys/malformed bindings reject before any run write — as does a seed against a graph with {run.KEY} refs, or a JSON-encoded map passed as a string. Values are persisted in prompts; do not supply secrets. A seed cannot replace baked literals."}, 
+        "run_context": {"type": ["string", "object"], "description": "run only: non-empty string seed appended to every first-wave agent (including agents behind gate-only paths), OR non-empty map of identifier keys to non-empty strings replacing only explicit {run.KEY} in node goals/contexts, fan-out goals/item goals and gate questions. Library-sourced launches also render profile, echo string output, gate options and wait.until_argv; every surviving ref refuses before any write. Inline argv retains its existing unbound-placeholder refusal. Missing keys/malformed bindings reject before any run write — as does a seed against a graph with {run.KEY} refs, or a JSON-encoded map passed as a string. Values are persisted in prompts; do not supply secrets. A seed cannot replace baked literals."},
         "description": {"type": "string", "description": "save: one-line purpose shown by library/list."},
+        "params": {"type": "object", "additionalProperties": {"type": "object"}, "description": "save: optional meta.params descriptions/default suggestions for run_context keys. Required keys derive from graph refs, never this metadata. Omission retains prior params; {} deliberately clears them. Missing/dead declarations warn, never prevent saving."},
         "tags": {"type": "array", "items": {"type": "string"}, "description": "save (optional): 1-10 discovery tags — legacy flat tokens (lowercase alnum [-_.] <=32) or faceted `facet:value` (facets: use_case, repo, domain, risk, note; values [a-z0-9._-] <=48; e.g. use_case:code-review). Call `library` first and reuse its tag_vocab values VERBATIM — never coin a tag you have not seen. Resaving without tags keeps the entry's existing tags; stored in the meta envelope. library (optional): filter to entries carrying ALL listed tags (same 1-10 law as save — an empty array errors on BOTH verbs; omit tags for no filter); an empty result's tag_match_counts says which term starved."},
         "why_not_library": {"type": "string", "description": "submit (REQUIRED, >=80 chars): why no library graph covered this task — name the entries you checked and the shape you needed. The receipt is what makes hand-rolling honest."},
         "lane": {"type": "string", "description": "submit (optional, <=128 chars): lane label carried beside the submission for the quartermaster's triage; no scheduling effect."},
@@ -1950,6 +1951,17 @@ def act_save(args):
         if terr:
             return {"error": terr}
         tags = norm
+    params = args.get("params")
+    if "params" in args and (not isinstance(params, dict) or any(
+            not isinstance(k, str) or not _RUN_KEY.fullmatch(k) or not isinstance(v, dict)
+            for k, v in params.items())):
+        return {"error": "params must map identifier keys to metadata objects"}
+    if params is None:
+        prev_path = _lib_read(p.stem) if p.parent == library_root() else p
+        if prev_path.exists():
+            prev_meta = _common.library_entry(jload(prev_path)).get("meta") or {}
+            if isinstance(prev_meta.get("params"), dict):
+                params = prev_meta["params"]
     # #70 RETAIN-ON-OVERWRITE: a resave that says nothing about a meta field carries
     # the previous entry's value (re-shelve-from-run_id is the documented normal flow
     # and must not silently drop discovery coverage). `tags:[]` stays the #50 error
@@ -2022,7 +2034,7 @@ def act_save(args):
         graph["provenance"] = {"owner": owner, "source": source,
                                "saved_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
                                "source_digest": _common.source_digest(graph)}
-    if desc is not None or tags is not None:
+    if desc is not None or tags is not None or params is not None:
         # #50 envelope: meta carries discovery fields the wf/1 grammar has no key
         # for; the inner graph stays validator-clean. The normalizer loads either.
         meta = {}
@@ -2030,6 +2042,8 @@ def act_save(args):
             meta["description"] = desc
         if tags is not None:
             meta["tags"] = tags
+        if params is not None:
+            meta["params"] = params
         data = {"meta": meta, "graph": graph}
     else:
         # bare form (pre-#50 bytes, and what the solo golden freezes): the
@@ -2048,6 +2062,16 @@ def act_save(args):
     # law: the save lands; only a warning key rides the response, and a clean
     # save's response stays byte-identical (no empty key — golden bytes).
     _warn = _stale_literal_warnings(graph)
+    # est-kg3y s12: only an ENVELOPE entry declares a contract (meta is where
+    # params live), so only it can disagree with its refs. A bare entry's
+    # contract is wholly derived from refs — a bound bare save stays warning-free
+    # (est-2ek.1.245 T2b: binding points are the cure, never a new warning).
+    if data is not graph:
+        contract = _common.run_context_contract(_expanded, params)
+        if contract["missing"]:
+            _warn.append("s12 uncontracted run_context refs: " + ", ".join(contract["missing"]))
+        if contract["dead"]:
+            _warn.append("s12 dead declared params: " + ", ".join(contract["dead"]))
     if _warn:
         out["save_warnings"] = _warn
     return out
@@ -2099,6 +2123,11 @@ def _library_rows():
             if entry["envelope"] or name.startswith(_GENERAL_PREFIX):
                 row["id"] = str(p.relative_to(root))
                 row["tags"] = entry["tags"]
+            contract = _common.run_context_contract(graph, entry["meta"].get("params"))
+            if contract["refs"]:
+                row["params"] = contract["params"]
+            if contract["dead"]:
+                row["dead_params"] = contract["dead"]
             prov = graph.get("provenance")
             if isinstance(prov, dict):
                 row.update({k: prov.get(k) for k in ("owner", "source", "source_digest")})
@@ -2107,6 +2136,21 @@ def _library_rows():
 
 def act_library(args):
     rows, skipped, quarantined = _library_rows()
+    if args.get("name") is not None:
+        name = args["name"]
+        try:
+            name = _lib_rel_name(_lib_path(name))
+        except ValueError as e:
+            return {"error": str(e)}
+        row = next((r for r in rows if r["name"] == name), None)
+        if row is None:
+            return _from_unknown_error(name)
+        launch = {"action": "run", "from": name}
+        if row.get("params"):
+            launch["run_context"] = {k: v.get("default", f"<{k}>")
+                                     for k, v in row["params"].items()}
+        return {"entry": dict(row, instantiate=launch,
+                              command="workflow " + json.dumps(launch, ensure_ascii=False))}
     # The 1.1 hint stays verbatim for the bare/empty library (golden-solo byte law);
     # the submit nudge rides along once the library carries #50 discovery entries —
     # the moment the reader is in the discovery-first world.
@@ -2241,7 +2285,7 @@ _RUN_REF = re.compile(r"\{run\.([^{}]*)\}")
 _RUN_KEY = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
 
 
-def _bind_run_context(graph, binding):
+def _bind_run_context(graph, binding, *, library_sourced=False):
     """Resolve a launch binding on a post-defaults copy, before persistence.
 
     Map substitution is deliberately narrow: no str.format, no interpolation of
@@ -2328,6 +2372,17 @@ def _bind_run_context(graph, binding):
                         f"run_context[{key!r}] must not contain braces when bound into a "
                         "fan-out goal — the runner re-interpolates fan-out goals per item")
         return out
+    if library_sourced:
+        nodes = []
+        for original in graph["nodes"]:
+            n = original
+            fan = isinstance(n.get("fanout"), dict)
+            for label, path in _common._include_text_fields(original):
+                n = _common._include_set(n, path, render(
+                    _common._include_get(original, path),
+                    fanout=label.startswith("fanout.") or (label == "goal" and fan)))
+            nodes.append(n)
+        return dict(graph, nodes=nodes)
     nodes = []
     for original in graph["nodes"]:
         n = dict(original)
@@ -2684,11 +2739,25 @@ def act_run(args):
         graph = _common.apply_graph_defaults(graph)
     except ValueError as e:
         return {"error": f"graph invalid: defaults/shape: {e}"}
+    if lib_name:
+        # Post-defaults: `defaults` is already baked into nodes, so the render
+        # surface the runner consumes is nodes[] alone (the retained `defaults`
+        # block is never rendered and must not read as a survivor).
+        refs = _common.run_context_contract({"nodes": graph["nodes"]})["refs"]
+        binding = args.get("run_context")
+        if refs and not isinstance(binding, dict):
+            return {"error": "library run_context must bind non-empty string values for: "
+                             + ", ".join(refs) + "; refused before any write or spawn"}
     if "run_context" in args:
         try:
-            graph = _bind_run_context(graph, args["run_context"])
+            graph = _bind_run_context(graph, args["run_context"], library_sourced=bool(lib_name))
         except ValueError as e:
             return {"error": str(e)}
+    if lib_name:
+        refs = _common.run_context_contract({"nodes": graph["nodes"]})["refs"]
+        if refs:
+            return {"error": "library run_context has surviving {run.KEY} references: "
+                             + ", ".join(refs) + "; refused before any write or spawn"}
     if _includes:
         # Composite runs are fail-closed on unbound refs (live composite-run receipt,
         # 2026-09-30): a shelved sub-graph's {run.KEY} contract is invisible to a
@@ -3618,6 +3687,14 @@ def _wf_command(raw_args):
     """`/wf` — the library front door. `/wf <name> [note]` supplies the note
     atomically as a launch seed, never as post-launch steering."""
     arg = (raw_args or "").strip()
+    if arg.startswith("show "):
+        detail = act_library({"name": arg[5:].strip()})
+        if "error" in detail:
+            return detail["error"]
+        entry = detail["entry"]
+        return (f"Workflow **{entry['name']}** — required inputs: "
+                + (", ".join(entry.get("params", {})) or "(none)")
+                + "\n" + entry["command"])
     out = act_library({})
     lib = out["library"]
     quarantined = out.get("quarantined") or []
