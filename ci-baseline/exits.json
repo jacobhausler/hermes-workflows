@@ -1173,5 +1173,10 @@
     "test": "test_graph_result_158.py",
     "exit": 0,
     "log": "CI run 37719805756 Serial suite: exit 0"
+  },
+  {
+    "test": "test_zombie_reaper_continuous.py",
+    "exit": 0,
+    "log": "rows_added_outside_ci in PROVENANCE.json"
   }
 ]
