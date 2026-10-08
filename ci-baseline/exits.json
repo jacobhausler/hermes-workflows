@@ -70,6 +70,11 @@
     "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_authoring_next_cut.py.log"
   },
   {
+    "test": "test_bank_the_corpse_131.py",
+    "exit": 0,
+    "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_bank_the_corpse_131.py.log"
+  },
+  {
     "test": "test_baseline_guard_9yl2.py",
     "exit": 0,
     "log": "rows_added_outside_ci in PROVENANCE.json"

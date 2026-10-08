@@ -14,7 +14,7 @@ Staleness law (wfcommon.efp): each stored result is verified under its stamped r
 against the current graph (own def + all ancestors' defs). An amend upstream makes
 downstream result stale — downstream nodes re-run or re-hold; unchanged chains replay.
 """
-import json, os, random, re, signal, socket, subprocess, sys, threading, time
+import json, os, random, re, shutil, signal, socket, subprocess, sys, threading, time
 import fcntl
 import hashlib
 from contextlib import nullcontext as _nullcontext
@@ -1386,7 +1386,7 @@ def commit_item_record(run, node, byid, index, result):
     for k in ("output", "error", "error_class", "ms", "attempts", "attempts_log",
               "skey", "log_path", "prompt_path", "pid", "started", "spawn",
               "served_model", "served_billing_provider", "billed_models", "adopted", "harvested",
-              "tree_descendants", "final"):
+              "tree_descendants", "final", "banked"):
         v = result.get(k)
         if v is not None:
             rec[k] = v
@@ -2316,6 +2316,94 @@ def _clean_capture(text):
     return "\n".join(l for l in (text or "").splitlines()
                      if DEAD_SESSION_NOISE not in l)
 
+def _work_files(run, node, index):
+    """(wd, files) of the child's durable work dir, newest-mtime first — the ONE
+    walk _banked_work and _bank_the_corpse share. Raises OSError."""
+    wd = child_work_dir(run, node, index)
+    return wd, sorted((f for f in wd.rglob("*") if f.is_file()),
+                      key=lambda f: f.stat().st_mtime, reverse=True)
+
+CORPUS_MAX_BYTES = 16 << 20   # #131 snapshot budget; files past it are manifest-only
+
+def _bank_the_corpse(run, node, index, spawn, out):
+    """#131 bank-the-corpse: on a wall-kill (timed_out, BOTH wait paths) write
+    nodes/<_node_file>.corpus/ = work/ (snapshot of the durable work dir, newest
+    first under CORPUS_MAX_BYTES), stdout_tail.txt (out[-4000:]) and
+    manifest.json (every file + size + mtime, newest first; last_written = the
+    newest), then log ONE node.banked line. Returns the corpus path for the
+    death record's `banked` pointer. Honest-empty: ANY failure logs node.banked
+    with error= and returns None — it never raises, so it can never move the
+    timeout verdict. Deterministic: the latest wall-kill's corpus replaces the
+    prior one (built in a tmp dir, swapped in by rename)."""
+    corpus = run / "nodes" / f"{_node_file(node, index)}.corpus"
+    tmp = corpus.with_name(f"{corpus.name}.{os.getpid()}.tmp")
+    try:
+        wd, files = _work_files(run, node, index)
+        shutil.rmtree(tmp, ignore_errors=True)
+        (tmp / "work").mkdir(parents=True)
+        rows, n, nbytes, truncated = [], 0, 0, False
+        for f in files:
+            st, rel = f.stat(), f.relative_to(wd).as_posix()
+            copied = 0
+            if not f.is_symlink() and nbytes < CORPUS_MAX_BYTES:
+                # D1 (est-muob) byte-bounded copy: the cap is enforced AT COPY
+                # TIME against the bytes actually read, not a pre-copy stat an
+                # external writer can outgrow mid-copy. The manifest's
+                # `bytes` is the ACTUAL bytes on disk; anything clipped by the
+                # cap sets `truncated`.
+                dst = tmp / "work" / rel
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                src_f = open(f, "rb")
+                dst_f = open(dst, "wb")
+                try:
+                    while True:
+                        chunk = src_f.read(1 << 20)
+                        if not chunk:
+                            break                      # honest EOF
+                        room = CORPUS_MAX_BYTES - nbytes
+                        if len(chunk) > room:
+                            # D1: the cap clips the read — copy the remainder
+                            # of this chunk, flag it, and stop.
+                            dst_f.write(chunk[:room])
+                            nbytes += room
+                            truncated = True
+                            break
+                        dst_f.write(chunk)
+                        nbytes += len(chunk)
+                    shutil.copystat(f, dst)
+                finally:
+                    src_f.close()
+                    dst_f.close()
+                copied = 1
+            if copied:
+                n += 1
+            rows.append({"path": rel, "size": st.st_size, "mtime": st.st_mtime,
+                         "copied": bool(copied)})
+        (tmp / "stdout_tail.txt").write_text((out or "")[-4000:], encoding="utf-8", errors="replace")
+        (tmp / "manifest.json").write_text(json.dumps(
+            {"node": node["id"], "index": index, "spawn": spawn, "work_dir": str(wd),
+             "last_written": rows[0]["path"] if rows else None, "files": rows,
+             "bytes": nbytes, "budget": CORPUS_MAX_BYTES, "truncated": truncated}, indent=1))
+        if corpus.is_dir() and not corpus.is_symlink():
+            shutil.rmtree(corpus)
+        os.rename(tmp, corpus)
+    except Exception as e:
+        shutil.rmtree(tmp, ignore_errors=True)
+        # D3 (est-muob): the never-raises promise (AGENTS.md) covers the LOGS
+        # too — a wedged events.jsonl must never escape into the verdict path.
+        try:
+            log(run, "node.banked", node=node["id"], index=index, spawn=spawn, files=0, bytes=0,
+                corpus=None, error=f"{type(e).__name__}: {e}")
+        except Exception:
+            pass
+        return None
+    try:
+        log(run, "node.banked", node=node["id"], index=index, spawn=spawn, files=n, bytes=nbytes,
+            corpus=str(corpus))
+    except Exception:
+        pass
+    return str(corpus)
+
 def _banked_work(run, node, index):
     """(file_names, [(name, content_excerpt), ...]) of the child's durable work
     dir — drive-1's banked output, harvested BEFORE the re-drive spawns so
@@ -2323,9 +2411,7 @@ def _banked_work(run, node, index):
     Newest-mtime first; each file excerpted, the whole section capped.
     Honest empty on any OSError."""
     try:
-        wd = child_work_dir(run, node, index)
-        files = sorted((f for f in wd.rglob("*") if f.is_file()),
-                       key=lambda f: f.stat().st_mtime, reverse=True)
+        wd, files = _work_files(run, node, index)
     except OSError:
         return [], []
     names = [f.relative_to(wd).as_posix() for f in files]
@@ -3023,7 +3109,7 @@ def _left_live_record(pid, stuck, note, r=None):
     if r.get("attempts_log") is not None:
         rec["attempts_log"] = r["attempts_log"]
     for k in ("log_path", "prompt_path", "pid", "spawn", "skey", "final",
-              "tree_pids", "profile_home"):
+              "tree_pids", "profile_home", "banked"):
         if r.get(k) is not None:
             rec[k] = r[k]
     return rec
@@ -3721,7 +3807,8 @@ def _proc_unreadable_record(pid, node_id, spawn_no, r=None):
     # failed quarantine; the unreadable record must not erase it.
     if r.get("attempts_log") is not None:
         rec["attempts_log"] = r["attempts_log"]
-    for k in ("log_path", "prompt_path", "pid", "spawn", "skey", "profile_home"):
+    for k in ("log_path", "prompt_path", "pid", "spawn", "skey", "profile_home",
+              "banked"):
         if r.get(k) is not None:
             rec[k] = r[k]
     return rec
@@ -4056,6 +4143,9 @@ def _adopt_child(meta, node, byid, index, child, schema, fo_cancel=None):
         _note_turn_tier(run, nid, report_path)
         try: os.unlink(report_path)
         except OSError: pass
+        bk = _bank_the_corpse(run, node, index, child.get("attempt"), out)   # #131
+        if bk:
+            evd["banked"] = bk
         hv = _harvest_death(out, harvest_schema)
         if hv:
             return {"status": "partial", "error": f"adopted child exceeded its re-armed wall "
@@ -4692,6 +4782,9 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
                          f"(killed; log empty — never got past its first call)",
                 "error_class": "early_death", "raw": "", "ms": ms, **sk, **evd}
     if timed_out:
+        bk = _bank_the_corpse(run, node, index, spawn_no, out)   # #131: the wall-kill banks the corpse
+        if bk:
+            evd["banked"] = bk
         hv = _harvest_death(out, harvest_schema)   # #4: a timeout that printed a valid answer keeps it
         if hv:
             return {"status": "partial", "error": f"timeout after {timeout_s}s "
@@ -5350,6 +5443,11 @@ def _bounded_retry(meta, r, respawn, ev, ev_kw, node=None, index=None):
     al = list(r.get("attempts_log") or [])
     entry = {"attempt": len(al), "error_class": eclass, "at": now(), "resume": True,
              **_attempt_counts(run, r)}
+    # D4 (est-muob): the dead attempt's corpse pointer is the only witness of
+    # WHERE drive-1's banked work lives — the attempts_log entry and the
+    # merged winner record must both keep it.
+    if r.get("banked") is not None:
+        entry["banked"] = r["banked"]
     if dead:
         entry["fresh_session"] = True
     al.append(entry)
@@ -5358,6 +5456,8 @@ def _bounded_retry(meta, r, respawn, ev, ev_kw, node=None, index=None):
     r2 = respawn(resume_preamble=preamble)
     r2["attempts_log"] = al
     r2["attempts"] = (r2.get("spawn") + 1) if isinstance(r2.get("spawn"), int) else len(al) + 1
+    if r.get("banked") is not None and r2.get("banked") is None:
+        r2["banked"] = r["banked"]
     return r2
 
 def drain_inbox(run, consumed):

@@ -310,6 +310,10 @@ Author-run receipt: [receipts/exchange-run/author-run.json](receipts/exchange-ru
   `node.retry` event and the `attempts_log` entry stamp `fresh_session: true`.
 - A child silent for 120 s after spawn is killed as `early_death`; a child still writing its
   log when the wall fires gets one 50 % extension (`node.extended`), then dies.
+- A wall-killed child's corpse is banked (#131): `nodes/<id>[.<i>].corpus/` holds `work/`
+  (its durable work dir), `stdout_tail.txt` and `manifest.json` (`last_written` first); one
+  `node.banked` event, and the death record's `banked` points at it. A failed bank logs
+  `node.banked` with `error` and never changes the timeout verdict.
 - A run with unfinished work and no live runner is `interrupted`. Inspect committed
   outputs, then `wait` to resume — finished nodes replay-skip by fingerprint.
 - **Partial-rescue law (#134):** the sole recovery state of a run is the committed

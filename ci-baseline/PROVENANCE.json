@@ -42,13 +42,22 @@
       "supersede_by": "next green-CI refresh (replace with the CI-captured row)"
     },
     {
+      "test": "test_bank_the_corpse_131.py",
+      "exit": 0,
+      "measured": "2026-10-08 local run (16/16 PASS) on feat/bank-the-corpse-131; the row can only ever make CI red, never green",
+      "supersede_by": "next green-CI refresh (replace with the CI-captured row)"
+    },
+    {
       "test": "test_graph_orphan_deletion_231.py",
       "exit": 0,
       "measured": "2026-10-08 local foreground run on the rebased #245 head: 13 PASS, ALL PASS (rc=0); new test from #245 (est-i24i)",
       "supersede_by": "next green-CI refresh (replace with the CI-captured row)"
     }
   ],
-  "totals": {"cases": 237, "red": 0},
+  "totals": {
+    "cases": 238,
+    "red": 0
+  },
   "contract": "Green CI ledgers only (every exit == 0); rows not captured by CI are listed in rows_added_outside_ci with how they were measured. Refresh from the tip of main after each main move; see README.md.",
   "tracking_item": "est-9yl2",
   "source_issue": 75
