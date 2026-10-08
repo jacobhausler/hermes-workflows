@@ -122,10 +122,22 @@
       "exit": 0,
       "measured": "2026-10-08 local foreground run (ALL PASS) on build/workflows-96; the row can only ever make CI red, never green",
       "supersede_by": "next green-CI refresh (replace with the CI-captured row)"
+    },
+    {
+      "test": "test_run_dir_proof_199.py",
+      "exit": 0,
+      "measured": "2026-10-08 local foreground run on fix/run-dir-proof-199 rebased onto main 8bc661c: Ran 11 tests OK, rc=0; ledger row for the test this PR adds (#248)",
+      "supersede_by": "next green-CI refresh (replace with the CI-captured row)"
+    },
+    {
+      "test": "test_personal_path_scrub_867.py",
+      "exit": 0,
+      "measured": "2026-10-08 local foreground run on fix/run-dir-proof-199 r3 (owner ruling: no guard exemptions): export audit catches the fixture narrative rc!=0 at pre-fix head, GREEN rc=0 after the scrub-list category landed; pack ZIP 0 offenders",
+      "supersede_by": "next green-CI refresh (replace with the CI-captured row)"
     }
   ],
   "totals": {
-    "cases": 247,
+    "cases": 252,
     "red": 0
   },
   "contract": "Green CI ledgers only (every exit == 0); rows not captured by CI are listed in rows_added_outside_ci with how they were measured. Refresh from the tip of main after each main move; see README.md.",

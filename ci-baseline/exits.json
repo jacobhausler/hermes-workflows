@@ -1247,5 +1247,15 @@
     "test": "test_package_source_only_756.py",
     "exit": 0,
     "log": "CI run 37722866724 Serial suite: exit 0"
+  },
+  {
+    "test": "test_run_dir_proof_199.py",
+    "exit": 0,
+    "log": "Local foreground python3 tests/test_run_dir_proof_199.py on rebased #248 @ main 3b45625: Ran 11 tests OK, exit 0"
+  },
+  {
+    "test": "test_personal_path_scrub_867.py",
+    "exit": 0,
+    "log": "Local foreground python3 tests/test_personal_path_scrub_867.py on rebased #248 @ main 3b45625: DONE personal_path_scrub_867 OK, exit 0"
   }
 ]
