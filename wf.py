@@ -2343,7 +2343,7 @@ def _bank_the_corpse(run, node, index, spawn, out):
         (tmp / "work").mkdir(parents=True)
         rows, n, nbytes, truncated = [], 0, 0, False
         for f in files:
-            st, rel = f.stat(), f.relative_to(wd).as_posix()
+            rel = f.relative_to(wd).as_posix()
             copied = 0
             if not f.is_symlink() and nbytes < CORPUS_MAX_BYTES:
                 # D1 (est-muob) byte-bounded copy: the cap is enforced AT COPY
@@ -2353,9 +2353,7 @@ def _bank_the_corpse(run, node, index, spawn, out):
                 # cap sets `truncated`.
                 dst = tmp / "work" / rel
                 dst.parent.mkdir(parents=True, exist_ok=True)
-                src_f = open(f, "rb")
-                dst_f = open(dst, "wb")
-                try:
+                with open(f, "rb") as src_f, open(dst, "wb") as dst_f:
                     while True:
                         chunk = src_f.read(1 << 20)
                         if not chunk:
@@ -2371,12 +2369,12 @@ def _bank_the_corpse(run, node, index, spawn, out):
                         dst_f.write(chunk)
                         nbytes += len(chunk)
                     shutil.copystat(f, dst)
-                finally:
-                    src_f.close()
-                    dst_f.close()
                 copied = 1
             if copied:
                 n += 1
+            # Copied rows describe the snapshot, including a cap-clipped file;
+            # manifest-only rows still describe the uncopied source.
+            st = (tmp / "work" / rel).stat() if copied else f.stat()
             rows.append({"path": rel, "size": st.st_size, "mtime": st.st_mtime,
                          "copied": bool(copied)})
         (tmp / "stdout_tail.txt").write_text((out or "")[-4000:], encoding="utf-8", errors="replace")

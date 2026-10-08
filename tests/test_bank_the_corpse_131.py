@@ -19,10 +19,13 @@ mtime, newest first; `last_written` = the newest). One `node.banked` event, and 
      with error=, files=0, no pointer, verdict still failed/timeout, squatter intact.
   U  OSError inside the copy (in-process): the helper never raises, returns None.
   A  adopted path: an orphan past its re-armed wall is killed and banked the same way.
+  N1 per-file sizes match the banked snapshot after source growth and truncation.
+  N2 failed source/destination opens are honest-empty and release acquired handles.
+  N3 PROVENANCE evidence counts match the runtime check ledger (including itself).
 
 Run: python3 tests/test_bank_the_corpse_131.py
 """
-import json, os, shutil, subprocess, sys, tempfile, threading
+import json, os, re, shutil, subprocess, sys, tempfile, threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
@@ -32,9 +35,10 @@ BUILD = Path(os.environ.get("WF_TEST_BUILD") or HERE.parent)
 sys.path.insert(0, str(BUILD))
 import wf  # noqa: E402
 
-ok = True
+ok, checks = True, []
 def check(label, cond, detail=""):
     global ok
+    checks.append(bool(cond))
     print(("PASS " if cond else "FAIL ") + label + (f"  {detail}" if detail and not cond else ""))
     ok = ok and bool(cond)
 
@@ -168,6 +172,43 @@ try:
           got is None and raised is None and banked(r)[-1:] and "injected" in banked(r)[-1]["error"],
           repr(raised))
 
+    # N2: either open can fail; the second open must not leak the first handle.
+    open_results = []
+    for fail_mode in ("rb", "wb"):
+        r = mk("b131-open-" + fail_mode, [{"id": "o", "type": "agent", "goal": "x"}])
+        node = {"id": "o"}
+        (wf.child_work_dir(r, node, None) / "open.txt").write_text("snapshot")
+        handles, modes = [], []
+        def fail_open(file, mode, *args, **kwargs):
+            if mode not in ("rb", "wb"):
+                return open(file, mode, *args, **kwargs)
+            modes.append(mode)
+            if mode == fail_mode:
+                raise PermissionError("injected " + mode + " open")
+            handle = open(file, mode, *args, **kwargs)
+            handles.append(handle)
+            return handle
+        raised = None
+        try:
+            with patch.object(wf, "open", fail_open, create=True):
+                got = wf._bank_the_corpse(r, node, None, 0, "tail")
+        except Exception as exc:
+            got, raised = None, exc
+        events = banked(r)
+        closed = all(handle.closed for handle in handles)
+        open_results.append({"mode": fail_mode, "closed": closed,
+                             "ok": got is None and raised is None and closed
+                             and modes == (["rb"] if fail_mode == "rb" else ["rb", "wb"])
+                             and len(events) == 1 and events[0].get("corpus") is None
+                             and events[0].get("files") == events[0].get("bytes") == 0
+                             and "injected " + fail_mode + " open" in events[0].get("error", "")
+                             and not list((r / "nodes").glob("*.tmp"))
+                             and not list((r / "nodes").glob("*.corpus"))})
+        for handle in handles:
+            handle.close()  # also clean up the deliberately broken implementation
+    check("N2 both failing opens are honest-empty and close every acquired handle",
+          all(result["ok"] for result in open_results), str(open_results))
+
     # ============ A: adopted-orphan path banks the same way ============
     r = mk("b131-adopt", [{"id": "f", "type": "agent", "goal": "x", "timeout": 1}])
     node = {"id": "f", "type": "agent", "goal": "x", "timeout": 1}
@@ -241,6 +282,10 @@ try:
         bk = banked(r)
         check("D1 node.banked line carries the same honest bytes",
               len(bk) == 1 and bk[0].get("bytes") == on_disk, str(bk)[:300])
+    check("N1 every copied per-file size equals the banked bytes after growth/truncation",
+          bank is not None and all(row["size"] == (Path(bank) / "work" / row["path"]).stat().st_size
+                                   for row in man["files"] if row["copied"]),
+          str(man.get("files"))[:300])
 
     # ============ D2 (est-muob): quarantine records keep the corpse pointer ============
     # The quarantine builders carry log_path/prompt_path/... forward but DROP
@@ -320,5 +365,15 @@ try:
 finally:
     shutil.rmtree(HOME, ignore_errors=True)
 
+provenance = json.loads((BUILD / "ci-baseline" / "PROVENANCE.json").read_text())
+# Once a green-CI refresh supersedes this outside-CI row, no local quote remains.
+evidence = [row for row in provenance["rows_added_outside_ci"]
+            if row["test"] == Path(__file__).name]
+measured = evidence[0]["measured"] if len(evidence) == 1 else ""
+count = re.search(r"\bTOTAL (\d+) FAIL (\d+)\b", measured)
+check("N3 PROVENANCE count matches the actual runtime ledger including this check",
+      not evidence or (len(evidence) == 1 and count is not None and int(count[1]) == len(checks) + 1),
+      measured)
+print(f"TOTAL {len(checks)} FAIL {sum(not passed for passed in checks)}")
 print("ALL PASS" if ok else "SOME FAILED")
 sys.exit(0 if ok else 1)

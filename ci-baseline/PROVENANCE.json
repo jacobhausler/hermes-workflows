@@ -44,7 +44,7 @@
     {
       "test": "test_bank_the_corpse_131.py",
       "exit": 0,
-      "measured": "2026-10-08 local run (16/16 PASS) on feat/bank-the-corpse-131; the row can only ever make CI red, never green",
+      "measured": "2026-10-08 local background run of tests/test_bank_the_corpse_131.py on fix/not1j-corpse-size: TOTAL 30 FAIL 0, exit 0; counts parsed from runtime PASS/FAIL ledger (including the provenance self-check); the row can only ever make CI red, never green",
       "supersede_by": "next green-CI refresh (replace with the CI-captured row)"
     }
   ],
