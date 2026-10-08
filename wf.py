@@ -6930,13 +6930,16 @@ def main(run_id):
 
 def finalize(run, graph, status):
     nodes = graph["nodes"]
-    finals = [n["id"] for n in nodes
-              if not any(n["id"] in o.get("after", []) for o in nodes)]
     lines = [f"# Workflow '{graph.get('name', 'workflow')}' — {status}"]
-    for fid in finals:
-        rec = jload(run / "nodes" / f"{fid}.json")
-        if rec and rec.get("status") in ("done", "partial"):   # #4: harvested partial output belongs in the summary
-            lines.append(f"\n## {fid}\n\n```json\n"
+    # est-p318w: every node, graph order, status + output. Rendering only
+    # done/partial LEAVES left a bare header whenever the sole leaf was
+    # pruned (gate on_skip:prune skipping a publisher) — run.done promises
+    # the node outputs are here. #4: harvested partial output stays in.
+    for n in nodes:
+        rec = jload(run / "nodes" / f"{n['id']}.json") or {}
+        lines.append(f"\n## {n['id']} — {rec.get('status') or 'no record'}")
+        if rec.get("output") is not None:
+            lines.append("\n```json\n"
                          + json.dumps(rec.get("output"), ensure_ascii=False, indent=2, default=str)
                          + "\n```")
     (run / "summary.md").write_text("\n".join(lines) + "\n")
