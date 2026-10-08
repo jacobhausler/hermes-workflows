@@ -62,7 +62,7 @@ REPO = "octocat/whatever"
 PR = 245
 LIVE = 6019510641
 FALLBACK_MARK = "repo-admin formal-review-fallback"
-RA_MARK = "<!-- repo-admin reviewed=e08513f verdict=changes profile=bot reviewer=gh-dispatch -->"
+RA_MARK = "<!-- repo-admin reviewed=e08513f verdict=changes profile=bot reviewer=peer-bot -->"
 BODY = "FINDINGS: request changes.\n\n" + RA_MARK + "\n"
 
 # the #245 field receipt, verbatim shape
@@ -77,7 +77,7 @@ class FakeGitHub:
     replace-all `PATCH issues/{n} {labels}` is modelled faithfully (it WIPES
     every label not in the list). drop=True accepts writes but never lands them."""
 
-    def __init__(self, me="jacobhausler", author="jacobhausler", review=None,
+    def __init__(self, me="estate-cred", author="estate-cred", review=None,
                  labels=("keep-me",), comments=None, drop=False):
         self.calls = []
         self.me, self.author, self.review = me, author, review
@@ -142,8 +142,8 @@ g = FakeGitHub()
 out = mod.post_formal_review(REPO, PR, BODY, token="t0ken", transport=g)
 check("T1 self-review detected BEFORE posting (credential == author recorded)",
       out.get("self_review", {}).get("self_review") is True
-      and out["self_review"].get("credential") == "jacobhausler"
-      and out["self_review"].get("author") == "jacobhausler", out.get("self_review"))
+      and out["self_review"].get("credential") == "estate-cred"
+      and out["self_review"].get("author") == "estate-cred", out.get("self_review"))
 check("T1 the doomed POST /reviews is NEVER attempted", g.posted_reviews() == [],
       g.posted_reviews())
 written = list(g.comments.values())

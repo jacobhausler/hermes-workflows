@@ -60,16 +60,16 @@ def mkrun(name, node):
     (r / "graph.json").write_text(json.dumps({"name": name, "nodes": [node]}))
     return r
 
-PIN = "openai-codex/gpt-6.1-sol"
-BASE_NODE = {"id": "peer", "type": "agent", "goal": "g", "provider": "openai-codex",
-             "model": "gpt-6.1-sol", "route_verified": PIN}
+PIN = "vendor-a/model-pinned"
+BASE_NODE = {"id": "peer", "type": "agent", "goal": "g", "provider": "vendor-a",
+             "model": "model-pinned", "route_verified": PIN}
 meta = {"_run": RUN, "_spawn_n": {}, "_procs_lock": threading.Lock(), "_procs": {},
         "_stop": threading.Event(), "node_timeout": 15}
 (RUN / "graph.json").write_text(json.dumps({"name": "rh", "nodes": [BASE_NODE]}))
 
 # ---- H1: require_route:false + mismatched served -> PASS (escape hatch is live)
 n1 = dict(BASE_NODE, require_route=False)
-r1 = wf._route_hold(meta, {"status": "done", "served_model": "claude-opus-5-5"}, n1)
+r1 = wf._route_hold(meta, {"status": "done", "served_model": "model-elsewhere"}, n1)
 check("H1 require_route:false: mismatched served PASSES the commit hold (opt-out is live code)",
       r1.get("status") == "done" and r1.get("error_class") != "route_unavailable", r1)
 check("H1 the contradicted proof is dropped from the node def at hold time",
@@ -78,18 +78,18 @@ check("H1 the contradicted proof is dropped from the node def at hold time",
 # ---- H2: defaults.require_route:false resolves the opt-out (door precedence)
 RUN_D = mkrun("rh-defs", BASE_NODE)
 meta_d = dict(meta, _run=RUN_D)
-r2 = wf._route_hold(meta_d, {"status": "done", "served_model": "claude-opus-5-5"},
+r2 = wf._route_hold(meta_d, {"status": "done", "served_model": "model-elsewhere"},
                     dict(BASE_NODE))
 # graph defaults WITHOUT a node-level key
 (RUN_D / "graph.json").write_text(json.dumps(
     {"name": "rh-defs", "defaults": {"require_route": False}, "nodes": [BASE_NODE]}))
-r2b = wf._route_hold(meta_d, {"status": "done", "served_model": "claude-opus-5-5"},
+r2b = wf._route_hold(meta_d, {"status": "done", "served_model": "model-elsewhere"},
                      dict(BASE_NODE))
 check("H2 graph defaults.require_route:false also skips the hold",
       r2b.get("status") == "done", r2b)
 
 # ---- H3: no opt-out -> #25 byte-identical
-r3 = wf._route_hold(meta, {"status": "done", "served_model": "claude-opus-5-5"},
+r3 = wf._route_hold(meta, {"status": "done", "served_model": "model-elsewhere"},
                     dict(BASE_NODE))
 check("H3 no opt-out: mismatch still fails typed route_unavailable",
       r3.get("status") == "failed" and r3.get("error_class") == "route_unavailable", r3)
@@ -118,7 +118,7 @@ def fresh_run(name, verified, extra=None):
          "_procs": {}, "_stop": threading.Event(), "node_timeout": 15}
     return r, node, m
 
-SUB = {"provider": "other-seat", "model": "claude-opus"}
+SUB = {"provider": "other-seat", "model": "model-sub"}
 
 # R1: first spawn under a live receipt: substitution still refused
 rA, nA, mA = fresh_run("rh-r1", "openai/m-pinned")
