@@ -4298,12 +4298,17 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
     sr = os.environ.get("HERMES_WRITE_SAFE_ROOT")
     if sr:
         env["HERMES_WRITE_SAFE_ROOT"] = sr + os.pathsep + wd
+    # est-2ek.1.772: Popen cwd=wd is not enough — the Hermes terminal tool takes its
+    # default cwd from $TERMINAL_CWD, which dict(os.environ, ...) inherits from the
+    # host. Pin it so a terminal call with no workdir lands in the node's workspace.
+    env["TERMINAL_CWD"] = wd
     if route:
         # Delegation is not isolation. The target's -p resolves against the common
         # root, never the launcher's named-profile home. Do not forward launcher
         # secrets (provider keys and unrelated environment variables).
         keep = {"PATH", "HOME", "LANG", "TERM", "TZ", "TMPDIR",
-                "HERMES_QUIET_TURN_REPORT_FILE", "WF_RUNS_ROOT", "HERMES_WRITE_SAFE_ROOT"}
+                "HERMES_QUIET_TURN_REPORT_FILE", "WF_RUNS_ROOT", "HERMES_WRITE_SAFE_ROOT",
+                "TERMINAL_CWD"}
         env = {k: v for k, v in env.items()
                if k in keep or k.startswith("LC_") or k.startswith("HERMES_WF_")}
         env["HERMES_HOME"] = str(hermes_root())
