@@ -51,7 +51,7 @@ One tool, action-routed — the complete surface, with the flags that matter:
 | Action | What it does |
 |---|---|
 | `run` | Launch a graph from `graph` (inline), `graph_path` (≤1 MiB local file), or `from` (library name). Optional `name`, `run_context` (seed string, or a binding map replacing `{run.KEY}` refs — malformed input is refused before anything is written; values land in prompts, so no secrets), `team`, `lane_key` (dedupe: a second run on an unfinished incumbent returns it instead of spawning), `dry_run:true` (full validation, zero writes). |
-| `status` | Read-only read model: per-node state, metrics, held gate, `node_facts` on failures, derived `next` steps — never spawns a runner. `lane_key` reads the incumbent instead. |
+| `status` | Read-only read model: per-node state, metrics, held gate, `node_facts` on failures, derived `next` steps — never spawns a runner. `lane_key` reads the incumbent instead; a lane entry whose claimed run dir no longer exists on disk reports `state: "orphaned"` (a claimed-then-lost run, not a forever-`pending` ghost). |
 | `wait` | The resume-and-watch verb: the only read action that respawns an idle runner; blocks to the next boundary (default 600 s, ceiling 1800 s), self-yielding before the host's tool deadline with a "call wait again" note. |
 | `release` | Answer a held human gate (`gate_id`, `answer`); respawns the runner when idle. A human release pre-empts a machine `wait` park. |
 | `steer` | Queue steering text for a running node (refused on gates and terminal nodes; delivery is cooperative via the child's `inbox` pull — never a mid-prompt injection). |
