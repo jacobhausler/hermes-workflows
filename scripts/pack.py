@@ -80,6 +80,7 @@ INCLUDE_FILES = (
     "SKILL.md",
     "__init__.py",
     "card_enforcement.py",  # #157: imported by __init__.py at bind time — a packaged plugin without it dies at import
+    "post_exit_hook.py",  # imported by the runner and the shipped test_post_exit_hook.py
     "dashboard/manifest.json",
     "dashboard/index.js",  # hidden API plugin still needs the web host's script/registration contract
     "dashboard/plugin_api.py",
@@ -150,6 +151,15 @@ INCLUDE_FILES = (
 INCLUDE_PATTERNS = ("tests/test_*.py", "tests/test_*.mjs", "references/*.md",
                     "tests/fixtures/dialect/*")   # #33: the corpus test_dialect_js_33 asserts against
 EXECUTABLE_FILES = {"scripts/pack.py", "tests/fake"}
+# Checkout-only tests stay in repository CI, not the release's test glob.
+SOURCE_ONLY_TESTS = {
+    "tests/test_diagram_law.py": "needs diagrams/README.md and the source-only renderer",
+    "tests/test_example_census_fanout.py": "imports source-only scripts/make_public.py",
+    "tests/test_example_issue_to_pr.py": "imports source-only scripts/make_public.py",
+    "tests/test_example_release_lifecycle.py": "imports source-only scripts/make_public.py",
+    "tests/test_lane_recover_8edcc9bf.py": "executes source-only scripts/lane_recover.py",
+    "tests/test_example_exchange_run.py": "reads source-only scripts/scrub-list.txt",
+}
 
 
 def collect_sources() -> list[tuple[str, bytes]]:
@@ -160,6 +170,7 @@ def collect_sources() -> list[tuple[str, bytes]]:
             raise RuntimeError(f"include pattern matched no files: {pattern}")
         paths.update(path.relative_to(ROOT) for path in matches)
 
+    paths.difference_update(Path(name) for name in SOURCE_ONLY_TESTS)
     sources: list[tuple[str, bytes]] = []
     for rel in sorted(paths, key=lambda p: p.as_posix()):
         path = ROOT / rel
