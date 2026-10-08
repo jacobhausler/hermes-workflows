@@ -1385,7 +1385,13 @@ def _route_enforcement(graph, routes, skip=(), models=None):
                        f"not pin. Repoint it, or accept fallback with require_route: "
                        f"false ON THAT NODE (a `defaults` flip opts the whole graph in)")
         elif liv == "alive":
-            n["route_verified"] = f"{n.get('provider') or p}/{n.get('model') or m}"
+            # #318: bake what the ping ACTUALLY proved — the resolved route (alias
+            # TARGET id when the node pins an alias), not the bare alias name.
+            # A re-substituted node (#116) reads its served rung from the same place.
+            res_now = ent.get("resolved") or {}
+            rp = res_now.get("provider") or n.get("provider") or p
+            rm = res_now.get("model") or n.get("model") or m
+            n["route_verified"] = f"{rp}/{rm}"
     return ("route_unavailable at submit — " + "; ".join(bad)) if bad else None
 
 def _quota_refusal(graph, routes=None, cache_path=None, skip=()):
