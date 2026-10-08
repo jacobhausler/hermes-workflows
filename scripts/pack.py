@@ -105,6 +105,7 @@ INCLUDE_FILES = (
     "plugin.yaml",
     "CHANGELOG.md",
     "scripts/graph_check.py",
+    "scripts/graph_orphans.py",  # shipped graph tests exec-load this helper and run its CLI
     "scripts/graph_diagram.py",
     "scripts/diagram_readme.py",
     "scripts/pack.py",
