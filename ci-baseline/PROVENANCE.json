@@ -38,7 +38,7 @@
     {
       "test": "test_resume_hint_130.py",
       "exit": 0,
-      "measured": "2026-10-08 local run (28/28 PASS) on feat/resume-hint-130; the row can only ever make CI red, never green",
+      "measured": "2026-10-08 local foreground run (38/38 PASS, rc=0) on feat/resume-hint-130 after review fixes; the row can only ever make CI red, never green",
       "supersede_by": "next green-CI refresh (replace with the CI-captured row)"
     }
   ],
