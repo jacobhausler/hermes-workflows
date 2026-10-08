@@ -12,6 +12,8 @@ The fix is ONE provider normalization contract (wfcommon.canonical_model_id)
 used by BOTH the submit-proof comparison (door ping same-route law) and the
 actual-child identity comparisons (runner commit hold + post-admission receipt
 hold). Acceptance pinned here:
+  * dot/hyphen equivalence is Anthropic-only; other providers and aggregator vendor
+    namespaces compare as spelled (section 4, from the review on PR #238)
   * alias pair 5.1 vs 5-1 -> proven-and-run items are NOT route_unavailable
   * a genuinely different model stays blocked (require_route NOT weakened —
     no fallback enabled, the gate itself unchanged)
@@ -53,7 +55,7 @@ OTHER = "claude-opus-5-5"
 check("canonical_model_id exported by wfcommon (the shared contract)",
       callable(getattr(wc, "canonical_model_id", None)))
 if callable(getattr(wc, "canonical_model_id", None)):
-    cm = wc.canonical_model_id
+    cm = lambda m, prov="anthropic": wc.canonical_model_id(m, prov)   # the pin's provider
     check("alias pair 5.1 vs 5-1 canonicalize EQUAL",
           cm(DOT) == cm(HY), f"{cm(DOT)!r} vs {cm(HY)!r}")
     check("provider-qualified strips to the same model identity",
@@ -66,6 +68,18 @@ if callable(getattr(wc, "canonical_model_id", None)):
           cm(DOT + "(anthropic)") == cm(HY), cm(DOT + "(anthropic)"))
     check("case/whitespace insensitive",
           cm("  Anthropic/" + DOT.upper() + " ") == cm(HY))
+    # provider boundary: the dot/hyphen equivalence is Anthropic's alone, and a vendor
+    # namespace on an aggregator route is part of the id (zap review on PR #238)
+    check("openai-codex keeps dots: model-5.1 != model-5-1",
+          wc.canonical_model_id("model-5.1", "openai-codex") != wc.canonical_model_id("model-5-1", "openai-codex"))
+    check("openrouter keeps the vendor namespace: vendor-a/alpha != vendor-b/alpha",
+          wc.canonical_model_id("vendor-a/alpha", "openrouter") != wc.canonical_model_id("vendor-b/alpha", "openrouter"))
+    check("only the route's OWN provider prefix is peeled",
+          wc.canonical_model_id("openrouter/vendor-a/alpha", "openrouter") == wc.canonical_model_id("vendor-a/alpha", "openrouter")
+          and wc.canonical_model_id("vendor-a/alpha", "openrouter") == "vendor-a/alpha")
+    check("provider-less ids compare as spelled", wc.canonical_model_id("m-5.1") != wc.canonical_model_id("m-5-1"))
+    check("hyphen runs are left alone (docstring == regex)",
+          wc.canonical_model_id("m--1", "anthropic") == "m--1" and wc.canonical_model_id("m..1", "anthropic") == "m-1")
 
 # ---- 1. runner commit hold: dotted proof vs hyphenated billed -> NO hold --------
 # Exact field shape: door proved anthropic/claude-fable-5.1, the row billed
@@ -215,5 +229,34 @@ set_ping(None)
 out = door.act_run({"graph": pinned_graph()})
 check("core-absence never blocks (fail-open on absence unchanged)",
       bool(out.get("run_id")), out)
+
+# ---- 4. provider boundaries: the same punctuation is NOT the same route off Anthropic ----
+OAI, OAI_DOT, OAI_HY = "openai-codex", "model-5.1", "model-5-1"
+check("door same-route law: openai-codex dotted pin vs hyphenated record is NOT same-route",
+      not door._same_ping_route({"provider": OAI, "model": OAI_HY}, OAI, OAI_DOT))
+check("door same-route law: openrouter cross-vendor (vendor-b/alpha vs pin vendor-a/alpha) is NOT same-route",
+      not door._same_ping_route({"provider": "openrouter", "model": "vendor-b/alpha"}, "openrouter", "vendor-a/alpha"))
+check("door same-route law: openrouter same vendor still same-route",
+      door._same_ping_route({"provider": "openrouter", "model": "vendor-a/alpha"}, "openrouter", "vendor-a/alpha"))
+before = len(_spawned)
+set_ping({"record": {"provider": OAI, "model": OAI_HY}})
+out = door.act_run({"graph": {"name": "p699b", "nodes": [{"id": "plans", "type": "agent", "goal": "x",
+                                                         "provider": OAI, "model": OAI_DOT}]}})
+check("door: openai-codex dotted pin answered by a hyphenated route is refused at submit, nothing spawned",
+      "error" in out and "FALLBACK LADDER" in out.get("error", "").upper() and len(_spawned) == before, out)
+out = wfmod._route_hold(meta, {"status": "done", "served_model": OAI_HY},
+                        {"model": OAI_DOT, "provider": OAI, "route_verified": f"{OAI}/{OAI_DOT}"})
+check("commit hold: openai-codex hyphenated billed vs dotted proof -> still route_unavailable",
+      out.get("status") == "failed" and out.get("error_class") == "route_unavailable", out)
+set_ping({"record": {"provider": OAI, "model": OAI_HY}})
+check("quota recovery probe: a hyphenated answer for a dotted provider-less stamp is NOT a recovery",
+      door._ping_reachable(OAI_DOT) is False)
+set_ping({"record": {"provider": "anthropic", "model": HY}})
+check("quota recovery probe: Anthropic-qualified stamp answered under the normalized spelling recovers",
+      door._ping_reachable(f"anthropic/{DOT}") is True)
+(run699 / "route_receipts.json").write_text(json.dumps({"plans": f"{OAI}/{OAI_DOT}"}))
+r = wfmod._route_substitution_refusal({"_run": run699}, {"id": "plans", "type": "agent", "provider": OAI, "model": OAI_HY}, 5)
+check("receipt hold (durable file): openai-codex hyphenated re-spawn under a dotted receipt is denied",
+      isinstance(r, dict) and r.get("error_class") == "route_substitution_denied", r)
 
 sys.exit(1 if fails else 0)

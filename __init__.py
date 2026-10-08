@@ -1086,20 +1086,16 @@ def _same_ping_route(ri, provider, model):
     call_llm's recovery ladder may answer from another lane (capacity errors bypass the
     explicit-provider gate); a ping whose recorded route is not the pinned one proves
     nothing about the pinned one — the caller degrades to 'unknown', never 'alive'/'dead'.
-    est-2ek.1.699: the MODEL half compares under the ONE canonical model-id contract
-    (wfcommon.route_ids_equal) — core records the ping route with ITS normalized
-    spelling ('m-1-1') while the node pins the author's ('m-1.1');
-    raw-string equality there falsely called the same route a fallback-ladder
-    surprise and refused a healthy pin at submit. The PROVIDER half keeps its
-    'label(provider)' extraction; a provider mismatch is still never same-route."""
+    The MODEL half also admits the ONE route-identity contract (wfcommon.route_ids_equal,
+    est-2ek.1.699); a provider mismatch is never same-route."""
     def _lbl(v):
         v = str(v or "").strip().lower()
         m = re.search(r"\(([^()]+)\)\s*$", v)  # 'main-agent(openai)' / 'fallback_chain[0](x)'
         return m.group(1) if m else v
-    rp = _lbl((ri or {}).get("provider"))
-    rm = (ri or {}).get("model")
-    lp = str(provider).strip().lower()
-    return bool(rp) and rp == lp and _common.route_ids_equal(rm, model)
+    rp, rm = _lbl((ri or {}).get("provider")), _lbl((ri or {}).get("model"))
+    lp, lm = str(provider).strip().lower(), str(model).strip().lower()
+    return bool(rp) and rp == lp and (rm == lm or rm == lm.rsplit("/", 1)[-1]
+                                      or _common.route_ids_equal((ri or {}).get("model"), lm, lp))
 
 _PING_SUBPROCESS = '''import json, sys
 try:
@@ -1233,11 +1229,12 @@ def _ping_reachable(model):
     except Exception:
         return False
     rm = str(ri.get("model") or "").strip().lower()
-    # est-2ek.1.699: same ONE canonical contract as _same_ping_route — a ping
-    # answered under core's normalized spelling of the stamped model IS the
-    # stamped route (5.1 vs 5-1), not a fallback-ladder answer. A different
-    # model stays a non-recovery (the wrong-route proves-nothing law unchanged).
-    return _common.route_ids_equal(rm, model)
+    m = re.search(r"\(([^()]+)\)\s*$", rm)      # 'main-agent(openai)' label shape
+    if m:
+        rm = m.group(1)
+    lm = str(model).strip().lower()
+    return bool(rm) and (rm == lm or rm == lm.rsplit("/", 1)[-1]
+                         or _common.route_ids_equal(ri.get("model"), lm, lm.partition("/")[0] if "/" in lm else None))
 
 def _safe_ping_note(exc, status):
     try:
