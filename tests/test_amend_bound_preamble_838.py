@@ -7,8 +7,7 @@ preamble while graph.json's defaults.context keeps the {run.KEY} template. The
 amend door re-applies apply_graph_defaults to the submitted graph; its
 `startswith(pre)` guard compared the unbound template to the bound context, missed,
 and prepended the preamble again — new bytes, new efp, completed nodes re-ran
-(live: workflow 20261008-043243-keeper-windows-protocol-, graph.amended 05:55:25Z,
-fix/verify context 3045 -> 5685 chars, two preamble copies).
+A completed node must retain its original context and fingerprint on amend.
 Stdlib only; no runner spawned."""
 import atexit, copy, importlib, os, sys, tempfile
 from pathlib import Path
@@ -30,8 +29,8 @@ def check(label, cond, detail=""):
     print(("PASS " if cond else "FAIL ") + label + (f"  -- {detail}" if detail and not cond else ""))
     fails += 0 if cond else 1
 
-PRE = "Shared preamble: parent holds claim {run.bead} in {run.store}. Stop on contention."
-BIND = {"bead": "est-l5ky", "store": "/home/x/beads"}
+PRE = "Shared preamble: parent holds claim {run.task} in {run.store}. Stop on contention."
+BIND = {"task": "case-123", "store": "/workspace/tasks"}
 
 def author():
     return {"name": "probe", "defaults": {"context": PRE},
@@ -42,7 +41,7 @@ def author():
 # The act_run order: defaults baked first, run_context bound second.
 launched = door._bind_run_context(apply_graph_defaults(author()), BIND)
 byid = {n["id"]: n for n in launched["nodes"]}
-bound_pre = PRE.replace("{run.bead}", BIND["bead"]).replace("{run.store}", BIND["store"])
+bound_pre = PRE.replace("{run.task}", BIND["task"]).replace("{run.store}", BIND["store"])
 check("launch: fix context = bound preamble + own context",
       byid["fix"]["context"] == bound_pre + "\n\nfix own", repr(byid["fix"]["context"]))
 check("launch: defaults.context keeps the {run.KEY} template",
@@ -81,9 +80,9 @@ out = apply_graph_defaults(g)["nodes"][0]["context"]
 check("literal mismatch outside {run.KEY} slots still prepends",
       out.startswith(PRE + "\n\n"), repr(out[:60]))
 # A changed preamble on amend is still applied (an edit, not a re-bake).
-g2 = copy.deepcopy(launched); g2["defaults"]["context"] = "NEW preamble {run.bead}"
+g2 = copy.deepcopy(launched); g2["defaults"]["context"] = "NEW preamble {run.task}"
 out2 = {n["id"]: n for n in apply_graph_defaults(g2)["nodes"]}["fix"]["context"]
-check("edited preamble on amend is prepended", out2.startswith("NEW preamble {run.bead}\n\n"))
+check("edited preamble on amend is prepended", out2.startswith("NEW preamble {run.task}\n\n"))
 # Unbound template (no run_context at launch) stays idempotent as before.
 plain = apply_graph_defaults(author())
 check("unbound launch: re-apply idempotent",

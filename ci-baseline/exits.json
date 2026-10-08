@@ -55,11 +55,6 @@
     "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_admission_ledger_85.py.log"
   },
   {
-    "test": "test_adopt_stop_race.py",
-    "exit": 0,
-    "log": "Local foreground tests/test_adopt_stop_race.py: RESULT PASS, exit 0"
-  },
-  {
     "test": "test_alias_receipt_respawn_318.py",
     "exit": 0,
     "log": "rows_added_outside_ci in PROVENANCE.json"
@@ -68,11 +63,6 @@
     "test": "test_alias_route_ping_318.py",
     "exit": 0,
     "log": "rows_added_outside_ci in PROVENANCE.json"
-  },
-  {
-    "test": "test_amend_bound_preamble_838.py",
-    "exit": 0,
-    "log": "Local foreground python3 tests/test_amend_bound_preamble_838.py: ALL PASS, exit 0"
   },
   {
     "test": "test_amend_preview_defdiff.py",
@@ -685,11 +675,6 @@
     "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_orphan_adopt_790c6ad.py.log"
   },
   {
-    "test": "test_package_source_only_756.py",
-    "exit": 0,
-    "log": "CI run 37722866724 Serial suite: exit 0"
-  },
-  {
     "test": "test_packaging.py",
     "exit": 0,
     "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_packaging.py.log"
@@ -893,11 +878,6 @@
     "test": "test_route_efforts_b3c98b2a.py",
     "exit": 0,
     "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_route_efforts_b3c98b2a.py.log"
-  },
-  {
-    "test": "test_route_identity_699.py",
-    "exit": 0,
-    "log": "CI run 37779459550 at 2b7804a Serial suite: exit 0"
   },
   {
     "test": "test_route_substitution_641.py",
@@ -1209,11 +1189,6 @@
     "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_tool_call_text_6st.py.log"
   },
   {
-    "test": "test_tree_quiesce_reap.py",
-    "exit": 0,
-    "log": "Local foreground tests/test_tree_quiesce_reap.py: RESULT PASS, exit 0"
-  },
-  {
     "test": "test_v3_fixes.py",
     "exit": 0,
     "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_v3_fixes.py.log"
@@ -1272,5 +1247,30 @@
     "test": "test_when_ancestry_0930.py",
     "exit": 0,
     "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_when_ancestry_0930.py.log"
+  },
+  {
+    "test": "test_route_identity_699.py",
+    "exit": 0,
+    "log": "CI run 37779459550 at 2b7804a Serial suite: exit 0"
+  },
+  {
+    "test": "test_package_source_only_756.py",
+    "exit": 0,
+    "log": "CI run 37722866724 Serial suite: exit 0"
+  },
+  {
+    "test": "test_adopt_stop_race.py",
+    "exit": 0,
+    "log": "Local foreground tests/test_adopt_stop_race.py: RESULT PASS, exit 0"
+  },
+  {
+    "test": "test_amend_bound_preamble_838.py",
+    "exit": 0,
+    "log": "Local foreground python3 tests/test_amend_bound_preamble_838.py: ALL PASS, exit 0"
+  },
+  {
+    "test": "test_tree_quiesce_reap.py",
+    "exit": 0,
+    "log": "Local foreground tests/test_tree_quiesce_reap.py: RESULT PASS, exit 0"
   }
 ]
