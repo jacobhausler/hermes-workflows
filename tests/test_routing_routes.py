@@ -1,5 +1,6 @@
 """Deterministic regressions for explicit workflow provider/model routing."""
 import importlib.util
+import json
 import os
 import sys
 import tempfile
@@ -73,6 +74,8 @@ with tempfile.TemporaryDirectory(prefix=".routing-test-", dir=HERE) as tmp:
     (run / "nodes").mkdir(parents=True)
     node = {"id": "child", "type": "agent", "goal": "route", "model": "gpt-6-luna",
             "provider": "openai-codex"}
+    # Admission compares the persisted definition, as it does for a real run.
+    (run / "graph.json").write_text(json.dumps({"nodes": [node]}))
     captured = []
 
     class FakeProcess:
