@@ -1012,17 +1012,19 @@ def _resolve_models(nodes, committed=None, keep=()) -> tuple[str | None, dict | 
             if tier:
                 display += f"  ({tier})"
         table[n["id"]] = display
+        # the alias/tier TARGET's model when the name is an alias (the CLI resolves it;
+        # the route table — pinged AND reported — speaks the real model id, est-2ek.1.318),
+        # else the baked literal. The node def keeps the alias verbatim.
+        route_model = im if (tier or m in known) and im else m
         routes[n["id"]] = {
             # requested = what the AUTHOR wrote (an inherited provider is not a request);
-            # resolved = the effective route (node def after resolution, base semantics).
+            # resolved = the effective route (alias target, else node def after resolution).
             "requested": {"provider": provider or None, "model": requested_model or None},
-            "resolved": {"provider": n.get("provider") or None, "model": n.get("model") or None},
+            "resolved": {"provider": n.get("provider") or None, "model": route_model or None},
         }
-        # route for the PER-ROUTE reasoning check: the alias/tier TARGET's model when the
-        # name is an alias (the CLI resolves it; the route table speaks the real model id),
-        # else the baked literal.
+        # route for the PER-ROUTE reasoning check (same target id as the route table).
         requests.append((n["id"], requested_model, provider, n,
-                         eff_provider, (im if (tier or m in known) and im else m)))
+                         eff_provider, route_model))
     pf_err = model_preflight(requests, tiers, _seat_model_cfg())
     if pf_err:
         return pf_err, None, None
