@@ -159,6 +159,12 @@ SOURCE_ONLY_TESTS = {
     "tests/test_example_release_lifecycle.py": "imports source-only scripts/make_public.py",
     "tests/test_lane_recover_8edcc9bf.py": "executes source-only scripts/lane_recover.py",
     "tests/test_example_exchange_run.py": "reads source-only scripts/scrub-list.txt",
+    "tests/test_lane_recover_legacy_amend_237r4.py": "loads source-only scripts/lane_recover.py",
+    "tests/test_respawn_hardening_723.py": "loads source-only scripts/lane_recover.py",
+    "tests/test_crash_no_exit_respawn_718.py": "loads source-only scripts/lane_recover.py",
+    "tests/test_lane_recover_cli_237r3.py": "executes source-only scripts/lane_recover.py",
+    "tests/test_plugin_resolution_live_not_old.py": "loads source-only scripts/lane_recover.py",
+    "tests/test_scrub_yml_166b.py": "executes source-only scripts/make_public.py",
 }
 
 
