@@ -830,9 +830,11 @@ def library_entry(data):
     # a token that is invalid there is DROPPED from the read (never an error —
     # quarantine is for whole-entry shape, F-2 #62 — and the vocabulary/filter/
     # replay readers all read the normalized list). Deterministic order: the
-    # normalizer dedups preserving first-seen order. The tag grammar lives in the
-    # door (__init__.py); readers get it through the injectable hook below so the
-    # shared module keeps zero dependency on the door's import graph.
+    # normalizer dedups preserving first-seen order. The tag grammar lives HERE
+    # in the shared module (est-qeul moved it out of the door; the door's
+    # _norm_tags now delegates to norm_tags), so the read fold calls it
+    # directly — no hook, and no dependency from the shared module back onto
+    # the door's import graph.
     tags = _normalize_tags_read(meta.get("tags"))
     return {"meta": meta, "graph": graph, "description": description,
             "tags": tags, "envelope": envelope}
