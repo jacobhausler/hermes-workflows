@@ -2838,6 +2838,18 @@ def act_run(args):
     bad = _unbound_gate_argv_refs(graph)
     if bad:
         return bad
+    # est-2ek.1.856 (B3): the seat-cap knobs are validated where they can still
+    # refuse — an invalid WORKFLOW_MAX_SEATS / config workflows.max_seats refuses
+    # the launch BEFORE any run directory is written or child spawned. Without
+    # this the typo only surfaced at the first node's spawn (a failed node), and
+    # 8/8 lanes shipped with the cap never read at all (the w54 field report).
+    try:
+        _common.seat_max_seats()
+    except _common.SeatCapError as e:
+        return {"error": f"invalid seat cap: {e} "
+                        "(WORKFLOW_MAX_SEATS env or config workflows.max_seats; an integer "
+                        f"in [{_common.SEAT_CAP_FLOOR}, {_common.SEAT_CAP_CEILING}], or unset "
+                        "for the default; the per-run opt-out stays graph max_seats: 0)"}
     # 1.1 (RATIFY F2): profile validation runs on the RENDERED graph ({run.KEY} resolved).
     bad = _profile_error(graph)
     if bad:

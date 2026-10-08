@@ -69,6 +69,8 @@ admission_ledger_errors = wfcommon.admission_ledger_errors   # #85: artifact-adm
 FP_RULE_VERSION = wfcommon.FP_RULE_VERSION
 record_efp_valid = wfcommon.record_efp_valid
 seat_forbidden_models = wfcommon.seat_forbidden_models
+seat_max_seats = wfcommon.seat_max_seats
+SeatCapError = wfcommon.SeatCapError
 runs_root = wfcommon.runs_root
 hermes_root = wfcommon.hermes_root
 profile_home = wfcommon.profile_home
@@ -1731,6 +1733,13 @@ ERROR_CLASSES = frozenset(("provider_400", "unresolved_model", "cap_exhausted",
                            # declared lane still carries the dead attempt's
                            # uncommitted TRACKED wreckage — bank it, then re-drive.
                            "lane_wreckage",
+                           # est-2ek.1.856 (B3): the seat-cap knob (WORKFLOW_MAX_SEATS
+                           # env / config workflows.max_seats) named a non-integer or
+                           # a value outside [4, 16]. The door refuses the whole launch
+                           # with it; a runner that sees it flip invalid mid-run fails
+                           # the node with it. Operator input error: never retried,
+                           # never silently defaulted.
+                           "seat_cap",
                            # committed by the seat floor / policy gate
                            # (wf forbidden_model sites) and by unmet input deps
                            # (_fail_precondition). AGENTS.md cites this set as
@@ -2763,6 +2772,39 @@ def _proof_of_life(lp, proc, hb, tree_pids):
 # One ticket file per held seat; the count + create is serialized by an flock on
 # <seats>/.lock. A ticket whose pids are all verifiably dead is pruned at acquire.
 SEATS_DEFAULT = 4
+# est-2ek.1.856 (FIFO): a waiter that finds the semaphore full registers a
+# queue marker under <seats>/queue/ (NOT a ticket — the ticket glob above never
+# sees the subdir). Admission requires `live < cap` AND no strictly-older live
+# marker (order key (enqueued, uuid)); the blind flock poll made first-poller
+# win, so a long-waiting node starved behind a churn of short runs (keeper
+# field report 2026-10-08 12:19Z: accept_probe sat seat.wait 17 min while
+# gh-drive runs re-took every freed seat). Markers gate FAIRNESS only — never
+# capacity; the bounded wait + typed seat_wait stay the outer bound.
+SEAT_QUEUE_DIR = "queue"
+SEAT_QUEUE_HB_S = 0.5      # own-marker heartbeat refresh cadence
+SEAT_QUEUE_LIVE_S = 8.0    # a marker is a live waiter while pid lives AND hb is this fresh
+SEAT_QUEUE_PRUNE_S = 20.0  # owner liveness has failed this long -> marker pruned (reconfirmed)
+
+def _seat_prune_ledger(seats, kind, name, row, reason):
+    """est-2ek.1.857: dropping someone else's ticket/marker is LOUD. Every
+    external unlink appends one line to <seats>/.pruned.jsonl (ts, pruner pid,
+    kind, ticket name, row snapshot, reason) — the 857 field report was
+    undebuggable precisely because the prune was silent. Best-effort: a ledger
+    failure never blocks admission; the file rotates once at ~1 MiB."""
+    try:
+        p = Path(seats) / ".pruned.jsonl"
+        try:
+            if p.exists() and p.stat().st_size > 1_048_576:
+                os.replace(p, Path(str(p) + ".1"))
+        except OSError:
+            pass
+        rec = {"ts": round(time.time(), 3), "pruner": os.getpid(),
+               "kind": kind, "ticket": name, "reason": reason,
+               "row": row if isinstance(row, dict) else str(row)[:400]}
+        with open(p, "a", encoding="utf-8") as f:
+            f.write(json.dumps(rec, default=str) + "\n")
+    except OSError:
+        pass
 
 def _seat_cap_from_env_files():
     """Operator-set WORKFLOW_MAX_SEATS from the Hermes .env files (est-gxjh6).
@@ -2807,21 +2849,16 @@ def _seat_cap_from_env_files():
             return n
     return None
 
-def _max_seats(meta):
-    v = meta.get("max_seats")
-    if isinstance(v, int) and not isinstance(v, bool):
-        return v
-    try:                                            # explicit env wins (export/CLI shape)
-        e = os.environ.get("WORKFLOW_MAX_SEATS")
-        if e is not None:
-            return int(e)
-    except ValueError:
-        pass
-    f = _seat_cap_from_env_files()                  # else read the .env fresh (est-gxjh6)
-    if f is not None:
-        return f
-    return SEATS_DEFAULT
-
+    # est-2ek.1.856: the operator knobs (WORKFLOW_MAX_SEATS env, config
+    # workflows.max_seats) are validated in ONE place — wfcommon.seat_max_seats
+    # (floor/ceiling + the typed SeatCapError), resolved at every call so a
+    # config change takes effect on the next node, same law as the seat model
+    # floor. An invalid value RAISES here; the spawn path fails it closed as
+    # error_class=seat_cap, it is never a silent SEATS_DEFAULT. The explicit
+    # per-run meta max_seats (the door's knob, 0 disables) still wins untouched.
+    return seat_max_seats(meta.get("max_seats")
+                          if isinstance(meta.get("max_seats"), int)
+                          and not isinstance(meta.get("max_seats"), bool) else None)
 def _seats_dir():
     d = os.environ.get("WF_SEATS_DIR", "")
     return Path(d) if d else runs_root() / ".seats"
@@ -2876,8 +2913,14 @@ def _seat_live_tickets(seats, anc=()):
     same _seat_holder_live test (alive + boottime equal, #80). A contradicted
     (recycled) child boottime is a stranger wearing the ancestor's pid: no
     lend, the ticket counts. A live runner holder keeps the ticket occupied, so
-    a stale child pin must never buy a capacity exemption."""
+    a stale child pin must never buy a capacity exemption.
+    est-2ek.1.857 (over-admit): a SINGLE death verdict is never load-bearing.
+    Candidates for pruning are re-confirmed after a short settle (the same
+    liveness law, re-run); any holder that reconfirms alive keeps its ticket
+    AND counts as live (an unconfirmed verdict is unknown, and unknown is
+    never undercounted). Every external unlink is logged to .pruned.jsonl."""
     live = 0
+    doomed = []            # (ticket_path, row|None, holders) — first-pass dead
     for t in seats.glob("*.json"):
         try:
             row = json.loads(t.read_text())
@@ -2894,13 +2937,28 @@ def _seat_live_tickets(seats, anc=()):
             live += 1  # unreadable: uncertain capacity, kept and counted
             continue
         if not any(_seat_holder_live(p, b) for p, b in holders):
-            try: t.unlink()
-            except OSError: pass
+            doomed.append((t, row, holders))     # est-857: not yet — reconfirm
             continue
         if (child is not None and anc is not None and len(holders) > 1
                 and child in anc and _seat_holder_live(child, child_bt)):
             continue   # lent: the SAME proven-live child sits in our ancestry
         live += 1
+    if doomed:
+        # One settle, then re-run the identical law over every candidate. A
+        # holder that flips back to alive at reconfirmation was a transient
+        # mis-sample (the 857 shape: LIVE tickets unlinked wholesale, cap void):
+        # keep the ticket and count it. Only a candidate dead on BOTH passes is
+        # pruned — loudly.
+        time.sleep(0.05)
+        for t, row, holders in doomed:
+            if any(_seat_holder_live(p, b) for p, b in holders):
+                live += 1                        # mis-sample: never drop a live seat
+                continue
+            try:
+                t.unlink()
+                _seat_prune_ledger(seats, "ticket", t.name, row, "holders-dead-2of2")
+            except OSError:
+                pass
     return live
 
 # est-g255 P255-5: the semaphore is full and this process's ancestry cannot be
@@ -2909,6 +2967,136 @@ def _seat_live_tickets(seats, anc=()):
 # silently burning the whole bounded wait as if the cap were merely busy.
 _SEAT_UNSUPPORTED = object()
 SEAT_LOCK_POLL_S = 0.02
+
+def _seat_queue_register(own, name, enq, uid):
+    """est-2ek.1.856: create (once) this waiter's queue marker under <seats>/
+    queue/. Call-site holds the .lock flock, so marker creation is linearizable
+    with the count + ticket write. `enq` is the waiter's arrival time (stable
+    across retries); (enqueued, uuid) is its queue position."""
+    try:
+        own.parent.mkdir(parents=True, exist_ok=True)
+        if own.is_file():
+            return True
+        tmp = own.with_name(own.name + ".tmp")
+        tmp.write_text(json.dumps({"pid": os.getpid(),
+                                   "boottime": _proc_boottime(os.getpid()),
+                                   "uuid": uid, "name": str(name),
+                                   "enqueued": round(enq, 3),
+                                   "ts": round(time.time(), 3),
+                                   "hb": round(time.time(), 3)}))
+        os.replace(tmp, own)
+        return True
+    except OSError:
+        return False
+
+def _seat_queue_beat(own, last_hb):
+    """Refresh the own-marker heartbeat at ~SEAT_QUEUE_HB_S cadence (best
+    effort — an owner whose marker vanished re-registers next loop)."""
+    now_s = time.time()
+    if now_s - last_hb < SEAT_QUEUE_HB_S:
+        return last_hb
+    try:
+        row = json.loads(own.read_text())
+        row["hb"] = round(now_s, 3)
+        tmp = own.with_name(own.name + ".tmp")
+        tmp.write_text(json.dumps(row))
+        os.replace(tmp, own)
+    except (OSError, ValueError):
+        pass
+    return now_s
+
+def _seat_queue_remove(own):
+    """A waiter removes its OWN marker at admit/expiry/abort — never another's
+    (that path is _seat_queue_prune, reconfirmed and ledgered)."""
+    try:
+        own.unlink()
+    except OSError:
+        pass
+
+def _seat_queue_scan(seats, own, my_key, anc, now_s):
+    """(older_live, prune_candidates) for one admission decision. `older_live`
+    is True when a LIVE marker exists whose (enqueued, uuid) is strictly older
+    than mine — the queue is the arbiter, the flock-poll race is not. An
+    unreadable marker is uncertain capacity: it blocks until its mtime ages
+    past SEAT_QUEUE_PRUNE_S (never a silently-dropped fairness claim). A dead
+    owner or a heartbeat older than SEAT_QUEUE_PRUNE_S (a wedged waiter cannot
+    wedge the queue forever) is a prune CANDIDATE — the caller reconfirms and
+    logs. A marker owned by an ANCESTOR of this process is lent, never
+    blocking (same law as _seat_live_tickets, est-g255 P255-5)."""
+    qd = seats / SEAT_QUEUE_DIR
+    older, cands = False, []
+    try:
+        markers = sorted(qd.glob("*.json"))
+    except OSError:
+        return False, []
+    for m in markers:
+        if m == own:
+            continue
+        try:
+            row = json.loads(m.read_text())
+            opid = int(row["pid"])
+            enq = float(row.get("enqueued", row.get("ts", 0)))
+            uid = str(row.get("uuid") or m.name)
+        except FileNotFoundError:
+            continue
+        except (OSError, ValueError, TypeError, AttributeError, KeyError):
+            try:
+                mt = m.stat().st_mtime
+            except OSError:
+                continue
+            if now_s - mt > SEAT_QUEUE_PRUNE_S:
+                cands.append((m, None, None, "corrupt"))
+            else:
+                older = True                      # unreadable: cannot rule out older
+            continue
+        if anc is not None and opid in anc:
+            continue                              # lent: our own ancestry is waiting on us
+        try:
+            hb = row.get("hb")
+            hb = float(hb) if isinstance(hb, (int, float)) else m.stat().st_mtime
+        except OSError:
+            continue
+        alive_owner = _proc_alive(opid)
+        if alive_owner and (now_s - hb) <= SEAT_QUEUE_LIVE_S:
+            if (enq, uid) < my_key:
+                older = True
+        elif not alive_owner or (now_s - hb) > SEAT_QUEUE_PRUNE_S:
+            cands.append((m, row, opid,
+                          "dead-owner" if not alive_owner else "hb-stale"))
+        # else: alive owner with an aging heartbeat (between LIVE_S and PRUNE_S)
+        # — neither blocking nor prunable yet; it self-heals at both bounds.
+    return older, cands
+
+def _seat_queue_prune(seats, cands):
+    """est-2ek.1.857 law for markers too: a single death verdict never deletes
+    anyone's claim. Re-run the liveness check after a settle; a candidate whose
+    owner reconfirms alive (or whose heartbeat refreshed) is kept. Pruned
+    markers land in the .pruned.jsonl ledger — loud."""
+    if not cands:
+        return
+    time.sleep(0.05)
+    for m, row, opid, kind in cands:
+        try:
+            row2 = json.loads(m.read_text())
+        except Exception:
+            row2 = row
+        if kind == "dead-owner":
+            if opid is None or _proc_alive(opid):
+                continue                          # mis-sample or corrupt-row revived: keep
+        elif kind in ("hb-stale", "corrupt"):
+            try:
+                hb2 = (row2 or {}).get("hb")
+                hb2 = (float(hb2) if isinstance(hb2, (int, float))
+                       else (row2 or {}).get("ts") or m.stat().st_mtime)
+            except OSError:
+                continue                          # vanished: nothing to prune
+            if time.time() - hb2 <= SEAT_QUEUE_PRUNE_S:
+                continue                          # heartbeat refreshed: real waiter
+        try:
+            m.unlink()
+            _seat_prune_ledger(seats, "queue-marker", m.name, row2, kind)
+        except OSError:
+            pass
 
 def _seat_acquire(seats, name, cap, bounded_s, on_wait=None, abort=None,
                   admit_lock=None):
@@ -2929,7 +3117,13 @@ def _seat_acquire(seats, name, cap, bounded_s, on_wait=None, abort=None,
     est-g255 r3 (zap probes: parent-admit-lock-probes.json): a bare
     `with admit_lock:` blocked on Lock.acquire() past bounded_s and past an
     abort; the acquisition is now a poll of admit_lock.acquire(timeout=...)
-    that checks _out() between tries, mirroring the non-blocking flock poll."""
+    that checks _out() between tries, mirroring the non-blocking flock poll.
+    est-2ek.1.856 (FIFO): first-poller-wins starved long waiters behind
+    short-run churn. A waiter that finds the door shut registers a queue
+    marker; admission then requires live < cap AND no strictly-older live
+    marker (order key (enqueued, uuid)). Markers gate fairness only — never
+    capacity; the own marker is removed at every exit (admit, expiry, abort,
+    unsupported) under the same under-lock recheck contract as tickets."""
     seats = Path(seats)
     seats.mkdir(parents=True, exist_ok=True)
     if cap is None or cap <= 0:
@@ -2940,75 +3134,96 @@ def _seat_acquire(seats, name, cap, bounded_s, on_wait=None, abort=None,
     anc = _ancestors()                      # fixed for this process's life
     waited = False
     safe = re.sub(r"[^A-Za-z0-9_.-]", "_", str(name))[:60]
-    while True:
-        # est-g255 r2 R1: the cancel-setter synchronizes on admit_lock BEFORE
-        # setting its Event (see the fan-out's _cancel_stragglers), so holding
-        # it here — then rechecking abort() under it AND the .lock flock —
-        # makes ticket creation atomic against a cancel landing at any earlier
-        # moment: either the setter won (abort True under our recheck -> no
-        # ticket) or the ticket exists and the setter's scan sees this holder.
-        # est-g255 r3: the acquisition itself must honor the same bounded
-        # contract — a bare `with admit_lock:` blocked on Lock.acquire() past
-        # bounded_s and past an abort (zap probes parent-admit-lock-probes-
-        # json). Poll admit_lock.acquire(timeout=...) and check _out() between
-        # tries; a bounded wait that expires or aborts while the mutex is
-        # contended returns None exactly like the flock path. When no mutex
-        # is supplied the spawn path keeps its nullcontext (unchanged).
-        if admit_lock is None:
-            al_acquired = False
-        else:
-            al_acquired = False
-            while not al_acquired:
-                if _out():
-                    return None
-                remaining = t_end - time.time()
-                al_acquired = admit_lock.acquire(
-                    timeout=SEAT_LOCK_POLL_S if remaining == float("inf")
-                    else max(0.0, min(SEAT_LOCK_POLL_S, remaining)))
-                if al_acquired:
-                    break
-                if _out():
-                    return None
-        try:
-            fd = os.open(str(seats / ".lock"), os.O_RDWR | os.O_CREAT, 0o644)
-            try:
-                while True:
-                    try:
-                        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                        break
-                    except BlockingIOError:
-                        if _out():
-                            return None
-                        time.sleep(SEAT_LOCK_POLL_S)
-                try:
+    uid = uuid.uuid4().hex[:8]
+    enq = time.time()                       # arrival: stable across every retry loop
+    own = seats / SEAT_QUEUE_DIR / f"{safe}.{os.getpid()}.{uid}.json"
+    my_key = (round(enq, 3), uid)
+    last_hb = 0.0
+    try:
+        while True:
+            # est-g255 r2 R1: the cancel-setter synchronizes on admit_lock BEFORE
+            # setting its Event (see the fan-out's _cancel_stragglers), so holding
+            # it here — then rechecking abort() under it AND the .lock flock —
+            # makes ticket creation atomic against a cancel landing at any earlier
+            # moment: either the setter won (abort True under our recheck -> no
+            # ticket) or the ticket exists and the setter's scan sees this holder.
+            # est-g255 r3: the acquisition itself must honor the same bounded
+            # contract — a bare `with admit_lock:` blocked on Lock.acquire() past
+            # bounded_s and past an abort (zap probes parent-admit-lock-probes-
+            # json). Poll admit_lock.acquire(timeout=...) and check _out() between
+            # tries; a bounded wait that expires or aborts while the mutex is
+            # contended returns None exactly like the flock path. When no mutex
+            # is supplied the spawn path keeps its nullcontext (unchanged).
+            if admit_lock is None:
+                al_acquired = False
+            else:
+                al_acquired = False
+                while not al_acquired:
                     if _out():
                         return None
-                    if _seat_live_tickets(seats, anc) < cap:
-                        if _out():          # ATOMIC cancel recheck: same lock
-                                          # the cancel-setter takes pre-set
+                    remaining = t_end - time.time()
+                    al_acquired = admit_lock.acquire(
+                        timeout=SEAT_LOCK_POLL_S if remaining == float("inf")
+                        else max(0.0, min(SEAT_LOCK_POLL_S, remaining)))
+                    if al_acquired:
+                        break
+                    if _out():
+                        return None
+            try:
+                fd = os.open(str(seats / ".lock"), os.O_RDWR | os.O_CREAT, 0o644)
+                try:
+                    while True:
+                        try:
+                            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                            break
+                        except BlockingIOError:
+                            if _out():
+                                return None
+                            time.sleep(SEAT_LOCK_POLL_S)
+                    try:
+                        if _out():
                             return None
-                        t = seats / f"{safe}.{os.getpid()}.{uuid.uuid4().hex[:8]}.json"
-                        tmp = t.with_name(t.name + ".tmp")
-                        tmp.write_text(json.dumps({"pid": os.getpid(), "name": str(name),
-                                                   "boottime": _proc_boottime(os.getpid()),
-                                                   "ts": round(time.time(), 3)}))
-                        os.replace(tmp, t)
-                        return t
-                    if anc is None:
-                        return _SEAT_UNSUPPORTED
+                        live = _seat_live_tickets(seats, anc)
+                        older, cands = _seat_queue_scan(seats, own, my_key, anc,
+                                                        time.time())
+                        _seat_queue_prune(seats, cands)
+                        if live >= cap or older:
+                            # the door is shut for someone: take our place in the
+                            # queue FIRST (under the same flock), then decide —
+                            # an admitted newcomer can never jump a live marker.
+                            _seat_queue_register(own, name, enq, uid)
+                        if live < cap and not older:
+                            if _out():          # ATOMIC cancel recheck: same lock
+                                              # the cancel-setter takes pre-set
+                                return None
+                            t = seats / f"{safe}.{os.getpid()}.{uid}.json"
+                            tmp = t.with_name(t.name + ".tmp")
+                            tmp.write_text(json.dumps({"pid": os.getpid(), "name": str(name),
+                                                       "boottime": _proc_boottime(os.getpid()),
+                                                       "ts": round(time.time(), 3)}))
+                            os.replace(tmp, t)
+                            return t
+                        if live >= cap and anc is None:
+                            return _SEAT_UNSUPPORTED
+                    finally:
+                        fcntl.flock(fd, fcntl.LOCK_UN)
                 finally:
-                    fcntl.flock(fd, fcntl.LOCK_UN)
+                    os.close(fd)
             finally:
-                os.close(fd)
-        finally:
-            if al_acquired:
-                admit_lock.release()
-        if not waited and on_wait:
-            waited = True
-            on_wait()
-        if _out():
-            return None
-        time.sleep(0.2)
+                if al_acquired and admit_lock is not None:
+                    admit_lock.release()
+            if not waited and on_wait:
+                waited = True
+                on_wait()
+            if _out():
+                return None
+            last_hb = _seat_queue_beat(own, last_hb)
+            time.sleep(0.2)
+    finally:
+        # every exit frees the queue: admitted (the seat is ours — no longer a
+        # waiter), expired, aborted, or refused. A waiter never leaves a marker
+        # that would gate admissions after it is gone.
+        _seat_queue_remove(own)
 
 def _seat_bind(ticket, child_pid):
     """Record the seat's child pid (+ its start tick): the ticket stays held
@@ -4651,11 +4866,26 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
                   or (seat_cancel is not None and seat_cancel.is_set()))
     while seat_hold:                       # a prior attempt's deferred seat
         _seat_release(seat_hold.pop())
+    try:
+        _seat_cap = _max_seats(meta)
+    except SeatCapError as e:
+        # est-2ek.1.856 (B3) runner half: the door refuses this launch before any
+        # write/spawn; a runner that launched while the knob was valid and finds
+        # it invalid at the acquire instant (operator edited config mid-run)
+        # fails the NODE closed with the typed class — never a silent default,
+        # never a blind spawn.
+        return {"status": "failed",
+                "error": f"seat_cap: invalid seat cap — {e} "
+                        "(WORKFLOW_MAX_SEATS env or config workflows.max_seats; an integer "
+                        f"in [{wfcommon.SEAT_CAP_FLOOR}, {wfcommon.SEAT_CAP_CEILING}] "
+                        "or unset; the per-run opt-out is run.json max_seats: 0)",
+                "error_class": "seat_cap", "ms": int((time.time() - _seat_w0) * 1000),
+                "spawn": spawn_no, "attempts": 1, **route}
     seat = _seat_acquire(
-        _seats_dir(), f"{run.name}.{node['id']}", _max_seats(meta),
+        _seats_dir(), f"{run.name}.{node['id']}", _seat_cap,
         _seat_wall if isinstance(_seat_wall, (int, float)) else None,
         on_wait=lambda: log(run, "seat.wait", node=node["id"], index=index,
-                            spawn=spawn_no, cap=_max_seats(meta)),
+                            spawn=spawn_no, cap=_seat_cap),
         abort=_cancelled, admit_lock=seat_admit_lock)
     if seat is _SEAT_UNSUPPORTED:
         return {"status": "failed",
