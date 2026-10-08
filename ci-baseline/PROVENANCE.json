@@ -185,10 +185,16 @@
     }
   ],
   "totals": {
-    "cases": 260,
+"cases": 259,
     "red": 0
   },
   "contract": "Green CI ledgers only (every exit == 0); rows not captured by CI are listed in rows_added_outside_ci with how they were measured. Refresh from the tip of main after each main move; see README.md.",
   "tracking_item": "est-9yl2",
-  "source_issue": 75
+  "source_issue": 75,
+  "rows_removed_outside_ci": [
+    {
+      "test": "test_dialect_js_33.py",
+      "reason": "test deleted with wf_dialect.py in #231 (green row, exit 0 \u2014 not a laundered red)"
+    }
+  ]
 }

@@ -145,11 +145,9 @@ INCLUDE_FILES = (
     "tests/fixtures/wf_spawn_isolation_762.py",
     "tests/test_fanout_ui.mjs",
     "wf.py",
-    "wf_dialect.py",
     "wfcommon.py",
 )
-INCLUDE_PATTERNS = ("tests/test_*.py", "tests/test_*.mjs", "references/*.md",
-                    "tests/fixtures/dialect/*")   # #33: the corpus test_dialect_js_33 asserts against
+INCLUDE_PATTERNS = ("tests/test_*.py", "tests/test_*.mjs", "references/*.md")
 EXECUTABLE_FILES = {"scripts/pack.py", "tests/fake"}
 # Checkout-only tests stay in repository CI, not the release's test glob.
 SOURCE_ONLY_TESTS = {

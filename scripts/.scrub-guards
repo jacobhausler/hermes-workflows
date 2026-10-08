@@ -59,16 +59,6 @@ tests/test_failures_0923.py
 tests/fake_hermes.py
 tests/test_ratelimit_54.py
 tests/test_ratelimit_park_walls_159c.py
-# Dialect golden fixtures: `model: 'sonnet'` is a pinned byte of the importer golden
-# (test_dialect_js_33 asserts the export carries it verbatim).
-tests/test_dialect_js_33.py
-tests/fixtures/dialect/golden-export.workflow.json
-tests/fixtures/dialect/sequential-awaits.js
-tests/fixtures/dialect/sequential-awaits.expected.json
-# Vendor-grammar mapping docs: quoting the vendor's vocabulary IS their purpose (the
-# same GUARD class as tests/test_skill_docs.py quoting its own ban).
-references/anthropic-grammar.md
-references/dialect.md
 # Concrete alias-pitfall example in the playbook (line-anchored by regex, not by file,
 # so a future stray model name in the playbook still fires).
 regex:die 404 \(`opus` → `anthropic/opus` while the alias meant `claude-opus-5-5`\)
