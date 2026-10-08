@@ -165,7 +165,12 @@ def _route_substitution_refusal(meta, node, spawn_no):
     # a substitution must never self-certify against itself.
     candidates = {v, v_model}
     for alias, target in _seat_alias_map(hermes_home()).items():
-        if alias.lower() in (v, v_model):
+        # #318: the bake names the TARGET the ping proved, so the receipt side of
+        # the match may be the alias's TARGET as well as the alias — a same-alias
+        # respawn (retry/resume of an alias-pinned node) is the same route seen
+        # through the seat's alias map, never a substitution.
+        if alias.lower() in (v, v_model) or str(target).lower() in (v, v_model) \
+                or str(target).rsplit("/", 1)[-1].lower() in (v, v_model):
             candidates |= {alias.lower(), str(target).lower(),
                            str(target).rsplit("/", 1)[-1].lower()}
     if a in candidates or a.rsplit("/", 1)[-1] in candidates:
