@@ -2533,6 +2533,23 @@ def _log_recent(lp, created):
         return False
     return st.st_mtime > created + 1e-6 and time.time() - st.st_mtime <= _LOG_ACTIVITY_WINDOW_S
 
+def _session_recent(run, title, home=None):
+    """est-2ek.1.595: the second EXTEND-NOT-KILL witness. A oneshot -Q child
+    block-buffers stdout, so its spawn log can stay frozen while it works (two
+    maintain children died at the exact wall with live inference sockets); its OWN
+    sessions row — title `<skey>#a<attempt>`, the --continue key — keeps moving in
+    state.db. True only when THAT row's last_activity_at is within the activity
+    window; no key, no db, no row, or another attempt's row proves nothing."""
+    if not title:
+        return False
+    skey = str(title).split("#a", 1)[0]
+    try:
+        row = child_metrics(Path(run).name, home).get(skey, {}).get("sessions", {}).get(title)
+    except Exception:
+        return False
+    la = (row or {}).get("last_activity")
+    return isinstance(la, (int, float)) and time.time() - la <= _LOG_ACTIVITY_WINDOW_S
+
 FIRST_MESSAGE_S = 120  # run-level default; NEVER an author key (tier law)
 
 def _first_message_s(meta):
@@ -4094,9 +4111,11 @@ def _adopt_child(meta, node, byid, index, child, schema, fo_cancel=None):
                 _tree_watch(handle, tree_seen)
                 tree_next_watch = now_s + PROCREE_POLL_S
             if now_s >= deadline and not extended and not meta["_stop"].is_set() \
-                    and _log_recent(lp, 0):
+                    and (_log_recent(lp, 0)
+                         or _session_recent(run, child.get("skey"), _profile_evidence(node).get("profile_home"))):
                 # EXTEND-NOT-KILL (#11), adoption form: a still-writing orphan gets
-                # ONE +50% grace; a silent one dies — the cap is total wall.
+                # ONE +50% grace (its spawn log OR its own state.db session row still
+                # moving — est-2ek.1.595); a silent one dies — the cap is total wall.
                 extra_s = round(wall * 0.5) if wall else 0
                 log(run, "node.extended", node=nid, extra_s=extra_s, adopted=True)
                 deadline += extra_s or 1
@@ -4700,13 +4719,18 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
                 else:
                     early_death = True
             if not early_death and now_s >= deadline and not extended \
-                    and not meta["_stop"].is_set() and _log_recent(lp, log_created):
+                    and not meta["_stop"].is_set() \
+                    and (_log_recent(lp, log_created)
+                         or _session_recent(run, f"{skey}#a{attempt}" if skey else None, cue_home)):
                 # EXTEND-NOT-KILL (#11): a child whose log shows a write within the
-                # last 120 s is working, not hung — grant ONE extension of 50% of the
-                # wall (node.extended); the second expiry kills.
+                # last 120 s — or, for a block-buffered oneshot -Q child whose log never
+                # moves, whose own state.db session row moved in that window
+                # (est-2ek.1.595) — is working, not hung: grant ONE extension of 50% of
+                # the wall (node.extended); the second expiry kills.
                 extended = True
                 extra_s = round(timeout_s * 0.5) or 1
-                log(run, "node.extended", node=node["id"], extra_s=extra_s)
+                log(run, "node.extended", node=node["id"], extra_s=extra_s,
+                    **({} if _log_recent(lp, log_created) else {"basis": "session"}))
                 timeout_s += extra_s
                 deadline += extra_s
                 continue
