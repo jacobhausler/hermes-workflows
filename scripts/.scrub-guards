@@ -111,4 +111,8 @@ regex:github\.com/jacobhausler/hermes-workflows/security/advisories
 # citation must name the governing repo, file, digest, and public check mirror
 # verbatim — the pointer IS the verification handle a cold reader checks; guarded.
 regex:^Cross-estate joint eng protocol v1 is the SSOT
+# One-owner check-guide pointer (references/development.md): CONTRIBUTING.md is not
+# packaged in the release ZIP, so the shipped reference resolves the canonical gates
+# block by public URL — the pointer IS the one-source handle; guarded verbatim.
+regex:^\[CONTRIBUTING\.md\]\(https://github\.com/jacobhausler/hermes-workflows/blob/main/CONTRIBUTING\.md\)$
 scripts/vendor/archify/renderers/shared/generated-brand-marks.mjs
