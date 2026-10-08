@@ -17,16 +17,22 @@ Pinned here:
 Run (stdlib only): python3 tests/test_literal_provider_prefix_46.py
 """
 import importlib.util
+import json
 import os
+import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "tests"))
 spec = importlib.util.spec_from_file_location("wf_door_46", ROOT / "__init__.py")
 door = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(door)
+import wf_test_isolation as _iso71; _iso71.install(door)  # #71 r5: pin settings.runs_root alongside WF_RUNS_ROOT
 
 SEAT = {"default": "seat-default", "aliases": {"sol": "openai-codex/gpt-6-sol"}}
 
@@ -90,6 +96,100 @@ class LiteralProviderPrefix46(unittest.TestCase):
         baked = dict(literal)
         self.resolve(literal)
         self.assertEqual(literal, baked)
+
+
+LITERAL = "openai-codex/gpt-6-sol"
+
+
+class BakedIdentityComparators46(unittest.TestCase):
+    """#291 review (zap): the bake must not erase the full 'provider/model' identity from
+    the comparators that ran on the author form before it — policy bans at amend (F1),
+    replay-skip freezing of the author literal (F2), and quota-cache keys (F3)."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory(prefix="wf46b-")
+        self.addCleanup(tmp.cleanup)
+        self.home = Path(tmp.name)
+        env = patch.dict(os.environ, {"HERMES_HOME": tmp.name,
+                                      "WF_RUNS_ROOT": str(self.home / "workflows"),
+                                      "WF_QUOTA_CACHE": str(self.home / "quota.json")})
+        env.start()
+        self.addCleanup(env.stop)
+        self.seat = {"default": "seat-default", "aliases": dict(SEAT["aliases"])}
+        for target, value in (("_seat_model_cfg", lambda: self.seat), ("model_tiers", lambda: {}),
+                              ("_ping_route_once", lambda p, m: {"liveness": "unknown"})):
+            p = patch.object(door, target, value)
+            p.start()
+            self.addCleanup(p.stop)
+
+    def author(self, **graph):
+        return {"name": "lit46", "nodes": [node("a", model=LITERAL)], **graph}
+
+    def commit_run(self, rid="run-46"):
+        from wfcommon import efp
+        g = door._common.apply_graph_defaults(self.author())
+        err, _t, _r = door._resolve_models(g["nodes"])
+        self.assertIsNone(err, err)
+        self.assertEqual((g["nodes"][0].get("provider"), g["nodes"][0]["model"]),
+                         ("openai-codex", "gpt-6-sol"))
+        r = self.home / "workflows" / rid
+        (r / "nodes").mkdir(parents=True)
+        (r / "graph.json").write_text(json.dumps(g))
+        byid = {n["id"]: n for n in g["nodes"]}
+        for n in g["nodes"]:
+            (r / "nodes" / f"{n['id']}.json").write_text(
+                json.dumps({"status": "done", "efp": efp(byid, n)}))
+        return rid
+
+    def amend(self, rid, graph):
+        return door.act_amend({"run_id": rid, "graph": graph, "dry_run": True})
+
+    # F1: a full-id ban still binds the amend path (policy runs after the bake there)
+    def test_f1_full_id_ban_binds_baked_node(self):
+        baked = node("a", provider="openai-codex", model="gpt-6-sol")
+        err = door._model_policy_error({"nodes": [baked],
+                                        "model_policy": {"forbidden_models": [LITERAL]}})
+        self.assertIsNotNone(err)
+
+    def test_f1_full_id_ban_refuses_amend(self):
+        rid = self.commit_run()
+        out = self.amend(rid, self.author(model_policy={"forbidden_models": [LITERAL]}))
+        self.assertIn("forbidden", str(out.get("error")), out)
+
+    def test_f1_seat_ban_refuses_amend(self):
+        rid = self.commit_run()
+        self.seat["workflows_forbidden_models"] = [LITERAL]
+        out = self.amend(rid, self.author())
+        self.assertIn("forbidden", str(out.get("error")), out)
+
+    # F2: the author literal replays as the committed baked node -> frozen, unchanged
+    def test_f2_author_literal_freezes_committed_bake(self):
+        rid = self.commit_run()
+        old = json.loads((self.home / "workflows" / rid / "graph.json").read_text())
+        g = door._common.apply_graph_defaults(self.author())
+        _ob, frozen = door._frozen_committed(door.run_dir(rid), old, g["nodes"])
+        self.assertEqual(frozen, {"a"})
+        out = self.amend(rid, self.author())
+        self.assertIsNone(out.get("error"), out)
+        self.assertEqual((out.get("unchanged"), out.get("will_rerun")), (["a"], []), out)
+
+    def test_f2_seat_alias_removed_does_not_rerun_done_work(self):
+        rid = self.commit_run()
+        self.seat["aliases"] = {}
+        out = self.amend(rid, self.author())
+        self.assertIsNone(out.get("error"), out)
+        self.assertEqual((out.get("unchanged"), out.get("will_rerun")), (["a"], []), out)
+
+    # F3: a quota entry stamped under the pre-change full key still refuses
+    def test_f3_full_id_quota_key_still_refuses(self):
+        (self.home / "quota.json").write_text(json.dumps(
+            {LITERAL: {"resets_epoch": time.time() + 3600, "at": time.time(), "marker": "q"}}))
+        g = self.author()
+        err, _t, routes = door._resolve_models(g["nodes"])
+        self.assertIsNone(err, err)
+        msg = door._quota_refusal(g, routes)
+        self.assertIsNotNone(msg)
+        self.assertIn("quota-exhausted", msg)
 
 
 if __name__ == "__main__":
