@@ -110,17 +110,15 @@ _BEDROCK_PREFIXES = ("global.", "us.", "eu.", "apac.", "ap.", "au.", "jp.", "ca.
 
 def canonical_model_id(model, provider=None):
     """Identity form of `model` on `provider`'s route; '' for absent input (absence
-    proves nothing). Lowercase, strip, peel a trailing '(label)' (core's
-    'name(provider)' route_info shape), peel a leading '<provider>/' only when it
+    proves nothing). Lowercase, strip, peel a leading '<provider>/' only when it
     names the route's OWN provider; Anthropic only, claude prefixed, non-Bedrock: each
-    '.' becomes '-' (as stock core bills it). Never rewrites what gets billed or
+    '.' becomes '-' (as stock core bills it). A literal '(suffix)' is part of the id:
+    stock core preserves it and records the concrete model verbatim, so this contract
+    never peels it for any provider. Never rewrites what gets billed or
     relaxes a gate."""
     m = str(model or "").strip().lower()
     if not m:
         return ""
-    lbl = re.search(r"\(([^()]*)\)\s*$", m)
-    if lbl and lbl.group(1):
-        m = m[:lbl.start()].strip()
     prov = str(provider or "").strip().lower()
     if prov and m.startswith(prov + "/"):
         m = m[len(prov) + 1:]
