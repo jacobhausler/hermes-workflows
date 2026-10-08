@@ -97,12 +97,13 @@
     },
     {
       "test": "tests/test_route_identity_699.py",
-      "added_by": "gh-dispatch (est-2ek.1.699, PR #296)",
+      "added_by": "author lane (est-2ek.1.699, PR #296)",
       "measured": "2026-10-08 lane run: 240 cases, 0 red (65/65 checks in-file)"
     }
   ],
   "totals": {
-    "cases": 0,
+    "cases": 246,
+    "red": 0
   },
   "contract": "Green CI ledgers only (every exit == 0); rows not captured by CI are listed in rows_added_outside_ci with how they were measured. Refresh from the tip of main after each main move; see README.md.",
   "tracking_item": "est-9yl2",
