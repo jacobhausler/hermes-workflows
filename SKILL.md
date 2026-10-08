@@ -66,7 +66,9 @@ ending your turn right after `run` is how runs stall.
   spawns) when an ancestor's committed output lacks a listed path — the run FAILS,
   never skips quietly; skip-on-missing is a `when` gate with `on_skip:"prune"`.
 - After-edges block on a `partial` (harvest-on-death) ancestor
-  (`blocked_by_partial_ancestor`); consume the harvest with `after_partial:true`.
+  (`blocked_by_partial_ancestor`); consume the harvest with `after_partial:true`; a solo producer may instead set `harvest_policy: "validate"` so its own
+  schema-valid, self-declared-complete harvest commits `done` with the death kept on the
+  record. Details: [grammar](references/grammar.md).
 
 ## Run and handoff
 
