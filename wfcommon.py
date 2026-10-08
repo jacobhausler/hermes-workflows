@@ -5482,7 +5482,7 @@ def run_explain(out):
     return f"{status}: " + ", ".join(parts)
 
 def current_attempt(cm, spawns):
-    """Activity only for verified spawn session titles; DB rows alone prove no liveness."""
+    """Activity only for live spawn session titles (verified, or ledger-marked foreign-ns); DB rows alone prove no liveness."""
     live = {}
     for spawn in spawns:
         title = (spawn or {}).get("skey")
