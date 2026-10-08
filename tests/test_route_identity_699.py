@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """est-2ek.1.699 — route IDENTITY: dotted vs hyphenated model aliases.
 
-Field evidence run 20261005-030530-zap-banked-findings-squa: nodes pinned
-claude-fable-5.1; the door's submit ping PROVED anthropic/claude-fable-5.1 alive
+Field evidence run 20261005-030530-zap-banked-findings-squa: nodes pinned a
+dotted Anthropic id (5.1); the door's submit ping PROVED it alive on anthropic
 (route_verified baked, liveness alive) and the items completed — yet the commit
-hold marked them route_unavailable because core normalizes/bills the model id as
-claude-fable-5-1. The door's proof and the runner's identity law compared RAW
+hold marked them route_unavailable because core normalizes/bills the model id
+with a hyphen (5-1). The door's proof and the runner's identity law compared RAW
 strings, so the same route under two spellings billed as a different one.
 
 The fix is ONE provider normalization contract (wfcommon.canonical_model_id)
@@ -48,8 +48,14 @@ def check(label, cond, detail=""):
     print(("PASS " if cond else "FAIL ") + label + (f"  {detail}" if detail and not cond else ""))
     fails += 0 if cond else 1
 
-DOT, HY = "claude-fable-5.1", "claude-fable-5-1"
-OTHER = "claude-opus-5-5"
+# Fixtures (neutral names; the claude- prefix is load-bearing: stock core folds
+# '.'->'-' ONLY for claude prefixed Anthropic ids). Every scrub hit in this file
+# lives in this block, and only these lines are allow-listed in .scrub-guards.
+DOT, HY = "claude-model-5.1", "claude-model-5-1"
+OTHER = "claude-other-8"
+UNDER = "claude-model-5_1"
+BEDROCK_DOT, BEDROCK_HY = "us.anthropic.claude-model-5-1", "us-anthropic-claude-model-5-1"
+FALLBACK = "seat-fallback-9"
 
 # ---- 0. the ONE canonical normalizer exists and is the shared contract ---------
 check("canonical_model_id exported by wfcommon (the shared contract)",
@@ -62,7 +68,7 @@ if callable(getattr(wc, "canonical_model_id", None)):
           cm("anthropic/" + DOT) == cm(HY) == cm("anthropic/" + HY),
           f"{cm('anthropic/' + DOT)!r} vs {cm(HY)!r}")
     check("different models stay DIFFERENT (no fuzzy equality)",
-          cm(OTHER) != cm(DOT) and cm("qwen38-next") != cm(DOT))
+          cm(OTHER) != cm(DOT) and cm(FALLBACK) != cm(DOT))
     check("core's labeled route shape 'name(provider)' normalizes",
           cm(f"main-agent({DOT})".replace("main-agent", DOT)) == cm(HY) or
           cm(DOT + "(anthropic)") == cm(HY), cm(DOT + "(anthropic)"))
@@ -78,12 +84,23 @@ if callable(getattr(wc, "canonical_model_id", None)):
           wc.canonical_model_id("openrouter/vendor-a/alpha", "openrouter") == wc.canonical_model_id("vendor-a/alpha", "openrouter")
           and wc.canonical_model_id("vendor-a/alpha", "openrouter") == "vendor-a/alpha")
     check("provider-less ids compare as spelled", wc.canonical_model_id("m-5.1") != wc.canonical_model_id("m-5-1"))
-    check("hyphen runs are left alone (docstring == regex)",
-          wc.canonical_model_id("m--1", "anthropic") == "m--1" and wc.canonical_model_id("m..1", "anthropic") == "m-1")
+    check("hyphen runs are left alone", wc.canonical_model_id("m--1", "anthropic") == "m--1")
+    # review of #296 (P1a): mirror stock core normalize_model_name exactly — '.'->'-'
+    # per dot, claude prefixed ids only, '_' preserved, Bedrock namespace dots kept
+    check("non-claude anthropic id keeps dots: m..1 != m-1",
+          not wc.route_ids_equal("m..1", "m-1", "anthropic"), wc.canonical_model_id("m..1", "anthropic"))
+    check("non-claude id keeps dots on anthropic: model-5.4 != model-5-4",
+          not wc.route_ids_equal("model-5.4", "model-5-4", "anthropic"))
+    check("underscore is preserved: 5_1 != 5-1",
+          not wc.route_ids_equal(UNDER, HY, "anthropic"), wc.canonical_model_id(UNDER, "anthropic"))
+    check("Bedrock namespace dots survive",
+          not wc.route_ids_equal(BEDROCK_DOT, BEDROCK_HY, "anthropic"), wc.canonical_model_id(BEDROCK_DOT, "anthropic"))
+    check("each dot folds singly (stock replace): claude x..1 -> x--1",
+          wc.canonical_model_id(DOT.replace(".", ".."), "anthropic") == HY.replace("5-1", "5--1"))
 
 # ---- 1. runner commit hold: dotted proof vs hyphenated billed -> NO hold --------
-# Exact field shape: door proved anthropic/claude-fable-5.1, the row billed
-# claude-fable-5-1 for a node that completed.
+# Exact field shape: door proved anthropic/<dotted>, the row billed the
+# hyphenated spelling for a node that completed.
 meta = {"_run": Path(tmp_dir.name)}
 PROOF = {"model": DOT, "provider": "anthropic", "route_verified": f"anthropic/{DOT}"}
 out = wfmod._route_hold(meta, {"status": "done", "served_model": HY}, PROOF)
@@ -102,7 +119,7 @@ check("commit hold: provider-qualified billed alias passes", out.get("status") =
 out = wfmod._route_hold(meta, {"status": "done", "served_model": OTHER}, PROOF)
 check("commit hold: different model billed despite alive proof -> still route_unavailable",
       out.get("status") == "failed" and out.get("error_class") == "route_unavailable", out)
-out = wfmod._route_hold(meta, {"status": "done", "served_model": "qwen38-next"}, PROOF)
+out = wfmod._route_hold(meta, {"status": "done", "served_model": FALLBACK}, PROOF)
 check("commit hold: seat fallback still route_unavailable", out.get("status") == "failed", out)
 # unknown served / no proof: legacy laws byte-identical
 check("commit hold: unknown served passes (never invents known)",
@@ -219,7 +236,7 @@ check("dead pin still REFUSED at submit (gate not softened, no fallback enabled)
       and DOT in out.get("error", ""), out)
 
 # fallback-ladder surprise (different model recorded) STILL refused
-set_ping({"record": {"provider": "openai", "model": "gpt-6-sol-900k"}})
+set_ping({"record": {"provider": "openai", "model": "other-route-9"}})
 out = door.act_run({"graph": pinned_graph()})
 check("fallback-ladder surprise still REFUSED (wrong_route law intact)",
       "error" in out and "FALLBACK LADDER" in out.get("error", "").upper(), out)
@@ -258,5 +275,25 @@ check("quota recovery probe: Anthropic-qualified stamp answered under the normal
 r = wfmod._route_substitution_refusal({"_run": run699}, {"id": "plans", "type": "agent", "provider": OAI, "model": OAI_HY}, 5)
 check("receipt hold (durable file): openai-codex hyphenated re-spawn under a dotted receipt is denied",
       isinstance(r, dict) and r.get("error_class") == "route_substitution_denied", r)
+
+# ---- 5. review of #296: the overbroad-fold counterexamples die at the commit hold ----
+for served, pin in ((UNDER, HY), ("m..1", "m-1"), ("model-5.4", "model-5-4"), (BEDROCK_DOT, BEDROCK_HY)):
+    out = wfmod._route_hold(meta, {"status": "done", "served_model": served},
+                            {"model": "pin-x", "provider": "anthropic", "route_verified": f"anthropic/{pin}"})
+    check(f"commit hold: {served!r} billed vs {pin!r} proved -> route_unavailable",
+          out.get("status") == "failed" and out.get("error_class") == "route_unavailable", out)
+out = wfmod._route_hold(meta, {"status": "done", "served_model": OTHER}, PROOF)
+check("commit hold: cross-model control still route_unavailable",
+      out.get("status") == "failed" and out.get("error_class") == "route_unavailable", out)
+
+# ---- 6. review of #296 (P1b): a cross-provider receipt is refused BEFORE any folding ----
+(run699 / "route_receipts.json").write_text(json.dumps({"plans": f"{OAI}/{OAI_DOT}"}))
+r = wfmod._route_substitution_refusal({"_run": run699}, {"id": "plans", "type": "agent", "provider": "anthropic", "model": OAI_HY}, 6)
+check("receipt hold: openai-codex receipt + anthropic node of the folded spelling -> denied",
+      isinstance(r, dict) and r.get("error_class") == "route_substitution_denied", r)
+check("route_provider: receipt provider governs; a node/receipt provider split folds nothing",
+      wc.route_provider({"provider": "anthropic"}, f"{OAI}/{OAI_DOT}") == ""
+      and wc.route_provider({"provider": "anthropic"}, f"anthropic/{DOT}") == "anthropic"
+      and wc.route_provider({}, f"anthropic/{DOT}") == "anthropic")
 
 sys.exit(1 if fails else 0)
