@@ -116,10 +116,16 @@
       "test": "tests/test_route_identity_699.py",
       "added_by": "author lane (est-2ek.1.699, PR #296)",
       "measured": "2026-10-08 lane run: 240 cases, 0 red (65/65 checks in-file)"
+    },
+    {
+      "test": "test_wall_extend_session_595.py",
+      "exit": 0,
+      "measured": "CI run 37720369252 at 60f3dfec: regression exit 0; the sole suite failure was test_baseline_guard_9yl2.py because this row was absent",
+      "supersede_by": "next green-CI refresh (replace with the CI-captured row)"
     }
   ],
   "totals": {
-    "cases": 247,
+    "cases": 250,
     "red": 0
   },
   "contract": "Green CI ledgers only (every exit == 0); rows not captured by CI are listed in rows_added_outside_ci with how they were measured. Refresh from the tip of main after each main move; see README.md.",
