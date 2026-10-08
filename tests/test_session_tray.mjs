@@ -325,5 +325,50 @@ assert.match(src, /composerAreas\?\.tray \?\? composerAreas\?\.underside \?\? co
   assert.match(textOf(thick), /2\/5/, 'mirror thick row shows node progress')
 }
 
+// -- 9. review #233 (zap @7e1cce8): blank-sid root parity + rail release surface -----
+{
+  // Root parity at blank sid: the mount owner pre-scopes under the
+  // focus-degraded law and hands RunTray sid ''. The mirror must render the
+  // same live ledger, not null.
+  const runs = [mk('h1', 'held', 'S1'), mk('b1', 'running', 'S1'), mk('d1', 'done', 'S1')]
+  for (const trayOpen of [null, { expanded: true, openRun: null }]) {
+    const p = { runs, sid: '', trayOpen, trayRef: { current: null }, trayEnabled: true }
+    const real = mod.RunTray(p)
+    const mirrored = mirror.RunTray(p)
+    assert.ok(real, 'plugin.js RunTray renders the pre-scoped ledger at blank sid')
+    assert.ok(mirrored, 'mirror RunTray renders the pre-scoped ledger at blank sid (not null)')
+    assert.equal(textOf(mirrored), textOf(real), 'mirror root text == plugin.js root text at blank sid')
+  }
+  // Nonblank control stays in parity too.
+  const p1 = { runs, sid: 'S1', trayOpen: null, trayRef: { current: null }, trayEnabled: true }
+  assert.equal(textOf(mirror.RunTray(p1)), textOf(mod.RunTray(p1)), 'nonblank-sid parity control')
+
+  // Rail release surface: the rail suppresses gate controls ONLY while the
+  // tray actually supplies them (enabled + expanded). Disabled, unanswered
+  // settings, or a collapsed tray -> the rail keeps the inline release.
+  const held = [
+    mk('h1', 'held', 'S1', { held_gate: { id: 'g1', question: 'Ship?', options: ['a'] } }),
+    mk('b1', 'running', 'S1'),
+  ]
+  const gaOf = tree => findBy(tree, n => typeof n.type === 'function' && n.type.name === 'GateActions').length
+  const railOf = tree => findBy(tree, n => typeof n.type === 'function' && n.type.name === 'PillRail')[0]
+  globalThis.__stubRuns = held
+  for (const [label, overrides] of [
+    ['gate off', new Map([[mod.$trayGate, false]])],
+    ['settings unanswered (bootstrap failed)', new Map([[mod.$trayGate, null]])],
+    ['gate on, tray collapsed', new Map([[mod.$trayGate, true], [mod.$trayOpen, null]])],
+  ]) {
+    globalThis.__stubOverrides = overrides
+    const tree = SessionStrip()
+    assert.equal(railOf(tree).props.suppressGates, false, `${label}: rail keeps its gate controls`)
+    assert.equal(gaOf(tree), 1, `${label}: exactly one inline release action for the held run`)
+  }
+  globalThis.__stubOverrides = new Map([[mod.$trayGate, true], [mod.$trayOpen, { expanded: true, openRun: null }]])
+  const exp = SessionStrip()
+  assert.equal(railOf(exp).props.suppressGates, true, 'gate on + expanded: tray owns the release, rail suppresses')
+  assert.equal(gaOf(exp), 1, 'gate on + expanded: still exactly one release action (no duplicate)')
+  globalThis.__stubOverrides = null
+}
+
 rmSync(tmp, { recursive: true, force: true })
 console.log('ALL PASS test_session_tray (live-set model + splitRuns parity, cron/owner law, pictured `N running workflows` density, slim collapsed row + flipChevron, thick rows w/ bar+node id+snippet+elapsed, MiniGraph for the clicked run, dedupe GateActions, collapse laws, runtray.mjs mirror)')
