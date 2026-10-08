@@ -166,6 +166,8 @@ SOURCE_ONLY_TESTS = {
     "tests/test_plugin_resolution_live_not_old.py": "loads source-only scripts/lane_recover.py",
     "tests/test_scrub_yml_166b.py": "executes source-only scripts/make_public.py",
     "tests/test_stuck_node_finalize_733.py": "executes source-only scripts/lane_recover.py (main's #235)",
+    # #248 r3 (rebase onto main's #298): executes source-only make_public.py + reads scripts/scrub-list.txt
+    "tests/test_personal_path_scrub_867.py": "executes source-only scripts/make_public.py, reads scripts/scrub-list.txt",
 }
 
 

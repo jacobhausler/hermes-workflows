@@ -26,3 +26,7 @@ wf-mechanic|pf-mechanic-2|rui-mechanic|gh-dispatch|haus-fixer|dag-quartermaster|
 \bopus\b|\bfable\b|\bpennyroyal\b
 \bgpt-4[\w.\-]*|\bgpt-5[\w.\-]*|\bgpt-6[\w.\-]*|\bclaude-[\w.\-]+|\bsonnet\b|\bhaiku\b
 \bsol\b(?!-)
+# --- personal home paths (est-2ek.1.867: shipped prose/fixture data must not carry
+# an operator's absolute home path; enforced on the export tree AND audited
+# independently inside the pack ZIP by tests/test_personal_path_scrub_867.py) ---
+(?:/home|/Users)/[A-Za-z0-9._-]{2,}/\.hermes(?:/|\b)
