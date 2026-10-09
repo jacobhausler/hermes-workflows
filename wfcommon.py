@@ -3595,6 +3595,77 @@ def seat_wait_view(per_index, now_s=None):
         view["waiting"] = idxs
     return view
 
+WALL_NEAR_RATIO = 0.8   # #133: >80 % of either bound reads near-wall
+
+def _iso_epoch(s):
+    """epoch seconds off a stored ISO ts, None when unparseable (never raises)."""
+    from datetime import datetime
+    try:
+        return datetime.fromisoformat(str(s)).timestamp()
+    except (TypeError, ValueError):
+        return None
+
+def _node_extends(r):
+    """{node: [(ts_epoch, extra_s)]} from the committed node.extended events —
+    the #133 wall-meter input: the runner's ONE 50 % extend-not-kill bump (#11)
+    is already in events.jsonl, the meter only sums what is there. Malformed
+    lines, foreign nodes and rows without a numeric extra_s are ignored; an
+    unreadable ledger yields NO bumps (honest absence, never a fabricated wall)."""
+    out = {}
+    try:
+        text = (Path(r) / "events.jsonl").read_text()
+    except OSError:
+        return out
+    for line in text.splitlines():
+        if '"node.extended"' not in line:      # cheap pre-filter before the parse
+            continue
+        try:
+            e = json.loads(line)
+        except Exception:
+            continue
+        if e.get("event") != "node.extended" or not e.get("node"):
+            continue
+        ex = e.get("extra_s")
+        if isinstance(ex, (int, float)) and not isinstance(ex, bool):
+            out.setdefault(e["node"], []).append((_iso_epoch(e.get("ts")), float(ex)))
+    return out
+
+def _wall_meter(n, active, extends):
+    """#133 wall meter for ONE running node — pure arithmetic over facts the
+    runner already committed: the verified active spawn's `started` (fan-out:
+    the senior item sets the node's meter), the BAKED def `timeout`, and the
+    node.extended bumps committed at or after that spawn. p95_s is the measured
+    p95 the SHAPE_PRESETS table already holds for the node's shape; an explicit
+    timeout beyond it is the author's own wall, so the meter names both bounds.
+    One word: over-p95 (elapsed at/over either bound) / near-wall (>80 % of
+    either) / on-track. Honest absence (#128/R2 law): no parseable started, or
+    no bound at all => NO key — never a fabricated number."""
+    import time as _time
+    starts = [t for t in (_iso_epoch(a.get("started")) for a in active) if t is not None]
+    if not starts:
+        return None
+    started = min(starts)
+    timeout = n.get("timeout")
+    wall_s = (int(timeout) if isinstance(timeout, (int, float))
+              and not isinstance(timeout, bool) and timeout > 0 else None)
+    if wall_s is not None:
+        # only bumps committed by THIS spawn's life count (a pre-spawn
+        # extension belongs to a dead attempt, not to the wall we sit inside)
+        wall_s += int(sum(ex for (ts, ex) in extends.get(n.get("id"), ())
+                          if ts is None or ts >= started - 1))
+    preset = SHAPE_PRESETS.get(n.get("shape", DEFAULT_SHAPE), {}) or {}
+    p95 = preset.get("timeout")
+    p95 = (int(p95) if isinstance(p95, (int, float))
+           and not isinstance(p95, bool) and p95 > 0 else None)
+    bounds = [b for b in (wall_s, p95) if b is not None]
+    if not bounds:
+        return None
+    elapsed = int(_time.time() - started)
+    over = any(elapsed >= b for b in bounds)
+    near = any(elapsed > WALL_NEAR_RATIO * b for b in bounds)
+    return {"elapsed_s": elapsed, "wall_s": wall_s, "p95_s": p95,
+            "meter": "over-p95" if over else "near-wall" if near else "on-track"}
+
 def run_state(r):
     """Derived truth of a run dir: status, per-node status, held gate meta.
     status: pending|running|interrupted|held|done|failed|stopped.
@@ -3612,6 +3683,7 @@ def run_state(r):
         if st in ("done", "partial"):   # #4: partial output IS output for when/refs
             outputs[n["id"]] = (rec or {}).get("output")
     prune_states(graph["nodes"], states)   # derived view: pruned-but-uncommitted read as skipped
+    _ext_map = [None]   # #133: the node.extended ledger, lazily parsed once per call
     for n in graph["nodes"]:
         st, rec = states[n["id"]], recs[n["id"]]
         active = _active_spawns(r, n, byid) if live and st == "pending" and kind(n).spawns is True else []
@@ -3626,6 +3698,14 @@ def run_state(r):
             prog = _progress_for(r, n)
             if prog:
                 nodes[n["id"]]["progress"] = prog
+            # #133 wall meter: elapsed-vs-wall-and-p95, right now — arithmetic
+            # over the spawn's `started`, the baked def timeout, and the one
+            # node.extended bump. Honest absence: no key when nothing grounds it.
+            if _ext_map[0] is None:
+                _ext_map[0] = _node_extends(r)   # ledger parsed once per call
+            wm = _wall_meter(n, active, _ext_map[0])
+            if wm:
+                nodes[n["id"]]["wall"] = wm
     # est-2ek.1.833: a live runner blocked on the global seat cap says so per node.
     if live:
         for nid, per in open_seat_waits(r).items():

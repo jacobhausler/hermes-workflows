@@ -3108,7 +3108,10 @@ def act_status(args):
                                                                      # #128: the artifact-mtime heartbeat rides
                                                                      # status/wait/list identically; honest
                                                                      # absence — no key when no artifact visible
-                                                                     "progress") if kk in v}
+                                                                     # #133: the wall meter rides identically —
+                                                                     # {elapsed_s, wall_s, p95_s, meter}, absent
+                                                                     # when nothing grounds it
+                                                                     "progress", "wall") if kk in v}
                                            for k, v in st["nodes"].items()},
            "done": st["done"], "skipped": st["skipped"], "total": st["total"],
            # O1: the card to paste into the report rides on EVERY status (and via
