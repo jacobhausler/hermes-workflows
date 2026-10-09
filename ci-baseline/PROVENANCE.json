@@ -153,6 +153,12 @@
       "added_by": "author lane (est-2ek.1.699, PR #296)",
       "measured": "2026-10-08 lane run: 240 cases, 0 red (65/65 checks in-file)",
       "test": "tests/test_route_identity_699.py"
+    },
+    {
+      "exit": 0,
+      "measured": "CI run 37719797358 at 1a667de6: regression exit 0; the sole suite failure was test_baseline_guard_9yl2.py because this row was absent",
+      "supersede_by": "next green-CI refresh (replace with the CI-captured row)",
+      "test": "test_literal_provider_prefix_46.py"
     }
   ],
   "source_issue": 75,
