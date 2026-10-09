@@ -75,5 +75,36 @@ pv_b = wfcommon.amend_preview(r, budge)
 check("budget-only edit to pending node is not changed",
       pv_b["changed"] == [] and pv_b["will_rerun"] == [], json.dumps(pv_b))
 
-print(f"\n{'ALL PASS' if not FAILS else 'FAILED: ' + ', '.join(FAILS)} ({6 - len(FAILS)}/6)")
+# ---- issue #18 (the un-fixed half): a node RUNNING when amended carries the
+# spawn-time record (status="running", never a commit — node_rec reads it as
+# pending). A model/provider-only edit to it must surface too: the re-driven
+# runner spawns it with the NEW def, so preview must not read changed:[].
+base_r = [agent("a", model="m-a", provider="p1"),
+          agent("b", ["a"], model="m-b", provider="p2"),
+          agent("c", ["b"])]
+r2 = fresh("20991006-000001-amenddefdiff", base_r)
+byid2 = {n["id"]: n for n in base_r}
+(r2 / "nodes" / "a.json").write_text(json.dumps(
+    {"status": "done", "efp": wfcommon.efp(byid2, byid2["a"]), "output": {"ok": True}}))
+(r2 / "nodes" / "b.json").write_text(json.dumps(
+    {"status": "running", "efp": wfcommon.efp(byid2, byid2["b"]), "pid": 999999,
+     "spawn_cmd": ["fake"], "log_path": "logs/b.a1.log", "skey": "s", "attempt": 1}))
+st_b_run, rec_b = wfcommon.node_rec(r2, byid2["b"], byid2)
+check("fixture: b running reads pending with a spawn-time record",
+      st_b_run == "pending" and (rec_b or {}).get("status") == "running",
+      f"{st_b_run}/{(rec_b or {}).get('status')}")
+
+new_r = [dict(n) for n in base_r]
+new_r[1] = {**new_r[1], "model": "m-c", "provider": "p9"}
+pv_r = wfcommon.amend_preview(r2, new_r)
+check("def-edit to RUNNING never-committed b is flagged changed",
+      "b" in pv_r["changed"], json.dumps(pv_r))
+check("def-edit to RUNNING b propagates will_rerun to c",
+      pv_r["will_rerun"] == ["b", "c"], json.dumps(pv_r))
+
+pv_r_same = wfcommon.amend_preview(r2, [dict(n) for n in base_r])
+check("untouched RUNNING node stays out of changed/will_rerun",
+      pv_r_same["changed"] == [] and pv_r_same["will_rerun"] == [], json.dumps(pv_r_same))
+
+print(f"\n{'ALL PASS' if not FAILS else 'FAILED: ' + ', '.join(FAILS)} ({10 - len(FAILS)}/10)")
 sys.exit(1 if FAILS else 0)

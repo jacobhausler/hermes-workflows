@@ -4004,9 +4004,11 @@ def amend_preview(r, new_nodes):
         status[n["id"]] = st
         if st == "pending" and (rec or {}).get("status") in ("done", "partial", "failed", "skipped"):
             committed_mismatch.add(n["id"])  # committed but efp-stale
-        elif st == "pending" and rec is None:
-            # never committed (pending/running): compare the def against the frozen
-            # graph so a model/provider-only edit isn't previewed as no-work (est-c9is)
+        elif st == "pending" and (rec is None or rec.get("status") == "running"):
+            # never committed (pending, or RUNNING with only the spawn-time record —
+            # status=running is safe by construction, never a commit): compare the
+            # def against the frozen graph so a model/provider-only edit isn't
+            # previewed as no-work (est-c9is; running half is issue #18).
             old = next((o for o in old_nodes if isinstance(o, dict) and o.get("id") == n["id"]), None)
             if isinstance(old, dict) and def_hash(old) != def_hash(n):
                 def_drift.add(n["id"])
