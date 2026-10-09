@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """#133 wall meter: run_state/status publish per-running-node wall seconds.
-(jacobhausler/hermes-workflows#133 — elapsed-vs-wall-and-p95 on every running node.)
+(hermes-workflows#133 — elapsed-vs-wall-and-p95 on every running node.)
 
 run_state's per-running-node block gains `wall` = {elapsed_s, wall_s, p95_s,
 meter}: pure arithmetic over facts the runner already committed — the verified
