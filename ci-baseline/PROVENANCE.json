@@ -194,10 +194,16 @@
       "exit": 0,
       "measured": "2026-10-08 foreground run in the fix worktree: DONE route_hold_optout_retry OK (RC=0); RED-proof at base 8bc661c (H1/H2/R2 FAIL -> RC=1).",
       "supersede_by": "next green-CI refresh (replace with the CI-captured row)"
+    },
+    {
+      "test": "test_seat_cap_dotenv_gxjh6.py",
+      "exit": 0,
+      "measured": "2026-10-09 local foreground run: 14/14 checks PASS, exit 0 (PYTHONPATH=/opt/hermes python3 tests/test_seat_cap_dotenv_gxjh6.py); full-suite run on the same tree green for all seat-family tests",
+      "supersede_by": "next green-CI refresh (replace with the CI-captured row)"
     }
   ],
   "totals": {
-    "cases": 262,
+    "cases": 263,
     "red": 0
   },
   "contract": "Green CI ledgers only (every exit == 0); rows not captured by CI are listed in rows_added_outside_ci with how they were measured. Refresh from the tip of main after each main move; see README.md.",

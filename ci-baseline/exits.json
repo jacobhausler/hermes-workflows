@@ -1306,5 +1306,10 @@
     "test": "test_route_hold_optout_retry_w56.py",
     "exit": 0,
     "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_route_hold_optout_retry_w56.py.log"
+  },
+  {
+    "test": "test_seat_cap_dotenv_gxjh6.py",
+    "exit": 0,
+    "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_seat_cap_dotenv_gxjh6.py.log"
   }
 ]
