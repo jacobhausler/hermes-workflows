@@ -1272,5 +1272,10 @@
     "test": "test_tree_quiesce_reap.py",
     "exit": 0,
     "log": "Local foreground tests/test_tree_quiesce_reap.py: RESULT PASS, exit 0"
+  },
+  {
+    "test": "test_pin_delta_check_133387.py",
+    "exit": 0,
+    "log": "Local foreground tests/test_pin_delta_check_133387.py: RESULT PASS, exit 0 (40 cases, est-zee7e)"
   }
 ]
