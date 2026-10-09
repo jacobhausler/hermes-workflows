@@ -2661,14 +2661,63 @@ def _proof_of_life(lp, proc, hb, tree_pids):
 # <seats>/.lock. A ticket whose pids are all verifiably dead is pruned at acquire.
 SEATS_DEFAULT = 4
 
+def _seat_cap_from_env_files():
+    """Operator-set WORKFLOW_MAX_SEATS from the Hermes .env files (est-gxjh6).
+
+    A long-lived runner inherits the ENVIRONMENT OF THE PROCESS THAT LAUNCHED it
+    — a cap set in ~/.hermes/.env (or a profile .env) after the serve process
+    booted is INVISIBLE to os.environ.get for the runner's whole life. Read the
+    files fresh at every cap decision so the fleet knob lands without a restart.
+    The parse is a deliberate subset: plain KEY=VALUE lines, one optional
+    `export ` prefix, `#` comments, blank lines; one-layer quotes. Anything odd
+    falls through — an unreadable/absent .env is absent, never fatal."""
+    try:
+        home = wfcommon.hermes_home()
+    except Exception:
+        return None
+    cands = []
+    prof = os.environ.get("HERMES_PROFILE", "").strip()
+    if prof and re.fullmatch(r"[A-Za-z0-9._-]+", prof):
+        cands.append(home / "profiles" / prof / ".env")
+    cands.append(home / ".env")
+    for f in cands:
+        try:
+            txt = f.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for line in txt.splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            if line.startswith("export "):
+                line = line[7:].lstrip()
+            k, _, v = line.partition("=")
+            if k.strip() != "WORKFLOW_MAX_SEATS":
+                continue
+            v = v.split(" #", 1)[0].strip().strip("\"'")
+            try:
+                n = int(v)
+            except ValueError:
+                continue
+            if n < 0:
+                continue
+            return n
+    return None
+
 def _max_seats(meta):
     v = meta.get("max_seats")
     if isinstance(v, int) and not isinstance(v, bool):
         return v
-    try:
-        return int(os.environ.get("WORKFLOW_MAX_SEATS", SEATS_DEFAULT))
+    try:                                            # explicit env wins (export/CLI shape)
+        e = os.environ.get("WORKFLOW_MAX_SEATS")
+        if e is not None:
+            return int(e)
     except ValueError:
-        return SEATS_DEFAULT
+        pass
+    f = _seat_cap_from_env_files()                  # else read the .env fresh (est-gxjh6)
+    if f is not None:
+        return f
+    return SEATS_DEFAULT
 
 def _seats_dir():
     d = os.environ.get("WF_SEATS_DIR", "")
