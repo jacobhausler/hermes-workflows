@@ -153,8 +153,10 @@
           },
           "verify_list": {
             "type": "array",
+            "minItems": 1,
             "items": {
-              "type": "string"
+              "type": "string",
+              "minLength": 1
             }
           },
           "seat_divergence": {

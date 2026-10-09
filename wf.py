@@ -165,10 +165,16 @@ def _route_substitution_refusal(meta, node, spawn_no):
     # a substitution must never self-certify against itself.
     candidates = {v, v_model}
     for alias, target in _seat_alias_map(hermes_home()).items():
-        if alias.lower() in (v, v_model):
+        # #318: the bake names the TARGET the ping proved, so the receipt side of
+        # the match may be the alias's TARGET as well as the alias — a same-alias
+        # respawn (retry/resume of an alias-pinned node) is the same route seen
+        # through the seat's alias map, never a substitution.
+        if alias.lower() in (v, v_model) or str(target).lower() in (v, v_model) \
+                or str(target).rsplit("/", 1)[-1].lower() in (v, v_model):
             candidates |= {alias.lower(), str(target).lower(),
                            str(target).rsplit("/", 1)[-1].lower()}
-    if a in candidates or a.rsplit("/", 1)[-1] in candidates:
+    if a in candidates or a.rsplit("/", 1)[-1] in candidates or any(
+            wfcommon.route_ids_equal(a, c, wfcommon.route_provider(node, verified)) for c in candidates):
         return None                            # same route: the receipt is not a spawn lock
     return {"status": "failed",
             "error": f"route_substitution_denied: node {node['id']!r} has a proved-alive "
@@ -5360,8 +5366,9 @@ def _route_hold(meta, result, node=None, final_served=None):
             candidates |= {alias.lower(), str(target).lower(),
                            str(target).rsplit("/", 1)[-1].lower()}
     s = str(served).strip().lower()
-    if s in candidates or s.rsplit("/", 1)[-1] in candidates:
-        return result
+    if s in candidates or s.rsplit("/", 1)[-1] in candidates or any(
+            wfcommon.route_ids_equal(s, c, wfcommon.route_provider(node, verified)) for c in candidates):
+        return result                          # est-2ek.1.699: route-identity contract (wfcommon)
     lead = (f"final served_model {final_served!r}; a mid-session call billed {served!r}"
             if final_served and final_served != served else f"node billed {served!r}")
     result.update(status="failed", error_class="route_unavailable",
@@ -6930,13 +6937,16 @@ def main(run_id):
 
 def finalize(run, graph, status):
     nodes = graph["nodes"]
-    finals = [n["id"] for n in nodes
-              if not any(n["id"] in o.get("after", []) for o in nodes)]
     lines = [f"# Workflow '{graph.get('name', 'workflow')}' — {status}"]
-    for fid in finals:
-        rec = jload(run / "nodes" / f"{fid}.json")
-        if rec and rec.get("status") in ("done", "partial"):   # #4: harvested partial output belongs in the summary
-            lines.append(f"\n## {fid}\n\n```json\n"
+    # est-p318w: every node, graph order, status + output. Rendering only
+    # done/partial LEAVES left a bare header whenever the sole leaf was
+    # pruned (gate on_skip:prune skipping a publisher) — run.done promises
+    # the node outputs are here. #4: harvested partial output stays in.
+    for n in nodes:
+        rec = jload(run / "nodes" / f"{n['id']}.json") or {}
+        lines.append(f"\n## {n['id']} — {rec.get('status') or 'no record'}")
+        if rec.get("output") is not None:
+            lines.append("\n```json\n"
                          + json.dumps(rec.get("output"), ensure_ascii=False, indent=2, default=str)
                          + "\n```")
     (run / "summary.md").write_text("\n".join(lines) + "\n")

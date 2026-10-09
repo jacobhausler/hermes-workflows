@@ -96,6 +96,54 @@ def source_digest(graph):
 # overrides so a team can share one root that survives any profile's deletion; unset or
 # empty = the 1.0.15 default, byte-identical.
 
+# ---------- est-2ek.1.699: the ONE route-identity contract ----------
+# The door proves a route at submit under the author's spelling; core bills under its
+# own normalized one. Every identity comparison between those worlds (the door's
+# same-route ping law, the runner's #25 commit hold, the #641 receipt hold) goes
+# through route_ids_equal, so a proven-and-run item cannot die route_unavailable over
+# punctuation. Provider-aware and a mirror of stock core's normalize_model_name
+# (agent/anthropic_message_convert.py): only claude prefixed Anthropic ids fold, each
+# '.' to '-'; '_' is kept, Bedrock ids keep their namespace dots; every other
+# provider compares as spelled, and an aggregator's vendor namespace is part of the id.
+_BEDROCK_PREFIXES = ("global.", "us.", "eu.", "apac.", "ap.", "au.", "jp.", "ca.",
+                     "sa.", "me.", "af.", "anthropic.")
+
+def canonical_model_id(model, provider=None):
+    """Identity form of `model` on `provider`'s route; '' for absent input (absence
+    proves nothing). Lowercase, strip, peel a leading '<provider>/' only when it
+    names the route's OWN provider; Anthropic only, claude prefixed, non-Bedrock: each
+    '.' becomes '-' (as stock core bills it). A literal '(suffix)' is part of the id:
+    stock core preserves it and records the concrete model verbatim, so this contract
+    never peels it for any provider. Never rewrites what gets billed or
+    relaxes a gate."""
+    m = str(model or "").strip().lower()
+    if not m:
+        return ""
+    prov = str(provider or "").strip().lower()
+    if prov and m.startswith(prov + "/"):
+        m = m[len(prov) + 1:]
+    if prov == "anthropic" and m.startswith("claude-") and not m.startswith(_BEDROCK_PREFIXES):
+        m = m.replace(".", "-")
+    return m
+
+def route_ids_equal(a, b, provider=None):
+    """True when `a` and `b` name the same model on `provider`'s route under the
+    contract above. Empty on either side is never equal."""
+    ca, cb = canonical_model_id(a, provider), canonical_model_id(b, provider)
+    return bool(ca) and bool(cb) and ca == cb
+
+def route_provider(node, verified=None):
+    """The provider whose spelling rules apply: the RECEIPT's own (leading segment of a
+    provider-qualified `verified`), else the node's `provider`, else ''. When both are
+    present and differ the route is cross-provider: '' (nothing folds, so a
+    substitution is refused before any normalization)."""
+    prov = str((node or {}).get("provider") or "").strip().lower()
+    v = str(verified or "")
+    vp = v.partition("/")[0].strip().lower() if "/" in v else ""
+    if vp and prov and vp != prov:
+        return ""
+    return vp or prov
+
 def hermes_home():
     """Core's resolution when importable, else the raw env (1.0.15 semantics, unchanged).
 
@@ -1023,9 +1071,13 @@ def validate_graph_errors(nodes, *, admission=False):
         # prompt-only annotation; enum is ENFORCED at harvest (#107 — the old
         # law "never accept a constraint that cannot be enforced" stays TRUE:
         # enum joined the subset only once wf.validate() checks membership).
+        # #96: minItems/minLength joined the SAME way — wf.validate() now
+        # enforces both (array length; non-blank char count via v.strip(),
+        # fail-closed: a whitespace-only probe is not a probe), so the door
+        # admits exactly what the harvester can enforce, nothing more.
         for k in sorted(set(schema) - {"type", "required", "properties", "items",
-                                       "description", "enum"}):
-            E(nid, f"{field}.{k}", "unsupported schema keyword; supported: type, required, properties, items, description, enum")
+                                       "description", "enum", "minItems", "minLength"}):
+            E(nid, f"{field}.{k}", "unsupported schema keyword; supported: type, required, properties, items, description, enum, minItems, minLength")
         if "type" in schema and schema["type"] not in ("object", "array", "string", "number", "integer", "boolean"):
             E(nid, f"{field}.type", "unsupported schema type")
         if "required" in schema and (not isinstance(schema["required"], list)
@@ -1045,6 +1097,17 @@ def validate_graph_errors(nodes, *, admission=False):
                 E(nid, f"{field}.enum", "enum members must be a list of non-empty strings")
             elif schema.get("type") != "string":
                 E(nid, f"{field}.enum", "enum is only legal on type:'string' (the harvester enforces string membership only)")
+        # #96: minItems/minLength — same enforceability law as enum. The door
+        # admits a floor ONLY where wf.validate() can actually enforce it:
+        # minItems on type:'array', minLength on type:'string', each a
+        # non-negative int (bool is never a count — same bool law as #113).
+        for _kw, _t in (("minItems", "array"), ("minLength", "string")):
+            if _kw in schema:
+                mv = schema[_kw]
+                if isinstance(mv, bool) or not isinstance(mv, int) or mv < 0:
+                    E(nid, f"{field}.{_kw}", f"{_kw} must be a non-negative integer")
+                elif schema.get("type") != _t:
+                    E(nid, f"{field}.{_kw}", f"{_kw} is only legal on type:'{_t}' (the harvester enforces it only there)")
         props = schema.get("properties")
         if props is not None:
             if not isinstance(props, dict):
@@ -3351,6 +3414,85 @@ def _active_spawns(r, n, byid):
             active.append(v)
     return active
 
+def _progress_for(r, n):
+    """#128 artifact-mtime progress channel: the write-first file IS the heartbeat.
+    The child work dir <run>/work/<node>[.<i>]/ (child_work_dir, wf.py — the dir
+    WORK_DIR_NOTE already mandates) is scanned at QUERY time for the most recently
+    modified regular file across the node's item dirs (fan-out: latest activity
+    wins). Pure read, no writes, NEVER raises: absent/unreadable artifact or a
+    stat/decode failure means an ABSENT `progress` field, never a fabricated one
+    (R2/when_error law), and absence draws no stall inference. last_line is the
+    last NEWLINE-TERMINATED line — a trailing partial line is dropped so the
+    reader never sees a torn line mid-append."""
+    try:
+        import stat as _stat
+        import time
+        base = re.sub(r"[^A-Za-z0-9_.-]", "_", str(n.get("id")))
+        work = Path(r) / "work"
+        if not base or not work.is_dir():
+            return None
+        dirs = []
+        if (work / base).is_dir():
+            dirs.append(work / base)
+        try:  # fan-out siblings <base>.<i> (runner names them via child_work_dir)
+            dirs.extend(p for p in sorted(work.iterdir())
+                        if p.is_dir() and p.name.startswith(base + "."))
+        except OSError:
+            pass
+        if not dirs:
+            return None
+        best = None  # (mtime, size, absolute path)
+        seen = 0
+        for d in dirs:
+            for dirpath, _sub, files in os.walk(d):
+                for fn in files:
+                    seen += 1
+                    if seen > 2000:  # a pathological tree never stalls status
+                        break
+                    p = Path(dirpath) / fn
+                    try:
+                        st_ = p.stat()
+                    except OSError:
+                        continue
+                    if not _stat.S_ISREG(st_.st_mode):
+                        continue
+                    if best is None or st_.st_mtime > best[0]:
+                        best = (st_.st_mtime, st_.st_size, p)
+                    if seen > 2000:
+                        break
+                if seen > 2000:
+                    break
+        if best is None:
+            return None
+        mtime, size, p = best
+        try:  # tail-read only: a growing artifact is never fully re-read
+            with open(p, "rb") as fh:
+                if size > 65536:
+                    fh.seek(-65536, os.SEEK_END)
+                    fh.readline()  # drop the window's own head: it may itself be torn
+                    data = fh.read()
+                else:
+                    data = fh.read()
+        except OSError:
+            return None
+        try:
+            text = data.decode("utf-8")
+        except UnicodeDecodeError:
+            return None  # a binary/unreadable artifact yields no key, no error
+        prog = {"artifact": str(p.relative_to(Path(r))),
+                "size": size,
+                "mtime_age_s": max(0.0, time.time() - mtime)}
+        if text.endswith("\n"):
+            lines = text[:-1].split("\n")
+            if text[:-1]:
+                prog["last_line"] = lines[-1]
+        elif "\n" in text:  # trailing PARTIAL line: drop it, last whole line wins
+            prog["last_line"] = text.rsplit("\n", 1)[0].rsplit("\n", 1)[-1]
+        # a file with NO newline-terminated line yet: honest absence of last_line
+        return prog
+    except Exception:
+        return None  # fail-safe read model: this NEVER raises into status/wait/list
+
 def active_child(r, n, byid, index=None):
     """Per-item entry point to the verification law (790c6ad): the runner's
     fan-out branch calls this BEFORE Popen on a resumed runner — a verified live
@@ -3462,6 +3604,11 @@ def run_state(r):
         if active:
             nodes[n["id"]]["active_spawn"] = active[0]
             nodes[n["id"]]["active_spawns"] = active
+            # #128: the write-first artifact under the node's child work dir is the
+            # heartbeat — derive-only, honest absence (no key when no file is visible).
+            prog = _progress_for(r, n)
+            if prog:
+                nodes[n["id"]]["progress"] = prog
     # est-2ek.1.833: a live runner blocked on the global seat cap says so per node.
     if live:
         for nid, per in open_seat_waits(r).items():
@@ -4289,12 +4436,23 @@ def _rename_hint(r, v, s):
     return f" (you wrote '{hit}'? the schema needs '{r}')"
 
 def validate(out, schema):
-    """Tiny forgiving validator: type / required / properties / items / enum.
+    """Tiny forgiving validator: type / required / properties / items / enum
+    / minItems / minLength.
     #107: `enum` membership is ENFORCED here — a str value against a
     string-membered enum (exactly what the door's schema_check admits: a
     non-empty list of non-empty strings on type:'string'), so a misspelled
     verdict takes the same typed-correction-retry path as a `type` violation
-    and the error string names the allowed set for the retry prompt."""
+    and the error string names the allowed set for the retry prompt.
+    #96: `minItems` (array length) and `minLength` (string floor) are
+    ENFORCED here on exactly the placements the door admits — type:'array' /
+    type:'string' with a non-negative int — and only AFTER the value's type
+    checked (a wrong-typed value gets the type error, never a pile-on).
+    minLength counts NON-BLANK chars (`len(v.strip())`): a whitespace-only
+    probe is not a probe — a deliberate, fail-closed deviation from JSON
+    Schema, where minLength counts raw chars. Malformed floors (non-int) are
+    ignored here, never crash: the door is the enforcement point; a
+    hand-built schema must not take the runner down. An all-blank
+    verify_list-style array now fails closed like the rest of the law."""
     errs = []
     if not schema:
         return errs
@@ -4319,6 +4477,16 @@ def validate(out, schema):
                 and all(isinstance(x, str) for x in en) and v not in en):
             errs.append(f"{path}: not an allowed value (allowed: "
                         + ", ".join(repr(x) for x in en) + ")")
+        # #96: floors, enforced only where the door admits them (right value
+        # type, non-negative int floor). bool refused: True is not a count.
+        mi = s.get("minItems")
+        if (t == "array" and isinstance(v, list) and isinstance(mi, int)
+                and not isinstance(mi, bool) and mi >= 0 and len(v) < mi):
+            errs.append(f"{path}: expected at least {mi} item(s)")
+        ml = s.get("minLength")
+        if (t == "string" and isinstance(v, str) and isinstance(ml, int)
+                and not isinstance(ml, bool) and ml >= 0 and len(v.strip()) < ml):
+            errs.append(f"{path}: expected at least {ml} non-blank char(s)")
         if isinstance(v, dict):
             for r in s.get("required", []):
                 if r not in v:

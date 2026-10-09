@@ -55,6 +55,16 @@
     "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_admission_ledger_85.py.log"
   },
   {
+    "test": "test_alias_receipt_respawn_318.py",
+    "exit": 0,
+    "log": "rows_added_outside_ci in PROVENANCE.json"
+  },
+  {
+    "test": "test_alias_route_ping_318.py",
+    "exit": 0,
+    "log": "rows_added_outside_ci in PROVENANCE.json"
+  },
+  {
     "test": "test_amend_preview_defdiff.py",
     "exit": 0,
     "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_amend_preview_defdiff.py.log"
@@ -785,6 +795,11 @@
     "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_profile_home_0928.py.log"
   },
   {
+    "test": "test_progress_channel_128.py",
+    "exit": 0,
+    "log": "rows_added_outside_ci in PROVENANCE.json"
+  },
+  {
     "test": "test_prompt_workdir.py",
     "exit": 0,
     "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_prompt_workdir.py.log"
@@ -928,6 +943,11 @@
     "test": "test_schema_key_suggest_62.py",
     "exit": 0,
     "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_schema_key_suggest_62.py.log"
+  },
+  {
+    "test": "test_schema_min_96.py",
+    "exit": 0,
+    "log": "Local foreground run tests/test_schema_min_96.py: ALL PASS, exit 0"
   },
   {
     "test": "test_scrub_yml_166b.py",
@@ -1129,6 +1149,11 @@
     "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_suite_zero_discovery_112.py.log"
   },
   {
+    "test": "test_summary_all_nodes_p318w.py",
+    "exit": 0,
+    "log": "rows_added_outside_ci in PROVENANCE.json"
+  },
+  {
     "test": "test_systemexit_stamp.py",
     "exit": 0,
     "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_systemexit_stamp.py.log"
@@ -1222,5 +1247,15 @@
     "test": "test_when_ancestry_0930.py",
     "exit": 0,
     "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_when_ancestry_0930.py.log"
+  },
+  {
+    "test": "test_route_identity_699.py",
+    "exit": 0,
+    "log": "CI run 37779459550 at 2b7804a Serial suite: exit 0"
+  },
+  {
+    "test": "test_package_source_only_756.py",
+    "exit": 0,
+    "log": "CI run 37722866724 Serial suite: exit 0"
   }
 ]

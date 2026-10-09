@@ -1012,17 +1012,19 @@ def _resolve_models(nodes, committed=None, keep=()) -> tuple[str | None, dict | 
             if tier:
                 display += f"  ({tier})"
         table[n["id"]] = display
+        # the alias/tier TARGET's model when the name is an alias (the CLI resolves it;
+        # the route table — pinged AND reported — speaks the real model id, est-2ek.1.318),
+        # else the baked literal. The node def keeps the alias verbatim.
+        route_model = im if (tier or m in known) and im else m
         routes[n["id"]] = {
             # requested = what the AUTHOR wrote (an inherited provider is not a request);
-            # resolved = the effective route (node def after resolution, base semantics).
+            # resolved = the effective route (alias target, else node def after resolution).
             "requested": {"provider": provider or None, "model": requested_model or None},
-            "resolved": {"provider": n.get("provider") or None, "model": n.get("model") or None},
+            "resolved": {"provider": n.get("provider") or None, "model": route_model or None},
         }
-        # route for the PER-ROUTE reasoning check: the alias/tier TARGET's model when the
-        # name is an alias (the CLI resolves it; the route table speaks the real model id),
-        # else the baked literal.
+        # route for the PER-ROUTE reasoning check (same target id as the route table).
         requests.append((n["id"], requested_model, provider, n,
-                         eff_provider, (im if (tier or m in known) and im else m)))
+                         eff_provider, route_model))
     pf_err = model_preflight(requests, tiers, _seat_model_cfg())
     if pf_err:
         return pf_err, None, None
@@ -1085,14 +1087,17 @@ def _same_ping_route(ri, provider, model):
     """True when the route core RECORDED for the ping is the pinned route itself.
     call_llm's recovery ladder may answer from another lane (capacity errors bypass the
     explicit-provider gate); a ping whose recorded route is not the pinned one proves
-    nothing about the pinned one — the caller degrades to 'unknown', never 'alive'/'dead'."""
+    nothing about the pinned one — the caller degrades to 'unknown', never 'alive'/'dead'.
+    The MODEL half also admits the ONE route-identity contract (wfcommon.route_ids_equal,
+    est-2ek.1.699); a provider mismatch is never same-route."""
     def _lbl(v):
         v = str(v or "").strip().lower()
         m = re.search(r"\(([^()]+)\)\s*$", v)  # 'main-agent(openai)' / 'fallback_chain[0](x)'
         return m.group(1) if m else v
     rp, rm = _lbl((ri or {}).get("provider")), _lbl((ri or {}).get("model"))
     lp, lm = str(provider).strip().lower(), str(model).strip().lower()
-    return bool(rp) and rp == lp and (rm == lm or rm == lm.rsplit("/", 1)[-1])
+    return bool(rp) and rp == lp and (rm == lm or rm == lm.rsplit("/", 1)[-1]
+                                      or _common.route_ids_equal((ri or {}).get("model"), lm, lp))
 
 _PING_SUBPROCESS = '''import json, sys
 try:
@@ -1230,7 +1235,8 @@ def _ping_reachable(model):
     if m:
         rm = m.group(1)
     lm = str(model).strip().lower()
-    return bool(rm) and (rm == lm or rm == lm.rsplit("/", 1)[-1])
+    return bool(rm) and (rm == lm or rm == lm.rsplit("/", 1)[-1]
+                         or _common.route_ids_equal(ri.get("model"), lm, lm.partition("/")[0] if "/" in lm else None))
 
 def _safe_ping_note(exc, status):
     try:
@@ -1383,7 +1389,13 @@ def _route_enforcement(graph, routes, skip=(), models=None):
                        f"not pin. Repoint it, or accept fallback with require_route: "
                        f"false ON THAT NODE (a `defaults` flip opts the whole graph in)")
         elif liv == "alive":
-            n["route_verified"] = f"{n.get('provider') or p}/{n.get('model') or m}"
+            # #318: bake what the ping ACTUALLY proved — the resolved route (alias
+            # TARGET id when the node pins an alias), not the bare alias name.
+            # A re-substituted node (#116) reads its served rung from the same place.
+            res_now = ent.get("resolved") or {}
+            rp = res_now.get("provider") or n.get("provider") or p
+            rm = res_now.get("model") or n.get("model") or m
+            n["route_verified"] = f"{rp}/{rm}"
     return ("route_unavailable at submit — " + "; ".join(bad)) if bad else None
 
 def _quota_refusal(graph, routes=None, cache_path=None, skip=()):
@@ -2988,7 +3000,11 @@ def act_status(args):
     # that run_state derived from — a fresh probe here can flip across a dying
     # runner's flock and make status vs runner_live disagree.
     out = {"run_id": st["run_id"], "name": st["name"], "status": st["status"],
-           "runner_live": alive, "nodes": {k: {kk: v[kk] for kk in ("type", "status", "fanout")}
+           "runner_live": alive, "nodes": {k: {kk: v[kk] for kk in ("type", "status", "fanout",
+                                                                     # #128: the artifact-mtime heartbeat rides
+                                                                     # status/wait/list identically; honest
+                                                                     # absence — no key when no artifact visible
+                                                                     "progress") if kk in v}
                                            for k, v in st["nodes"].items()},
            "done": st["done"], "skipped": st["skipped"], "total": st["total"],
            # O1: the card to paste into the report rides on EVERY status (and via

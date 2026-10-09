@@ -100,7 +100,9 @@ workflow { "action": "wait", "run_id": "<run_id>" }          → repeat until te
 
 Fan-out with `quorum`, gates with `when`/`on_skip`/`wait`, `requires` output
 preconditions, `after_partial` harvest release, `inputs` selection from upstream
-output, string-field `enum`s, graph-level `defaults` (precedence: explicit node
+output, string-field `enum`s, answer-schema floors `minItems` (on `type:"array"`)
+and `minLength` (on `type:"string"`, counted on stripped chars — a whitespace-only
+string is too short), graph-level `defaults` (precedence: explicit node
 key > `shape` preset > `defaults`) and `model_policy` — the authoritative
 vocabulary is [references/grammar.md](references/grammar.md); the bundled
 authoring skill keeps a compressed working copy in [SKILL.md](SKILL.md).

@@ -38,6 +38,13 @@ tests/test_routing_routes.py
 tests/test_require_route_25.py
 tests/test_metrics_0923.py
 tests/test_route_efforts_b3c98b2a.py
+# est-2ek.1.699: ONLY the fixture block — stock core folds '.'->'-' solely for
+# claude prefixed ids, so the dotted/hyphenated pair and its controls must carry
+# that prefix (neutral model names; every other line of the test is scrub-clean).
+tests/test_route_identity_699.py:54
+tests/test_route_identity_699.py:55
+tests/test_route_identity_699.py:56
+tests/test_route_identity_699.py:57
 tests/test_fatal_quota_24.py
 tests/test_tiers.py
 tests/test_model_preflight_0924.py
