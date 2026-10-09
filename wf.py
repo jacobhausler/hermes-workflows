@@ -2776,9 +2776,9 @@ SEATS_DEFAULT = 4
 # queue marker under <seats>/queue/ (NOT a ticket — the ticket glob above never
 # sees the subdir). Admission requires `live < cap` AND no strictly-older live
 # marker (order key (enqueued, uuid)); the blind flock poll made first-poller
-# win, so a long-waiting node starved behind a churn of short runs (keeper
-# field report 2026-10-08 12:19Z: accept_probe sat seat.wait 17 min while
-# gh-drive runs re-took every freed seat). Markers gate FAIRNESS only — never
+# win, so a long-waiting node starved behind a churn of short runs (field
+# report 2026-10-08 12:19Z: accept_probe sat seat.wait 17 min while short-run
+# cron re-launches re-took every freed seat). Markers gate FAIRNESS only — never
 # capacity; the bounded wait + typed seat_wait stay the outer bound.
 SEAT_QUEUE_DIR = "queue"
 SEAT_QUEUE_HB_S = 0.5      # own-marker heartbeat refresh cadence
