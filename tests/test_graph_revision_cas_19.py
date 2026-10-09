@@ -24,7 +24,7 @@ HOME = Path(_tmp.name)
 os.environ["HERMES_HOME"] = str(HOME)
 os.environ["WF_RUNS_ROOT"] = str(HOME / "workflows")
 os.environ["HERMES_WF_HERMES_BIN"] = "/bin/true"
-(HOME / "config.yaml").write_text("model:\n  default: qwen38-next\n")
+(HOME / "config.yaml").write_text("model:\n  default: seat-default\n")
 
 import hashlib
 import wfcommon  # noqa: E402
