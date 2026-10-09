@@ -5,6 +5,7 @@ launch it, read its run-dir via the SHARED read model (wfcommon.run_state), drop
 its input files. No standing daemon or control plane, no second opinion on run
 state (one runner process per run, detached out of the caller's tree at spawn #8).
 """
+import contextlib
 import importlib.util, json, os, re, select, shutil, stat, subprocess, sys, time
 import fcntl, hashlib, uuid
 from datetime import datetime, timezone
@@ -731,6 +732,7 @@ WORKFLOW_PARAMS = {
             ),
         },
         "answer": {"type": "string", "description": "release: the human's answer text (from clarify)."},
+        "graph_revision": {"type": "string", "description": "amend/steer/release: optional CAS token — the run's current graph revision (from run/status/amend). A token that differs from the head is refused with {error:'graph_revision_stale', yours, head} and NOTHING is written (no graph.json, no amends row, no restart.request, no inbox line, no gate answer). Absent = last-writer-wins (today's behavior). amend echoes the new head as graph_revision."},
         "gate_id": {"type": "string", "description": "release: gate node id."},
         "node": {"type": "string", "description": "steer: target node id (pending node picks it up at spawn; a LIVE child pulls it at its next seam via its own inbox call — the prompt is never rewritten)."},
         "text": {"type": "string", "description": "steer: the steering message."},
@@ -3073,7 +3075,10 @@ def _create_run(args, graph, lib_name, models, routes, _liveness_notes, lane_pat
             f"{r} is not a directory under the durable runs root {r.parent}; "
             "no run was durably created (check the launch path's root resolution, "
             "esp. a stub/non-registering door carrying settings.runs_root)")
-    out = {"run_id": rid, "models": models, "routes": routes, "hint":
+    out = {"run_id": rid, "models": models, "routes": routes,
+           # #19: the head a CAS writer pins against — echoed at launch so the
+           # caller needs no second read before its first guarded write.
+           "graph_revision": _graph_revision(r), "hint":
             # Copy-exact inducement (papercut #70): the hint IS the paste line —
             # no paraphrase, no fallback. The card is agent-authored by ruling.
             # The liveness suffix rides BEHIND the paste line (prefix stays copy-exact).
@@ -3160,7 +3165,10 @@ def act_status(args):
            "done": st["done"], "skipped": st["skipped"], "total": st["total"],
            # O1: the card to paste into the report rides on EVERY status (and via
            # act_wait, every wait) — the inducement never depends on the agent recalling it.
-           "card": _card(st["run_id"])}
+           "card": _card(st["run_id"]),
+           # #19: the graph head rides EVERY status read (derived, never stored —
+           # status is where a CAS caller reads the token before a guarded write).
+           "graph_revision": _graph_revision(r)}
     if resolved_via:   # #58: the run lives outside the caller's resolved root — loud, not silent
         out["resolved_via"] = resolved_via
         out["resolved_via_note"] = ("run resolved under a sibling root (dispatch-time home "
@@ -3448,6 +3456,61 @@ def act_wait(args):
             return _echo({**act_status(args), "note": f"still running after {int(time.time()-t0)}s — call wait again (self-yield at {int(seg)}s keeps us under the harness tool deadline)"})
         time.sleep(2)
 
+# ---------- graph revision CAS (issue #19) ----------
+# The revision is DERIVED, never stored: "seq:sha16" over the run's own bytes
+# (seq = amends.jsonl line count, 0 for a fresh run; sha16 = sha256 of the
+# current graph.json bytes, first 16 hex). Nothing to migrate (R10: pre-token
+# run dirs already carry everything the token is computed from) and a stored
+# token could drift from the graph it claims to name — a derived one cannot.
+# Only the door's two graph.json writers exist (act_run at create, act_amend),
+# so seq is monotone: every graph mutation appends exactly one amends row
+# (act_run mints a run with seq 0). All CAS + write happens under the per-run
+# door lock: the runner's admission flock is held for the runner's whole
+# lifetime on the runner side, so the door cannot take it (deadlock).
+
+def _graph_revision(r):
+    """The run's current graph revision "<seq>:<sha16>", or None when the run
+    has no graph.json (unknown run / no graph to pin)."""
+    try:
+        data = (r / "graph.json").read_bytes()
+    except OSError:
+        return None
+    seq = 0
+    try:
+        with (r / "amends.jsonl").open("r", encoding="utf-8") as f:
+            seq = sum(1 for line in f if line.strip())
+    except OSError:
+        pass
+    return f"{seq}:{hashlib.sha256(data).hexdigest()[:16]}"
+
+def _revision_cas(r, args):
+    """Compare-and-set on the graph revision. Tokenless (key absent/None) =
+    today's last-writer-wins semantics, unchanged (returns None). A submitted
+    token that differs from the head returns the typed refusal — the CALLER
+    must have checked this under _graph_lock(r) and must write NOTHING on a
+    refusal; the head named in the error is the head the caller must re-read
+    and rebase against."""
+    tok = args.get("graph_revision")
+    if tok is None:
+        return None
+    head = _graph_revision(r)
+    if tok == head:
+        return None
+    return {"error": "graph_revision_stale", "yours": tok, "head": head}
+
+@contextlib.contextmanager
+def _graph_lock(r):
+    """#19: the per-run door lock held by every graph-revision CAS and every
+    graph.json mutation (act_amend's read-modify-write; the CAS-guarded inbox
+    append and gate-answer write). Locking only inside the WRITERS — the shared
+    jload primitive is untouched (it is a god node; callers stay unchanged)."""
+    with (r / "graph.lock").open("a+b") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)
+
 def _release_core(r, gate_id, answer, ui=False):
     """ONE gate-answer path for tool and UI. Stale answers never block: the answer
     file is overwritten iff absent-or-stale; the gate re-holds unless the efp
@@ -3499,7 +3562,18 @@ def act_release(args):
         # (or already was) stopped — amend or re-run instead.
         return {"error": "run is stopped/stop pending — answer refused; amend or re-run to continue"}
     gate_id = args.get("gate_id")
-    res = _release_core(r, gate_id, args.get("answer", ""))
+    # #19 (est-19k9w): optional CAS — a gate answer is a write against the
+    # CURRENT graph (its efp is computed from the live defs); answering under a
+    # revision the caller never saw is refused with NOTHING written — the hold
+    # stays exactly as it was. release never bumps the revision: it does not
+    # touch graph.json. The CAS + answer write share one door lock; the respawn
+    # happens OUTSIDE it (never hold the door lock across a spawn). The UI path
+    # (_release_core directly) is tokenless by construction, today's semantics.
+    with _graph_lock(r):
+        _stale = _revision_cas(r, args)
+        if _stale:
+            return _stale
+        res = _release_core(r, gate_id, args.get("answer", ""))
     if not res.get("ok"):
         return res
     mode = _resume_after_action(
@@ -3541,9 +3615,17 @@ def act_steer(args):
         return {"ok": False,
                 "error": f"node is {node_status} — steering not queued: a {node_status} node never spawns again, "
                          "so the text would never be delivered; amend is the correct verb to make it eligible again"}
-    with open(r / "inbox.jsonl", "a") as f:
-        f.write(json.dumps({"node": node["id"], "text": args.get("text", ""),
-                            "at": datetime.now(timezone.utc).isoformat(timespec="seconds")}) + "\n")
+    # #19 (est-19k9w): optional CAS — steering text must not be queued against a
+    # graph revision the caller never saw (the node set / defs may have moved).
+    # The append happens under the same lock as the check, and a refusal writes
+    # NOTHING: no inbox line, no steer.queued event, gate files untouched.
+    with _graph_lock(r):
+        _stale = _revision_cas(r, args)
+        if _stale:
+            return _stale
+        with open(r / "inbox.jsonl", "a") as f:
+            f.write(json.dumps({"node": node["id"], "text": args.get("text", ""),
+                                "at": datetime.now(timezone.utc).isoformat(timespec="seconds")}) + "\n")
     _steer_event(r, "steer.queued", node=node["id"],
                  chars=len(args.get("text", "") or ""))  # #17: the door logs the queue
     if node_status == "running":
@@ -3634,6 +3716,14 @@ def act_amend(args):
         return bad
     if new is None:
         return {"error": "amend needs full replacement graph or graph_path"}
+    # #19 (est-19k9w): opt-in compare-and-set on the graph revision, checked
+    # EARLY so a stale caller is refused before the expensive gates and before
+    # anything is written (a dry_run reports staleness too). Tokenless = today's
+    # last-writer-wins, unchanged. The write site re-checks under the same lock.
+    with _graph_lock(r):
+        _stale = _revision_cas(r, args)
+    if _stale:
+        return _stale
     # An amend of an include-expanded run passes the EXPANDED graph (no `include`
     # key — strip-on-expand), so this is the identity no-op; a replacement graph
     # that DOES carry includes is a fresh author form and expands before validation
@@ -3703,12 +3793,29 @@ def act_amend(args):
         return {"ok": True, "dry_run": True, "models": _models, "routes": _routes, **preview,
                 "hint": "nothing written — re-run without dry_run to apply"
                         + _liveness_hint_suffix(_liveness_notes)}
-    (r / "amends.jsonl").open("a").write(
-        json.dumps({"at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-                    "old": jload(r / "graph.json"), "new": new}) + "\n")
-    tmp = r / f"graph.json.{os.getpid()}.tmp"
-    tmp.write_text(json.dumps(new, ensure_ascii=False, indent=2))
-    os.replace(tmp, r / "graph.json")
+    # #19 (est-19k9w): the write site holds the per-run door lock across the
+    # whole read-modify-write (the 09-27 alternating-writers shape: two amends
+    # each read the old graph, the later replace silently loses the earlier).
+    # The CAS token is RE-CHECKED here — between the early refuse and this lock
+    # another writer may have moved the head (check+write under one lock is the
+    # atomic unit; the early check is only the cheap pre-empt). A refusal lands
+    # BEFORE amends.jsonl / graph.json / restart.request / gate files are touched.
+    with _graph_lock(r):
+        _stale = _revision_cas(r, args)
+        if _stale:
+            return _stale
+        _base_rev = _graph_revision(r)
+        (r / "amends.jsonl").open("a").write(
+            json.dumps({"at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                        "old": jload(r / "graph.json"), "new": new,
+                        # #19: the row names the head it was written against and
+                        # whether the caller pinned it (cas:true = refused-if-stale).
+                        "base_revision": _base_rev,
+                        "cas": args.get("graph_revision") is not None}) + "\n")
+        tmp = r / f"graph.json.{os.getpid()}.tmp"
+        tmp.write_text(json.dumps(new, ensure_ascii=False, indent=2))
+        os.replace(tmp, r / "graph.json")
+        _new_rev = _graph_revision(r)
     # est-2ek.1.641: an applied amend re-proves routes through this submit's
     # ping — bake the proved-alive receipts for the NEW defs (frozen replay-skip
     # nodes keep their committed receipt: the file is merged, never rewritten).
@@ -3747,6 +3854,7 @@ def act_amend(args):
     else:
         applies = "live runner hot-reloads at its next wave boundary; the next transition wakes the owner automatically"
     return {"ok": True, "models": _models, "routes": _routes, "applies": applies,
+            "graph_revision": _new_rev,   # #19: the new head — the token a next CAS writes against
             "hint": "continuation is automatic; do not wait or poll" + _liveness_hint_suffix(_liveness_notes), **preview}
 
 def act_stop(args):

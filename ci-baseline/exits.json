@@ -399,6 +399,11 @@
     "log": "CI run 37719805756 Serial suite: exit 0"
   },
   {
+    "test": "test_graph_revision_cas_19.py",
+    "exit": 0,
+    "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_graph_revision_cas_19.py.log"
+  },
+  {
     "test": "test_graph_single_writer_153.py",
     "exit": 0,
     "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_graph_single_writer_153.py.log"

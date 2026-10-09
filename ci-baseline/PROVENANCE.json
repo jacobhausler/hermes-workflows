@@ -216,10 +216,16 @@
       "exit": 0,
       "measured": "2026-10-09 local foreground run on fix/xwvu9-post-exit-strip: RED pre-change (3 FAIL: module in shipped tree+ZIP, wf.py dispatch present), GREEN post-strip (Ran 3 tests OK, rc=0); the strip PR (est-xwvu9, upstream hermes-agent #133387 review 5467148429 accepted ask) adds this test without a CI row",
       "supersede_by": "next green-CI refresh (replace with the CI-captured row)"
+    },
+    {
+      "test": "test_graph_revision_cas_19.py",
+      "exit": 0,
+      "measured": "2026-10-09 foreground run in the fix worktree: ALL PASS (37 checks, RC=0); RED-proof at base d69a64d (T1 B-amend returns ok, FAIL -> RC=1).",
+      "supersede_by": "next green-CI refresh (replace with the CI-captured row)"
     }
   ],
   "totals": {
-    "cases": 266,
+    "cases": 36,
     "red": 0
   },
   "contract": "Green CI ledgers only (every exit == 0); rows not captured by CI are listed in rows_added_outside_ci with how they were measured. Refresh from the tip of main after each main move; see README.md.",
