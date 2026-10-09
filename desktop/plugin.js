@@ -206,7 +206,6 @@ const idleTone = s => s == null ? EDGE_TONE.pending : s < 30 ? EDGE_TONE.running
  *  #133: live also carries the wall meter word — `● 4s · near-wall` — the read
  *  model's {elapsed_s, wall_s, p95_s, meter} for a running node. Absent stays
  *  absent (never invented); the words are the run_state vocabulary verbatim. */
-const METER_TONE = { 'on-track': EDGE_TONE.running, 'near-wall': EDGE_TONE.held, 'over-p95': EDGE_TONE.failed }
 function Vitals({ m, live, size, cost, wall }) {
   if (!m) return null
   const fs = size === 'xs' ? 10 : 11
@@ -1522,6 +1521,11 @@ const EDGE_TONE = {
   pending: 'var(--ui-stroke-secondary)',
   skipped: 'var(--ui-text-tertiary)'
 }
+
+// #133: wall-meter word tones (Vitals). Declared here, right after EDGE_TONE:
+// a top-level const here reads EDGE_TONE at module-eval time, so it must not
+// sit above the palette (TDZ). The words are the run_state meter vocab verbatim.
+const METER_TONE = { 'on-track': EDGE_TONE.running, 'near-wall': EDGE_TONE.held, 'over-p95': EDGE_TONE.failed }
 
 // ONE tone vocabulary for every reader (issue #48): the rail pill (pillModel),
 // the canvas NodeCard, the mini-DAG pill, the edges and the timeline all read
