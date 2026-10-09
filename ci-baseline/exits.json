@@ -1272,5 +1272,10 @@
     "test": "test_tree_quiesce_reap.py",
     "exit": 0,
     "log": "Local foreground tests/test_tree_quiesce_reap.py: RESULT PASS, exit 0"
+  },
+  {
+    "test": "test_wall_meter_133.py",
+    "exit": 0,
+    "log": "Local foreground cd tests && PYTHONPATH=/opt/hermes:.. python3 test_wall_meter_133.py: RESULT GREEN (18 checks, 0 failed), exit 0"
   }
 ]

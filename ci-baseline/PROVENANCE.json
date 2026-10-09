@@ -152,10 +152,16 @@
       "test": "tests/test_route_identity_699.py",
       "added_by": "author lane (est-2ek.1.699, PR #296)",
       "measured": "2026-10-08 lane run: 240 cases, 0 red (65/65 checks in-file)"
+    },
+    {
+      "test": "test_wall_meter_133.py",
+      "exit": 0,
+      "measured": "2026-10-09 local foreground run (cd tests && PYTHONPATH=/opt/hermes:.. python3 test_wall_meter_133.py): RESULT GREEN, 18 checks / 0 failed, exit 0; RED at the test-only commit 2a2d789 (13 of 18 failed \u2014 the `wall` key absent); the PR (#133 wall meter) adds this test without a CI row",
+      "supersede_by": "next green-CI refresh (replace with the CI-captured row)"
     }
   ],
   "totals": {
-    "cases": 255,
+    "cases": 256,
     "red": 0
   },
   "contract": "Green CI ledgers only (every exit == 0); rows not captured by CI are listed in rows_added_outside_ci with how they were measured. Refresh from the tip of main after each main move; see README.md.",
