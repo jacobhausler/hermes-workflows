@@ -2523,6 +2523,15 @@ def _lane_state(key, entry):
         st = None
         r = runs_root() / "__invalid_lane_run__"
     state = st["status"] if st else "pending"
+    # est-2ek.1.199: a lane entry CLAIMING a run whose dir does not exist on
+    # disk is the postmortem's census-blind ghost — 'pending forever' made the
+    # ledger loop sleep 6h. Surface it as an explicit orphaned-run status the
+    # monitor/STALL line can read at plugin level. The dir check is what
+    # distinguishes it from a not-yet-written-but-launching dir: at this point
+    # the door has already passed (or refused) its durability proof, so a
+    # claimed run without a dir is gone, not pending.
+    if st is None and not r.is_dir():
+        state = "orphaned"
     live = st.get("runner_live", False) if st else False   # A2 one-read law
     unfinished = state not in ("done", "failed", "stopped")
     return {"lane_key": key, "run_id": rid, "state": state,
@@ -2851,6 +2860,76 @@ def act_run(args):
                        includes=_includes, include_notes=_include_notes,
                        concurrency_meta=concurrency_meta)
 
+def _new_ancestor_dirs(p):
+    """est-2ek.1.199: the directory entries a `p.mkdir(parents=True)` would
+    create, deepest first — so the durability proof can fsync the ENTRY that
+    names each newly created dir, not just the leaf. Best-effort by design: a
+    race here only ever means an extra fsync on a dir we did not create.
+    """
+    out, cur = [], Path(p)
+    while True:
+        try:
+            if cur.exists():
+                return out
+        except OSError:
+            return out
+        out.append(cur)
+        if cur.parent == cur:
+            return out
+        cur = cur.parent
+
+# est-2ek.1.199: the three files a fresh run dir MUST carry before its run_id
+# may ride back to the caller. The proof treats absence as failure, never skip.
+_DURABLE_RUN_FILES = ("graph.json", "run.json", "wake_protocol")
+
+def _prove_run_dir(r, extra_dirs=()):
+    """est-2ek.1.199: the door's durability proof for a fresh run dir, run
+    BEFORE the runner spawns and BEFORE the run_id rides back to the caller.
+
+    fsync the three mandatory durable files (graph.json, run.json,
+    wake_protocol — a missing one is an EXPLICIT failure: a half-written run
+    dir must never be handed back as launched), then fsync the run dir, the
+    runs root, and every ancestor entry the launch itself created via
+    extra_dirs (link durability — a fsynced file in an un-fsynced dir can
+    vanish with the dir on crash; `mkdir(parents=True)` can create the root
+    AND its ancestors, so each newly created entry needs its own sync). Then
+    VERIFY the dir still exists under the resolved durable root — the phantom
+    shape is a run_id whose dir is not under the root the estate census walks.
+    Any failure raises RuntimeError naming the ATTEMPTED PATH (loud, per the
+    postmortem ticket: never a phantom run_id). handle() turns the raise into
+    the tool's error payload; act_run callers inside the plugin never see a
+    half-proved run advertised as launched.
+    """
+    attempted = str(r)
+    root = r.parent
+    try:
+        for fname in _DURABLE_RUN_FILES:
+            f = r / fname
+            if not f.is_file():
+                raise RuntimeError(
+                    f"run dir proof FAILED: mandatory durable file {fname} is "
+                    f"missing at attempted path {f} — run not launched-proof; "
+                    "do not resume by id")
+            with open(f, "rb") as fh:
+                os.fsync(fh.fileno())
+        for d in (r, root, *extra_dirs):
+            dfd = os.open(d, getattr(os, "O_DIRECTORY", 0))
+            try:
+                os.fsync(dfd)
+            finally:
+                os.close(dfd)
+    except OSError as e:
+        raise RuntimeError(
+            f"run dir proof FAILED (fsync) at attempted path {attempted}: "
+            f"{type(e).__name__}: {e} — run not launched-proof; do not resume by id")
+    if not r.is_dir():
+        raise RuntimeError(
+            f"run dir proof FAILED: run dir vanished after launch — attempted path "
+            f"{attempted} is not a directory under the durable runs root {root}; "
+            "no run was durably created (check the launch path's root resolution, "
+            "esp. a stub/non-registering door carrying settings.runs_root)")
+
+
 def _create_run(args, graph, lib_name, models, routes, _liveness_notes, lane_path=None,
                 *, concurrency_meta=None, includes=None, include_notes=None):
     """Under the lane flock: complete run dir, atomic registry entry, then spawn."""
@@ -2859,6 +2938,10 @@ def _create_run(args, graph, lib_name, models, routes, _liveness_notes, lane_pat
         c for c in name.lower() if c.isalnum() or c in "-_")[:24]
     rid, n = base, 0
     root = runs_root()
+    # est-2ek.1.199: snapshot which ancestor entries ALREADY exist before
+    # mkdir(parents=True) gets a chance to mint them — the durability proof
+    # must fsync the entry naming each newly created dir (blocker 3).
+    _new_dirs = _new_ancestor_dirs(root)
     root.mkdir(parents=True, exist_ok=True)
     while True:  # collision-resistant exclusive create
         r = root / (rid if n == 0 else f"{rid}-{n}")
@@ -2925,7 +3008,28 @@ def _create_run(args, graph, lib_name, models, routes, _liveness_notes, lane_pat
             os.replace(tmp, lane_path)
         finally:
             tmp.unlink(missing_ok=True)
+    # est-2ek.1.199 (fb-fix STALL postmortem): a door launch returned a run_id
+    # whose dir never landed under the durable root; the ledger loop slept 6h
+    # on 'in_progress' because nothing ever proved the dir to the launcher.
+    # DURABILITY PROOF law: every mandatory durable file is fsynced (absence
+    # fails, never skips), then the run dir, the runs root, and any
+    # newly-created ancestor entries are fsynced (link durability), and the dir
+    # must STILL EXIST under the resolved durable root BEFORE the runner spawns
+    # and before the run_id is handed back. A failed proof RAISES with the
+    # attempted path — handle() surfaces it as the tool error; a phantom run_id
+    # is never returned and no work starts behind a refused proof (a caller
+    # retry must not duplicate work that already began).
+    _prove_run_dir(r, extra_dirs=_new_dirs)
     _spawn_runner(r)
+    # Re-check AFTER the spawn: a dir that vanished while/just after the runner
+    # started is still the phantom shape (the door's own writes are already
+    # proved and synced at this point; only an external removal lands here).
+    if not r.is_dir():
+        raise RuntimeError(
+            f"run dir proof FAILED: run dir vanished after launch — attempted path "
+            f"{r} is not a directory under the durable runs root {r.parent}; "
+            "no run was durably created (check the launch path's root resolution, "
+            "esp. a stub/non-registering door carrying settings.runs_root)")
     out = {"run_id": rid, "models": models, "routes": routes, "hint":
             # Copy-exact inducement (papercut #70): the hint IS the paste line —
             # no paraphrase, no fallback. The card is agent-authored by ruling.

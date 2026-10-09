@@ -18,6 +18,8 @@ SOURCE_ONLY_TESTS = {
     "tests/test_plugin_resolution_live_not_old.py", "tests/test_scrub_yml_166b.py",
     # rebased onto main's #235: same shape, executes source-only lane_recover.py
     "tests/test_stuck_node_finalize_733.py",
+    # #248 r3 rebase onto main's #298: executes source-only make_public.py, reads scripts/scrub-list.txt
+    "tests/test_personal_path_scrub_867.py",
 }
 # A shipped test that loads/executes `<root> / "scripts" / "<file>"` needs that file in the ZIP.
 SCRIPT_REF = re.compile(r'(?:ROOT|BUILD)\s*/\s*"scripts"\s*/\s*"([^"]+)"|ROOT\s*/\s*"scripts/([^"]+)"')
