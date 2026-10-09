@@ -491,6 +491,31 @@ if _FAKE_MODE == "seat_timing":       # one span row per child: [start, end] of 
 if _FAKE_MODE == "hang":
     _t.sleep(float(os.environ.get("FAKE_HANG_SEC", "60")))
     sys.exit(0)
+if _FAKE_MODE in ("session_pulse", "session_frozen"):   # est-2ek.1.595: the oneshot -Q shape —
+    # nothing ever reaches the spawn log while the child works, but its own sessions row
+    # (title = the --continue key) is in state.db. pulse: last_activity_at keeps moving;
+    # frozen: the row exists but never moves again. Either way the answer comes at the end.
+    import sqlite3 as _sq
+    _title = args[args.index("--continue") + 1]
+    _db = _sq.connect(os.path.join(_FAKE_HOME, "state.db"), timeout=5)
+    _db.execute("create table if not exists sessions (id text primary key, title text, model text, billing_provider text, "
+                "input_tokens int, output_tokens int, cache_read_tokens int, reasoning_tokens int, api_call_count int, "
+                "tool_call_count int, estimated_cost_usd real, last_activity_at real, last_activity_description text, "
+                "ended_at real, started_at real)")
+    _t0 = time.time()
+    _seen = _t0 - 3600 if _FAKE_MODE == "session_frozen" else _t0
+    _db.execute("insert into sessions values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (_title, _title, "fake", None, 0, 0, 0, 0, 0, 0, 0.0, _seen, "", None, _seen))
+    _db.commit()
+    _end = _t0 + float(os.environ.get("FAKE_SESSION_SEC", "3"))
+    while time.time() < _end:
+        if _FAKE_MODE == "session_pulse":
+            _db.execute("update sessions set last_activity_at=? where id=?", (time.time(), _title))
+            _db.commit()
+        _t.sleep(0.2)
+    _db.close()
+    print("```json\n" + json.dumps({"result": "ok", "session": _FAKE_MODE}) + "\n```", flush=True)
+    sys.exit(0)
 if _FAKE_MODE == "early":          # writes stdout, then keeps cooking (mid-run log growth)
     print("partial progress line, flushed early", flush=True)
     _t.sleep(float(os.environ.get("FAKE_EARLY_SLEEP", "3")))

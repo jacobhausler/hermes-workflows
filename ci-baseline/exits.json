@@ -424,11 +424,6 @@
     "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_honest_status_jam_a3.py.log"
   },
   {
-    "test": "test_hook_abandon_safety.py",
-    "exit": 0,
-    "log": "rows_added_outside_ci in PROVENANCE.json"
-  },
-  {
     "test": "test_import_purity_133387.py",
     "exit": 0,
     "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_import_purity_133387.py.log"
@@ -1124,11 +1119,6 @@
     "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_steer_truth_0924.py.log"
   },
   {
-    "test": "test_stock_dispatch_selection_304.py",
-    "exit": 0,
-    "log": "rows_added_outside_ci in PROVENANCE.json"
-  },
-  {
     "test": "test_stop_reason_status_95.py",
     "exit": 0,
     "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_stop_reason_status_95.py.log"
@@ -1258,6 +1248,11 @@
     "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_wake_hermetic_env.py.log"
   },
   {
+    "test": "test_wall_extend_session_595.py",
+    "exit": 0,
+    "log": "CI run 37720369252 Serial suite: exit 0"
+  },
+  {
     "test": "test_wfpid_owner_8.py",
     "exit": 0,
     "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_wfpid_owner_8.py.log"
@@ -1296,5 +1291,15 @@
     "test": "test_wall_meter_133.py",
     "exit": 0,
     "log": "Local foreground cd tests && PYTHONPATH=/opt/hermes:.. python3 test_wall_meter_133.py: RESULT GREEN (18 checks, 0 failed), exit 0"
+  },
+  {
+    "test": "test_hook_abandon_safety.py",
+    "exit": 0,
+    "log": "rows_added_outside_ci in PROVENANCE.json"
+  },
+  {
+    "test": "test_stock_dispatch_selection_304.py",
+    "exit": 0,
+    "log": "rows_added_outside_ci in PROVENANCE.json"
   }
 ]
