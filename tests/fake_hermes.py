@@ -233,6 +233,19 @@ if _FAKE_MODE == "ratelimit_straggler":
         sys.exit(1)
     print("```json\n" + json.dumps({"result": "winner-answer"}) + "\n```")
     sys.exit(0)
+# ---- est-xodi (M3 pin): first spawn dies on the banner, the PARKED respawn goes
+# ---- silent-slow (prints nothing for FAKE_SLEEP s) then answers with a VALID
+# ---- payload. Only the consumed remaining-wall cap can kill it before commit. ----
+if _FAKE_MODE == "ratelimit_then_slow":
+    _k159 = "".join(ch for ch in (q.splitlines()[0] if q.strip() else "x") if ch.isalnum())[:24] or "x"
+    if _rl159_count(_k159) == 0:                     # first spawn: banner death
+        print("Warning: Unknown toolsets: bogus")
+        print("hermes -z: agent failed: Anthropic credentials are rate-limited for "
+              "claude-fable-5-1; other Claude models remain available (see `hermes auth list`).")
+        sys.exit(1)
+    _t.sleep(float(os.environ.get("FAKE_SLEEP", "1.65")))
+    print("```json\n" + json.dumps({"result": "answered-way-late"}) + "\n```")
+    sys.exit(0)
 # ---- est-t0vz (issue #54): credential-window 429 park modes ----
 # The banner below is the VERBATIM AuthError text the stock CLI raises at
 # /opt/hermes/hermes_cli/runtime_provider.py:358, as it reaches the runner's merged
