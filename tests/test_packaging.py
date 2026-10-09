@@ -103,9 +103,8 @@ def main() -> None:
             check("audit helper ships: scripts/pr_tag_audit.py is in the ZIP (explicit include decision)",
                   "scripts/pr_tag_audit.py" in packed_scripts)
             check("pack-list contract: ZIP scripts/ set equals the exact declared packed set",
-                  packed_scripts == {"scripts/graph_check.py", "scripts/pack.py",
+                  packed_scripts == {"scripts/pack.py",
                                       "scripts/pr_tag_audit.py", "scripts/suite.py",
-                                      "scripts/graph_path_ban.py", "scripts/graph_regen.py",
                                       # est-5p7x: the diagram-law generators — shipped
                                       # because tests/test_diagram_law.py executes both
                                       # from the package root (same rationale as the

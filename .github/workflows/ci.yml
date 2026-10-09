@@ -2,8 +2,7 @@
 #   1. desktop half parses as ESM
 #   2. serial test suite (stdlib Python + Node .mjs) → ci-out/exits.json + per-test logs
 #   3. private-string scrub audit
-#   4. knowledge-graph single-writer (PR branches must not touch graphify-out/; main owns regen)
-#   5. `hermes plugins validate .` against a PINNED upstream commit
+#   4. `hermes plugins validate .` against a PINNED upstream commit
 #
 # HERMES_PIN = the measured requires_hermes floor, tag v2026.9.21 (first release
 # whose quiet turn report carries HERMES_QUIET_TURN_REPORT_FILE; evidence in
@@ -29,13 +28,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        # fetch-depth:0 — the ban step computes merge-base(origin/main, HEAD);
-        # a shallow checkout (default depth 1) has no shared history with
-        # origin/main, merge-base fails, and the gate fails CLOSED (peer repro,
-        # run 37127917562: rc=2 "cannot compute merge-base"). Full history is
-        # the only way the ban can answer anything but "unknown".
-        with:
-          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:
@@ -50,12 +42,10 @@ jobs:
           git clone --filter=blob:none https://github.com/NousResearch/hermes-agent /tmp/hermes-agent
           git -C /tmp/hermes-agent checkout "$HERMES_PIN"
 
-      - name: Install pinned hermes (editable) + graphify
+      - name: Install pinned hermes (editable)
         run: |
           pip install -e /tmp/hermes-agent
-          pip install "graphifyy==0.9.67"
           hermes --version || true
-          graphify --version
 
       - name: Desktop half parses (ESM)
         run: cp desktop/plugin.js /tmp/plugin.check.mjs && node --check /tmp/plugin.check.mjs
@@ -77,31 +67,5 @@ jobs:
       - name: Scrub audit (private strings)
         run: python3 scripts/make_public.py /tmp/public-tree
 
-      - name: PR branches do not touch the knowledge graph (single-writer)
-        if: github.event_name == 'pull_request'
-        # merge-base needs real history: default fetch-depth:1 checkout has no
-        # origin/main ref and the ban correctly fails closed (peer review #170).
-        # The suite above ran BEFORE this step on the shallow tree, so deepening
-        # here is order-safe.
-        run: |
-          git fetch --no-recurse-submodules origin main
-          python3 scripts/graph_path_ban.py
-
       - name: Validate plugin against pinned hermes
         run: hermes plugins validate .
-
-  graph-main:
-    # Single-writer honesty guarantee (#153): the committed graph on MAIN must
-    # equal the AST of the main tree. The regen lane (ra-graph-regen) is the
-    # only writer; this job is the proof it cannot lie. AST-only, no LLM.
-    if: github.event_name == 'push'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: Install pinned graphify
-        run: pip install "graphifyy==0.9.67"
-      - name: Committed graph matches main source (AST only)
-        run: python3 scripts/graph_check.py

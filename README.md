@@ -175,11 +175,9 @@ procedures, and the rules that keep the tree publishable. Changes are gated by
 the serial suite (`python3 scripts/suite.py . ci-out`) and
 `hermes plugins validate .` — both run in [CI](.github/workflows/ci.yml).
 
-The repo ships a [graphify](https://github.com/Graphify-Labs/graphify) knowledge
-graph (`graphify-out/`, deterministic AST extraction — no LLM in the build; the
-committed graph is drift-gated by CI). `graphify query "<question>"` returns a
-scoped subgraph instead of a grep dump; `graphify-out/GRAPH_REPORT.md` is the
-architecture overview and the current node/edge census.
+[`graphify`](https://github.com/Graphify-Labs/graphify) is an OPTIONAL local
+navigation aid — `graphify query "<question>"` beats a grep dump. Its output is
+never committed and CI never builds it; source and tests are the spec.
 
 ## License
 

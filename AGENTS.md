@@ -405,8 +405,6 @@ subscription routes.
 | `scripts/suite.py` | Serial runner with per-test logs + `exits.json` ledger (the merge gate); `--baseline <ledger>` adds `admission.json` splitting reds into introduced vs pre-existing (exact name+exit identities; a base red is blocking, never waived — and a base red whose test was DELETED reports `missing`, which blocks too, so `rm` can't launder a red to green); zero discovery under `tests/` is a failed admission (`green:false` + `zero_discovery:true`, nonzero exit) and an invalid root exits 2 before any out-dir side effects (#112) |
 | `scripts/pr_formal_review.py` | Author-aware formal review (est-2ek.1.866): preflight compares `GET /user` vs the PR author BEFORE posting; a self-review (shared credential == author, the GitHub 422 "Can not request changes on your own pull request") NEVER attempts the doomed POST — it takes the verified fallback (findings into the ONE live marker comment — `--comment-id` PATCHes it, law 3 — with the fallback reason recorded before the trailing marker, plus the `changes-requested` label ADDED via `POST issues/{n}/labels`, never the replace-all `PATCH issues/{n}`; both read back); different identities post the real `REQUEST_CHANGES`; one credential, never forged; exit nonzero unless the write is read-back-verified |
 | `scripts/pack.py` | Release zip + `SHA256SUMS` + sidecar |
-| `scripts/graph_path_ban.py` | PR gate (#153, single-writer): fails a PR whose diff vs merge-base(origin/<base-ref>, HEAD) touches `graphify-out/`, unless head branch is the regen lane (`^chore/graph-`) and the diff is ONLY graph files |
-| `scripts/graph_regen.py` | The single writer (#153): at `--repo-dir` with `HEAD == --base-sha`, AST update + `graph_check.py --fix`, then prints `NO_CHANGES` (no PR) or `FILES` for the caller's `chore(graph):` PR — never pushes, never opens the PR itself |
 | `scripts/make_public.py` | Publish-tree exporter with a private-string audit gate (`scripts/.scrub-guards` allow-list) |
 | `docs/` | Patched-core guide, manifest decisions, catalog entry + PR body, scrub audit |
 
@@ -420,52 +418,23 @@ node --experimental-strip-types tests/test_edge_routing.mjs
 python3 scripts/suite.py . ci-out                 # full serial suite → ci-out/exits.json (merge gate)
 hermes plugins validate .                         # manifest + SDK-surface + security scan
 python3 scripts/make_public.py /tmp/public-tree   # private-string audit; must print "0 scrub hits"
-python3 scripts/graph_path_ban.py                 # PR diff touches no graphify-out/ (single-writer, #153)
 ```
 
 A change is done when: its targeted test is green, the full suite is green, validate
-prints `Validation passed.`, the scrub audit prints `0 scrub hits`, and the path-ban
-prints `OK`. CI runs the same gates ([.github/workflows/ci.yml](.github/workflows/ci.yml));
-the knowledge-graph honesty gate (`scripts/graph_check.py`) runs there only as the
-push-on-main `graph-main` job — the regen lane owns the graph (#153).
+prints `Validation passed.`, and the scrub audit prints `0 scrub hits`. CI runs the
+same gates ([.github/workflows/ci.yml](.github/workflows/ci.yml)).
 
-### 4b′. Navigate with the knowledge graph
+### 4b′. Navigate with the knowledge graph (optional)
 
-The repo ships a [graphify](https://github.com/Graphify-Labs/graphify) knowledge
-graph at `graphify-out/` — every function, class, test, and doc heading
-(see `graphify-out/GRAPH_REPORT.md` line 1 for the current node/edge census — stated
-figures in prose go stale; the report is regenerated with the graph), built by deterministic tree-sitter parsing (no LLM, no network); one edge
-per `(source, target, relation)` (`count` marks a collapsed multi-edge; policy in `scripts/graph_check.py`).
-Query it before you grep or open files one by one:
-
-```sh
-uv tool install graphifyy                                      # once; the CLI is `graphify`
-graphify query "how does a failed node get its error_class"    # scoped subgraph for a question
-graphify path "act_run" "run_child" --undirected               # how two symbols connect
-graphify explain "run_state"                                   # one symbol + every neighbour
-graphify god-nodes --top 12                                    # the hubs everything flows through
-```
-
-`graphify-out/GRAPH_REPORT.md` is the broad-architecture view (community hubs,
-surprising cross-file links). Every edge is tagged `EXTRACTED` (read from source) or
-`INFERRED` (resolved by graphify) so you know what was found vs guessed.
-
-Keeping it current (**single-writer, #153**: PRs never touch `graphify-out/` — CI's
-`scripts/graph_path_ban.py` enforces it; only the main-owned regen lane
-(`scripts/graph_regen.py` via `ra-graph-regen`, branch `chore/graph-<sha7>`) writes
-it, and `scripts/graph_check.py` runs as a push-on-main job proving main graph ==
-main source):
-
-| you did | run |
-|---|---|
-| changed any `.py`/`.js`/`.md` in a PR | nothing — main's graph refreshes itself after merge (the bot's regen lane; do NOT run `graphify update` in a PR branch) |
-| maintain main / the regen lane | `python3 scripts/graph_regen.py --repo-dir <clone> --base-sha <main sha>` (AST-only update + `graph_check.py --fix`; prints NO_CHANGES or FILES for the caller's PR — never pushes) |
-| want to check without rewriting | `python3 scripts/graph_check.py` (`--fix` rewrites — regen lane only) |
-| added/renamed whole subsystems | `graphify label . --missing-only` names new communities — the ONLY LLM step; any OpenAI-compatible endpoint works (`OPENAI_BASE_URL`, `OPENAI_MODEL`, `GRAPHIFY_MAX_OUTPUT_TOKENS=16000` for thinking models). Never run in CI; weekly on the regen lane |
-
-Committed: `graph.json`, `GRAPH_REPORT.md`, `manifest.json`, `.graphify_labels.json(.sig)`,
-`.graphify_analysis.json`, `.graphify_root`. Ignored: `graph.html`, `cache/`, `cost.json`,
-dated backups. `.graphifyignore` excludes `graphify-out/` and `.github/` from the corpus.
+[`graphify`](https://github.com/Graphify-Labs/graphify) builds a code-navigation
+graph locally (`uv tool install graphifyy` → `graphify update .` in a scratch
+checkout): `graphify query "<question>"`, `graphify path "act_run" "run_child"
+--undirected`, `graphify affected "<symbol>" --depth 2`, `graphify god-nodes`.
+It is an exploration aid, not a gate: the output is never committed, CI never
+builds it, and a `graphify-out/` in your PR diff is deleted by review. Source
+and tests are the spec. (`.graphifyignore` ships so local runs skip generated
+noise; `scripts/graph_diagram.py` + `diagram_readme.py` are unrelated — they
+draw the example workflow diagrams in `examples/README.md`, which DO ship.)
 
 ### 4c. Rules
 

@@ -104,17 +104,10 @@ INCLUDE_FILES = (
     "examples/basics/smoke.json",
     "plugin.yaml",
     "CHANGELOG.md",
-    "scripts/graph_check.py",
     "scripts/graph_diagram.py",
     "scripts/diagram_readme.py",
     "scripts/pack.py",
     "scripts/pr_tag_audit.py",  # est-4vnq: tests/test_pr_tag_audit.py executes it; the shipped suite must not die on a missing helper
-    # wf165c: tests/test_graph_single_writer_153.py exec-modules BOTH at import
-    # (spec_from_file_location, repo convention) — the shipped suite must not
-    # die FileNotFoundError from the unpacked root. CI needs neither inside
-    # the package, but the suite does, so they pack.
-    "scripts/graph_path_ban.py",
-    "scripts/graph_regen.py",
     # est-5p7x (PR #165 CI blocker, run 37440782151): tests/test_diagram_law.py
     # (shipped via the tests/test_*.py glob) subprocess-executes BOTH generators
     # from the package root — the exact est-4vnq finding-4 shape. The merge ref
@@ -130,14 +123,11 @@ INCLUDE_FILES = (
     # so the ZIP side stays honest.
     "scripts/pr_formal_review.py",
     "scripts/suite.py",
-    "graphify-out/GRAPH_REPORT.md",
-    "graphify-out/graph.json",
     ".graphifyignore",
     "tests/fake",
     "tests/fake_hermes.py",
     "tests/wf_test_isolation.py",
     "tests/wf_test_markers.py",  # est-jue3: shared parseable-content marker waits, imported by the shipped tests (est-4vnq finding-4 shape: an unshipped helper kills the suite)
-    "tests/graph_gate_dep.py",  # shared fail-closed dep guard for the graph-gate tests (sys-hvd5gl)
     "tests/fixtures/mac-source.txt",
     "tests/fixtures/seat_acquire_driver.py",   # est-g2xx: seat-semaphore driver
     # est-2ek.1.762: the spawn-isolation law's shared helpers — SHIPPED because

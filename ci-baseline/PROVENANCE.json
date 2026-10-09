@@ -230,12 +230,19 @@
       "supersede_by": "next green-CI refresh (replace with the CI-captured row)"
     },
     {
-      "test": "test_graph_regen_z_parser_h3yi.py",
-      "added_by": "est-h3yi PR lane (author CI-pending; refreshed only from a green Serial suite job)"
+      "test": "(M02 deletion batch)",
+      "removed": [
+        "test_graph_gate.py",
+        "test_graph_single_writer_153.py",
+        "test_graphify_dedupe_27.py",
+        "test_graph_regen_z_parser_h3yi.py"
+      ],
+      "measured": "rows removed with their tests on the M02 branch; test_graph_regen_z_parser_h3yi.py goes too \u2014 its subject scripts/graph_regen.py + graph_path_ban.py are deleted with the regime (the -z parser lives in git history / the #314 branch)",
+      "supersede_by": "next green-CI refresh"
     }
   ],
   "totals": {
-    "cases": 269,
+    "cases": 265,
     "red": 0
   },
   "contract": "Green CI ledgers only (every exit == 0); rows not captured by CI are listed in rows_added_outside_ci with how they were measured. Refresh from the tip of main after each main move; see README.md.",
