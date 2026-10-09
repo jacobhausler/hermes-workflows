@@ -89,6 +89,10 @@ def _model_policy_error(graph):
         _p, alias_target = _alias_provider_pair(node.get("tier") or requested, seat, tiers, known)
         effective = alias_target or requested
         candidates = {requested, effective, node.get("model")}
+        if node.get("provider") and "/" not in str(requested):
+            # #291 F1: amend checks policy AFTER resolution, where a baked literal reads
+            # {provider: X, model: Y}; the ban on the full 'X/Y' must still bind it.
+            candidates.add(f"{node['provider']}/{requested}")
         if "/" in effective:
             candidates.add(effective.rsplit("/", 1)[-1])
         if candidates & forbidden:
@@ -707,7 +711,7 @@ WORKFLOW_PARAMS = {
             "or (when run-dir bytes are measurable \u2014 amend/validate) an absent artifact file or sha256 mismatch are each refused with an error naming the item and the missing/extra source \u2014 an item can never silently consume another item's artifacts (#85))}, "
             "on_fail ('skip' | '<fallback-agent-node-id>' \u2014 on this node's failure commit it `skipped` (join-tolerant, run continues; a join with one live dep still runs), and with a fallback id ALSO let that agent node run; validated at run time: fallback must exist, be an agent, not be an ancestor; cancelled deaths are never caught"
             ")} \u2014 agent node. A provider requires a non-empty model; "
-            "model aliases and literal IDs are preserved (tiers resolve explicitly, and a matching provider/model prefix is removed for the CLI). Run/amend responses include requested/resolved provider/model routes. Gate node: {id, type:'gate', after, question, options, context, when (bounded expr: out.<node>.<dotted.path> with == != > >= < <=, and/or/not, parens; "
+            "model aliases are preserved; a literal 'provider/model' id keeps its route identity but is split into provider + model when the seat routes that provider (tiers resolve explicitly, and a matching provider/model prefix is removed for the CLI). Run/amend responses include requested/resolved provider/model routes. Gate node: {id, type:'gate', after, question, options, context, when (bounded expr: out.<node>.<dotted.path> with == != > >= < <=, and/or/not, parens; "
             "malformed when is rejected at run/amend validation and holds the gate at fire \u2014 never a silent skip), wait:{wait_s, until_argv:[fixed argv, no shell], every_s (default 60), timeout_s (default 3600)} (machine-answered gate: parks the run at zero tokens \u2014 wait_s alone = timer; until_argv re-runs until exit 0; timeout \u2192 gate fails; its last stdout/stderr tail is the gate's output, "
             "usable via inputs). A human release pre-empts a park), on_skip:'pass'|'prune' (with when: prune commits the gate `skipped` and every node whose deps are ALL skipped is skipped too \u2014 terminal, not a failure; a join with one live dep runs; default pass = the arm still runs)}. Echo node: {id, type:'echo', after, "
             "output} — commits its `output` verbatim as the node result with zero tokens and no child spawn; downstream nodes consume it via after/inputs like any done node. Composite graphs: a top-level `include:[{as, use, seeds?, exports?}]` names library graphs "
@@ -910,7 +914,9 @@ _ROUTE_MATCH_KEYS = ("model", "tier", "provider")
 def _resolve_models(nodes, committed=None, keep=()) -> tuple[str | None, dict | None, dict | None]:
     """Resolve tier keys in place and return (error, model_table, routes).
 
-    Explicit aliases and literal ids stay unchanged. If a provider is supplied and the
+    Explicit aliases stay unchanged. A literal 'X/Y' with no provider, X a provider the
+    seat routes, is split to provider=X, model=Y (est-2ek.1.46); `routes.requested`
+    keeps the author's literal, and policy/freeze/quota compare the full 'X/Y'. If a provider is supplied and the
     model is prefixed by that same provider, strip the redundant prefix for the CLI's
     ``-m`` value. `routes` contains requested and effective provider/model pairs only;
     no credentials or config values. At the tail, the FEEDBACK #43 ``model_preflight``
@@ -995,11 +1001,23 @@ def _resolve_models(nodes, committed=None, keep=()) -> tuple[str | None, dict | 
         # author never writes the provider the alias already names. The model string
         # itself stays verbatim (house contract: aliases are preserved); only the
         # provider is baked so the runner's --provider matches the alias's own route.
-        ip = im = None
+        ip = im = lit_provider = None
         if m and not provider and not frozen and (tier or m in known):
             ip, im = _alias_provider_pair(requested_model, _seat_model_cfg(), tiers, known)
             if ip:
                 n["provider"] = ip
+        if (m and not provider and not frozen and not ip and not tier
+                and "/" in m and m not in _seat_aliases()):
+            # est-2ek.1.46: a literal 'provider/model' with no node.provider used to reach the
+            # child as a bare `-m provider/model` (seat default route + prefixed id -> HTTP 400)
+            # while the alias for the same model worked. Bake the provider the same way aliases
+            # do, but ONLY for a provider the seat itself routes through: an aggregator's
+            # 'vendor/model' namespace is not a provider claim. `requested` below keeps the
+            # author's literal (provider None).
+            lp, _, lm = m.partition("/")
+            if lp.strip() and lm.strip() and lp in _seat_provider_ids(tiers):
+                ip = lit_provider = n["provider"] = lp
+                n["model"] = m = lm
         eff_provider = provider or ip
         if m and provider:
             prefix, sep, remainder = m.partition("/")
@@ -1008,7 +1026,7 @@ def _resolve_models(nodes, committed=None, keep=()) -> tuple[str | None, dict | 
         if m:
             # display: author-explicit provider names the route (base semantics);
             # an inherited provider shows in `routes` only.
-            display = f"{provider}/{m}" if provider else str(m)
+            display = f"{provider or lit_provider}/{m}" if (provider or lit_provider) else str(m)
             if tier:
                 display += f"  ({tier})"
         table[n["id"]] = display
@@ -1428,6 +1446,13 @@ def _quota_refusal(graph, routes=None, cache_path=None, skip=()):
         res = ent.get("resolved") or {}
         names = {str(n.get("model")),
                  *( [str(res.get("model"))] if res.get("model") else [] )}
+        # #291 F3: entries stamped under the full 'provider/model' id (the pre-bake
+        # literal) still bind the baked node {provider, model}.
+        req = (ent.get("requested") or {}).get("model")
+        if req:
+            names.add(str(req))
+        if n.get("provider") and "/" not in str(n.get("model")):
+            names.add(f"{n['provider']}/{n['model']}")
         for key in names:
             hit = cache.get(key)
             if not isinstance(hit, dict) or hit.get("resets_epoch", 0) <= _t.time():
@@ -1496,6 +1521,24 @@ def _seat_model_cfg():
                     out["default"] = val.strip().strip("'\"")
             elif indent > 2 and in_aliases and val.strip():
                 out["aliases"][key.strip()] = val.strip().strip("'\"")
+    except Exception:
+        pass
+    return out
+
+def _seat_provider_ids(tiers=None):
+    """Provider ids the SEAT itself routes through: the 'provider/' prefix of every seat
+    alias and tier target, plus the configured `providers:` keys when hermes_cli is
+    importable (stdlib-only hosts fall back to the alias/tier prefixes). Deliberately not
+    the core's whole provider catalogue: an aggregator route's 'vendor/model' namespace
+    must not be mistaken for a provider claim (est-2ek.1.46)."""
+    out = set()
+    for target in [*_seat_aliases().values(), *(tiers or {}).values()]:
+        p, sep, rest = str(target).partition("/")
+        if sep and p.strip() and rest.strip():
+            out.add(p.strip())
+    try:
+        from hermes_cli.config import load_config_readonly
+        out |= {str(k) for k in ((load_config_readonly() or {}).get("providers") or {})}
     except Exception:
         pass
     return out
@@ -3566,7 +3609,11 @@ def _frozen_committed(r, old, new_nodes):
             continue
         same = all(n.get(k) == c.get(k) for k in _ROUTE_MATCH_KEYS) or (
             bool(c.get("tier")) and n.get("model") == c["tier"]
-            and n.get("provider") in (None, c.get("provider")))
+            and n.get("provider") in (None, c.get("provider"))) or (
+            # #291 F2: the author literal 'X/Y' replays as its committed bake {X, Y}
+            # (est-2ek.1.46) whether or not the seat still routes X.
+            not n.get("provider") and not c.get("tier") and bool(c.get("provider"))
+            and n.get("model") == f"{c['provider']}/{c.get('model')}")
         if same and _common.node_rec(r, c, ob)[0] in ("done", "partial", "skipped"):
             frozen.add(n["id"])
     moved = True
