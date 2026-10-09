@@ -210,11 +210,6 @@
     "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_diagram_law.py.log"
   },
   {
-    "test": "test_dialect_js_33.py",
-    "exit": 0,
-    "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_dialect_js_33.py.log"
-  },
-  {
     "test": "test_directive_card_error.mjs",
     "exit": 0,
     "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_directive_card_error.mjs.log"

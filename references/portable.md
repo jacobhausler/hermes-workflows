@@ -21,21 +21,3 @@ There is no index, service, or marketplace: a workflow is published when someone
 - `source_digest` (canonical `nodes` JSON): `d3c024d89563d84cf8af104752e22741350533a1977b843f382a51aeee436634`
 
 `tests/test_portable_32.py` asserts the example validates and that both digests still match this page; editing the example means re-pinning here in the same commit.
-
-## The js dialect seam: `wf_dialect.py`
-
-Anthropic-style `.claude/workflows/<name>.js` files are the other dialect of the same graph shape ([dialect](dialect.md) is the mapping table; `tests/fixtures/dialect/` is its executable form). `wf_dialect.py` is a standalone stdlib module at the plugin root — deliberately NOT a `workflow` tool action: interop is an authoring-time file conversion, and the tool's action set stays closed. Two commands, run from the plugin root:
-
-- Import: `python3 wf_dialect.py import <script.js>` prints `{"ok": true, "graph": {…wf/1…}, "warnings": […]}` (exit 0) or `{"ok": false, "refuse": "<construct> at line N"}` (exit 1). Only the [§3 subset](dialect.md#3-the-importable-subset-stated-once) imports: literal `meta`, sequential `const x = await agent(template, {schema, label, model, phase})`, a static `parallel([...])` of agent calls/thunks, `pipeline(<const>.<field> | [literal], stage…)` with every stage a direct `agent(...)`, `phase()`/`log()` literals (dropped, reported), a bare `return <const>` or `return <pipeline>.filter(Boolean)`. Everything else is refused with the construct and its line named — never approximated. Save the `graph` to `<name>.workflow.json` and run it with `graph_path`.
-- Export: `python3 wf_dialect.py export <graph.json> [--name N] [--out <dir>/<name>.js]` writes their shape (static `meta`, `await agent(...)` in wave order, `parallel([...])` for a static fan-out, `pipeline(...)` for `items_from` and chained fan-outs, `{run.KEY}` → `${args.KEY}`, `phase('Wave n')` from `after` depth). `--out` never creates the directory. Output is byte-stable for equal input.
-
-Lossy-export warning rule: every wf/1 key with no counterpart on their side is emitted as a `// LOSSY: <key> = <value>` comment line AT the node and listed again in the header `// LOSSY SUMMARY`, and printed once per key on stderr; nothing is dropped silently. The keys that can surface:
-
-| Scope | Keys reported lossy |
-| --- | --- |
-| agent node | `provider`, `toolsets`, `max_turns`, `timeout`, `run_budget`, `reasoning`, `tier`, `shape`, `repo`, `require_route`, `route_verified`, `profile`, `requires` |
-| gate node | `hold_timeout`, `on_skip`, `requires`, `context`, `wait`, `when` |
-| fan-out | per-item `schema` (when not carried by the parallel form), `{index}` in a pipeline template |
-| graph | `model_policy`, any `defaults` key with no js counterpart |
-
-A human gate becomes a `// HOLD: <question> [options]` stub whose const carries `default_option`. A graph whose semantics have no representation at all is REFUSED by name, mirroring the importer: a fan-out `quorum` (race), a human gate with no `default_option`, a `when` gate that prunes descendants, an `inputs` ref inside a fan-out's `{items, all_results}` object other than `.items`. The optional `node --check` syntax gate runs when `node` is on PATH; when it is absent the result carries `node_check: skipped` plus one warning and the importer's own scanner is the only gate (never a crash). Library use: `import wf_dialect; wf_dialect.js_import(source)` / `wf_dialect.export_report(graph)` (`js_export` raises `DialectRefusal`).
