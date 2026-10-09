@@ -1296,5 +1296,15 @@
     "test": "test_wall_meter_133.py",
     "exit": 0,
     "log": "Local foreground cd tests && PYTHONPATH=/opt/hermes:.. python3 test_wall_meter_133.py: RESULT GREEN (18 checks, 0 failed), exit 0"
+  },
+  {
+    "test": "test_hook_abandon_safety.py",
+    "exit": 0,
+    "log": "rows_added_outside_ci in PROVENANCE.json"
+  },
+  {
+    "test": "test_stock_dispatch_selection_304.py",
+    "exit": 0,
+    "log": "rows_added_outside_ci in PROVENANCE.json"
   }
 ]
