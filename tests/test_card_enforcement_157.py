@@ -141,6 +141,11 @@ class CardEnforcement(unittest.TestCase):
         first = self.call()
         self.assertIsNotNone(first)
         self.assertIsNone(self.call())            # retry, same turn
+        # #304 peer review: delivery is witnessed by SELECTION, not by the
+        # text merely being referenced. Mirror apply_llm_output_transform's
+        # winner test (`isinstance(r, str) and r`) — the bool coercion is the
+        # witness — then the next turn must stay silent off the marker.
+        self.assertTrue(isinstance(first, str) and first)
         self.assertIsNone(self.call(turn="t2"))   # next turn
 
     # ---- (c) model already pasted the bare directive: hands off --------------
