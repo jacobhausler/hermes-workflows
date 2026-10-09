@@ -3075,10 +3075,7 @@ def _create_run(args, graph, lib_name, models, routes, _liveness_notes, lane_pat
             f"{r} is not a directory under the durable runs root {r.parent}; "
             "no run was durably created (check the launch path's root resolution, "
             "esp. a stub/non-registering door carrying settings.runs_root)")
-    out = {"run_id": rid, "models": models, "routes": routes,
-           # #19: the head a CAS writer pins against — echoed at launch so the
-           # caller needs no second read before its first guarded write.
-           "graph_revision": _graph_revision(r), "hint":
+    out = {"run_id": rid, "models": models, "routes": routes, "hint":
             # Copy-exact inducement (papercut #70): the hint IS the paste line —
             # no paraphrase, no fallback. The card is agent-authored by ruling.
             # The liveness suffix rides BEHIND the paste line (prefix stays copy-exact).
