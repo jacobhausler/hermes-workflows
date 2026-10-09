@@ -1308,8 +1308,13 @@
     "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_route_hold_optout_retry_w56.py.log"
   },
   {
+    "test": "test_seat_cap_dotenv_gxjh6.py",
+    "exit": 0,
+    "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_seat_cap_dotenv_gxjh6.py.log"
+  },
+  {
     "test": "test_lease_busy_retry.py",
     "exit": 0,
-    "log": "local: lease-busy 1.3.3 lane — RED at base d69a64d (no _is_lease_busy, class absent), GREEN at head: 18/18 checks rc=0; re-run green under synthetic CPU load"
+    "log": "local: lease-busy 1.3.3 lane \u2014 RED at base d69a64d (no _is_lease_busy, class absent), GREEN at head: 18/18 checks rc=0; re-run green under synthetic CPU load"
   }
 ]
