@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.3.3 — 2026-10-09
+
+Patch line: a child that dies rc=130 carrying the CLI's session-lease notice
+(`Stopped waiting for another Hermes process on this session. Your message was
+not processed.`) is now typed `lease_busy` instead of falling to `unknown` and
+failing the node: the class joins the closed `ERROR_CLASSES` set and
+`_BOUNDED_RETRY_CLASSES`, so the node gets exactly ONE bounded re-drive as a
+FRESH session under the next attempt key (never `--continue` of the still-busy
+session) after `node.retrying error_class=lease_busy`. The Oct-3 field shape:
+two runs where a freshly spawned review child printed the CLI's lease notice
+after ~1800 s of lease waiting and exited 130 — the runner knew only SIGKILL
+deaths, so the collision read as an untyped terminal failure. The tool-progress
+gate is bypassed for this class alone (the notice proves the attempt never
+ran); a rc=130 death without the notice keeps its existing classification,
+and a harvestable fenced answer still outranks the class (#4 law). Pin:
+`tests/test_lease_busy_retry.py`.
+
 ## 1.3.2 — 2026-10-09
 
 Patch line, 37 commits since v1.3.1 (merge order #274 → #272 → #275 → #285

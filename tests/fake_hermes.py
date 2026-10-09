@@ -395,6 +395,31 @@ if _FAKE_MODE == "retry_progress" and "RESUME" in q:    # #5: transport death WI
         sys.exit(2)
     print("```json\n" + json.dumps({"result": "resumed"}) + "\n```")
     sys.exit(0)
+if _FAKE_MODE == "lease_busy":
+    # lease-busy (2026-10-03 field shape): attempt 1 prints the CLI's dead-session
+    # banner + the CLI's fail-closed lease notice verbatim and exits 130 (the CLI's
+    # lease-wait timeout exit). NO state.db row is written — the tool-progress gate
+    # MUST be bypassed for this class. Attempt 2 answers only when its prompt carried
+    # the fresh-session harvest preamble (proves the re-drive is a FRESH session,
+    # not a resume of the busy one); without it, dies 130 again on the same notice.
+    cnt = 0
+    if os.environ.get("FAKE_ATTEMPT_DIR"):
+        os.makedirs(os.environ["FAKE_ATTEMPT_DIR"], exist_ok=True)
+        p = os.path.join(os.environ["FAKE_ATTEMPT_DIR"], "attempts")
+        cnt = int(open(p).read()) if os.path.exists(p) else 0
+        open(p, "w").write(str(cnt + 1))
+    if cnt == 0 or "Dead-session re-drive harvest" not in q:
+        print("Session 20261003_000000_fake00 found but has no messages. Starting fresh.", flush=True)
+        print("Stopped waiting for another Hermes process on this session. "
+              "Your message was not processed.", flush=True)
+        sys.exit(130)
+    print("```json\n" + json.dumps({"result": "lease-recovered"}) + "\n```")
+    sys.exit(0)
+if _FAKE_MODE == "rc130_quiet":
+    # control twin: exits 130 WITHOUT the lease notice — must keep the existing
+    # `unknown` classification and stay terminal (no lease re-drive).
+    print("some unrelated chatter, no lease marker")
+    sys.exit(130)
 if _FAKE_MODE == "dead_session_102" and "DEADSESS" in q:
     # #102: drive 1 dies on its wall leaving a session row with tool_call_count>0
     # (bounded-retry gate opens) and NO persisted messages when FAKE_MESSAGES=0;

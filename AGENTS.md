@@ -243,7 +243,7 @@ existing verbatim leniency.
 - `node.failed` events carry `error_class` from the closed set defined in code
   (`wf.py ERROR_CLASSES`) — `cancelled | cap_exhausted | config_input | crashed | early_death |
   fanout_empty | fatal_quota | forbidden_model | incomplete_work |
-  inputs | item_record | lane_wreckage | left_live_descendants | malformed_turn | precondition | provider_400 | quorum |
+  inputs | item_record | lane_wreckage | lease_busy | left_live_descendants | malformed_turn | precondition | provider_400 | quorum |
   ratelimit |
   route_substitution_denied | route_unavailable | schema | seat_unsupported | seat_wait | spawn | timeout | transport | transport_exhausted |
   unresolved_model`, plus `unknown` as the harvest-time default when nothing matches —
@@ -278,6 +278,18 @@ existing verbatim leniency.
   reach — fails on the FIRST attempt (the retry ladder cannot beat a multi-day reset)
   and stamps the model into the seat quota cache; the door then refuses a launch on
   that model until the horizon passes (one recovery ping first).
+  `lease_busy`: a child that exited rc=130 with the CLI's own fail-closed lease notice
+  (`Stopped waiting for another Hermes process on this session. Your message was not
+  processed.`) lost the session-lease race — another Hermes process held the session
+  for the whole CLI lease wait (~30 min field-measured) and the message never reached
+  the model. A pure collision, never a verdict on the work: ONE bounded re-drive as a
+  FRESH session under the next attempt key (`#a{n+1}`, never `--continue` of the busy
+  one — that lease belongs to someone else), preceded by `node.retrying
+  error_class=lease_busy` and the 5 s bounded backoff. The tool-progress gate is
+  inverted here on purpose: the CLI's notice PROVES nothing of the attempt ran, so the
+  replay-safety evidence the other bounded classes need cannot exist; a harvestable
+  fenced answer still outranks the class (#4 harvest law runs first). A rc=130 death
+  WITHOUT the notice keeps its existing classification untouched.
   `ratelimit` (#54): a credential-window 429 — the child's stdout carries the CLI's
   own `... credentials are rate-limited for <model> ...` banner. Classified BEFORE
   transport/fatal_quota (the banner wins even when quota phrases co-occur: this death
@@ -319,6 +331,10 @@ existing verbatim leniency.
   a SIGKILL-wave child that banked nothing), the re-drive spawns as a FRESH session seeded
   instead with a harvest preamble (banked work-dir files + cleaned log tail); the
   `node.retry` event and the `attempts_log` entry stamp `fresh_session: true`.
+  `lease_busy` gets the same ONE bounded re-drive but ALWAYS as a FRESH session under the
+  next attempt key (never `--continue` the busy session) and WITHOUT the tool-progress
+  precondition — the CLI's own lease notice proves the attempt never ran; its machine-wait
+  event is `node.retrying error_class=lease_busy`.
 - A child silent for 120 s after spawn is killed as `early_death`; a child still writing its
   log when the wall fires gets one 50 % extension (`node.extended`), then dies.
 - A wall-killed child's corpse is banked (#131): `nodes/<id>[.<i>].corpus/` holds `work/`

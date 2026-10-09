@@ -1533,7 +1533,13 @@ _BOUNDED_RETRY_CLASSES = ("transport", "early_death", "cap_exhausted", "timeout"
                           # real tool calls — the bounded (tool-progress) ladder is the
                           # right re-drive channel; never Q4 (zero-calls evidence is the
                           # wrong proof here) and never beyond the ONE bounded re-drive.
-                          "malformed_turn")
+                          "malformed_turn",
+                          # lease-busy (2026-10-03 field evidence): the child lost the
+                          # session-lease race — the CLI waited it out, refused to process
+                          # the message, and exited 130. A transient collision, not a
+                          # verdict on the work: exactly ONE bounded re-drive as a FRESH
+                          # session (see _is_lease_busy for the two-fact pin).
+                          "lease_busy")
 _BOUNDED_RETRY_BACKOFF = 5.0
 RESUME_LINE = "Do not redo finished work; continue from the state above."
 
@@ -1707,7 +1713,11 @@ ERROR_CLASSES = frozenset(("provider_400", "unresolved_model", "cap_exhausted",
                            # lane carries a proved-alive receipt for another model —
                            # post-admission route substitution is a denial, never a
                            # silent re-billing (runs 20261004-070649-zap-night-*).
-                           "route_substitution_denied"))
+                           "route_substitution_denied",
+                           # lease-busy: rc=130 death on the CLI's session-lease wait
+                           # (see _is_lease_busy) — bounded transient, one FRESH-session
+                           # re-drive, never terminal on a lease collision.
+                           "lease_busy"))
 _AGENT_FAIL_PREFIX = "hermes -z: agent failed:"
 # turn_failure_copy.py ends every non-retryable failure with a fixed-format trailer
 # `Provider said: <summary>`; api_error_summary.py:49 formats the summary as
@@ -2175,6 +2185,38 @@ def _classify_rc_output(out):
 _CONFIG_INPUT_WINDOW_MS = 1000
 _CONFIG_INPUT_TOKENS = ("unknown provider", "not a known provider",
                         "provider not found", "no provider named")
+
+# ---------- lease-busy: a session-lease collision is transient, never terminal ----------
+# Field evidence (Oct-3, two runs): a freshly spawned review child printed
+#   `Session <id> found but has no messages. Starting fresh.`
+#   `Stopped waiting for another Hermes process on this session. Your message was not processed.`
+# and exited rc=130 after ~1800 s — the CLI's own turn-lease wait timed out against a
+# Hermes process already holding that session (agent/turn_facade_lease.py emits this
+# verbatim fail-closed notice; the 130 is the CLI's lease-timeout exit). Nothing of the
+# child's work ever started, so `unknown` made the node terminal on a pure collision.
+# Two facts must BOTH hold — neither alone is sufficient (mirrors the est-tmuu law):
+#   1. the child exited with the CLI's lease-wait code, rc == 130 (runner-known);
+#   2. its merged capture carries the CLI's verbatim lease-refusal notice (the child
+#      never processed the message — a fact the CLI itself asserts, not prose we grep
+#      for sentiment).
+# The consequence is the #5 BOUNDED channel: ONE re-drive as a FRESH session (next
+# attempt key, never --continue of the busy one — the prior session is someone else's
+# lease). A harvestable fenced answer outranks this class (the #4 harvest law runs
+# first), so a lease death that somehow printed a real answer still commits partial.
+LEASE_BUSY_RC = 130
+LEASE_BUSY_TOKEN = "stopped waiting for another hermes process on this session"
+
+def _is_lease_busy(rc, out):
+    """(bool, marker-line) — True only when BOTH lease-busy facts hold: the child
+    exited rc == LEASE_BUSY_RC (130) AND its capture carries the CLI's verbatim
+    lease-refusal notice. Returns (False, None) otherwise; the caller keeps the
+    existing classification exactly."""
+    if rc != LEASE_BUSY_RC:
+        return False, None
+    for l in (out or "").splitlines():
+        if LEASE_BUSY_TOKEN in l.strip().lower():
+            return True, l.strip()
+    return False, None
 
 def _classify_config_input(out, ms):
     """(bool, marker) — True only when BOTH est-tmuu facts hold: the child died
@@ -4979,6 +5021,22 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
                              f"of waiting. Marker: {marker}",
                     "error_class": "fatal_quota", "raw": (out or "")[-2000:], "ms": ms,
                     "final": final_reply, **sk, **evd}
+        lb, lb_marker = _is_lease_busy(rc, out)
+        if lb:
+            # lease-busy: the CLI's own fail-closed lease notice + its lease-wait exit
+            # code — a collision with another Hermes process on this session, never a
+            # verdict on the work. Typed failed here; the #5 bounded ladder re-drives
+            # it ONCE as a FRESH session (see _bounded_retry). Ranks AFTER the #4
+            # harvest (an answer that made it out still commits partial) and before
+            # the generic unknown/malformed_turn buckets, exactly like config_input
+            # claims its deterministic shape.
+            return {"status": "failed",
+                    "error": f"child exited rc={rc} on the CLI's session-lease wait — another "
+                             f"Hermes process held this session and the message was never "
+                             f"processed; one bounded re-drive as a fresh session follows. "
+                             f"Marker: {lb_marker}",
+                    "error_class": "lease_busy", "raw": (out or "")[-2000:], "ms": ms,
+                    "final": final_reply, **sk, **evd}
         if eclass == "unknown" and _tool_call_as_text(final_reply or out or ""):
             # est-2ek.1.541 malformed turn: the rc!=0 death whose reply IS serialized
             # tool-call markup rendered as text — no marker line to pin, no fenced answer
@@ -5521,17 +5579,26 @@ def _bounded_retry(meta, r, respawn, ev, ev_kw, node=None, index=None):
     its sessions row exists but NO message rows do, the resume is a pretense —
     the re-drive takes the harvest preamble (banked work dir + cleaned log
     tail) instead of the resume preamble, and node.retry + attempts_log stamp
-    fresh_session. Absent evidence (None) keeps the resume path."""
+    fresh_session. Absent evidence (None) keeps the resume path.
+    lease-busy exception: the CLI's own notice PROVES the prior attempt never
+    processed the message, so the tool-progress gate (which exists to avoid
+    replaying AMBIGUOUS partial work) cannot apply — a spawn that provably
+    never started has nothing to duplicate. lease_busy deaths therefore skip
+    the progress gate, always take the harvest preamble (dead=True — never
+    --continue the still-busy session), and log the machine-wait event
+    `node.retrying error_class=lease_busy` before the 5 s wait."""
     run = meta["_run"]
     if r.get("status") != "failed" or r.get("harvest"):
         return r
     eclass = r.get("error_class")
     if eclass not in _BOUNDED_RETRY_CLASSES:
         return r
+    lease = (eclass == "lease_busy")
     progress = (_tool_progress(run, r.get("skey"), r.get("raw"), r["profile_home"])
                 if r.get("profile_home") else _tool_progress(run, r.get("skey"), r.get("raw")))
-    if meta["_stop"].is_set() or not progress:
-        return r                                   # no positive progress evidence: fail closed
+    if meta["_stop"].is_set() or not (progress or lease):
+        return r          # no positive progress evidence: fail closed (lease: the death
+                         # fact itself is the evidence — the message was never processed)
     if meta["_stop"].is_set():
         return r
     # jam-h22/h30: a rate-limited death waits a FULL-JITTER draw (cap 5 s) before
@@ -5542,6 +5609,10 @@ def _bounded_retry(meta, r, respawn, ev, ev_kw, node=None, index=None):
         delay = random.uniform(0, _BOUNDED_RETRY_BACKOFF)
     else:
         delay = _BOUNDED_RETRY_BACKOFF
+    if lease:
+        # machine-wait event (ratelimit-park shape): the collision is named BEFORE
+        # the wait so a cold reader sees why the node went quiet for 5 s.
+        log(run, ev + ".retrying", error_class=eclass, backoff_s=delay, **ev_kw)
     if meta["_stop"].wait(delay) or meta["_stop"].is_set():
         return r
     with meta["_procs_lock"]:
@@ -5561,13 +5632,20 @@ def _bounded_retry(meta, r, respawn, ev, ev_kw, node=None, index=None):
         return iso
     # #102: dead (empty) session evidence — False is the pretense-resume shape,
     # True keeps today's resume, None (unavailable) never flips the path.
-    dead = False
-    if node is not None:
+    # lease_busy FORCES dead=True: the CLI's notice proves the message was never
+    # processed, so resuming that session is a pretense whatever state.db says —
+    # and the session itself may still belong to the OTHER process' lease. The
+    # re-drive always takes the harvest preamble under a fresh skey (#a{n+1}).
+    dead = bool(lease)
+    if node is not None and not dead:
         sess = (_session_has_messages(r.get("skey"), r["profile_home"])
                 if r.get("profile_home") else _session_has_messages(r.get("skey")))
         dead = (sess is False)
     log(run, ev + ".retry", error_class=eclass,
-        reason=(f"bounded auto-retry: {eclass} with tool progress — one re-drive as a FRESH "
+        reason=(f"bounded auto-retry: {eclass} — session-lease collision (message never "
+                f"processed); one re-drive as a FRESH session, never --continue the busy one"
+                if lease else
+                f"bounded auto-retry: {eclass} with tool progress — one re-drive as a FRESH "
                 f"session (prior session persisted no messages — #102)" if dead else
                 f"bounded auto-retry: {eclass} with tool progress — one machine-resume re-drive"),
         **ev_kw, **({"fresh_session": True} if dead else {}))
