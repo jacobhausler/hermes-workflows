@@ -1,205 +1,232 @@
-# Graph Report - tree  (2026-10-06)
+# Graph Report - tree  (2026-10-09)
 
 ## Corpus Check
-- 388 files · ~829,290 words
+- 468 files · ~932,805 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 7 file(s) not represented in the graph (top: (none) 7)
 
 ## Summary
-- 4212 nodes · 9044 edges · 224 communities (184 shown, 40 thin omitted)
-- Extraction: 95% EXTRACTED · 5% INFERRED · 0% AMBIGUOUS · INFERRED: 437 edges (avg confidence: 0.9)
+- 5026 nodes · 10730 edges · 254 communities (211 shown, 43 thin omitted)
+- Extraction: 94% EXTRACTED · 6% INFERRED · 0% AMBIGUOUS · INFERRED: 597 edges (avg confidence: 0.89)
 - Token cost: 0 input · 0 output
 
 ## Community Hubs (Navigation)
-- wf.py
-- wfcommon.py
-- path-semantics.mjs
-- jload
-- compileWorkflowInternal
 - os
-- test_confidence_substrate_116.py
-- ref_node_fs
+- compileWorkflowInternal
 - sys
-- pathlib
-- shutil
-- CardEnforcement
+- path-semantics.mjs
 - time
-- workflow-compiler.mjs
-- efp
-- i18n.mjs
-- threading
-- atomic-output.mjs
-- geometry.mjs
-- importlib_util
-- json
-- asArray
-- generated-validators.mjs
-- cli.mjs
-- brand-marks.mjs
-- route-quality.mjs
+- test_require_route_25.py
 - subprocess
+- pathlib
+- wf.py
+- threading
+- env
+- shutil
+- geometry.mjs
+- wfcommon.py
+- CardEnforcement
+- workflow-compiler.mjs
+- log
+- ref_node_fs
+- 11-golden-solo.py
+- atomic-output.mjs
+- CurrentAttemptMetrics
+- jload
+- hermes_home
+- route-quality.mjs
+- test_wfpid_owner_8.py
+- run_state
+- i18n.mjs
+- _expand_include_pass
+- generated-validators.mjs
+- json
+- brand-marks.mjs
+- efp
+- test_cross_container_liveness_91b9a3de.py
 - card_enforcement.py
 - properties
-- test_preflight_liveness_152be7f7.py
+- plugin_api.py
+- _adopt_child
 - properties
+- run_child
+- test_session_wake_matrix_101.py
 - test_fanout_expand.mjs
-- plugin.js
 - _Exporter
+- .wait
+- test_daemonize_8.py
 - test_orphan_adopt_790c6ad.py
+- pack.py
+- validate_graph_errors
+- lane_recover.py
+- test_literal_provider_prefix_46.py
+- test_ratelimit_park_walls_159c.py
+- plugin.js
+- test_fanout_item_commit_765.py
 - $defs
 - test_11_ui_imports.mjs
-- wf_dialect.py
-- test_admission_ledger_85.py
-- act_save
-- lane_recover.py
+- Changelog
+- test_deleted_cwd_resume_5c37b19.py
+- NodePanel
 - DoorLib50
-- test_ratelimit_park_walls_159c.py
-- test_fanout_item_goal.py
-- .wait
-- _Importer
-- test_crash_respawn_idempotence_8.py
-- test_session_wake_101.py
-- _stamp_served
-- _proc_snapshot
-- validate_graph_errors
-- _ping_route_once
-- test_silent_death_reaper_8.py
-- 11-golden-solo.py
-- test_lane_hygiene_preamble_8edcc9bf.py
-- __init__.py
-- test_session_wake_matrix_101.py
+- _sidecar_live_registered
 - act_run
-- graph_diagram.py
+- wf_dialect.py
+- _Importer
+- __init__.py
+- EngineNextCut
+- test_fanout_item_goal.py
+- test_session_wake_101.py
+- act_save
+- .meta
+- test_preflight_liveness_152be7f7.py
+- RunDirProof199
+- act_amend
+- .agent_args
 - test_pill_rail_expand.mjs
-- _expand_include_pass
-- plugin_api.py
+- test_lost_handoff_sync_wake_r18.py
+- _ping_route_once
 - $ref
 - properties
-- test_runner_orphan_666.py
 - test_live_truth_ui.mjs
-- Changelog
-- test_daemonize_8.py
-- NodePanel
-- test_tab_polish_48.mjs
 - README.md
-- SessionStrip
-- CurrentAttemptMetrics
-- parseTime
-- _input_graph
 - act_status
-- Anthropic Claude Code "dynamic workflows" — JS grammar fact sheet
+- cli.mjs
+- throwDiagnosticError
+- park_gate
+- test_tab_polish_48.mjs
+- SessionStrip
+- _kill_registered_children
+- test_amend_rebake_034849a2.py
+- _route_receipt_load
+- _resolve_models
 - test_register_surface.mjs
+- _proc_boottime
+- structural_graph_errors
 - desktop-readability.mjs
 - items
 - properties
 - test_canvas_wrap.mjs
 - test_node_click_expand.mjs
 - test_pane_render_uncapped.mjs
-- .statement
-- Nodes and data
-- _resolve_models
+- now
+- GraphView
+- test_card_frontend_contract.mjs
+- graph_path_ban.py
 - CardBackend
+- test_confidence_substrate_116.py
 - test_edge_routing.mjs
 - PB87
 - test_session_strip.mjs
 - test_tool_bridge_settings_9c41e2b7.py
-- Disclosure verification — clause-by-clause evidence
-- graph_path_ban.py
+- release_law
+- recover_crashed_runner
 - repository
-- EngineNextCut
-- LiveTruth
-- test_machine_watch_94.py
+- test_admission_ledger_85.py
 - test_node_panel.mjs
 - test_pane_model_agentfirst.mjs
-- _create_run
+- test_respawn_hardening_723.py
+- 2. The mapping table
+- graph_diagram.py
 - graph_regen.py
 - portable-path.mjs
+- measuredContentBounds
 - items
+- runs_root_probe.py
+- test_malformed_turn_adopted_541.py
 - test_proctree_61b.py
 - PC1603
-- GraphView
+- _bank_the_corpse
+- Graph grammar and authoring boundaries
+- parseTime
+- _input_graph
+- kind
+- test_plugin_resolution_live_not_old.py
 - TeamIntegration
+- GoldenFixtureWave1
+- test_schema_enum_107.py
+- FoldParity114
 - test_pill_rail.mjs
-- test_wfpid_owner_8.py
-- echo
+- test_runner_orphan_666.py
+- post_exit_hook.py
 - func3
 - anchor
-- test_deleted_cwd_resume_5c37b19.py
+- test_crash_respawn_idempotence_8.py
+- test_docs_surface_drift.py
 - test_metrics_missing_ui.mjs
-- release_law
+- test_seat_live_g2xx.py
 - make_public.py
-- Patched core: typed turn-cap deaths (optional)
-- pack.py
 - legendEntry
 - ConcurrencyBake100
 - test_malformed_turn_541.py
-- test_node_facts.py
-- 1.2.1 — 2026-10-04
-- label
+- test_pr_tag_audit.py
+- test_run_tray.mjs
 - RunTray
-- graph_check.py
+- pr_tag_audit.py
 - Workflow Renderer
 - workflow.schema.json
 - test_lane_recover_8edcc9bf.py
-- test_malformed_turn_adopted_541.py
-- test_proctree_61.py
-- test_proctree_identity_80.py
 - ProvenanceCounters
-- test_schema_enum_107.py
-- _aux_run
-- DialectRefusal
+- test_seat_postpopen_cleanup_r2_g255.py
+- FakeGitHub
+- plugin-catalog: add `hermes-workflows` (community, automation)
+- Hermes Workflows
 - translations
 - semanticRelation
 - ConvoySpliceRun
+- test_crash_no_exit_respawn_718.py
 - test_enum_clamp_5med_flah.py
+- GraphResult158
+- test_graph_revision_cas_19.py
+- test_plugin_asks_164_fallback.py
 - test_sprint101w2_B2-retry.py
-- _SV
+- DialectRefusal
 - Event-driven wakes: replacing cron polls with a push spine
 - _expand_includes_at_door
-- Hermes Workflows
-- GoldenFixtureWave1
+- diagram_readme.py
+- test_clean_lane_1660.py
 - test_explain_stale_0929.py
-- test_fatal_quota_24.py
 - Owner
+- test_routing_routes.py
 - test_run_dry_run.py
-- _B
 - model_preflight
+- manifest.json
+- Disclosure verification — clause-by-clause evidence
 - Workflow examples
 - install
+- .read_text
 - LifecycleNotice
+- Ctx
 - CoreFaithfulCtx
-- test_incident_response_93.py
 - test_include_door.py
-- test_include_expansion_core.py
+- test_library_corrupt_prev_yzoy.py
+- test_measured_zero_7ps8.py
+- PostExitHookTest
+- SpyRegistry
 - test_steer_live_40.py
-- reconcile_effects
-- explain_stale
-- Security Policy
-- 1.0.2 — 2026-09-26 — the run watches itself
+- test_suite_runs_root_762.py
 - Manifest decisions (publish pass, 2026-09-24)
 - _bind_run_context
-- _reap_silent_death
+- _route_enforcement
 - _spawn_runner
-- ref_node_crypto
+- journaled_calls
 - point
 - portableOutputPath
 - DoorLane
 - Claim
-- HTTP429
-- kill_tree
-- _dead_session_harvest
-- _wake_identity
-- Operator playbook (measured lessons)
+- test_findrun_twin_t1kk.py
+- test_runs_root_realpath_7ps8.py
+- _admission
 - validatePortablePath
 - focus
-- OrderOnlyGrammar
 - make_run
-- test_jec0_recursion_containment.py
-- _runner_term_cleanup
+- mk_pointer
+- PostExitStripTest
+- patch_active
+- patch_active
 - _rename_hint
-- manifest.json
 - Pill
-- Bail
+- _operative_texts
 - locale
 - path
 - bias
@@ -208,10 +235,10 @@
 - toCol
 - dynamic-agent-count.js
 - BlockedLegibility100
-- Integrated
-- _AdoptedHandle
-- .render_item_template
-- _lane_hygiene_preamble
+- _LADDER
+- native_engine
+- _Sink
+- Contributor checks (not ordinary user setup)
 - label
 - labelSegment
 - variant
@@ -219,7 +246,9 @@
 - date-now.js
 - meta-nonliteral.js
 - Ctx
-- _NoRedirect
+- Ctx
+- Ctx
+- ci-baseline/README.md
 - fake
 - args-iterable.js
 - args-template.js
@@ -232,17 +261,17 @@
 - two-stage-pipeline.js
 - unknown-option.js
 - while-loop.js
-- _include_set
+- Boom
 
 ## God Nodes (most connected - your core abstractions)
 1. `compileWorkflowInternal()` - 174 edges
-2. `run_child()` - 65 edges
-3. `efp()` - 47 edges
-4. `asArray()` - 46 edges
-5. `jload()` - 46 edges
-6. `main()` - 39 edges
-7. `log()` - 35 edges
-8. `CardEnforcement` - 33 edges
+2. `run_child()` - 80 edges
+3. `efp()` - 51 edges
+4. `jload()` - 47 edges
+5. `asArray()` - 46 edges
+6. `log()` - 38 edges
+7. `CardEnforcement` - 33 edges
+8. `run_state()` - 33 edges
 9. `validateReadablePinnedGeometry()` - 32 edges
 10. `loop()` - 31 edges
 
@@ -255,769 +284,877 @@
   docs/catalog/pr-body.md → scripts/vendor/archify/renderers/shared/generated-validators.mjs
 - `Fixed` --references--> `unknown()`  [INFERRED]
   CHANGELOG.md → scripts/vendor/archify/renderers/shared/path-semantics.mjs
-- `Relationship to a patched core` --references--> `unknown()`  [INFERRED]
-  docs/catalog/pr-body.md → scripts/vendor/archify/renderers/shared/path-semantics.mjs
+- `Review checklist (the maintainer runs exactly this)` --references--> `unknown()`  [INFERRED]
+  CONTRIBUTING.md → scripts/vendor/archify/renderers/shared/path-semantics.mjs
 
 ## Import Cycles
 - None detected.
 
-## Communities (224 total, 40 thin omitted)
+## Communities (254 total, 43 thin omitted)
 
-### Community 0 - "wf.py"
-Cohesion: 0.03
-Nodes (154): concurrent_futures, What the plugin gains, socket, urllib_error, _account_tree(), _adopt_child(), _complete(), _attempt_api_calls() (+146 more)
+### Community 0 - "os"
+Cohesion: 0.02
+Nodes (39): importlib_util, os, launch_env(), est-2ek.1.762: the launch-env pin for every test that spawns `wf.py run`. The…, Build a scrubbed launch env with both pins from scratch (POSIX-safe:…, est-6226 test B fixture: a synthetic "caller" (stands in for the gateway seat)…, Authoring door regressions; all state stays in this worktree, no…, Feedback #72: schemas may declare type "boolean". (1) validate_graph_errors… (+31 more)
 
-### Community 1 - "wfcommon.py"
-Cohesion: 0.03
-Nodes (104): 1.1.0 — 2026-09-28 — bot-team features: optional `profile` / `requires` / `lane_key` / runs-root / provenance, collections, Owner settings: `runs_root` and `profile` (tool-bridge first-class, #41/#42), shlex, guard_errors(), #8 stamp law (sole owner): the ADMITTED runner stamps its OWN wf.pid here —…, ready_stamp(), _active_spawn() (+96 more)
-
-### Community 2 - "path-semantics.mjs"
-Cohesion: 0.05
-Nodes (89): 2. Install, 2a. Catalog install (stock Hermes), 2b. Remote desktop app, 2c. From a release zip, 2d. Optional: typed turn-cap deaths, 4. Contribute, 4a. Map, 4b′. Navigate with the knowledge graph (+81 more)
-
-### Community 3 - "jload"
-Cohesion: 0.04
-Nodes (92): 1.1.1 — 2026-09-29 — runner correctness (cross-container liveness, ancestor gate answers), profile-home fix, lane-clean gate, portable files, pill rail, act_steer(), _acquire(), Run acquire_lock in-process; return ('busy', emitted) or ('acquired', '')., fixture(), put(), 95d7010295d70102: versioned replay integrity across the budget-rule change., test() (+84 more)
-
-### Community 4 - "compileWorkflowInternal"
-Cohesion: 0.07
-Nodes (90): animateAttr(), focusEdgeAttrs(), edgeLabelAccent(), joinRoutePoints(), labelPoint(), rectsOverlap(), routeHonorsEndpointSides(), routePointsValue() (+82 more)
-
-### Community 5 - "os"
-Cohesion: 0.03
-Nodes (35): os, tempfile, Lane A preconditions: null and missing ancestor fields fail before Popen, then…, Authoring door regressions; all state stays in this worktree, no…, fresh(), est-2ek.1.660: startup clean-lane assert. A re-drive (wf.py run <id>) of a run…, A fresh throwaway git lane + a base commit., The dead attempt's uncommitted WIP on a TRACKED file. (+27 more)
-
-### Community 6 - "test_confidence_substrate_116.py"
-Cohesion: 0.03
-Nodes (30): agent_reasoning_effort, atexit, contextlib, importlib, Meta, dict, #116 — confidence_substrate: engine-stamped fallback when a pinned confidence…, Estate config.yaml: top-level `workflows:` section with the owner's… (+22 more)
-
-### Community 7 - "ref_node_fs"
-Cohesion: 0.04
-Nodes (46): ref_node_assert, ref_node_fs, ref_node_os, ref_node_path, ref_node_url, compiled, __dirname, layoutJson (+38 more)
-
-### Community 8 - "sys"
-Cohesion: 0.04
-Nodes (20): sys, Stub hermes_bin for test_orphan_adopt_790c6ad — the live-orphan repro child.…, End-to-end test of the `workflow` tool door against fake hermes., #58 (door/sibling-root scan for status+wait): a LIVE run must never answer…, jam-h25 join-kind: a zero-spawn node that commits a deterministic json object…, wf(), est-2ek.1.599 regression pin: lanes must not materialize run graphs onto the…, B2b probes (peer-review owed items): (A) empty-array query shares the save law,… (+12 more)
-
-### Community 9 - "pathlib"
-Cohesion: 0.04
-Nodes (27): copy, pathlib, re, main(), pr_tag_audit.py — release-time gate for `(open PR #NN)` doc tags. Docs that…, resolve_repo(), _fake_state_row(), Fake hermes chat for wf.py engine tests. Usage: fake_hermes.py chat --query-… (+19 more)
-
-### Community 10 - "shutil"
-Cohesion: 0.04
-Nodes (20): shutil, graphify_dep_guard(), Fail-closed guard for the graphify CLI — the declared test dep behind the graph…, None if graphify is on PATH; else the exit code (1 fail-closed, or 0 SKIP under…, est-bbfy: pre-cap persist/finish budget cue (residual half of est-2ek.1.95).…, wf(), graph_check.py contract: committed graph ⇔ tree, both directions, plus the…, commit_all() (+12 more)
-
-### Community 11 - "CardEnforcement"
-Cohesion: 0.09
-Nodes (14): 1. New area + payload type — `lib/tool-result-contribs.ts` (new file), 2. Export from the SDK — `sdk/index.ts`, 3. One resolution point — `components/assistant-ui/tool/fallback.tsx`, Plugin-side readiness, Proposed core hook: tool-result card rendering (optional, upstream-shaped), The patch (≈30 lines, additive), What the plugin would then register (one block, `desktop/plugin.js`), Why (issue #157) (+6 more)
-
-### Community 12 - "time"
-Cohesion: 0.04
-Nodes (25): Dedicated 1.1 child fixture. Never imports the installed Hermes installation.…, answer(), Engine test: sequential, fanout, gate hold/release/resume, replay-skip,…, Stamp the gate answer with the CURRENT gate efp, like the door's release does., sh(), wf(), Papercuts 2026-09-22 round 2 (owner feedback drain, sibling seat): 3.…, wf() (+17 more)
-
-### Community 13 - "workflow-compiler.mjs"
-Cohesion: 0.08
-Nodes (49): throwDiagnosticError(), withDiagnosticRecordingSuppressed(), legendFootprint(), measuredEntryWidth(), measureLegend(), relationshipLegendObstacles(), renderLegend(), resolveLegend() (+41 more)
-
-### Community 14 - "efp"
+### Community 1 - "compileWorkflowInternal"
 Cohesion: 0.06
-Nodes (50): 2.1 Fields documented, 2.2 The static-read law (verbatim, S1 §"Edit a saved script"), 2.3 meta with phases (verbatim, from the Claude-generated cookbook script, S5), 2. The `meta` export block, Composite graphs (include), File-authored graphs, Gates and branches, Graph grammar and authoring boundaries (+42 more)
+Nodes (101): animateAttr(), focusEdgeAttrs(), svgAccessibleText(), svgRootAttrs(), edgeLabelAccent(), endpointSideIssue(), joinRoutePoints(), rectsOverlap() (+93 more)
 
-### Community 15 - "i18n.mjs"
-Cohesion: 0.08
-Nodes (48): brandLabelFitWidth(), brandMarkFor(), brandMetadataFor(), brandTopRailProblem(), markAttrs(), renderBrandMark(), focusNodeAttrs(), focusNodeTitle() (+40 more)
-
-### Community 16 - "threading"
+### Community 2 - "sys"
 Cohesion: 0.04
-Nodes (16): sqlite3, Stub hermes_bin for test_runner_orphan_666 — the runner-death-orphan repro…, Lane C (read model) acceptance, 1.1 team sprint — wfcommon profile/requires…, rerr(), Lane A: routed spawn, env boundary, missing-profile race and DB ownership., est-tmuu — a deterministic provider/alias config death is NOT transient…, v0.7.6 Lane A contracts (Q1 + Q4 + Q8), real runner + tests/fake. Q1 spawn-time…, Lifecycle regressions: fresh exits, truthful steering, retry evidence, final… (+8 more)
+Nodes (45): sys, tempfile, F3 boundary/claim integration: real door processes + kernel flock; no hook in…, GoldenSolo, Frozen v1.0.15 solo gate; six real fake_hermes workflows; no team settings., LaneSupervisor, Suite hook for the standalone 20-cycle lane-supervisor kill/resume harness., Lane E: cross-lane executable integration fixtures; no production… (+37 more)
 
-### Community 17 - "atomic-output.mjs"
+### Community 3 - "path-semantics.mjs"
+Cohesion: 0.06
+Nodes (83): 2. Install, 2a. Catalog install (stock Hermes), 2b. Remote desktop app, 2c. From a release zip, 2d. Optional: typed turn-cap deaths, Apply (source install only), Patched core: typed turn-cap deaths (optional), The patch (+75 more)
+
+### Community 4 - "time"
+Cohesion: 0.03
+Nodes (25): signal, main(), Twenty real runner crash/resume cycles; status lane_key checked against /proc.…, until(), main(), Twenty real runner crash/resume cycles; status lane_key checked against /proc.…, until(), Stub hermes_bin for test_orphan_adopt_790c6ad — the live-orphan repro child.… (+17 more)
+
+### Community 5 - "test_require_route_25.py"
+Cohesion: 0.03
+Nodes (37): agent_reasoning_effort, atexit, importlib, admission(), invalidate_receipts(), load_baseline(), A refused invocation must never leave a PRIOR green receipt standing in a…, Serial bounded suite with durable per-case logs and atomic exit ledger. The… (+29 more)
+
+### Community 6 - "subprocess"
+Cohesion: 0.03
+Nodes (26): subprocess, CrashResume, Suite hook for the standalone 20-cycle crash/resume harness., DIAGRAM LAW v1 — the derived-diagram gate contracts (stdlib-only). Laws under…, Item #77 (verb-roadmap/artifact-recovery): every node.failed EVENT must carry…, porcelain(), est-954r pin — the B1 test's raw run must never dirty the tracked tree.…, Tracked-path dirt as {path: XY}, parsed from git status --porcelain. (+18 more)
+
+### Community 7 - "pathlib"
+Cohesion: 0.03
+Nodes (31): ast, glob, hashlib, hermes_constants, pathlib, re, 1.1 door contracts: advisory keyed claims, no implicit resume, opt-in source., est-9yl2 — the committed CI baseline is load-bearing; guard its invariants.… (+23 more)
+
+### Community 8 - "wf.py"
+Cohesion: 0.03
+Nodes (66): concurrent_futures, errno, socket, error-class closed set — ERROR_CLASSES is the closed set AGENTS.md cites; it…, est-6st - a reply that IS serialized tool-call markup must never coerce. Field…, build_inputs(), _crash_gen(), drain_inbox() (+58 more)
+
+### Community 9 - "threading"
+Cohesion: 0.03
+Nodes (19): Stub hermes_bin for test_runner_orphan_666 — the runner-death-orphan repro…, est-2ek.1.318 (ra-review observation 2 / zap marker 6068266252,…, _boom(), #131 — bank-the-corpse on wall-kill. A child killed at its wall (`timeout`)…, est-tmuu — a deterministic provider/alias config death is NOT transient…, est-2ek.1.641 — post-admission route substitution is DENIED before submit.…, _abort_d(), est-g255 r3 (zap CHANGES at 81826493, HIGH) — the seat-admission loop must be… (+11 more)
+
+### Community 10 - "env"
+Cohesion: 0.03
+Nodes (27): est-bbfy: pre-cap persist/finish budget cue (residual half of est-2ek.1.95).…, wf(), answer(), Engine test: sequential, fanout, gate hold/release/resume, replay-skip,…, Stamp the gate answer with the CURRENT gate efp, like the door's release does., sh(), wf(), jam-h25 join-kind: a zero-spawn node that commits a deterministic json object… (+19 more)
+
+### Community 11 - "shutil"
+Cohesion: 0.03
+Nodes (26): shutil, graphify_dep_guard(), Fail-closed guard for the graphify CLI — the declared test dep behind the graph…, None if graphify is on PATH; else the exit code (1 fail-closed, or 0 SKIP under…, Lane C (read model) acceptance, 1.1 team sprint — wfcommon profile/requires…, rerr(), amend preview flags NEVER-COMMITTED nodes whose def differs from the frozen…, graph_check.py contract: committed graph ⇔ tree, both directions, plus the… (+18 more)
+
+### Community 12 - "geometry.mjs"
+Cohesion: 0.08
+Nodes (62): recordDiagnostic(), anchorFitsCanvas(), arrowClassMap, asArray(), AUTHORED_PLAN_KEYS, authoredAnalysisSegments(), axisCanvasOverflow(), clampAnchorToCanvas() (+54 more)
+
+### Community 13 - "wfcommon.py"
+Cohesion: 0.04
+Nodes (59): collections, shlex, amend_preview(), apply_substrate_disclosure(), blocked_legibility(), canonical_model_id(), current_attempt(), _downstream() (+51 more)
+
+### Community 14 - "CardEnforcement"
+Cohesion: 0.08
+Nodes (16): 1. New area + payload type — `lib/tool-result-contribs.ts` (new file), 2. Export from the SDK — `sdk/index.ts`, 3. One resolution point — `components/assistant-ui/tool/fallback.tsx`, Plugin-side readiness, Proposed core hook: tool-result card rendering (optional, upstream-shaped), The patch (≈30 lines, additive), What the plugin would then register (one block, `desktop/plugin.js`), Why (issue #157) (+8 more)
+
+### Community 15 - "workflow-compiler.mjs"
+Cohesion: 0.08
+Nodes (49): brandTopRailProblem(), withDiagnosticRecordingSuppressed(), legendFootprint(), measuredEntryWidth(), measureLegend(), renderLegend(), resolveLegend(), createSpatialGrid() (+41 more)
+
+### Community 16 - "log"
+Cohesion: 0.07
+Nodes (54): _account_tree(), _attempt_counts(), _boot_sweep(), _bounded_retry(), _fallback_ladder(), _final_quiesce(), _is_rate_limited(), _isolate_prior() (+46 more)
+
+### Community 17 - "ref_node_fs"
+Cohesion: 0.05
+Nodes (36): ref_node_assert, ref_node_fs, ref_node_path, ref_node_url, ref_node_vm, compiled, __dirname, layoutJson (+28 more)
+
+### Community 18 - "11-golden-solo.py"
+Cohesion: 0.04
+Nodes (23): contextlib, plugin_api, sqlite3, capture(), _core_home(), main(), normalize(), Golden solo capture/compare against v1.0.15 using the SAME fake_hermes. python3… (+15 more)
+
+### Community 19 - "atomic-output.mjs"
 Cohesion: 0.15
 Nodes (48): backupPublicRegularFileBinding(), captureAtomicOutput(), captureRegularFileBinding(), captureRegularFileHandle(), captureRequestedEntry(), captureTarget(), captureWriteSlot(), closeCapturedDescriptor() (+40 more)
 
-### Community 18 - "geometry.mjs"
+### Community 20 - "CurrentAttemptMetrics"
+Cohesion: 0.10
+Nodes (12): pin_env(), Force both pins into an explicit child-env mapping and return it. `runs_root`…, CurrentAttemptMetrics, run_graph(), LiveTruth, MetricsUnknownFold114, One child_metrics() row exactly as wfcommon.child_metrics folds it., run_state-shaped state for node ids in `nodes` (both adapters read ONE). (+4 more)
+
+### Community 21 - "jload"
 Cohesion: 0.07
-Nodes (46): anchorFitsCanvas(), arrowClassMap, AUTHORED_PLAN_KEYS, axisCanvasOverflow(), clampAnchorToCanvas(), collectAmbiguousCorridors(), collectArrowheadCollisions(), collectBorderRuns() (+38 more)
+Nodes (45): _acquire(), Run acquire_lock in-process; return ('busy', emitted) or ('acquired', '')., All per-item spawn records with a live pid, once every item is RUNNING., read_children(), acquire_lock(), _dead_letter(), emit(), finalize() (+37 more)
 
-### Community 19 - "importlib_util"
-Cohesion: 0.04
-Nodes (19): importlib_util, die(), Test-only crash injector: kill the claiming process at an actual filesystem…, replace(), write(), Feedback #72: schemas may declare type "boolean". (1) validate_graph_errors…, Door-copy pins for the fan-out quorum blurb (fb 2f9653b1cc98a4e0) and its lane-…, _hermes_bin must never raise under a live door ctx (09-28 launch blocker).… (+11 more)
+### Community 22 - "hermes_home"
+Cohesion: 0.06
+Nodes (44): Owner settings: `runs_root` and `profile` (tool-bridge first-class, #41/#42), #8 stamp law (sole owner): the ADMITTED runner stamps its OWN wf.pid here —…, ready_stamp(), confidence_substrate(), effective_runs_root(), _expand_config_values(), hermes_home(), hermes_root() (+36 more)
 
-### Community 20 - "json"
-Cohesion: 0.04
-Nodes (20): json, admission(), load_baseline(), Serial bounded suite with durable per-case logs and atomic exit ledger. The…, Read a prior ledger into {test: exit}. Contract is exact identities, so an…, Diff red identities base vs fix. An identity match requires BOTH the test name…, Identical solo child wrapper for both tag and candidate; records env key sets.…, ancestors() (+12 more)
+### Community 23 - "route-quality.mjs"
+Cohesion: 0.09
+Nodes (42): automaticPortRhythmBridge(), collectRouteRhythmIssues(), collinearForward(), crossProduct(), isFinitePoint(), normalizeRoutePoints(), pointInBox(), pointLiesOnSegment() (+34 more)
 
-### Community 21 - "asArray"
-Cohesion: 0.12
-Nodes (44): recordDiagnostic(), asArray(), authoredAnalysisSegments(), cleanAmbiguousCorridorProblems(), cleanBorderRunProblems(), cleanCrossingProblems(), cleanEndpointSideProblems(), cleanFlowProblems() (+36 more)
+### Community 24 - "test_wfpid_owner_8.py"
+Cohesion: 0.05
+Nodes (21): v0.7.6 Lane A contracts (Q1 + Q4 + Q8), real runner + tests/fake. Q1 spawn-time…, #61 — the runner is process-tree aware before it judges an attempt. Evidence…, alive(), boottime(), kill_all(), #80 review findings — a sidecar row is a CLAIM; /proc is the COURT…, Kernel start tick (field 22 of /proc/pid/stat — rest[19] after the comm)., alive() (+13 more)
 
-### Community 22 - "generated-validators.mjs"
+### Community 25 - "run_state"
+Cohesion: 0.06
+Nodes (42): 1.1.1 — 2026-09-29 — runner correctness (cross-container liveness, ancestor gate answers), profile-home fix, lane-clean gate, portable files, pill rail, fixture(), put(), 95d7010295d70102: versioned replay integrity across the budget-rule change., test(), item_records_certified(), Validate an aggregate candidate against the CANONICAL per-item records on disk,…, active_child() (+34 more)
+
+### Community 26 - "i18n.mjs"
+Cohesion: 0.08
+Nodes (42): brandLabelFitWidth(), brandMarkFor(), brandMetadataFor(), markAttrs(), renderBrandMark(), focusNodeAttrs(), focusNodeTitle(), BUILTIN_CATALOGS (+34 more)
+
+### Community 27 - "_expand_include_pass"
+Cohesion: 0.06
+Nodes (39): 1.2.1 — 2026-10-04, Library run-context contract, check(), expand_includes / include_provenance core-resolver contracts (design…, refuses(), _expand_include_pass(), map_site(), own() (+31 more)
+
+### Community 28 - "generated-validators.mjs"
 Cohesion: 0.05
 Nodes (43): pattern10, pattern11, pattern12, pattern13, pattern14, pattern15, pattern16, pattern29 (+35 more)
 
-### Community 23 - "cli.mjs"
-Cohesion: 0.09
-Nodes (38): applyLocaleTranslations(), isFilesystemError(), loadDiagram(), loadDiagramWithBrandMarks(), outputPathGuards, RELATIONSHIP_COLLECTIONS, SEMANTIC_COLLECTIONS, START_TYPES (+30 more)
-
-### Community 24 - "brand-marks.mjs"
-Cohesion: 0.09
-Nodes (38): ref_node_dns, ref_node_http, ref_node_https, ref_node_net, asUrl(), attribute(), BASIC_HTML_REFERENCES, beforeDeadline() (+30 more)
-
-### Community 25 - "route-quality.mjs"
-Cohesion: 0.10
-Nodes (37): automaticPortRhythmBridge(), collectRouteRhythmIssues(), collinearForward(), crossProduct(), isFinitePoint(), normalizeRoutePoints(), pointLiesOnSegment(), properSegmentIntersection() (+29 more)
-
-### Community 26 - "subprocess"
+### Community 29 - "json"
 Cohesion: 0.06
-Nodes (21): subprocess, F3 boundary/claim integration: real door processes + kernel flock; no hook in…, CrashResume, Suite hook for the standalone 20-cycle crash/resume harness., GoldenSolo, Frozen v1.0.15 solo gate; six real fake_hermes workflows; no team settings., LaneSupervisor, Suite hook for the standalone 20-cycle lane-supervisor kill/resume harness. (+13 more)
+Nodes (23): copy, json, die(), Test-only crash injector: kill the claiming process at an actual filesystem…, replace(), write(), Identical solo child wrapper for both tag and candidate; records env key sets.…, Door-copy pins for the fan-out quorum blurb (fb 2f9653b1cc98a4e0) and its lane-… (+15 more)
 
-### Community 27 - "card_enforcement.py"
+### Community 30 - "brand-marks.mjs"
+Cohesion: 0.08
+Nodes (40): ref_node_dns, ref_node_http, ref_node_https, ref_node_net, asUrl(), attribute(), BASIC_HTML_REFERENCES, beforeDeadline() (+32 more)
+
+### Community 31 - "efp"
+Cohesion: 0.07
+Nodes (40): 4. Contribute, 4a. Map, 4b′. Navigate with the knowledge graph, 4b. Run the checks, 4c. Rules, 4d. Release, Composite graphs (include), File-authored graphs (+32 more)
+
+### Community 32 - "test_cross_container_liveness_91b9a3de.py"
+Cohesion: 0.05
+Nodes (16): fcntl, io, graph(), hold(), 91b9a3de (recurrence of baa0088f19452326): cross-container runner liveness. The…, A holder in ANOTHER process group — the kernel view of 'a runner in a sibling…, #128 artifact-mtime progress channel: the write-first file is the heartbeat.…, est-2ek.1.833: status/next expose global-seat back-pressure. Run… (+8 more)
+
+### Community 33 - "card_enforcement.py"
 Cohesion: 0.07
 Nodes (35): _age_minutes(), _bare_directive_ids(), bind(), _card_hook(), _CardText, _confirm(), _events(), _mark() (+27 more)
 
-### Community 28 - "properties"
+### Community 34 - "properties"
 Cohesion: 0.05
 Nodes (40): $ref, type, type, $ref, minimum, type, $ref, $ref (+32 more)
 
-### Community 29 - "test_preflight_liveness_152be7f7.py"
-Cohesion: 0.07
-Nodes (29): author(), commit_run(), Ctx, fb 034849a23af94418: an amend must not re-resolve already-committed nodes…, Commit a run the way act_run does (defaults + resolve) under the DEFAULT seat;…, seat(), check(), contract() (+21 more)
+### Community 35 - "plugin_api.py"
+Cohesion: 0.08
+Nodes (28): asyncio, 1.3.1 — 2026-10-07, Explorer V2: one node truth, two readers, _events(), _fold_metrics(), get_node_log(), get_run(), _list_runs() (+20 more)
 
-### Community 30 - "properties"
+### Community 36 - "_adopt_child"
+Cohesion: 0.06
+Nodes (35): est-jec0 / PR #122 B1 pin: the prose-JSON fallback must never crash the node.…, _adopt_child(), _AdoptedHandle, _classify_config_input(), _classify_rc_output(), extract_json(), _harvest_cancelled(), _harvest_death() (+27 more)
+
+### Community 37 - "properties"
 Cohesion: 0.05
 Nodes (38): enum, additionalProperties, properties, type, additionalProperties, properties, type, $ref (+30 more)
 
-### Community 31 - "test_fanout_expand.mjs"
+### Community 38 - "run_child"
+Cohesion: 0.06
+Nodes (35): _bespoke_middle(), _budget_cue_margin(), _child_spoke(), _clamp_warn(), derived_contract(), _filter_child_toolsets(), _first_message_s(), _gate400_parse() (+27 more)
+
+### Community 39 - "test_session_wake_matrix_101.py"
+Cohesion: 0.08
+Nodes (23): _fallback(), main(), _mark(), _ok(), post_formal_review(), Author-aware formal review. Returns a verdict dict; the CLI exits non-zero when…, pr_formal_review.py — the AUTHOR-AWARE formal-review step (est-2ek.1.866). The…, The ONE network seam: tests replace it with a fake. Returns (status:int,… (+15 more)
+
+### Community 40 - "test_fanout_expand.mjs"
 Cohesion: 0.07
 Nodes (29): badge0, badge1, badgeOf(), box(), calls, coll, { columnGroups: columnGroupsFn, bandRows: bandRowsFn }, def (+21 more)
 
-### Community 32 - "plugin.js"
-Cohesion: 0.08
-Nodes (32): api(), BREATHE, ctxRest(), EDGE_TONE, $fanExpanded, $fanItem, fanItems(), $fanOpen (+24 more)
+### Community 41 - "_Exporter"
+Cohesion: 0.12
+Nodes (14): _const_name(), _Exporter, _js_literal(), _js_str(), Deterministic JS literal (sorted object keys) — JSON is a JS subset., fan-out b directly after fan-out a with items_from a.items and no other reader…, A fan-out that is one template for every item (no per-item goals) -> template…, Effective `context` of an agent node = wfcommon.apply_graph_defaults semantics… (+6 more)
 
-### Community 33 - "_Exporter"
-Cohesion: 0.15
-Nodes (12): _const_name(), _Exporter, _js_literal(), _js_str(), Deterministic JS literal (sorted object keys) — JSON is a JS subset., fan-out b directly after fan-out a with items_from a.items and no other reader…, A fan-out that is one template for every item (no per-item goals) -> template…, Effective `context` of an agent node = wfcommon.apply_graph_defaults semantics… (+4 more)
+### Community 42 - ".wait"
+Cohesion: 0.11
+Nodes (33): 1. What this is (30 seconds), 3. Operate, 3a. The loop, 3b. Minimal graph, 3c. Fan-out, gates, branches, 3d. Failures, resume, amend, 3e. Reporting a finished run, 5. Where things live at runtime (+25 more)
 
-### Community 34 - "test_orphan_adopt_790c6ad.py"
+### Community 43 - "test_daemonize_8.py"
 Cohesion: 0.07
-Nodes (12): datetime, _iso(), #157 (MACHINERY rung, backend half): card enforcement via transform_llm_output.…, est-jam8 — the config death is typed config_input on EVERY read path. Deep…, env_for(), put_rec(), 790c6ad — live-orphan adoption on a respawned runner. Forensic shape (waveA3):…, start_runner() (+4 more)
+Nodes (15): ctypes, select, alive(), call(), descendants(), _kill(), proc_map(), psutil children(recursive) equivalent: live ppid links, /proc only. (+7 more)
 
-### Community 35 - "$defs"
+### Community 44 - "test_orphan_adopt_790c6ad.py"
+Cohesion: 0.06
+Nodes (13): datetime, A stop arriving inside an adopted child's liveness probe stays cancelled., stopped_during_probe(), est-jam8 — the config death is typed config_input on EVERY read path. Deep…, env_for(), put_rec(), 790c6ad — live-orphan adoption on a respawned runner. Forensic shape (waveA3):…, start_runner() (+5 more)
+
+### Community 45 - "pack.py"
+Cohesion: 0.10
+Nodes (29): build(), collect_sources(), install_provenance(), main(), _packaged_at(), Path, Build the private, reproducible Hermes Workflows source ZIP (stdlib only)., _source_commit() (+21 more)
+
+### Community 46 - "validate_graph_errors"
+Cohesion: 0.07
+Nodes (24): ONE gate-answer path for tool and UI. Stale answers never block: the answer…, _release_core(), _include_when_heads(), Return a LIST of {node, field, msg} — EVERY defect, not the first. Strict ids:…, Heads of genuine out.<id> references (tokenizer-driven; string literals…, Syntax-mode value: total-order sentinel so a PARSE-ONLY pass never raises on…, Parse-only check for validate_graph — VALUE-INDEPENDENT (sentinel operands), so…, Conditional-gate predicate over a BOUNDED grammar (out paths, literals,… (+16 more)
+
+### Community 47 - "lane_recover.py"
+Cohesion: 0.11
+Nodes (32): apply_patch(), _atomic_json(), Bail, _finalize_locked(), finalize_run(), find_session(), _hermes_home(), main() (+24 more)
+
+### Community 48 - "test_literal_provider_prefix_46.py"
+Cohesion: 0.11
+Nodes (13): Before you push (mechanical gates), Contributing to hermes-workflows, For agents, Issues, License, Review checklist (the maintainer runs exactly this), What lands fast, What needs an issue first (+5 more)
+
+### Community 49 - "test_ratelimit_park_walls_159c.py"
+Cohesion: 0.07
+Nodes (12): random, bounded_wait(), FakeStop, jam-h22/h30 (hackathon): rate-limit/429 transport deaths retry with…, Run _transient_retry once over a rate-limited death; return the logged…, transient_delay(), _Clock, _Draw (+4 more)
+
+### Community 50 - "plugin.js"
+Cohesion: 0.08
+Nodes (30): api(), BREATHE, ctxRest(), EDGE_TONE, $fanExpanded, $fanItem, fanItems(), $fanOpen (+22 more)
+
+### Community 51 - "test_fanout_item_commit_765.py"
+Cohesion: 0.16
+Nodes (27): agg_record(), check(), check_invariant(), fan_graph(), item_records(), jload_runjson(), main(), mk() (+19 more)
+
+### Community 52 - "$defs"
 Cohesion: 0.07
 Nodes (29): enum, oneOf, enum, $defs, animation, brandMark, componentType, id (+21 more)
 
-### Community 36 - "test_11_ui_imports.mjs"
+### Community 53 - "test_11_ui_imports.mjs"
 Cohesion: 0.08
 Nodes (25): actual, baseShown, cardBaseline, codeOnly, dropNulls(), EDGE_TONE, $fanItem, FROZEN_BASELINE (+17 more)
 
-### Community 37 - "wf_dialect.py"
-Cohesion: 0.08
-Nodes (25): export_report(), _fmt_goal(), _has_tpl(), js_export(), js_import(), _main(), _mask(), _match_close() (+17 more)
+### Community 54 - "Changelog"
+Cohesion: 0.07
+Nodes (27): 0.9.0 — 2026-09-24, 1.0.10 — 2026-09-27 — child work dir is writable under HERMES_WRITE_SAFE_ROOT, 1.0.11 — 2026-09-27 — false when-gate defaults to prune (decorative-gate footgun closed), 1.0.16 — 2026-09-28, 1.0.2 — 2026-09-26 — the run watches itself, 1.0.3 — 2026-09-26 — the feedback fleet's four lane fixes, 1.0.4 — 2026-09-26 — manifest floor matches the fleet, 1.0.6 — 2026-09-26 — suite ledger resets; fanout grammar named (+19 more)
 
-### Community 38 - "test_admission_ledger_85.py"
-Cohesion: 0.08
-Nodes (14): ast, hashlib, 1.1 door contracts: advisory keyed claims, no implicit resume, opt-in source., agent(), art_graph(), fan_graph(), #85 — artifact-admission guard: input ledgers map 1:1 to declared sources. The…, seed -> fan, fan.after=[seed]; ledger rows reference seed.facts[i]. (+6 more)
+### Community 55 - "test_deleted_cwd_resume_5c37b19.py"
+Cohesion: 0.10
+Nodes (17): _ast(), _dump(), _edge_key(), main(), _norm(), normalize(), Graph drift gate: is the committed graphify-out/graph.json current for this…, Return a NEW graph dict in canonical form (see module docstring). Pure; input… (+9 more)
 
-### Community 39 - "act_save"
+### Community 56 - "NodePanel"
+Cohesion: 0.13
+Nodes (28): attemptNo(), box(), defaultTabFor(), Dot(), factText(), fanCounts(), FanStrip(), fanSummary() (+20 more)
+
+### Community 58 - "_sidecar_live_registered"
+Cohesion: 0.08
+Nodes (28): _stop_watcher(), _proc_children_of(), _proc_envv(), _proc_snapshot(), _proc_state(), Snapshot the spawn's live SUBTREE while it still LIVES: after it dies and is…, Can the process table be read at all? #61b B2 (fail-closed family of the door's…, One pass over /proc: {pid: (ppid, pgid)} for LIVE (non-zombie) pids. Zombie =… (+20 more)
+
+### Community 59 - "act_run"
 Cohesion: 0.09
-Nodes (27): act_library(), act_save(), _from_unknown_error(), _lane_shelf_guard(), _lib_path(), _lib_read(), _lib_rel_name(), library_root() (+19 more)
+Nodes (27): act_list(), act_run(), _card(), _concurrency_bake(), _create_run(), _identity_stamps(), _lane_entry(), _lane_paths() (+19 more)
 
-### Community 40 - "lane_recover.py"
-Cohesion: 0.12
-Nodes (27): apply_patch(), find_session(), _hermes_home(), journaled_calls(), main(), open_ro(), profile_db(), The sessions row for a child key. `skey` may already carry `#a<n>`; a bare key… (+19 more)
-
-### Community 42 - "test_ratelimit_park_walls_159c.py"
+### Community 60 - "wf_dialect.py"
 Cohesion: 0.08
-Nodes (10): random, bounded_wait(), FakeStop, jam-h22/h30 (hackathon): rate-limit/429 transport deaths retry with…, Run _transient_retry once over a rate-limited death; return the logged…, transient_delay(), Late, Committee wf159c fix-response (PR #159) — three blocking findings, pinned. The… (+2 more)
+Nodes (24): check(), refuses(), export_report(), _fmt_goal(), _has_tpl(), js_export(), js_import(), _line() (+16 more)
 
-### Community 43 - "test_fanout_item_goal.py"
-Cohesion: 0.20
-Nodes (26): _assert_no_fail_closed(), _assert_prompts_carry_own(), cards(), clean_items(), corrupt_items(), fan_graph(), fan_graph_bare(), idx_of() (+18 more)
+### Community 61 - "_Importer"
+Cohesion: 0.16
+Nodes (10): _control_kw(), _forbidden_label(), _Importer, _match_close or a named refusal (F2 #36): an unterminated construct is reported…, True when masked[s:e] does not close every bracket it opens (an unterminated…, Best-effort name for a glue expression, from its visible method calls., dialect.md row 13: name Date.now()/Math.random()/new Date()/Promise.* by name., `${expr}` -> ('args', key) | ('const', name, [fields]) | refuse. Accepts the… (+2 more)
 
-### Community 44 - ".wait"
-Cohesion: 0.14
-Nodes (24): 1. What this is (30 seconds), 3. Operate, 3a. The loop, 3b. Minimal graph, 3c. Fan-out, gates, branches, 3d. Failures, resume, amend, 3e. Reporting a finished run, 5. Where things live at runtime (+16 more)
+### Community 62 - "__init__.py"
+Cohesion: 0.11
+Nodes (24): difflib, act_doctor_version(), act_inbox(), _death_anchor(), _gw_restart_window_match(), handle(), model_tiers(), _owner_settings_error() (+16 more)
 
-### Community 45 - "_Importer"
-Cohesion: 0.17
-Nodes (12): _Importer, _line(), _ordered(), Split masked[s:e] on `sep` at bracket depth 0 -> list of (start, end)., _match_close or a named refusal (F2 #36): an unterminated construct is reported…, Parse `agent(<prompt>, {opts})` between the parens. Returns (prompt, opts,…, A literal label -> str; a template label -> its literal spine (for ids)., The exporter's own `## Inputs (wf/1 refs)` tail is pure refs: fold it back to… (+4 more)
+### Community 63 - "EngineNextCut"
+Cohesion: 0.15
+Nodes (9): catalogKeys(), Archify JSON IR Schemas, Files, Legend presentation contract, Runtime validation, schema_version policy, Shared definitions (common.schema.json), nodes() (+1 more)
 
-### Community 46 - "test_crash_respawn_idempotence_8.py"
-Cohesion: 0.09
-Nodes (10): signal, main(), Twenty real runner crash/resume cycles; status lane_key checked against /proc.…, until(), main(), Twenty real runner crash/resume cycles; status lane_key checked against /proc.…, until(), Lane E: cross-lane executable integration fixtures; no production… (+2 more)
+### Community 64 - "test_fanout_item_goal.py"
+Cohesion: 0.23
+Nodes (24): _assert_no_fail_closed(), _assert_prompts_carry_own(), cards(), clean_items(), corrupt_items(), fan_graph(), fan_graph_bare(), idx_of() (+16 more)
 
-### Community 47 - "test_session_wake_101.py"
+### Community 65 - "test_session_wake_101.py"
 Cohesion: 0.09
 Nodes (10): answer(), drive(), _Hang, _Hang10, BaseHTTPRequestHandler, One runner process, stdout captured (the door's spawn redirects this to…, Session-wake law: lifecycle TRANSITIONS reach the owner session stamp, exactly…, _Redir (+2 more)
 
-### Community 48 - "_stamp_served"
-Cohesion: 0.10
-Nodes (25): bake_route_receipts(), hermes_home(), Post-spawn receipt write (the door's proof, executed by the runner): a spawn…, est-2ek.1.641: BEFORE submit — if this lane has a proved-alive receipt and this…, Message-existence evidence for the #102 dead-session guard: True when the dead…, Commit actual child seat truth, never the requested alias. No row means unknown., The target owns the child's session DB; absent routing preserves legacy home., {alias -> target model} for one seat's config, stdlib-only (same YAML-lite… (+17 more)
-
-### Community 49 - "_proc_snapshot"
-Cohesion: 0.08
-Nodes (25): _proc_boottime(), _proc_children_of(), _proc_envv(), _proc_snapshot(), _proc_state(), Can the process table be read at all? #61b B2 (fail-closed family of the door's…, Kernel start tick of a pid: field 22 of /proc/pid/stat (starttime, clock ticks…, One pass over /proc: {pid: (ppid, pgid)} for LIVE (non-zombie) pids. Zombie =… (+17 more)
-
-### Community 50 - "validate_graph_errors"
-Cohesion: 0.09
-Nodes (21): _defaults_errors(), grammar_errors(), model_names_valid(), model_policy_errors(), Closed-set + type rules for one model_policy object, as messages of the form…, Graph-level (non-node) defects as [{node:None, field, msg}] — the exact checks…, The WHOLE structural+node validation of a graph object (unnormalized) — what a…, gate.wait = {wait_s?, until_argv?, every_s?, timeout_s?}: a machine-answered… (+13 more)
-
-### Community 51 - "_ping_route_once"
-Cohesion: 0.09
-Nodes (23): _confidence_substitute(), _import_call_llm(), _ping_note(), _ping_reachable(), _ping_retry_after(), _ping_route_once(), _ping_status(), _ping_subprocess() (+15 more)
-
-### Community 52 - "test_silent_death_reaper_8.py"
-Cohesion: 0.09
-Nodes (9): fcntl, io, hold(), 91b9a3de (recurrence of baa0088f19452326): cross-container runner liveness. The…, A holder in ANOTHER process group — the kernel view of 'a runner in a sibling…, kill_tree(), Sweep the current runner (own pgid via start_new_session) and every child the…, #8 fix-law item 2 (crash-visibility half): a door respawn after a SILENT runner… (+1 more)
-
-### Community 53 - "11-golden-solo.py"
-Cohesion: 0.10
-Nodes (14): glob, hermes_constants, plugin_api, capture(), _core_home(), main(), normalize(), Golden solo capture/compare against v1.0.15 using the SAME fake_hermes. python3… (+6 more)
-
-### Community 54 - "test_lane_hygiene_preamble_8edcc9bf.py"
-Cohesion: 0.14
-Nodes (19): stat, check(), home_and_fake(), leaks(), main(), mk_run(), #37 lane hygiene — the RED-by-checkout ban rides the machine build-lane…, Every (file, token) pair where a preamble token appears in a record file. (+11 more)
-
-### Community 55 - "__init__.py"
-Cohesion: 0.13
-Nodes (20): difflib, act_doctor_version(), act_release(), act_stop(), handle(), _lane_state(), _last_event_ts(), model_tiers() (+12 more)
-
-### Community 56 - "test_session_wake_matrix_101.py"
-Cohesion: 0.10
-Nodes (13): http_server, inspect, action_rows(), parked(), PR #97 R18 — the lost handoff: an owner action taken INSIDE the synchronous…, wait_for(), answer(), base_env() (+5 more)
-
-### Community 57 - "act_run"
+### Community 66 - "act_save"
 Cohesion: 0.12
-Nodes (22): act_amend(), act_run(), _concurrency_bake(), _frozen_committed(), _lane_entry(), _lane_paths(), _liveness_hint_suffix(), _profile_error() (+14 more)
+Nodes (22): act_library(), act_save(), _from_unknown_error(), _lane_shelf_guard(), _lib_path(), _lib_read(), _lib_rel_name(), library_root() (+14 more)
 
-### Community 58 - "graph_diagram.py"
+### Community 67 - ".meta"
+Cohesion: 0.10
+Nodes (22): 10. Permissions, invocation & resume (grammar-adjacent facts), 1.1 Canonical minimal example (verbatim, S1), 1. What a workflow script is, 2.1 Fields documented, 2.2 The static-read law (verbatim, S1 §"Edit a saved script"), 2.3 meta with phases (verbatim, from the Claude-generated cookbook script, S5), 2. The `meta` export block, 3.2 `parallel(tasks)` (+14 more)
+
+### Community 68 - "test_preflight_liveness_152be7f7.py"
+Cohesion: 0.12
+Nodes (20): check(), contract(), EscapeLineOnly, fake_call_llm(), _fake_parse_retry_after(), FakeHTTPError, graph_two_routes(), HostileStr (+12 more)
+
+### Community 69 - "RunDirProof199"
+Cohesion: 0.11
+Nodes (5): load(), RunDirProof199, guess(), killer(), spy()
+
+### Community 70 - "act_amend"
+Cohesion: 0.11
+Nodes (23): act_amend(), act_release(), act_steer(), act_stop(), _frozen_committed(), _graph_lock(), _profile_error(), Strict: no silent normalization — ids double as directory names. Profile-scoped… (+15 more)
+
+### Community 71 - ".agent_args"
 Cohesion: 0.15
-Nodes (18): main(), qa_gates(), Build examples/diagrams/README.md — the derived diagram table. Owns that file…, Derive the gates column from the QA receipt body — never string memory. Twin of…, sha(), cards_for(), counts_for(), depth_map() (+10 more)
+Nodes (13): _ordered(), _parse_literal(), Split masked[s:e] on `sep` at bracket depth 0 -> list of (start, end)., A template literal: parts are str (literal text) or _Ref (an `${expr}`)., Parse one literal starting at offset i (whitespace allowed). Returns (value,…, Parse `agent(<prompt>, {opts})` between the parens. Returns (prompt, opts,…, A literal label -> str; a template label -> its literal spine (for ids)., A NON-fan-out goal: refs -> after/inputs (§3 data-flow rule), prose names the… (+5 more)
 
-### Community 59 - "test_pill_rail_expand.mjs"
+### Community 72 - "test_pill_rail_expand.mjs"
 Cohesion: 0.10
 Nodes (19): clickables, clickIdx, closed, escBlock, escIdx, hasMini(), here, jsxPath (+11 more)
 
-### Community 60 - "_expand_include_pass"
-Cohesion: 0.12
-Nodes (21): _expand_include_pass(), map_site(), own(), _include_error(), _include_namespace_child(), _include_render(), replace(), _include_seed_scan() (+13 more)
+### Community 73 - "test_lost_handoff_sync_wake_r18.py"
+Cohesion: 0.10
+Nodes (8): http_server, inspect, est-g2xx seat-semaphore driver fixture. Usage: seat_acquire_driver.py…, action_rows(), parked(), PR #97 R18 — the lost handoff: an owner action taken INSIDE the synchronous…, wait_for(), Regression pin: the wake suites are hermetic against an INHERITED WF_RUNS_ROOT…
 
-### Community 61 - "plugin_api.py"
-Cohesion: 0.17
-Nodes (19): _events(), _fold_metrics(), get_node_log(), get_run(), _list_runs(), _node_log_tail(), Dashboard backend for hermes-workflows — thin projection of the SHARED read…, Load this plugin's sibling module without binding global ``wfcommon``. (+11 more)
+### Community 74 - "_ping_route_once"
+Cohesion: 0.10
+Nodes (20): _hermes_bin(), _import_call_llm(), _ping_reachable(), _ping_retry_after(), _ping_route_once(), _ping_status(), _ping_subprocess(), _quota_refusal() (+12 more)
 
-### Community 62 - "$ref"
+### Community 75 - "$ref"
 Cohesion: 0.11
 Nodes (21): items, type, items, type, $ref, items, minItems, type (+13 more)
 
-### Community 63 - "properties"
+### Community 76 - "properties"
 Cohesion: 0.10
 Nodes (21): $ref, const, minItems, type, additionalProperties, required, type, minItems (+13 more)
 
-### Community 64 - "test_runner_orphan_666.py"
-Cohesion: 0.11
-Nodes (14): _belt(), _detach_heartbeat(), Contract-following belt: never returns while the runner lives; hard-exits non-…, Double-fork + setsid: the heartbeat writer escapes BOTH our process group and…, beats(), child_pids(), gc_pids(), Child + detached grandchild live and heartbeating. (+6 more)
-
-### Community 65 - "test_live_truth_ui.mjs"
+### Community 77 - "test_live_truth_ui.mjs"
 Cohesion: 0.10
 Nodes (17): committed, def, detail, fanItems, isBusy, { ItemDetail }, liveDef, nodes (+9 more)
 
-### Community 66 - "Changelog"
-Cohesion: 0.10
-Nodes (20): 0.9.0 — 2026-09-24, 1.0.10 — 2026-09-27 — child work dir is writable under HERMES_WRITE_SAFE_ROOT, 1.0.11 — 2026-09-27 — false when-gate defaults to prune (decorative-gate footgun closed), 1.0.16 — 2026-09-28, 1.0.3 — 2026-09-26 — the feedback fleet's four lane fixes, 1.0.4 — 2026-09-26 — manifest floor matches the fleet, 1.0.6 — 2026-09-26 — suite ledger resets; fanout grammar named, 1.0.8 — 2026-09-27 — quorum cancels never fire blind (+12 more)
-
-### Community 67 - "test_daemonize_8.py"
-Cohesion: 0.13
-Nodes (13): ctypes, select, alive(), call(), descendants(), _kill(), proc_map(), psutil children(recursive) equivalent: live ppid links, /proc only. (+5 more)
-
-### Community 68 - "NodePanel"
+### Community 78 - "README.md"
 Cohesion: 0.16
-Nodes (20): attemptNo(), box(), defaultTabFor(), Dot(), factText(), fanCounts(), FanStrip(), fanSummary() (+12 more)
+Nodes (8): examples/diagrams/ — derived diagram table, Backend host, Desktop app machine, Manual installation — Hermes Workflows 1.3.3, Removal, Source-tree verification, Verify and unpack on each machine that needs a component, Node budgets
 
-### Community 69 - "test_tab_polish_48.mjs"
+### Community 79 - "act_status"
+Cohesion: 0.12
+Nodes (18): act_status(), act_wait(), _respawn_throttled(), _find_run_sibling_scan(), _graph_revision(), _lane_key_error(), _output_pointer(), #58 (READ paths only): resolve a run dir across the sibling known roots before… (+10 more)
+
+### Community 80 - "cli.mjs"
+Cohesion: 0.16
+Nodes (18): applyLocaleTranslations(), isFilesystemError(), loadDiagram(), outputPathGuards, RELATIONSHIP_COLLECTIONS, SEMANTIC_COLLECTIONS, START_TYPES, throwAtomicOutputFailure() (+10 more)
+
+### Community 81 - "throwDiagnosticError"
+Cohesion: 0.19
+Nodes (18): boundaryKey, fallbackDiagnostic(), formatDiagnostics(), installRendererDiagnosticBoundary(), normalizedDiagnostic(), plainObject(), readerSignal, recorded (+10 more)
+
+### Community 82 - "park_gate"
+Cohesion: 0.10
+Nodes (19): _R, _aux_run(), _boot_lane_assert(), _fail_precondition(), _kill_aux_tree(), _lane_gate(), _mint_suite_proof(), _on_fail_catch() (+11 more)
+
+### Community 83 - "test_tab_polish_48.mjs"
 Cohesion: 0.10
 Nodes (15): CARD_STATES, findBy(), GATE, here, hookSeen, jsxPath, modPath, NODES (+7 more)
 
-### Community 70 - "README.md"
-Cohesion: 0.17
-Nodes (6): examples/diagrams/ — derived diagram table, Node budgets, Build-lane hygiene and lane recovery, Contributor checks (not ordinary user setup), RED before green, The one canonical suite command
-
-### Community 71 - "SessionStrip"
+### Community 84 - "SessionStrip"
 Cohesion: 0.14
 Nodes (19): ackFinished(), DirectiveCard(), focusAtom(), isBusy(), listQuery(), originLabel(), ownedRuns(), paneModel() (+11 more)
 
-### Community 73 - "parseTime"
-Cohesion: 0.21
-Nodes (18): ago(), DirectiveBody(), fmtDur(), idleS(), idleTone(), inlineHeader(), ItemChips(), kfmt() (+10 more)
-
-### Community 74 - "_input_graph"
+### Community 85 - "_kill_registered_children"
 Cohesion: 0.11
-Nodes (18): act_inbox(), act_submit(), _coerce_graph(), _inline_graph_size_error(), _input_graph(), Choose one explicitly supplied source; never discover files on the caller's…, #50 (epic #49): submit a hand-rolled graph for STUDY — the quarantine inbox…, Two inbox halves, one action name, never in conflict (a child's steer env and a… (+10 more)
+Nodes (19): _belt(), _detach_heartbeat(), Contract-following belt: never returns while the runner lives; hard-exits non-…, Double-fork + setsid: the heartbeat writer escapes BOTH our process group and…, child_parent_watch(), _install_runner_term_cleanup(), _on_sigterm(), _kill_registered_children() (+11 more)
 
-### Community 75 - "act_status"
-Cohesion: 0.14
-Nodes (16): act_status(), act_wait(), _respawn_throttled(), _find_run_sibling_scan(), _lane_key_error(), _output_pointer(), #58 (READ paths only): resolve a run dir across the sibling known roots before…, Compact stand-in for a committed node output: enough to DECIDE to pay for… (+8 more)
+### Community 86 - "test_amend_rebake_034849a2.py"
+Cohesion: 0.12
+Nodes (11): author(), commit_run(), Ctx, fb 034849a23af94418: an amend must not re-resolve already-committed nodes…, Commit a run the way act_run does (defaults + resolve) under the DEFAULT seat;…, seat(), FRResult, Meta (+3 more)
 
-### Community 76 - "Anthropic Claude Code "dynamic workflows" — JS grammar fact sheet"
-Cohesion: 0.11
-Nodes (17): 10. Permissions, invocation & resume (grammar-adjacent facts), 1.1 Canonical minimal example (verbatim, S1), 1. What a workflow script is, 3.2 `parallel(tasks)`, 3.3 `pipeline(items, stage1, stage2, ...)`, 3.4 `phase(title)`, 3.5 `log(message)`, 3.6 Script return value (+9 more)
+### Community 87 - "_route_receipt_load"
+Cohesion: 0.13
+Nodes (19): hermes_home(), Post-spawn receipt write (the door's proof, executed by the runner): a spawn…, est-2ek.1.641: BEFORE submit — if this lane has a proved-alive receipt and this…, route-hold escalation (w56): a RE-DRIVE (spawn_no > 1) whose run already died…, Message-existence evidence for the #102 dead-session guard: True when the dead…, {alias -> target model} for one seat's config, stdlib-only (same YAML-lite…, #25: commit-time fail-closed hold (field report fb-fix-9c575645: pinned billed…, The target owns the child's session DB; absent routing preserves legacy home. (+11 more)
 
-### Community 77 - "test_register_surface.mjs"
+### Community 88 - "_resolve_models"
+Cohesion: 0.15
+Nodes (18): act_validate(), _alias_provider_pair(), _model_policy_error(), Compatibility wrapper: resolve models and return the historical (error, table)…, The seat's `model:` block ({default, aliases}) — hermes_cli when importable,…, Provider ids the SEAT itself routes through: the 'provider/' prefix of every…, Names the seat itself resolves for -m: model aliases + the default model., Dry-run the door's validation pipeline WITHOUT liveness ping or any write: the… (+10 more)
+
+### Community 89 - "test_register_surface.mjs"
 Cohesion: 0.12
 Nodes (14): areas, { Edges, depthMap }, g, grab(), here, jsxPath, loadPlugin(), nodes (+6 more)
 
-### Community 78 - "desktop-readability.mjs"
+### Community 90 - "_proc_boottime"
+Cohesion: 0.12
+Nodes (17): _ancestors(), _ppid_of(), _proc_boottime(), Parent pid: /proc first, `ps -o ppid=` where there is no procfs (macOS/ BSD —…, This process's ancestor pids, or None when NO channel can read even our own…, est-g255 P255-3: a ticket holder lives only while the SAME process does —…, Held tickets, pruning verifiably dead ones. A ticket held by an ANCESTOR of…, Wait until a seat is free (<= bounded_s), returning the ticket Path; None on… (+9 more)
+
+### Community 91 - "structural_graph_errors"
+Cohesion: 0.12
+Nodes (17): grammar_errors(), model_names_valid(), model_policy_errors(), Graph-level defects for the optional `result` key (est-2ek.1.158): it must name…, Dot-integer tuple for coarse >= comparison; None when not parseable ('99.0.0'…, Graph-level defects for the optional `requires_plugin` key: a coarse dot-…, The typed refusal text when `required` exceeds `runner_version`, else None.…, Closed-set + type rules for one model_policy object, as messages of the form… (+9 more)
+
+### Community 92 - "desktop-readability.mjs"
 Cohesion: 0.12
 Nodes (13): DECLARED_WIDE_READER_CONTRACT, DECLARED_WIDE_READER_MAX_WIDTH, DECLARED_WIDE_READER_RATIO, DECLARED_WIDE_REFERENCE_BODY_HORIZONTAL_PX, DECLARED_WIDE_REFERENCE_DIAGRAM_HORIZONTAL_PX, declaredWideReadabilityBudget(), DESKTOP_FIXED_VERTICAL_CHROME_PX, DESKTOP_READABILITY_VIEWPORT (+5 more)
 
-### Community 79 - "items"
+### Community 93 - "items"
 Cohesion: 0.15
 Nodes (17): items, type, cards, guidedViews, sourceReferences, items, maxItems, type (+9 more)
 
-### Community 80 - "properties"
+### Community 94 - "properties"
 Cohesion: 0.12
 Nodes (17): enum, minimum, type, $ref, properties, minimum, type, maxLength (+9 more)
 
-### Community 81 - "test_canvas_wrap.mjs"
+### Community 95 - "test_canvas_wrap.mjs"
 Cohesion: 0.13
 Nodes (13): checkWrap(), cols, { depthMap, columnGroups, bandRows, Edges, CARD_W, MINI }, fan, layout(), many, mini, miniBody (+5 more)
 
-### Community 82 - "test_node_click_expand.mjs"
+### Community 96 - "test_node_click_expand.mjs"
 Cohesion: 0.13
 Nodes (14): box(), def, fanDef, fanItemsFn, headButton(), here, jsx(), { NodeCard: RealNodeCard } (+6 more)
 
-### Community 83 - "test_pane_render_uncapped.mjs"
+### Community 97 - "test_pane_render_uncapped.mjs"
 Cohesion: 0.12
 Nodes (16): FLEET, here, iso(), jsxPath, keys, labels, modPath, now (+8 more)
 
-### Community 84 - ".statement"
-Cohesion: 0.15
-Nodes (8): _control_kw(), _forbidden_label(), Top-level statements as (start, end) offsets: split on `;` or newline at…, True when masked[s:e] does not close every bracket it opens (an unterminated…, Best-effort name for a glue expression, from its visible method calls., dialect.md row 13: name Date.now()/Math.random()/new Date()/Promise.* by name., `${expr}` -> ('args', key) | ('const', name, [fields]) | refuse. Accepts the…, _statements()
+### Community 98 - "now"
+Cohesion: 0.13
+Nodes (17): _budget_cue_claimed(), _budget_cue_inject(), commit_item_record(), ledger_row(), _node_file(), _note_turn_tier(), now(), _profile_evidence() (+9 more)
 
-### Community 85 - "Nodes and data"
-Cohesion: 0.12
-Nodes (15): 1.0.17 — 2026-09-28, 3. The importable subset, stated once, Nodes and data, build_inputs(), _dangling_placeholders(), fmt_goal(), _inputs_block(), Ordered unique '{NAME}' tokens that survived rendering and resolve to NOTHING… (+7 more)
+### Community 99 - "GraphView"
+Cohesion: 0.20
+Nodes (16): bandRows(), columnGroups(), depthMap(), edgeFlowPolicy(), Edges(), edgeTone(), FanStack(), GraphView() (+8 more)
 
-### Community 86 - "_resolve_models"
-Cohesion: 0.17
-Nodes (16): act_validate(), _alias_provider_pair(), _model_policy_error(), Compatibility wrapper: resolve models and return the historical (error, table)…, The seat's `model:` block ({default, aliases}) — hermes_cli when importable,…, Names the seat itself resolves for -m: model aliases + the default model., Dry-run the door's validation pipeline WITHOUT liveness ping or any write: the…, Validate effective node routes after defaults and resolution, before graph.json. (+8 more)
+### Community 100 - "test_card_frontend_contract.mjs"
+Cohesion: 0.13
+Nodes (10): ref_node_crypto, ref_node_os, boundedSidecarStem(), sidecarStemNeedsBounding(), macEvidence, parserSource, plugin, root (+2 more)
 
-### Community 87 - "CardBackend"
+### Community 101 - "graph_path_ban.py"
+Cohesion: 0.20
+Nodes (15): ban_decision(), build_parser(), changed_files(), exempt_branch(), _git(), _git_bytes(), head_branch(), main() (+7 more)
+
+### Community 102 - "CardBackend"
 Cohesion: 0.16
 Nodes (3): CardBackend, Context, Core-faithful get_config: plugin-scoped, reserved roots RAISE. The real core…
 
-### Community 88 - "test_edge_routing.mjs"
+### Community 103 - "test_confidence_substrate_116.py"
+Cohesion: 0.14
+Nodes (11): alive(), HTTP429, Meta, dict, Exception, #116 — confidence_substrate: engine-stamped fallback when a pinned confidence…, Stub the core ping seam like test_require_route_25: behavior keyed by…, Estate config.yaml: top-level `workflows:` section with the owner's… (+3 more)
+
+### Community 104 - "test_edge_routing.mjs"
 Cohesion: 0.13
 Nodes (12): chain, check(), dead, { Edges, depthMap }, failed, nodes, omitted, page (+4 more)
 
-### Community 90 - "test_session_strip.mjs"
+### Community 106 - "test_session_strip.mjs"
 Cohesion: 0.12
 Nodes (14): empty, here, jsxPath, many, modPath, pm, pmUnknown, reactPath (+6 more)
 
-### Community 91 - "test_tool_bridge_settings_9c41e2b7.py"
+### Community 107 - "test_tool_bridge_settings_9c41e2b7.py"
 Cohesion: 0.17
 Nodes (12): _blocker_home(), check(), parity_case(), parity_cfg(), parity_probe(), probe(), Fresh interpreter. mode 'ctx' -> settings through a core-faithful plugin ctx;…, #41 / #42 — owner settings `runs_root` + `profile` (tool-bridge first-class).… (+4 more)
 
-### Community 92 - "Disclosure verification — clause-by-clause evidence"
-Cohesion: 0.13
-Nodes (13): 1. Detached runner, 2. Agent-child argv and environment, 3. Machine gate `wait.until_argv`, 4. State location, 5. Network, cron, credentials — the corrected clause, Disclosure verification — clause-by-clause evidence, Catalog rules, checked at the pinned SHA, Disclosure (what the plugin actually does at runtime) (+5 more)
+### Community 108 - "release_law"
+Cohesion: 0.17
+Nodes (15): 1.1.3 — 2026-10-01, blocked_by(), dead_set(), dead(), dep_satisfied(), P1 (jury form): the NEAREST unfinished ancestors of a pending node, each with…, After-edge release law. #4 (harvest-on-death) keeps a `partial` ancestor's…, est-ij0: ids that can never commit — `failed`, or `pending` behind a dead DATA… (+7 more)
 
-### Community 93 - "graph_path_ban.py"
-Cohesion: 0.22
-Nodes (14): ban_decision(), build_parser(), changed_files(), exempt_branch(), _git(), head_branch(), main(), merge_base() (+6 more)
+### Community 109 - "recover_crashed_runner"
+Cohesion: 0.16
+Nodes (15): crashed_no_exit_signature(), _flock_held(), _jload(), _load_door(), _pid_is_our_runner(), Stable crash fingerprint: graph.json + run.json digests. Same content = same…, Mirror of wfcommon.runner_lock_held: HELD => live, unconditionally., True iff the run carries the crashed-no-exit signature: a previous pid, that… (+7 more)
 
-### Community 94 - "repository"
+### Community 110 - "repository"
 Cohesion: 0.13
 Nodes (15): repository, enum, link_mode, provider, revision, url, enum, additionalProperties (+7 more)
 
-### Community 97 - "test_machine_watch_94.py"
+### Community 111 - "test_admission_ledger_85.py"
 Cohesion: 0.16
-Nodes (8): argv(), check(), native_engine(), spawn(), probe_transitions(), Executable machine-watch contract: probe transitions and native gate scheduling., Door-transport guard: run_context must never silently route a map to seed.…, state()
+Nodes (9): agent(), art_graph(), fan_graph(), guard_errors(), #85 — artifact-admission guard: input ledgers map 1:1 to declared sources. The…, seed -> fan, fan.after=[seed]; ledger rows reference seed.facts[i]., admission_ledger_errors(), _ledger_item_label() (+1 more)
 
-### Community 98 - "test_node_panel.mjs"
+### Community 112 - "test_node_panel.mjs"
 Cohesion: 0.16
 Nodes (10): activeTabOf(), code, EDGE_TONE, here, jsx(), queries, render(), src (+2 more)
 
-### Community 99 - "test_pane_model_agentfirst.mjs"
+### Community 113 - "test_pane_model_agentfirst.mjs"
 Cohesion: 0.13
 Nodes (12): bare, here, jsxPath, m, modPath, none, now, reactPath (+4 more)
 
-### Community 100 - "_create_run"
-Cohesion: 0.18
-Nodes (14): act_list(), _card(), _create_run(), _hermes_bin(), _identity_stamps(), _lifecycle_notice(), ONE resolver (wfcommon.runs_root): `settings.runs_root` (owner, #42) >…, Use the tool worker's task-local session, not another turn's process env. (+6 more)
+### Community 114 - "test_respawn_hardening_723.py"
+Cohesion: 0.21
+Nodes (11): check(), claim_running(), current_efp(), ev_lines(), load(), main(), mk_run(), PR #237 respawn-hardening blockers (zap review comment 6017431132). Four gates… (+3 more)
 
-### Community 101 - "graph_regen.py"
+### Community 115 - "2. The mapping table"
+Cohesion: 0.15
+Nodes (13): 1.0.1 — 2026-09-25, Deaths become outcomes, Operator surface, The door validates from lists, The graph carries less, 1. Shape of each side in one screen, 2. The mapping table, 4. What this PR does not decide (+5 more)
+
+### Community 116 - "graph_diagram.py"
+Cohesion: 0.23
+Nodes (11): cards_for(), counts_for(), depth_map(), d(), derive(), fit_label(), inject(), main() (+3 more)
+
+### Community 117 - "graph_regen.py"
 Cohesion: 0.25
 Nodes (13): build_parser(), _git(), graph_check(), graph_diff_files(), head_sha(), main(), Undo working-tree dirt under graphify-out/ (git checkout HEAD -- ...)., graph_regen.py — the single-writer knowledge-graph regen (issue #153). Used by… (+5 more)
 
-### Community 102 - "portable-path.mjs"
+### Community 118 - "portable-path.mjs"
 Cohesion: 0.29
 Nodes (12): assertProfile(), classifySemanticCollision(), collisionError(), createSemanticIndex(), findSemanticCollision(), pathError(), PORTABLE_PATH_PROFILES, PortablePathError (+4 more)
 
-### Community 103 - "items"
+### Community 119 - "measuredContentBounds"
+Cohesion: 0.26
+Nodes (14): finalizeReadableViewBox(), measuredContentBounds(), renderLane(), workflowLegendLayout(), workflowLegendRects(), createWorkflowLaneGeometry(), laneGroupFooterH(), laneGroupHeaderH() (+6 more)
+
+### Community 120 - "items"
 Cohesion: 0.23
 Nodes (14): items, type, items, type, additionalProperties, required, type, items (+6 more)
 
-### Community 104 - "test_proctree_61b.py"
+### Community 121 - "runs_root_probe.py"
+Cohesion: 0.21
+Nodes (13): _call_window(), is_fixture_dir(), main(), Path, Run one test in a fully scrubbed env whose HOME stand-in is exactly where an…, est-2ek.1.762 probe: no test-suite run may leave run dirs under the PRODUCTION…, The source window of a subprocess call: its line plus continuation lines until…, 1-based line numbers of each subprocess call that spawns the runner (`wf.py ...… (+5 more)
+
+### Community 122 - "test_malformed_turn_adopted_541.py"
+Cohesion: 0.16
+Nodes (13): check(), drive(), mk_run(), est-2ek.1.541 R8 — the malformed-turn CLASSIFICATION LAW is path-invariant.…, mode='fresh': plain run (one spawn dies with markup). mode='adopted': register…, _attempt_api_calls(), Tool-progress evidence for the #5 bounded retry: True only when the dead…, est-2ek.1.595: the second EXTEND-NOT-KILL witness. A oneshot -Q child block-… (+5 more)
+
+### Community 123 - "test_proctree_61b.py"
 Cohesion: 0.22
 Nodes (10): alive(), check(), cleanup(), escape_case(), mk(), #61b — the four adversarial blockers, RED first, standalone (not pytest).…, read_rows(), rec_of() (+2 more)
 
-### Community 106 - "GraphView"
-Cohesion: 0.26
-Nodes (13): bandRows(), columnGroups(), depthMap(), edgeFlowPolicy(), Edges(), edgeTone(), FanStack(), GraphView() (+5 more)
+### Community 125 - "_bank_the_corpse"
+Cohesion: 0.14
+Nodes (14): _bank_the_corpse(), _banked_work(), _cancel_evidence(), child_work_dir(), _clean_capture(), _dead_session_harvest(), A4: every child starts in <run>/work/<node>[.<i>]/. Relative paths land in the…, a2d7f664: honest evidence for a quorum-straggler cancel. Snapshot of the… (+6 more)
 
-### Community 107 - "TeamIntegration"
+### Community 126 - "Graph grammar and authoring boundaries"
+Cohesion: 0.15
+Nodes (12): 1.0.17 — 2026-09-28, Gates and branches, Graph grammar and authoring boundaries, Nodes and data, Run verdict (optional), Staleness and replay, Tags (meta envelope), Unit-lock of _dangling_placeholders (mirrors fmt_goal's lookup): resolved… (+4 more)
+
+### Community 127 - "parseTime"
+Cohesion: 0.27
+Nodes (13): ago(), DirectiveBody(), fmtDur(), inlineHeader(), nodesCount(), PaneRow(), parseTime(), pillModel() (+5 more)
+
+### Community 128 - "_input_graph"
+Cohesion: 0.15
+Nodes (13): act_submit(), _coerce_graph(), _inline_graph_size_error(), _input_graph(), Choose one explicitly supplied source; never discover files on the caller's…, Return graph-level and node-level defects together, before any write/spawn.…, #50 (epic #49): submit a hand-rolled graph for STUDY — the quarantine inbox…, The door only ever sees `graph` as a parsed object from the tool schema, but a… (+5 more)
+
+### Community 129 - "kind"
+Cohesion: 0.15
+Nodes (12): 3. The importable subset, stated once, mirror(), apply_graph_defaults(), _defaults_errors(), kind(), _preamble_baked(), Bake run-level `defaults` + per-node `shape` presets into the agent node defs,…, Canonical reasoning set: ('none',) + hermes_constants.VALID_REASONING_EFFORTS.… (+4 more)
+
+### Community 130 - "test_plugin_resolution_live_not_old.py"
+Cohesion: 0.19
+Nodes (10): PluginResolutionError, Exception, No trustworthy live plugin copy: refuse to resolve, never fall back., Deterministically resolve the LIVE plugin dir under `plugins_root` (default:…, resolve_plugin_dir(), check(), load(), main() (+2 more)
+
+### Community 131 - "TeamIntegration"
 Cohesion: 0.26
 Nodes (3): Parse the child's first trace record once it has LANDED. The old predicate was…, TeamIntegration, until()
 
-### Community 108 - "test_pill_rail.mjs"
+### Community 132 - "GoldenFixtureWave1"
+Cohesion: 0.17
+Nodes (3): GoldenFixtureWave1, OrderOnlyGrammar, The peer run that motivated est-ij0: 16 lanes, one convoy of converges, one…
+
+### Community 133 - "test_schema_enum_107.py"
+Cohesion: 0.17
+Nodes (6): pytest entry point: the est-077y core rejection, re-run standalone., test_fanout_empty_items_reject(), V(), agent_node(), enum_err(), #107 — the door ADMITS and the runner ENFORCES schema `enum`. Closed vocabulary…
+
+### Community 134 - "FoldParity114"
+Cohesion: 0.26
+Nodes (4): FoldParity114, claim(), law(), state()
+
+### Community 135 - "test_pill_rail.mjs"
 Cohesion: 0.15
 Nodes (10): findBy(), here, jsxPath, modPath, reactPath, sdkPath, src, textOf() (+2 more)
 
-### Community 109 - "test_wfpid_owner_8.py"
-Cohesion: 0.21
-Nodes (9): alive(), cmdline(), _proc_pids(), #8 (review findings 3+4, P1): the ADMITTED runner is the SOLE wf.pid owner.…, Live runner pids for THIS run id: cmdline carries the exact run dir name., Poll until the run's admitted runner self-stamped wf.pid and is alive., runners_for(), wait_live() (+1 more)
+### Community 136 - "test_runner_orphan_666.py"
+Cohesion: 0.19
+Nodes (6): beats(), child_pids(), gc_pids(), Child + detached grandchild live and heartbeating., est-2ek.1.666 — a terminating runner must never orphan its agent-node child.…, settle_and_watch()
 
-### Community 110 - "echo"
-Cohesion: 0.18
-Nodes (11): 1.0.1 — 2026-09-25, Deaths become outcomes, Operator surface, The door validates from lists, The graph carries less, Graph grammar in 30 seconds, 1. Shape of each side in one screen, 2. The mapping table (+3 more)
+### Community 137 - "post_exit_hook.py"
+Cohesion: 0.24
+Nodes (11): plistlib, _atomic(), _check(), _detached(), dispatch(), _live(), Runner-owned, durable handoff for an external post-exit script. The…, Called by the close node before returning; persists the runner's work order. (+3 more)
 
-### Community 111 - "func3"
+### Community 138 - "func3"
 Cohesion: 0.24
 Nodes (12): func3(), validate20(), validate22(), validate24(), validate27(), validate28(), validate30(), validate31() (+4 more)
 
-### Community 112 - "anchor"
+### Community 139 - "anchor"
 Cohesion: 0.32
 Nodes (12): anchor(), automaticPortSpread(), chosenSide(), defaultFromSide(), defaultToSide(), legacyDefaultFromSide(), legacyDefaultToSide(), edgeSides() (+4 more)
 
-### Community 114 - "test_metrics_missing_ui.mjs"
+### Community 140 - "test_crash_respawn_idempotence_8.py"
+Cohesion: 0.20
+Nodes (7): alive(), child_pids(), kill_tree(), #8 fix-law item 3 — crash-respawn idempotence (attempt-N preamble + reconcile-…, Pids the fake children appended to their FAKE_PID_LOG (one per spawn)., Repo idiom (test_wfpid_owner_8): os.kill 0 + /proc state — a zombie the…, SIGKILL the runner, then its recorded fake children (the child owns its pgid —…
+
+### Community 141 - "test_docs_surface_drift.py"
+Cohesion: 0.18
+Nodes (9): compare(), load_door(), _mutated_door(), Path, Docs-surface drift guard: the README's tool-action table must name exactly the…, Execute the isolated door by path and return its ACTUAL ACTIONS dict. Import is…, action -> full row line, from the rows under the tool-table anchor. wf165c/B3:…, Pure bidirectional comparison — the self-proof mutates inputs, never the tree. (+1 more)
+
+### Community 142 - "test_metrics_missing_ui.mjs"
 Cohesion: 0.18
 Nodes (6): EDGE_TONE, $fanItem, { ItemChips }, src, texts(), walk()
 
-### Community 115 - "release_law"
-Cohesion: 0.23
-Nodes (12): dead_set(), dead(), dep_satisfied(), After-edge release law. #4 (harvest-on-death) keeps a `partial` ancestor's…, est-ij0: ids that can never commit — `failed`, or `pending` behind a dead DATA…, ONE after-edge release law for runner and read model -> (deps_ok, deps_res,…, release_law(), deps_ok() (+4 more)
+### Community 143 - "test_seat_live_g2xx.py"
+Cohesion: 0.18
+Nodes (5): launch(), _P, Hermetic child env (the test_wake_hermetic_env.py law): an inherited WF_* (e.g.…, est-g2xx — heartbeat liveness past a buffered child + global agent-seat cap.…, _scrubbed_env()
 
-### Community 116 - "make_public.py"
+### Community 144 - "make_public.py"
 Cohesion: 0.27
 Nodes (10): argparse, fnmatch, Pattern, excluded(), load_guards(), load_scrub_list(), main(), Path (+2 more)
 
-### Community 117 - "Patched core: typed turn-cap deaths (optional)"
-Cohesion: 0.16
-Nodes (11): Apply (source install only), Patched core: typed turn-cap deaths (optional), The patch, Verify, What the patch adds, Backend host, Desktop app machine, Manual installation — Hermes Workflows 1.3.0 (+3 more)
-
-### Community 118 - "pack.py"
-Cohesion: 0.31
-Nodes (10): build(), collect_sources(), install_provenance(), main(), _packaged_at(), Path, Build the private, reproducible Hermes Workflows source ZIP (stdlib only)., _source_commit() (+2 more)
-
-### Community 119 - "legendEntry"
+### Community 145 - "legendEntry"
 Cohesion: 0.18
 Nodes (11): legendEntry, maxLength, minLength, type, additionalProperties, minProperties, properties, type (+3 more)
 
-### Community 121 - "test_malformed_turn_541.py"
+### Community 147 - "test_malformed_turn_541.py"
 Cohesion: 0.18
 Nodes (5): est-2ek.1.541 — a malformed turn (final reply = serialized tool-call markup)…, Spawns = per-attempt stdout logs the runner wrote (logs/<node>.a<N>.log)., The markup must never ride a COMMITTED answer: no done/partial status, and…, record_never_commits_markup(), spawns_of()
 
-### Community 122 - "test_node_facts.py"
+### Community 148 - "test_pr_tag_audit.py"
 Cohesion: 0.22
-Nodes (5): asyncio, fastapi, call(), expect404(), O2 backend acceptance (L4): wfcommon.node_facts, the /runs/{id}/nodes/{nid}/log…
+Nodes (9): add_doc_only_tag(), make_fake_gh(), make_tree(), Path, Behavioral tests for scripts/pr_tag_audit.py (the release-side tag-state gate).…, Copy the minimal file set the audit touches; optionally rewrite README.md., Insert DOC_ONLY_TAG_ROW as the last row of the tool action table., A deterministic stand-in for gh: answers `pr view N --repo ... --json ...` from… (+1 more)
 
-### Community 123 - "1.2.1 — 2026-10-04"
-Cohesion: 0.20
-Nodes (10): 1.2.1 — 2026-10-04, expand_includes(), _include_get(), _include_scratch_paths(), _include_text_fields(), _include_texts(), The string fields the {run.KEY} seed-render surface touches: the exact set…, Read one authored string by path segments (str = dict key, int = list index).… (+2 more)
+### Community 149 - "test_run_tray.mjs"
+Cohesion: 0.18
+Nodes (9): findBy(), here, jsxPath, modPath, reactPath, sdkPath, src, textOf() (+1 more)
 
-### Community 124 - "label"
-Cohesion: 0.22
-Nodes (9): label(), Labeled(), 3.1 `agent(prompt, options?)`, Archify JSON IR Schemas, Error format, Runtime validation, schema_version policy, Shared definitions (common.schema.json) (+1 more)
-
-### Community 125 - "RunTray"
+### Community 150 - "RunTray"
 Cohesion: 0.29
 Nodes (10): runStatusOf(), RunTray(), RunTrayRunRow(), trayAggregateLabel(), trayBandOf(), trayElapsed(), trayModel(), trayRecap() (+2 more)
 
-### Community 127 - "graph_check.py"
-Cohesion: 0.40
-Nodes (9): _ast(), _dump(), _edge_key(), main(), _norm(), normalize(), Graph drift gate: is the committed graphify-out/graph.json current for this…, Return a NEW graph dict in canonical form (see module docstring). Pure; input… (+1 more)
+### Community 152 - "pr_tag_audit.py"
+Cohesion: 0.27
+Nodes (7): dispatched_actions(), main(), pr_tag_audit.py — release-time gate for `(open PR #NN)` doc tags. Docs that…, ACTUAL dispatch keys from the executed door (finding 1 / R6): executing beats…, (action, line_no) for every README action-table row that carries an open-PR tag…, resolve_repo(), shipped_tagged_rows()
 
-### Community 128 - "Workflow Renderer"
+### Community 153 - "Workflow Renderer"
 Cohesion: 0.20
 Nodes (9): Design Rules, Fixed v1, Input, Layout contracts, Legend, Migration and layout receipt, Optional semantic checks, Readable v2 (+1 more)
 
-### Community 129 - "workflow.schema.json"
+### Community 154 - "workflow.schema.json"
 Cohesion: 0.20
 Nodes (9): additionalProperties, $defs, side, $id, required, $schema, enum, title (+1 more)
 
-### Community 130 - "test_lane_recover_8edcc9bf.py"
+### Community 155 - "test_lane_recover_8edcc9bf.py"
 Cohesion: 0.29
 Nodes (7): check(), main(), The #39 review probes (3b/3c/3e) in one session: the role='tool' row is joined…, #37 lane hygiene — scripts/lane_recover.py replays a dead lane's journaled…, run(), seed(), seed_review()
 
-### Community 131 - "test_malformed_turn_adopted_541.py"
-Cohesion: 0.24
-Nodes (9): check(), drive(), mk_run(), est-2ek.1.541 R8 — the malformed-turn CLASSIFICATION LAW is path-invariant.…, mode='fresh': plain run (one spawn dies with markup). mode='adopted': register…, Tool-progress evidence for the #5 bounded retry: True only when the dead…, _tool_progress(), active_child() (+1 more)
-
-### Community 133 - "test_proctree_identity_80.py"
-Cohesion: 0.22
-Nodes (5): alive(), boottime(), kill_all(), #80 review findings — a sidecar row is a CLAIM; /proc is the COURT…, Kernel start tick (field 22 of /proc/pid/stat — rest[19] after the comm).
-
-### Community 134 - "ProvenanceCounters"
+### Community 156 - "ProvenanceCounters"
 Cohesion: 0.27
 Nodes (3): mk_run(), ProvenanceCounters, Materialise a committed-done run dir; run_json_body is written verbatim to…
 
-### Community 135 - "test_schema_enum_107.py"
+### Community 157 - "test_seat_postpopen_cleanup_r2_g255.py"
 Cohesion: 0.22
-Nodes (3): agent_node(), enum_err(), #107 — the door ADMITS and the runner ENFORCES schema `enum`. Closed vocabulary…
+Nodes (4): Boom, _boom_hb(), RuntimeError, est-g255 r2 R3 (zap CHANGES at 1233d3fd, MED) — EVERY step after a successful…
 
-### Community 136 - "_aux_run"
-Cohesion: 0.20
-Nodes (10): _aux_run(), _boot_lane_assert(), _kill_aux_tree(), _lane_gate(), fb-digest-29d (64c6772b): a node that declares `repo: <path>` owns a git lane,…, Machine-generated resume preamble prepended to the goal for the ONE #5 re-…, subprocess.run-shaped helper for the runner's OWN auxiliary probes, registered…, SIGKILL the aux child AND its group (the child is its own group leader via… (+2 more)
+### Community 158 - "FakeGitHub"
+Cohesion: 0.22
+Nodes (3): FakeGitHub, est-2ek.1.866 — the formal-review step is AUTHOR-AWARE (RED on base, GREEN on…, Stateful transport: comments and labels persist across calls, and the replace-…
 
-### Community 137 - "DialectRefusal"
-Cohesion: 0.24
-Nodes (5): DialectRefusal, _NonLiteral, Exception, Raised by the exporter when a graph's semantics have no representable form.…, _Refuse
+### Community 159 - "plugin-catalog: add `hermes-workflows` (community, automation)"
+Cohesion: 0.22
+Nodes (7): Catalog rules, checked at the pinned SHA, Disclosure (what the plugin actually does at runtime), plugin-catalog: add `hermes-workflows` (community, automation), Relationship to a patched core, `requires_hermes: ">=0.21.4"` — measured, not guessed, Test evidence (re-run on the published pin before submitting), What it is
 
-### Community 138 - "translations"
+### Community 160 - "Hermes Workflows"
+Cohesion: 0.22
+Nodes (9): For agents and contributors, Graph grammar in 30 seconds, Hermes Workflows, Install, License, Requirements, Two builds, one codebase, What a run leaves behind (+1 more)
+
+### Community 161 - "translations"
 Cohesion: 0.22
 Nodes (9): maxLength, minLength, type, translations, pattern, additionalProperties, maxProperties, propertyNames (+1 more)
 
-### Community 139 - "semanticRelation"
+### Community 162 - "semanticRelation"
 Cohesion: 0.22
 Nodes (9): semanticRelation, $ref, from, to, additionalProperties, properties, required, type (+1 more)
 
-### Community 140 - "ConvoySpliceRun"
+### Community 163 - "ConvoySpliceRun"
 Cohesion: 0.36
 Nodes (3): convoy_graph(), ConvoySpliceRun, Three lanes; lane B's work dies. Lane C's converge is ordered after B's (echo…
 
-### Community 141 - "test_enum_clamp_5med_flah.py"
+### Community 164 - "test_crash_no_exit_respawn_718.py"
+Cohesion: 0.36
+Nodes (8): check(), claim_running(), ev_lines(), load(), main(), mk_run(), est-2ek.1.718: a crashed runner (dead pid, NO runner_exit.json) with pending/…, A node record mid-crash: status=running with a pid the sweep took.
+
+### Community 165 - "test_enum_clamp_5med_flah.py"
 Cohesion: 0.31
 Nodes (6): drive(), mk(), est-flah — unknown enum values clamp at RESOLVE time, never a hard child death.…, record(), toolsets_run(), toolsets
 
-### Community 142 - "test_sprint101w2_B2-retry.py"
+### Community 167 - "test_graph_revision_cas_19.py"
+Cohesion: 0.22
+Nodes (4): issue #19 (est-19k9w): the graph revision CAS — a caller that read the graph at…, Every byte a refused CAS call must leave untouched., run_dir_bytes(), writer()
+
+### Community 168 - "test_plugin_asks_164_fallback.py"
+Cohesion: 0.22
+Nodes (4): argv_models(), est-2ek.1.164: per-node `fallback_models` — a transport_exhausted death tries…, The -m value the fake was spawned with, one entry per child spawn., wf()
+
+### Community 169 - "test_sprint101w2_B2-retry.py"
 Cohesion: 0.22
 Nodes (3): Sprint101 Lane B2-retry contracts (#5 bounded auto-retry, #4 harvest-on-death).…, Spawns for a run = child log files the runner wrote (logs/<node>.a<N>.log); the…, spawns_of()
 
-### Community 144 - "Event-driven wakes: replacing cron polls with a push spine"
+### Community 170 - "DialectRefusal"
+Cohesion: 0.28
+Nodes (5): DialectRefusal, _NonLiteral, Exception, Raised by the exporter when a graph's semantics have no representable form.…, _Refuse
+
+### Community 171 - "Event-driven wakes: replacing cron polls with a push spine"
 Cohesion: 0.25
 Nodes (7): Coalescing bursts without a queue, Event-driven wakes: replacing cron polls with a push spine, Operational notes, Poison, bounded by construction, The one law that makes this safe, The shape, Why a poll is expensive
 
-### Community 145 - "_expand_includes_at_door"
+### Community 172 - "_expand_includes_at_door"
 Cohesion: 0.25
 Nodes (7): _expand_includes_at_door(), _include_error_from_valueerror(), _library_reader(), read(), The include resolver's library reader: a closure over _lib_read — the SAME…, A resolver ValueError rides the existing door error envelope (the…, The single door choke point for composite graphs (design: expand BEFORE…
 
-### Community 146 - "Hermes Workflows"
-Cohesion: 0.25
-Nodes (8): For agents and contributors, Hermes Workflows, Install, License, Requirements, Two builds, one codebase, What a run leaves behind, Why this exists
+### Community 173 - "diagram_readme.py"
+Cohesion: 0.36
+Nodes (7): main(), qa_gates(), Build examples/diagrams/README.md — the derived diagram table. Owns that file…, Derive the gates column from the QA receipt body — never string memory. Twin of…, sha(), example_graphs(), The ONE walker for shipped example graphs — shared by --all here and…
 
-### Community 148 - "test_explain_stale_0929.py"
+### Community 174 - "test_clean_lane_1660.py"
+Cohesion: 0.25
+Nodes (5): fresh(), est-2ek.1.660: startup clean-lane assert. A re-drive (wf.py run <id>) of a run…, A fresh throwaway git lane + a base commit., The dead attempt's uncommitted WIP on a TRACKED file., seed_wreckage()
+
+### Community 175 - "test_explain_stale_0929.py"
 Cohesion: 0.29
 Nodes (4): fresh(), put(), why-rerun (jam-h27) acceptance: wfcommon.explain_stale — one-line 'why is this…, Commit nodes/<recname>.json the way wf.py save_node does.
 
-### Community 149 - "test_fatal_quota_24.py"
-Cohesion: 0.29
-Nodes (3): _LADDER, _OK, #24 — subscription-quota 429s are NOT transient transport. (a) a marker…
-
-### Community 150 - "Owner"
+### Community 176 - "Owner"
 Cohesion: 0.29
 Nodes (5): _append_act(), _door_call(), Owner, BaseHTTPRequestHandler, The api_server shape: the POST stays open for the whole owner turn…
 
-### Community 152 - "_B"
+### Community 177 - "test_routing_routes.py"
 Cohesion: 0.32
-Nodes (3): _A, _B, BaseHTTPRequestHandler
+Nodes (4): Ctx, fake_popen(), FakeProcess, Deterministic regressions for explicit workflow provider/model routing.
 
-### Community 153 - "model_preflight"
+### Community 179 - "model_preflight"
 Cohesion: 0.29
 Nodes (7): 1.0.5 — 2026-09-26 — preflight LIVENESS ping (warn-and-surface), model_preflight(), _nearest_effort(), Prefer the core route API; on older cores use the Codex vocabulary for openai-…, Nearest supported ladder level (weaker first — never an escalation), or None., Pure (no I/O): the FEEDBACK #43 model preflight, run at run/amend submit time…, _route_efforts()
 
-### Community 154 - "Workflow examples"
+### Community 180 - "manifest.json"
+Cohesion: 0.29
+Nodes (6): api, entry, name, tab, hidden, version
+
+### Community 181 - "Disclosure verification — clause-by-clause evidence"
+Cohesion: 0.29
+Nodes (7): nudgeOwner(), 2. Agent-child argv and environment, 3. Machine gate `wait.until_argv`, 4. State location, 5. Network, cron, credentials — the corrected clause, 6. Desktop gate answer (maintainer ask #122099, teknium1), Disclosure verification — clause-by-clause evidence
+
+### Community 182 - "Workflow examples"
 Cohesion: 0.29
 Nodes (7): basics/ — one idea each, read these first, build/ — fan-out, barriers, ledgers, ops/ — incident & fleet, release/ — the SDLC back half, review/ — independent judgment, Running one, Workflow examples
 
-### Community 155 - "install"
+### Community 183 - "install"
 Cohesion: 0.29
 Nodes (6): _owner_setting_read(), THE owner-settings read (#41/#42 share it with hermes_bin): plugin-scoped…, install(), Wrap the door's owner-settings reader: the `runs_root` lookup answers the…, Pin the door's `settings.runs_root` to whatever `WF_RUNS_ROOT` says at call…, _wrap_resolver()
 
-### Community 157 - "CoreFaithfulCtx"
+### Community 184 - ".read_text"
+Cohesion: 0.29
+Nodes (3): _NoProcPath, Integrated, no_proc()
+
+### Community 187 - "CoreFaithfulCtx"
 Cohesion: 0.29
 Nodes (3): CoreFaithfulCtx, get_config with core's exact plugin-relative key rules (plugins_state.py)., RecordingCtx
 
-### Community 158 - "test_incident_response_93.py"
-Cohesion: 0.38
-Nodes (4): engine_case(), poll_sequence(), probe_argv(), Execute the shipped incident probe argv and the real parked-gate loop.
+### Community 189 - "test_library_corrupt_prev_yzoy.py"
+Cohesion: 0.43
+Nodes (6): call(), check(), poison(), #146 item 1 (est-yzoy): corrupt-prev RETAIN PROTECTION — the whole invalid…, Retain-needing save over a damaged image must fail closed with the typed reason…, refuse()
 
-### Community 160 - "test_include_expansion_core.py"
+### Community 190 - "test_measured_zero_7ps8.py"
 Cohesion: 0.33
-Nodes (3): check(), expand_includes / include_provenance core-resolver contracts (design…, refuses()
+Nodes (5): fresh_dashboard(), load(), The dashboard reports its MEASURED executed count, INCLUDING a measured zero.…, A VALID never-executed run: the graph+run+node trio run_state accepts, no logs/…, seed_run()
 
-### Community 161 - "test_steer_live_40.py"
+### Community 192 - "SpyRegistry"
+Cohesion: 0.29
+Nodes (4): DeadPopen, dict, Records every registration insert; raises once on the rg:-keyed insert when…, SpyRegistry
+
+### Community 193 - "test_steer_live_40.py"
 Cohesion: 0.29
 Nodes (3): mk(), B1 cooperative steer (feedback #13/#40) — the file protocol and cursor, proved…, Hand-built run dir with run.json meta pinning hermes_bin to the fake — WITHOUT…
 
-### Community 162 - "reconcile_effects"
-Cohesion: 0.29
-Nodes (7): _effect_row_valid(), _effects_path(), Rows of the run's side-effect journal. A torn line (the writer died mid-append)…, A journal row is a committed FACT iff its node still resolves under the CURRENT…, #8 item 3 (b): reconcile the committed side-effect records against the graph.…, reconcile_effects(), side_effect_rows()
-
-### Community 163 - "explain_stale"
-Cohesion: 0.29
-Nodes (6): _amend_snapshots(), explain_stale(), commit_era(), diff_fields(), [(at, old_nodes, new_nodes)] from amends.jsonl; malformed lines skipped. Only…, One-line 'why is this committed node re-running' verdict for a stale node…
-
-### Community 164 - "Security Policy"
+### Community 194 - "test_suite_runs_root_762.py"
 Cohesion: 0.33
-Nodes (4): Reporting a vulnerability, Response time, Security Policy, Supported versions
+Nodes (4): Path, est-2ek.1.762 — every spawned-runner test must pin WF_RUNS_ROOT to its own…, _run_dirs(), _scrub()
 
-### Community 165 - "1.0.2 — 2026-09-26 — the run watches itself"
-Cohesion: 0.33
-Nodes (6): 1.0.2 — 2026-09-26 — the run watches itself, Additions, Archify: no (verdict + evidence), SMIL for candy, Explorer V2: one node truth, two readers, Launching is showing (no agent control), WORKFLOWS beside SESSIONS | BOTS
-
-### Community 166 - "Manifest decisions (publish pass, 2026-09-24)"
+### Community 195 - "Manifest decisions (publish pass, 2026-09-24)"
 Cohesion: 0.33
 Nodes (5): (a) requires_env semantics — VERDICT: user-provided env, prompted at install, Author, (b) capabilities block validation — VERDICT: catalog-side is metadata-only; manifest-side is registry-normalized, HERMES_WF_STEER_* decision — VERDICT: NOT in requires_env; requires_env: [], Manifest decisions (publish pass, 2026-09-24)
 
-### Community 167 - "_bind_run_context"
+### Community 196 - "_bind_run_context"
 Cohesion: 0.33
 Nodes (4): _bind_run_context(), agent_ancestor(), render(), Resolve a launch binding on a post-defaults copy, before persistence. Map…
 
-### Community 168 - "_reap_silent_death"
+### Community 197 - "_route_enforcement"
 Cohesion: 0.33
-Nodes (6): _death_anchor(), _gw_restart_window_match(), #8 (P0, remaining half): observed gw-restart reason. The incident shape is the…, The death window anchor: the last event ts on the record (the dead runner's…, #8 fix-law item 2 (crash-visibility): make a silent runner death loud BEFORE a…, _reap_silent_death()
+Nodes (6): _confidence_substitute(), #25: node key > graph defaults > default True on nodes that pin an explicit…, #116: declared-fallback branch of the #25 gate (R6: same path, not a parallel…, #25: a node that pins an explicit route and did NOT opt into the fallback…, _require_route_effective(), _route_enforcement()
 
-### Community 169 - "_spawn_runner"
+### Community 198 - "_spawn_runner"
 Cohesion: 0.33
 Nodes (6): One newline-terminated pid off the ready pipe, <= _READY_WAIT_S. None on EOF or…, Spawn the run's runner process — DAEMONIZED out of the caller's tree (#8). Law…, Direct spawn for no-fork platforms / refused fork: here the Popen'd child IS…, _ready_pid(), _spawn_runner(), _spawn_runner_legacy()
 
-### Community 170 - "ref_node_crypto"
-Cohesion: 0.40
-Nodes (3): ref_node_crypto, boundedSidecarStem(), sidecarStemNeedsBounding()
+### Community 199 - "journaled_calls"
+Cohesion: 0.33
+Nodes (6): journaled_calls(), The error text carried by a role='tool' result row, or None when the call…, {tool_call_id: content} for every role='tool' row of the session — the result…, Ordered [{index, tool, args, call_id, msg_id, error}] of write_file/patch…, result_error(), tool_results()
 
-### Community 171 - "point"
+### Community 200 - "point"
 Cohesion: 0.33
 Nodes (6): point, items, maxItems, minItems, prefixItems, type
 
-### Community 172 - "portableOutputPath"
+### Community 201 - "portableOutputPath"
 Cohesion: 0.33
 Nodes (6): portableOutputPath, allOf, description, minLength, pattern, type
 
-### Community 175 - "HTTP429"
+### Community 204 - "test_findrun_twin_t1kk.py"
 Cohesion: 0.33
-Nodes (6): alive(), HTTP429, Exception, Stub the core ping seam like test_require_route_25: behavior keyed by…, set_ping(), call_llm()
+Nodes (3): est-t1kk — find_run must open the LISTED valid twin, not the torn first-root…, valid = the graph+run+node trio run_state accepts; torn = a partial spawn: the…, seed_run()
 
-### Community 176 - "kill_tree"
+### Community 205 - "test_runs_root_realpath_7ps8.py"
 Cohesion: 0.33
-Nodes (6): alive(), child_pids(), kill_tree(), Pids the fake children appended to their FAKE_PID_LOG (one per spawn)., Repo idiom (test_wfpid_owner_8): os.kill 0 + /proc state — a zombie the…, SIGKILL the runner, then its recorded fake children (the child owns its pgid —…
+Nodes (3): est-7ps8 — runs-root census fixes from the PR#259 non-blocking notes. Three…, A run dir: valid = the graph+run+node trio run_state accepts; logs = a non-…, seed_run()
 
-### Community 177 - "_dead_session_harvest"
-Cohesion: 0.33
-Nodes (6): _banked_work(), _clean_capture(), _dead_session_harvest(), Strip the dead-session CLI noise lines from a death capture (#102)., (file_names, [(name, content_excerpt), ...]) of the child's durable work dir —…, The #102 harvest preamble for a re-drive whose prior session persisted NO…
-
-### Community 178 - "_wake_identity"
-Cohesion: 0.33
-Nodes (6): Durable amendment generation: how many graph.amended events the run's own…, The run's ALREADY-COMMITTED failed-node set straight from the node records…, THE transition-instance discriminant (B3 law): a string that is IDENTICAL…, _wake_identity(), _wake_resolved_failed(), _wake_rev()
-
-### Community 179 - "Operator playbook (measured lessons)"
-Cohesion: 0.40
-Nodes (5): Babysitting (read the status model, not `ps`), Build-sprint lanes (parallel agent lanes on one repo), Ergonomics, Fleet children (audits, censuses, sweeps), Operator playbook (measured lessons)
-
-### Community 180 - "validatePortablePath"
+### Community 207 - "validatePortablePath"
 Cohesion: 0.40
 Nodes (5): architecture(), dataflow(), lifecycle(), sequence(), validatePortablePath()
 
-### Community 181 - "focus"
+### Community 208 - "focus"
 Cohesion: 0.40
 Nodes (5): items, minItems, type, $ref, focus
 
-### Community 183 - "make_run"
+### Community 209 - "make_run"
 Cohesion: 0.40
 Nodes (5): make_run(), Path, Create a state.db with one sessions row per (title, api, tools)., Minimal run dir: graph.json + nodes/*.json records as given., seed_db()
 
-### Community 184 - "test_jec0_recursion_containment.py"
-Cohesion: 0.40
-Nodes (3): est-jec0 / PR #122 B1 pin: the prose-JSON fallback must never crash the node.…, last_balanced_object(), Sprint101 #9: the LAST top-level balanced {...} in stdout that json accepts…
-
-### Community 185 - "_runner_term_cleanup"
+### Community 210 - "mk_pointer"
 Cohesion: 0.50
-Nodes (5): _install_runner_term_cleanup(), _on_sigterm(), ONE cleanup, every exit path (est-2ek.1.666): registered children are killpg'd,…, Wire the termination cleanup into every exit path of the runner process: *…, _runner_term_cleanup()
+Nodes (5): mk_pointer(), Path, Write the handoff shape the shipped publish node writes: run_dir/ release-…, Real `wf.py run` of a gate-only child graph whose until_argv is the shipped…, run_gate_only()
 
-### Community 186 - "_rename_hint"
+### Community 214 - "_rename_hint"
 Cohesion: 0.40
 Nodes (5): est-2ek.1.62: does `val` satisfy the declared type in schema fragment `prop`…, est-2ek.1.62: when a required key is MISSING but the object carries an extra…, _rename_hint(), chk(), _value_type_ok()
 
-### Community 187 - "manifest.json"
-Cohesion: 0.50
-Nodes (3): api, tab, hidden
-
-### Community 188 - "Pill"
+### Community 215 - "Pill"
 Cohesion: 0.67
 Nodes (4): Pill(), pillProgress(), PillRail(), railModel()
 
-### Community 189 - "Bail"
+### Community 216 - "_operative_texts"
 Cohesion: 0.50
-Nodes (3): Bail, Exception, A typed early exit: message + process exit code (2 = no session/run/db).
+Nodes (4): _operative_texts(), Yield (path, text) for every string in the OPERATIVE subtree (goal, context,…, [] when the graph binds or is literal-free; else one warning string per…, _stale_literal_warnings()
 
-### Community 191 - "locale"
+### Community 218 - "locale"
 Cohesion: 0.50
 Nodes (4): locale, maxLength, pattern, type
 
-### Community 192 - "path"
+### Community 219 - "path"
 Cohesion: 0.50
 Nodes (4): maxLength, minLength, type, path
 
-### Community 193 - "bias"
+### Community 220 - "bias"
 Cohesion: 0.50
 Nodes (4): maximum, minimum, type, bias
 
-### Community 194 - "col"
+### Community 221 - "col"
 Cohesion: 0.50
 Nodes (4): maximum, minimum, type, col
 
-### Community 195 - "fromCol"
+### Community 222 - "fromCol"
 Cohesion: 0.50
 Nodes (4): maximum, minimum, type, fromCol
 
-### Community 196 - "toCol"
+### Community 223 - "toCol"
 Cohesion: 0.50
 Nodes (4): toCol, maximum, minimum, type
 
-### Community 197 - "dynamic-agent-count.js"
+### Community 224 - "dynamic-agent-count.js"
 Cohesion: 0.50
 Nodes (3): byOwner, distinct, meta
 
-### Community 202 - "_lane_hygiene_preamble"
-Cohesion: 0.50
-Nodes (4): _is_build_lane(), _lane_hygiene_preamble(), The build shape: `shape: "build"` declared, or a `repo:` lane declared (the…, Machine-generated lane-hygiene preamble for build-shape nodes ("" otherwise).…
-
-### Community 203 - "label"
+### Community 230 - "label"
 Cohesion: 0.67
 Nodes (3): minLength, type, label
 
-### Community 204 - "labelSegment"
+### Community 231 - "labelSegment"
 Cohesion: 0.67
 Nodes (3): minimum, type, labelSegment
 
-### Community 205 - "variant"
+### Community 232 - "variant"
 Cohesion: 0.67
 Nodes (3): variant, enum, $ref
 
-### Community 206 - "width"
+### Community 233 - "width"
 Cohesion: 0.67
 Nodes (3): width, minimum, type
 
 ## Knowledge Gaps
-- **623 isolated node(s):** `api`, `hidden`, `Q`, `TERMINAL`, `$selRun` (+618 more)
-  These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 1937 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
-- **40 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **629 isolated node(s):** `name`, `version`, `api`, `entry`, `hidden` (+624 more)
+  These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 2380 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
+- **43 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `workflow()` connect `.wait` to `Changelog`, `workflow-compiler.mjs`, `efp`, `Hermes Workflows`, `validatePortablePath`, `asArray`, `generated-validators.mjs`, `Disclosure verification — clause-by-clause evidence`?**
-  _High betweenness centrality (0.148) - this node is a cross-community bridge._
-- **Why does `unknown()` connect `path-semantics.mjs` to `wf.py`, `Changelog`, `1.0.2 — 2026-09-26 — the run watches itself`, `Anthropic Claude Code "dynamic workflows" — JS grammar fact sheet`, `.wait`, `Nodes and data`, `model_preflight`, `1.2.1 — 2026-10-04`, `Disclosure verification — clause-by-clause evidence`?**
-  _High betweenness centrality (0.106) - this node is a cross-community bridge._
-- **Why does `1.1.1 — 2026-09-29 — runner correctness (cross-container liveness, ancestor gate answers), profile-home fix, lane-clean gate, portable files, pill rail` connect `jload` to `plugin.js`, `Changelog`, `NodePanel`, `SessionStrip`, `GraphView`, `act_status`, `.wait`, `Nodes and data`, `_resolve_models`, `Pill`, `test_fanout_expand.mjs`?**
-  _High betweenness centrality (0.075) - this node is a cross-community bridge._
+- **Why does `workflow()` connect `.wait` to `Hermes Workflows`, `plugin-catalog: add `hermes-workflows` (community, automation)`, `compileWorkflowInternal`, `validatePortablePath`, `workflow-compiler.mjs`, `2. The mapping table`, `Changelog`, `measuredContentBounds`, `generated-validators.mjs`, `Graph grammar and authoring boundaries`, `efp`?**
+  _High betweenness centrality (0.138) - this node is a cross-community bridge._
+- **Why does `unknown()` connect `path-semantics.mjs` to `plugin-catalog: add `hermes-workflows` (community, automation)`, `plugin_api.py`, `.meta`, `.wait`, `test_literal_provider_prefix_46.py`, `model_preflight`, `Changelog`, `_expand_include_pass`, `Graph grammar and authoring boundaries`, `efp`?**
+  _High betweenness centrality (0.103) - this node is a cross-community bridge._
+- **Why does `1.1.1 — 2026-09-29 — runner correctness (cross-container liveness, ancestor gate answers), profile-home fix, lane-clean gate, portable files, pill rail` connect `run_state` to `GraphView`, `test_fanout_expand.mjs`, `wf.py`, `.wait`, `act_status`, `SessionStrip`, `jload`, `Changelog`, `Pill`, `NodePanel`, `_resolve_models`?**
+  _High betweenness centrality (0.077) - this node is a cross-community bridge._
 - **Are the 4 inferred relationships involving `compileWorkflowInternal()` (e.g. with `acceptsFix()` and `compareCost()`) actually correct?**
   _`compileWorkflowInternal()` has 4 INFERRED edges - model-reasoned connections that need verification._
-- **What connects `api`, `hidden`, `Q` to the rest of the system?**
-  _623 weakly-connected nodes found - possible documentation gaps or missing edges._
-- **Should `wf.py` be split into smaller, more focused modules?**
-  _Cohesion score 0.02870140612076096 - nodes in this community are weakly interconnected._
-- **Should `wfcommon.py` be split into smaller, more focused modules?**
-  _Cohesion score 0.028523769808173477 - nodes in this community are weakly interconnected._
+- **What connects `name`, `version`, `api` to the rest of the system?**
+  _629 weakly-connected nodes found - possible documentation gaps or missing edges._
+- **Should `os` be split into smaller, more focused modules?**
+  _Cohesion score 0.022747156605424323 - nodes in this community are weakly interconnected._
+- **Should `compileWorkflowInternal` be split into smaller, more focused modules?**
+  _Cohesion score 0.06158415841584158 - nodes in this community are weakly interconnected._
