@@ -979,6 +979,23 @@ def _defaults_errors(d):
                                           "spawn)")
     return errs
 
+_PRE_RUN_REF = re.compile(r"\{run\.[^{}]*\}")
+
+def _preamble_baked(pre, ctx):
+    """est-2ek.1.838: is `pre` (defaults.context) already the head of `ctx`? The door
+    bakes defaults BEFORE binding run_context, so a persisted node context carries the
+    BOUND preamble while graph.json's defaults.context keeps the {run.KEY} template.
+    Each {run.KEY} slot therefore matches any non-empty text; every literal byte of
+    the preamble must still match exactly (an edited preamble is not 'baked')."""
+    if ctx.startswith(pre):
+        return True
+    parts = _PRE_RUN_REF.split(pre)
+    if len(parts) == 1:
+        return False
+    rx = "(?s:.+?)".join(re.escape(p) for p in parts)
+    # the preamble is the WHOLE context or is followed by the "\n\n" own-context seam
+    return re.match(rf"(?s){rx}(?:\n\n|\Z)", ctx) is not None
+
 def apply_graph_defaults(graph):
     """Bake run-level `defaults` + per-node `shape` presets into the agent node defs,
     called by the door BEFORE graph.json is written: the runner and every fingerprint
@@ -1026,7 +1043,7 @@ def apply_graph_defaults(graph):
             if n.get("require_route") is None and "require_route" in defaults:
                 n["require_route"] = defaults["require_route"]
             pre = defaults.get("context") or ""
-            if pre and not str(n.get("context") or "").startswith(pre):
+            if pre and not _preamble_baked(pre, str(n.get("context") or "")):
                 n["context"] = pre + ("\n\n" + n["context"] if n.get("context") else "")
         nodes.append(n)
     return dict(graph, nodes=nodes)

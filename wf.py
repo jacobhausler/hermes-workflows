@@ -3830,12 +3830,18 @@ def _tree_quiesce(known, pgid, hold_s, proof_s, term_grace_s=None):
     when the proof budget ran out (fail closed upstream, never blind-respawn) —
     or whenever the table became unreadable (#61b B2: an unreadable /proc can
     never produce 'dead', the proof only completes on a readable re-walk)."""
+    known = set(known)
     def _live():
         s = {p for p in known if _proc_alive(p)}
         members = _proc_pids_by_pgid(pgid)
         if members is None:
             return None                             # #61b B2: unreadable
+        known.update(members)
         s |= {p for p in members if _proc_alive(p)}
+        # Death proof is also the reap boundary for our adopted children.
+        # Leaving owned zombies here races the next spawn and final verdict.
+        for p in known - s:
+            _reap_zombie(p)
         return sorted(s)
     live = _live()
     if live is None:
@@ -4106,6 +4112,10 @@ def _adopt_child(meta, node, byid, index, child, schema, fo_cancel=None):
             time.sleep(0.1)
     finally:
         with meta["_procs_lock"]:
+            # The stop watcher can set+kill after our stop check but before
+            # the liveness probe observes death. Classify at the same locked
+            # boundary where this child leaves the watcher's kill registry.
+            cancelled = cancelled or meta["_stop"].is_set()
             meta["_procs"].pop(key, None)
         if tree_seen:
             # #61b B1: persist the adopted spawn's tracked subtree across the
