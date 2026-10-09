@@ -1330,5 +1330,10 @@
     "test": "test_post_exit_strip_xwvu9.py",
     "exit": 0,
     "log": "Local foreground run on fix/xwvu9-post-exit-strip: RED at 8632839 tree pre-change (3 FAIL), GREEN after the strip (3 tests OK)"
+  },
+  {
+    "test": "test_effects_receipt_pygyy.py",
+    "exit": 0,
+    "log": "Local foreground run on PR #346 rebased head (fresh WF_RUNS_ROOT, outside run dirs): Ran 10 tests OK, rc=0; the PR adds this test without a CI row"
   }
 ]

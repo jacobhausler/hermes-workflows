@@ -39,6 +39,22 @@ if "QFLUSH" in q:
 if "QSLEEP" in q:
     try: time.sleep(float(q.split("QSLEEP")[1].split()[0]))
     except Exception: pass
+# est-pygyy (#56): EFFECT-EMIT <rel/path> BYTES=<n> — the child publishes its
+# artifact at spawn time (cwd = the child work dir <run>/work/<node>[.<i>],
+# A4), so the runner's effect-receipt gate is proven to measure bytes AT the
+# commit edge, not at admission. Item rows carry their own EFFECT-EMIT token
+# (the fan-out shape: each item publishes its own artifact). Inert without
+# the marker: golden paths byte-identical.
+if "EFFECT-EMIT" in q:
+    _sp = q.split()
+    _i = _sp.index("EFFECT-EMIT")
+    _tok = _sp[_i + 1]
+    _n = int(_sp[_i + 2].split("BYTES=")[1]) if len(_sp) > _i + 2 and \
+        _sp[_i + 2].startswith("BYTES=") else 32
+    _p = os.path.join(os.getcwd(), _tok)
+    os.makedirs(os.path.dirname(_p) or ".", exist_ok=True)
+    with open(_p, "wb") as _f:
+        _f.write(b"e" * _n)
 # ---- #61 process-tree modes (no behavior change without the env) ----
 # FAKE_GC=1: background a same-session grandchild that outlives this child —
 # the detached-suite shape. Its pid is appended to $FAKE_GC_PIDS so the test

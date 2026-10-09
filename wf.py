@@ -1091,6 +1091,59 @@ def save_node(run, node, byid, rec):
     os.replace(tmp, p)  # atomic: a completed node file is a committed fact
     _mint_suite_proof(run, node, rec, byid)   # est-2ek.1.603 (no-op unless declared)
 
+# ---------- effect-receipt gate (est-pygyy, issue #56) ----------
+# A node whose stated purpose is EXTERNAL publication declares the postconditions
+# the run must be able to PROVE before its `done` stands: `effects: [{file,
+# sha256?, min_bytes?}, ...]`. The runner verifies each row against bytes under
+# the RUN DIR at the commit edge — the artifact exists, is big enough, and (when
+# declared) carries the exact digest — and records the measured facts as
+# `effect_receipts` rows {file, exists, bytes, sha256, ok} on the node record
+# (what a publication-only recovery re-reads; NEVER re-authorizes the artifact).
+# Honest degradation: no `effects` key = this function returns the record
+# untouched, every existing graph is byte-identical (golden EMPTY). A declared
+# receipt that cannot be PROVEN demotes done/partial to failed
+# error_class "effect_receipt" — a proven-fail, deliberately absent from both
+# retry ladders. The runner NEVER fabricates a proven row: ok=True is written
+# only from bytes it read itself this instant.
+
+def _effect_gate(run, node, rec):
+    rows = node.get("effects")
+    if not rows or rec.get("status") not in ("done", "partial"):
+        return rec                        # undeclared / non-committing: untouched
+    proven, failures = [], []
+    for row in rows:
+        f = str(row.get("file", ""))
+        entry = {"file": f, "exists": False, "bytes": 0, "sha256": None, "ok": False}
+        p = Path(run) / f
+        inside = bool(f) and not f.startswith("/") and "\\" not in f \
+            and ".." not in f.split("/")
+        if inside:                        # never read outside the run dir
+            try:
+                data = p.read_bytes()
+                entry["exists"], entry["bytes"] = True, len(data)
+                entry["sha256"] = hashlib.sha256(data).hexdigest()
+                if entry["bytes"] == 0:
+                    failures.append(f"{f}: empty")
+                elif row.get("min_bytes") and entry["bytes"] < row["min_bytes"]:
+                    failures.append(f"{f}: {entry['bytes']}B < min_bytes {row['min_bytes']}")
+                elif row.get("sha256") and entry["sha256"] != row["sha256"]:
+                    failures.append(f"{f}: sha256 mismatch (got {entry['sha256']})")
+                else:
+                    entry["ok"] = True
+            except OSError:
+                failures.append(f"{f}: missing under the run dir")
+        else:
+            failures.append(f"{f}: path escapes the run dir")
+        proven.append(entry)
+    rec = dict(rec, effect_receipts=proven)
+    if failures:
+        rec = {"status": "failed",
+               "error": "effect_receipt_unproven: " + "; ".join(failures),
+               "error_class": "effect_receipt",
+               "effect_receipts": proven,
+               "output": rec.get("output"), "ms": rec.get("ms")}
+    return rec
+
 # ---------- child execution ----------
 
 CONTRACT = ("Finish your answer with ONE fenced ```json block holding your result. "
@@ -1717,7 +1770,15 @@ ERROR_CLASSES = frozenset(("provider_400", "unresolved_model", "cap_exhausted",
                            # lease-busy: rc=130 death on the CLI's session-lease wait
                            # (see _is_lease_busy) — bounded transient, one FRESH-session
                            # re-drive, never terminal on a lease collision.
-                           "lease_busy"))
+                           "lease_busy",
+                           # est-pygyy (#56): a node declaring `effects` effect-receipt
+                           # postconditions committed failed because the runner could
+                           # not PROVE them at the commit edge (artifact missing/empty/
+                           # digest-mismatch under the run dir). A proven-fail: never
+                           # retryable — the same graph dies identically until the
+                           # artifact actually lands; the run never reaches run.done
+                           # over a false publication.
+                           "effect_receipt"))
 _AGENT_FAIL_PREFIX = "hermes -z: agent failed:"
 # turn_failure_copy.py ends every non-retryable failure with a fixed-format trailer
 # `Provider said: <summary>`; api_error_summary.py:49 formats the summary as
@@ -6102,6 +6163,7 @@ def run_agent_node(run, meta, byid, node, outputs, steering):
                                       "error_class": "item_record",
                                       "record_problems": problems,
                                       "output": {"items": merged, "all_results": results}}
+                merged_rec = _effect_gate(run, node, merged_rec)  # #56: receipts proven at commit
                 save_node(run, node, byid, merged_rec)
                 if merged_rec["status"] == "done":
                     log(run, "node.finished", node=nid, done=len(merged), failed=len(failed),
@@ -6125,6 +6187,7 @@ def run_agent_node(run, meta, byid, node, outputs, steering):
             r = _final_quiesce(meta, r, "node", {"node": nid})   # #61: never commit over a live tree
             r = _stamp_served(meta, r, node)   # dad50be0: seat truth at the commit, never the alias
             r = _lane_gate(run, node, r)   # 64c6772b: a declared lane must be clean at commit
+            r = _effect_gate(run, node, r)  # #56: declared effect receipts must be PROVEN at commit
             save_node(run, node, byid, r)
             if r["status"] in ("done", "partial"):   # #4: a harvested partial IS committed output
                 # #61b B3: when the tracked tree set was non-empty, the solo
@@ -6879,7 +6942,16 @@ def main(run_id):
                     _fail_precondition(run, n, rs.byid, [why])
                     states[n["id"]] = "failed"
                     continue
-                save_node(run, n, rs.byid, {"status": "done", "output": n.get("output"), "ms": 0})
+                # est-pygyy (#56): the receipt gate rides the echo commit path too
+                # (same boundary-commit law as the publisher gate above).
+                _erec = _effect_gate(run, n, {"status": "done", "output": n.get("output"),
+                                              "ms": 0})
+                save_node(run, n, rs.byid, _erec)
+                if _erec["status"] != "done":
+                    log(run, "node.failed", node=n["id"], error=_erec["error"],
+                        error_class="effect_receipt", attempts=0)
+                    states[n["id"]] = "failed"
+                    continue
                 log(run, "node.done", node=n["id"], echo=True)
                 states[n["id"]] = "done"; outputs[n["id"]] = n.get("output")
 

@@ -730,6 +730,10 @@ AGENT_KEYS = {"id", "type", "after", "goal", "context", "schema", "model", "prov
               # producer: on commit done the runner mints the durable token
               # nodes/<id>.suite-proof.json (node id + committed efp).
               "publishes", "suite_proof",
+              # est-pygyy (issue #56): a publication node may DECLARE effect
+              # receipts — postconditions the runner PROVES at the commit edge
+              # before a done can stand. Absent = today's behavior byte-identical.
+              "effects",
               # jam-h23: on-death catch. 'skip' commits the failed node `skipped`
               # (join-tolerant); '<fallback-node-id>' additionally lets that agent run.
               "on_fail",
@@ -751,7 +755,14 @@ GATE_KEYS = {"id", "type", "after", "question", "options", "context", "when", "w
 ECHO_KEYS = {"id", "type", "after", "output",
              # est-2ek.1.603: an echo commits at the wave boundary WITHOUT a spawn, so
              # the publisher gate covers the echo commit path too.
-             "publishes"}
+             "publishes",
+             # est-pygyy (issue #56): the receipt gate covers the echo commit path
+             # exactly like the publisher gate — an echo that publishes must prove it.
+             "effects"}
+# est-pygyy (issue #56): the closed shape of one effect-receipt row (validated at
+# the door, enforced by wf._effect_gate at the runner's commit edge).
+EFFECT_KEYS = {"file", "sha256", "min_bytes"}
+_HEX64_OK = re.compile(r"^[0-9a-f]{64}$")
 JOIN_KEYS = {"id", "type", "after", "keys", "wait"}
 # ONE table for node kinds: closed key-set + the schedule hook. `spawns` is True
 # (agent: spawn a child when ready), False (gate: hold at the wave boundary), None
@@ -1266,6 +1277,45 @@ def validate_graph_errors(nodes, *, admission=False):
             elif not isinstance(n["suite_proof"], bool):
                 E(nid, "suite_proof", "suite_proof must be a boolean "
                                       "(true = committing done mints a suite proof token)")
+        if "effects" in n:
+            # est-pygyy (issue #56): declared effect receipts — the postconditions
+            # the runner PROVES at the commit edge before a done may stand. The
+            # engine never infers effects from prose; a declared receipt that cannot
+            # be proven fails the node typed (error_class effect_receipt), so the
+            # door validates the SHAPE fail-closed here: non-empty list <=8 rows,
+            # each {file, sha256?, min_bytes?} (closed keys; file is a run-dir
+            # relative path — absolute and escaping paths are refused HERE, never
+            # discovered at the commit edge).
+            ef = n["effects"]
+            if not isinstance(ef, list) or not ef:
+                E(nid, "effects", "effects must be a non-empty list of effect-receipt "
+                                  "objects {file, sha256?, min_bytes?}")
+            elif len(ef) > 8:
+                E(nid, "effects", f"effects has {len(ef)} rows; the cap is 8")
+            else:
+                for j, row in enumerate(ef):
+                    fld = f"effects[{j}]"
+                    if not isinstance(row, dict):
+                        E(nid, fld, "each effect receipt must be an object "
+                                    "{file, sha256?, min_bytes?}")
+                        continue
+                    stray = sorted(set(row) - EFFECT_KEYS)
+                    if stray:
+                        E(nid, fld, f"{fld} unknown key(s) {stray}; allowed: "
+                                    "file, sha256, min_bytes")
+                    f_ = row.get("file")
+                    if not isinstance(f_, str) or not f_.strip():
+                        E(nid, fld, f"{fld} file must be a non-empty string")
+                    elif f_.startswith("/") or "\\" in f_ or ".." in f_.split("/"):
+                        E(nid, fld, f"{fld} file {f_!r} invalid: must be a run-dir "
+                                    "relative path (no absolute path, no '..')")
+                    if "sha256" in row and not (isinstance(row["sha256"], str)
+                                                and _HEX64_OK.match(row["sha256"])):
+                        E(nid, fld, f"{fld} sha256 must be a 64-hex digest")
+                    mb = row.get("min_bytes")
+                    if mb is not None and (not isinstance(mb, int) or isinstance(mb, bool)
+                                           or mb <= 0):
+                        E(nid, fld, f"{fld} min_bytes must be a positive integer")
         for k, hi in (("timeout", 86400), ("max_turns", 200), ("run_budget", 86400)):
             v = n.get(k)
             if v is not None and (not isinstance(v, (int, float)) or isinstance(v, bool) or v <= 0 or v > hi):

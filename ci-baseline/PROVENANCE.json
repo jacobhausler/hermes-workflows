@@ -222,10 +222,16 @@
       "exit": 0,
       "measured": "2026-10-09 foreground run in the fix worktree: ALL PASS (37 checks, RC=0); RED-proof at base d69a64d (T1 B-amend returns ok, FAIL -> RC=1).",
       "supersede_by": "next green-CI refresh (replace with the CI-captured row)"
+    },
+    {
+      "test": "test_effects_receipt_pygyy.py",
+      "exit": 0,
+      "measured": "2026-10-09 local foreground run on PR #346 rebased onto 57058c9 (clean parity env, fresh WF_RUNS_ROOT, outside run dirs): Ran 10 tests OK, rc=0; the PR adds this test without a CI row",
+      "supersede_by": "next green-CI refresh (replace with the CI-captured row)"
     }
   ],
   "totals": {
-    "cases": 267,
+    "cases": 268,
     "red": 0
   },
   "contract": "Green CI ledgers only (every exit == 0); rows not captured by CI are listed in rows_added_outside_ci with how they were measured. Refresh from the tip of main after each main move; see README.md.",
