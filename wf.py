@@ -4901,9 +4901,25 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
             return {"status": "failed", "error": "cancelled while waiting for an agent seat"
                     + ("" if meta["_stop"].is_set() else " (quorum already met)"),
                     "error_class": "cancelled", "ms": 0, **route}
+        # est-2ek.1.856 deep review D1: the cap printed in the seat_wait row is
+        # RE-RESOLVED here — the wait can outlive a valid-knob instant, and an
+        # operator edit landing mid-wait must not raise SeatCapError out of
+        # run_child (the caller's harvest would swallow it as `crashed`, an
+        # untyped death). Same law as the acquire-instant catch above: the
+        # broken knob fails the NODE typed seat_cap, naming itself.
+        try:
+            _seat_cap_now = _max_seats(meta)
+        except SeatCapError as e:
+            return {"status": "failed",
+                    "error": f"seat_cap: invalid seat cap — {e} "
+                            "(WORKFLOW_MAX_SEATS env or config workflows.max_seats; an integer "
+                            f"in [{wfcommon.SEAT_CAP_FLOOR}, {wfcommon.SEAT_CAP_CEILING}] "
+                            "or unset; the per-run opt-out is run.json max_seats: 0)",
+                    "error_class": "seat_cap", "ms": int((time.time() - _seat_w0) * 1000),
+                    "spawn": spawn_no, "attempts": 1, **route}
         return {"status": "failed",
                 "error": f"seat_wait: no global agent seat freed within {_seat_wall}s "
-                         f"(cap={_max_seats(meta)}; WORKFLOW_MAX_SEATS / run.json max_seats)",
+                         f"(cap={_seat_cap_now}; WORKFLOW_MAX_SEATS / run.json max_seats)",
                 "error_class": "seat_wait", "ms": int((time.time() - _seat_w0) * 1000),
                 "spawn": spawn_no, "attempts": 1, **route}
     t0 = time.time()

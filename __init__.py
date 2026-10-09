@@ -3039,6 +3039,13 @@ def _create_run(args, graph, lib_name, models, routes, _liveness_notes, lane_pat
     # never gain the key (solo byte-identity law — the golden key set holds).
     if graph.get("requires_plugin") is not None:
         meta["plugin_version"] = _common.plugin_version()
+    # est-2ek.1.856 deep review D2: the advertised per-run seat-cap opt-out is
+    # baked where the runner reads it — run.json meta max_seats (the structural
+    # pass has already validated the value: integer in [4,16] or the explicit 0
+    # off-sentinel; _max_seats honours meta over env/config). Absent = key never
+    # written: a plain run keeps the exact golden key set.
+    if "max_seats" in graph:
+        meta["max_seats"] = graph["max_seats"]
     # Composite runs record which shelf bytes they expanded from (author-form
     # provenance) and any non-fatal resolver notes (scratch collisions). Empty =
     # key omitted: a plain run keeps the exact pre-include run.json key set.
@@ -3848,8 +3855,23 @@ def act_amend(args):
             meta["include_notes"] = _include_notes
         else:
             meta.pop("include_notes", None)
-    if meta.get("name") != new["name"] or _includes or _include_notes:
+    _name_changed = meta.get("name") != new["name"]
+    if _name_changed or _includes or _include_notes:
         meta["name"] = new["name"]
+    # est-2ek.1.856 deep review D2: run.json's meta max_seats is the CURRENT
+    # graph's truth — SET-OR-REMOVE like the include notes: an amend that
+    # declares max_seats bakes it, an amend whose graph drops the key must drop
+    # it from run.json too (a stale opt-out surviving a graph swap would leave
+    # the runner honouring a cap its own graph no longer declares).
+    _MS_MISSING = object()                            # one sentinel, compared by identity
+    _ms_before = meta.get("max_seats", _MS_MISSING)   # pre-amend truth, before mutation
+    _ms_now = new.get("max_seats", _MS_MISSING)
+    if _ms_now is not _MS_MISSING:
+        meta["max_seats"] = new["max_seats"]
+    else:
+        meta.pop("max_seats", None)
+    if (_name_changed or _includes or _include_notes
+            or _ms_before != _ms_now):
         mtmp = r / f"run.json.{os.getpid()}.tmp"
         mtmp.write_text(json.dumps(meta, ensure_ascii=False))
         os.replace(mtmp, r / "run.json")

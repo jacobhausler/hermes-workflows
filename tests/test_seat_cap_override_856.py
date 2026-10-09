@@ -285,5 +285,179 @@ for t in tix:
 shutil.rmtree(HOME_F, ignore_errors=True)
 shutil.rmtree(_tmp, ignore_errors=True)
 
+# ---------- C6 (deep review D1): the seat_wait error string must never        --
+# re-raise SeatCapError out of run_child. The seat_wait branch re-resolves
+# _max_seats(meta) inline to print the cap. Shape: the knob is VALID when the
+# node resolves it at the acquire instant (4658) and the operator breaks it
+# WHILE the node sits on the seat wait; the inline call at 4694 then raises
+# SeatCapError out of run_child and the caller's harvest swallows it as
+# `crashed` — the typed seat_cap law (C4) leaks as an untyped death.
+# Contract: the seat_wait branch must fail the node TYPED seat_cap (same
+# handling as the primary acquire site), never let the exception escape.
+HOME_W = HERE / "home-856-waitflip"
+shutil.rmtree(HOME_W, ignore_errors=True)
+HOME_W.mkdir()
+(HOME_W / "config.yaml").write_text("model:\n  default: cap856\n")
+os.environ["HERMES_HOME"] = str(HOME_W)
+os.environ["WF_RUNS_ROOT"] = str(HOME_W / "workflows")
+seats_w = HOME_W / "seats"
+os.environ["WF_SEATS_DIR"] = str(seats_w)
+os.environ["WORKFLOW_MAX_SEATS"] = "4"          # valid at the acquire instant
+run_w = HOME_W / "workflows" / "r-wait"
+(run_w / "nodes").mkdir(parents=True)
+node_w = {"id": "waitn", "type": "agent", "goal": "ok"}
+(run_w / "graph.json").write_text(json.dumps({"name": "r-wait", "nodes": [node_w]}))
+
+# hold ALL 4 seats (cap 4 via env, no meta knob) so the child's acquire times
+# out into the seat_wait branch; flip the knob to invalid mid-wait.
+holder_w = [wf._seat_acquire(seats_w, f"C6-holder-{i}", 4, 20.0) for i in range(4)]
+check("C6 setup: holder holds all 4 seats (cap 4 via env)",
+      all(isinstance(t, Path) and t.exists() for t in holder_w),
+      f"got={[str(t) for t in holder_w]}")
+meta_w = {"_run": run_w, "hermes_bin": str(HERE / "nonexistent-hermes-must-never-run"),
+          "_spawn_n": {}, "_procs_lock": threading.Lock(), "_procs": {},
+          "_stop": threading.Event(), "node_timeout": 2}
+_flip = threading.Timer(0.3, lambda: os.environ.__setitem__("WORKFLOW_MAX_SEATS", "banana"))
+_flip.start()
+try:
+    res_w = wf.run_child(meta_w, node_w, {"waitn": node_w}, "ok", "", None,
+                         skey="wf:r-wait:waitn")
+    escaped = None
+except wf.SeatCapError as e:         # D1 shape: the inline re-resolve escaping
+    escaped, res_w = e, None
+finally:
+    _flip.cancel()
+    os.environ.pop("WORKFLOW_MAX_SEATS", None)
+    for t in holder_w:
+        if isinstance(t, Path):
+            try: wf._seat_release(t)
+            except OSError: pass
+check("C6a: a knob that breaks mid seat-wait never raises SeatCapError out of "
+      "run_child — the node fails typed, never a swallowed `crashed`",
+      escaped is None and isinstance(res_w, dict),
+      f"escaped={escaped!r} res={str(res_w)[:200]}")
+check("C6b: the typed verdict is seat_cap naming the broken knob (same handling as "
+      "the primary acquire path) — never a swallowed unknown/crashed death",
+      isinstance(res_w, dict) and res_w.get("status") == "failed"
+      and res_w.get("error_class") == "seat_cap"
+      and "banana" in str(res_w.get("error", "")),
+      json.dumps(res_w, default=str)[:300])
+check("C6c: zero spawns and no ticket/queue marker left behind by the broken-knob death",
+      not seats_w.exists() or not [p for p in seats_w.rglob("*.json")
+                                   if p not in holder_w],
+      f"left: {[p.name for p in seats_w.rglob('*.json') if p not in holder_w] if seats_w.exists() else '-'}")
+shutil.rmtree(HOME_W, ignore_errors=True)
+
+# ---------- C7 (deep review D2): the advertised per-run opt-out is the truth. --
+# Three error strings advertise "the per-run opt-out is graph/run.json max_seats
+# : 0" (door submit refusal, runner seat_cap, runner seat_wait). An advertised
+# contract must be TRUE: the graph key is accepted by the structural validator
+# (integer in [4,16] or 0), act_run bakes it into run.json, and the runner's
+# _max_seats honours it (C1 already proves meta wins and 0 disables). A plain
+# run NEVER grows the key (solo golden key-set law).
+with tempfile.TemporaryDirectory(prefix="cap856-d2-") as td:
+    home = Path(td)
+    (home / "config.yaml").write_text("model:\n  default: safe\n")
+    base_env = {"HERMES_HOME": td, "WF_RUNS_ROOT": str(home / "workflows")}
+
+    def _door_run(g, extra_env=None):
+        env = dict(base_env)
+        env.pop("WORKFLOW_MAX_SEATS", None)
+        if extra_env:
+            env.update(extra_env)
+        with patch.dict(os.environ, env, clear=False), \
+             patch.dict(sys.modules, {"hermes_cli.config": None, "hermes_constants": None}), \
+             patch.object(door, "_spawn_runner"):
+            os.environ.pop("WORKFLOW_MAX_SEATS", None)
+            return door.act_run({"graph": g, "hermes_bin": FAKE})
+
+    def _run_json(res):
+        # the run.json of THIS launch only — matched by its run_id, never rglob
+        rid = res.get("run_id") if isinstance(res, dict) else None
+        if not rid:
+            return None
+        for p in (home / "workflows").rglob("run.json"):
+            if rid in str(p.parent):
+                return json.loads(p.read_text())
+        return None
+
+    off = _door_run(dict(mini_graph(), max_seats=0))
+    rj = _run_json(off)
+    check("C7a: the door ACCEPTS the advertised graph max_seats: 0 (not 'unknown graph key') "
+          "and run.json records it — the advertised opt-out is a real contract",
+          bool(off.get("run_id")) and isinstance(rj, dict) and rj.get("max_seats") == 0,
+          json.dumps(off)[:200] + f" run.json={str(rj)[:200]}")
+    cap8 = _door_run(dict(mini_graph(), max_seats=8))
+    rj8 = _run_json(cap8)
+    check("C7b: a valid graph cap (8) launches and lands in run.json for the runner",
+          bool(cap8.get("run_id")) and isinstance(rj8, dict) and rj8.get("max_seats") == 8,
+          json.dumps(cap8)[:200] + f" run.json={str(rj8)[:200]}")
+    bad_ms = _door_run(dict(mini_graph(), max_seats="banana"))
+    check("C7c: an invalid graph max_seats refuses at submit naming the key and the "
+          "shape (value error, not 'unknown graph key'), before any write",
+          isinstance(bad_ms, dict) and "max_seats" in str(bad_ms.get("error", ""))
+          and "unknown graph key" not in str(bad_ms.get("error", ""))
+          and "integer" in str(bad_ms.get("error", "")),
+          json.dumps(bad_ms)[:300])
+    bad_lo = _door_run(dict(mini_graph(), max_seats=3))
+    check("C7d: graph max_seats below the floor (3) refuses with the range",
+          isinstance(bad_lo, dict) and "max_seats" in str(bad_lo.get("error", ""))
+          and str(wfc.SEAT_CAP_FLOOR) in str(bad_lo.get("error", "")),
+          json.dumps(bad_lo)[:300])
+    bad_bool = _door_run(dict(mini_graph(), max_seats=True))
+    check("C7e: bool graph max_seats is the typo shape, refused (same law as env/config)",
+          isinstance(bad_bool, dict) and "max_seats" in str(bad_bool.get("error", "")),
+          json.dumps(bad_bool)[:300])
+    plain = _door_run(mini_graph())
+    rjp = _run_json(plain)
+    check("C7f: a plain run (no max_seats declared) never grows the key — the solo "
+          "golden key-set law is untouched",
+          bool(plain.get("run_id")) and "max_seats" not in (rjp or {}),
+          json.dumps(plain)[:150] + f" keys={sorted((rjp or {}).keys())}")
+
+# ---------- C8 (deep review D2, amend half): run.json's max_seats is the        --
+# CURRENT graph's truth. An amend that declares the key bakes it; an amend whose
+# replacement graph DROPS the key must drop it too — a stale opt-out surviving a
+# graph swap would leave the runner honouring a cap its own graph no longer
+# declares (the same set-or-remove law the include notes follow).
+with tempfile.TemporaryDirectory(prefix="cap856-d2-amend-") as td:
+    home = Path(td)
+    (home / "config.yaml").write_text("model:\n  default: safe\n")
+
+    def _amend_env(fn, *a, **k):
+        with patch.dict(os.environ, {"HERMES_HOME": td,
+                                     "WF_RUNS_ROOT": str(home / "workflows")}, clear=False), \
+             patch.dict(sys.modules, {"hermes_cli.config": None, "hermes_constants": None}), \
+             patch.object(door, "_spawn_runner"), \
+             patch.object(door, "_ping_route_once",
+                          lambda p, m: {"liveness": "unknown"}), \
+             patch.object(door, "_resume_after_action", lambda *x, **y: "no-runner"):
+            os.environ.pop("WORKFLOW_MAX_SEATS", None)
+            return fn(*a, **k)
+
+    made = _amend_env(door.act_run, {"graph": mini_graph(), "hermes_bin": FAKE})
+    rid = made.get("run_id")
+    rdir = home / "workflows" / rid if rid else None
+    rjam = json.loads((rdir / "run.json").read_text()) if rdir else {}
+    check("C8 setup: plain run armed, run.json carries no max_seats",
+          bool(rid) and "max_seats" not in rjam, json.dumps(made)[:200])
+    am1 = _amend_env(door.act_amend, {"run_id": rid, "graph": dict(mini_graph(), max_seats=0)})
+    rjam1 = json.loads((rdir / "run.json").read_text()) if rdir else {}
+    check("C8a: an amend declaring graph max_seats bakes it into run.json "
+          "(the advertised per-run contract survives a graph swap)",
+          not (isinstance(am1, dict) and am1.get("error")) and rjam1.get("max_seats") == 0,
+          json.dumps(am1, default=str)[:200] + f" run.json={str(rjam1)[:200]}")
+    am2 = _amend_env(door.act_amend, {"run_id": rid, "graph": mini_graph()})
+    rjam2 = json.loads((rdir / "run.json").read_text()) if rdir else {}
+    check("C8b: an amend whose graph DROPS max_seats removes it from run.json — "
+          "no stale opt-out may outlive the graph that declared it",
+          not (isinstance(am2, dict) and am2.get("error")) and "max_seats" not in rjam2,
+          json.dumps(am2, default=str)[:200] + f" run.json={str(rjam2)[:200]}")
+    am3 = _amend_env(door.act_amend, {"run_id": rid, "graph": dict(mini_graph(), max_seats=True)})
+    check("C8c: amend measures the key with the SAME law as run (bool refused, "
+          "before graph.json is swapped)",
+          isinstance(am3, dict) and "max_seats" in str(am3.get("error", "")),
+          json.dumps(am3, default=str)[:300])
+
 print(("" if ok else "FAILURES PRESENT ") + "DONE")
 sys.exit(0 if ok else 1)

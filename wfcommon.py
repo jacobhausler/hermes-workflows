@@ -1813,6 +1813,11 @@ def admission_ledger_errors(graph, run_dir=None):
 STRUCTURAL_GRAPH_KEYS = {"name", "nodes", "description", "defaults", "model_policy",
                          "provenance", "grammar", "include",
                          "concurrency", "item_concurrency",  # #100: optional run-level limits
+                         # est-2ek.1.856 deep review D2: the advertised per-run
+                         # seat-cap opt-out ("graph max_seats: 0") is a REAL key —
+                         # accepted here, validated by value below, baked into
+                         # run.json by the door; the runner's _max_seats honours it.
+                         "max_seats",
                          # est-2ek.1.166: the version handshake — an author may
                          # declare the minimum plugin version the graph needs;
                          # a stale runner refuses LOUDLY at arm time, naming both.
@@ -1956,6 +1961,17 @@ def structural_graph_errors(graph, extra_keys=()):
     for key in ("concurrency", "item_concurrency"):
         if key in graph and (type(graph[key]) is not int or graph[key] <= 0):
             E(key, f"{key} must be a positive integer")
+    # est-2ek.1.856 deep review D2: the advertised per-run seat-cap opt-out is
+    # measured by the SAME law as the operator knobs — one integer inside
+    # [SEAT_CAP_FLOOR, SEAT_CAP_CEILING] or the explicit 0 off-sentinel; bool is
+    # the typo shape. A bad value refuses at submit naming the key, never
+    # 'unknown graph key' and never a silent default (SeatCapError is a
+    # ValueError, so the refuse message carries the knob name and range).
+    if "max_seats" in graph:
+        try:
+            _seat_cap_valid(graph["max_seats"], "graph max_seats")
+        except SeatCapError as e_:
+            E("max_seats", str(e_))
     # est-2ek.1.166: shape-only here (dot-integer string); the staleness
     # refusal itself belongs at the arm/launch seams so it names the runner's
     # own version — same message the door and the boot guard both use.
