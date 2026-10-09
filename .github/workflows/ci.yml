@@ -61,11 +61,12 @@ jobs:
         run: cp desktop/plugin.js /tmp/plugin.check.mjs && node --check /tmp/plugin.check.mjs
 
       - name: Serial suite
-        # est-9yl2: admission against the committed green ledger
-        # (ci-baseline/exits.json, PROVENANCE.json). Red identity = test name +
-        # exit code; only `introduced` blocks the lane. No baseline => every red
-        # is introduced, so a missing/corrupt ledger fails closed (suite.py rc=2).
-        run: python3 scripts/suite.py . ci-out --baseline ci-baseline/exits.json
+        # Full serial pass is the gate: every discovered test, every exit 0
+        # (zero discovery = failed, #112). Optional `--baseline <measured-ledger>`
+        # remains for local diagnosis of introduced-vs-pre-existing reds; it is
+        # diagnostic only — base reds never waive (suite.py), and a ledger
+        # measured on the PR's merge-base beats any committed inventory.
+        run: python3 scripts/suite.py . ci-out
 
       - name: Upload suite ledger + per-test logs
         if: always()
