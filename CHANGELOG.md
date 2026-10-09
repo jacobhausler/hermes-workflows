@@ -1,5 +1,58 @@
 # Changelog
 
+## 1.3.2 — 2026-10-09
+
+Patch line, 36 commits since v1.3.1 (merge order #274 → #272 → #275 → #285
+→ #300 → #289 → #294 → #293 → #299 → #290 → #292 → #303 → #280 → #301 → #286
+→ #309 → #311 → #318 → #313 → #315 → #305 → #235 → #281 → #253 → #282 → #307
+→ #296 → #298 → #287 → #312 → #248 → #306 → #327 → #328 → #322 → #291): the
+wall-meter/read-model wave (per-running-node wall seconds, artifact-mtime
+progress channel, failed_nodes[] surfacing, bank-the-corpse on wall-kill),
+the provider/route-identity fixes (seat-routed provider/model literals,
+alias-pinned ping, billed-model ledger), the door admission hardenings
+(schema minItems/minLength, baked-empty fanout refusal, fsync+verify run
+dir, surviving-template refusal at amend), the shelf-to-launch contract,
+and the graph-level `result:` verdict node. No new tool surface.
+
+Merges since the tag, in brief:
+
+- 851174d #274 — docs(runs): keep find_run docstring to the operative contract
+- 4647aec #272 — test(proctree): parseable-content pid/record waits in sibling fixtures
+- 0a44455 #275 — fix(ci): graph_path_ban sees renames + quoted paths — -z name-status
+- d9a53dc #285 — ci(baseline): ledger row for test_library_tag_read_qeul.py — heals main admission guard
+- b172aab #300 — fix(runner): disclose single-query tool approval limits
+- 10c56d9 #289 — fix(runner): pin child TERMINAL_CWD to its work dir
+- a884eb9 #294 — docs(tool): workflow tool description carries the use/avoid sentence and names delegate_task
+- 7f04d95 #293 — fix(door): refuse a surviving {run.KEY} in gate wait.until_argv at run/amend
+- 6d181fd #299 — fix(suite): isolate inherited workflow identity
+- cde1530 #290 — fix(runner): node record lists every billed model; route hold names final vs mid-session
+- 8073d93 #292 — feat(grammar): optional graph-level result: <node id> — status/wait name the verdict node
+- 8152edb #303 — docs(grammar): scope the result: contract
+- 0d91f80 #280 — wfcommon: reject baked-empty fanout.items:[] at the door
+- aca313d #301 — fix(dashboard): loadable hidden API entry
+- 869c401 #286 — feat(runner): bank-the-corpse on wall-kill — deterministic <node>.corpus/ + node.banked event
+- a11a427 #309 @atbrace — fix(suite): refused invocation invalidates stale green receipts on the --baseline fail path (audit M11)
+- 5801d11 #311 @atbrace — test: drop the self-proving stray-file check from the partial-rescue law test (audit M08)
+- f3801c9 #318 — docs: one owner per check truth — contributor guide halves, skill sheds its second copy (M05/M06)
+- 2f63070 #313 — fix(runner): truthful corpse sizes, protected opens, measured provenance
+- 1d6a66f #315 — docs(wfcommon): cut the dead injectable-hook claim from the tag READ fold
+- 0abd168 #305 — fix: status/next expose global seat back-pressure
+- 8bc661c #235 — feat(#733): dead-on-arrival finalize for stuck running node records
+- bb7e163 #281 — test(parity): dual-surface fold parity contract test, test-only
+- f45b79a #253 — feat(door): est-kg3y — shelf-to-launch contract: library run_context validation + meta.params surfacing + s12
+- dfc388e #282 — read model: artifact-mtime progress channel — run_state publishes {artifact, size, mtime_age_s, last_line} for running nodes
+- f549709 #307 — fix(runner): summary.md lists every node's status + output
+- e48a3e8 #296 — fix: provider-aware route-identity contract
+- 703ccb0 #298 — fix(pack): exclude checkout-only tests from release ZIP
+- 19b43d6 #287 — fix(door): alias-pinned nodes ping and report the alias target id, not the bare alias
+- 3b45625 #312 — fix(door,harvest): admit + enforce schema minItems/minLength, fail closed on blank lists
+- 69ed113 #248 — fix(door): est-2ek.1.199 — fsync+verify the run dir before run_id returns; orphaned-run lane status
+- 7d8e6bb #306 — fix: defaults.context bake is idempotent across a run_context-bound amend
+- 96ee587 #327 — fix(amend): preview flags def drift on RUNNING never-committed nodes (issue #18)
+- 94fd074 #328 — feat(read-model,door,desktop): #133 wall meter — per-running-node wall seconds
+- 92b8f67 #322 @atbrace-hermes — feat(read model): populate failed_nodes[] in run_state + status/wait (sys-5lnm17)
+- 8632839 #291 — fix(door): bake the provider of a seat-routed provider/model literal at submit
+
 ## 1.3.1 — 2026-10-07
 
 Patch line, 46 commits since v1.3.0 (merge order #214 → #215 → #218 → #217 → #219
