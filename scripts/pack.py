@@ -134,6 +134,10 @@ INCLUDE_FILES = (
     "scripts/diagram_readme.py",
     "scripts/pack.py",
     "scripts/pr_tag_audit.py",  # est-4vnq: tests/test_pr_tag_audit.py executes it; the shipped suite must not die on a missing helper
+    # est-zee7e: tests/test_pin_delta_check_133387.py (shipped via the
+    # tests/test_*.py glob) exec-modules this at import from the package root —
+    # the est-4vnq finding-4 shape; the gate script ships beside its test.
+    "scripts/pin_delta_check.py",
     # est-5p7x (PR #165 CI blocker, run 37440782151): tests/test_diagram_law.py
     # (shipped via the tests/test_*.py glob) subprocess-executes BOTH generators
     # from the package root — the exact est-4vnq finding-4 shape. The merge ref

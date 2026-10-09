@@ -110,6 +110,10 @@ def main() -> None:
             check("pack-list contract: ZIP scripts/ set equals the exact declared packed set",
                   packed_scripts == {"scripts/pack.py",
                                       "scripts/pr_tag_audit.py", "scripts/suite.py",
+                                      # est-zee7e: the pin-delta re-pin gate ships
+                                      # because its shipped test exec-loads it from
+                                      # the package root (est-4vnq finding-4 shape).
+                                      "scripts/pin_delta_check.py",
                                       # est-5p7x: the diagram-law generators — shipped
                                       # because tests/test_diagram_law.py executes both
                                       # from the package root (same rationale as the
