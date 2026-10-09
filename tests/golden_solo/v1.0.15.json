@@ -487,6 +487,7 @@
     "status": {
       "card": "::workflow{id=\"<RUN>\"}",
       "done": 2,
+      "failed_nodes": [],
       "name": "dag",
       "next": [],
       "nodes": {
@@ -525,6 +526,7 @@
     "wait": {
       "card": "::workflow{id=\"<RUN>\"}",
       "done": 2,
+      "failed_nodes": [],
       "name": "dag",
       "next": [],
       "nodes": {
@@ -866,6 +868,7 @@
     "status": {
       "card": "::workflow{id=\"<RUN>\"}",
       "done": 1,
+      "failed_nodes": [],
       "name": "echo",
       "next": [],
       "nodes": {
@@ -895,6 +898,7 @@
     "wait": {
       "card": "::workflow{id=\"<RUN>\"}",
       "done": 1,
+      "failed_nodes": [],
       "name": "echo",
       "next": [],
       "nodes": {
@@ -2001,6 +2005,7 @@
     "status": {
       "card": "::workflow{id=\"<RUN>\"}",
       "done": 2,
+      "failed_nodes": [],
       "name": "fanout-quorum",
       "next": [],
       "nodes": {
@@ -2152,6 +2157,7 @@
     "wait": {
       "card": "::workflow{id=\"<RUN>\"}",
       "done": 2,
+      "failed_nodes": [],
       "name": "fanout-quorum",
       "next": [],
       "nodes": {
@@ -2622,6 +2628,7 @@
     "status": {
       "card": "::workflow{id=\"<RUN>\"}",
       "done": 1,
+      "failed_nodes": [],
       "name": "ra-review-golden",
       "next": [],
       "nodes": {
@@ -2652,6 +2659,7 @@
     "wait": {
       "card": "::workflow{id=\"<RUN>\"}",
       "done": 1,
+      "failed_nodes": [],
       "name": "ra-review-golden",
       "next": [],
       "nodes": {
@@ -3003,6 +3011,7 @@
     "status": {
       "card": "::workflow{id=\"<RUN>\"}",
       "done": 1,
+      "failed_nodes": [],
       "name": "retry-partial",
       "next": [],
       "nodes": {
@@ -3051,6 +3060,7 @@
     "wait": {
       "card": "::workflow{id=\"<RUN>\"}",
       "done": 1,
+      "failed_nodes": [],
       "name": "retry-partial",
       "next": [],
       "nodes": {
@@ -3441,6 +3451,7 @@
     "status": {
       "card": "::workflow{id=\"<RUN>\"}",
       "done": 3,
+      "failed_nodes": [],
       "name": "when-prune",
       "next": [],
       "nodes": {
@@ -3480,6 +3491,7 @@
     "wait": {
       "card": "::workflow{id=\"<RUN>\"}",
       "done": 3,
+      "failed_nodes": [],
       "name": "when-prune",
       "next": [],
       "nodes": {

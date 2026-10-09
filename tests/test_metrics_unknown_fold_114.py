@@ -68,6 +68,7 @@ def st_for(nodes):
     """run_state-shaped state for node ids in `nodes` (both adapters read ONE)."""
     return {
         "run_id": RUN, "name": "metrics114", "status": "done", "runner_live": False,
+        "failed_nodes": [],   # sys-5lnm17: run_state() always publishes it; nothing failed here
         "nodes": {nid: {"type": "agent", "status": "done", "after": [],
                         "fanout": nid == "a", "stale_of_amend": None} for nid in nodes},
         "done": len(nodes), "skipped": 0, "total": len(nodes),

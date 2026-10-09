@@ -164,10 +164,22 @@
       "exit": 0,
       "measured": "2026-10-08 local foreground run on harden/upstream-0.21.5-hook-contract (PR #304): Ran 3 tests, OK, rc=0 (also RED first at pre-fix head 88f37b2: 3 failures, proving the pins bite); the PR added this test without a ledger row (baseline guard: tests without rows)",
       "supersede_by": "next green-CI refresh (replace with the CI-captured row)"
+    },
+    {
+      "test": "test_wall_meter_133.py",
+      "exit": 0,
+      "measured": "2026-10-09 local foreground run (cd tests && PYTHONPATH=/opt/hermes:.. python3 test_wall_meter_133.py): RESULT GREEN, 18 checks / 0 failed, exit 0; RED at the test-only commit 2a2d789 (13 of 18 failed \u2014 the `wall` key absent); the PR (#133 wall meter) adds this test without a CI row",
+      "supersede_by": "next green-CI refresh (replace with the CI-captured row)"
+    },
+    {
+      "test": "test_failed_nodes_5lnm.py",
+      "exit": 0,
+      "measured": "2026-10-08 local foreground run (8/8 checks PASS, rc=0) on sys-5lnm17 branch; the row can only ever make CI red, never green",
+      "supersede_by": "next green-CI refresh (replace with the CI-captured row)"
     }
   ],
   "totals": {
-    "cases": 257,
+    "cases": 259,
     "red": 0
   },
   "contract": "Green CI ledgers only (every exit == 0); rows not captured by CI are listed in rows_added_outside_ci with how they were measured. Refresh from the tip of main after each main move; see README.md.",
