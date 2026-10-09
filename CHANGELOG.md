@@ -2,10 +2,10 @@
 
 ## 1.3.2 — 2026-10-09
 
-Patch line, 36 commits since v1.3.1 (merge order #274 → #272 → #275 → #285
+Patch line, 37 commits since v1.3.1 (merge order #274 → #272 → #275 → #285
 → #300 → #289 → #294 → #293 → #299 → #290 → #292 → #303 → #280 → #301 → #286
 → #309 → #311 → #318 → #313 → #315 → #305 → #235 → #281 → #253 → #282 → #307
-→ #296 → #298 → #287 → #312 → #248 → #306 → #327 → #328 → #322 → #291): the
+→ #296 → #298 → #287 → #312 → #248 → #306 → #327 → #328 → #322 → #291 → #295): the
 wall-meter/read-model wave (per-running-node wall seconds, artifact-mtime
 progress channel, failed_nodes[] surfacing, bank-the-corpse on wall-kill),
 the provider/route-identity fixes (seat-routed provider/model literals,
@@ -52,6 +52,7 @@ Merges since the tag, in brief:
 - 94fd074 #328 — feat(read-model,door,desktop): #133 wall meter — per-running-node wall seconds
 - 92b8f67 #322 @atbrace-hermes — feat(read model): populate failed_nodes[] in run_state + status/wait (sys-5lnm17)
 - 8632839 #291 — fix(door): bake the provider of a seat-routed provider/model literal at submit
+- aeb89ff #295 — fix(runner): wall extension accepts the child's own session row as proof of life (est-2ek.1.595)
 
 ## 1.3.1 — 2026-10-07
 
