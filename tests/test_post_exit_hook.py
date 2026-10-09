@@ -1,17 +1,27 @@
-"""Regression for runner-owned roll-last post-exit handoff (est-w4qa)."""
+"""Regression for the roll-last post-exit handoff module (est-w4qa).
+
+est-xwvu9 (upstream hermes-agent PR #133387, review 5467148429): the runner no
+longer dispatches this mechanism and the module is NOT shipped — it lives at
+scripts/post_exit_hook.py (outside pack's INCLUDE) for our own distribution
+path only. The runner-side dispatch test was removed with the dispatch; what
+remains proves the preserved module's own safety contract (registration
+validation, never-installing-on-failure, launch-attempt receipts). Source-only
+like every other test that executes a scripts/ file (see pack SOURCE_ONLY_TESTS).
+"""
+import importlib.util
 import json
 import os
-import subprocess
-import sys
-import time
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 REPO = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(REPO))
-import post_exit_hook as hook
+_spec = importlib.util.spec_from_file_location(
+    "post_exit_hook_sourceonly", REPO / "scripts" / "post_exit_hook.py")
+assert _spec is not None and _spec.loader is not None
+hook = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(hook)
 
 # All fixture writes stay on durable work ground, never the platform scratch dir.
 FIXTURES = Path(os.environ.get("WF_HOOK_TEST_ROOT",
@@ -70,34 +80,6 @@ class PostExitHookTest(unittest.TestCase):
         with patch.object(hook.subprocess, "run") as no_relaunch:
             self.assertEqual(hook.dispatch(self.run_dir, "done"), rec)
             no_relaunch.assert_not_called()
-
-    def test_actual_runner_writes_receipt_after_exit(self):
-        # Real wf.py process; echo needs no model and makes a terminal run.
-        (self.run_dir / "graph.json").write_text(json.dumps({"name": "roll-last-test", "nodes": [
-            {"id": "done", "type": "echo", "output": {"status": "ok"}}]}))
-        (self.run_dir / "run.json").write_text(json.dumps({"hermes_bin": "offline"}))
-        hook.register(self.run_dir, self.script, "0")
-        env = dict(os.environ, HERMES_HOME=str(self.root), WF_RUNS_ROOT=str(self.root / "workflows"))
-        p = subprocess.run([sys.executable, str(REPO / "wf.py"), "run", self.run_dir.name],
-                           env=env, capture_output=True, text=True, timeout=50)
-        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
-        self.assertIn("WORKFLOW_DONE", p.stdout)
-        rec = json.loads((self.run_dir / hook.RECEIPT).read_text())
-        self.assertGreater(rec["runner_pid"], 0)
-        self.assertEqual(rec["state"], "dispatched", rec)
-        self.assertEqual(rec["author"], "workflow_runner")
-        deadline = time.monotonic() + 4
-        final = ""
-        while time.monotonic() < deadline:
-            try:
-                final = (self.outside / "state").read_text().strip()
-            except OSError:
-                final = ""
-            if final == "all_done":
-                break
-            time.sleep(0.1)
-        self.assertEqual(final, "all_done", "state marker never reached all_done")
-        self.assertEqual(json.loads((self.run_dir / "runner_exit.json").read_text())["reason"], "done")
 
 
 if __name__ == "__main__":

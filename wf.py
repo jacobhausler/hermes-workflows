@@ -7176,16 +7176,6 @@ def main(run_id):
         except Exception: pass
     if reason is not None:
         write_runner_exit(run, reason, graph=exit_graph[0])
-        # A registered roll-last install is deliberately NOT a spawned agent
-        # child: those are killed with the runner. Sweep before handing off to
-        # launchd (or its detached fallback), then author a durable receipt in
-        # the run dir. A failed handoff stays RED for the nightly readback gate.
-        _runner_term_cleanup(meta, "post_exit_handoff")
-        try:
-            from post_exit_hook import dispatch as dispatch_post_exit_hook
-            dispatch_post_exit_hook(run, reason)
-        except Exception as e:
-            log(run, "runner.post_exit_hook_error", error=repr(e))
     return reason
 
 def finalize(run, graph, status):

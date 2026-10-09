@@ -20,6 +20,9 @@ SOURCE_ONLY_TESTS = {
     "tests/test_stuck_node_finalize_733.py",
     # #248 r3 rebase onto main's #298: executes source-only make_public.py, reads scripts/scrub-list.txt
     "tests/test_personal_path_scrub_867.py",
+    # est-xwvu9: the post-exit hook is stripped from the shipped build; this test
+    # executes the source-only scripts/post_exit_hook.py (kept for our own dist path)
+    "tests/test_post_exit_hook.py",
 }
 # A shipped test that loads/executes `<root> / "scripts" / "<file>"` needs that file in the ZIP.
 SCRIPT_REF = re.compile(r'(?:ROOT|BUILD)\s*/\s*"scripts"\s*/\s*"([^"]+)"|ROOT\s*/\s*"scripts/([^"]+)"')
@@ -39,8 +42,7 @@ def main():
         for path in sorted(SOURCE_ONLY_TESTS):
             assert path not in members, f"source-only test shipped without its inputs: {path}"
             print("PASS source-only test excluded:", path)
-        for path in ("tests/test_packaging.py", "tests/test_package_source_only_756.py",
-                     "post_exit_hook.py"):
+        for path in ("tests/test_packaging.py", "tests/test_package_source_only_756.py",):
             assert path in members, f"package regression gate omitted: {path}"
             print("PASS package gate still ships:", path)
         # Derived sweep: no shipped test may reference an unshipped scripts/ file.

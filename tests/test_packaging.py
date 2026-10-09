@@ -131,7 +131,12 @@ def main() -> None:
                 check("pack-list contract: every repo scripts/*.py is packed or declared source-only (no silent middle)",
                       {p.name for p in (ROOT / "scripts").glob("*.py")} ==
                       {Path(s).name for s in packed_scripts}
-                      | {"make_public.py", "lane_recover.py"})
+                      | {"make_public.py", "lane_recover.py",
+  # est-xwvu9 (upstream #133387 accepted ask): the post-exit
+  # hook is stripped from the shipped build; kept here for
+  # our own distribution path, executed by the source-only
+  # tests/test_post_exit_hook.py.
+  "post_exit_hook.py"})
             else:
                 print("SKIP pack-list repo-side half: no .git — running from an "
                       "unpacked ZIP/archive, where the premise does not exist")
