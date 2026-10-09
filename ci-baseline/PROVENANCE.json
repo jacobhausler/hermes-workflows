@@ -176,10 +176,16 @@
       "measured": "CI run 37720369252 at 60f3dfec: regression exit 0; the sole suite failure was test_baseline_guard_9yl2.py because this row was absent",
       "supersede_by": "next green-CI refresh (replace with the CI-captured row)",
       "test": "test_wall_extend_session_595.py"
+    },
+    {
+      "test": "test_spawn_enoent_retry_w33.py",
+      "exit": 0,
+      "measured": "2026-10-09 local foreground run on fix/w33-spawn-enoent: RED at base 96ee587 (legs A+B reproduce the est-ulwpg typed spawn death ms=0 attempts=1 byte-for-byte; leg C green), GREEN at fix head: 11 PASS / 0 FAIL rc=0; spawn-family siblings seat_popen_exception/postpopen_cleanup/cancel_at_ticket/11_runner_profile/spawn_ledger/lane_hygiene all rc=0",
+      "supersede_by": "next green-CI refresh (replace with the CI-captured row)"
     }
   ],
   "totals": {
-    "cases": 259,
+    "cases": 260,
     "red": 0
   },
   "contract": "Green CI ledgers only (every exit == 0); rows not captured by CI are listed in rows_added_outside_ci with how they were measured. Refresh from the tip of main after each main move; see README.md.",

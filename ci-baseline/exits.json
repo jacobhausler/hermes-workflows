@@ -1059,6 +1059,11 @@
     "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_skill_docs.py.log"
   },
   {
+    "test": "test_spawn_enoent_retry_w33.py",
+    "exit": 0,
+    "log": "local: est-ulwpg RED at base 96ee587 (witness spawn death reproduced legs A+B), GREEN at fix head (11/11 checks)"
+  },
+  {
     "test": "test_spawn_ledger_8.py",
     "exit": 0,
     "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_spawn_ledger_8.py.log"

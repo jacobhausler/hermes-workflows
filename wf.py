@@ -15,6 +15,7 @@ against the current graph (own def + all ancestors' defs). An amend upstream mak
 downstream result stale — downstream nodes re-run or re-hold; unchanged chains replay.
 """
 import json, os, random, re, shutil, signal, socket, subprocess, sys, threading, time
+import errno
 import fcntl
 import hashlib
 from contextlib import nullcontext as _nullcontext
@@ -4579,10 +4580,35 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
                             "error_class": "cancelled", "ms": 0, **route}
                 tokens.append(token)     # registered BEFORE Popen — a spawn that
                                          # dies mid-launch still owns its survivors
-                proc = subprocess.Popen(cmd, stdout=logf, stderr=subprocess.STDOUT,
-                                        stdin=subprocess.DEVNULL, env=env, text=True,
-                                        cwd=wd,
-                                        start_new_session=True)  # own pgid: a timeout kill can
+                # est-ulwpg (witness 20261009-072611-fb-closeout-batch): the wd
+                # snapshot above is captured BEFORE the seat wait; an external
+                # sweeper can prune <run>/work/<node> while this spawn sits on
+                # a contended seat, and Popen then dies ENOENT-on-cwd as a typed
+                # error_class=spawn death (ms=0, attempts=1, no retry). (a) RE-ENSURE
+                # the cwd HERE — inside the _procs_lock section, immediately before
+                # Popen: child_work_dir's mkdir(parents=True, exist_ok=True) is
+                # idempotent, so this is free when nothing deleted the dir. (b) If
+                # the deleater still wins the instant before exec — Popen raises
+                # OSError ENOENT whose filename IS the cwd — re-create wd once and
+                # retry the Popen EXACTLY once in this same lock section. Any other
+                # error (a missing hermes_bin is ENOENT too, filename==argv[0])
+                # re-raises untouched and keeps the typed launcher failure below.
+                def _popen_child(cwd_path):
+                    return subprocess.Popen(cmd, stdout=logf, stderr=subprocess.STDOUT,
+                                            stdin=subprocess.DEVNULL, env=env, text=True,
+                                            cwd=cwd_path,
+                                            start_new_session=True)  # own pgid: a timeout kill can
+                _child_cwd = str(child_work_dir(run, node, index))   # THE re-ensure
+                try:
+                    proc = _popen_child(_child_cwd)
+                except OSError as _pe:
+                    _fn = str(getattr(_pe, "filename", "") or "")
+                    if (getattr(_pe, "errno", None) == errno.ENOENT
+                            and _fn and _fn in (wd, _child_cwd)):
+                        _child_cwd = str(child_work_dir(run, node, index))
+                        proc = _popen_child(_child_cwd)   # second failure = typed, as before
+                    else:
+                        raise
                 # est-g255 r2 R3: once Popen returns, the child belongs to the
                 # cleanup owner: register + heartbeat-path setup complete INSIDE
                 # this try — a fault at either reaps the child, deregisters and
