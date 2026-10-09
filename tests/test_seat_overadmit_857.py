@@ -2,8 +2,8 @@
 """est-2ek.1.857 — the seat semaphore must never drop a LIVE ticket, and never
 admit past the cap (over-admit ~2x field report).
 
-Failure (keeper field report 2026-10-08 12:45–12:48Z, spool key 248a5bf33fe5999a,
-evidence /home/hermes/.hermes/work/haus-keeper/evidence/seat-overadmit-20261008T1248Z.txt):
+Failure (field report 2026-10-08 12:45–12:48Z, spool key 248a5bf33fe5999a,
+evidence recorded locally as seat-overadmit-20261008T1248Z):
 8–9 live workflow agent children vs 4 tickets in ~/.hermes/workflows/.seats
 (cap 4). Three children had NO ticket while their runner and the child were
 both alive; the surviving tickets were always a same-second batch of four,

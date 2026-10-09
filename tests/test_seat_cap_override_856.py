@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """est-2ek.1.856 — the seat cap is an operator knob, validated where it can still refuse.
 
-Failure (keeper field report 2026-10-08, w54 spool): the cap was resolved at
+Failure (field report 2026-10-08, w54 spool): the cap was resolved at
 import time into a baked default and the operator knobs were half-read —
 `_max_seats` swallowed an unparseable WORKFLOW_MAX_SEATS into SEATS_DEFAULT
 (`int(os.environ.get(...))` wrapped in `except ValueError: return 4`), config
@@ -24,7 +24,7 @@ Fix contract:
     it invalid at the acquire instant fails the NODE closed with
     error_class="seat_cap" — never a silent default, never a blind spawn.
 
-And the fairness ask folded in (est-2ek.1.856 sibling, the keeper starve shape):
+And the fairness ask folded in (est-2ek.1.856 sibling, the starve shape):
 with cap 1, ONE long-waiting node plus eight freshly-launched short-run
 waiters, admission order must equal arrival order (monotonic enqueued key).
 Base's blind flock poll is first-poller-wins: the fresh arrivals re-took every

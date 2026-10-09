@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """est-2ek.1.856 — the global agent seat must admit waiters FIFO, not first-poller-wins.
 
-Failure (keeper field report 2026-10-08 12:19Z, spool key 57f5b8ba394a173c):
+Failure (field report 2026-10-08 12:19Z, spool key 57f5b8ba394a173c):
 `_seat_acquire` is a blind poll loop — every waiter wakes on the .lock flock and
 the FIRST poller to sweep takes a freed seat, regardless of how long it has
-waited. keeper-windows-client-up's accept_probe (needs the owner's scarce
-Windows boot window) sat `seat.wait` while freshly-launched gh-dispatch cron
-runs (gh-drive-prs / gh-drive-issues, one holding 2 seats) re-took every freed
+waited. A lane's accept_probe (needing a scarce operator approval window)
+sat `seat.wait` while freshly-launched scheduled cron
+runs (one holding 2 seats) re-took every freed
 ticket. A long-waiting node starves behind churn of short runs.
 
 Fix contract (wf.py): a waiter that finds the semaphore full registers a queue
