@@ -81,6 +81,23 @@ def _core_home(path):
         hc.reset_hermes_home_override(token)
 
 
+def _reset_session_context():
+    """est-2ek.1.862: neutralize the core session-identity ContextVars for the
+    golden capture. get_session_env prefers a BOUND ContextVar over os.environ,
+    so on a host where gateway.session_context is importable and a session was
+    ever bound in this process, stripping env alone would still stamp the owner
+    keys. reset_session_vars puts every var back to _UNSET ("never bound here")
+    which makes get_session_env fall through to the — now stripped — environment.
+    On a standalone plugin host without the gateway the ImportError path is the
+    status quo: _session_env already reads os.environ only, env-stripping is the
+    whole story."""
+    try:
+        from gateway.session_context import reset_session_vars
+    except ImportError:
+        return
+    reset_session_vars()
+
+
 def capture(root, after_save=None):
     inherited_override = hc.get_hermes_home_override()
     root = Path(root).resolve()
@@ -106,6 +123,18 @@ def capture(root, after_save=None):
         env['HERMES_WRITE_SAFE_ROOT'] = str(td/'safe')
         for key in ('WF_RUNS_ROOT','FAKE_MODE','FAKE_API_CALLS','FAKE_LOG','FAKE_PROMPT_LOG','FAKE_ARGV_LOG'):
             env.pop(key,None)
+        # est-2ek.1.862: the golden seat is the FROZEN v1.0.15 seat — no owner
+        # identity. The door stamps run.json.owner.{session_id,ui_session_id,
+        # platform} from _session_env; an API-inherited HERMES_SESSION_PLATFORM
+        # leaked through the dict-merge below and made the frozen baseline
+        # (owner.platform null) seat-red / CI-green. Strip the identity keys from
+        # the child seat AND neutralize the core ContextVar channel (it outranks
+        # os.environ when bound), so a capture launched from a Hermes seat sees
+        # exactly the clean-runner seat on every machine.
+        for key in [k for k in env if k.startswith('HERMES_SESSION_')
+                    or k.startswith('HERMES_UI_SESSION_')]:
+            env.pop(key, None)
+        _reset_session_context()
         paths = [(str(Path(__file__).resolve().parents[1]),'<REPO>'),(str(root),'<REPO>'), (str(td),'<TEMP>')]
         # The child runs retain their original seat-default identity (no launch_root).
         # Shield them from an inherited core-home override without altering HERMES_HOME.

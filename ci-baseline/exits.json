@@ -1316,5 +1316,9 @@
     "test": "test_lease_busy_retry.py",
     "exit": 0,
     "log": "local: lease-busy 1.3.3 lane \u2014 RED at base d69a64d (no _is_lease_busy, class absent), GREEN at head: 18/18 checks rc=0; re-run green under synthetic CPU load"
+  },
+  {
+    "test": "test_golden_seat_no_inherited_identity_862.py",
+    "exit": 0
   }
 ]

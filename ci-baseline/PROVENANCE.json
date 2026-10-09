@@ -206,10 +206,14 @@
       "exit": 0,
       "measured": "2026-10-09 foreground runs in the fix worktree: RED at base d69a64d (AttributeError: no _is_lease_busy; class absent from both tuples), GREEN at head \u2014 18/18 checks rc=0 standalone and exit 0 inside the serial suite run; re-run green under 8 synthetic CPU hogs (the jam8-style load flake shape).",
       "supersede_by": "next green-CI refresh (replace with the CI-captured row)"
+    },
+    {
+      "test": "test_golden_seat_no_inherited_identity_862.py",
+      "added_by": "est-2ek.1.862 PR lane (author CI-pending; refreshed only from a green Serial suite job)"
     }
   ],
   "totals": {
-    "cases": 264,
+    "cases": 265,
     "red": 0
   },
   "contract": "Green CI ledgers only (every exit == 0); rows not captured by CI are listed in rows_added_outside_ci with how they were measured. Refresh from the tip of main after each main move; see README.md.",
