@@ -10,7 +10,7 @@ The reverse-transition shape (unit, deterministic — no fake, no subprocess):
 Both node.retrying events fire (park's and ladder's), so the event history
 holds two deaths. Before the fix the ladder reset attempts_log to its own
 bookkeeping — the committed record carried ONLY the transport death and the
-parked rate-limit death was silently dropped (the bead's runner-subprocess
+parked rate-limit death was silently dropped (the finding's runner-subprocess
 repro: attempts=3, attempts_log=[transport] only).
 
 The fix (est-ja41, this pin):
@@ -42,7 +42,8 @@ BUILD = HERE.parent
 HOME = HERE / "home-ja41"
 RUNS = HOME / "workflows"
 os.environ["HERMES_HOME"] = str(HOME)
-os.environ.pop("WF_RUNS_ROOT", None)   # est-2ek.1.762 pin: HERMES_HOME alone is not a sandbox
+os.environ["WF_RUNS_ROOT"] = str(HOME / "workflows")   # est-2ek.1.762 pin: HERMES_HOME alone is not a sandbox
+os.environ.pop("WF_RUNS_ROOT", None)   # unset for THIS process; children pin it explicitly
 sys.path.insert(0, str(BUILD))
 import wf  # noqa: E402
 import wf as _wfmod  # noqa: E402
@@ -86,7 +87,7 @@ _wfmod.random = fixed
 _wfmod._attempt_api_calls = lambda *a, **k: 0   # replay-safe evidence (FAKE_API_CALLS=0 shape)
 
 try:
-    # ---- A1 (the bead's class): banner -> park -> transport -> ladder -> done.
+    # ---- A1 (the finding's class): banner -> park -> transport -> ladder -> done.
     # The park produces the banner death first (hand-off INTO the park), then
     # the LADDER sees the transport death on the park's respawn... that is B2.
     # est-ja41 is the reverse: the PARK runs first and hands its history to
@@ -205,7 +206,7 @@ try:
     check("A6: attempt numbers stay continuous across the inherited seam", nums == list(range(len(nums))),
           str(nums))
 
-    # ---- A7 (runner-subprocess, the bead's actual shape): banner death ->
+    # ---- A7 (runner-subprocess, the finding's actual shape): banner death ->
     # parked respawn dies transport (api_count=0) -> second respawn answers.
     # Committed record must show BOTH deaths and attempts consistent with 3
     # spawns. FAKE_MODE ratelimit_then_transport below drives exactly that. ----

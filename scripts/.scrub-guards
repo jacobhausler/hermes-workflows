@@ -59,6 +59,10 @@ tests/test_failures_0923.py
 tests/fake_hermes.py
 tests/test_ratelimit_54.py
 tests/test_ratelimit_park_walls_159c.py
+# est-ja41 pin of the SAME banner-fixture family: the verbatim credential-window
+# banner is the input the committed give-up text must quote byte-for-byte —
+# fixture identity, same GUARD class as the two siblings above.
+tests/test_ratelimit_history_ja41.py
 # Dialect golden fixtures: `model: 'sonnet'` is a pinned byte of the importer golden
 # (test_dialect_js_33 asserts the export carries it verbatim).
 tests/test_dialect_js_33.py
