@@ -256,7 +256,7 @@
    "test": "test_heartbeat_verdict_127.py",
    "exit": 0,
    "measured": "gates job 114201933768 (run 38048219124, PR #352 head 28499084, 2026-10-10): serial-suite tally 'test_heartbeat_verdict_127.py: 0'",
-   "added_by": "haus-exec (baseline refresh for PR #352's own new test)"
+   "added_by": "author lane (est-zsws, PR #352; refreshed only from a green Serial suite job)"
   }
  ],
  "source_issue": 75,
