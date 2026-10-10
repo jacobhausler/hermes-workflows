@@ -134,6 +134,12 @@ INCLUDE_FILES = (
     "graphify-out/graph.json",
     ".graphifyignore",
     "tests/fake",
+    # est-1nkx (PR #158 second-read): tests/test_sprint101w2_B1-classes.py snapshots
+    # tests/fake-b1 (TRACKED_SHA_BEFORE) and the gitpin pin audits it — the fixture
+    # must ship, the exact est-4vnq finding-4 shape (a shipped test dies on an
+    # unpackaged input). It is also self-repairing under the ZIP (see the pin's
+    # git-free path) and regenerates itself from fake_hermes.py when absent.
+    "tests/fake-b1",
     "tests/fake_hermes.py",
     "tests/wf_test_isolation.py",
     "tests/wf_test_markers.py",  # est-jue3: shared parseable-content marker waits, imported by the shipped tests (est-4vnq finding-4 shape: an unshipped helper kills the suite)
@@ -154,7 +160,7 @@ INCLUDE_FILES = (
 )
 INCLUDE_PATTERNS = ("tests/test_*.py", "tests/test_*.mjs", "references/*.md",
                     "tests/fixtures/dialect/*")   # #33: the corpus test_dialect_js_33 asserts against
-EXECUTABLE_FILES = {"scripts/pack.py", "tests/fake"}
+EXECUTABLE_FILES = {"scripts/pack.py", "tests/fake", "tests/fake-b1"}
 # Checkout-only tests stay in repository CI, not the release's test glob.
 SOURCE_ONLY_TESTS = {
     "tests/test_diagram_law.py": "needs diagrams/README.md and the source-only renderer",

@@ -1339,5 +1339,9 @@
   {
     "test": "test_graph_regen_z_parser_h3yi.py",
     "exit": 0
+  },
+  {
+    "test": "test_release_zip_1nkx.py",
+    "exit": 0
   }
 ]
