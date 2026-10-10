@@ -136,6 +136,9 @@ check("C substitution to an unrelated model: still DENIED, zero attempts",
 # ---- D: a spawn at the literal verified TARGET passes (#25 identity law) ---------
 LEDGER.write_text("")                      # fresh ledger: D bills in isolation
 d_node = dict(node, provider="example-provider", model="example-model-1")
+# D changes the authored definition, not a queued spawn's route. Materialize
+# that definition so the launch-instant staleness guard sees the same graph.
+(RUN / "graph.json").write_text(json.dumps({"name": "ralias", "nodes": [d_node]}))
 r5 = wf.run_child(meta, d_node, {"work": d_node}, "do the work", "", None,
                   skey="wf:ralias:work#5")
 check("D spawn at the literal verified TARGET: NOT refused (full-route identity)",
