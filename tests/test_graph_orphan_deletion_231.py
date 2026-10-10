@@ -231,6 +231,31 @@ if go is not None:
               r3.returncode == 1 and "gone.py" in r3.stdout,
               (r3.stdout + r3.stderr).strip()[-250:])
 
+    # Git paths are identities, not whitespace-delimited words (PR #245 P2).
+    # Exercise both current and base trees, then the actual packaged gate.
+    for gone in ("real gone.py", "real\tgone.py", "real\ngone.py", "real\rgone.py", "café gone.py"):
+        with tempfile.TemporaryDirectory(prefix="gorph-path-") as td:
+            repo, base_sha = build_repo(td, ["a.py", gone], CORE_SOURCES + ["a.py", gone])
+            r = run_cli(repo, [])
+            check(f"tracked path identity preserved: {gone!r}", r.returncode == 0,
+                  (r.stdout + r.stderr)[-400:])
+            (repo / gone).unlink()
+            commit_all(repo, "delete special path")
+            r = run_cli(repo, ["--base", base_sha], env=pr_env(base_sha))
+            check(f"deleted path identity preserved: {gone!r}", r.returncode == 0,
+                  (r.stdout + r.stderr)[-400:])
+
+    with tempfile.TemporaryDirectory(prefix="gorph-phantom-") as td:
+        repo, base_sha = build_repo(td, ["a.py", "real phantom.py"],
+                                    CORE_SOURCES + ["a.py", "real phantom.py", "phantom.py"],
+                                    absent=("phantom.py",))
+        (repo / "real phantom.py").unlink()
+        commit_all(repo, "delete real spaced path, not fabricated suffix")
+        r = run_cli(repo, ["--base", base_sha], env=pr_env(base_sha))
+        check("a word in a deleted filename cannot legitimize a fabricated source",
+              r.returncode == 1 and "FORBIDDEN" in r.stdout and "phantom.py" in r.stdout,
+              (r.stdout + r.stderr)[-400:])
+
     # --- counterfactual 2: graph indexes a source that was NEVER in the base ----------
     with tempfile.TemporaryDirectory(prefix="gorph-fab-") as td:
         repo, base_sha = build_repo(td, ["a.py"],
