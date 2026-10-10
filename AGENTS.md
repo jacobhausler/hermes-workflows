@@ -245,7 +245,7 @@ existing verbatim leniency.
   fanout_empty | fatal_quota | forbidden_model | incomplete_work |
   inputs | item_record | lane_wreckage | lease_busy | left_live_descendants | malformed_turn | precondition | provider_400 | quorum |
   ratelimit |
-  route_substitution_denied | route_unavailable | schema | seat_unsupported | seat_wait | spawn | timeout | transport | transport_exhausted |
+  route_substitution_denied | route_unavailable | schema | seat_unsupported | seat_wait | spawn | stale_graph | timeout | transport | transport_exhausted |
   unresolved_model`, plus `unknown` as the harvest-time default when nothing matches —
   plus `attempts`. Read the class, not the prose. `cancelled` (a `stop`, or a fan-out
   straggler at quorum) is never a failure: the run reads `stopped`, and a `wait` re-drives it.
@@ -269,6 +269,15 @@ existing verbatim leniency.
   degradation). An adopted orphan whose tree outlives it never commits a clean `done`
   — the completeness error rides WITH the answer (`partial` + this class). The class
   is terminal — never re-driven by either retry ladder.
+  `stale_graph` (est-byft8): a spawn that queued on the global agent seat and reached
+  the Popen instant AFTER an amend moved its effective fingerprint is refused typed —
+  the queued definition never launches. The comparison is the replay-skip efp law
+  itself (budgets are not work: a timeout/max_turns-only amend never refuses), so a
+  reload would re-drive exactly the nodes the guard refuses. The wave boundary then
+  consumes `restart.request`, reloads, and re-drives the node under the CURRENT
+  definition; the refusal releases its seat ticket and is outside both retry ladders.
+  An unreadable `graph.json` at the check fails OPEN (the guard catches detected
+  staleness, never invents a death).
   `config_input` (est-tmuu, operator-verified 2026-10-02): a child that dies rc!=0 within
   ~1 s of spawn AND whose capture carries a provider/alias config-error marker (`Unknown
   provider '<alias>' …`) is a deterministic INPUT error, not transient transport — the node
