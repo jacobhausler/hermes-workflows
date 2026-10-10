@@ -257,11 +257,17 @@
    "exit": 0,
    "measured": "gates job 114201933768 (run 38048219124, PR #352 head 28499084, 2026-10-10): serial-suite tally 'test_heartbeat_verdict_127.py: 0'",
    "added_by": "author lane (est-zsws, PR #352; refreshed only from a green Serial suite job)"
+  },
+  {
+   "test": "test_upstream_hook_contract.py",
+   "exit": 0,
+   "measured": "2026-10-10 local foreground run at the gate-cure head: 3 PASS lines (1 parsed plugin hook 'transform_llm_output' found among 44 extracted core VALID_HOOKS names), rc=0 (PYTHONPATH=/opt/hermes); SKIP + rc=0 when hermes_cli is unimportable (proven in a stripped env, the suite-runs-without-core case); CI run 38052460596 green at head 217a2b6 with this row",
+   "added_by": "author lane (est-a91h7, PR #365 gate-cure; measured locally + green ci run 38052460596)"
   }
  ],
  "source_issue": 75,
  "totals": {
-  "cases": 273,
+  "cases": 274,
   "red": 0
  },
  "tracking_item": "est-9yl2"
