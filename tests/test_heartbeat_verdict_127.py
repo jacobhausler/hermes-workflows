@@ -173,7 +173,7 @@ class HeartbeatDoor(unittest.TestCase):
             "started": now - 1000, "log_path": str(self.home / "child.log"),
             "spawn_cmd": [sys.executable, str(self.script), "--continue", title],
             "efp": door.efp({"a": self.node}, self.node),
-            "fp_rule_version": door.FP_RULE_VERSION}))
+            "fp_rule_version": wfcommon.FP_RULE_VERSION}))
         return child
 
     def test_stale_metrics_child_flips_stalled_and_explain_names_it(self):
@@ -214,7 +214,7 @@ class HeartbeatDoor(unittest.TestCase):
         (self.run_dir / "nodes" / "a.json").write_text(json.dumps({
             "status": "done", "output": {"r": 1},
             "efp": door.efp({"a": self.node}, self.node),
-            "fp_rule_version": door.FP_RULE_VERSION}))
+            "fp_rule_version": wfcommon.FP_RULE_VERSION}))
         st = door.act_status({"run_id": "hb127"})
         self.assertEqual(st["status"], "done")
         self.assertNotIn("explain", st)

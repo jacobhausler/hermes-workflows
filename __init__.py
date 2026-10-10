@@ -3321,10 +3321,23 @@ def act_status(args):
                 line["last"] = current["last_desc"]
                 line["last_tool_at"] = la  # #18: the epoch of the last verified activity
             out["nodes"][nid]["metrics"] = line
+            # #127 (est-zsws): the heartbeat verdict rides EVERY running node's
+            # status line — derived from the fold just built plus the #128
+            # progress artifact age. Read model only: no writes, no key for a
+            # node that is not running.
+            if st["nodes"][nid].get("status") == "running":
+                out["nodes"][nid]["heartbeat"] = _common.heartbeat(
+                    line, out["nodes"][nid].get("progress"))
             for k in tot: tot[k] += f.get(k) or 0
         out["metrics"] = {"tokens": f"{tot['tokens_in']}▸{tot['tokens_out']}",
                           **({"api_calls": tot["api_calls"]} if api_calls_known else {}),
                           "tool_calls": tot["tool_calls"], **({"cost_usd": round(tot["cost"], 4)} if tot["cost"] else {})}
+    # #127 (est-zsws): one-line run-level explain composed ONLY from fields the
+    # payload already carries (statuses, heartbeat verdicts, blocked_by, parked).
+    # Terminal runs have nothing to explain — the key is absent, never an slogan.
+    _ex = _common.run_explain(out)
+    if _ex:
+        out["explain"] = _ex
     # est-2ek.1.158: a graph that declares `result: <node id>` names the node whose
     # output IS the run verdict; terminal status/wait report it (derive-only: the
     # node entry built above). Graphs without the key never gain the field.

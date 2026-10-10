@@ -4425,6 +4425,77 @@ def child_metrics(run_id, home=None):
                       max(m["ended"], ended) if m["ended"] is not None and ended is not None else None)
     return out
 
+STALL_IDLE_S = 600   # #127 (jam-h1): the query-time stall threshold, tunable per call
+
+def heartbeat(metrics, progress=None, now=None, stall_s=STALL_IDLE_S):
+    """#127 (est-zsws): the ONE per-running-node heartbeat verdict, derived at query
+    time from evidence the read model ALREADY has — no new writes, no child
+    cooperation, no persisted surface (the caller splices the returned dict into
+    the status payload next to `metrics`/`progress`).
+      alive   = a verified spawn is live (the existing `live` count decides).
+      last_evidence_age_s = the FRESHEST known evidence age among the child's
+                session-row idle_s and the #128 artifact progress (mtime_age_s) —
+                a child that writes artifacts but never ticks its DB row is NOT
+                stalled; None when neither is known (honest absence, R2).
+      stalled = alive AND a KNOWN age past the threshold. A stall is NEVER
+                inferred from absence: unknown age => stalled False, always.
+    api_calls_delta_over_window stays out of v1 per the issue-plan correction:
+    child rows carry only the cumulative api_call_count, no per-call series, and
+    a delta needs persisted windows this issue forbids."""
+    ages = []
+    idle = (metrics or {}).get("idle_s")
+    if isinstance(idle, (int, float)) and not isinstance(idle, bool):
+        ages.append(max(0, int(idle)))
+    mtime_age = (progress or {}).get("mtime_age_s")
+    if isinstance(mtime_age, (int, float)) and not isinstance(mtime_age, bool):
+        ages.append(max(0, int(mtime_age)))
+    alive = bool((metrics or {}).get("live"))
+    age = min(ages) if ages else None
+    return {"alive": alive,
+            "last_evidence_age_s": age,
+            "stalled": bool(alive and age is not None and age >= stall_s)}
+
+def run_explain(out):
+    """#127 (est-zsws): ONE line telling a scheduler why the run is where it is,
+    composed ONLY from fields the status payload already carries (node statuses,
+    heartbeat verdicts, blocked_by words, parked markers). Terminal runs have
+    nothing to explain — None, never an empty slogan."""
+    status = out.get("status")
+    if status in ("done", "failed", "stopped"):
+        return None
+    nodes = out.get("nodes") or {}
+    running, stalled, pending, parked, blocked_names = 0, [], 0, 0, []
+    for nid, v in nodes.items():
+        st = v.get("status")
+        if st == "running":
+            running += 1
+            hb = v.get("heartbeat") or {}
+            if hb.get("stalled"):
+                age = hb.get("last_evidence_age_s")
+                stalled.append(f"{nid} {age}s" if age is not None else nid)
+        elif st == "pending":
+            if v.get("parked"):
+                parked += 1
+                continue
+            pending += 1
+            for b in v.get("blocked_by") or []:
+                name = str(b).split(":", 1)[0].strip()
+                if name and name not in blocked_names:
+                    blocked_names.append(name)
+    parts = []
+    if running:
+        parts.append(f"{running} running" + (f" ({len(stalled)} stalled: {', '.join(stalled)})" if stalled else ""))
+    if pending:
+        p = f"{pending} pending"
+        if blocked_names:
+            p += f" blocked by {', '.join(blocked_names)}"
+        parts.append(p)
+    if parked:
+        parts.append(f"{parked} parked")
+    if not parts:
+        return f"{status}: no running work"
+    return f"{status}: " + ", ".join(parts)
+
 def current_attempt(cm, spawns):
     """Activity only for verified spawn session titles; DB rows alone prove no liveness."""
     live = {}
