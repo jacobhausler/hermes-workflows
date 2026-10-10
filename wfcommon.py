@@ -3469,14 +3469,69 @@ def _verify_spawn_rec(r, n, byid, rec):
     return {**{k: rec[k] for k in ("pid", "started", "attempt", "log_path") if k in rec},
             "skey": title}
 
+def _foreign_ns_spawn(r, n, byid, rec, ledger=None):
+    """est-2ek.1.818: a child the reader cannot see in its own /proc (the runner's
+    container has another pid namespace) is not thereby dead. DISPLAY path only —
+    adoption and the reaper keep the strict _verify_spawn_rec law. The runner lock
+    (flock, cross-namespace safe) is already proven held by the caller; the
+    evidence added here is the runner's own spawn-ledger: a `child` row for this
+    exact (pid, skey) written AFTER the last `runner` row (spawned by the runner
+    now holding the lock, not a crashed predecessor) with no `child_end` after it,
+    on a status=running record whose efp is current. A pid that IS visible but
+    fails identity (zombie, skey absent from argv: PID reuse) is never relaxed.
+    Returns the identity marked verified=False, or None."""
+    if not isinstance(rec, dict) or rec.get("status") != "running" \
+            or not record_efp_valid(rec, byid, n):
+        return None
+    pid, skey = rec.get("pid"), rec.get("skey")
+    if not isinstance(pid, int) or pid <= 0 or not isinstance(skey, str) or not skey:
+        return None
+    if Path(f"/proc/{pid}").exists():
+        return None   # visible here: _verify_spawn_rec already judged its identity
+    if not runner_lock_held(r):
+        return None   # no cross-namespace proof of a live runner: nothing to inherit from
+    try:
+        os.kill(pid, 0)
+        return None   # signalable but absent from /proc (hidepid etc.): unknown, not proof
+    except ProcessLookupError:
+        pass
+    except OSError:
+        return None
+    if ledger is None:
+        try:
+            ledger = [json.loads(x) for x in (Path(r) / "spawn-ledger.jsonl").read_text().splitlines() if x.strip()]
+        except (OSError, ValueError):
+            return None
+    spawned = False
+    for row in ledger:
+        if not isinstance(row, dict):
+            continue
+        if row.get("role") == "runner":
+            spawned = False   # a newer runner generation: earlier children are its predecessor's
+        elif row.get("pid") == pid and row.get("skey") == skey:
+            if row.get("role") == "child":
+                spawned = True
+            elif row.get("role") == "child_end":
+                spawned = False
+    if not spawned:
+        return None
+    title = skey if "#a" in skey or not isinstance(rec.get("attempt"), int) else f"{skey}#a{rec['attempt']}"
+    return {**{k: rec[k] for k in ("pid", "started", "attempt", "log_path") if k in rec},
+            "skey": title, "verified": False,
+            "unverified_because": "pid not visible in this pid namespace; runner lock held and "
+                                  "spawn-ledger shows this child spawned by the current runner, not ended"}
+
 def _active_spawns(r, n, byid):
-    """All verified uncommitted child identities, never historical DB liveness."""
+    """All verified uncommitted child identities, never historical DB liveness.
+    A live runner's own ledger-proven child in a foreign pid namespace is listed
+    too, marked verified=False (est-2ek.1.818)."""
     records = [r / "nodes" / f"{n['id']}.json"]
     if n.get("fanout"):
         records.extend(sorted((r / "nodes").glob(f"{n['id']}.[0-9]*.json")))
     active = []
     for path in records:
-        v = _verify_spawn_rec(r, n, byid, jload(path))
+        rec = jload(path)
+        v = _verify_spawn_rec(r, n, byid, rec) or _foreign_ns_spawn(r, n, byid, rec)
         if v:
             active.append(v)
     return active
@@ -4426,7 +4481,7 @@ def child_metrics(run_id, home=None):
     return out
 
 def current_attempt(cm, spawns):
-    """Activity only for verified spawn session titles; DB rows alone prove no liveness."""
+    """Activity only for live spawn session titles (verified, or ledger-marked foreign-ns); DB rows alone prove no liveness."""
     live = {}
     for spawn in spawns:
         title = (spawn or {}).get("skey")
