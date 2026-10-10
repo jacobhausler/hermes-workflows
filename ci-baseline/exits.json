@@ -1339,5 +1339,10 @@
   {
     "test": "test_graph_regen_z_parser_h3yi.py",
     "exit": 0
+  },
+  {
+    "test": "test_when_on_agent_engine.py",
+    "exit": 0,
+    "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_when_on_agent_engine.py.log"
   }
 ]
