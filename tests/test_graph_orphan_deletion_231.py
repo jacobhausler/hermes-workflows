@@ -253,7 +253,7 @@ if go is not None:
         commit_all(repo, "delete real spaced path, not fabricated suffix")
         r = run_cli(repo, ["--base", base_sha], env=pr_env(base_sha))
         check("a word in a deleted filename cannot legitimize a fabricated source",
-              r.returncode == 1 and "FORBIDDEN" in r.stdout and "phantom.py" in r.stdout,
+              r.returncode == 1 and "\n  x phantom.py\n" in r.stdout,
               (r.stdout + r.stderr)[-400:])
 
     # --- counterfactual 2: graph indexes a source that was NEVER in the base ----------
