@@ -35,7 +35,8 @@ ending your turn right after `run` is how runs stall.
 - A node `schema` makes the runner write the reply contract into the prompt — keep
   contract prose out of goals.
 - Independent tasks: separate nodes or one `fanout` with `items`. `quorum` races:
-  once N succeed, the rest are cancelled.
+  once N succeed, the rest are cancelled — `quorum_drain_s:<s>` (default 0) gives
+  running stragglers a drain window to land before that cancel.
 - Shared settings go in a graph-level `defaults` once. Leave node budgets unset and
   name a `shape`; see [budgets](references/budgets.md). A constant travels as an
   `echo` node, never an agent spawn.

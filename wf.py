@@ -5880,6 +5880,41 @@ def run_agent_node(run, meta, byid, node, outputs, steering):
             # death still commits with partial credit.
             explicit_quorum = fo.get("quorum")
             quorum = explicit_quorum or (len(items) // 2 + 1)
+            # est-06xk (#123): drain-with-deadline. `quorum_drain_s` (door-validated
+            # number >= 0, legal only with an explicit quorum) defers the quorum
+            # SIGKILL by drain_s seconds: stragglers already running at the quorum
+            # moment get a window to LAND their answer (a landing commits like any
+            # other item — the drain cancels nothing that arrives before the
+            # deadline), and at the deadline the very same _cancel_stragglers runs.
+            # 0/unset = today's behavior: SIGKILL the moment quorum is met. The
+            # future flip of the default is one constant here, not a redesign.
+            # Defensively parsed at the runner too: the door validates, but the
+            # runner loads graph.json straight (same belt as the A5 quorum parse).
+            try:
+                drain_s = float(fo.get("quorum_drain_s") or 0) if explicit_quorum else 0.0
+            except (TypeError, ValueError):
+                drain_s = 0.0
+            if not drain_s >= 0:          # NaN and negatives land on today's behavior
+                drain_s = 0.0
+            drain_timer = {}
+            def _arm_drain_once():
+                # ONE daemon timer armed at the QUORUM moment (never earlier),
+                # firing the established cancel; the callback takes the fan-out
+                # results lock exactly like every inline caller (est-g255 r2 R1:
+                # the setter holds the results lock before fo_cancel becomes
+                # visible, so the cancel can never land mid-spawn-section), and
+                # no-ops once every item has resolved — a committed node is
+                # never killed behind its own finish line.
+                if drain_s > 0 and "t" not in drain_timer:
+                    def _fire():
+                        with lock:
+                            if all(x is not None for x in results):
+                                return
+                            _cancel_stragglers()
+                    t = threading.Timer(drain_s, _fire)
+                    t.daemon = True
+                    drain_timer["t"] = t
+                    t.start()
             fo_cancel = threading.Event()
             done_count = [0]
             def _cancel_stragglers():
@@ -6056,7 +6091,14 @@ def run_agent_node(run, meta, byid, node, outputs, steering):
                         # without one the node waits for every item (papercut #3).
                         if (explicit_quorum and done_count[0] >= quorum
                                 and any(x is None for x in results)):
-                            _cancel_stragglers()
+                            # est-06xk (#123): a drain window DEFERS the kill to its
+                            # deadline — a straggler that lands inside it commits and
+                            # the timer's full-commit guard no-ops. drain_s == 0 (the
+                            # default) keeps today's immediate cancel, verbatim.
+                            if drain_s > 0:
+                                _arm_drain_once()
+                            else:
+                                _cancel_stragglers()
                     # est-g255 P255-1: the seat goes back only NOW — after the
                     # quorum cancel (fo_cancel) is set — so a straggler parked in
                     # _seat_acquire can never take it and spawn past quorum.

@@ -917,7 +917,7 @@ def grammar_errors(graph):
                         + json.dumps(list(GRAMMAR_SUPPORTED))
                         + f" (absent = {GRAMMAR_DEFAULT!r})"}]
     return []
-FANOUT_KEYS = {"items", "items_from", "goal", "schema", "quorum", "ledger"}
+FANOUT_KEYS = {"items", "items_from", "goal", "schema", "quorum", "quorum_drain_s", "ledger"}
 DEFAULTS_KEYS = {"schema", "timeout", "max_turns", "reasoning", "provider", "model", "context",
                  "require_route",   # #25: bool — fail-closed pinned routes (see AGENT_KEYS)
                  # est-2ek.1.164: the transport fallback rungs fill from graph
@@ -1456,6 +1456,21 @@ def validate_graph_errors(nodes, *, admission=False):
                     q = fo.get("quorum")
                     if q is not None and (not isinstance(q, int) or isinstance(q, bool) or q < 1):
                         E(nid, "fanout.quorum", "fanout.quorum must be a positive int")
+                    # est-06xk (#123): drain-with-deadline is an OPT-IN modifier of
+                    # the quorum race — a number of seconds >= 0 (0 = today's
+                    # immediate SIGKILL at the quorum moment). bool is not a number
+                    # here (True would silently mean 1s); without an explicit quorum
+                    # there is no race and nothing to drain — refuse, never ignore.
+                    ds = fo.get("quorum_drain_s")
+                    if ds is not None:
+                        if isinstance(ds, bool) or not isinstance(ds, (int, float)) or not ds >= 0:
+                            E(nid, "fanout.quorum_drain_s",
+                              "fanout.quorum_drain_s must be a number >= 0 (drain-window "
+                              "seconds; 0 = cancel stragglers immediately at the quorum moment)")
+                        elif q is None:
+                            E(nid, "fanout.quorum_drain_s",
+                              "fanout.quorum_drain_s is only meaningful with an explicit "
+                              "fanout.quorum (without quorum the fan-out waits for every item)")
                     # #85: the input LEDGER is a list of per-item declarations; row
                     # CONTENT (source/artifact shape) is measured by the admission
                     # guard below the door — here only the container shape is a
