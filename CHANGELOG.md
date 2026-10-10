@@ -7,20 +7,19 @@ Patch line, eleven merged PRs since v1.3.3:
 - **Unconditional `plugin_version` stamp** — every new `run.json` reports the arming
   door's own truth (plugin.yaml via `wfcommon.plugin_version()`), not only runs that
   declared `requires_plugin`; old dirs without the key still load (derive-only, honest
-  absence) (#356, @jacobhausler).
+  absence) (#356).
 - **Agent nodes honor `when` + `on_skip`** — #132 slice 1: a node whose `when` predicate
-  is false skips with its declared `on_skip` outcome instead of running (#355,
-  @jacobhausler).
+  is false skips with its declared `on_skip` outcome instead of running (#355).
 - **Declared effect receipts gate publication-node `run.done`** — a publication node
-  cannot report done without its declared receipts (#346, @jacobhausler).
+  cannot report done without its declared receipts (#346).
 - **Opt-in graph-revision CAS** on door `amend`/`release`/`steer` — stale revisions
-  refuse instead of clobbering (#344, @jacobhausler).
+  refuse instead of clobbering (#344).
 - **Security:** the `post_exit_hook` mechanism is stripped from the shipped build
-  (upstream NousResearch/hermes-agent#133387 accepted ask) (#334, @jacobhausler).
+  (upstream NousResearch/hermes-agent#133387 accepted ask) (#334).
 - **`graph_regen` fix:** shared `\0`-separated `--name-status` parser for the regen
-  diff (est-h3yi) (#314, @jacobhausler).
+  diff (est-h3yi) (#314).
 - **Rate-limit-park wall pins** — M2/M3 fanout-respawn wall assertions plus mutation
-  proofs (est-xodi) (#339, @jacobhausler).
+  proofs (est-xodi) (#339).
 - **Docs:** portable pre-share validation must pass with `admission=True` (closes
   est-73vk) (#341); pack card-toolresult-hook ship card + truthful result-contract
   doc (est-k75i) (#359).
