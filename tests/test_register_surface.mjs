@@ -106,6 +106,36 @@ assert.deepEqual(areas, ['composer.top', 'panes', 'routes', 'transcript.directiv
   assert.equal(strip.area, 'composer.underside', 'the session-strip registration itself moved, not some other registration')
 }
 
+// -- 1b′. RED ON BASE (#230 item 0): an SDK that exposes a TRAY accumulation
+// area (the composer tray where subagents / background scripts / task lists
+// pile up — ComposerStatusStack, internal today; upstream ask wf230-composer-
+// tray-area) must win the mount. Feature-detected chain, one head per release:
+//   sessionStripArea(sdk) === sdk.tray ?? sdk.underside ?? sdk.top
+// (plugin.js registration site `id: 'session-strip'`). The const map exposes
+// a key ONLY on cores that mount the area ⇒ missing key ⇒ undefined ⇒ ?? falls
+// through — so one mount, never two, and today's underside/top mounts ride on
+// unchanged (assertions 1 and 1b above stay green).
+const { sessionStripArea } = mod
+{
+  // C: SDK WITH a tray key — the strip registers THERE, exactly.
+  const C = await loadPlugin('tray', { top: 'composer.top', underside: 'composer.underside', tray: 'composer.tray' })
+  assert.equal(sessionStripArea({ tray: 'composer.tray', underside: 'composer.underside', top: 'composer.top' }),
+    'composer.tray', 'sessionStripArea: tray key wins outright when the SDK exposes it')
+  const cStrip = C.regs.find(r => r.id === 'session-strip')
+  assert.ok(cStrip, 'tray SDK: a session-strip registration exists')
+  assert.equal(cStrip.area, 'composer.tray',
+    `tray SDK: the session-strip registration area is EXACTLY the tray key, got ${JSON.stringify(cStrip.area)}`)
+  const cAreas = [...new Set(C.regs.map(r => r.area))].sort()
+  assert.deepEqual(cAreas, ['composer.tray', 'panes', 'routes', 'transcript.directives'],
+    `tray SDK: the tray key replaces underside/top (one mount, never both), got ${JSON.stringify(cAreas)}`)
+}
+{
+  // A/B: the chain head is NEW — the fallbacks must be untouched by the tray head.
+  assert.equal(sessionStripArea({ top: 'composer.top' }), 'composer.top', 'older SDK: still composer.top')
+  assert.equal(sessionStripArea({ top: 'composer.top', underside: 'composer.underside' }), 'composer.underside',
+    'core >= v2026.7.30: still composer.underside')
+}
+
 // -- 1c. hook-order safety: SessionStrip returns null for an empty owned set,
 // but ONLY after every hook ran (a conditional hook call after an early return
 // would crash the app on the next render with a different branch).
@@ -243,4 +273,4 @@ const rcCalls = src.match(/runningCount\(/g).length
 const rcDefs = src.match(/const runningCount =/g).length
 assert.equal(rcCalls + rcDefs, 2, 'runningCount: definition + tabTitle call only')
 
-console.log('ALL PASS: register surface, dock, agent-first pane model, SMIL-only-on-running, one fan-stack')
+console.log('ALL PASS: register surface (+ tray ?? underside ?? top feature-detect), dock, agent-first pane model, SMIL-only-on-running, one fan-stack')
