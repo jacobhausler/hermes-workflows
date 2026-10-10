@@ -238,10 +238,16 @@
       "exit": 0,
       "measured": "2026-10-10 local foreground run on fix/est-xd3b-when-on-agent-runner: DONE when_on_agent_engine OK (16 checks, rc=0); RED-proof in a throwaway worktree at base 04e9bdd (11 FAIL / rc=1 \u2014 the false-predicate agents spawn instead of skipping; deleting the when-branch turns legs 1/2/4/7/8 red, deleting the when_error fail-safe turns 6 red, deleting its log() turns 6b red)",
       "supersede_by": "next green-CI refresh (replace with the CI-captured row)"
+    },
+    {
+      "test": "test_bead_close_claim_13z1.py",
+      "exit": 0,
+      "measured": "2026-10-10 local foreground run on the est-13z1 PR head (clean parity env, fresh WF_RUNS_ROOT, outside run dirs): Ran 10 tests OK, rc=0; RED-proof: same committed test at the test-only commit in `git worktree add --detach` = 9 FAIL / 1 OK; the PR adds this test without a CI row",
+      "supersede_by": "next green-CI refresh (replace with the CI-captured row)"
     }
   ],
   "totals": {
-    "cases": 270,
+    "cases": 271,
     "red": 0
   },
   "contract": "Green CI ledgers only (every exit == 0); rows not captured by CI are listed in rows_added_outside_ci with how they were measured. Refresh from the tip of main after each main move; see README.md.",

@@ -1344,5 +1344,10 @@
     "test": "test_when_on_agent_engine.py",
     "exit": 0,
     "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_when_on_agent_engine.py.log"
+  },
+  {
+    "test": "test_bead_close_claim_13z1.py",
+    "exit": 0,
+    "log": "Local foreground run on the est-13z1 PR head (clean parity env, fresh WF_RUNS_ROOT, outside run dirs): Ran 10 tests OK, rc=0; RED-proof at the test-only commit in a throwaway detached worktree (9 FAIL); the PR adds this test without a CI row"
   }
 ]

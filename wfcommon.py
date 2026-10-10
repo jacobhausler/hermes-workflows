@@ -695,7 +695,7 @@ ID_OK = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 # graph it baked itself. `reasoning` is validated per node (Q5).
 AGENT_KEYS = {"id", "type", "after", "goal", "context", "schema", "model", "provider", "toolsets",
               "max_turns", "timeout", "run_budget", "inputs", "fanout", "reasoning",
-              "tier", "shape", "repo",
+              "tier", "shape", "repo", "bead_close",
               # #24/#25: fail-closed pinned routes. Default TRUE for nodes
               # that pin an explicit model — a submit ping that AFFIRMATIVELY proves
               # the pinned route dead or answering from the fallback ladder refuses the
@@ -758,10 +758,18 @@ ECHO_KEYS = {"id", "type", "after", "output",
              "publishes",
              # est-pygyy (issue #56): the receipt gate covers the echo commit path
              # exactly like the publisher gate — an echo that publishes must prove it.
-             "effects"}
+             "effects",
+             # est-13z1: an echo commits its `output` verbatim at the wave boundary —
+             # a close claim riding that object is read back from the store exactly
+             # like an agent's, so the echo path carries the declaration too.
+             "bead_close"}
 # est-pygyy (issue #56): the closed shape of one effect-receipt row (validated at
 # the door, enforced by wf._effect_gate at the runner's commit edge).
 EFFECT_KEYS = {"file", "sha256", "min_bytes"}
+# est-13z1: closed shape of a bead-close declaration — the estate store path,
+# the bead id, and the actor the lane is entitled to close as (runner law:
+# --actor must match the assignee read from the store).
+BEAD_CLOSE_KEYS = {"store", "id", "actor"}
 _HEX64_OK = re.compile(r"^[0-9a-f]{64}$")
 JOIN_KEYS = {"id", "type", "after", "keys", "wait"}
 # ONE table for node kinds: closed key-set + the schedule hook. `spawns` is True
@@ -1316,6 +1324,38 @@ def validate_graph_errors(nodes, *, admission=False):
                     if mb is not None and (not isinstance(mb, int) or isinstance(mb, bool)
                                            or mb <= 0):
                         E(nid, fld, f"{fld} min_bytes must be a positive integer")
+        if "bead_close" in n:
+            # est-13z1: declared bead-close — the runner READS BACK the estate store
+            # (`bd -C <store> show <id> --json`) at the commit edge whenever this
+            # node's committed output claims the bead closed; an unproven claim
+            # fails typed (error_class bead_close). The door validates the SHAPE
+            # fail-closed: an object {store, id, actor?} (closed keys), store/id
+            # non-empty strings, id with no whitespace (it rides the fixed argv).
+            bc = n["bead_close"]
+            if not isinstance(bc, dict):
+                E(nid, "bead_close", "bead_close must be an object "
+                                     "{store, id, actor?}")
+            else:
+                stray = sorted(set(bc) - BEAD_CLOSE_KEYS)
+                if stray:
+                    E(nid, "bead_close", f"bead_close unknown key(s) {stray}; allowed: "
+                                         "store, id, actor")
+                st_ = bc.get("store")
+                if not isinstance(st_, str) or not st_.strip():
+                    E(nid, "bead_close", "bead_close.store must be a non-empty string")
+                elif "\x00" in st_ or "\n" in st_:
+                    E(nid, "bead_close", "bead_close.store must be a plain path "
+                                         "(no NUL/newline)")
+                bi_ = bc.get("id")
+                if not isinstance(bi_, str) or not bi_.strip():
+                    E(nid, "bead_close", "bead_close.id must be a non-empty string")
+                elif any(c.isspace() for c in bi_):
+                    E(nid, "bead_close", "bead_close.id must contain no whitespace "
+                                         "(it rides the store read-back argv)")
+                if "actor" in bc and (not isinstance(bc["actor"], str)
+                                       or not bc["actor"].strip()):
+                    E(nid, "bead_close", "bead_close.actor, when present, must be a "
+                                         "non-empty string")
         for k, hi in (("timeout", 86400), ("max_turns", 200), ("run_budget", 86400)):
             v = n.get(k)
             if v is not None and (not isinstance(v, (int, float)) or isinstance(v, bool) or v <= 0 or v > hi):

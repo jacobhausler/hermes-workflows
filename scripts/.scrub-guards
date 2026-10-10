@@ -133,3 +133,42 @@ scripts/vendor/archify/renderers/shared/generated-brand-marks.mjs
 # future stray hit elsewhere in these files still fires. GUARD, per AGENTS.md rule 4.
 .github/PULL_REQUEST_TEMPLATE.md:6
 .github/workflows/pr-compliance.yml:32
+
+# ---- est-13z1: the bead-close read-back gate (PR #360) ----
+# `bead_close` is the SHIPPED PUBLIC GRAMMAR key and `bd -C <store> show <id> --json`
+# is the runner's own enforcement argv — both are load-bearing public contract, the
+# same GUARD class as the effect-receipt `effects` rows they mirror. The estate-vocab
+# regex (`\bbd\b|\bbeads?\b`) fires on the contract naming; neutralizing it would ship
+# a gate that names nothing. Line-anchored (not file-guarded): a future stray hit
+# elsewhere in these files still fires. GUARD, per AGENTS.md rule 4.
+references/grammar.md:37
+tests/fake_bd_close_13z1.py
+tests/test_bead_close_claim_13z1.py
+wf.py:1147
+wf.py:1150
+wf.py:1155
+wf.py:1156
+wf.py:1171
+wf.py:1198
+wf.py:1199
+wf.py:1221
+wf.py:1225
+wf.py:1232
+wf.py:1724
+wf.py:1730
+wf.py:1731
+wf.py:1732
+wf.py:1733
+wf.py:1734
+wf.py:1736
+wf.py:1738
+wf.py:1745
+wf.py:1851
+wf.py:1852
+wf.py:4659
+wf.py:6326
+wfcommon.py:769
+wfcommon.py:770
+wfcommon.py:1328
+wfcommon.py:1329
+wfcommon.py:1330
