@@ -1349,5 +1349,10 @@
     "test": "test_when_on_agent_engine.py",
     "exit": 0,
     "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_when_on_agent_engine.py.log"
+  },
+  {
+    "test": "test_quorum_drain_deadline_06xk.py",
+    "exit": 0,
+    "log": "2026-10-10 local foreground run at est-06xk PR head: 23 checks, 0 FAIL, rc=0 (PYTHONPATH=/opt/hermes); RED at the test-only commit b464b8a on base caee50b (11 FAIL + traceback: unknown key fanout.quorum_drain_s, drain run never commits); the PR adds this test without a CI row"
   }
 ]

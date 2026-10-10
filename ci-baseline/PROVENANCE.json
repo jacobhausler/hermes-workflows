@@ -13,6 +13,12 @@
   "rows_added_outside_ci": [
     {
       "exit": 0,
+      "measured": "2026-10-10 local foreground run at est-06xk PR head: 23 checks, 0 FAIL, rc=0 (PYTHONPATH=/opt/hermes); RED at the test-only commit b464b8a on base caee50b (11 FAIL + traceback: unknown key fanout.quorum_drain_s, drain run never commits); the PR adds this test without a CI row",
+      "supersede_by": "next green-CI refresh (replace with the CI-captured row)",
+      "test": "test_quorum_drain_deadline_06xk.py"
+    },
+    {
+      "exit": 0,
       "measured": "2026-10-08 local foreground run: RESULT PASS, exit 0; deterministic stop/liveness interleaving fails on both original PR head and main 869c4010b822aec49748080b100f214085640076 (empty capture misclassified crashed; buffered answer misclassified done)",
       "supersede_by": "next green-CI refresh (replace with the CI-captured row)",
       "test": "test_adopt_stop_race.py"
