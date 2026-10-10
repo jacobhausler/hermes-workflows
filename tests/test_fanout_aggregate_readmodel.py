@@ -91,6 +91,11 @@ def test_fanout_stale_or_uncommitted_aggregate_does_not_supersede():
         write(run / "graph.json", amended)
         assert common.node_facts(run, "fan", 0)["status"] == "running"
         assert common.run_state(run)["nodes"]["fan"]["status"] == "pending"
+        for broken in ([], {"nodes": None}, {"nodes": [None]}):
+            write(run / "graph.json", broken)
+            assert common.node_facts(run, "fan", 0)["status"] == "running"
+        (run / "graph.json").unlink()
+        assert common.node_facts(run, "fan", 0)["status"] == "running"
 
 
 def test_fanout_item_verdict_is_not_inferred_from_aggregate_success():

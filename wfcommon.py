@@ -3975,15 +3975,65 @@ def run_child_metrics(r):
             out.setdefault(k, v)
     return out
 
+def _aggregate_item_fact(r, nid, index):
+    """Read-only projection of an item from a CURRENT done fan-out aggregate.
+    Never a recovery record: node_rec still reads only the aggregate on disk."""
+    graph = jload(Path(r) / "graph.json")
+    if not isinstance(graph, dict) or not isinstance(graph.get("nodes"), list):
+        return None
+    byid = {n["id"]: n for n in graph["nodes"] if isinstance(n, dict) and n.get("id")}
+    parent = str(nid)
+    # Accept either the explicit item index or its canonical record stem, but
+    # never split a real graph node whose own id happens to contain a dot.
+    if index is None and parent not in byid:
+        parent, _, index = parent.rpartition(".")
+    if isinstance(index, str) and index.isdecimal():
+        index = int(index)
+    n = byid.get(parent)
+    if type(index) is not int or index < 0 or not n or not n.get("fanout"):
+        return None
+    st, aggregate = node_rec(Path(r), n, byid)
+    if st != "done" or not isinstance(aggregate, dict):
+        return None  # stale, amended, partial and uncommitted aggregates cannot attest
+    output = aggregate.get("output")
+    rows = output.get("all_results") if isinstance(output, dict) else None
+    row = rows[index] if isinstance(rows, list) and index < len(rows) else None
+    if not isinstance(row, dict) or row.get("status") not in ("done", "partial", "failed", "skipped"):
+        row = {"status": "superseded"}  # aggregate closed it, exact item verdict unknown
+    return parent + ".json", row
+
+
 def node_facts(r, nid, index=None):
     """Record facts for one node (fan-out item via `index`), plus its steer truth.
+    A current done aggregate supersedes leftover running item spawn facts.
     None when the node has no record at all (never fabricate a record)."""
     name = str(nid) + (f".{index}" if index is not None else "")
     rec = jload(Path(r) / "nodes" / f"{name}.json")
     if not isinstance(rec, dict):
         return None
+    superseded = _aggregate_item_fact(r, nid, index) if rec.get("status") == "running" else None
+    if superseded:
+        source, row = superseded
+        # Keep spawn provenance, but outcome fields come ONLY from the committed
+        # aggregate row. No writes, item rescue, or fabricated success verdict.
+        rec = {k: v for k, v in rec.items() if k not in
+               ("status", "output", "error", "error_class", "harvest", "final", "ms")}
+        rec.update(row)
     facts = {k: (rec[k] if k in rec and rec[k] is not None else "unknown")
              for k in FACT_KEYS}
+    if superseded:
+        facts["superseded_by_aggregate"] = source
+        if rec["status"] == "superseded":
+            pid = rec.get("pid")
+            facts["pid_state"] = "unknown"
+            if type(pid) is int and pid > 0:
+                try:
+                    os.kill(pid, 0)
+                    facts["pid_state"] = "present"  # presence is not verified spawn identity
+                except ProcessLookupError:
+                    facts["pid_state"] = "absent"
+                except OSError:
+                    pass
     facts["steer"] = _steer_state(Path(r), str(nid))
     if rec.get("profile"):
         facts["profile"] = rec["profile"]

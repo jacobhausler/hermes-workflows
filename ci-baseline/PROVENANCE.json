@@ -14,6 +14,12 @@
  "rows_added_outside_ci": [
   {
    "exit": 0,
+   "measured": "2026-10-10 local foreground run: pytest 7 passed; serial script TOTAL 7 FAIL 0. RED on main 1867366747eadda8c6aca40a7ce871c4aecedabe: 4 failed, 3 passed (stale running item facts contradict current done aggregate).",
+   "supersede_by": "next green-CI refresh (replace with the CI-captured row)",
+   "test": "test_fanout_aggregate_readmodel.py"
+  },
+  {
+   "exit": 0,
    "measured": "2026-10-10 local foreground run at est-06xk PR head: 23 checks, 0 FAIL, rc=0 (PYTHONPATH=/opt/hermes); RED at the test-only commit b464b8a on base caee50b (11 FAIL + traceback: unknown key fanout.quorum_drain_s, drain run never commits); the PR adds this test without a CI row",
    "supersede_by": "next green-CI refresh (replace with the CI-captured row)",
    "test": "test_quorum_drain_deadline_06xk.py"
