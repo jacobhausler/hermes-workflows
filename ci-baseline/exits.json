@@ -55,6 +55,11 @@
   "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_admission_ledger_85.py.log"
  },
  {
+  "test": "test_adopt_stop_race.py",
+  "exit": 0,
+  "log": "Local foreground tests/test_adopt_stop_race.py: RESULT PASS, exit 0"
+ },
+ {
   "test": "test_alias_receipt_respawn_318.py",
   "exit": 0,
   "log": "rows_added_outside_ci in PROVENANCE.json"
@@ -63,6 +68,11 @@
   "test": "test_alias_route_ping_318.py",
   "exit": 0,
   "log": "rows_added_outside_ci in PROVENANCE.json"
+ },
+ {
+  "test": "test_amend_bound_preamble_838.py",
+  "exit": 0,
+  "log": "Local foreground python3 tests/test_amend_bound_preamble_838.py: ALL PASS, exit 0"
  },
  {
   "test": "test_amend_preview_defdiff.py",
@@ -250,6 +260,11 @@
   "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_edge_routing.mjs.log"
  },
  {
+  "test": "test_effects_receipt_pygyy.py",
+  "exit": 0,
+  "log": "Local foreground run on PR #346 rebased head (fresh WF_RUNS_ROOT, outside run dirs): Ran 10 tests OK, rc=0; the PR adds this test without a CI row"
+ },
+ {
   "test": "test_engine.py",
   "exit": 0,
   "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_engine.py.log"
@@ -389,9 +404,17 @@
   "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_gateway_sigterm_detach_6226.py.log"
  },
  {
+  "test": "test_golden_seat_no_inherited_identity_862.py",
+  "exit": 0
+ },
+ {
   "test": "test_graph_gate.py",
   "exit": 0,
   "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_graph_gate.py.log"
+ },
+ {
+  "test": "test_graph_regen_z_parser_h3yi.py",
+  "exit": 0
  },
  {
   "test": "test_graph_result_158.py",
@@ -417,6 +440,11 @@
   "test": "test_harvest_scan_guard.py",
   "exit": 0,
   "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_harvest_scan_guard.py.log"
+ },
+ {
+  "test": "test_heartbeat_verdict_127.py",
+  "exit": 0,
+  "log": "rows_added_outside_ci in PROVENANCE.json"
  },
  {
   "test": "test_hermes_bin_reserved_0928.py",
@@ -512,6 +540,11 @@
   "test": "test_launcher_config.py",
   "exit": 0,
   "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_launcher_config.py.log"
+ },
+ {
+  "test": "test_lease_busy_retry.py",
+  "exit": 0,
+  "log": "local: lease-busy 1.3.3 lane \u2014 RED at base d69a64d (no _is_lease_busy, class absent), GREEN at head: 18/18 checks rc=0; re-run green under synthetic CPU load"
  },
  {
   "test": "test_library.py",
@@ -689,6 +722,11 @@
   "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_orphan_adopt_790c6ad.py.log"
  },
  {
+  "test": "test_package_source_only_756.py",
+  "exit": 0,
+  "log": "CI run 37722866724 Serial suite: exit 0"
+ },
+ {
   "test": "test_packaging.py",
   "exit": 0,
   "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_packaging.py.log"
@@ -779,6 +817,11 @@
   "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_post_exit_hook.py.log"
  },
  {
+  "test": "test_post_exit_strip_xwvu9.py",
+  "exit": 0,
+  "log": "Local foreground run on fix/xwvu9-post-exit-strip: RED at 8632839 tree pre-change (3 FAIL), GREEN after the strip (3 tests OK)"
+ },
+ {
   "test": "test_pr_tag_audit.py",
   "exit": 0,
   "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_pr_tag_audit.py.log"
@@ -844,6 +887,11 @@
   "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_px11_memoryerror_containment.py.log"
  },
  {
+  "test": "test_quorum_drain_deadline_06xk.py",
+  "exit": 0,
+  "log": "2026-10-10 local foreground run at est-06xk PR head: 23 checks, 0 FAIL, rc=0 (PYTHONPATH=/opt/hermes); RED at the test-only commit b464b8a on base caee50b (11 FAIL + traceback: unknown key fanout.quorum_drain_s, drain run never commits); the PR adds this test without a CI row"
+ },
+ {
   "test": "test_ratelimit_54.py",
   "exit": 0,
   "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_ratelimit_54.py.log"
@@ -892,6 +940,16 @@
   "test": "test_route_efforts_b3c98b2a.py",
   "exit": 0,
   "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_route_efforts_b3c98b2a.py.log"
+ },
+ {
+  "test": "test_route_hold_optout_retry_w56.py",
+  "exit": 0,
+  "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_route_hold_optout_retry_w56.py.log"
+ },
+ {
+  "test": "test_route_identity_699.py",
+  "exit": 0,
+  "log": "CI run 37779459550 at 2b7804a Serial suite: exit 0"
  },
  {
   "test": "test_route_substitution_641.py",
@@ -989,6 +1047,11 @@
   "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_seat_cancel_at_ticket_r2_g255.py.log"
  },
  {
+  "test": "test_seat_cap_dotenv_gxjh6.py",
+  "exit": 0,
+  "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_seat_cap_dotenv_gxjh6.py.log"
+ },
+ {
   "test": "test_seat_lending_identity_r2_g255.py",
   "exit": 0,
   "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_seat_lending_identity_r2_g255.py.log"
@@ -1032,6 +1095,11 @@
   "test": "test_seats_not_a_run_g2xx.py",
   "exit": 0,
   "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_seats_not_a_run_g2xx.py.log"
+ },
+ {
+  "test": "test_self_review_422_1866.py",
+  "exit": 0,
+  "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_self_review_422_1866.py.log"
  },
  {
   "test": "test_session_strip.mjs",
@@ -1112,6 +1180,10 @@
   "test": "test_sprint101w2_D2-steer-liveness.py",
   "exit": 0,
   "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_sprint101w2_D2-steer-liveness.py.log"
+ },
+ {
+  "test": "test_stale_queued_spawn_byft8.py",
+  "exit": 0
  },
  {
   "test": "test_status_next.py",
@@ -1208,6 +1280,21 @@
   "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_tool_call_text_6st.py.log"
  },
  {
+  "test": "test_tree_quiesce_reap.py",
+  "exit": 0,
+  "log": "Local foreground tests/test_tree_quiesce_reap.py: RESULT PASS, exit 0"
+ },
+ {
+  "test": "test_unconditional_version_stamp.py",
+  "exit": 0,
+  "log": "rows_added_outside_ci in PROVENANCE.json"
+ },
+ {
+  "test": "test_upstream_hook_contract.py",
+  "exit": 0,
+  "log": "rows_added_outside_ci in PROVENANCE.json"
+ },
+ {
   "test": "test_v3_fixes.py",
   "exit": 0,
   "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_v3_fixes.py.log"
@@ -1263,6 +1350,11 @@
   "log": "CI run 37720369252 Serial suite: exit 0"
  },
  {
+  "test": "test_wall_meter_133.py",
+  "exit": 0,
+  "log": "Local foreground cd tests && PYTHONPATH=/opt/hermes:.. python3 test_wall_meter_133.py: RESULT GREEN (18 checks, 0 failed), exit 0"
+ },
+ {
   "test": "test_wfpid_owner_8.py",
   "exit": 0,
   "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_wfpid_owner_8.py.log"
@@ -1273,97 +1365,8 @@
   "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_when_ancestry_0930.py.log"
  },
  {
-  "test": "test_route_identity_699.py",
-  "exit": 0,
-  "log": "CI run 37779459550 at 2b7804a Serial suite: exit 0"
- },
- {
-  "test": "test_package_source_only_756.py",
-  "exit": 0,
-  "log": "CI run 37722866724 Serial suite: exit 0"
- },
- {
-  "test": "test_adopt_stop_race.py",
-  "exit": 0,
-  "log": "Local foreground tests/test_adopt_stop_race.py: RESULT PASS, exit 0"
- },
- {
-  "test": "test_amend_bound_preamble_838.py",
-  "exit": 0,
-  "log": "Local foreground python3 tests/test_amend_bound_preamble_838.py: ALL PASS, exit 0"
- },
- {
-  "test": "test_tree_quiesce_reap.py",
-  "exit": 0,
-  "log": "Local foreground tests/test_tree_quiesce_reap.py: RESULT PASS, exit 0"
- },
- {
-  "test": "test_wall_meter_133.py",
-  "exit": 0,
-  "log": "Local foreground cd tests && PYTHONPATH=/opt/hermes:.. python3 test_wall_meter_133.py: RESULT GREEN (18 checks, 0 failed), exit 0"
- },
- {
-  "test": "test_self_review_422_1866.py",
-  "exit": 0,
-  "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_self_review_422_1866.py.log"
- },
- {
-  "test": "test_route_hold_optout_retry_w56.py",
-  "exit": 0,
-  "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_route_hold_optout_retry_w56.py.log"
- },
- {
-  "test": "test_seat_cap_dotenv_gxjh6.py",
-  "exit": 0,
-  "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_seat_cap_dotenv_gxjh6.py.log"
- },
- {
-  "test": "test_lease_busy_retry.py",
-  "exit": 0,
-  "log": "local: lease-busy 1.3.3 lane \u2014 RED at base d69a64d (no _is_lease_busy, class absent), GREEN at head: 18/18 checks rc=0; re-run green under synthetic CPU load"
- },
- {
-  "test": "test_golden_seat_no_inherited_identity_862.py",
-  "exit": 0
- },
- {
-  "test": "test_post_exit_strip_xwvu9.py",
-  "exit": 0,
-  "log": "Local foreground run on fix/xwvu9-post-exit-strip: RED at 8632839 tree pre-change (3 FAIL), GREEN after the strip (3 tests OK)"
- },
- {
-  "test": "test_effects_receipt_pygyy.py",
-  "exit": 0,
-  "log": "Local foreground run on PR #346 rebased head (fresh WF_RUNS_ROOT, outside run dirs): Ran 10 tests OK, rc=0; the PR adds this test without a CI row"
- },
- {
-  "test": "test_graph_regen_z_parser_h3yi.py",
-  "exit": 0
- },
- {
-  "test": "test_unconditional_version_stamp.py",
-  "exit": 0,
-  "log": "rows_added_outside_ci in PROVENANCE.json"
- },
- {
   "test": "test_when_on_agent_engine.py",
   "exit": 0,
   "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_when_on_agent_engine.py.log"
- },
- {
-  "test": "test_quorum_drain_deadline_06xk.py",
-  "exit": 0,
-  "log": "2026-10-10 local foreground run at est-06xk PR head: 23 checks, 0 FAIL, rc=0 (PYTHONPATH=/opt/hermes); RED at the test-only commit b464b8a on base caee50b (11 FAIL + traceback: unknown key fanout.quorum_drain_s, drain run never commits); the PR adds this test without a CI row"
- },
- {
-  "test": "test_heartbeat_verdict_127.py",
-  "exit": 0,
-  "log": "rows_added_outside_ci in PROVENANCE.json"
- },
- 
- {
-  "test": "test_upstream_hook_contract.py",
-  "exit": 0,
-  "log": "rows_added_outside_ci in PROVENANCE.json"
  }
 ]

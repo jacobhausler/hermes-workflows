@@ -263,11 +263,15 @@
    "exit": 0,
    "measured": "2026-10-10 local foreground run at the gate-cure head: 3 PASS lines (1 parsed plugin hook 'transform_llm_output' found among 44 extracted core VALID_HOOKS names), rc=0 (PYTHONPATH=/opt/hermes); SKIP + rc=0 when hermes_cli is unimportable (proven in a stripped env, the suite-runs-without-core case); CI run 38052460596 green at head 217a2b6 with this row",
    "added_by": "author lane (est-a91h7, PR #365 gate-cure; measured locally + green ci run 38052460596)"
+  },
+  {
+   "test": "test_stale_queued_spawn_byft8.py",
+   "added_by": "est-byft8 PR lane (author CI-pending; refreshed only from a green Serial suite job)"
   }
  ],
  "source_issue": 75,
  "totals": {
-  "cases": 274,
+  "cases": 275,
   "red": 0
  },
  "tracking_item": "est-9yl2"
