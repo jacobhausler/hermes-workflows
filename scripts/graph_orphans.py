@@ -71,16 +71,21 @@ def _git(repo_dir, *args):
                           capture_output=True, text=True)
 
 
+def _git_paths(repo_dir, *args):
+    """Read NUL-delimited Git paths without quoting or newline translation."""
+    r = subprocess.run(["git", "-C", str(repo_dir), *args], capture_output=True)
+    return {p.decode("utf-8", "surrogateescape") for p in r.stdout.split(b"\0") if p} \
+        if r.returncode == 0 else None
+
+
 def tracked_files(repo_dir):
     """Paths tracked in the HEAD tree (None if git failed)."""
-    r = _git(repo_dir, "ls-files")
-    return set(r.stdout.split()) if r.returncode == 0 else None
+    return _git_paths(repo_dir, "ls-files", "-z")
 
 
 def base_tracked(repo_dir, base):
     """Paths tracked at `base` (None if git failed)."""
-    r = _git(repo_dir, "ls-tree", "-r", "--name-only", base)
-    return set(r.stdout.split()) if r.returncode == 0 else None
+    return _git_paths(repo_dir, "ls-tree", "-r", "-z", "--name-only", base)
 
 
 def in_pr_context(env=None):

@@ -301,7 +301,7 @@
   {
    "test": "test_graph_orphan_deletion_231.py",
    "exit": 0,
-   "measured": "2026-10-08 local foreground run on the rebased #245 head: 13 PASS, ALL PASS (rc=0); new test from #245 (est-i24i)",
+   "measured": "2026-10-10 local foreground run after rebase onto main 1867366747eadda8c6aca40a7ce871c4aecedabe: 24 PASS, ALL PASS, rc=0; RED at fa37192 (11 FAIL, rc=1); includes tracked/deleted space, tab, LF, CR and Unicode paths plus fabricated suffix rejection; source-only est-i24i repair",
    "supersede_by": "next green-CI refresh (replace with the CI-captured row)"
   }
  ],

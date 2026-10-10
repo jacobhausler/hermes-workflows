@@ -31,7 +31,6 @@ src = {n.get("source_file") for n in g["nodes"] if n.get("source_file")}
 check("graph covers the door, runner, read model and desktop half",
       {"__init__.py", "wf.py", "wfcommon.py", "desktop/plugin.js"} <= src)
 check("graph does not index itself or CI", not any(s.startswith(("graphify-out/", ".github/")) for s in src))
-tracked = set(subprocess.run(["git", "-C", str(ROOT), "ls-files"], capture_output=True, text=True).stdout.split())
 # Deletion-aware orphan check (est-i24i): an orphan whose source was deleted BY this
 # PR is tolerated until the next single-writer regen (graph_path_ban forbids in-PR
 # regens — that is the whole point of the ban); an orphan the base never tracked is
