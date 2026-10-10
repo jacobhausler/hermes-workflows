@@ -50,8 +50,7 @@ sys.path.insert(0, str(ROOT))
 _spec_iso762 = importlib.util.spec_from_file_location(
     "wf_spawn_isolation_762", Path(__file__).parent / "fixtures" / "wf_spawn_isolation_762.py")
 assert _spec_iso762 and _spec_iso762.loader
-_iso762 = importlib.util.module_from_spec(_iso762)
-_SPEC_ISO762_OK = True
+_iso762 = importlib.util.module_from_spec(_spec_iso762)
 _spec_iso762.loader.exec_module(_iso762)
 pin_env = _iso762.pin_env
 
@@ -95,7 +94,14 @@ def drive(root, runs, rid):
         os.close(wf._LOCK_FD)
         setattr(wf, "_LOCK_FD", None)
     wf._EXIT_WRITTEN[0] = False
-    with patch.dict(os.environ, env, clear=True):
+    # The DOOR law for agent+when belongs to the validator slice (est-l2ey):
+    # main tip still refuses it ("only gate nodes take when"). This slice is
+    # the RUNNER leg — what it does with a `when` that survived the door — so
+    # the door check is pinned open exactly like tests/test_11_runner_requires.py
+    # pins it for `requires`. Leg 6c separately pins that the grammar stays the
+    # door's property (a self-referencing head is refused by the validator).
+    with patch.dict(os.environ, env, clear=True), \
+         patch.object(wf, "validate_graph", return_value=None):
         wf.main(rid)
     if wf._LOCK_FD is not None:
         os.close(wf._LOCK_FD)
