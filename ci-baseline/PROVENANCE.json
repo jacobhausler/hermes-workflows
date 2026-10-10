@@ -257,11 +257,23 @@
    "exit": 0,
    "measured": "gates job 114201933768 (run 38048219124, PR #352 head 28499084, 2026-10-10): serial-suite tally 'test_heartbeat_verdict_127.py: 0'",
    "added_by": "author lane (est-zsws, PR #352; refreshed only from a green Serial suite job)"
+  },
+  {
+   "test": "test_fanout_stragglers_nxr.py",
+   "exit": 0,
+   "measured": "2026-10-10 local run at head: TOTAL 18 FAIL 0, exit 0; RED-on-base 30e0ba9: 8 legible FAIL lines (fat-tail fires; math checks degrade by name)",
+   "supersede_by": "next green-CI refresh (replace with the CI-captured row)"
+  },
+  {
+   "test": "test_fanout_cell_dcd.py",
+   "exit": 0,
+   "measured": "2026-10-10 local run at head: 19/19 PASS exit 0; RED-on-base 30e0ba9: 18 legible FAIL lines end-to-end (door refuses the key, no tally helper, no partner record)",
+   "supersede_by": "next green-CI refresh (replace with the CI-captured row)"
   }
  ],
  "source_issue": 75,
  "totals": {
-  "cases": 273,
+  "cases": 275,
   "red": 0
  },
  "tracking_item": "est-9yl2"

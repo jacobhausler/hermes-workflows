@@ -1,0 +1,73 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "PR #370 — Straggler Wake + the [fan, consolidate] Cell (sys-nxrhxo, sys-96dcod)",
+    "visual_preset": "signal-flow",
+    "quality_profile": "showcase",
+    "output": "sys-nxrhxo.html"
+  },
+  "lanes": [
+    { "id": "owner", "label": "Launching Session" },
+    { "id": "engine", "label": "Fan Wave (engine)" },
+    { "id": "ledger", "label": "Machine Records" }
+  ],
+  "phases": [
+    { "id": "wave", "label": "Items land", "fromCol": 0, "toCol": 1 },
+    { "id": "clock", "label": "Census clock", "fromCol": 2, "toCol": 3, "variant": "emphasis" },
+    { "id": "merge", "label": "Answer or name", "fromCol": 4, "toCol": 5, "variant": "dashed" }
+  ],
+  "mainPath": ["finished", "tick", "stream", "tally"],
+  "nodes": [
+    { "id": "finished", "lane": "engine", "col": 0, "type": "backend", "label": "item.finished", "sublabel": "one member lands", "width": 140 },
+    { "id": "tick", "lane": "engine", "col": 1, "type": "backend", "label": "census tick", "sublabel": "launch stamp at spawn", "width": 140 },
+    { "id": "evaln", "lane": "engine", "col": 2, "type": "backend", "label": "verdict math", "sublabel": "t0=p50 finish, floor max(180s, p50 dur)", "width": 160 },
+    { "id": "wake", "lane": "owner", "col": 3, "type": "frontend", "label": "one wake", "sublabel": "fixed text, per driven wave", "width": 150, "yOffset": 0 },
+    { "id": "stream", "lane": "engine", "col": 2, "type": "backend", "label": "batch stream", "sublabel": "N landed = one batch child", "width": 150, "yOffset": 74 },
+    { "id": "tally", "lane": "ledger", "col": 4, "type": "database", "label": "machine tally", "sublabel": "answered or NAMED missing", "width": 150 },
+    { "id": "evj", "lane": "ledger", "col": 1, "type": "database", "label": "events.jsonl", "sublabel": "census rides the log", "width": 140 },
+    { "id": "batchl", "lane": "ledger", "col": 3, "type": "database", "label": "batches.jsonl", "sublabel": "wave-end flush, tail named", "width": 150 }
+  ],
+  "edges": [
+    { "id": "fin-tick", "from": "finished", "to": "tick", "label": "bookkeeping", "variant": "default" },
+    { "id": "tick-eval", "from": "tick", "to": "evaln", "label": "open ages", "variant": "emphasis" },
+    { "id": "tick-stream", "from": "tick", "to": "stream", "label": "done member", "variant": "emphasis" },
+    { "id": "eval-wake", "from": "evaln", "to": "wake", "label": ">=2 open past floor", "variant": "emphasis" },
+    { "id": "tick-evj", "from": "tick", "to": "evj", "label": "log", "variant": "dashed" },
+    { "id": "wake-evj", "from": "wake", "to": "evj", "label": "wake row", "variant": "dashed", "role": "return" },
+    { "id": "stream-batchl", "from": "stream", "to": "batchl", "label": "verdicts", "variant": "dashed" },
+    { "id": "batchl-tally", "from": "batchl", "to": "tally", "label": "committed rows", "variant": "emphasis" },
+    { "id": "stream-tally", "from": "stream", "to": "tally", "label": "drains at wave end", "variant": "default" }
+  ],
+  "cards": [
+    {
+      "dot": "emerald",
+      "title": "The wake (nxr)",
+      "items": [
+        "t0 = cohort MEDIAN finish, never wave start",
+        "floor = max(180s engine constant, cohort p50)",
+        ">=2 open, launched items only; late wave-2 ages from launch",
+        "SHA latch: once per driven wave, re-arms on retry"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "The cell (dcd)",
+      "items": [
+        "consolidate:{from,batch} rides the DAG edge",
+        "batch child = ordinary agent on partner seat",
+        "failed members never ride a batch (NAMED)",
+        "partner never spawns: tally from records, zero prose"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "One clock",
+      "items": [
+        "author knob refused at the door",
+        "running|silent from budget_cue.injected only",
+        "drain (06xk) keeps the single SIGKILL path"
+      ]
+    }
+  ]
+}

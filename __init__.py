@@ -1931,6 +1931,28 @@ def _operative_texts(obj, path=""):
         for i, v in enumerate(obj):
             yield from _operative_texts(v, f"{path}[{i}]")
 
+def _fanout_cell_warnings(graph):
+    """est-fanout-cell (sys-96dcod): the encouragement channel. A fan-out node
+    whose wave has NO declared consolidate partner is legal — but it waits for
+    the whole cohort (the straggler tail blocks everything downstream). One
+    warning per uncalled fan-out, naming the fix; a celled graph stays
+    byte-identical response-wise (no empty key). NON-FATAL by law, same shape
+    as the stale-literal warning: authors hear it at the exact moment they
+    shelve or validate the graph."""
+    notes = []
+    nodes = graph.get("nodes") or []
+    partners = {n.get("consolidate", {}).get("from") for n in nodes
+                if isinstance(n.get("consolidate"), dict)}
+    for n in nodes:
+        if isinstance(n.get("fanout"), dict) and n.get("id") not in partners:
+            nid = str(n.get("id"))
+            notes.append(
+                "fanout without a consolidate cell (" + nid + "): the wave "
+                "waits for every item \u2014 pair it: an agent with "
+                '"consolidate":{"from":"' + nid + '","batch":1} '
+                "streams finished members while the straggler tail is still out")
+    return notes
+
 def _stale_literal_warnings(graph):
     """[] when the graph binds or is literal-free; else one warning string per
     offending literal, each naming where it lives and the run_context fix."""
@@ -2121,6 +2143,9 @@ def act_save(args):
     # law: the save lands; only a warning key rides the response, and a clean
     # save's response stays byte-identical (no empty key — golden bytes).
     _warn = _stale_literal_warnings(graph)
+    # est-fanout-cell: the same non-fatal law — a shelved graph that
+    # fans out without a consolidate partner gets ONE named warning.
+    _warn.extend(_fanout_cell_warnings(graph))
     # est-kg3y s12: only an ENVELOPE entry declares a contract (meta is where
     # params live), so only it can disagree with its refs. A bare entry's
     # contract is wholly derived from refs — a bound bare save stays warning-free

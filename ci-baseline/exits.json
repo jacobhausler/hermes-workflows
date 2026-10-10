@@ -1359,5 +1359,15 @@
   "test": "test_heartbeat_verdict_127.py",
   "exit": 0,
   "log": "rows_added_outside_ci in PROVENANCE.json"
+ },
+ {
+  "test": "test_fanout_stragglers_nxr.py",
+  "exit": 0,
+  "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_fanout_stragglers_nxr.py.log"
+ },
+ {
+  "test": "test_fanout_cell_dcd.py",
+  "exit": 0,
+  "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_fanout_cell_dcd.py.log"
  }
 ]
