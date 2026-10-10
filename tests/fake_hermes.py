@@ -228,6 +228,22 @@ def _rl159_count(key):
     c = int(open(pth).read()) if os.path.exists(pth) else 0
     open(pth, "w").write(str(c + 1))
     return c
+if _FAKE_MODE == "ratelimit_then_transport":   # est-ja41 (PR #159 finding): the REVERSE
+    # order — banner death, the PARKED respawn dies transport (api_count=0 shape),
+    # the ladder respawn answers. The transient ladder must NOT drop the park's
+    # parked attempt from the committed attempts_log.
+    _k159 = "".join(ch for ch in (q.splitlines()[0] if q.strip() else "x") if ch.isalnum())[:24] or "x"
+    if _rl159_count(_k159) == 0:                     # first spawn: banner death
+        print("Warning: Unknown toolsets: bogus")
+        print("hermes -z: agent failed: Anthropic credentials are rate-limited for "
+              "claude-fable-5-1; other Claude models remain available (see `hermes auth list`).")
+        sys.exit(1)
+    if _rl159_count(_k159 + "t") == 0:               # parked respawn: transport death
+        print("Warning: Unknown toolsets: bogus")
+        print("hermes -z: agent failed: openai.APIConnectionError. Connection error.")
+        sys.exit(2)
+    print("```json\n" + json.dumps({"result": "answered-after-both"}) + "\n```")
+    sys.exit(0)
 if _FAKE_MODE == "ratelimit_after_transport":
     _k159 = "".join(ch for ch in (q.splitlines()[0] if q.strip() else "x") if ch.isalnum())[:24] or "x"
     if _rl159_count(_k159) == 0:                     # first spawn: transport death
