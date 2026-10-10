@@ -5444,12 +5444,21 @@ def _transient_retry(meta, r, respawn, ev, ev_kw, node=None, cancel=None):
     provider_400/cancelled/spawn. attempts_log records every failed attempt; a
     final retryable death after retries = error_class transport_exhausted.
     A `partial` harvest (#4) enters here as non-failed and is NEVER retried;
-    a still-retryable death hands off to _bounded_retry (#5) once Q4 is spent."""
+    a still-retryable death hands off to _bounded_retry (#5) once Q4 is spent.
+    est-ja41 (PR #159 finding, reverse of wf159c B2): a banner death the PARK
+    handled BEFORE this ladder arrives here as a transport death carrying the
+    park's attempts_log on the record (banner -> transport -> success shape).
+    The ladder SEEDS that history — never resets it — so the committed record
+    agrees with the event history (every parked death stays machine-visible).
+    The two-death cap and the transport_exhausted demotion count THIS ladder's
+    own attempts only; an inherited log alone never demotes a record the
+    ladder never touched."""
     run = meta["_run"]
     backoff = _retry_conf_params(meta)[0]
-    attempts_log = []
+    attempts_log = list(r.get("attempts_log") or [])   # est-ja41: inherited park history
+    ladder_attempts = 0
     while (r.get("status") == "failed" and r.get("error_class") in _RETRYABLE_CLASSES
-           and len(attempts_log) < 2):
+           and ladder_attempts < 2):
         if meta["_stop"].is_set():
             break
         calls = (_attempt_api_calls(run, r.get("skey"), r["profile_home"])
@@ -5466,18 +5475,22 @@ def _transient_retry(meta, r, respawn, ev, ev_kw, node=None, cancel=None):
             attempts_log.append({"attempt": len(attempts_log),
                                  "error_class": r["error_class"], "at": now(),
                                  **_attempt_counts(run, r)})
+            ladder_attempts += 1   # est-ja41: counts for the demote trigger, same as pre-fix
             log(run, ev + ".retry_skipped", reason="retry budget exhausted",
                 error_class=r.get("error_class"), **ev_kw)
             break
         attempts_log.append({"attempt": len(attempts_log),
 "error_class": r["error_class"], "at": now(),
                              **_attempt_counts(run, r)})
+        ladder_attempts += 1   # est-ja41: THIS ladder's own attempt counter
         # jam-h22/h30: rate-limited deaths draw full-jitter sleeps (see _retry_sleep);
         # a false-positive-free retry decision is unchanged — only the delay differs.
         rate_limited = _is_rate_limited(r.get("raw"))
         if rate_limited:
             r["subtype"] = "rate_limited"
-        delay = _retry_sleep(backoff, len(attempts_log) - 1, r.get("raw"))
+        # est-ja41: the sleep schedule indexes the LADDER's attempts, never the
+        # merged history — an inherited park log must not shift 5 s -> 20 s.
+        delay = _retry_sleep(backoff, ladder_attempts - 1, r.get("raw"))
         log(run, ev + ".retrying", error_class=r["error_class"], backoff_s=delay,
             rate_limited=rate_limited,
             attempts_log=list(attempts_log), **ev_kw)
@@ -5514,7 +5527,12 @@ def _transient_retry(meta, r, respawn, ev, ev_kw, node=None, cancel=None):
         r["attempts_log"] = attempts_log
         last_spawn = r.get("spawn")
         r["attempts"] = last_spawn + 1 if isinstance(last_spawn, int) else len(attempts_log) + r.get("attempts", 0)
-        if r.get("error_class") in _RETRYABLE_CLASSES:
+        # est-ja41: transport_exhausted is the LADDER's own verdict — "this
+        # ladder spent its respawns on the same dead model". An inherited park
+        # history proves nothing about this ladder; for no-inherit runs
+        # ladder_attempts>=1 reproduces the pre-fix trigger (own log non-empty)
+        # exactly, including the blocked-append path.
+        if ladder_attempts >= 1 and r.get("error_class") in _RETRYABLE_CLASSES:
             r["error_class"] = "transport_exhausted"
     return r
 
