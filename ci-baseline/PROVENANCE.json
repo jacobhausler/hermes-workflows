@@ -232,10 +232,16 @@
     {
       "test": "test_graph_regen_z_parser_h3yi.py",
       "added_by": "est-h3yi PR lane (author CI-pending; refreshed only from a green Serial suite job)"
+    },
+    {
+      "test": "test_unconditional_version_stamp.py",
+      "exit": 0,
+      "measured": "2026-10-10 local foreground run in lane drive-est-0sj4 @ 7f2c35d: 13/13 PASS, FAILURES: 0, exit 0 (est-0sj4 acceptance: plain run.json stamps plugin_version==plugin.yaml; status echoes; old dir omits; amend preserves; unreadable plugin.yaml keeps absent)",
+      "supersede_by": "next green-CI refresh (replace with the CI-captured row)"
     }
   ],
   "totals": {
-    "cases": 269,
+    "cases": 270,
     "red": 0
   },
   "contract": "Green CI ledgers only (every exit == 0); rows not captured by CI are listed in rows_added_outside_ci with how they were measured. Refresh from the tip of main after each main move; see README.md.",
