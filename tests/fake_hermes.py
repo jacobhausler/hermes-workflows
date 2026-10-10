@@ -67,6 +67,15 @@ if os.environ.get("FAKE_GC"):
     if _gcp:
         with open(_gcp, "a") as _f:
             _f.write(str(_gc.pid) + "\n")
+# est-13z1: CLOSE-CLAIM {<json>} — the child returns EXACTLY that object as its
+# fenced answer (the false-close shape: output prose/note claims "est-x closed"
+# while the estate store says otherwise). The bead-close gate must anchor to the
+# store read-back, never to this reply. Inert without the marker.
+if "CLOSE-CLAIM" in q:
+    _line = next(l for l in q.splitlines() if "CLOSE-CLAIM" in l)
+    _body = _line.split("CLOSE-CLAIM", 1)[1].strip()
+    print("Done — posted the verdict.\n```json\n" + _body + "\n```")
+    sys.exit(0)
 if os.environ.get("FAKE_MODE") == "background" and "BGPROGRESS" in q:   # #61: the 06f57ea9 shape —
     # background the REAL work, print progress chatter, exit 0 with NO fenced
     # block (suite.a0.log verbatim style: "Suite is running ... Waiting").
