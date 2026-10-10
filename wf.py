@@ -2849,6 +2849,7 @@ def _seat_cap_from_env_files():
             return n
     return None
 
+def _max_seats(meta):
     # est-2ek.1.856: the operator knobs (WORKFLOW_MAX_SEATS env, config
     # workflows.max_seats) are validated in ONE place — wfcommon.seat_max_seats
     # (floor/ceiling + the typed SeatCapError), resolved at every call so a
@@ -2858,7 +2859,8 @@ def _seat_cap_from_env_files():
     # per-run meta max_seats (the door's knob, 0 disables) still wins untouched.
     return seat_max_seats(meta.get("max_seats")
                           if isinstance(meta.get("max_seats"), int)
-                          and not isinstance(meta.get("max_seats"), bool) else None)
+                          and not isinstance(meta.get("max_seats"), bool) else None,
+                          dotenv_reader=_seat_cap_from_env_files)
 def _seats_dir():
     d = os.environ.get("WF_SEATS_DIR", "")
     return Path(d) if d else runs_root() / ".seats"

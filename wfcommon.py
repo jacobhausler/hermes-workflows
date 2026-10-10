@@ -4215,7 +4215,7 @@ def _seat_cap_valid(v, label):
     return n
 
 
-def seat_max_seats(meta_cap=None):
+def seat_max_seats(meta_cap=None, dotenv_reader=None):
     """The global agent-seat cap, resolved at every use (config is re-read, never baked).
 
     Precedence (est-2ek.1.856): explicit per-run run.json meta max_seats (the door's
@@ -4234,6 +4234,16 @@ def seat_max_seats(meta_cap=None):
     env = (os.environ.get("WORKFLOW_MAX_SEATS") or "").strip()
     if env:
         return _seat_cap_valid(env, "WORKFLOW_MAX_SEATS")
+    # est-gxjh6 (union with est-2ek.1.856): a long-lived runner inherits its
+    # launcher's environment, so the .env files are re-read FRESH at every cap
+    # decision via this hook (profile .env then root .env). The reader itself
+    # stays lenient — garbage/negative/non-numeric lines are skipped, an
+    # unreadable file is absent — but a value it does return is an
+    # operator-named cap and rides the same validation as the exported env.
+    if dotenv_reader is not None:
+        d = dotenv_reader()
+        if d is not None:
+            return _seat_cap_valid(d, "WORKFLOW_MAX_SEATS (.env)")
     raw = None
     try:
         from hermes_cli.config import load_config_readonly
