@@ -31,12 +31,15 @@ INIT_PATH = REPO_ROOT / "__init__.py"
 REGISTER_HOOK_RE = re.compile(r"""register_hook\(\s*['"]([A-Za-z0-9_]+)['"]""")
 
 # The core declares its accepted hook names as a module-level set literal:
-#   VALID_HOOKS = {"pre_tool_call", "post_tool_call", ...}
-# Extract it textually so we never import hermes_cli.plugins.
+#   VALID_HOOKS: set[str] = {
+#       "pre_tool_call", "post_tool_call", ...
+#   }
+# Extract it textually so we never import hermes_cli.plugins. The body runs
+# to the closing brace at line start (MULTILINE), so a stray "}" inside an
+# explanatory comment cannot truncate the extraction early.
 VALID_HOOKS_RE = re.compile(
-    r"""VALID_HOOKS\s*(?::\s*[Ff]rozenset(?:\[str\])?)?\s*[:=]?\s*[\(\{\[]"""
-    r"""(?P<body>.*?)\)?\]?\}""",
-    re.DOTALL,
+    r"""^VALID_HOOKS[^=\n]*=\s*\{(?P<body>.*?)^\}""",
+    re.DOTALL | re.MULTILINE,
 )
 QUOTED_NAME_RE = re.compile(r"""['"]([A-Za-z0-9_]+)['"]""")
 
@@ -78,7 +81,10 @@ def core_valid_hooks(plugins_path):
     match = VALID_HOOKS_RE.search(text)
     if match is None:
         return None
-    return set(QUOTED_NAME_RE.findall(match.group("body")))
+    # Drop comment lines before collecting quoted names: the literal carries
+    # prose comments with quoted example payloads that are not hook names.
+    body = "\n".join(line.split("#", 1)[0] for line in match.group("body").splitlines())
+    return set(QUOTED_NAME_RE.findall(body))
 
 
 def main():
