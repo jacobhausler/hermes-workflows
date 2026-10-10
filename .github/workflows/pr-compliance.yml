@@ -1,8 +1,13 @@
 name: pr-compliance
 # Enforcement gate (owner directive 2026-10-09: agents must NOT be able to
 # avoid compliance). Required status check on main: a PR merges only if the
-# branch carries an archify explainer PNG OR the body carries the C2
+# branch ADDS an archify explainer PNG OR the body carries the C2
 # two-claim exemption token. Fails closed: workflow error = red = blocked.
+# Diff-scoped (est-o8c6o): once est-zsws.png lived on main, the old
+# `ls docs/pr-diagrams/*.png` on the merge-commit checkout let EVERY later
+# same-repo PR pass on the inherited copy. Compliance is now measured as
+# files THIS PR adds (HEAD^1..HEAD^2, diff-filter=A) — carrying, copying-in,
+# or deleting inherited files is not compliance.
 # Machine-checks FORM only (PNG exists / token has two sentences); claim
 # truth stays with the reviewer — that half is unforgeable only by reading.
 # Mirror of the peer estate's gate (atbrace pr-compliance@main); one
@@ -20,14 +25,21 @@ jobs:
       BODY: ${{ github.event.pull_request.body }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          # merge commit (parents HEAD^1 base, HEAD^2 head) must exist to diff.
+          # depth 50: a shallow clone must still contain the merge base, or
+          # `diff HEAD^1 HEAD^2` degenerates to the full tree and inherited
+          # PNGs would pass the added-file check again.
+          fetch-depth: 50
+          fetch-tags: false
       - name: diagram or two-claim exemption (standard v0.2 C1/C2)
         run: |
           set -uo pipefail
-          if ls docs/pr-diagrams/*.png >/dev/null 2>&1; then
-            echo "compliant: archify explainer on branch"; exit 0
+          if [ -n "$(git diff --name-only --diff-filter=A HEAD^1 HEAD^2 -- 'docs/pr-diagrams/*.png')" ]; then
+            echo "compliant: archify explainer ADDED by this PR"; exit 0
           fi
           if printf '%s' "$BODY" | grep -qE '^pr-diagram:[[:space:]]*exempt.*\..*\.'; then
             echo "compliant: two-claim exemption token (C2)"; exit 0
           fi
-          echo "::error::needs docs/pr-diagrams/*.png on branch OR 'pr-diagram: exempt — <what>. <why>.' in the body (haus-docs rules/pr-diagram-standard.md v0.2 C1/C2)"
+          echo "::error::this PR must ADD docs/pr-diagrams/*.png (inherited copies on main do not count) OR carry 'pr-diagram: exempt — <what>. <why>.' in the body (haus-docs rules/pr-diagram-standard.md v0.2 C1/C2)"
           exit 1
