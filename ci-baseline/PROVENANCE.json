@@ -232,10 +232,14 @@
     {
       "test": "test_graph_regen_z_parser_h3yi.py",
       "added_by": "est-h3yi PR lane (author CI-pending; refreshed only from a green Serial suite job)"
+    },
+    {
+      "test": "test_ratelimit_history_ja41.py",
+      "added_by": "est-ja41 PR lane (author CI-pending; refreshed only from a green Serial suite job)"
     }
   ],
   "totals": {
-    "cases": 269,
+    "cases": 270,
     "red": 0
   },
   "contract": "Green CI ledgers only (every exit == 0); rows not captured by CI are listed in rows_added_outside_ci with how they were measured. Refresh from the tip of main after each main move; see README.md.",
