@@ -151,6 +151,8 @@ INCLUDE_FILES = (
     "scripts/suite.py",
     ".graphifyignore",
     "tests/fake",
+    # B1 and its gitpin snapshot this fixture before generating the child copy.
+    "tests/fake-b1",
     "tests/fake_hermes.py",
     "tests/wf_test_isolation.py",
     "tests/wf_test_markers.py",  # est-jue3: shared parseable-content marker waits, imported by the shipped tests (est-4vnq finding-4 shape: an unshipped helper kills the suite)
@@ -170,7 +172,7 @@ INCLUDE_FILES = (
 )
 INCLUDE_PATTERNS = ("tests/test_*.py", "tests/test_*.mjs", "references/*.md",
                     "tests/fixtures/dialect/*")   # #33: the corpus test_dialect_js_33 asserts against
-EXECUTABLE_FILES = {"scripts/pack.py", "tests/fake"}
+EXECUTABLE_FILES = {"scripts/pack.py", "tests/fake", "tests/fake-b1"}
 # Checkout-only tests stay in repository CI, not the release's test glob.
 SOURCE_ONLY_TESTS = {
     "tests/test_diagram_law.py": "needs diagrams/README.md and the source-only renderer",
