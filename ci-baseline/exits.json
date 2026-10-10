@@ -1360,10 +1360,14 @@
   "exit": 0,
   "log": "rows_added_outside_ci in PROVENANCE.json"
  },
- 
  {
   "test": "test_upstream_hook_contract.py",
   "exit": 0,
   "log": "rows_added_outside_ci in PROVENANCE.json"
+ },
+ {
+  "test": "test_bead_close_claim_13z1.py",
+  "exit": 0,
+  "log": "Local foreground run on the est-13z1 PR head (clean parity env, fresh WF_RUNS_ROOT, outside run dirs): Ran 10 tests OK, rc=0; RED-proof at the test-only commit in a throwaway detached worktree (9 FAIL); the PR adds this test without a CI row"
  }
 ]
