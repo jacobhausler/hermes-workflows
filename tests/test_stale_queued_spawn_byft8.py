@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """est-byft8 — a queued spawn must never launch a stale definition.
 
-The incident (run 20261008-043243-keeper-windows-protocol): a node sat queued on
+The incident (estate nightly run 20261008-043243-windows-protocol-*; the full
+run id lives in the tracking issue): a node sat queued on
 the global agent-seat semaphore while the wave was in flight; an amend baked at
 05:55:25Z was STILL dispatched at 05:57:46Z after the 05:57:34Z amendment —
 run_child passed _seat_acquire and Popen'd the OLD prompt. wf.py never rechecked
@@ -107,9 +108,9 @@ def mk(rid, nodes, **meta):
 def runx(rid, tag, timeout=120):
     """Launch the runner as a subprocess; FAKE_LOG per run so spawn counts are clean."""
     env = dict(os.environ, HERMES_HOME=str(HOME), WF_SEATS_DIR=str(SEATS),
+               WF_RUNS_ROOT=str(RUNS),   # est-2ek.1.762 pin: HERMES_HOME alone is not a sandbox
                FAKE_LOG=str(HOME / f"fake-{tag}.log"),
                FAKE_PROMPT_LOG=str(HOME / f"prompts-{tag}.log"))
-    env.pop("WF_RUNS_ROOT", None)
     for f in (env["FAKE_LOG"], env["FAKE_PROMPT_LOG"]):
         Path(f).write_text("")
     return subprocess.run([sys.executable, str(BUILD / "wf.py"), "run", rid],
