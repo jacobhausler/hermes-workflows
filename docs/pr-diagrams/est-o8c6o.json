@@ -1,0 +1,60 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "PR Gate Diff-Scoped — OLD ls vs NEW merge-base (est-o8c6o)",
+    "visual_preset": "signal-flow",
+    "quality_profile": "showcase",
+    "output": "est-o8c6o.html"
+  },
+  "lanes": [
+    { "id": "pr", "label": "Pull Request" },
+    { "id": "gate", "label": "diagram-check", "variant": "exception" },
+    { "id": "repo", "label": "Repo State" }
+  ],
+  "phases": [
+    { "id": "old", "label": "OLD: ls on checkout", "fromCol": 0, "toCol": 1, "variant": "dashed" },
+    { "id": "new", "label": "NEW: merge-base diff", "fromCol": 2, "toCol": 4, "variant": "emphasis" }
+  ],
+  "mainPath": ["author", "checkout", "base", "diffstep", "verdict"],
+  "nodes": [
+    { "id": "author", "lane": "pr", "col": 0, "type": "external", "label": "PR Author", "sublabel": "no carrier added", "width": 140 },
+    { "id": "oldpass", "lane": "pr", "col": 1, "type": "security", "label": "Old: free pass", "sublabel": "any later PR inherits", "width": 140 },
+    { "id": "checkout", "lane": "gate", "col": 0, "type": "backend", "label": "Merge-ref checkout", "sublabel": "HEAD = merge commit", "width": 145 },
+    { "id": "oldcheck", "lane": "gate", "col": 1, "type": "security", "label": "ls docs/pr-diagrams", "sublabel": "existence only — the bug", "width": 150 },
+    { "id": "base", "lane": "gate", "col": 2, "type": "database", "label": "merge-base", "sublabel": "HEAD^1 ↔ HEAD^2", "width": 135 },
+    { "id": "diffstep", "lane": "gate", "col": 3, "type": "backend", "label": "diff A|R|M *.png", "sublabel": "authored by THIS PR", "tag": "three-dot scope", "width": 150 },
+    { "id": "verdict", "lane": "gate", "col": 4, "type": "security", "label": "RED without own carrier", "sublabel": "C2 token still admissible", "width": 155 },
+    { "id": "mainpng", "lane": "repo", "col": 0, "type": "database", "label": "main carrier pair", "sublabel": "est-zsws.png", "width": 140 },
+    { "id": "pair", "lane": "repo", "col": 4, "type": "database", "label": "branch adds pair", "sublabel": "est-o8c6o.{json,png}", "width": 145 }
+  ],
+  "edges": [
+    { "id": "author-checkout", "from": "author", "to": "checkout", "label": "opens PR", "variant": "default" },
+    { "id": "main-ls", "from": "mainpng", "to": "oldcheck", "label": "copy present", "variant": "dashed" },
+    { "id": "oldcheck-oldpass", "from": "oldcheck", "to": "oldpass", "label": "green on inheritance", "variant": "security", "role": "error" },
+    { "id": "checkout-base", "from": "checkout", "to": "base", "label": "fetch-depth 0", "variant": "emphasis" },
+    { "id": "base-diff", "from": "base", "to": "diffstep", "variant": "emphasis" },
+    { "id": "pair-diff", "from": "pair", "to": "diffstep", "label": "A|R|M entries", "variant": "dashed" },
+    { "id": "diff-verdict", "from": "diffstep", "to": "verdict", "label": "entries? else C2", "variant": "emphasis" }
+  ],
+  "cards": [
+    {
+      "dot": "rose",
+      "title": "The defect (est-o8c6o)",
+      "items": [
+        "ls read the merge-commit checkout, not the diff",
+        "After first carrier merged, every later PR passed for free",
+        "Proof: #370 diff adds 0 carriers, no token, would green"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "The fix",
+      "items": [
+        "merge-base diff = GitHub three-dot view",
+        "Inherited copy yields zero diff entries — cannot pass",
+        "C2 exemption path unchanged; fail-closed on conflict"
+      ]
+    }
+  ]
+}
