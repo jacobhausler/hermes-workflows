@@ -1,9 +1,10 @@
 name: pr-compliance
 # Enforcement gate (owner directive 2026-10-09: agents must NOT be able to
 # avoid compliance). Required status check on main: a PR merges only if the
-# branch carries an archify explainer PNG OR the body carries the C2
-# two-claim exemption token. Fails closed: workflow error = red = blocked.
-# Machine-checks FORM only (PNG exists / token has two sentences); claim
+# PR DIFF ADDS an archify explainer PNG OR the body carries the C2 two-claim
+# exemption token. Diff-scoped (est-o8c6o): an inherited copy sitting on main
+# proves nothing about THIS diff. Fails closed: workflow error = red = blocked.
+# Machine-checks FORM only (PNG added / token has two sentences); claim
 # truth stays with the reviewer — that half is unforgeable only by reading.
 # Mirror of the peer estate's gate (atbrace pr-compliance@main); one
 # sentence added to the error line pointing at the standard.
@@ -20,14 +21,28 @@ jobs:
       BODY: ${{ github.event.pull_request.body }}
     steps:
       - uses: actions/checkout@v4
-      - name: diagram or two-claim exemption (standard v0.2 C1/C2)
+        # the merge ref (HEAD = merge commit, HEAD^1 base / HEAD^2 head) gives
+        # the diff-scoped view for free; a conflicting PR has no merge ref and
+        # the checkout dies -> fail-closed red, same posture as a workflow error.
+        with:
+          fetch-depth: 0
+      - name: diagram ADDED by this PR, or two-claim exemption (standard v0.2 C1/C2, diff-scoped 2026-10-10)
         run: |
           set -uo pipefail
-          if ls docs/pr-diagrams/*.png >/dev/null 2>&1; then
-            echo "compliant: archify explainer on branch"; exit 0
+          # Diff-scoped: the PR must author its own explainer. The old `ls` read
+          # the merge-commit checkout, so once one PNG sat on main EVERY later
+          # PR inherited it and passed for free (est-o8c6o; proven by #370:
+          # zero carrier files in its diff, no token, would have greened).
+          # merge-base-scoped (= GitHub's three-dot diff, what the reviewer sees):
+          # an inherited copy yields ZERO diff entries, so it cannot pass. A/R/M
+          # all count: the PR must author (add, rename, or revise) the carrier.
+          BASE=$(git merge-base HEAD^1 HEAD^2)
+          ADDED=$(git diff --name-status "$BASE" HEAD^2 -- 'docs/pr-diagrams/' | awk '$1 ~ /^A|^R|^M/ && $NF ~ /\.png$/ {print $NF}' || true)
+          if [ -n "$ADDED" ]; then
+            echo "compliant: archify explainer authored by this PR:"; printf '%s\n' "$ADDED"; exit 0
           fi
           if printf '%s' "$BODY" | grep -qE '^pr-diagram:[[:space:]]*exempt.*\..*\.'; then
             echo "compliant: two-claim exemption token (C2)"; exit 0
           fi
-          echo "::error::needs docs/pr-diagrams/*.png on branch OR 'pr-diagram: exempt — <what>. <why>.' in the body (haus-docs rules/pr-diagram-standard.md v0.2 C1/C2)"
+          echo "::error::this PR must author docs/pr-diagrams/<bead>.png (archify carrier pair; inherited copies from main do not count) OR carry 'pr-diagram: exempt — <what>. <why>.' in the body (haus-docs rules/pr-diagram-standard.md v0.2 C1/C2)"
           exit 1
