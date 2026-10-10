@@ -92,6 +92,21 @@ class LauncherRecovery(unittest.TestCase):
         rec, stdout = self.drive(str(blocked))
         self.failed(rec, stdout)
 
+    @unittest.skipIf(hasattr(os, 'geteuid') and os.geteuid() == 0,
+                     'root bypasses fixture directory permissions')
+    def test_inaccessible_pin_is_not_replaced(self):
+        locked = self.home / 'locked'
+        locked.mkdir()
+        pin = locked / 'hermes'
+        pin.write_text(self.shim.read_text())
+        pin.chmod(0o755)
+        locked.chmod(0o000)
+        try:
+            rec, stdout = self.drive(str(pin))
+            self.failed(rec, stdout)
+        finally:
+            locked.chmod(0o700)
+
     def test_dangling_pin_symlink_uses_path_shim(self):
         link = self.bin / 'collected-link'
         link.symlink_to(self.home / 'gone-environment' / 'hermes')

@@ -8061,9 +8061,20 @@ def main(run_id):
             notify(run, "run.failed", key="pre-start: version handshake")
             write_runner_exit(run, "blocked: plugin version handshake", _vh)
             return
-    if not meta.get("hermes_bin"):
-        import shutil as _sh
-        meta["hermes_bin"] = _sh.which("hermes") or "hermes"
+    # Re-resolve an install path collected since dispatch using the runner's
+    # owner-controlled PATH. Present pins (even non-executable ones) and bare
+    # command names retain their original spawn semantics; no run.json rewrite.
+    _pin = meta.get("hermes_bin")
+    _missing_pin = False
+    if _pin and os.path.dirname(_pin):
+        try:
+            os.stat(_pin)
+        except FileNotFoundError:
+            _missing_pin = True
+        except OSError:
+            pass  # inaccessible/invalid pins keep failing at spawn, never bypassed
+    if not _pin or _missing_pin:
+        meta["hermes_bin"] = shutil.which("hermes") or "hermes"
     (run / "nodes").mkdir(exist_ok=True)
     (run / "gates").mkdir(exist_ok=True)
     acquire_lock(run)
