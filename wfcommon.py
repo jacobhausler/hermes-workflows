@@ -1813,6 +1813,11 @@ def admission_ledger_errors(graph, run_dir=None):
 STRUCTURAL_GRAPH_KEYS = {"name", "nodes", "description", "defaults", "model_policy",
                          "provenance", "grammar", "include",
                          "concurrency", "item_concurrency",  # #100: optional run-level limits
+                         # est-2ek.1.856 deep review D2: the advertised per-run
+                         # seat-cap opt-out ("graph max_seats: 0") is a REAL key —
+                         # accepted here, validated by value below, baked into
+                         # run.json by the door; the runner's _max_seats honours it.
+                         "max_seats",
                          # est-2ek.1.166: the version handshake — an author may
                          # declare the minimum plugin version the graph needs;
                          # a stale runner refuses LOUDLY at arm time, naming both.
@@ -1956,6 +1961,17 @@ def structural_graph_errors(graph, extra_keys=()):
     for key in ("concurrency", "item_concurrency"):
         if key in graph and (type(graph[key]) is not int or graph[key] <= 0):
             E(key, f"{key} must be a positive integer")
+    # est-2ek.1.856 deep review D2: the advertised per-run seat-cap opt-out is
+    # measured by the SAME law as the operator knobs — one integer inside
+    # [SEAT_CAP_FLOOR, SEAT_CAP_CEILING] or the explicit 0 off-sentinel; bool is
+    # the typo shape. A bad value refuses at submit naming the key, never
+    # 'unknown graph key' and never a silent default (SeatCapError is a
+    # ValueError, so the refuse message carries the knob name and range).
+    if "max_seats" in graph:
+        try:
+            _seat_cap_valid(graph["max_seats"], "graph max_seats")
+        except SeatCapError as e_:
+            E("max_seats", str(e_))
     # est-2ek.1.166: shape-only here (dot-integer string); the staleness
     # refusal itself belongs at the arm/launch seams so it names the runner's
     # own version — same message the door and the boot guard both use.
@@ -4166,6 +4182,107 @@ def amend_preview(r, new_nodes):
             "will_rerun": will_rerun, "unchanged": unchanged}
 
 # ---------- seat-level model floor (stdlib-only when core isn't importable) ----------
+
+SEATS_DEFAULT = 4          # the semaphore's shipped default (wf.py binds the same law)
+SEAT_CAP_FLOOR = 4         # the smallest cap a raise/override may name (est-2ek.1.856)
+SEAT_CAP_CEILING = 16      # the largest cap config/env may name (est-2ek.1.856)
+
+
+class SeatCapError(ValueError):
+    """An operator-named seat cap (WORKFLOW_MAX_SEATS env or config workflows.max_seats)
+    that is not an integer inside [SEAT_CAP_FLOOR, SEAT_CAP_CEILING]. A typo'd cap is an
+    operator INPUT error, never a silent SEATS_DEFAULT: the door refuses the launch with
+    it and the runner fails closed with it, exactly the seat_forbidden_models law."""
+
+
+def _seat_cap_valid(v, label):
+    """Validate one operator-named cap. bool is NOT an int here (True -> 1 is a typo
+    shape, not a cap). Out-of-band or unparseable raises SeatCapError naming the knob.
+    0 is the documented semaphore-off sentinel (the est-g255 `WORKFLOW_MAX_SEATS=0`
+    guidance on hosts with no ancestry channel) — valid ONLY as an explicit 0; every
+    other value must sit inside [SEAT_CAP_FLOOR, SEAT_CAP_CEILING]."""
+    if isinstance(v, bool) or not isinstance(v, (int, str)):
+        raise SeatCapError(f"{label}={v!r} is not an integer")
+    try:
+        n = int(v)
+    except ValueError:
+        raise SeatCapError(f"{label}={v!r} is not an integer")
+    if n == 0:
+        return 0                                    # explicit off, est-g255 guidance
+    if not (SEAT_CAP_FLOOR <= n <= SEAT_CAP_CEILING):
+        raise SeatCapError(f"{label}={v!r} is outside [{SEAT_CAP_FLOOR}, {SEAT_CAP_CEILING}] "
+                           "(or 0 to disable the semaphore)")
+    return n
+
+
+def seat_max_seats(meta_cap=None, dotenv_reader=None):
+    """The global agent-seat cap, resolved at every use (config is re-read, never baked).
+
+    Precedence (est-2ek.1.856): explicit per-run run.json meta max_seats (the door's
+    existing knob, 0 disables) > WORKFLOW_MAX_SEATS env > config workflows.max_seats
+    > SEATS_DEFAULT. An operator-named cap (env or config) MUST be an integer inside
+    [SEAT_CAP_FLOOR, SEAT_CAP_CEILING] or this raises SeatCapError — an invalid value
+    is a clear door error (refuse before any write or spawn), never a silent default.
+    0/false via env/config is NOT the opt-out (0 would silently disable the
+    semaphore); the opt-out stays the explicit per-run meta max_seats.
+    Config is read core-first (load_config_readonly — the seat's profile-aware
+    config, including the `workflows` section core defaults away), then a lite
+    top-level scan of <home>/config.yaml for bare hosts without hermes_cli
+    (same shape as seat_forbidden_models)."""
+    if isinstance(meta_cap, int) and not isinstance(meta_cap, bool):
+        return meta_cap
+    env = (os.environ.get("WORKFLOW_MAX_SEATS") or "").strip()
+    if env:
+        return _seat_cap_valid(env, "WORKFLOW_MAX_SEATS")
+    # est-gxjh6 (union with est-2ek.1.856): a long-lived runner inherits its
+    # launcher's environment, so the .env files are re-read FRESH at every cap
+    # decision via this hook (profile .env then root .env). The reader itself
+    # stays lenient — garbage/negative/non-numeric lines are skipped, an
+    # unreadable file is absent — but a value it does return is an
+    # operator-named cap and rides the same validation as the exported env.
+    if dotenv_reader is not None:
+        d = dotenv_reader()
+        if d is not None:
+            return _seat_cap_valid(d, "WORKFLOW_MAX_SEATS (.env)")
+    raw = None
+    try:
+        from hermes_cli.config import load_config_readonly
+        cfg = load_config_readonly()
+        if cfg:
+            w = cfg.get("workflows")
+            if isinstance(w, dict):
+                raw = w.get("max_seats")
+    except Exception:
+        raw = None
+    if raw is None:
+        home = None
+        try:
+            from hermes_constants import get_hermes_home
+            home = get_hermes_home()
+        except Exception:
+            home = Path(os.environ.get("HERMES_HOME") or (Path.home() / ".hermes"))
+        try:
+            lines = (home / "config.yaml").read_text().splitlines()
+        except OSError:
+            lines = []
+        section = None
+        for line in lines:
+            line = line.split(" #", 1)[0]
+            if not line.strip() or line.lstrip().startswith("#"):
+                continue
+            indent = len(line) - len(line.lstrip())
+            text = line.strip()
+            if indent == 0:
+                section = text.partition(":")[0]
+            elif section == "workflows" and indent == 2:
+                key, _, scalar = text.partition(":")
+                if key == "max_seats" and scalar.strip():
+                    raw = scalar.strip().strip("'\"")
+                    break
+    if raw is None:
+        return SEATS_DEFAULT
+    return _seat_cap_valid(raw, "config workflows.max_seats")
+
 
 def seat_forbidden_models():
     """Read model.workflows_forbidden_models on the child seat, including bare CLI hosts.
