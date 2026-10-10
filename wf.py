@@ -1727,6 +1727,10 @@ ERROR_CLASSES = frozenset(("provider_400", "unresolved_model", "cap_exhausted",
                            "incomplete_work", "early_death", "cancelled",
                            "schema", "spawn", "inputs",
                            "quorum", "fanout_empty", "crashed", "unknown",
+                           # est-byft8: a queued spawn refused at the Popen instant
+                           # because an amend/delete moved its effective fingerprint
+                           # while it waited for a seat; the wave reloads and re-drives.
+                           "stale_graph",
                            # est-2ek.1.660: a (re-)drive refused at startup because a
                            # declared lane still carries the dead attempt's
                            # uncommitted TRACKED wreckage — bank it, then re-drive.
@@ -4482,6 +4486,56 @@ def _adopt_child(meta, node, byid, index, child, schema, fo_cancel=None):
         rec["ratelimit_banner"] = marker
     return rec
 
+def _stale_spawn_refusal(run, node, byid):
+    """est-byft8: the launch-instant staleness check for a QUEUED spawn.
+
+    A spawn may sit on a contended global agent seat for minutes; an amend
+    (or delete) landing during that queue window moves the node's effective
+    fingerprint after the prompt was composed. The queued definition must
+    NEVER launch. The comparison is the runner's OWN staleness law — the
+    effective fingerprint (wfcommon.efp: own def minus budgets + ancestor
+    efps), exactly what replay-skip uses to decide a committed record is
+    stale — so "would a reload re-drive this node?" and "is this queued
+    spawn stale?" can never disagree.
+
+    Returns None to proceed (unchanged def, or any unreadable/uncomputable
+    input — the guard catches DETECTED staleness and never invents a death),
+    or a record dict for the typed refusal. graph.json is only ever replaced
+    atomically (os.replace), so the read is always whole."""
+    try:
+        queued = efp(byid, node)
+    except Exception:
+        return None
+    try:
+        g2 = jload(run / "graph.json")
+    except Exception:
+        return None
+    if not (isinstance(g2, dict) and isinstance(g2.get("nodes"), list) and g2["nodes"]):
+        return None
+    cur = {}
+    for n in g2["nodes"]:
+        if isinstance(n, dict) and n.get("id"):
+            cur[n["id"]] = n
+    if not cur:
+        return None
+    nid = node.get("id")
+    if nid in cur:
+        try:
+            now_efp = efp(cur, cur[nid])
+        except Exception:
+            return None
+        if now_efp == queued:
+            return None
+        why = f"amended since this spawn was queued (efp {queued} -> {now_efp})"
+    else:
+        why = f"deleted from the graph since this spawn was queued (queued efp {queued})"
+    return {"status": "failed", "error_class": "stale_graph",
+            "error": (f"stale_graph: node {nid} was {why}; the queued spawn refuses to launch "
+                      f"old work — the wave boundary reloads the graph and re-drives the node "
+                      f"under the current definition"),
+            "ms": 0}
+
+
 def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering=None, attempt=0, skey=None,
               inputs="", index=None, resume_preamble="", reasoning_override=None,
               seat_cancel=None, seat_hold=None, seat_admit_lock=None, model_override=None):
@@ -4778,6 +4832,17 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
                     return {"status": "failed", "error": "cancelled at launch instant"
                             + ("" if meta["_stop"].is_set() else " (quorum already met)"),
                             "error_class": "cancelled", "ms": 0, **route}
+                # est-byft8: launch-instant STALENESS recheck — a queued spawn that
+                # waited on the seat across an amend must never launch its old
+                # prompt. Refuse typed (seat freed by the finally), never Popen; the
+                # wave boundary consumes restart.request, reloads, and the replay-skip
+                # efp law re-drives the node under the CURRENT definition. Same lock
+                # as the cancel recheck: stop wins over stale; an amend landing after
+                # this instant is a live-child event, unchanged law for everyone.
+                _stale = _stale_spawn_refusal(run, node, byid)
+                if _stale is not None:
+                    logf.close()
+                    return {**_stale, "spawn": spawn_no, "attempts": 1, **route}
                 tokens.append(token)     # registered BEFORE Popen — a spawn that
                                          # dies mid-launch still owns its survivors
                 # est-ulwpg (witness 20261009-072611-fb-closeout-batch): the wd
