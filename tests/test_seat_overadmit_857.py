@@ -42,6 +42,31 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 HOME = HERE / "home-857-overadmit"
+
+
+def _kill_stray_fakes():
+    """Kill any fake_hermes.py whose command line names our HOME dir.
+
+    The fake children are spawned in their own session, so the runner-group
+    killpg sweep cannot reach them: a previous instance of this test (whose
+    holders hang 30 s) leaks live fakes whose cmdline still carries the
+    fixed HOME path, and a re-run inside that window would count them as
+    children. Sweep at start AND at teardown — never leave a fake alive."""
+    out = subprocess.run(["ps", "-eo", "pid,args"], capture_output=True,
+                         text=True).stdout
+    for line in out.splitlines():
+        if "fake_hermes.py" in line and str(HOME) in line:
+            pid = int(line.split()[0])
+            try:
+                os.killpg(os.getpgid(pid), 9)
+            except OSError:
+                try:
+                    os.kill(pid, 9)
+                except OSError:
+                    pass
+
+
+_kill_stray_fakes()
 shutil.rmtree(HOME, ignore_errors=True)
 HOME.mkdir()
 os.environ["HERMES_HOME"] = str(HOME)
@@ -163,6 +188,23 @@ def invariant_once():
     return (fc == alive_bound and len(alive_bound) == len(tr) and len(tr) <= 2,
             f"fake_children={sorted(fc)} tickets={len(tr)} bound_alive={sorted(alive_bound)}")
 
+
+def invariant_settle(timeout=10.0):
+    """Poll invariant_once until it holds or the window dies.
+
+    A single sample can straddle two writes: the waiter's ticket lands BEFORE
+    its child appears in `ps` (admit-then-spawn is the engine's order), and a
+    released ticket vanishes only AFTER the node commit the test just watched
+    for. Those transients resolve in milliseconds and are not the 857 shape —
+    a PERSISTENT violation (tickets while no child lives, children with no
+    ticket) never settles green and still fails."""
+    deadline = time.time() + timeout
+    while True:
+        g, d = invariant_once()
+        if g or time.time() >= deadline:
+            return g, d
+        time.sleep(0.2)
+
 r1 = mk("r857-holder-a", 30)
 r2 = mk("r857-holder-b", 30)
 launch(r1, 30)
@@ -170,6 +212,15 @@ launch(r2, 30)
 
 t_end = time.time() + 40
 while time.time() < t_end and len(ticket_rows()) < 2:
+    time.sleep(0.15)
+# Baseline gate: hold the window start until the invariant has been observed
+# green at least once. A ticket lands before its child appears in `ps`
+# (admit-then-spawn is the engine's order); sampling from launch would count
+# that millisecond build-up as a violation. Once both children are alive and
+# bound, the strict all-samples window begins — the waiter never spawns while
+# two tickets are held, so any violation inside it is the 857 shape.
+t_base = time.time() + 40
+while time.time() < t_base and not invariant_once()[0]:
     time.sleep(0.15)
 
 r3 = mk("r857-waiter-c", 4)
@@ -234,7 +285,7 @@ rec2 = wait_node(r2)
 rec3 = wait_node(r3)
 check("B3: the killed holder's seat went back and the waiter was admitted (its node committed)",
       bool(rec3), json.dumps({"b": rec2.get("status"), "c": rec3.get("status")}))
-g, d = invariant_once()
+g, d = invariant_settle()
 check("B3: invariant still holds after the re-admission (tickets == live children)",
     g, d)
 
@@ -266,6 +317,7 @@ for p in procs.values():
     try: p.wait(timeout=10)
     except Exception: pass
 
+_kill_stray_fakes()      # fakes live in their own sessions — killpg can't reach them
 shutil.rmtree(HOME, ignore_errors=True)
 print(("" if ok else "FAILURES PRESENT ") + "DONE")
 sys.exit(0 if ok else 1)
