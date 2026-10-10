@@ -115,7 +115,11 @@ def main() -> None:
                                       # from the package root (same rationale as the
                                       # pr_tag_audit include above).
                                       "scripts/diagram_readme.py",
-                                      "scripts/graph_diagram.py"})
+                                      "scripts/graph_diagram.py",
+                                      # est-2ek.1.866 (PR #323): tests/test_self_review_422_1866.py
+                                      # exec-modules this at import — packs per the
+                                      # est-4vnq finding-4 rationale in pack.py.
+                                      "scripts/pr_formal_review.py"})
             # wf165d: the no-silent-middle half only has a premise in a REPO
             # checkout — the source-only scripts (make_public.py,
             # lane_recover.py) never travel inside the ZIP, so from the
@@ -131,7 +135,12 @@ def main() -> None:
                 check("pack-list contract: every repo scripts/*.py is packed or declared source-only (no silent middle)",
                       {p.name for p in (ROOT / "scripts").glob("*.py")} ==
                       {Path(s).name for s in packed_scripts}
-                      | {"make_public.py", "lane_recover.py"})
+                      | {"make_public.py", "lane_recover.py",
+  # est-xwvu9 (upstream #133387 accepted ask): the post-exit
+  # hook is stripped from the shipped build; kept here for
+  # our own distribution path, executed by the source-only
+  # tests/test_post_exit_hook.py.
+  "post_exit_hook.py"})
             else:
                 print("SKIP pack-list repo-side half: no .git — running from an "
                       "unpacked ZIP/archive, where the premise does not exist")

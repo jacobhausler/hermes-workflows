@@ -487,6 +487,8 @@
     "status": {
       "card": "::workflow{id=\"<RUN>\"}",
       "done": 2,
+      "failed_nodes": [],
+      "graph_revision": "0:0eb5c17876a7ccc3",
       "name": "dag",
       "next": [],
       "nodes": {
@@ -525,6 +527,8 @@
     "wait": {
       "card": "::workflow{id=\"<RUN>\"}",
       "done": 2,
+      "failed_nodes": [],
+      "graph_revision": "0:0eb5c17876a7ccc3",
       "name": "dag",
       "next": [],
       "nodes": {
@@ -866,6 +870,8 @@
     "status": {
       "card": "::workflow{id=\"<RUN>\"}",
       "done": 1,
+      "failed_nodes": [],
+      "graph_revision": "0:8799c027d3065dc0",
       "name": "echo",
       "next": [],
       "nodes": {
@@ -895,6 +901,8 @@
     "wait": {
       "card": "::workflow{id=\"<RUN>\"}",
       "done": 1,
+      "failed_nodes": [],
+      "graph_revision": "0:8799c027d3065dc0",
       "name": "echo",
       "next": [],
       "nodes": {
@@ -2001,6 +2009,8 @@
     "status": {
       "card": "::workflow{id=\"<RUN>\"}",
       "done": 2,
+      "failed_nodes": [],
+      "graph_revision": "0:c98906fe4264998e",
       "name": "fanout-quorum",
       "next": [],
       "nodes": {
@@ -2152,6 +2162,8 @@
     "wait": {
       "card": "::workflow{id=\"<RUN>\"}",
       "done": 2,
+      "failed_nodes": [],
+      "graph_revision": "0:c98906fe4264998e",
       "name": "fanout-quorum",
       "next": [],
       "nodes": {
@@ -2622,6 +2634,8 @@
     "status": {
       "card": "::workflow{id=\"<RUN>\"}",
       "done": 1,
+      "failed_nodes": [],
+      "graph_revision": "0:76b990d03ad6bffb",
       "name": "ra-review-golden",
       "next": [],
       "nodes": {
@@ -2652,6 +2666,8 @@
     "wait": {
       "card": "::workflow{id=\"<RUN>\"}",
       "done": 1,
+      "failed_nodes": [],
+      "graph_revision": "0:76b990d03ad6bffb",
       "name": "ra-review-golden",
       "next": [],
       "nodes": {
@@ -3003,6 +3019,8 @@
     "status": {
       "card": "::workflow{id=\"<RUN>\"}",
       "done": 1,
+      "failed_nodes": [],
+      "graph_revision": "0:da788ed63d02f2ac",
       "name": "retry-partial",
       "next": [],
       "nodes": {
@@ -3051,6 +3069,8 @@
     "wait": {
       "card": "::workflow{id=\"<RUN>\"}",
       "done": 1,
+      "failed_nodes": [],
+      "graph_revision": "0:da788ed63d02f2ac",
       "name": "retry-partial",
       "next": [],
       "nodes": {
@@ -3441,6 +3461,8 @@
     "status": {
       "card": "::workflow{id=\"<RUN>\"}",
       "done": 3,
+      "failed_nodes": [],
+      "graph_revision": "0:36b5fad1837c3eba",
       "name": "when-prune",
       "next": [],
       "nodes": {
@@ -3480,6 +3502,8 @@
     "wait": {
       "card": "::workflow{id=\"<RUN>\"}",
       "done": 3,
+      "failed_nodes": [],
+      "graph_revision": "0:36b5fad1837c3eba",
       "name": "when-prune",
       "next": [],
       "nodes": {

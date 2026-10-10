@@ -164,8 +164,20 @@ _atexit.register(_shutil.rmtree, _suite_runs_root, ignore_errors=True)
 # Tests own private shelves, not the caller's lane identity. Keep the operator
 # launcher override; leave the live shelf guard unchanged (est-2ek.1.808).
 _KEEP_WF_ENV = {'HERMES_WF_HERMES_BIN'}
+# est-2ek.1.862: a test process must never wear the LAUNCHING agent's session
+# identity. An API seat exports HERMES_SESSION_PLATFORM=api_server (and friends);
+# the door stamps run.json.owner.{session_id,ui_session_id,platform} via
+# _session_env, so the frozen golden baseline (owner.platform null) was CI-green
+# / seat-red — six owner diffs under an inherited env. The suite owns the seat
+# the tests see: HERMES_SESSION_* / HERMES_UI_SESSION_* are lane-identity keys,
+# stripped exactly like HERMES_WF_* above. Tests that WANT a session identity
+# set it themselves in their own child env (wake matrices, card suites).
+_NO_SESSION_IDENTITY = {k for k in os.environ
+                        if k.startswith('HERMES_SESSION_')
+                        or k.startswith('HERMES_UI_SESSION_')}
 _base_env = {k: v for k, v in os.environ.items()
-             if not k.startswith('HERMES_WF_') or k in _KEEP_WF_ENV}
+             if (not k.startswith('HERMES_WF_') or k in _KEEP_WF_ENV)
+             and k not in _NO_SESSION_IDENTITY}
 for argv in cases:
     name = Path(argv[-1]).name
     log = out / (name + '.log')

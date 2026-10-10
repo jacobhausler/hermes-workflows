@@ -5,6 +5,7 @@ launch it, read its run-dir via the SHARED read model (wfcommon.run_state), drop
 its input files. No standing daemon or control plane, no second opinion on run
 state (one runner process per run, detached out of the caller's tree at spawn #8).
 """
+import contextlib
 import importlib.util, json, os, re, select, shutil, stat, subprocess, sys, time
 import fcntl, hashlib, uuid
 from datetime import datetime, timezone
@@ -89,6 +90,10 @@ def _model_policy_error(graph):
         _p, alias_target = _alias_provider_pair(node.get("tier") or requested, seat, tiers, known)
         effective = alias_target or requested
         candidates = {requested, effective, node.get("model")}
+        if node.get("provider") and "/" not in str(requested):
+            # #291 F1: amend checks policy AFTER resolution, where a baked literal reads
+            # {provider: X, model: Y}; the ban on the full 'X/Y' must still bind it.
+            candidates.add(f"{node['provider']}/{requested}")
         if "/" in effective:
             candidates.add(effective.rsplit("/", 1)[-1])
         if candidates & forbidden:
@@ -707,7 +712,7 @@ WORKFLOW_PARAMS = {
             "or (when run-dir bytes are measurable \u2014 amend/validate) an absent artifact file or sha256 mismatch are each refused with an error naming the item and the missing/extra source \u2014 an item can never silently consume another item's artifacts (#85))}, "
             "on_fail ('skip' | '<fallback-agent-node-id>' \u2014 on this node's failure commit it `skipped` (join-tolerant, run continues; a join with one live dep still runs), and with a fallback id ALSO let that agent node run; validated at run time: fallback must exist, be an agent, not be an ancestor; cancelled deaths are never caught"
             ")} \u2014 agent node. A provider requires a non-empty model; "
-            "model aliases and literal IDs are preserved (tiers resolve explicitly, and a matching provider/model prefix is removed for the CLI). Run/amend responses include requested/resolved provider/model routes. Gate node: {id, type:'gate', after, question, options, context, when (bounded expr: out.<node>.<dotted.path> with == != > >= < <=, and/or/not, parens; "
+            "model aliases are preserved; a literal 'provider/model' id keeps its route identity but is split into provider + model when the seat routes that provider (tiers resolve explicitly, and a matching provider/model prefix is removed for the CLI). Run/amend responses include requested/resolved provider/model routes. Gate node: {id, type:'gate', after, question, options, context, when (bounded expr: out.<node>.<dotted.path> with == != > >= < <=, and/or/not, parens; "
             "malformed when is rejected at run/amend validation and holds the gate at fire \u2014 never a silent skip), wait:{wait_s, until_argv:[fixed argv, no shell], every_s (default 60), timeout_s (default 3600)} (machine-answered gate: parks the run at zero tokens \u2014 wait_s alone = timer; until_argv re-runs until exit 0; timeout \u2192 gate fails; its last stdout/stderr tail is the gate's output, "
             "usable via inputs). A human release pre-empts a park), on_skip:'pass'|'prune' (with when: prune commits the gate `skipped` and every node whose deps are ALL skipped is skipped too \u2014 terminal, not a failure; a join with one live dep runs; default pass = the arm still runs)}. Echo node: {id, type:'echo', after, "
             "output} — commits its `output` verbatim as the node result with zero tokens and no child spawn; downstream nodes consume it via after/inputs like any done node. Composite graphs: a top-level `include:[{as, use, seeds?, exports?}]` names library graphs "
@@ -727,6 +732,7 @@ WORKFLOW_PARAMS = {
             ),
         },
         "answer": {"type": "string", "description": "release: the human's answer text (from clarify)."},
+        "graph_revision": {"type": "string", "description": "amend/steer/release: optional CAS token — the run's current graph revision (from run/status/amend). A token that differs from the head is refused with {error:'graph_revision_stale', yours, head} and NOTHING is written (no graph.json, no amends row, no restart.request, no inbox line, no gate answer). Absent = last-writer-wins (today's behavior). amend echoes the new head as graph_revision."},
         "gate_id": {"type": "string", "description": "release: gate node id."},
         "node": {"type": "string", "description": "steer: target node id (pending node picks it up at spawn; a LIVE child pulls it at its next seam via its own inbox call — the prompt is never rewritten)."},
         "text": {"type": "string", "description": "steer: the steering message."},
@@ -910,7 +916,9 @@ _ROUTE_MATCH_KEYS = ("model", "tier", "provider")
 def _resolve_models(nodes, committed=None, keep=()) -> tuple[str | None, dict | None, dict | None]:
     """Resolve tier keys in place and return (error, model_table, routes).
 
-    Explicit aliases and literal ids stay unchanged. If a provider is supplied and the
+    Explicit aliases stay unchanged. A literal 'X/Y' with no provider, X a provider the
+    seat routes, is split to provider=X, model=Y (est-2ek.1.46); `routes.requested`
+    keeps the author's literal, and policy/freeze/quota compare the full 'X/Y'. If a provider is supplied and the
     model is prefixed by that same provider, strip the redundant prefix for the CLI's
     ``-m`` value. `routes` contains requested and effective provider/model pairs only;
     no credentials or config values. At the tail, the FEEDBACK #43 ``model_preflight``
@@ -995,11 +1003,23 @@ def _resolve_models(nodes, committed=None, keep=()) -> tuple[str | None, dict | 
         # author never writes the provider the alias already names. The model string
         # itself stays verbatim (house contract: aliases are preserved); only the
         # provider is baked so the runner's --provider matches the alias's own route.
-        ip = im = None
+        ip = im = lit_provider = None
         if m and not provider and not frozen and (tier or m in known):
             ip, im = _alias_provider_pair(requested_model, _seat_model_cfg(), tiers, known)
             if ip:
                 n["provider"] = ip
+        if (m and not provider and not frozen and not ip and not tier
+                and "/" in m and m not in _seat_aliases()):
+            # est-2ek.1.46: a literal 'provider/model' with no node.provider used to reach the
+            # child as a bare `-m provider/model` (seat default route + prefixed id -> HTTP 400)
+            # while the alias for the same model worked. Bake the provider the same way aliases
+            # do, but ONLY for a provider the seat itself routes through: an aggregator's
+            # 'vendor/model' namespace is not a provider claim. `requested` below keeps the
+            # author's literal (provider None).
+            lp, _, lm = m.partition("/")
+            if lp.strip() and lm.strip() and lp in _seat_provider_ids(tiers):
+                ip = lit_provider = n["provider"] = lp
+                n["model"] = m = lm
         eff_provider = provider or ip
         if m and provider:
             prefix, sep, remainder = m.partition("/")
@@ -1008,7 +1028,7 @@ def _resolve_models(nodes, committed=None, keep=()) -> tuple[str | None, dict | 
         if m:
             # display: author-explicit provider names the route (base semantics);
             # an inherited provider shows in `routes` only.
-            display = f"{provider}/{m}" if provider else str(m)
+            display = f"{provider or lit_provider}/{m}" if (provider or lit_provider) else str(m)
             if tier:
                 display += f"  ({tier})"
         table[n["id"]] = display
@@ -1428,6 +1448,13 @@ def _quota_refusal(graph, routes=None, cache_path=None, skip=()):
         res = ent.get("resolved") or {}
         names = {str(n.get("model")),
                  *( [str(res.get("model"))] if res.get("model") else [] )}
+        # #291 F3: entries stamped under the full 'provider/model' id (the pre-bake
+        # literal) still bind the baked node {provider, model}.
+        req = (ent.get("requested") or {}).get("model")
+        if req:
+            names.add(str(req))
+        if n.get("provider") and "/" not in str(n.get("model")):
+            names.add(f"{n['provider']}/{n['model']}")
         for key in names:
             hit = cache.get(key)
             if not isinstance(hit, dict) or hit.get("resets_epoch", 0) <= _t.time():
@@ -1496,6 +1523,24 @@ def _seat_model_cfg():
                     out["default"] = val.strip().strip("'\"")
             elif indent > 2 and in_aliases and val.strip():
                 out["aliases"][key.strip()] = val.strip().strip("'\"")
+    except Exception:
+        pass
+    return out
+
+def _seat_provider_ids(tiers=None):
+    """Provider ids the SEAT itself routes through: the 'provider/' prefix of every seat
+    alias and tier target, plus the configured `providers:` keys when hermes_cli is
+    importable (stdlib-only hosts fall back to the alias/tier prefixes). Deliberately not
+    the core's whole provider catalogue: an aggregator route's 'vendor/model' namespace
+    must not be mistaken for a provider claim (est-2ek.1.46)."""
+    out = set()
+    for target in [*_seat_aliases().values(), *(tiers or {}).values()]:
+        p, sep, rest = str(target).partition("/")
+        if sep and p.strip() and rest.strip():
+            out.add(p.strip())
+    try:
+        from hermes_cli.config import load_config_readonly
+        out |= {str(k) for k in ((load_config_readonly() or {}).get("providers") or {})}
     except Exception:
         pass
     return out
@@ -3104,16 +3149,23 @@ def act_status(args):
     # that run_state derived from — a fresh probe here can flip across a dying
     # runner's flock and make status vs runner_live disagree.
     out = {"run_id": st["run_id"], "name": st["name"], "status": st["status"],
+           "failed_nodes": st["failed_nodes"],   # sys-5lnm17: which nodes died, on every status/wait
            "runner_live": alive, "nodes": {k: {kk: v[kk] for kk in ("type", "status", "fanout",
                                                                      # #128: the artifact-mtime heartbeat rides
                                                                      # status/wait/list identically; honest
                                                                      # absence — no key when no artifact visible
-                                                                     "progress") if kk in v}
+                                                                     # #133: the wall meter rides identically —
+                                                                     # {elapsed_s, wall_s, p95_s, meter}, absent
+                                                                     # when nothing grounds it
+                                                                     "progress", "wall") if kk in v}
                                            for k, v in st["nodes"].items()},
            "done": st["done"], "skipped": st["skipped"], "total": st["total"],
            # O1: the card to paste into the report rides on EVERY status (and via
            # act_wait, every wait) — the inducement never depends on the agent recalling it.
-           "card": _card(st["run_id"])}
+           "card": _card(st["run_id"]),
+           # #19: the graph head rides EVERY status read (derived, never stored —
+           # status is where a CAS caller reads the token before a guarded write).
+           "graph_revision": _graph_revision(r)}
     if resolved_via:   # #58: the run lives outside the caller's resolved root — loud, not silent
         out["resolved_via"] = resolved_via
         out["resolved_via_note"] = ("run resolved under a sibling root (dispatch-time home "
@@ -3401,6 +3453,61 @@ def act_wait(args):
             return _echo({**act_status(args), "note": f"still running after {int(time.time()-t0)}s — call wait again (self-yield at {int(seg)}s keeps us under the harness tool deadline)"})
         time.sleep(2)
 
+# ---------- graph revision CAS (issue #19) ----------
+# The revision is DERIVED, never stored: "seq:sha16" over the run's own bytes
+# (seq = amends.jsonl line count, 0 for a fresh run; sha16 = sha256 of the
+# current graph.json bytes, first 16 hex). Nothing to migrate (R10: pre-token
+# run dirs already carry everything the token is computed from) and a stored
+# token could drift from the graph it claims to name — a derived one cannot.
+# Only the door's two graph.json writers exist (act_run at create, act_amend),
+# so seq is monotone: every graph mutation appends exactly one amends row
+# (act_run mints a run with seq 0). All CAS + write happens under the per-run
+# door lock: the runner's admission flock is held for the runner's whole
+# lifetime on the runner side, so the door cannot take it (deadlock).
+
+def _graph_revision(r):
+    """The run's current graph revision "<seq>:<sha16>", or None when the run
+    has no graph.json (unknown run / no graph to pin)."""
+    try:
+        data = (r / "graph.json").read_bytes()
+    except OSError:
+        return None
+    seq = 0
+    try:
+        with (r / "amends.jsonl").open("r", encoding="utf-8") as f:
+            seq = sum(1 for line in f if line.strip())
+    except OSError:
+        pass
+    return f"{seq}:{hashlib.sha256(data).hexdigest()[:16]}"
+
+def _revision_cas(r, args):
+    """Compare-and-set on the graph revision. Tokenless (key absent/None) =
+    today's last-writer-wins semantics, unchanged (returns None). A submitted
+    token that differs from the head returns the typed refusal — the CALLER
+    must have checked this under _graph_lock(r) and must write NOTHING on a
+    refusal; the head named in the error is the head the caller must re-read
+    and rebase against."""
+    tok = args.get("graph_revision")
+    if tok is None:
+        return None
+    head = _graph_revision(r)
+    if tok == head:
+        return None
+    return {"error": "graph_revision_stale", "yours": tok, "head": head}
+
+@contextlib.contextmanager
+def _graph_lock(r):
+    """#19: the per-run door lock held by every graph-revision CAS and every
+    graph.json mutation (act_amend's read-modify-write; the CAS-guarded inbox
+    append and gate-answer write). Locking only inside the WRITERS — the shared
+    jload primitive is untouched (it is a god node; callers stay unchanged)."""
+    with (r / "graph.lock").open("a+b") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)
+
 def _release_core(r, gate_id, answer, ui=False):
     """ONE gate-answer path for tool and UI. Stale answers never block: the answer
     file is overwritten iff absent-or-stale; the gate re-holds unless the efp
@@ -3452,7 +3559,18 @@ def act_release(args):
         # (or already was) stopped — amend or re-run instead.
         return {"error": "run is stopped/stop pending — answer refused; amend or re-run to continue"}
     gate_id = args.get("gate_id")
-    res = _release_core(r, gate_id, args.get("answer", ""))
+    # #19 (est-19k9w): optional CAS — a gate answer is a write against the
+    # CURRENT graph (its efp is computed from the live defs); answering under a
+    # revision the caller never saw is refused with NOTHING written — the hold
+    # stays exactly as it was. release never bumps the revision: it does not
+    # touch graph.json. The CAS + answer write share one door lock; the respawn
+    # happens OUTSIDE it (never hold the door lock across a spawn). The UI path
+    # (_release_core directly) is tokenless by construction, today's semantics.
+    with _graph_lock(r):
+        _stale = _revision_cas(r, args)
+        if _stale:
+            return _stale
+        res = _release_core(r, gate_id, args.get("answer", ""))
     if not res.get("ok"):
         return res
     mode = _resume_after_action(
@@ -3494,9 +3612,17 @@ def act_steer(args):
         return {"ok": False,
                 "error": f"node is {node_status} — steering not queued: a {node_status} node never spawns again, "
                          "so the text would never be delivered; amend is the correct verb to make it eligible again"}
-    with open(r / "inbox.jsonl", "a") as f:
-        f.write(json.dumps({"node": node["id"], "text": args.get("text", ""),
-                            "at": datetime.now(timezone.utc).isoformat(timespec="seconds")}) + "\n")
+    # #19 (est-19k9w): optional CAS — steering text must not be queued against a
+    # graph revision the caller never saw (the node set / defs may have moved).
+    # The append happens under the same lock as the check, and a refusal writes
+    # NOTHING: no inbox line, no steer.queued event, gate files untouched.
+    with _graph_lock(r):
+        _stale = _revision_cas(r, args)
+        if _stale:
+            return _stale
+        with open(r / "inbox.jsonl", "a") as f:
+            f.write(json.dumps({"node": node["id"], "text": args.get("text", ""),
+                                "at": datetime.now(timezone.utc).isoformat(timespec="seconds")}) + "\n")
     _steer_event(r, "steer.queued", node=node["id"],
                  chars=len(args.get("text", "") or ""))  # #17: the door logs the queue
     if node_status == "running":
@@ -3562,7 +3688,11 @@ def _frozen_committed(r, old, new_nodes):
             continue
         same = all(n.get(k) == c.get(k) for k in _ROUTE_MATCH_KEYS) or (
             bool(c.get("tier")) and n.get("model") == c["tier"]
-            and n.get("provider") in (None, c.get("provider")))
+            and n.get("provider") in (None, c.get("provider"))) or (
+            # #291 F2: the author literal 'X/Y' replays as its committed bake {X, Y}
+            # (est-2ek.1.46) whether or not the seat still routes X.
+            not n.get("provider") and not c.get("tier") and bool(c.get("provider"))
+            and n.get("model") == f"{c['provider']}/{c.get('model')}")
         if same and _common.node_rec(r, c, ob)[0] in ("done", "partial", "skipped"):
             frozen.add(n["id"])
     moved = True
@@ -3583,6 +3713,14 @@ def act_amend(args):
         return bad
     if new is None:
         return {"error": "amend needs full replacement graph or graph_path"}
+    # #19 (est-19k9w): opt-in compare-and-set on the graph revision, checked
+    # EARLY so a stale caller is refused before the expensive gates and before
+    # anything is written (a dry_run reports staleness too). Tokenless = today's
+    # last-writer-wins, unchanged. The write site re-checks under the same lock.
+    with _graph_lock(r):
+        _stale = _revision_cas(r, args)
+    if _stale:
+        return _stale
     # An amend of an include-expanded run passes the EXPANDED graph (no `include`
     # key — strip-on-expand), so this is the identity no-op; a replacement graph
     # that DOES carry includes is a fresh author form and expands before validation
@@ -3652,12 +3790,29 @@ def act_amend(args):
         return {"ok": True, "dry_run": True, "models": _models, "routes": _routes, **preview,
                 "hint": "nothing written — re-run without dry_run to apply"
                         + _liveness_hint_suffix(_liveness_notes)}
-    (r / "amends.jsonl").open("a").write(
-        json.dumps({"at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-                    "old": jload(r / "graph.json"), "new": new}) + "\n")
-    tmp = r / f"graph.json.{os.getpid()}.tmp"
-    tmp.write_text(json.dumps(new, ensure_ascii=False, indent=2))
-    os.replace(tmp, r / "graph.json")
+    # #19 (est-19k9w): the write site holds the per-run door lock across the
+    # whole read-modify-write (the 09-27 alternating-writers shape: two amends
+    # each read the old graph, the later replace silently loses the earlier).
+    # The CAS token is RE-CHECKED here — between the early refuse and this lock
+    # another writer may have moved the head (check+write under one lock is the
+    # atomic unit; the early check is only the cheap pre-empt). A refusal lands
+    # BEFORE amends.jsonl / graph.json / restart.request / gate files are touched.
+    with _graph_lock(r):
+        _stale = _revision_cas(r, args)
+        if _stale:
+            return _stale
+        _base_rev = _graph_revision(r)
+        (r / "amends.jsonl").open("a").write(
+            json.dumps({"at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                        "old": jload(r / "graph.json"), "new": new,
+                        # #19: the row names the head it was written against and
+                        # whether the caller pinned it (cas:true = refused-if-stale).
+                        "base_revision": _base_rev,
+                        "cas": args.get("graph_revision") is not None}) + "\n")
+        tmp = r / f"graph.json.{os.getpid()}.tmp"
+        tmp.write_text(json.dumps(new, ensure_ascii=False, indent=2))
+        os.replace(tmp, r / "graph.json")
+        _new_rev = _graph_revision(r)
     # est-2ek.1.641: an applied amend re-proves routes through this submit's
     # ping — bake the proved-alive receipts for the NEW defs (frozen replay-skip
     # nodes keep their committed receipt: the file is merged, never rewritten).
@@ -3696,6 +3851,7 @@ def act_amend(args):
     else:
         applies = "live runner hot-reloads at its next wave boundary; the next transition wakes the owner automatically"
     return {"ok": True, "models": _models, "routes": _routes, "applies": applies,
+            "graph_revision": _new_rev,   # #19: the new head — the token a next CAS writes against
             "hint": "continuation is automatic; do not wait or poll" + _liveness_hint_suffix(_liveness_notes), **preview}
 
 def act_stop(args):

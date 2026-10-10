@@ -320,6 +320,10 @@
     "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_failed_events_77.py.log"
   },
   {
+    "test": "test_failed_nodes_5lnm.py",
+    "exit": 0
+  },
+  {
     "test": "test_failures_0923.py",
     "exit": 0,
     "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_failures_0923.py.log"
@@ -393,6 +397,11 @@
     "test": "test_graph_result_158.py",
     "exit": 0,
     "log": "CI run 37719805756 Serial suite: exit 0"
+  },
+  {
+    "test": "test_graph_revision_cas_19.py",
+    "exit": 0,
+    "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_graph_revision_cas_19.py.log"
   },
   {
     "test": "test_graph_single_writer_153.py",
@@ -558,6 +567,11 @@
     "test": "test_list_root_280.py",
     "exit": 0,
     "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_list_root_280.py.log"
+  },
+  {
+    "test": "test_literal_provider_prefix_46.py",
+    "exit": 0,
+    "log": "CI run 37719797358 Serial suite: exit 0"
   },
   {
     "test": "test_live_truth.py",
@@ -1050,6 +1064,11 @@
     "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_skill_docs.py.log"
   },
   {
+    "test": "test_spawn_enoent_retry_w33.py",
+    "exit": 0,
+    "log": "local: est-ulwpg RED at base 96ee587 (witness spawn death reproduced legs A+B), GREEN at fix head (11/11 checks)"
+  },
+  {
     "test": "test_spawn_ledger_8.py",
     "exit": 0,
     "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_spawn_ledger_8.py.log"
@@ -1239,6 +1258,11 @@
     "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_wake_hermetic_env.py.log"
   },
   {
+    "test": "test_wall_extend_session_595.py",
+    "exit": 0,
+    "log": "CI run 37720369252 Serial suite: exit 0"
+  },
+  {
     "test": "test_wfpid_owner_8.py",
     "exit": 0,
     "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_wfpid_owner_8.py.log"
@@ -1272,6 +1296,49 @@
     "test": "test_tree_quiesce_reap.py",
     "exit": 0,
     "log": "Local foreground tests/test_tree_quiesce_reap.py: RESULT PASS, exit 0"
+  },
+  {
+    "test": "test_wall_meter_133.py",
+    "exit": 0,
+    "log": "Local foreground cd tests && PYTHONPATH=/opt/hermes:.. python3 test_wall_meter_133.py: RESULT GREEN (18 checks, 0 failed), exit 0"
+  },
+  {
+    "test": "test_self_review_422_1866.py",
+    "exit": 0,
+    "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_self_review_422_1866.py.log"
+  },
+  {
+    "test": "test_route_hold_optout_retry_w56.py",
+    "exit": 0,
+    "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_route_hold_optout_retry_w56.py.log"
+  },
+  {
+    "test": "test_seat_cap_dotenv_gxjh6.py",
+    "exit": 0,
+    "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_seat_cap_dotenv_gxjh6.py.log"
+  },
+  {
+    "test": "test_lease_busy_retry.py",
+    "exit": 0,
+    "log": "local: lease-busy 1.3.3 lane \u2014 RED at base d69a64d (no _is_lease_busy, class absent), GREEN at head: 18/18 checks rc=0; re-run green under synthetic CPU load"
+  },
+  {
+    "test": "test_golden_seat_no_inherited_identity_862.py",
+    "exit": 0
+  },
+  {
+    "test": "test_post_exit_strip_xwvu9.py",
+    "exit": 0,
+    "log": "Local foreground run on fix/xwvu9-post-exit-strip: RED at 8632839 tree pre-change (3 FAIL), GREEN after the strip (3 tests OK)"
+  },
+  {
+    "test": "test_effects_receipt_pygyy.py",
+    "exit": 0,
+    "log": "Local foreground run on PR #346 rebased head (fresh WF_RUNS_ROOT, outside run dirs): Ran 10 tests OK, rc=0; the PR adds this test without a CI row"
+  },
+  {
+    "test": "test_graph_regen_z_parser_h3yi.py",
+    "exit": 0
   },
   {
     "test": "test_pin_delta_check_133387.py",

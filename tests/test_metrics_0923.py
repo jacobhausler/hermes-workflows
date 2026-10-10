@@ -35,10 +35,12 @@ nodes = [{"id": "a", "type": "agent", "goal": "x", "model": "openai-codex/gpt-6-
          {"id": "g", "type": "gate", "question": "q", "options": ["y"]}]
 err, table = door.resolve_models(nodes)
 check(err is None, "resolve_models accepts alias targets + unknown literal")
-check(nodes[0]["model"] == "openai-codex/gpt-6-sol", "literal alias-target stays literal")
+# est-2ek.1.46: a literal whose prefix is a provider the seat routes through bakes that provider
+# (a bare `-m openai-codex/...` died HTTP 400 on the seat default route); the table row keeps the full route.
+check((nodes[0].get("provider"), nodes[0]["model"]) == ("openai-codex", "gpt-6-sol"), "literal alias-target bakes its provider")
 check(table["a"] == "openai-codex/gpt-6-sol", "routing table preserves explicit literal")
 check(nodes[1]["model"] == "sol", "alias untouched")
-check(nodes[2]["model"] == "anthropic/claude-opus-5-5", "non-alias literal untouched")
+check((nodes[2].get("provider"), nodes[2]["model"]) == ("anthropic", "claude-opus-5-5"), "seat-routed vendor literal bakes its provider")
 
 # --- (2) keys on events + record, via the real runner and fake hermes ---
 fake = str(HERE / "fake")  # the executable shim (fake_hermes.py is not +x)

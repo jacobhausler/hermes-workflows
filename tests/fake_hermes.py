@@ -39,6 +39,22 @@ if "QFLUSH" in q:
 if "QSLEEP" in q:
     try: time.sleep(float(q.split("QSLEEP")[1].split()[0]))
     except Exception: pass
+# est-pygyy (#56): EFFECT-EMIT <rel/path> BYTES=<n> — the child publishes its
+# artifact at spawn time (cwd = the child work dir <run>/work/<node>[.<i>],
+# A4), so the runner's effect-receipt gate is proven to measure bytes AT the
+# commit edge, not at admission. Item rows carry their own EFFECT-EMIT token
+# (the fan-out shape: each item publishes its own artifact). Inert without
+# the marker: golden paths byte-identical.
+if "EFFECT-EMIT" in q:
+    _sp = q.split()
+    _i = _sp.index("EFFECT-EMIT")
+    _tok = _sp[_i + 1]
+    _n = int(_sp[_i + 2].split("BYTES=")[1]) if len(_sp) > _i + 2 and \
+        _sp[_i + 2].startswith("BYTES=") else 32
+    _p = os.path.join(os.getcwd(), _tok)
+    os.makedirs(os.path.dirname(_p) or ".", exist_ok=True)
+    with open(_p, "wb") as _f:
+        _f.write(b"e" * _n)
 # ---- #61 process-tree modes (no behavior change without the env) ----
 # FAKE_GC=1: background a same-session grandchild that outlives this child —
 # the detached-suite shape. Its pid is appended to $FAKE_GC_PIDS so the test
@@ -233,6 +249,19 @@ if _FAKE_MODE == "ratelimit_straggler":
         sys.exit(1)
     print("```json\n" + json.dumps({"result": "winner-answer"}) + "\n```")
     sys.exit(0)
+# ---- est-xodi (M3 pin): first spawn dies on the banner, the PARKED respawn goes
+# ---- silent-slow (prints nothing for FAKE_SLEEP s) then answers with a VALID
+# ---- payload. Only the consumed remaining-wall cap can kill it before commit. ----
+if _FAKE_MODE == "ratelimit_then_slow":
+    _k159 = "".join(ch for ch in (q.splitlines()[0] if q.strip() else "x") if ch.isalnum())[:24] or "x"
+    if _rl159_count(_k159) == 0:                     # first spawn: banner death
+        print("Warning: Unknown toolsets: bogus")
+        print("hermes -z: agent failed: Anthropic credentials are rate-limited for "
+              "claude-fable-5-1; other Claude models remain available (see `hermes auth list`).")
+        sys.exit(1)
+    _t.sleep(float(os.environ.get("FAKE_SLEEP", "1.65")))
+    print("```json\n" + json.dumps({"result": "answered-way-late"}) + "\n```")
+    sys.exit(0)
 # ---- est-t0vz (issue #54): credential-window 429 park modes ----
 # The banner below is the VERBATIM AuthError text the stock CLI raises at
 # /opt/hermes/hermes_cli/runtime_provider.py:358, as it reaches the runner's merged
@@ -395,6 +424,31 @@ if _FAKE_MODE == "retry_progress" and "RESUME" in q:    # #5: transport death WI
         sys.exit(2)
     print("```json\n" + json.dumps({"result": "resumed"}) + "\n```")
     sys.exit(0)
+if _FAKE_MODE == "lease_busy":
+    # lease-busy (2026-10-03 field shape): attempt 1 prints the CLI's dead-session
+    # banner + the CLI's fail-closed lease notice verbatim and exits 130 (the CLI's
+    # lease-wait timeout exit). NO state.db row is written — the tool-progress gate
+    # MUST be bypassed for this class. Attempt 2 answers only when its prompt carried
+    # the fresh-session harvest preamble (proves the re-drive is a FRESH session,
+    # not a resume of the busy one); without it, dies 130 again on the same notice.
+    cnt = 0
+    if os.environ.get("FAKE_ATTEMPT_DIR"):
+        os.makedirs(os.environ["FAKE_ATTEMPT_DIR"], exist_ok=True)
+        p = os.path.join(os.environ["FAKE_ATTEMPT_DIR"], "attempts")
+        cnt = int(open(p).read()) if os.path.exists(p) else 0
+        open(p, "w").write(str(cnt + 1))
+    if cnt == 0 or "Dead-session re-drive harvest" not in q:
+        print("Session 20261003_000000_fake00 found but has no messages. Starting fresh.", flush=True)
+        print("Stopped waiting for another Hermes process on this session. "
+              "Your message was not processed.", flush=True)
+        sys.exit(130)
+    print("```json\n" + json.dumps({"result": "lease-recovered"}) + "\n```")
+    sys.exit(0)
+if _FAKE_MODE == "rc130_quiet":
+    # control twin: exits 130 WITHOUT the lease notice — must keep the existing
+    # `unknown` classification and stay terminal (no lease re-drive).
+    print("some unrelated chatter, no lease marker")
+    sys.exit(130)
 if _FAKE_MODE == "dead_session_102" and "DEADSESS" in q:
     # #102: drive 1 dies on its wall leaving a session row with tool_call_count>0
     # (bounded-retry gate opens) and NO persisted messages when FAKE_MESSAGES=0;
@@ -490,6 +544,31 @@ if _FAKE_MODE == "seat_timing":       # one span row per child: [start, end] of 
     sys.exit(0)
 if _FAKE_MODE == "hang":
     _t.sleep(float(os.environ.get("FAKE_HANG_SEC", "60")))
+    sys.exit(0)
+if _FAKE_MODE in ("session_pulse", "session_frozen"):   # est-2ek.1.595: the oneshot -Q shape —
+    # nothing ever reaches the spawn log while the child works, but its own sessions row
+    # (title = the --continue key) is in state.db. pulse: last_activity_at keeps moving;
+    # frozen: the row exists but never moves again. Either way the answer comes at the end.
+    import sqlite3 as _sq
+    _title = args[args.index("--continue") + 1]
+    _db = _sq.connect(os.path.join(_FAKE_HOME, "state.db"), timeout=5)
+    _db.execute("create table if not exists sessions (id text primary key, title text, model text, billing_provider text, "
+                "input_tokens int, output_tokens int, cache_read_tokens int, reasoning_tokens int, api_call_count int, "
+                "tool_call_count int, estimated_cost_usd real, last_activity_at real, last_activity_description text, "
+                "ended_at real, started_at real)")
+    _t0 = time.time()
+    _seen = _t0 - 3600 if _FAKE_MODE == "session_frozen" else _t0
+    _db.execute("insert into sessions values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (_title, _title, "fake", None, 0, 0, 0, 0, 0, 0, 0.0, _seen, "", None, _seen))
+    _db.commit()
+    _end = _t0 + float(os.environ.get("FAKE_SESSION_SEC", "3"))
+    while time.time() < _end:
+        if _FAKE_MODE == "session_pulse":
+            _db.execute("update sessions set last_activity_at=? where id=?", (time.time(), _title))
+            _db.commit()
+        _t.sleep(0.2)
+    _db.close()
+    print("```json\n" + json.dumps({"result": "ok", "session": _FAKE_MODE}) + "\n```", flush=True)
     sys.exit(0)
 if _FAKE_MODE == "early":          # writes stdout, then keeps cooking (mid-run log growth)
     print("partial progress line, flushed early", flush=True)

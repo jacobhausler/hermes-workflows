@@ -80,7 +80,6 @@ INCLUDE_FILES = (
     "SKILL.md",
     "__init__.py",
     "card_enforcement.py",  # #157: imported by __init__.py at bind time — a packaged plugin without it dies at import
-    "post_exit_hook.py",  # imported by the runner and the shipped test_post_exit_hook.py
     "dashboard/manifest.json",
     "dashboard/index.js",  # hidden API plugin still needs the web host's script/registration contract
     "dashboard/plugin_api.py",
@@ -129,6 +128,11 @@ INCLUDE_FILES = (
     # graph helpers above, so the ZIP side stays honest.
     "scripts/diagram_readme.py",
     "scripts/graph_diagram.py",
+    # est-2ek.1.866 (PR #323 CI red, run 37842073930 admission introduced=1):
+    # tests/test_self_review_422_1866.py exec-modules this at import
+    # (spec_from_file_location) — the exact est-4vnq finding-4 shape. Stdlib-only,
+    # so the ZIP side stays honest.
+    "scripts/pr_formal_review.py",
     "scripts/suite.py",
     "graphify-out/GRAPH_REPORT.md",
     "graphify-out/graph.json",
@@ -172,6 +176,10 @@ SOURCE_ONLY_TESTS = {
     "tests/test_stuck_node_finalize_733.py": "executes source-only scripts/lane_recover.py (main's #235)",
     # #248 r3 (rebase onto main's #298): executes source-only make_public.py + reads scripts/scrub-list.txt
     "tests/test_personal_path_scrub_867.py": "executes source-only scripts/make_public.py, reads scripts/scrub-list.txt",
+    # est-xwvu9 (upstream #133387 accepted ask): the post-exit hook is NOT shipped;
+    # this test executes the source-only scripts/post_exit_hook.py kept for our own
+    # distribution path only.
+    "tests/test_post_exit_hook.py": "executes source-only scripts/post_exit_hook.py (stripped from the shipped build, est-xwvu9)",
 }
 
 

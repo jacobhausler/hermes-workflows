@@ -35,6 +35,8 @@ tests/golden_solo/v1.0.15.json
 tests/test_amend_rebake_034849a2.py
 tests/test_sprint101_A-door.py
 tests/test_routing_routes.py
+# Alias-versus-literal routing fixture; the mocked route tokens are asserted verbatim.
+tests/test_literal_provider_prefix_46.py
 tests/test_require_route_25.py
 tests/test_metrics_0923.py
 tests/test_route_efforts_b3c98b2a.py
@@ -123,3 +125,11 @@ regex:^Cross-estate joint eng protocol v1 is the SSOT
 # block by public URL — the pointer IS the one-source handle; guarded verbatim.
 regex:^\[CONTRIBUTING\.md\]\(https://github\.com/jacobhausler/hermes-workflows/blob/main/CONTRIBUTING\.md\)$
 scripts/vendor/archify/renderers/shared/generated-brand-marks.mjs
+
+# ---- est-q2nwx: owner pr-compliance gate text (main tip 6ee8fba, CI run 37949429728) ----
+# The owner's own pr-compliance gate (haus-docs rules/pr-diagram-standard.md v0.2 C1/C2)
+# SHIPS these two public repo artifacts; the flagged vocabulary is the gate's mandated
+# citation/exemption text, not a private string. Line-anchored (not file-guarded) so any
+# future stray hit elsewhere in these files still fires. GUARD, per AGENTS.md rule 4.
+.github/PULL_REQUEST_TEMPLATE.md:6
+.github/workflows/pr-compliance.yml:32

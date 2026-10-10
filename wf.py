@@ -15,6 +15,7 @@ against the current graph (own def + all ancestors' defs). An amend upstream mak
 downstream result stale — downstream nodes re-run or re-hold; unchanged chains replay.
 """
 import json, os, random, re, shutil, signal, socket, subprocess, sys, threading, time
+import errno
 import fcntl
 import hashlib
 from contextlib import nullcontext as _nullcontext
@@ -186,6 +187,51 @@ def _route_substitution_refusal(meta, node, spawn_no):
                      f"the door's ping.",
             "error_class": "route_substitution_denied", "raw": "", "ms": 0,
             "attempts": 1, "spawn": spawn_no}
+
+def _stale_route_receipt_clear(meta, node, spawn_no):
+    """route-hold escalation (w56): a RE-DRIVE (spawn_no > 1) whose run already
+    died on the route family for THIS node (route_unavailable /
+    route_substitution_denied in events.jsonl) clears the node's durable receipt
+    — the proof that holds the re-drive is one reality already contradicted, and
+    the estate was deleting it by hand next to the node record. The clear is
+    loud (node.route_receipt_cleared) and scoped: only this node's row, only for
+    a re-drive, and only after route-family evidence. A first spawn NEVER clears
+    (the door re-bakes proofs at submit; the receipt guards that first spawn).
+    Returns True when a receipt row was removed."""
+    if not (meta.get("_run") and spawn_no and spawn_no > 1) or not (node or {}).get("id"):
+        return False
+    run = meta["_run"]
+    try:
+        lines = (run / "events.jsonl").read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return False
+    hit = False
+    for line in lines:
+        try:
+            ev = json.loads(line)
+        except Exception:
+            continue
+        if ev.get("node") != node["id"]:
+            continue
+        if ev.get("error_class") in ("route_unavailable", "route_substitution_denied"):
+            hit = True
+            break
+    if not hit:
+        return False
+    p = _route_receipts_path(run)
+    try:
+        rec = _route_receipt_load(run)
+        if node["id"] not in rec:
+            return False
+        old = rec.pop(node["id"])
+        tmp = p.with_name(f"{p.name}.{os.getpid()}.tmp")
+        tmp.write_text(json.dumps(rec, ensure_ascii=False, indent=2))
+        os.replace(tmp, p)
+    except OSError:
+        return False
+    log(run, "node.route_receipt_cleared", node=node["id"], cleared=old,
+        reason="re-drive after a route-family death (stale receipt, w56)")
+    return True
 
 def _profile_evidence(node):
     name = node.get("profile")
@@ -1045,6 +1091,59 @@ def save_node(run, node, byid, rec):
     os.replace(tmp, p)  # atomic: a completed node file is a committed fact
     _mint_suite_proof(run, node, rec, byid)   # est-2ek.1.603 (no-op unless declared)
 
+# ---------- effect-receipt gate (est-pygyy, issue #56) ----------
+# A node whose stated purpose is EXTERNAL publication declares the postconditions
+# the run must be able to PROVE before its `done` stands: `effects: [{file,
+# sha256?, min_bytes?}, ...]`. The runner verifies each row against bytes under
+# the RUN DIR at the commit edge — the artifact exists, is big enough, and (when
+# declared) carries the exact digest — and records the measured facts as
+# `effect_receipts` rows {file, exists, bytes, sha256, ok} on the node record
+# (what a publication-only recovery re-reads; NEVER re-authorizes the artifact).
+# Honest degradation: no `effects` key = this function returns the record
+# untouched, every existing graph is byte-identical (golden EMPTY). A declared
+# receipt that cannot be PROVEN demotes done/partial to failed
+# error_class "effect_receipt" — a proven-fail, deliberately absent from both
+# retry ladders. The runner NEVER fabricates a proven row: ok=True is written
+# only from bytes it read itself this instant.
+
+def _effect_gate(run, node, rec):
+    rows = node.get("effects")
+    if not rows or rec.get("status") not in ("done", "partial"):
+        return rec                        # undeclared / non-committing: untouched
+    proven, failures = [], []
+    for row in rows:
+        f = str(row.get("file", ""))
+        entry = {"file": f, "exists": False, "bytes": 0, "sha256": None, "ok": False}
+        p = Path(run) / f
+        inside = bool(f) and not f.startswith("/") and "\\" not in f \
+            and ".." not in f.split("/")
+        if inside:                        # never read outside the run dir
+            try:
+                data = p.read_bytes()
+                entry["exists"], entry["bytes"] = True, len(data)
+                entry["sha256"] = hashlib.sha256(data).hexdigest()
+                if entry["bytes"] == 0:
+                    failures.append(f"{f}: empty")
+                elif row.get("min_bytes") and entry["bytes"] < row["min_bytes"]:
+                    failures.append(f"{f}: {entry['bytes']}B < min_bytes {row['min_bytes']}")
+                elif row.get("sha256") and entry["sha256"] != row["sha256"]:
+                    failures.append(f"{f}: sha256 mismatch (got {entry['sha256']})")
+                else:
+                    entry["ok"] = True
+            except OSError:
+                failures.append(f"{f}: missing under the run dir")
+        else:
+            failures.append(f"{f}: path escapes the run dir")
+        proven.append(entry)
+    rec = dict(rec, effect_receipts=proven)
+    if failures:
+        rec = {"status": "failed",
+               "error": "effect_receipt_unproven: " + "; ".join(failures),
+               "error_class": "effect_receipt",
+               "effect_receipts": proven,
+               "output": rec.get("output"), "ms": rec.get("ms")}
+    return rec
+
 # ---------- child execution ----------
 
 CONTRACT = ("Finish your answer with ONE fenced ```json block holding your result. "
@@ -1487,7 +1586,13 @@ _BOUNDED_RETRY_CLASSES = ("transport", "early_death", "cap_exhausted", "timeout"
                           # real tool calls — the bounded (tool-progress) ladder is the
                           # right re-drive channel; never Q4 (zero-calls evidence is the
                           # wrong proof here) and never beyond the ONE bounded re-drive.
-                          "malformed_turn")
+                          "malformed_turn",
+                          # lease-busy (2026-10-03 field evidence): the child lost the
+                          # session-lease race — the CLI waited it out, refused to process
+                          # the message, and exited 130. A transient collision, not a
+                          # verdict on the work: exactly ONE bounded re-drive as a FRESH
+                          # session (see _is_lease_busy for the two-fact pin).
+                          "lease_busy")
 _BOUNDED_RETRY_BACKOFF = 5.0
 RESUME_LINE = "Do not redo finished work; continue from the state above."
 
@@ -1661,7 +1766,19 @@ ERROR_CLASSES = frozenset(("provider_400", "unresolved_model", "cap_exhausted",
                            # lane carries a proved-alive receipt for another model —
                            # post-admission route substitution is a denial, never a
                            # silent re-billing (runs 20261004-070649-zap-night-*).
-                           "route_substitution_denied"))
+                           "route_substitution_denied",
+                           # lease-busy: rc=130 death on the CLI's session-lease wait
+                           # (see _is_lease_busy) — bounded transient, one FRESH-session
+                           # re-drive, never terminal on a lease collision.
+                           "lease_busy",
+                           # est-pygyy (#56): a node declaring `effects` effect-receipt
+                           # postconditions committed failed because the runner could
+                           # not PROVE them at the commit edge (artifact missing/empty/
+                           # digest-mismatch under the run dir). A proven-fail: never
+                           # retryable — the same graph dies identically until the
+                           # artifact actually lands; the run never reaches run.done
+                           # over a false publication.
+                           "effect_receipt"))
 _AGENT_FAIL_PREFIX = "hermes -z: agent failed:"
 # turn_failure_copy.py ends every non-retryable failure with a fixed-format trailer
 # `Provider said: <summary>`; api_error_summary.py:49 formats the summary as
@@ -2130,6 +2247,38 @@ _CONFIG_INPUT_WINDOW_MS = 1000
 _CONFIG_INPUT_TOKENS = ("unknown provider", "not a known provider",
                         "provider not found", "no provider named")
 
+# ---------- lease-busy: a session-lease collision is transient, never terminal ----------
+# Field evidence (Oct-3, two runs): a freshly spawned review child printed
+#   `Session <id> found but has no messages. Starting fresh.`
+#   `Stopped waiting for another Hermes process on this session. Your message was not processed.`
+# and exited rc=130 after ~1800 s — the CLI's own turn-lease wait timed out against a
+# Hermes process already holding that session (agent/turn_facade_lease.py emits this
+# verbatim fail-closed notice; the 130 is the CLI's lease-timeout exit). Nothing of the
+# child's work ever started, so `unknown` made the node terminal on a pure collision.
+# Two facts must BOTH hold — neither alone is sufficient (mirrors the est-tmuu law):
+#   1. the child exited with the CLI's lease-wait code, rc == 130 (runner-known);
+#   2. its merged capture carries the CLI's verbatim lease-refusal notice (the child
+#      never processed the message — a fact the CLI itself asserts, not prose we grep
+#      for sentiment).
+# The consequence is the #5 BOUNDED channel: ONE re-drive as a FRESH session (next
+# attempt key, never --continue of the busy one — the prior session is someone else's
+# lease). A harvestable fenced answer outranks this class (the #4 harvest law runs
+# first), so a lease death that somehow printed a real answer still commits partial.
+LEASE_BUSY_RC = 130
+LEASE_BUSY_TOKEN = "stopped waiting for another hermes process on this session"
+
+def _is_lease_busy(rc, out):
+    """(bool, marker-line) — True only when BOTH lease-busy facts hold: the child
+    exited rc == LEASE_BUSY_RC (130) AND its capture carries the CLI's verbatim
+    lease-refusal notice. Returns (False, None) otherwise; the caller keeps the
+    existing classification exactly."""
+    if rc != LEASE_BUSY_RC:
+        return False, None
+    for l in (out or "").splitlines():
+        if LEASE_BUSY_TOKEN in l.strip().lower():
+            return True, l.strip()
+    return False, None
+
 def _classify_config_input(out, ms):
     """(bool, marker) — True only when BOTH est-tmuu facts hold: the child died
     within _CONFIG_INPUT_WINDOW_MS of spawn AND its capture carries a
@@ -2533,6 +2682,23 @@ def _log_recent(lp, created):
         return False
     return st.st_mtime > created + 1e-6 and time.time() - st.st_mtime <= _LOG_ACTIVITY_WINDOW_S
 
+def _session_recent(run, title, home=None):
+    """est-2ek.1.595: the second EXTEND-NOT-KILL witness. A oneshot -Q child
+    block-buffers stdout, so its spawn log can stay frozen while it works (two
+    maintain children died at the exact wall with live inference sockets); its OWN
+    sessions row — title `<skey>#a<attempt>`, the --continue key — keeps moving in
+    state.db. True only when THAT row's last_activity_at is within the activity
+    window; no key, no db, no row, or another attempt's row proves nothing."""
+    if not title:
+        return False
+    skey = str(title).split("#a", 1)[0]
+    try:
+        row = child_metrics(Path(run).name, home).get(skey, {}).get("sessions", {}).get(title)
+    except Exception:
+        return False
+    la = (row or {}).get("last_activity")
+    return isinstance(la, (int, float)) and time.time() - la <= _LOG_ACTIVITY_WINDOW_S
+
 FIRST_MESSAGE_S = 120  # run-level default; NEVER an author key (tier law)
 
 def _first_message_s(meta):
@@ -2598,14 +2764,63 @@ def _proof_of_life(lp, proc, hb, tree_pids):
 # <seats>/.lock. A ticket whose pids are all verifiably dead is pruned at acquire.
 SEATS_DEFAULT = 4
 
+def _seat_cap_from_env_files():
+    """Operator-set WORKFLOW_MAX_SEATS from the Hermes .env files (est-gxjh6).
+
+    A long-lived runner inherits the ENVIRONMENT OF THE PROCESS THAT LAUNCHED it
+    — a cap set in ~/.hermes/.env (or a profile .env) after the serve process
+    booted is INVISIBLE to os.environ.get for the runner's whole life. Read the
+    files fresh at every cap decision so the fleet knob lands without a restart.
+    The parse is a deliberate subset: plain KEY=VALUE lines, one optional
+    `export ` prefix, `#` comments, blank lines; one-layer quotes. Anything odd
+    falls through — an unreadable/absent .env is absent, never fatal."""
+    try:
+        home = wfcommon.hermes_home()
+    except Exception:
+        return None
+    cands = []
+    prof = os.environ.get("HERMES_PROFILE", "").strip()
+    if prof and re.fullmatch(r"[A-Za-z0-9._-]+", prof):
+        cands.append(home / "profiles" / prof / ".env")
+    cands.append(home / ".env")
+    for f in cands:
+        try:
+            txt = f.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for line in txt.splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            if line.startswith("export "):
+                line = line[7:].lstrip()
+            k, _, v = line.partition("=")
+            if k.strip() != "WORKFLOW_MAX_SEATS":
+                continue
+            v = v.split(" #", 1)[0].strip().strip("\"'")
+            try:
+                n = int(v)
+            except ValueError:
+                continue
+            if n < 0:
+                continue
+            return n
+    return None
+
 def _max_seats(meta):
     v = meta.get("max_seats")
     if isinstance(v, int) and not isinstance(v, bool):
         return v
-    try:
-        return int(os.environ.get("WORKFLOW_MAX_SEATS", SEATS_DEFAULT))
+    try:                                            # explicit env wins (export/CLI shape)
+        e = os.environ.get("WORKFLOW_MAX_SEATS")
+        if e is not None:
+            return int(e)
     except ValueError:
-        return SEATS_DEFAULT
+        pass
+    f = _seat_cap_from_env_files()                  # else read the .env fresh (est-gxjh6)
+    if f is not None:
+        return f
+    return SEATS_DEFAULT
 
 def _seats_dir():
     d = os.environ.get("WF_SEATS_DIR", "")
@@ -4094,9 +4309,11 @@ def _adopt_child(meta, node, byid, index, child, schema, fo_cancel=None):
                 _tree_watch(handle, tree_seen)
                 tree_next_watch = now_s + PROCREE_POLL_S
             if now_s >= deadline and not extended and not meta["_stop"].is_set() \
-                    and _log_recent(lp, 0):
+                    and (_log_recent(lp, 0)
+                         or _session_recent(run, child.get("skey"), _profile_evidence(node).get("profile_home"))):
                 # EXTEND-NOT-KILL (#11), adoption form: a still-writing orphan gets
-                # ONE +50% grace; a silent one dies — the cap is total wall.
+                # ONE +50% grace (its spawn log OR its own state.db session row still
+                # moving — est-2ek.1.595); a silent one dies — the cap is total wall.
                 extra_s = round(wall * 0.5) if wall else 0
                 log(run, "node.extended", node=nid, extra_s=extra_s, adopted=True)
                 deadline += extra_s or 1
@@ -4287,6 +4504,9 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
     # est-2ek.1.641: BEFORE submit — a lane with a proved-alive receipt may
     # never re-submit on a different model (post-admission substitution is a
     # denial, not a fallback). The seat is never touched: zero attempts.
+    # route-hold escalation (w56): a re-drive whose run already died on the
+    # route family clears the contradicted receipt at this same seam, first.
+    _stale_route_receipt_clear(meta, node, spawn_no)
     _rsd = _route_substitution_refusal(meta, node, spawn_no)
     if _rsd is not None:
         log(run, "node.route_substitution_denied", node=node["id"], index=index,
@@ -4560,10 +4780,35 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
                             "error_class": "cancelled", "ms": 0, **route}
                 tokens.append(token)     # registered BEFORE Popen — a spawn that
                                          # dies mid-launch still owns its survivors
-                proc = subprocess.Popen(cmd, stdout=logf, stderr=subprocess.STDOUT,
-                                        stdin=subprocess.DEVNULL, env=env, text=True,
-                                        cwd=wd,
-                                        start_new_session=True)  # own pgid: a timeout kill can
+                # est-ulwpg (witness 20261009-072611-fb-closeout-batch): the wd
+                # snapshot above is captured BEFORE the seat wait; an external
+                # sweeper can prune <run>/work/<node> while this spawn sits on
+                # a contended seat, and Popen then dies ENOENT-on-cwd as a typed
+                # error_class=spawn death (ms=0, attempts=1, no retry). (a) RE-ENSURE
+                # the cwd HERE — inside the _procs_lock section, immediately before
+                # Popen: child_work_dir's mkdir(parents=True, exist_ok=True) is
+                # idempotent, so this is free when nothing deleted the dir. (b) If
+                # the deleater still wins the instant before exec — Popen raises
+                # OSError ENOENT whose filename IS the cwd — re-create wd once and
+                # retry the Popen EXACTLY once in this same lock section. Any other
+                # error (a missing hermes_bin is ENOENT too, filename==argv[0])
+                # re-raises untouched and keeps the typed launcher failure below.
+                def _popen_child(cwd_path):
+                    return subprocess.Popen(cmd, stdout=logf, stderr=subprocess.STDOUT,
+                                            stdin=subprocess.DEVNULL, env=env, text=True,
+                                            cwd=cwd_path,
+                                            start_new_session=True)  # own pgid: a timeout kill can
+                _child_cwd = str(child_work_dir(run, node, index))   # THE re-ensure
+                try:
+                    proc = _popen_child(_child_cwd)
+                except OSError as _pe:
+                    _fn = str(getattr(_pe, "filename", "") or "")
+                    if (getattr(_pe, "errno", None) == errno.ENOENT
+                            and _fn and _fn in (wd, _child_cwd)):
+                        _child_cwd = str(child_work_dir(run, node, index))
+                        proc = _popen_child(_child_cwd)   # second failure = typed, as before
+                    else:
+                        raise
                 # est-g255 r2 R3: once Popen returns, the child belongs to the
                 # cleanup owner: register + heartbeat-path setup complete INSIDE
                 # this try — a fault at either reaps the child, deregisters and
@@ -4700,13 +4945,18 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
                 else:
                     early_death = True
             if not early_death and now_s >= deadline and not extended \
-                    and not meta["_stop"].is_set() and _log_recent(lp, log_created):
+                    and not meta["_stop"].is_set() \
+                    and (_log_recent(lp, log_created)
+                         or _session_recent(run, f"{skey}#a{attempt}" if skey else None, cue_home)):
                 # EXTEND-NOT-KILL (#11): a child whose log shows a write within the
-                # last 120 s is working, not hung — grant ONE extension of 50% of the
-                # wall (node.extended); the second expiry kills.
+                # last 120 s — or, for a block-buffered oneshot -Q child whose log never
+                # moves, whose own state.db session row moved in that window
+                # (est-2ek.1.595) — is working, not hung: grant ONE extension of 50% of
+                # the wall (node.extended); the second expiry kills.
                 extended = True
                 extra_s = round(timeout_s * 0.5) or 1
-                log(run, "node.extended", node=node["id"], extra_s=extra_s)
+                log(run, "node.extended", node=node["id"], extra_s=extra_s,
+                    **({} if _log_recent(lp, log_created) else {"basis": "session"}))
                 timeout_s += extra_s
                 deadline += extra_s
                 continue
@@ -4880,6 +5130,22 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
                              f"provider message below; amend the node to a live model instead "
                              f"of waiting. Marker: {marker}",
                     "error_class": "fatal_quota", "raw": (out or "")[-2000:], "ms": ms,
+                    "final": final_reply, **sk, **evd}
+        lb, lb_marker = _is_lease_busy(rc, out)
+        if lb:
+            # lease-busy: the CLI's own fail-closed lease notice + its lease-wait exit
+            # code — a collision with another Hermes process on this session, never a
+            # verdict on the work. Typed failed here; the #5 bounded ladder re-drives
+            # it ONCE as a FRESH session (see _bounded_retry). Ranks AFTER the #4
+            # harvest (an answer that made it out still commits partial) and before
+            # the generic unknown/malformed_turn buckets, exactly like config_input
+            # claims its deterministic shape.
+            return {"status": "failed",
+                    "error": f"child exited rc={rc} on the CLI's session-lease wait — another "
+                             f"Hermes process held this session and the message was never "
+                             f"processed; one bounded re-drive as a fresh session follows. "
+                             f"Marker: {lb_marker}",
+                    "error_class": "lease_busy", "raw": (out or "")[-2000:], "ms": ms,
                     "final": final_reply, **sk, **evd}
         if eclass == "unknown" and _tool_call_as_text(final_reply or out or ""):
             # est-2ek.1.541 malformed turn: the rc!=0 death whose reply IS serialized
@@ -5356,11 +5622,29 @@ def _route_hold(meta, result, node=None, final_served=None):
     neither the verified route, an alias of it, nor the node's own resolved model
     means the child billed someone else: failed, error_class=route_unavailable.
     Unknown served (no state.db row) is NOT a mismatch — the runner never invents
-    'known' from absence (R2 law)."""
+    'known' from absence (R2 law).
+    route-hold escalation (w56): the opt-out this hold's OWN error text advertises
+    (`require_route: false`) is HONORED here — node key > graph `defaults` (same
+    precedence as the door's _require_route_effective). A node whose author
+    accepts fallback commits its completed output instead of losing it to
+    route_unavailable, and the contradicted proof is dropped from the def so no
+    later probe re-fires against it. Without the key: #25 behavior byte-identical."""
     node = node or {}
     verified = node.get("route_verified")
     if not verified or result.get("status") not in ("done", "partial"):
         return result       # never mask a genuine death with the hold
+    rq = node.get("require_route")
+    if rq is None:
+        try:
+            rq = (json.loads((meta.get("_run") / "graph.json").read_text())
+                  .get("defaults") or {}).get("require_route")
+        except Exception:
+            rq = None
+    if rq is None or rq is True:
+        pass
+    elif not rq:
+        node.pop("route_verified", None)      # the opted-out proof is void going forward
+        return result
     served = result.get("served_model")
     if not served:
         return result                                    # unknown: never counted
@@ -5405,17 +5689,26 @@ def _bounded_retry(meta, r, respawn, ev, ev_kw, node=None, index=None):
     its sessions row exists but NO message rows do, the resume is a pretense —
     the re-drive takes the harvest preamble (banked work dir + cleaned log
     tail) instead of the resume preamble, and node.retry + attempts_log stamp
-    fresh_session. Absent evidence (None) keeps the resume path."""
+    fresh_session. Absent evidence (None) keeps the resume path.
+    lease-busy exception: the CLI's own notice PROVES the prior attempt never
+    processed the message, so the tool-progress gate (which exists to avoid
+    replaying AMBIGUOUS partial work) cannot apply — a spawn that provably
+    never started has nothing to duplicate. lease_busy deaths therefore skip
+    the progress gate, always take the harvest preamble (dead=True — never
+    --continue the still-busy session), and log the machine-wait event
+    `node.retrying error_class=lease_busy` before the 5 s wait."""
     run = meta["_run"]
     if r.get("status") != "failed" or r.get("harvest"):
         return r
     eclass = r.get("error_class")
     if eclass not in _BOUNDED_RETRY_CLASSES:
         return r
+    lease = (eclass == "lease_busy")
     progress = (_tool_progress(run, r.get("skey"), r.get("raw"), r["profile_home"])
                 if r.get("profile_home") else _tool_progress(run, r.get("skey"), r.get("raw")))
-    if meta["_stop"].is_set() or not progress:
-        return r                                   # no positive progress evidence: fail closed
+    if meta["_stop"].is_set() or not (progress or lease):
+        return r          # no positive progress evidence: fail closed (lease: the death
+                         # fact itself is the evidence — the message was never processed)
     if meta["_stop"].is_set():
         return r
     # jam-h22/h30: a rate-limited death waits a FULL-JITTER draw (cap 5 s) before
@@ -5426,6 +5719,10 @@ def _bounded_retry(meta, r, respawn, ev, ev_kw, node=None, index=None):
         delay = random.uniform(0, _BOUNDED_RETRY_BACKOFF)
     else:
         delay = _BOUNDED_RETRY_BACKOFF
+    if lease:
+        # machine-wait event (ratelimit-park shape): the collision is named BEFORE
+        # the wait so a cold reader sees why the node went quiet for 5 s.
+        log(run, ev + ".retrying", error_class=eclass, backoff_s=delay, **ev_kw)
     if meta["_stop"].wait(delay) or meta["_stop"].is_set():
         return r
     with meta["_procs_lock"]:
@@ -5445,13 +5742,20 @@ def _bounded_retry(meta, r, respawn, ev, ev_kw, node=None, index=None):
         return iso
     # #102: dead (empty) session evidence — False is the pretense-resume shape,
     # True keeps today's resume, None (unavailable) never flips the path.
-    dead = False
-    if node is not None:
+    # lease_busy FORCES dead=True: the CLI's notice proves the message was never
+    # processed, so resuming that session is a pretense whatever state.db says —
+    # and the session itself may still belong to the OTHER process' lease. The
+    # re-drive always takes the harvest preamble under a fresh skey (#a{n+1}).
+    dead = bool(lease)
+    if node is not None and not dead:
         sess = (_session_has_messages(r.get("skey"), r["profile_home"])
                 if r.get("profile_home") else _session_has_messages(r.get("skey")))
         dead = (sess is False)
     log(run, ev + ".retry", error_class=eclass,
-        reason=(f"bounded auto-retry: {eclass} with tool progress — one re-drive as a FRESH "
+        reason=(f"bounded auto-retry: {eclass} — session-lease collision (message never "
+                f"processed); one re-drive as a FRESH session, never --continue the busy one"
+                if lease else
+                f"bounded auto-retry: {eclass} with tool progress — one re-drive as a FRESH "
                 f"session (prior session persisted no messages — #102)" if dead else
                 f"bounded auto-retry: {eclass} with tool progress — one machine-resume re-drive"),
         **ev_kw, **({"fresh_session": True} if dead else {}))
@@ -5859,6 +6163,7 @@ def run_agent_node(run, meta, byid, node, outputs, steering):
                                       "error_class": "item_record",
                                       "record_problems": problems,
                                       "output": {"items": merged, "all_results": results}}
+                merged_rec = _effect_gate(run, node, merged_rec)  # #56: receipts proven at commit
                 save_node(run, node, byid, merged_rec)
                 if merged_rec["status"] == "done":
                     log(run, "node.finished", node=nid, done=len(merged), failed=len(failed),
@@ -5882,6 +6187,7 @@ def run_agent_node(run, meta, byid, node, outputs, steering):
             r = _final_quiesce(meta, r, "node", {"node": nid})   # #61: never commit over a live tree
             r = _stamp_served(meta, r, node)   # dad50be0: seat truth at the commit, never the alias
             r = _lane_gate(run, node, r)   # 64c6772b: a declared lane must be clean at commit
+            r = _effect_gate(run, node, r)  # #56: declared effect receipts must be PROVEN at commit
             save_node(run, node, byid, r)
             if r["status"] in ("done", "partial"):   # #4: a harvested partial IS committed output
                 # #61b B3: when the tracked tree set was non-empty, the solo
@@ -6636,7 +6942,16 @@ def main(run_id):
                     _fail_precondition(run, n, rs.byid, [why])
                     states[n["id"]] = "failed"
                     continue
-                save_node(run, n, rs.byid, {"status": "done", "output": n.get("output"), "ms": 0})
+                # est-pygyy (#56): the receipt gate rides the echo commit path too
+                # (same boundary-commit law as the publisher gate above).
+                _erec = _effect_gate(run, n, {"status": "done", "output": n.get("output"),
+                                              "ms": 0})
+                save_node(run, n, rs.byid, _erec)
+                if _erec["status"] != "done":
+                    log(run, "node.failed", node=n["id"], error=_erec["error"],
+                        error_class="effect_receipt", attempts=0)
+                    states[n["id"]] = "failed"
+                    continue
                 log(run, "node.done", node=n["id"], echo=True)
                 states[n["id"]] = "done"; outputs[n["id"]] = n.get("output")
 
@@ -6933,16 +7248,6 @@ def main(run_id):
         except Exception: pass
     if reason is not None:
         write_runner_exit(run, reason, graph=exit_graph[0])
-        # A registered roll-last install is deliberately NOT a spawned agent
-        # child: those are killed with the runner. Sweep before handing off to
-        # launchd (or its detached fallback), then author a durable receipt in
-        # the run dir. A failed handoff stays RED for the nightly readback gate.
-        _runner_term_cleanup(meta, "post_exit_handoff")
-        try:
-            from post_exit_hook import dispatch as dispatch_post_exit_hook
-            dispatch_post_exit_hook(run, reason)
-        except Exception as e:
-            log(run, "runner.post_exit_hook_error", error=repr(e))
     return reason
 
 def finalize(run, graph, status):
