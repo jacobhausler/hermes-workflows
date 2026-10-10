@@ -1144,6 +1144,101 @@ def _effect_gate(run, node, rec):
                "output": rec.get("output"), "ms": rec.get("ms")}
     return rec
 
+# ---------- bead-close read-back gate (est-13z1) ----------
+# The incident (run 20261008-013428-ra-pr-deep-283, node reconcile): the child's
+# answer claimed "est-o90l closed"; the node committed done, run.done fired, and
+# the bd read-back right after said the bead was still in_progress — an open
+# tracker nobody owns, exactly the false-locator class est-ym08 AC-3 refuses for
+# artifacts. Prompt law cannot fix this (the assignee guard makes an honest-
+# looking false claim easy to emit), so the RUNNER owns the check, same law as
+# the effect-receipt gate above and the lane gate: when a node whose purpose is
+# closing a bead CLAIMS closure, the runner reads the estate store ITSELF
+# (`bd -C <store> show <id> --json`, fixed argv through _aux_run) and records the
+# measured row as `bead_close_receipt`. Anything but an observed
+# status == "closed" demotes done/partial to failed error_class "bead_close" —
+# a proven-fail, deliberately absent from both retry ladders. The runner NEVER
+# fabricates an ok row and NEVER anchors to the child's prose: a reply carrying
+# `close-pending` is the honest non-claim (the lane-child law: return
+# 'close-pending: <reason>' and never claim closure), so no claim, no read, and
+# the record is untouched. Honest degradation: no `bead_close` key = every
+# existing graph byte-identical (golden EMPTY).
+
+_BEAD_PENDING_RE = re.compile(r"close[-_ ]?pending", re.I)
+
+def _declares_close_pending(out):
+    """True when the committed output carries the honest non-claim token —
+    `close-pending` (in any key, in prose, anywhere in the serialized reply).
+    The BEAD LAW tells a blocked child to return 'close-pending: <reason>'
+    and NEVER claim closure: nothing was asserted, so there is nothing to
+    read back — the record stays pristine and the store is never probed."""
+    if out is None:
+        return False
+    try:
+        blob = out if isinstance(out, str) else json.dumps(out, ensure_ascii=False, default=str)
+    except Exception:
+        blob = str(out)
+    return bool(_BEAD_PENDING_RE.search(blob))
+
+def _bead_close_gate(run, node, rec):
+    decl = node.get("bead_close")
+    if not isinstance(decl, dict) or rec.get("status") not in ("done", "partial"):
+        return rec                        # undeclared / non-committing: untouched
+    if _declares_close_pending(rec.get("output")):
+        return rec                        # honest non-claim: no read, record pristine
+    # Declared node committing without the honest escape: the runner verifies
+    # the store ITSELF — whether or not the output claims closure (test_d:
+    # closed-without-claim still PASSes from the read-back; the check anchors
+    # to the store, never to the prose).
+    bid = str(decl.get("id", "")).strip()
+    store = str(decl.get("store", "")).strip()
+    row = {"store": store, "id": bid, "actor": decl.get("actor"),
+           "observed_status": None, "assignee": None, "probe_rc": None, "ok": False}
+    try:
+        # #80 R3 / #61c: the runner's OWN probe goes through _aux_run (registered
+        # pid, bounded, own process group) with the fixed bd read-back argv.
+        p = _aux_run(["bd", "-C", store, "show", bid, "--json"], timeout=10)
+        row["probe_rc"] = p.returncode
+        if p.returncode == 0:
+            found = None
+            try:
+                parsed = json.loads(p.stdout)
+            except Exception:
+                parsed = None
+            rows = parsed if isinstance(parsed, list) else [parsed] if isinstance(parsed, dict) else []
+            for cand in rows:
+                if isinstance(cand, dict) and cand.get("id") == bid:
+                    found = cand
+                    break
+            if found is not None:
+                row["observed_status"] = found.get("status")
+                row["assignee"] = found.get("assignee")
+        if row["observed_status"] == "closed":
+            row["ok"] = True
+            reason = ""
+        elif row["observed_status"] is not None:
+            reason = f"observed status {row['observed_status']!r} in the store"
+        elif row["probe_rc"] == 1:
+            reason = "bead not found in the store (bd exit 1)"
+        elif row["probe_rc"] is None:
+            reason = "store read-back could not run"
+        else:
+            reason = f"store read-back unparseable (bd exit {row['probe_rc']})"
+    except Exception as e:
+        reason = f"store read-back could not run: {type(e).__name__}"
+    rec = dict(rec, bead_close_receipt=row)
+    if not row["ok"]:
+        rec = {"status": "failed",
+               "error": f"bead_close_unproven: {bid}: {reason} — the node's output "
+                        "claims the bead was closed; the runner read the estate "
+                        "store itself and it is not closed (assignee "
+                        f"{row['assignee']!r}). Close it with --actor matching the "
+                        "assignee, or return 'close-pending: <reason>' and never "
+                        "claim closure.",
+               "error_class": "bead_close",
+               "bead_close_receipt": row,
+               "output": rec.get("output"), "ms": rec.get("ms")}
+    return rec
+
 # ---------- child execution ----------
 
 CONTRACT = ("Finish your answer with ONE fenced ```json block holding your result. "
@@ -1626,6 +1721,32 @@ LANE_HYGIENE_LINES = (
 )
 LANE_HYGIENE_TOKEN = LANE_HYGIENE_LINES[0]   # the gate token tests grep for
 
+# est-13z1: the BEAD LAW for drain-wave children — prompt-side ONLY (the runner
+# never trusts it: a claimed closure is read back from the store at the commit
+# edge by _bead_close_gate). Rendered as a GOAL SUFFIX (the goal keeps line 1;
+# nothing from '## Inputs' onward changes), so the fan-out identity law holds.
+# Only nodes carrying a `bead_close` declaration pay the bytes.
+BEAD_LAW_LINES = (
+    "## Bead-close law (machine preamble)",
+    "- A bead is CLOSED only when `bd -C <store> show <id> --json` reads back "
+    "`status: closed` — your prose, the wave summary, or a `bd close` tool result "
+    "are not proof. Read the bead back after closing and paste the read-back.",
+    "- Close with `--actor` matching the bead's current assignee (the dispatching "
+    "bot); a close attempt whose actor differs from the assignee is refused by the "
+    "store's assignee guard. Check `assignee` from `bd show` BEFORE choosing the actor.",
+    "- If you cannot close (guard refused, owner decision, another bot's seat): "
+    "return `close-pending: <reason>` in your answer and NEVER claim the bead was "
+    "closed. The runner reads the store itself at commit — a `closed` claim the "
+    "store contradicts fails the node with error_class `bead_close`.",
+)
+BEAD_LAW_TOKEN = BEAD_LAW_LINES[0]   # the gate token tests grep for
+
+def _bead_law_preamble(node):
+    """BEAD LAW preamble for nodes declaring a `bead_close` (\"\" otherwise).
+    Prompt-side only — never written to graph.json or a node record, so def-hash
+    is neutral; the enforcement is the commit-edge read-back, not these bytes."""
+    return "\n".join(BEAD_LAW_LINES) if isinstance(node.get("bead_close"), dict) else ""
+
 def _is_build_lane(node):
     """The build shape: `shape: "build"` declared, or a `repo:` lane declared (the
     64c6772b lane-gate surface). DEFAULT_SHAPE fills budgets, never this law:
@@ -1727,6 +1848,12 @@ ERROR_CLASSES = frozenset(("provider_400", "unresolved_model", "cap_exhausted",
                            "incomplete_work", "early_death", "cancelled",
                            "schema", "spawn", "inputs",
                            "quorum", "fanout_empty", "crashed", "unknown",
+                           # est-13z1: the node's output claims an estate bead was
+                           # closed; the runner read the store itself (`bd show`)
+                           # and it is NOT closed. A proven-fail like
+                           # effect_receipt/lane_wreckage — never retried, since
+                           # the store says what it says.
+                           "bead_close",
                            # est-2ek.1.660: a (re-)drive refused at startup because a
                            # declared lane still carries the dead attempt's
                            # uncommitted TRACKED wreckage — bank it, then re-drive.
@@ -4529,7 +4656,14 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
     preamble = "\n\n".join(p for p in (_lane_hygiene_preamble(node),
                                         _respawn_effects_preamble(run, meta, byid, node),
                                         resume_preamble) if p)
-    prompt = ((preamble + "\n\n" + goal) if preamble else goal) + ("\n\n" + context if context else "")
+    # est-13z1: the BEAD LAW rides as a GOAL SUFFIX, never a prefix — the goal
+    # keeps line 1 (spawn-counting/first-line tools and item identity rely on
+    # the goal's own opening), and everything from '## Inputs' onward stays
+    # byte-identical across fan-out items, same law as WORK_DIR_NOTE.
+    _bl = _bead_law_preamble(node)
+    prompt = ((preamble + "\n\n" + goal) if preamble else goal) \
+        + (("\n\n" + _bl) if _bl else "") \
+        + ("\n\n" + context if context else "")
     # A4: the runner states each child's durable work dir (replaces the old
     # write-first authoring rule). It lands in the GOAL half, before '## Inputs':
     # the fan-out identity law holds everything from '## Inputs' onward
@@ -6164,6 +6298,7 @@ def run_agent_node(run, meta, byid, node, outputs, steering):
                                       "record_problems": problems,
                                       "output": {"items": merged, "all_results": results}}
                 merged_rec = _effect_gate(run, node, merged_rec)  # #56: receipts proven at commit
+                merged_rec = _bead_close_gate(run, node, merged_rec)  # est-13z1: a claimed close in ANY item output is read back from the store at commit
                 save_node(run, node, byid, merged_rec)
                 if merged_rec["status"] == "done":
                     log(run, "node.finished", node=nid, done=len(merged), failed=len(failed),
@@ -6188,6 +6323,7 @@ def run_agent_node(run, meta, byid, node, outputs, steering):
             r = _stamp_served(meta, r, node)   # dad50be0: seat truth at the commit, never the alias
             r = _lane_gate(run, node, r)   # 64c6772b: a declared lane must be clean at commit
             r = _effect_gate(run, node, r)  # #56: declared effect receipts must be PROVEN at commit
+            r = _bead_close_gate(run, node, r)  # est-13z1: a claimed bead close must be READ BACK from the store at commit
             save_node(run, node, byid, r)
             if r["status"] in ("done", "partial"):   # #4: a harvested partial IS committed output
                 # #61b B3: when the tracked tree set was non-empty, the solo
@@ -6946,10 +7082,11 @@ def main(run_id):
                 # (same boundary-commit law as the publisher gate above).
                 _erec = _effect_gate(run, n, {"status": "done", "output": n.get("output"),
                                               "ms": 0})
+                _erec = _bead_close_gate(run, n, _erec)   # est-13z1: an echo's close claim is read back too
                 save_node(run, n, rs.byid, _erec)
                 if _erec["status"] != "done":
                     log(run, "node.failed", node=n["id"], error=_erec["error"],
-                        error_class="effect_receipt", attempts=0)
+                        error_class=_erec.get("error_class", "effect_receipt"), attempts=0)
                     states[n["id"]] = "failed"
                     continue
                 log(run, "node.done", node=n["id"], echo=True)
