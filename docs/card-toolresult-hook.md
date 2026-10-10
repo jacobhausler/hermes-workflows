@@ -105,24 +105,56 @@ ctx.register({
   id: 'tool-result-card',
   area: TOOL_RESULT_AREA,
   data: {
-    // keyed on toolset + action + result shape: only our run-launch payload
-    claim: r => r.toolName === 'workflow' && r.args?.action === 'run' &&
-                typeof r.result?.run_id === 'string' && typeof r.result?.card === 'string',
-    render: r => jsx(DirectiveCard, { id: String(r.result.run_id) })
+    // The tool hands back a JSON STRING (`json.dumps(fn(args))`), and upstream's
+    // `upsertToolPart` preserves whatever the handler returned. Normalize first:
+    // match on an object, never on the raw part.result.
+    claim: r => {
+      if (r.toolName !== 'workflow' || r.args?.action !== 'run') return false
+      const res = typeof r.result === 'string' ? _safeJson(r.result) : r.result
+      return !!res && typeof res.run_id === 'string' && typeof res.card === 'string'
+    },
+    render: r => {
+      const res = typeof r.result === 'string' ? _safeJson(r.result) : r.result
+      return jsx(OwnerGatedCard, { id: String(res.run_id) })
+    }
   }
 })
-```
 
-Gated in the render on `run.json owner.session_id == viewing session` exactly
-as `SessionStrip` already pairs `host.state.focusedSessionId` /
-`focusedStoredSessionId`, so a card only mounts in the owning chat.
+// string -> object, never throws (a non-JSON result simply never claims)
+function _safeJson(s) { try { return JSON.parse(s) } catch { return null } }
+
+// The OWNERSHIP GUARD is ours to supply, NOT DirectiveCard's: DirectiveCard is
+// only an id-validity check plus DirectiveBody — it has no owner/session logic
+// (`DirectiveCard` at desktop/plugin.js ~415: `if (!ID_OK.test(id)) … else
+// DirectiveBody`). A bare DirectiveCard mounted from a tool-result slot would
+// render a FOREIGN-owner run's card in whatever chat happened to settle that
+// tool part. Gate on `run.json owner.session_id == viewing session` exactly as
+// the tray does: `ownedRuns` (desktop/plugin.js ~697) pairs
+// `owner.session_id === sid` / `owner.ui_session_id === uiSid` against
+// `host.state.focusedSessionId` / `focusedStoredSessionId` via the
+// feature-detected `focusAtom`s — reuse that pairing here (fetch through the
+// same `runQuery(id)` and render nothing until the run resolves AND is owned).
+function OwnerGatedCard({ id }) {
+  const runtimeSid = useValue(focusAtom(host?.state?.focusedSessionId))
+  const storedSid = useValue(focusAtom(host?.state?.focusedStoredSessionId))
+  const { data } = useQuery(runQuery(id))
+  if (!data || !ownedRuns([data], storedSid, runtimeSid).length) return null
+  return jsx(DirectiveCard, { id })
+}
+```
 
 ## Plugin-side readiness
 
-The door already returns `{run_id, models, routes, hint, card,
-lifecycle_notice}` on `action=run` (and `lifecycle_notice` on lane-key
-dedupe), so the result-shape key above (`result.run_id && result.card`) is
-stable contract, pinned by `tests/test_card_notice_157.py` and
-`tests/test_card_backend_080.py`. If upstream lands the hook, the plugin adds
-only the registration block plus a pure matcher pin; nothing here needs to
-change first, and the paste path is never removed.
+The door returns `{run_id, models, routes, hint, card, lifecycle_notice}` on
+`action=run` — that fresh payload is what `tests/test_card_notice_157.py` and
+`tests/test_card_backend_080.py` pin, so on a FRESH launch the shape key above
+(`result.run_id && result.card`) is stable contract. It is NOT stable across
+every settled tool-result record the renderer will see: the lane-key dedupe
+payload returns `lifecycle_notice` WITHOUT `card`, and persisted pre-#161
+records likewise carry no `card`. The matcher's `typeof result?.card ===
+'string'` clause therefore claims nothing on those records — correct behavior
+(the dedupe still owes the paste, and the paste path is never removed), but it
+means the hook covers fresh launches only. So, if upstream lands the hook, the
+plugin-side delta is: the registration block above (JSON normalization +
+`OwnerGatedCard` ownership guard) plus a pure matcher pin; the door and the
+backend payload need no change, and the paste path is never removed.

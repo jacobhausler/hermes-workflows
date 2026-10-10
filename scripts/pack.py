@@ -84,6 +84,10 @@ INCLUDE_FILES = (
     "dashboard/index.js",  # hidden API plugin still needs the web host's script/registration contract
     "dashboard/plugin_api.py",
     "desktop/plugin.js",
+    # est-k75i: the tool-result-card proposal doc ships with the package (the
+    # mandatory new-file pack-surface gate). Pinned by tests/test_packaging.py's
+    # ZIP-membership assertion — an unshipped doc is invisible to every install.
+    "docs/card-toolresult-hook.md",
     "examples/basics/approve-publish.json",
     "examples/review/blind-council.workflow.json",
     "examples/basics/branch-on-verdict.json",
