@@ -3021,12 +3021,17 @@ def _create_run(args, graph, lib_name, models, routes, _liveness_notes, lane_pat
     if concurrency_meta:
         meta.update(concurrency_meta)
     meta.update(_identity_stamps(args, graph, lib_name))   # 1.1: only derivable keys land
-    # est-2ek.1.166: a run that DECLARED a version requirement also reports the
-    # arming door's own truth (plugin.yaml via wfcommon.plugin_version), so a
-    # stale seat is visible from status without opening a run dir. Plain runs
-    # never gain the key (solo byte-identity law — the golden key set holds).
-    if graph.get("requires_plugin") is not None:
-        meta["plugin_version"] = _common.plugin_version()
+    # est-2ek.1.166 → ra-plan#125-1 (issue #125): EVERY run reports the arming
+    # door's own truth (plugin.yaml via wfcommon.plugin_version), not only runs
+    # that declared requires_plugin — a stale seat is visible from status for
+    # plain runs too, without opening a run dir. The stamp stays DERIVED, never
+    # invented (R2): an unreadable plugin.yaml ('') keeps the key absent, and
+    # act_status' derive-only echo therefore omits it exactly as before. The
+    # golden-solo comparison exempts this volatile provenance stamp (same
+    # sanctioned-delta precedent as `started`/`fp_rule_version` — est-ciin).
+    _pv = _common.plugin_version()
+    if _pv:
+        meta["plugin_version"] = _pv
     # Composite runs record which shelf bytes they expanded from (author-form
     # provenance) and any non-fatal resolver notes (scratch collisions). Empty =
     # key omitted: a plain run keeps the exact pre-include run.json key set.

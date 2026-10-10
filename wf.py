@@ -7026,8 +7026,43 @@ def main(run_id):
                 missing = _unmet_requires(n, outputs, prov) if n.get("requires") else []
                 if missing:
                     _fail_precondition(run, n, rs.byid, missing)
-                else:
-                    spawnable.append(n)
+                    continue
+                # est-xd3b (issue #132, runner slice): agent nodes HONOR when +
+                # on_skip — the gate-skip law at the same boundary: evaluated
+                # AFTER requires-unmet (an unmet hard dependency fails first,
+                # it is never laundered into a skip), BEFORE any spawn. A false
+                # predicate never spends a spawn or a token. on_skip: prune
+                # (default) commits the efp-stamped `skipped` rec + the
+                # agent.skipped event and the existing prune_states cascade
+                # arms the node's whole after-subtree; on_skip: pass commits
+                # `done` with the {agent: skipped} rec — the exact gate-skip
+                # pass-shape (wfcommon.run_state counts it done, downstream
+                # reads the marker). A BROKEN predicate FAILS SAFE: the node
+                # spawns and agent.when_error names the eval error (a node is
+                # never skipped by a failing assumption). Structurally-broken
+                # exprs never reach here — the door's bounded grammar refused
+                # them at submit (validator slice est-l2ey).
+                if n.get("when") is not None:
+                    _passed = True
+                    try:
+                        _passed = when_true(n, outputs)
+                    except Exception as _we:
+                        log(run, "agent.when_error", node=n["id"],
+                            error=f"{type(_we).__name__}: {_we}", when=n.get("when"))
+                    if not _passed:
+                        if str(n.get("on_skip", "prune")).lower() == "pass":
+                            save_node(run, n, rs.byid, {"status": "done",
+                                                       "output": {"agent": "skipped"},
+                                                       "ms": 0})
+                            log(run, "agent.skipped", node=n["id"], mode="pass")
+                            states[n["id"]] = "done"
+                            outputs[n["id"]] = {"agent": "skipped"}
+                        else:
+                            save_node(run, n, rs.byid, {"status": "skipped", "ms": 0})
+                            log(run, "agent.skipped", node=n["id"], mode="prune")
+                            states[n["id"]] = "skipped"
+                        continue
+                spawnable.append(n)
             if spawnable:
                 with ThreadPoolExecutor(max_workers=meta.get("concurrency", 4)) as ex:
                     list(ex.map(lambda n: run_agent_node(run, meta, rs.byid, n, outputs,

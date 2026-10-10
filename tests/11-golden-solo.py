@@ -59,6 +59,11 @@ def normalize(value, paths):
                                         # the est-2ek.1.765 fanout law COMMITTED the per-item records,
                                         # so their commit moment rides the record — volatile, like every
                                         # other wall clock in this set)
+                 'plugin_version',      # ra-plan#125-1/2 (est-ciin): unconditional provenance stamp —
+                                        # sanctioned delta like `started`: its VALUE is the repo's own
+                                        # plugin.yaml version (bumps every release), so pinning it would
+                                        # re-freeze a volatile; its PRESENCE is proven by the coarse
+                                        # tests/test_unconditional_version_stamp.py, not by the golden.
                  'session_id','ui_session_id'}}   # harness session stamp = owner provenance, volatile
     if isinstance(value, list):
         return [normalize(v, paths) for v in value]
@@ -209,7 +214,15 @@ def capture(root, after_save=None):
                     'list':listing, 'library':library,
                     'spawn_argv_env_keys':spawns,
                     'verdict':verdict,
-                    'run_json_keys':sorted(files['run.json'])}, paths)
+                    'run_json_keys':[k for k in sorted(files['run.json'])
+                                     if k != 'plugin_version'],     # est-ciin: same sanctioned delta —
+                                                                     # the frozen baseline predates the
+                                                                     # unconditional stamp; presence is
+                                                                     # proven by the coarse test
+                                                                     # (list entries are strings, so the
+                                                                     # dict-key exclusion alone can't
+                                                                     # drop a key NAME from this row)
+                    }, paths)
     return result
 
 

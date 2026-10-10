@@ -1341,8 +1341,13 @@
     "exit": 0
   },
   {
-    "test": "test_heartbeat_verdict_127.py",
+    "test": "test_unconditional_version_stamp.py",
     "exit": 0,
-    "log": "2026-10-10 local foreground run at PR #352 head 958b7a7 — Ran 13 tests OK, rc=0; RED at the test-only commit f18c889 on base 04e9bdd (10 errors); the PR adds this test without a CI row"
+    "log": "rows_added_outside_ci in PROVENANCE.json"
+  },
+  {
+    "test": "test_when_on_agent_engine.py",
+    "exit": 0,
+    "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_when_on_agent_engine.py.log"
   }
 ]

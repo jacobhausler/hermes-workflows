@@ -88,7 +88,12 @@ def main() -> None:
                       "examples/release/release-lifecycle.workflow.json", "examples/release/issue-to-pr.workflow.json", "examples/release/submit-pr.workflow.json", "references/portable.md",
                       "tests/test_packaging.py", "tests/test_fanout_ui.mjs", "tests/test_card_frontend_contract.mjs",
                       "tests/test_inline_header.mjs", "tests/fixtures/mac-source.txt",
-                      "references/grammar.md", "references/operations.md", "SHA256SUMS")))
+                      "references/grammar.md", "references/operations.md",
+                      # est-k75i: the upstream-shaped tool-result-card proposal doc is
+                      # part of the shipped surface — desktop contributors read it from
+                      # the package. Mandatory new-file pack-surface gate: an unshipped
+                      # doc is invisible to every install.
+                      "docs/card-toolresult-hook.md", "SHA256SUMS")))
             check("fake child retains executable mode in ZIP",
                   (archive.getinfo(root + "tests/fake").external_attr >> 16) & 0o111 == 0o111)
             # est-4vnq finding 4 (pack-list omission, made explicit — pack_choice=INCLUDED):
