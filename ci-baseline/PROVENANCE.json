@@ -232,10 +232,21 @@
     {
       "test": "test_graph_regen_z_parser_h3yi.py",
       "added_by": "est-h3yi PR lane (author CI-pending; refreshed only from a green Serial suite job)"
+    },
+    {
+      "test": "test_pin_delta_check_133387.py",
+      "exit": 0,
+      "measured": "2026-10-09 local foreground run: RESULT PASS, exit 0 (40/40 checks); RED witnessed on the pre-script tree (missing scripts/pin_delta_check.py killed every case), green requires the gate",
+      "supersede_by": "next green-CI refresh (replace with the CI-captured row)"
+    },
+    {
+      "test": "tests/test_pin_delta_check_133387.py",
+      "added_by": "author lane (est-zee7e, pin-delta host-effects gate)",
+      "measured": "2026-10-09 lane run: 40 cases, 0 red (40/40 checks in-file)"
     }
   ],
   "totals": {
-    "cases": 269,
+    "cases": 270,
     "red": 0
   },
   "contract": "Green CI ledgers only (every exit == 0); rows not captured by CI are listed in rows_added_outside_ci with how they were measured. Refresh from the tip of main after each main move; see README.md.",
