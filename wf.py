@@ -332,7 +332,10 @@ def _stamp_served(meta, result, node=None):
         return result
     forbidden = set(policy.get("forbidden_models") or []) | set(seat_floor)
     served = result["served_model"]
-    if metric and served is not None and (served in forbidden or served.rsplit("/", 1)[-1] in forbidden):
+    # Policy follows the billed provider, never the node's requested pin.
+    provider = result["served_billing_provider"]
+    if metric and served is not None and (served in forbidden or served.rsplit("/", 1)[-1] in forbidden
+            or any(wfcommon.route_ids_equal(served, banned, provider) for banned in forbidden)):
         result.update(status="failed", error=f"forbidden served model: {served}",
                       error_class="forbidden_model")
         return result

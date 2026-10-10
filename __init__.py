@@ -111,7 +111,10 @@ def _model_policy_error(graph):
             candidates.add(f"{node['provider']}/{requested}")
         if "/" in effective:
             candidates.add(effective.rsplit("/", 1)[-1])
-        if candidates & forbidden:
+        provider = node.get("provider") or _p
+        if candidates & forbidden or any(
+                _common.route_ids_equal(candidate, banned, provider)
+                for candidate in candidates for banned in forbidden):
             errs.append({"node": nid, "field": "model",
                          "msg": f"model policy: node {nid} resolves to forbidden model {effective!r}"})
     if not errs:

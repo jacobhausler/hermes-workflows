@@ -47,6 +47,8 @@ tests/test_route_identity_699.py:54
 tests/test_route_identity_699.py:55
 tests/test_route_identity_699.py:56
 tests/test_route_identity_699.py:57
+# Policy identity fixture: the prefix is required by stock Anthropic normalization.
+tests/test_forbidden_route_identity_e0yqy.py:26
 tests/test_fatal_quota_24.py
 tests/test_tiers.py
 tests/test_model_preflight_0924.py
