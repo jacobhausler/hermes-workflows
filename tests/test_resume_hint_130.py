@@ -215,8 +215,8 @@ import wf_dialect  # noqa: E402
 exported = wf_dialect.export_report({"name": "hint-lossy", "nodes": [
     {"id": "a", "type": "agent", "goal": "g", "resume_hint": False}]})
 check("H JS export warns about losing an explicit false resume_hint",
-      exported.get("ok") and {"node": "a", "key": "resume_hint", "value": False}
-      in exported.get("lossy", []) and "resume_hint" in exported["js"], str(exported))
+      exported.get("ok") and {"node": "a", "key": "resume_hint", "value": "false"}
+      in exported.get("lossy", []) and "// LOSSY: resume_hint = false" in exported["js"], str(exported))
 
 # ---- J (review N2/N4): budget skips, never truncates; log glob is node-exact ----
 import time as _t  # noqa: E402
