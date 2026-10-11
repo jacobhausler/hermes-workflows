@@ -220,24 +220,24 @@ check("H JS export warns about losing an explicit false resume_hint",
 
 # ---- J (review N2/N4): budget skips, never truncates; log glob is node-exact ----
 import time as _t  # noqa: E402
-import wf  # noqa: E402
+import wf as runner  # noqa: E402
 jr = RUNS / "rh130-unit"
 shutil.rmtree(jr, ignore_errors=True); (jr / "logs").mkdir(parents=True)
-wd = wf.child_work_dir(jr, {"id": "x"}, None)
+wd = runner.child_work_dir(jr, {"id": "x"}, None)
 now = _t.time()
 for i in range(3):   # three long-line files, newest first: each entry ~2.1 KB
     f = wd / f"big{i}.txt"; f.write_text(("L" * 300 + "\n") * 12); os.utime(f, (now - i, now - i))
 f = wd / "small.txt"; f.write_text("SMALL-130\n"); os.utime(f, (now - 10, now - 10))
 (jr / "logs" / "x.a0.log").write_text("OWNLOG-130\n")
 (jr / "logs" / "x.audit.a0.log").write_text("FOREIGNLOG-130\n")
-blk = wf._resume_hint_block(jr, {"id": "x", "resume_hint": True}, None, [])
+blk = runner._resume_hint_block(jr, {"id": "x", "resume_hint": True}, None, [])
 check("J budget overflow skips the big entry and keeps later small ones (continue, not break)",
       "SMALL-130" in blk and "OWNLOG-130" in blk, blk[-300:])
 check("J spawn-log source pinned: own x.a0.log listed", "x.a0.log" in blk)
 check("J log glob is node-exact: x.audit.a0.log never rides node x's inventory",
       "FOREIGNLOG-130" not in blk and "x.audit.a0.log" not in blk)
 check("J inventory stays within budget and ends in RESUME_LINE",
-      len(blk) < 6000 + 400 and blk.rstrip().endswith(wf.RESUME_LINE.strip()))
+      len(blk) < 6000 + 400 and blk.rstrip().endswith(runner.RESUME_LINE.strip()))
 
 # ---- K (review R10): the real amend door preserves rule-1 done records ----
 for stamped in (False, True):
