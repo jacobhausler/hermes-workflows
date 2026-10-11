@@ -140,7 +140,9 @@ r = mk("q1-spawn", [{"id": "a", "type": "agent", "goal": "sp"}])
 (r / "run.json").write_text(json.dumps({"hermes_bin": "/nonexistent/hermes-bin",
                                         "concurrency": 1, "node_timeout": 10,
                                         "retry_backoff": [0.05, 0.05]}))
-out = wf("q1-spawn")
+# Boot may recover an absent pin through PATH. This leg tests the no-launcher
+# spawn error, not recovery, and must never fall through to a real seat CLI.
+out = wf("q1-spawn", {"PATH": ""})
 rec = rec_of(r, "a")
 check("class spawn: Popen OSError", out.startswith("WORKFLOW_FAILED") and rec["error_class"] == "spawn"
       and rec.get("attempts_log") is None, json.dumps(rec)[:160])
