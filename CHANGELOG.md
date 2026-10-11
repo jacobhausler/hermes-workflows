@@ -1,5 +1,33 @@
 # Changelog
 
+## 1.3.6 — 2026-10-11
+
+Patch line, one merged PR — a ponytail truth pass over the docs and the comments.
+**Zero behavior change**; shipped bytes move only in prose, comments, docstrings,
+and one door description enumeration. The docs are the contract agents code
+against, and every rotted pointer is an agent lap burned on a wrong map:
+
+- **Node-type count corrected** — README and `references/grammar.md` said three
+  (`agent|gate|echo`); `join` is the shipped fourth since the 1.3.0 wave (#396).
+- **`reasoning` runtime-subset law updated to est-flah** — a relay's own enum-400
+  list triggers ONE logged clamp to the nearest supported level (never escalates)
+  and a re-drive; `provider_400` stands only when nothing clamps (#396).
+- **Grammar made complete** — `defaults` and the agent-field lists gain
+  `fallback_models` and `tier`; the `when` literal set gains `None`; the door's
+  run/amend description matches `DEFAULTS_KEYS` (#396).
+- **Dead pointers swept** — five line cites into core re-pointed (runtime_provider,
+  api_error_summary, main.py marker, GRAPH_MAX_BYTES, steer-var bake/reader sites),
+  the GRAPH_REPORT census pointer aimed at its `## Summary` block, four rot-prone
+  line cites replaced by symbol names, a dead doc anchor and a duplicated
+  `{runs,total,counts}` removed (#396).
+- **Comments that lied, told true** — `_typed_error_class` returns `cap_exhausted`
+  (the docstring predated the rename); the rate-limit cap quadruples, it never
+  "doubles-ish"; the settings-cache shape comment matches the stored tuple;
+  `post_exit_hook` docstrings now say the runner stopped dispatching it at the
+  est-xwvu9 strip — tests exercise it, the shipped build never does (#396).
+- **Prompt honesty** — `WORK_DIR_NOTE` drops the single-query repackaging
+  instruction that the engine never honored (catalog review 2, #399).
+
 ## 1.3.5 — 2026-10-11
 
 Patch line, sixteen merged PRs since v1.3.3 (supersedes the untagged 1.3.4 prep

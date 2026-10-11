@@ -1,6 +1,6 @@
 # Hermes Workflows
 
-![Version](https://img.shields.io/badge/version-1.3.5-blue)
+![Version](https://img.shields.io/badge/version-1.3.6-blue)
 
 **Agent-owned workflow graphs for [Hermes Agent](https://github.com/NousResearch/hermes-agent).**
 Your agent authors a JSON graph of agent nodes, fan-outs and gates; a background
