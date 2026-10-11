@@ -2352,18 +2352,15 @@ def _harvest_death(out, schema):
             "harvest": {"declared_status": declared if isinstance(declared, str) and declared else None}}
 
 def _cancel_evidence(run, nid, index, lp):
-    """a2d7f664: honest evidence for a quorum-straggler cancel. Snapshot of the
-    child's output state AT THE CANCEL INSTANT — spawn-log bytes (the same
-    _child_spoke primitive; bytes, not a bool, so the reason carries the
-    measurement) plus the file count in the child's durable work dir.
-    Returns (suffix, snapshot dict): suffix ' — no output on disk at quorum
-    moment' when the child had NOTHING (empty spawn log, empty work dir), else
-    ' — had output at quorum moment (log N bytes, workdir M files)'. A vanished
-    log/work dir reads as 0 bytes / 0 files (OSError is honest absence, never a
-    fabricated size)."""
+    """Snapshot after a quorum kill. Byte/file counts are raw disk evidence,
+    never proof of agent-visible output (startup banners/scaffolding count too).
+    A parsable fenced answer confirms output; a nonempty unstructured capture
+    is explicitly unknown, not absent and not confirmed agent output."""
     n_bytes = 0
+    capture = ""
     try:
         n_bytes = lp.stat().st_size
+        capture = lp.read_text(errors="replace")
     except (OSError, AttributeError):
         pass
     n_files = 0
@@ -2371,10 +2368,12 @@ def _cancel_evidence(run, nid, index, lp):
         n_files = sum(1 for f in child_work_dir(run, {"id": nid}, index).rglob("*") if f.is_file())
     except OSError:
         pass
+    visible = True if _harvest_death(capture, None) else (None if n_bytes else False)
+    snap = {"log_bytes": n_bytes, "work_files": n_files, "agent_visible_output": visible}
     if n_bytes == 0 and n_files == 0:
-        return " — no output on disk at quorum moment", {"log_bytes": 0, "work_files": 0}
-    return (f" — had output at quorum moment (log {n_bytes} bytes, workdir {n_files} files)"), \
-           {"log_bytes": n_bytes, "work_files": n_files}
+        return " — no output on disk at quorum moment", snap
+    state = "had output" if visible else "no confirmed agent-visible output"
+    return (f" — {state} at quorum moment (log {n_bytes} bytes, workdir {n_files} files)"), snap
 
 def _harvest_cancelled(out, schema, run, nid, index):
     """a2d7f664 harvest-at-cancel: the cancelled class was deliberately excluded
@@ -4428,9 +4427,9 @@ def _adopt_child(meta, node, byid, index, child, schema, fo_cancel=None):
     _note_turn_tier(run, nid, report_path)   # a death happened; success leaves no trace
     try: os.unlink(report_path)
     except OSError: pass
-    if fo_cancel is not None and fo_cancel.is_set() and was_alive:
-        # quorum straggler: WE observed the live orphan die to _cancel_stragglers'
-        # group kill (a child already dead at entry is classified from its capture).
+    if (fo_cancel is not None and fo_cancel.is_set() and was_alive
+            and getattr(handle, "_wf_quorum_cancel", False)):
+        # Quorum intent belongs to this adopted handle, not merely the event.
         # a2d7f664: same evidence + harvest-at-cancel as the run_child site — the
         # capture freezes at the kill, so the snapshot is honest to the quorum
         # moment; error_class/quorum math unchanged.
@@ -5062,14 +5061,11 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
         if (rc or 0) < 0 and meta["_stop"].is_set():
             return {"status": "failed", "error": "cancelled by stop", "error_class": "cancelled",
                     "raw": (out or "")[-2000:], "ms": ms, "final": final_reply, **sk, **evd}
-        if (rc or 0) < 0 and not timed_out and not early_death:
-            # signal-killed by the runner itself with no stop pending = a fan-out
-            # straggler killed at quorum (#12). Not a failure of the child's making.
-            # a2d7f664: never blind — the capture is frozen by the SIGKILL, so the
-            # snapshot is faithful to the quorum moment; and a straggler that had
-            # already flushed a valid fenced answer keeps its harvest (the cancelled
-            # class was excluded from _harvest_death — this is cancelled's own pass;
-            # classification and quorum math untouched, error_class stays cancelled).
+        if (rc == -signal.SIGKILL and seat_cancel is not None and seat_cancel.is_set()
+                and getattr(proc, "_wf_quorum_cancel", False)):
+            # The cancel setter recorded a successful kill request for THIS spawn.
+            # A negative rc (or a quorum event arriving after death) is not a cause.
+            # Snapshot/harvest are independent of the cancelled classification.
             suffix, snap = _cancel_evidence(run, node["id"], index, lp)
             hv = _harvest_cancelled(out, harvest_schema, run, node["id"], index)
             rec = {"status": "failed", "error": "cancelled: quorum already met" + suffix,
@@ -5079,6 +5075,19 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
             if hv:
                 rec.update(hv)
             return rec
+        if rc is not None and rc < 0:
+            signum = -rc
+            try:
+                sig_name = signal.Signals(signum).name
+            except ValueError:
+                sig_name = f"signal {signum}"
+            hv = _harvest_death(out, harvest_schema)
+            return {"status": "partial" if hv else "failed",
+                    "error": f"child terminated: {sig_name} (external: source unknown)",
+                    "error_class": "crashed", "death_class": "external_kill",
+                    "signal": sig_name, "signal_number": signum, "returncode": rc,
+                    "raw": (out or "")[-2000:], "ms": ms, "final": final_reply,
+                    **(hv or {}), **sk, **evd}
         if tclass == "cap_exhausted":
             hv = _harvest_death(out, harvest_schema)   # #4: every cap death that "said so precisely" keeps its answer
             if hv:
@@ -5941,11 +5950,24 @@ def run_agent_node(run, meta, byid, node, outputs, steering):
                     fo_cancel.set()
                     for k, p in list(meta["_procs"].items()):
                         if k.startswith(f"{nid}:"):
+                            # Only a live recipient of our successful kill request
+                            # gets quorum intent. Already-dead siblings keep their
+                            # actual exit cause, even if the event is now set.
+                            if isinstance(p, _AdoptedHandle):
+                                alive = _proc_alive(p.pid)
+                            else:
+                                alive = p.poll() is None
+                            if not alive:
+                                continue
                             try:
                                 os.killpg(os.getpgid(p.pid), signal.SIGKILL)
+                                setattr(p, "_wf_quorum_cancel", True)
                             except Exception:
-                                try: p.kill()
-                                except Exception: pass
+                                try:
+                                    p.kill()
+                                    setattr(p, "_wf_quorum_cancel", True)
+                                except Exception:
+                                    pass
             def one(i, item):
                 # an item's own `goal` wins over the fan-out template (papercut 2026-09-22:
                 # items[].goal was silently ignored, children got the placeholder template)

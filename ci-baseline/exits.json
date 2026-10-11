@@ -1365,5 +1365,10 @@
   "test": "test_upstream_hook_contract.py",
   "exit": 0,
   "log": "rows_added_outside_ci in PROVENANCE.json"
+ },
+ {
+  "test": "test_quorum_cause_guard_6226.py",
+  "exit": 0,
+  "log": "rows_added_outside_ci in PROVENANCE.json"
  }
 ]
