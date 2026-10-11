@@ -1,0 +1,211 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "Resume hint: keep banked work through retries",
+    "quality_profile": "showcase",
+    "output": "diagram/est-fp9d.html",
+    "repository": {
+      "url": "https://github.com/jacobhausler/hermes-workflows.git",
+      "revision": "fd5887f9ab6b5ac67e65fc7ca4e60900c2d69dc7"
+    }
+  },
+  "lanes": [
+    {
+      "id": "artifacts",
+      "label": "Surviving evidence"
+    },
+    {
+      "id": "runner",
+      "label": "Retry runner"
+    },
+    {
+      "id": "child",
+      "label": "Child prompt continuity"
+    }
+  ],
+  "mainPath": [
+    "retry",
+    "inventory",
+    "preamble",
+    "child",
+    "correction",
+    "continued"
+  ],
+  "nodes": [
+    {
+      "id": "files",
+      "lane": "artifacts",
+      "col": 1,
+      "type": "database",
+      "label": "Banked artifacts",
+      "sublabel": "work files + own logs",
+      "width": 150,
+      "sources": [
+        {
+          "path": "wf.py",
+          "line": 2585,
+          "end_line": 2633
+        }
+      ]
+    },
+    {
+      "id": "retry",
+      "lane": "runner",
+      "col": 0,
+      "type": "backend",
+      "label": "Re-run attempt",
+      "sublabel": "transient / park / bounded",
+      "width": 160,
+      "sources": [
+        {
+          "path": "wf.py",
+          "line": 5471,
+          "end_line": 5484
+        }
+      ]
+    },
+    {
+      "id": "inventory",
+      "lane": "runner",
+      "col": 1,
+      "type": "backend",
+      "label": "Artifact inventory",
+      "sublabel": "auto / true / false",
+      "width": 155,
+      "sources": [
+        {
+          "path": "wf.py",
+          "line": 2585,
+          "end_line": 2633
+        }
+      ]
+    },
+    {
+      "id": "preamble",
+      "lane": "runner",
+      "col": 2,
+      "type": "messagebus",
+      "label": "Resume preamble",
+      "sublabel": "prompt-side only",
+      "width": 155,
+      "sources": [
+        {
+          "path": "wf.py",
+          "line": 5820,
+          "end_line": 5837
+        }
+      ]
+    },
+    {
+      "id": "child",
+      "lane": "child",
+      "col": 3,
+      "type": "external",
+      "label": "Retry child",
+      "sublabel": "verify; continue work",
+      "width": 150,
+      "sources": [
+        {
+          "path": "wf.py",
+          "line": 4534,
+          "end_line": 4540
+        }
+      ]
+    },
+    {
+      "id": "correction",
+      "lane": "child",
+      "col": 4,
+      "type": "security",
+      "label": "Schema correction",
+      "sublabel": "retains the preamble",
+      "width": 160,
+      "sources": [
+        {
+          "path": "wf.py",
+          "line": 5322,
+          "end_line": 5334
+        }
+      ]
+    },
+    {
+      "id": "continued",
+      "lane": "child",
+      "col": 5,
+      "type": "external",
+      "label": "Corrected answer",
+      "sublabel": "never redo finished work",
+      "width": 160,
+      "sources": [
+        {
+          "path": "wf.py",
+          "line": 5322,
+          "end_line": 5334
+        }
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "id": "retry-hint",
+      "from": "retry",
+      "to": "inventory",
+      "label": "re-run",
+      "variant": "default"
+    },
+    {
+      "id": "files-hint",
+      "from": "files",
+      "to": "inventory",
+      "label": "read",
+      "variant": "dashed"
+    },
+    {
+      "id": "hint-pre",
+      "from": "inventory",
+      "to": "preamble",
+      "label": "enabled",
+      "variant": "emphasis"
+    },
+    {
+      "id": "pre-child",
+      "from": "preamble",
+      "to": "child",
+      "label": "prepend",
+      "variant": "emphasis"
+    },
+    {
+      "id": "child-correct",
+      "from": "child",
+      "to": "correction",
+      "label": "invalid JSON",
+      "variant": "security"
+    },
+    {
+      "id": "correct-continued",
+      "from": "correction",
+      "to": "continued",
+      "label": "one retry",
+      "variant": "emphasis"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Tri-state inventory",
+      "items": [
+        "Absent: enabled only when prior work files exist. True: always. False: no inventory bytes.",
+        "Entries carry path, size, mtime and tail lines; oversized entries are skipped within a 6000-character budget."
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Prompt-only policy",
+      "items": [
+        "Both current and legacy fingerprints ignore resume_hint; historical legacy budget semantics stay unchanged.",
+        "Fallback-ladder and post-amend first-spawn wiring remain deferred, not implemented here."
+      ]
+    }
+  ]
+}
