@@ -164,6 +164,47 @@ if "run_id" in r:
                   for t in texts), texts)
 else:
     check("fan-out child prompt: node-goal template — door renders run.KEY, runner renders {item}, each once", False, r)
+# est-2ek.1.792: run_context never reaches a gate's wait.until_argv (exec'd as fixed argv), so a
+# surviving {run.KEY} there is refused at the door (run, dry_run, amend) before any run write.
+# These are admission/commit checks; never launch a runner (even on the red baseline).
+hw._spawn_runner = lambda *_args, **_kwargs: None
+def _run_dirs():
+    root = HOME / "workflows"
+    return {p.name for p in root.iterdir() if p.is_dir() and p.name != "library"} if root.is_dir() else set()
+def _gate(argv, name="argv792"):
+    return {"name": name, "nodes": [{"id": "census", "type": "gate", "question": "wait for the census",
+                                     "wait": {"until_argv": argv}}]}
+before = _run_dirs()
+r = run(graph=_gate(["{run.python}", "-c", "pass"]), binding={"python": sys.executable})
+check("until_argv {run.KEY} refused: error names wait.until_argv[0] and run.python",
+      "wait.until_argv[0]" in r.get("error", "") and "run.python" in r.get("error", "")
+      and not r.get("run_id"), r)
+check("until_argv {run.KEY} refusal creates no run directory", before == _run_dirs(), _run_dirs() - before)
+r = run(graph=_gate(["true", "{run.x}"]))
+check("until_argv {run.KEY} refused without run_context too (argv index 1)",
+      "wait.until_argv[1]" in r.get("error", "") and "run.x" in r.get("error", "")
+      and before == _run_dirs(), r)
+r = run(graph=_gate(["{run.python}", "-c", "pass"]), binding={"python": sys.executable}, dry_run=True)
+check("until_argv {run.KEY} refused on dry_run", "wait.until_argv[0]" in r.get("error", "")
+      and before == _run_dirs(), r)
+lit = _gate([sys.executable, "-c", "pass"], name="literal792")
+lit["nodes"].append({"id": "a", "type": "agent", "goal": "use {run.thing}"})
+r = run(graph=lit, binding={"thing": "bound"})
+check("literal until_argv + bound goal still admits and commits", "run_id" in r, r)
+if "run_id" in r:
+    snap = {n["id"]: n for n in snapshot(r)["nodes"]}
+    check("literal until_argv committed byte-verbatim; goal binding unchanged",
+          snap["census"]["wait"]["until_argv"] == [sys.executable, "-c", "pass"]
+          and snap["a"]["goal"] == "use bound", snap)
+    gpath = HOME / "workflows" / r["run_id"] / "graph.json"
+    before_bytes = gpath.read_bytes()
+    bad = _gate(["{run.python}", "-c", "pass"], name="literal792")
+    bad["nodes"].append({"id": "a", "type": "agent", "goal": "use bound"})
+    am = json.loads(hw.handle({"action": "amend", "run_id": r["run_id"], "graph": bad}))
+    check("amend refuses a surviving {run.KEY} in wait.until_argv",
+          "wait.until_argv[0]" in am.get("error", "") and "run.python" in am.get("error", ""), am)
+    check("amend refusal leaves graph.json byte-identical", gpath.read_bytes() == before_bytes)
+
 # Real runner + fake child: inspect the exact prompt file, not only graph.json.
 hw._spawn_runner = actual_spawn
 os.environ["HERMES_WF_HERMES_BIN"] = str(BUILD / "fake")  # operator-side launcher (122099)

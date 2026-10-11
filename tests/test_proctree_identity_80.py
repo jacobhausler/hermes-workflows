@@ -34,6 +34,7 @@ from unittest.mock import patch
 HERE = Path(__file__).resolve().parent
 BUILD = Path(os.environ.get("WF_TEST_BUILD") or HERE.parent)
 sys.path.insert(0, str(BUILD))
+from wf_test_markers import read_pid_marker
 import wf  # noqa: E402
 
 ok = True
@@ -184,8 +185,9 @@ try:
     kid = subprocess.Popen([sys.executable, str(HOME / "r1c_kid_main.py"),
                             str(BUILD), str(sidecar), token], start_new_session=True)
     ALL.append(kid.pid)
-    assert wait_file(HOME / "r1c_kid.txt"), "kid fixture never came up"
-    kid_pid = int((HOME / "r1c_kid.txt").read_text())
+    kid_pids = read_pid_marker(HOME / "r1c_kid.txt")
+    assert kid_pids and kid_pids[0] > 0, "kid fixture never came up"
+    kid_pid = kid_pids[0]
     ALL.append(kid_pid)
     t = time.time() + 10
     while (not sidecar.exists() or sidecar.read_text().strip() == "") and time.time() - t < 10:

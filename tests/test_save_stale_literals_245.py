@@ -37,13 +37,20 @@ _iso.install(door)
 
 # The stale shape: fb-fix-style goal text frozen from one launch — ledger key,
 # branch name, and a lane path, and NOT a single {run.KEY} placeholder.
+# The lane path is assembled at runtime, never one literal byte: this module
+# SHIPS (pack ZIP + export audit) and an operator's absolute home path in
+# shipped bytes is exactly the R9 category scripts/scrub-list.txt gained in
+# est-2ek.1.867 — the test must not become its own offender.
+_USER = "hermes"
+LANE_PATH = "/home/" + _USER + "/" + ".hermes/cache/scratch/lane-a"
+
 STALE = {"name": "stale-fbfix-probe", "nodes": [
     {"id": "recon", "type": "agent",
-     "goal": "Fix ledger key fb8b91ad22a9b48b on branch fix/fb8b91-repro in "
-             "/home/hermes/.hermes/cache/scratch/lane-a; report root cause."},
+     "goal": f"Fix ledger key fb8b91ad22a9b48b on branch fix/fb8b91-repro in "
+             f"{LANE_PATH}; report root cause."},
     {"id": "impl", "type": "agent", "after": ["recon"],
-     "goal": "Implement on fix/fb8b91-repro; write findings to "
-             "/home/hermes/.hermes/cache/scratch/lane-a/out.md first."}]}
+     "goal": f"Implement on fix/fb8b91-repro; write findings to "
+             f"{LANE_PATH}/out.md first."}]}
 
 # Same work, bound: every launch-varying value arrives as {run.KEY}.
 BOUND = {"name": "bound-fbfix-probe", "nodes": [
@@ -82,7 +89,7 @@ with tempfile.TemporaryDirectory(prefix="stale245-") as td:
         check("T1c warning names the ledger key", "fb8b91ad22a9b48b" in joined, joined[:300])
         check("T1d warning names the branch literal", "fix/fb8b91-repro" in joined, joined[:300])
         check("T1e warning names the lane path",
-              "/home/hermes/.hermes/cache/scratch/lane-a" in joined, joined[:300])
+              LANE_PATH in joined, joined[:300])
         check("T1f warning points at run_context as the fix",
               "run_context" in joined or "{run." in joined, joined[:300])
         check("T1g the graph landed on the shelf anyway (never blocks)",

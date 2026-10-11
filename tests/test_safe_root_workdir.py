@@ -12,6 +12,12 @@ Cases: SET (inherited order kept, last entry == child's cwd), NARROW (never the
 run dir, run/work, or HOME/workflows), UNSET (child sees None), EMPTY (child
 sees '' or None), FAN-OUT (each item sees only its own <node>.<i>).
 
+est-2ek.1.772: the same dir is also the child's terminal-tool default cwd. The
+Hermes terminal tool resolves its default from $TERMINAL_CWD, not the process cwd,
+and a host-exported TERMINAL_CWD used to win — a `git clone` with no workdir landed
+outside the node workspace. Cases: TERMINAL_CWD INHERITED (foreign value replaced),
+TERMINAL_CWD UNSET (still pinned), TERMINAL_CWD FAN-OUT (each item its own dir).
+
 Self-contained fake CLI (written to the temp dir): must not touch the shared
 tests/fake_hermes.py. Plain script: exit non-zero on any red.
 """
@@ -33,11 +39,12 @@ def check(name, cond, detail=None):
         FAILS.append(name)
 
 
-# The fake child appends one JSON line {safe_root, cwd} to FAKE_LOG, then commits.
+# The fake child appends one JSON line {safe_root, cwd, terminal_cwd} to FAKE_LOG, then commits.
 FAKE = r'''#!/usr/bin/env python3
 import json, os
 with open(os.environ["FAKE_LOG"], "a") as f:
     f.write(json.dumps({"safe_root": os.environ.get("HERMES_WRITE_SAFE_ROOT"),
+                        "terminal_cwd": os.environ.get("TERMINAL_CWD"),
                         "cwd": os.getcwd()}) + "\n")
 print("progress line", flush=True)
 print("```json\n" + json.dumps({"result": "ok"}) + "\n```")
@@ -46,7 +53,7 @@ print("```json\n" + json.dumps({"result": "ok"}) + "\n```")
 UNSET = object()
 
 
-def run_graph(tmp, name, graph, safe_root):
+def run_graph(tmp, name, graph, safe_root, terminal_cwd=UNSET):
     home = tmp / "home"
     home.mkdir(parents=True, exist_ok=True)
     fake_bin = tmp / "fake-hermes"
@@ -60,8 +67,11 @@ def run_graph(tmp, name, graph, safe_root):
     fake_log = tmp / (name + ".fake.log")
     env = dict(os.environ, HERMES_HOME=str(home), WF_RUNS_ROOT=str(home / "workflows"), FAKE_LOG=str(fake_log))
     env.pop("HERMES_WRITE_SAFE_ROOT", None)
+    env.pop("TERMINAL_CWD", None)
     if safe_root is not UNSET:
         env["HERMES_WRITE_SAFE_ROOT"] = safe_root
+    if terminal_cwd is not UNSET:
+        env["TERMINAL_CWD"] = terminal_cwd
     p = subprocess.run([sys.executable, str(ROOT / "wf.py"), "run", name],
                        env=env, text=True, capture_output=True, timeout=90, cwd=str(tmp))
     out = p.stdout + p.stderr
@@ -128,6 +138,39 @@ def main():
                   not (set(parts) & (wants - {c.get("cwd")})), c)
             got.add(parts[-1])
         check("FAN-OUT per-item dirs recon.0 / recon.1", got == wants, (got, wants))
+
+    # ---------------- TERMINAL_CWD (est-2ek.1.772) ----------------
+    with tempfile.TemporaryDirectory(prefix="tc-inh-") as t:
+        tmp = Path(t)
+        foreign = str(tmp / "host-default-cwd")
+        _h, run, seen = run_graph(tmp, "tcinh", dict(SOLO, name="tcinh"), UNSET, terminal_cwd=foreign)
+        check("TERMINAL_CWD INHERITED one child spawned", len(seen) == 1, seen)
+        c = seen[0] if seen else {}
+        want = str((run / "work" / "recon").resolve())
+        check("TERMINAL_CWD INHERITED terminal default cwd == child's work dir",
+              c.get("terminal_cwd") == want, (c, want))
+        check("TERMINAL_CWD INHERITED terminal default cwd == process cwd",
+              c.get("terminal_cwd") == c.get("cwd"), c)
+        check("TERMINAL_CWD INHERITED foreign value not forwarded", c.get("terminal_cwd") != foreign, c)
+
+    with tempfile.TemporaryDirectory(prefix="tc-unset-") as t:
+        _h, run, seen = run_graph(Path(t), "tcunset", dict(SOLO, name="tcunset"), UNSET)
+        check("TERMINAL_CWD UNSET one child spawned", len(seen) == 1, seen)
+        c = seen[0] if seen else {}
+        check("TERMINAL_CWD UNSET terminal default cwd == child's work dir",
+              c.get("terminal_cwd") == str((run / "work" / "recon").resolve()), c)
+
+    with tempfile.TemporaryDirectory(prefix="tc-fan-") as t:
+        graph = {"name": "tcfan", "nodes": [{"id": "recon", "type": "agent",
+                                             "fanout": {"items": ["alpha", "beta"],
+                                                        "goal": "audit {item}"}}]}
+        _h, run, seen = run_graph(Path(t), "tcfan", graph, UNSET,
+                                  terminal_cwd=str(Path(t) / "host-default-cwd"))
+        check("TERMINAL_CWD FAN-OUT two children spawned", len(seen) == 2, seen)
+        wants = {str((run / "work" / f"recon.{i}").resolve()) for i in (0, 1)}
+        check("TERMINAL_CWD FAN-OUT each item's terminal cwd is its own dir, no sibling",
+              {c.get("terminal_cwd") for c in seen} == wants
+              and all(c.get("terminal_cwd") == c.get("cwd") for c in seen), (seen, wants))
 
     print(("" if not FAILS else "\nRED: ") + f"{len(FAILS)} failure(s)")
     return 1 if FAILS else 0

@@ -5,6 +5,7 @@ launch it, read its run-dir via the SHARED read model (wfcommon.run_state), drop
 its input files. No standing daemon or control plane, no second opinion on run
 state (one runner process per run, detached out of the caller's tree at spawn #8).
 """
+import contextlib
 import importlib.util, json, os, re, select, shutil, stat, subprocess, sys, time
 import fcntl, hashlib, uuid
 from datetime import datetime, timezone
@@ -64,6 +65,7 @@ GRAPH_KEYS = {"name", "nodes", "description", "defaults", "model_policy",
               "grammar",      # #32: dialect tag of a shared file ("wf/1"; absent = wf/1)
               "concurrency", "item_concurrency",  # #100: optional run-level limits
               "requires_plugin",  # est-2ek.1.166: version handshake (coarse >=; stale => arm-time refusal)
+              "result",           # est-2ek.1.158: node id whose output is the run verdict
               "include"}      # composite graphs: shelved-DAG expansion annotation; STRIPPED on
                               # expand, so a committed graph.json never carries it (only the
                               # library author form does)
@@ -88,6 +90,10 @@ def _model_policy_error(graph):
         _p, alias_target = _alias_provider_pair(node.get("tier") or requested, seat, tiers, known)
         effective = alias_target or requested
         candidates = {requested, effective, node.get("model")}
+        if node.get("provider") and "/" not in str(requested):
+            # #291 F1: amend checks policy AFTER resolution, where a baked literal reads
+            # {provider: X, model: Y}; the ban on the full 'X/Y' must still bind it.
+            candidates.add(f"{node['provider']}/{requested}")
         if "/" in effective:
             candidates.add(effective.rsplit("/", 1)[-1])
         if candidates & forbidden:
@@ -196,7 +202,7 @@ def _validation_error(graph, run_dir=None):
                              "field": "after", "msg": "after must be a list of node id strings"})
                 item["after"] = []
             safe.append(item)
-    errs.extend(validate_graph_errors(safe))
+    errs.extend(validate_graph_errors(safe, admission=True))  # R10: submit door only
     # #85: the artifact-admission guard composes with the validator here, so EVERY
     # door admission path (run/amend/submit/save/validate) measures ledgers before
     # any write/spawn. Artifact BYTES are measured only when a run dir exists to
@@ -676,10 +682,11 @@ WORKFLOW_PARAMS = {
             "description": "run=launch a graph; wait=read state, RESPAWNING an idle runner if work is pending (blocks to the next boundary when one is live); status=read-model of a run; release=answer a held human gate; steer=queue steering text for a node; inbox=(child-side, cooperative) pull late steering lines baked for THIS spawn — call once at a natural seam; amend=replace the graph (invalidates changed nodes + all downstream by fingerprint); stop=request stop; list=all runs; save=shelve a graph in the library under a name (from run_id or inline graph); library=list shelved graphs richly (name, description, tags, provenance, path-relative id). validate=dry-run the door's validation pipeline (defaults fill + defect collection + model/route policy) with no ping and no writes; returns {ok, errors:[{node,field,msg}], resolved_routes}. run from=<name> replays a shelved graph. submit=quarantine a hand-rolled graph for study (requires why_not_library >=80 chars; never joins the library — the quartermaster's human-gated loop decides); inbox kind=submissions lists them newest-first. doctor_version=read-only version truth for THIS install: {live_version, newest_packaged, source_commit, drift} comparing plugin.yaml against the install.json provenance that pack.py stamps at build time \u2014 one read, no network.",
         },
         "run_id": {"type": "string", "description": "Run id (required for every action except run/list)."},
-        "name": {"type": "string", "description": "run: overrides graph.name (default workflow); save: library name overrides graph.name (lowercase, [-_.]). amend: set graph.name in the replacement graph; omitting it retains the run name."},
+        "name": {"type": "string", "description": "run: overrides graph.name (default workflow); save: library name overrides graph.name (lowercase, [-_.]); library: return one entry with refs-derived required params and an instantiate command. amend: set graph.name in the replacement graph; omitting it retains the run name."},
         "from": {"type": "string", "description": "run: library graph name to replay (instead of graph or graph_path)."},
-        "run_context": {"type": ["string", "object"], "description": "run only: non-empty string seed appended to every first-wave agent (including agents behind gate-only paths), OR non-empty map of identifier keys to non-empty strings replacing only explicit {run.KEY} in node goals/contexts, fan-out goals/item goals and gate questions. Missing keys/malformed bindings reject before any run write — as does a seed against a graph with {run.KEY} refs, or a JSON-encoded map passed as a string. Values are persisted in prompts; do not supply secrets. A seed cannot replace baked literals."}, 
+        "run_context": {"type": ["string", "object"], "description": "run only: non-empty string seed appended to every first-wave agent (including agents behind gate-only paths), OR non-empty map of identifier keys to non-empty strings replacing only explicit {run.KEY} in node goals/contexts, fan-out goals/item goals and gate questions. Library-sourced launches also render profile, echo string output, gate options and wait.until_argv; every surviving ref refuses before any write. Inline argv retains its existing unbound-placeholder refusal. Missing keys/malformed bindings reject before any run write — as does a seed against a graph with {run.KEY} refs, or a JSON-encoded map passed as a string. Values are persisted in prompts; do not supply secrets. A seed cannot replace baked literals."},
         "description": {"type": "string", "description": "save: one-line purpose shown by library/list."},
+        "params": {"type": "object", "additionalProperties": {"type": "object"}, "description": "save: optional meta.params descriptions/default suggestions for run_context keys. Required keys derive from graph refs, never this metadata. Omission retains prior params; {} deliberately clears them. Missing/dead declarations warn, never prevent saving."},
         "tags": {"type": "array", "items": {"type": "string"}, "description": "save (optional): 1-10 discovery tags — legacy flat tokens (lowercase alnum [-_.] <=32) or faceted `facet:value` (facets: use_case, repo, domain, risk, note; values [a-z0-9._-] <=48; e.g. use_case:code-review). Call `library` first and reuse its tag_vocab values VERBATIM — never coin a tag you have not seen. Resaving without tags keeps the entry's existing tags; stored in the meta envelope. library (optional): filter to entries carrying ALL listed tags (same 1-10 law as save — an empty array errors on BOTH verbs; omit tags for no filter); an empty result's tag_match_counts says which term starved."},
         "why_not_library": {"type": "string", "description": "submit (REQUIRED, >=80 chars): why no library graph covered this task — name the entries you checked and the shape you needed. The receipt is what makes hand-rolling honest."},
         "lane": {"type": "string", "description": "submit (optional, <=128 chars): lane label carried beside the submission for the quartermaster's triage; no scheduling effect."},
@@ -700,14 +707,16 @@ WORKFLOW_PARAMS = {
             "engine-stamped substitution with a machine-injected result-schema disclosure (#116); no config = the refusal, verbatim; the sibling `route_verified` proof annotation is DOOR-BAKED only \u2014 never author-writable, "
             "an author value is dropped at resolve and re-proved by this submit's ping), inputs:['<ancestor>' | '<ancestor>.<dotted.path>', ...] (inject a committed upstream output into the prompt as a labelled json block under '## Inputs'; unresolvable ref fails the node at spawn; "
             "DIRECT parents from `after` are auto-injected capped at 8KB with a truncation marker \u2014 use inputs only to pick a dotted path or a non-parent ancestor; a parent listed in both appears once), fanout:{items | items_from:'<node_id>.<dotted.path>', goal (OPTIONAL template; an item's own `goal` key overrides it \u2014 when items carry their own goals the shared node goal prefixes each item prompt, "
-            "so no placeholder template is ever needed), schema, quorum (OPTIONAL positive int; ONLY when set: once quorum items have committed, the still-running stragglers are cancelled with error_class 'cancelled' and excluded from the failure math; when unset there is NO default \u2014 the fan-out waits for every item), ledger (OPTIONAL item-indexed INPUT LEDGER: one row per item, "
+            "so no placeholder template is ever needed), schema, quorum (OPTIONAL positive int; ONLY when set: once quorum items have committed, the still-running stragglers are cancelled with error_class 'cancelled' and excluded from the failure math; when unset there is NO default \u2014 the fan-out waits for every item)"
+            ", quorum_drain_s (OPTIONAL number >= 0; ONLY meaningful WITH an explicit quorum: the quorum cancel is deferred by this many seconds — ONE drain window armed at the quorum moment lets stragglers still running then land their answer (anything that lands inside the window commits like any other item); the stragglers still running at its deadline are cancelled exactly as before. Default 0 = the documented today-behavior: cancellation is immediate at the quorum moment)"
+            ", ledger (OPTIONAL item-indexed INPUT LEDGER: one row per item, "
             "positionally aligned; a row is a '<node_id>.<dotted.path>' input-ref string or {source:'<node_id>.<dotted.path>', artifact?:{file:rel/path under the run dir, sha256?:64-hex}} naming the on-disk artifact the item consumes. Admission refuses the graph fail-closed unless rows map 1:1 to items: a missing/extra row, two items sharing one source, a source head outside the node's after ancestry, "
             "or (when run-dir bytes are measurable \u2014 amend/validate) an absent artifact file or sha256 mismatch are each refused with an error naming the item and the missing/extra source \u2014 an item can never silently consume another item's artifacts (#85))}, "
             "on_fail ('skip' | '<fallback-agent-node-id>' \u2014 on this node's failure commit it `skipped` (join-tolerant, run continues; a join with one live dep still runs), and with a fallback id ALSO let that agent node run; validated at run time: fallback must exist, be an agent, not be an ancestor; cancelled deaths are never caught), "
-            "when (est-l2ey/issue #132: the SAME bounded expr as a gate — out.<ancestor>.<dotted.path> with == != > >= < <=, and/or/not, parens; heads must name an ancestor in this node's `after` closure; malformed or non-ancestor-headed is rejected at run/amend validation before any write/spawn), "
-            "on_skip:'pass'|'prune' (requires when: prune = the default; a false predicate commits the node terminal-`skipped` with ZERO spawns and every node whose deps are ALL skipped skips too — non-failure, a join with one live dep runs; pass = a false predicate commits the node `done` with {agent:'skipped'} and descendants proceed; a predicate that ERRORS at fire time spawns anyway and logs agent.when_error — never a silent skip)"
+            "when (the same bounded expr as a gate: out.<ancestor>.<dotted.path> with == != > >= < <=, and/or/not, parens; heads must name an ancestor in this node's after closure; malformed or non-ancestor-headed is rejected before any write/spawn), "
+            "on_skip:'pass'|'prune' (requires when; default prune: a false predicate commits skipped with zero spawns; pass: commits done with {agent:'skipped'} and descendants proceed; predicate errors spawn anyway and log agent.when_error)"
             "} \u2014 agent node. A provider requires a non-empty model; "
-            "model aliases and literal IDs are preserved (tiers resolve explicitly, and a matching provider/model prefix is removed for the CLI). Run/amend responses include requested/resolved provider/model routes. Gate node: {id, type:'gate', after, question, options, context, when (bounded expr: out.<node>.<dotted.path> with == != > >= < <=, and/or/not, parens; "
+            "model aliases are preserved; a literal 'provider/model' id keeps its route identity but is split into provider + model when the seat routes that provider (tiers resolve explicitly, and a matching provider/model prefix is removed for the CLI). Run/amend responses include requested/resolved provider/model routes. Gate node: {id, type:'gate', after, question, options, context, when (bounded expr: out.<node>.<dotted.path> with == != > >= < <=, and/or/not, parens; "
             "malformed when is rejected at run/amend validation and holds the gate at fire \u2014 never a silent skip), wait:{wait_s, until_argv:[fixed argv, no shell], every_s (default 60), timeout_s (default 3600)} (machine-answered gate: parks the run at zero tokens \u2014 wait_s alone = timer; until_argv re-runs until exit 0; timeout \u2192 gate fails; its last stdout/stderr tail is the gate's output, "
             "usable via inputs). A human release pre-empts a park), on_skip:'pass'|'prune' (with when: prune (the default, omitted = prune) commits the gate `skipped` and every node whose deps are ALL skipped is skipped too \u2014 terminal, not a failure; a join with one live dep runs; pass = the question is skipped but the arm still runs)}. Echo node: {id, type:'echo', after, "
             "output} — commits its `output` verbatim as the node result with zero tokens and no child spawn; downstream nodes consume it via after/inputs like any done node. Composite graphs: a top-level `include:[{as, use, seeds?, exports?}]` names library graphs "
@@ -727,6 +736,7 @@ WORKFLOW_PARAMS = {
             ),
         },
         "answer": {"type": "string", "description": "release: the human's answer text (from clarify)."},
+        "graph_revision": {"type": "string", "description": "amend/steer/release: optional CAS token — the run's current graph revision (from run/status/amend). A token that differs from the head is refused with {error:'graph_revision_stale', yours, head} and NOTHING is written (no graph.json, no amends row, no restart.request, no inbox line, no gate answer). Absent = last-writer-wins (today's behavior). amend echoes the new head as graph_revision."},
         "gate_id": {"type": "string", "description": "release: gate node id."},
         "node": {"type": "string", "description": "steer: target node id (pending node picks it up at spawn; a LIVE child pulls it at its next seam via its own inbox call — the prompt is never rewritten)."},
         "text": {"type": "string", "description": "steer: the steering message."},
@@ -743,6 +753,8 @@ WORKFLOW_SCHEMA = {
     "description": (
         "Multi-agent workflow graphs: run a DAG of agent/gate nodes (fan-out, human gates, replay-skip resume, "
         "steering, amend, per-node model tiers) as a background runner owned by this session. "
+        "Use it for independent lanes, a human gate, or a resumable graph; for one or two "
+        "independent calls use delegate_task instead. "
         "Argument shapes are in parameters; the `workflow` skill has the grammar and examples."
     ),
     "parameters": WORKFLOW_PARAMS,
@@ -908,7 +920,9 @@ _ROUTE_MATCH_KEYS = ("model", "tier", "provider")
 def _resolve_models(nodes, committed=None, keep=()) -> tuple[str | None, dict | None, dict | None]:
     """Resolve tier keys in place and return (error, model_table, routes).
 
-    Explicit aliases and literal ids stay unchanged. If a provider is supplied and the
+    Explicit aliases stay unchanged. A literal 'X/Y' with no provider, X a provider the
+    seat routes, is split to provider=X, model=Y (est-2ek.1.46); `routes.requested`
+    keeps the author's literal, and policy/freeze/quota compare the full 'X/Y'. If a provider is supplied and the
     model is prefixed by that same provider, strip the redundant prefix for the CLI's
     ``-m`` value. `routes` contains requested and effective provider/model pairs only;
     no credentials or config values. At the tail, the FEEDBACK #43 ``model_preflight``
@@ -993,11 +1007,23 @@ def _resolve_models(nodes, committed=None, keep=()) -> tuple[str | None, dict | 
         # author never writes the provider the alias already names. The model string
         # itself stays verbatim (house contract: aliases are preserved); only the
         # provider is baked so the runner's --provider matches the alias's own route.
-        ip = im = None
+        ip = im = lit_provider = None
         if m and not provider and not frozen and (tier or m in known):
             ip, im = _alias_provider_pair(requested_model, _seat_model_cfg(), tiers, known)
             if ip:
                 n["provider"] = ip
+        if (m and not provider and not frozen and not ip and not tier
+                and "/" in m and m not in _seat_aliases()):
+            # est-2ek.1.46: a literal 'provider/model' with no node.provider used to reach the
+            # child as a bare `-m provider/model` (seat default route + prefixed id -> HTTP 400)
+            # while the alias for the same model worked. Bake the provider the same way aliases
+            # do, but ONLY for a provider the seat itself routes through: an aggregator's
+            # 'vendor/model' namespace is not a provider claim. `requested` below keeps the
+            # author's literal (provider None).
+            lp, _, lm = m.partition("/")
+            if lp.strip() and lm.strip() and lp in _seat_provider_ids(tiers):
+                ip = lit_provider = n["provider"] = lp
+                n["model"] = m = lm
         eff_provider = provider or ip
         if m and provider:
             prefix, sep, remainder = m.partition("/")
@@ -1006,21 +1032,23 @@ def _resolve_models(nodes, committed=None, keep=()) -> tuple[str | None, dict | 
         if m:
             # display: author-explicit provider names the route (base semantics);
             # an inherited provider shows in `routes` only.
-            display = f"{provider}/{m}" if provider else str(m)
+            display = f"{provider or lit_provider}/{m}" if (provider or lit_provider) else str(m)
             if tier:
                 display += f"  ({tier})"
         table[n["id"]] = display
+        # the alias/tier TARGET's model when the name is an alias (the CLI resolves it;
+        # the route table — pinged AND reported — speaks the real model id, est-2ek.1.318),
+        # else the baked literal. The node def keeps the alias verbatim.
+        route_model = im if (tier or m in known) and im else m
         routes[n["id"]] = {
             # requested = what the AUTHOR wrote (an inherited provider is not a request);
-            # resolved = the effective route (node def after resolution, base semantics).
+            # resolved = the effective route (alias target, else node def after resolution).
             "requested": {"provider": provider or None, "model": requested_model or None},
-            "resolved": {"provider": n.get("provider") or None, "model": n.get("model") or None},
+            "resolved": {"provider": n.get("provider") or None, "model": route_model or None},
         }
-        # route for the PER-ROUTE reasoning check: the alias/tier TARGET's model when the
-        # name is an alias (the CLI resolves it; the route table speaks the real model id),
-        # else the baked literal.
+        # route for the PER-ROUTE reasoning check (same target id as the route table).
         requests.append((n["id"], requested_model, provider, n,
-                         eff_provider, (im if (tier or m in known) and im else m)))
+                         eff_provider, route_model))
     pf_err = model_preflight(requests, tiers, _seat_model_cfg())
     if pf_err:
         return pf_err, None, None
@@ -1083,14 +1111,17 @@ def _same_ping_route(ri, provider, model):
     """True when the route core RECORDED for the ping is the pinned route itself.
     call_llm's recovery ladder may answer from another lane (capacity errors bypass the
     explicit-provider gate); a ping whose recorded route is not the pinned one proves
-    nothing about the pinned one — the caller degrades to 'unknown', never 'alive'/'dead'."""
+    nothing about the pinned one — the caller degrades to 'unknown', never 'alive'/'dead'.
+    The MODEL half also admits the ONE route-identity contract (wfcommon.route_ids_equal,
+    est-2ek.1.699); a provider mismatch is never same-route."""
     def _lbl(v):
         v = str(v or "").strip().lower()
         m = re.search(r"\(([^()]+)\)\s*$", v)  # 'main-agent(openai)' / 'fallback_chain[0](x)'
         return m.group(1) if m else v
     rp, rm = _lbl((ri or {}).get("provider")), _lbl((ri or {}).get("model"))
     lp, lm = str(provider).strip().lower(), str(model).strip().lower()
-    return bool(rp) and rp == lp and (rm == lm or rm == lm.rsplit("/", 1)[-1])
+    return bool(rp) and rp == lp and (rm == lm or rm == lm.rsplit("/", 1)[-1]
+                                      or _common.route_ids_equal((ri or {}).get("model"), lm, lp))
 
 _PING_SUBPROCESS = '''import json, sys
 try:
@@ -1228,7 +1259,8 @@ def _ping_reachable(model):
     if m:
         rm = m.group(1)
     lm = str(model).strip().lower()
-    return bool(rm) and (rm == lm or rm == lm.rsplit("/", 1)[-1])
+    return bool(rm) and (rm == lm or rm == lm.rsplit("/", 1)[-1]
+                         or _common.route_ids_equal(ri.get("model"), lm, lm.partition("/")[0] if "/" in lm else None))
 
 def _safe_ping_note(exc, status):
     try:
@@ -1381,7 +1413,13 @@ def _route_enforcement(graph, routes, skip=(), models=None):
                        f"not pin. Repoint it, or accept fallback with require_route: "
                        f"false ON THAT NODE (a `defaults` flip opts the whole graph in)")
         elif liv == "alive":
-            n["route_verified"] = f"{n.get('provider') or p}/{n.get('model') or m}"
+            # #318: bake what the ping ACTUALLY proved — the resolved route (alias
+            # TARGET id when the node pins an alias), not the bare alias name.
+            # A re-substituted node (#116) reads its served rung from the same place.
+            res_now = ent.get("resolved") or {}
+            rp = res_now.get("provider") or n.get("provider") or p
+            rm = res_now.get("model") or n.get("model") or m
+            n["route_verified"] = f"{rp}/{rm}"
     return ("route_unavailable at submit — " + "; ".join(bad)) if bad else None
 
 def _quota_refusal(graph, routes=None, cache_path=None, skip=()):
@@ -1414,6 +1452,13 @@ def _quota_refusal(graph, routes=None, cache_path=None, skip=()):
         res = ent.get("resolved") or {}
         names = {str(n.get("model")),
                  *( [str(res.get("model"))] if res.get("model") else [] )}
+        # #291 F3: entries stamped under the full 'provider/model' id (the pre-bake
+        # literal) still bind the baked node {provider, model}.
+        req = (ent.get("requested") or {}).get("model")
+        if req:
+            names.add(str(req))
+        if n.get("provider") and "/" not in str(n.get("model")):
+            names.add(f"{n['provider']}/{n['model']}")
         for key in names:
             hit = cache.get(key)
             if not isinstance(hit, dict) or hit.get("resets_epoch", 0) <= _t.time():
@@ -1482,6 +1527,24 @@ def _seat_model_cfg():
                     out["default"] = val.strip().strip("'\"")
             elif indent > 2 and in_aliases and val.strip():
                 out["aliases"][key.strip()] = val.strip().strip("'\"")
+    except Exception:
+        pass
+    return out
+
+def _seat_provider_ids(tiers=None):
+    """Provider ids the SEAT itself routes through: the 'provider/' prefix of every seat
+    alias and tier target, plus the configured `providers:` keys when hermes_cli is
+    importable (stdlib-only hosts fall back to the alias/tier prefixes). Deliberately not
+    the core's whole provider catalogue: an aggregator route's 'vendor/model' namespace
+    must not be mistaken for a provider claim (est-2ek.1.46)."""
+    out = set()
+    for target in [*_seat_aliases().values(), *(tiers or {}).values()]:
+        p, sep, rest = str(target).partition("/")
+        if sep and p.strip() and rest.strip():
+            out.add(p.strip())
+    try:
+        from hermes_cli.config import load_config_readonly
+        out |= {str(k) for k in ((load_config_readonly() or {}).get("providers") or {})}
     except Exception:
         pass
     return out
@@ -1767,6 +1830,31 @@ def _unbound_include_refs(graph, provenance):
     return None
 
 
+def _unbound_gate_argv_refs(graph):
+    """est-2ek.1.792: a gate's wait.until_argv is exec'd as FIXED argv. run_context
+    renders {run.KEY} in goal/context/question/profile and fan-out goals only, so a
+    {run.KEY} surviving in an argv element reaches the machine gate as a literal
+    token (FileNotFoundError on '{run.python}', forever, no probe ever run). Refuse
+    it before any write or spawn, naming node, argv index and key. Applies to
+    parent-authored and included gates alike: an included gate's seeds were already
+    rendered by expansion, so anything left here is unbound."""
+    for node in graph.get("nodes") or []:
+        wait = node.get("wait") if isinstance(node, dict) else None
+        argv = wait.get("until_argv") if isinstance(wait, dict) else None
+        if not isinstance(argv, list):
+            continue
+        for i, el in enumerate(argv):
+            m = _RUN_REF.search(el) if isinstance(el, str) else None
+            if m:
+                return {"error": (
+                    f"run placeholder unbound: node {node.get('id')!r} wait.until_argv[{i}] "
+                    f"still references {{run.{m.group(1)}}} — run_context renders goals, "
+                    "contexts, questions and profile only, never command argv; write the "
+                    "value into the argv element literally (or hand it to the probe through "
+                    "a file); refused before any write or spawn")}
+    return None
+
+
 def _expand_includes_at_door(graph):
     """The single door choke point for composite graphs (design: expand BEFORE
     _validation_error, apply_graph_defaults and _bind_run_context, on run/amend/save).
@@ -1924,6 +2012,17 @@ def act_save(args):
         if terr:
             return {"error": terr}
         tags = norm
+    params = args.get("params")
+    if "params" in args and (not isinstance(params, dict) or any(
+            not isinstance(k, str) or not _RUN_KEY.fullmatch(k) or not isinstance(v, dict)
+            for k, v in params.items())):
+        return {"error": "params must map identifier keys to metadata objects"}
+    if params is None:
+        prev_path = _lib_read(p.stem) if p.parent == library_root() else p
+        if prev_path.exists():
+            prev_meta = _common.library_entry(jload(prev_path)).get("meta") or {}
+            if isinstance(prev_meta.get("params"), dict):
+                params = prev_meta["params"]
     # #70 RETAIN-ON-OVERWRITE: a resave that says nothing about a meta field carries
     # the previous entry's value (re-shelve-from-run_id is the documented normal flow
     # and must not silently drop discovery coverage). `tags:[]` stays the #50 error
@@ -1996,7 +2095,7 @@ def act_save(args):
         graph["provenance"] = {"owner": owner, "source": source,
                                "saved_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
                                "source_digest": _common.source_digest(graph)}
-    if desc is not None or tags is not None:
+    if desc is not None or tags is not None or params is not None:
         # #50 envelope: meta carries discovery fields the wf/1 grammar has no key
         # for; the inner graph stays validator-clean. The normalizer loads either.
         meta = {}
@@ -2004,6 +2103,8 @@ def act_save(args):
             meta["description"] = desc
         if tags is not None:
             meta["tags"] = tags
+        if params is not None:
+            meta["params"] = params
         data = {"meta": meta, "graph": graph}
     else:
         # bare form (pre-#50 bytes, and what the solo golden freezes): the
@@ -2022,6 +2123,16 @@ def act_save(args):
     # law: the save lands; only a warning key rides the response, and a clean
     # save's response stays byte-identical (no empty key — golden bytes).
     _warn = _stale_literal_warnings(graph)
+    # est-kg3y s12: only an ENVELOPE entry declares a contract (meta is where
+    # params live), so only it can disagree with its refs. A bare entry's
+    # contract is wholly derived from refs — a bound bare save stays warning-free
+    # (est-2ek.1.245 T2b: binding points are the cure, never a new warning).
+    if data is not graph:
+        contract = _common.run_context_contract(_expanded, params)
+        if contract["missing"]:
+            _warn.append("s12 uncontracted run_context refs: " + ", ".join(contract["missing"]))
+        if contract["dead"]:
+            _warn.append("s12 dead declared params: " + ", ".join(contract["dead"]))
     if _warn:
         out["save_warnings"] = _warn
     return out
@@ -2073,6 +2184,11 @@ def _library_rows():
             if entry["envelope"] or name.startswith(_GENERAL_PREFIX):
                 row["id"] = str(p.relative_to(root))
                 row["tags"] = entry["tags"]
+            contract = _common.run_context_contract(graph, entry["meta"].get("params"))
+            if contract["refs"]:
+                row["params"] = contract["params"]
+            if contract["dead"]:
+                row["dead_params"] = contract["dead"]
             prov = graph.get("provenance")
             if isinstance(prov, dict):
                 row.update({k: prov.get(k) for k in ("owner", "source", "source_digest")})
@@ -2081,6 +2197,21 @@ def _library_rows():
 
 def act_library(args):
     rows, skipped, quarantined = _library_rows()
+    if args.get("name") is not None:
+        name = args["name"]
+        try:
+            name = _lib_rel_name(_lib_path(name))
+        except ValueError as e:
+            return {"error": str(e)}
+        row = next((r for r in rows if r["name"] == name), None)
+        if row is None:
+            return _from_unknown_error(name)
+        launch = {"action": "run", "from": name}
+        if row.get("params"):
+            launch["run_context"] = {k: v.get("default", f"<{k}>")
+                                     for k, v in row["params"].items()}
+        return {"entry": dict(row, instantiate=launch,
+                              command="workflow " + json.dumps(launch, ensure_ascii=False))}
     # The 1.1 hint stays verbatim for the bare/empty library (golden-solo byte law);
     # the submit nudge rides along once the library carries #50 discovery entries —
     # the moment the reader is in the discovery-first world.
@@ -2215,7 +2346,7 @@ _RUN_REF = re.compile(r"\{run\.([^{}]*)\}")
 _RUN_KEY = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
 
 
-def _bind_run_context(graph, binding):
+def _bind_run_context(graph, binding, *, library_sourced=False):
     """Resolve a launch binding on a post-defaults copy, before persistence.
 
     Map substitution is deliberately narrow: no str.format, no interpolation of
@@ -2302,6 +2433,17 @@ def _bind_run_context(graph, binding):
                         f"run_context[{key!r}] must not contain braces when bound into a "
                         "fan-out goal — the runner re-interpolates fan-out goals per item")
         return out
+    if library_sourced:
+        nodes = []
+        for original in graph["nodes"]:
+            n = original
+            fan = isinstance(n.get("fanout"), dict)
+            for label, path in _common._include_text_fields(original):
+                n = _common._include_set(n, path, render(
+                    _common._include_get(original, path),
+                    fanout=label.startswith("fanout.") or (label == "goal" and fan)))
+            nodes.append(n)
+        return dict(graph, nodes=nodes)
     nodes = []
     for original in graph["nodes"]:
         n = dict(original)
@@ -2430,6 +2572,15 @@ def _lane_state(key, entry):
         st = None
         r = runs_root() / "__invalid_lane_run__"
     state = st["status"] if st else "pending"
+    # est-2ek.1.199: a lane entry CLAIMING a run whose dir does not exist on
+    # disk is the postmortem's census-blind ghost — 'pending forever' made the
+    # ledger loop sleep 6h. Surface it as an explicit orphaned-run status the
+    # monitor/STALL line can read at plugin level. The dir check is what
+    # distinguishes it from a not-yet-written-but-launching dir: at this point
+    # the door has already passed (or refused) its durability proof, so a
+    # claimed run without a dir is gone, not pending.
+    if st is None and not r.is_dir():
+        state = "orphaned"
     live = st.get("runner_live", False) if st else False   # A2 one-read law
     unfinished = state not in ("done", "failed", "stopped")
     return {"lane_key": key, "run_id": rid, "state": state,
@@ -2658,11 +2809,25 @@ def act_run(args):
         graph = _common.apply_graph_defaults(graph)
     except ValueError as e:
         return {"error": f"graph invalid: defaults/shape: {e}"}
+    if lib_name:
+        # Post-defaults: `defaults` is already baked into nodes, so the render
+        # surface the runner consumes is nodes[] alone (the retained `defaults`
+        # block is never rendered and must not read as a survivor).
+        refs = _common.run_context_contract({"nodes": graph["nodes"]})["refs"]
+        binding = args.get("run_context")
+        if refs and not isinstance(binding, dict):
+            return {"error": "library run_context must bind non-empty string values for: "
+                             + ", ".join(refs) + "; refused before any write or spawn"}
     if "run_context" in args:
         try:
-            graph = _bind_run_context(graph, args["run_context"])
+            graph = _bind_run_context(graph, args["run_context"], library_sourced=bool(lib_name))
         except ValueError as e:
             return {"error": str(e)}
+    if lib_name:
+        refs = _common.run_context_contract({"nodes": graph["nodes"]})["refs"]
+        if refs:
+            return {"error": "library run_context has surviving {run.KEY} references: "
+                             + ", ".join(refs) + "; refused before any write or spawn"}
     if _includes:
         # Composite runs are fail-closed on unbound refs (live composite-run receipt,
         # 2026-09-30): a shelved sub-graph's {run.KEY} contract is invisible to a
@@ -2673,6 +2838,10 @@ def act_run(args):
         bad = _unbound_include_refs(graph, _includes)
         if bad:
             return bad
+    # est-2ek.1.792: run_context never reaches argv — refuse a surviving {run.KEY}.
+    bad = _unbound_gate_argv_refs(graph)
+    if bad:
+        return bad
     # 1.1 (RATIFY F2): profile validation runs on the RENDERED graph ({run.KEY} resolved).
     bad = _profile_error(graph)
     if bad:
@@ -2740,6 +2909,76 @@ def act_run(args):
                        includes=_includes, include_notes=_include_notes,
                        concurrency_meta=concurrency_meta)
 
+def _new_ancestor_dirs(p):
+    """est-2ek.1.199: the directory entries a `p.mkdir(parents=True)` would
+    create, deepest first — so the durability proof can fsync the ENTRY that
+    names each newly created dir, not just the leaf. Best-effort by design: a
+    race here only ever means an extra fsync on a dir we did not create.
+    """
+    out, cur = [], Path(p)
+    while True:
+        try:
+            if cur.exists():
+                return out
+        except OSError:
+            return out
+        out.append(cur)
+        if cur.parent == cur:
+            return out
+        cur = cur.parent
+
+# est-2ek.1.199: the three files a fresh run dir MUST carry before its run_id
+# may ride back to the caller. The proof treats absence as failure, never skip.
+_DURABLE_RUN_FILES = ("graph.json", "run.json", "wake_protocol")
+
+def _prove_run_dir(r, extra_dirs=()):
+    """est-2ek.1.199: the door's durability proof for a fresh run dir, run
+    BEFORE the runner spawns and BEFORE the run_id rides back to the caller.
+
+    fsync the three mandatory durable files (graph.json, run.json,
+    wake_protocol — a missing one is an EXPLICIT failure: a half-written run
+    dir must never be handed back as launched), then fsync the run dir, the
+    runs root, and every ancestor entry the launch itself created via
+    extra_dirs (link durability — a fsynced file in an un-fsynced dir can
+    vanish with the dir on crash; `mkdir(parents=True)` can create the root
+    AND its ancestors, so each newly created entry needs its own sync). Then
+    VERIFY the dir still exists under the resolved durable root — the phantom
+    shape is a run_id whose dir is not under the root the estate census walks.
+    Any failure raises RuntimeError naming the ATTEMPTED PATH (loud, per the
+    postmortem ticket: never a phantom run_id). handle() turns the raise into
+    the tool's error payload; act_run callers inside the plugin never see a
+    half-proved run advertised as launched.
+    """
+    attempted = str(r)
+    root = r.parent
+    try:
+        for fname in _DURABLE_RUN_FILES:
+            f = r / fname
+            if not f.is_file():
+                raise RuntimeError(
+                    f"run dir proof FAILED: mandatory durable file {fname} is "
+                    f"missing at attempted path {f} — run not launched-proof; "
+                    "do not resume by id")
+            with open(f, "rb") as fh:
+                os.fsync(fh.fileno())
+        for d in (r, root, *extra_dirs):
+            dfd = os.open(d, getattr(os, "O_DIRECTORY", 0))
+            try:
+                os.fsync(dfd)
+            finally:
+                os.close(dfd)
+    except OSError as e:
+        raise RuntimeError(
+            f"run dir proof FAILED (fsync) at attempted path {attempted}: "
+            f"{type(e).__name__}: {e} — run not launched-proof; do not resume by id")
+    if not r.is_dir():
+        raise RuntimeError(
+            f"run dir proof FAILED: run dir vanished after launch — attempted path "
+            f"{attempted} is not a directory under the durable runs root {root}; "
+            "no run was durably created (check the launch path's root resolution, "
+            "esp. a stub/non-registering door carrying settings.runs_root)")
+
+
 def _create_run(args, graph, lib_name, models, routes, _liveness_notes, lane_path=None,
                 *, concurrency_meta=None, includes=None, include_notes=None):
     """Under the lane flock: complete run dir, atomic registry entry, then spawn."""
@@ -2748,6 +2987,10 @@ def _create_run(args, graph, lib_name, models, routes, _liveness_notes, lane_pat
         c for c in name.lower() if c.isalnum() or c in "-_")[:24]
     rid, n = base, 0
     root = runs_root()
+    # est-2ek.1.199: snapshot which ancestor entries ALREADY exist before
+    # mkdir(parents=True) gets a chance to mint them — the durability proof
+    # must fsync the entry naming each newly created dir (blocker 3).
+    _new_dirs = _new_ancestor_dirs(root)
     root.mkdir(parents=True, exist_ok=True)
     while True:  # collision-resistant exclusive create
         r = root / (rid if n == 0 else f"{rid}-{n}")
@@ -2782,12 +3025,17 @@ def _create_run(args, graph, lib_name, models, routes, _liveness_notes, lane_pat
     if concurrency_meta:
         meta.update(concurrency_meta)
     meta.update(_identity_stamps(args, graph, lib_name))   # 1.1: only derivable keys land
-    # est-2ek.1.166: a run that DECLARED a version requirement also reports the
-    # arming door's own truth (plugin.yaml via wfcommon.plugin_version), so a
-    # stale seat is visible from status without opening a run dir. Plain runs
-    # never gain the key (solo byte-identity law — the golden key set holds).
-    if graph.get("requires_plugin") is not None:
-        meta["plugin_version"] = _common.plugin_version()
+    # est-2ek.1.166 → ra-plan#125-1 (issue #125): EVERY run reports the arming
+    # door's own truth (plugin.yaml via wfcommon.plugin_version), not only runs
+    # that declared requires_plugin — a stale seat is visible from status for
+    # plain runs too, without opening a run dir. The stamp stays DERIVED, never
+    # invented (R2): an unreadable plugin.yaml ('') keeps the key absent, and
+    # act_status' derive-only echo therefore omits it exactly as before. The
+    # golden-solo comparison exempts this volatile provenance stamp (same
+    # sanctioned-delta precedent as `started`/`fp_rule_version` — est-ciin).
+    _pv = _common.plugin_version()
+    if _pv:
+        meta["plugin_version"] = _pv
     # Composite runs record which shelf bytes they expanded from (author-form
     # provenance) and any non-fatal resolver notes (scratch collisions). Empty =
     # key omitted: a plain run keeps the exact pre-include run.json key set.
@@ -2814,7 +3062,28 @@ def _create_run(args, graph, lib_name, models, routes, _liveness_notes, lane_pat
             os.replace(tmp, lane_path)
         finally:
             tmp.unlink(missing_ok=True)
+    # est-2ek.1.199 (fb-fix STALL postmortem): a door launch returned a run_id
+    # whose dir never landed under the durable root; the ledger loop slept 6h
+    # on 'in_progress' because nothing ever proved the dir to the launcher.
+    # DURABILITY PROOF law: every mandatory durable file is fsynced (absence
+    # fails, never skips), then the run dir, the runs root, and any
+    # newly-created ancestor entries are fsynced (link durability), and the dir
+    # must STILL EXIST under the resolved durable root BEFORE the runner spawns
+    # and before the run_id is handed back. A failed proof RAISES with the
+    # attempted path — handle() surfaces it as the tool error; a phantom run_id
+    # is never returned and no work starts behind a refused proof (a caller
+    # retry must not duplicate work that already began).
+    _prove_run_dir(r, extra_dirs=_new_dirs)
     _spawn_runner(r)
+    # Re-check AFTER the spawn: a dir that vanished while/just after the runner
+    # started is still the phantom shape (the door's own writes are already
+    # proved and synced at this point; only an external removal lands here).
+    if not r.is_dir():
+        raise RuntimeError(
+            f"run dir proof FAILED: run dir vanished after launch — attempted path "
+            f"{r} is not a directory under the durable runs root {r.parent}; "
+            "no run was durably created (check the launch path's root resolution, "
+            "esp. a stub/non-registering door carrying settings.runs_root)")
     out = {"run_id": rid, "models": models, "routes": routes, "hint":
             # Copy-exact inducement (papercut #70): the hint IS the paste line —
             # no paraphrase, no fallback. The card is agent-authored by ruling.
@@ -2889,12 +3158,23 @@ def act_status(args):
     # that run_state derived from — a fresh probe here can flip across a dying
     # runner's flock and make status vs runner_live disagree.
     out = {"run_id": st["run_id"], "name": st["name"], "status": st["status"],
-           "runner_live": alive, "nodes": {k: {kk: v[kk] for kk in ("type", "status", "fanout")}
+           "failed_nodes": st["failed_nodes"],   # sys-5lnm17: which nodes died, on every status/wait
+           "runner_live": alive, "nodes": {k: {kk: v[kk] for kk in ("type", "status", "fanout",
+                                                                     # #128: the artifact-mtime heartbeat rides
+                                                                     # status/wait/list identically; honest
+                                                                     # absence — no key when no artifact visible
+                                                                     # #133: the wall meter rides identically —
+                                                                     # {elapsed_s, wall_s, p95_s, meter}, absent
+                                                                     # when nothing grounds it
+                                                                     "progress", "wall") if kk in v}
                                            for k, v in st["nodes"].items()},
            "done": st["done"], "skipped": st["skipped"], "total": st["total"],
            # O1: the card to paste into the report rides on EVERY status (and via
            # act_wait, every wait) — the inducement never depends on the agent recalling it.
-           "card": _card(st["run_id"])}
+           "card": _card(st["run_id"]),
+           # #19: the graph head rides EVERY status read (derived, never stored —
+           # status is where a CAS caller reads the token before a guarded write).
+           "graph_revision": _graph_revision(r)}
     if resolved_via:   # #58: the run lives outside the caller's resolved root — loud, not silent
         out["resolved_via"] = resolved_via
         out["resolved_via_note"] = ("run resolved under a sibling root (dispatch-time home "
@@ -2967,6 +3247,8 @@ def act_status(args):
             out["nodes"][nid]["blocked_by"] = v["blocked_by"]
         if v.get("parked"):
             out["nodes"][nid]["parked"] = v["parked"]
+        if v.get("seat_wait"):   # est-2ek.1.833: global seat back-pressure, derive-only
+            out["nodes"][nid]["seat_wait"] = v["seat_wait"]
         sm = _steer_state(r, nid)
         if sm:
             out["nodes"][nid]["steer"] = sm
@@ -3014,18 +3296,31 @@ def act_status(args):
         cm = {}
     if cm or any(v.get("active_spawn") for v in st["nodes"].values()):
         import time as _t
+        # #114 (WF-04): the numeric fold + known/unknown policy is the ONE helper
+        # wfcommon.fold_child_metrics (presentation — tokens string, children,
+        # scope, cost_usd, heartbeat splice — stays here). api_calls is absent
+        # from a fold whose rows include an unknown child, so the run total sums
+        # the folds that produced a number and omits api_calls itself whenever
+        # ANY node fold omitted it — never a partial sum advertised as exact.
         tot = {"tokens_in": 0, "tokens_out": 0, "api_calls": 0, "tool_calls": 0, "cost": 0.0}
+        api_calls_known = True
         for nid in out["nodes"]:
             mine = {k: m for k, m in cm.items() if k.startswith(f"wf:{st['run_id']}:{nid}:")}
             active = st["nodes"][nid].get("active_spawns", [])
             if not mine and not active:
                 continue
-            f = {k: sum((m.get(k) or 0) for m in mine.values()) for k in tot}
+            # a live-only node (verified spawn, no DB rows yet) folds as zeros,
+            # exactly as the pre-helper sum-over-empty-did: "0▸0", not a crash.
+            f = _common.fold_child_metrics(mine.values()) or {k: 0 for k in tot}
             current = _common.current_attempt(mine, active)
-            line = {"tokens": f"{f['tokens_in']}▸{f['tokens_out']}", "api_calls": f["api_calls"],
-                    "tool_calls": f["tool_calls"], "children": len(mine), "scope": "cumulative"}
-            if any(not m.get("api_calls_known", True) for m in mine.values()):
-                line.pop("api_calls")
+            line = {"tokens": f"{f['tokens_in']}▸{f['tokens_out']}"}
+            if "api_calls" in f:
+                line["api_calls"] = f["api_calls"]
+            else:
+                api_calls_known = False
+            line["tool_calls"] = f["tool_calls"]
+            line["children"] = len(mine)
+            line["scope"] = "cumulative"
             if f["cost"]:
                 line["cost_usd"] = round(f["cost"], 4)
             if current["live"]:
@@ -3035,9 +3330,30 @@ def act_status(args):
                 line["last"] = current["last_desc"]
                 line["last_tool_at"] = la  # #18: the epoch of the last verified activity
             out["nodes"][nid]["metrics"] = line
-            for k in tot: tot[k] += f[k]
-        out["metrics"] = {"tokens": f"{tot['tokens_in']}▸{tot['tokens_out']}", "api_calls": tot["api_calls"],
+            # #127 (est-zsws): the heartbeat verdict rides EVERY running node's
+            # status line — derived from the fold just built plus the #128
+            # progress artifact age. Read model only: no writes, no key for a
+            # node that is not running.
+            if st["nodes"][nid].get("status") == "running":
+                out["nodes"][nid]["heartbeat"] = _common.heartbeat(
+                    line, out["nodes"][nid].get("progress"))
+            for k in tot: tot[k] += f.get(k) or 0
+        out["metrics"] = {"tokens": f"{tot['tokens_in']}▸{tot['tokens_out']}",
+                          **({"api_calls": tot["api_calls"]} if api_calls_known else {}),
                           "tool_calls": tot["tool_calls"], **({"cost_usd": round(tot["cost"], 4)} if tot["cost"] else {})}
+    # #127 (est-zsws): one-line run-level explain composed ONLY from fields the
+    # payload already carries (statuses, heartbeat verdicts, blocked_by, parked).
+    # Terminal runs have nothing to explain — the key is absent, never an slogan.
+    _ex = _common.run_explain(out)
+    if _ex:
+        out["explain"] = _ex
+    # est-2ek.1.158: a graph that declares `result: <node id>` names the node whose
+    # output IS the run verdict; terminal status/wait report it (derive-only: the
+    # node entry built above). Graphs without the key never gain the field.
+    _rid = (jload(r / "graph.json", {}) or {}).get("result")
+    if isinstance(_rid, str) and _rid in out["nodes"] and st["status"] in ("done", "failed", "stopped"):
+        out["result"] = {"node": _rid, "status": out["nodes"][_rid]["status"],
+                         "output": out["nodes"][_rid].get("output")}
     # A3: derived "what next?" — computed ONLY from the run_state fields already in
     # hand (derive-only, never a guess; an unreadable state yields no `next` at all).
     # The agent does what `next` says; an empty `next` means the run is terminal.
@@ -3047,7 +3363,16 @@ def act_status(args):
         out["next"] = [{"action": "release", "gate_id": hg.get("id"),
                        "options": hg.get("options") or []}]
     elif s in ("running", "pending", "interrupted"):
-        out["next"] = [{"action": "wait"}]
+        row = {"action": "wait"}
+        # est-2ek.1.833: a live run with no progress because the GLOBAL agent-seat
+        # cap is full names that reason, the cap and the oldest wait age.
+        sw = {nid: v["seat_wait"] for nid, v in st["nodes"].items() if v.get("seat_wait")}
+        if sw and st.get("runner_live"):
+            ages = [w["age_s"] for w in sw.values() if isinstance(w.get("age_s"), int)]
+            row.update({"reason": "seat_wait", "nodes": sorted(sw),
+                        "cap": next((w.get("cap") for w in sw.values() if w.get("cap") is not None), None),
+                        "age_s": max(ages) if ages else None})
+        out["next"] = [row]
     elif s == "failed":
         rows = [{"action": "amend", "node": nid, "error_class":
                  (out["nodes"][nid].get("node_facts")
@@ -3150,6 +3475,61 @@ def act_wait(args):
             return _echo({**act_status(args), "note": f"still running after {int(time.time()-t0)}s — call wait again (self-yield at {int(seg)}s keeps us under the harness tool deadline)"})
         time.sleep(2)
 
+# ---------- graph revision CAS (issue #19) ----------
+# The revision is DERIVED, never stored: "seq:sha16" over the run's own bytes
+# (seq = amends.jsonl line count, 0 for a fresh run; sha16 = sha256 of the
+# current graph.json bytes, first 16 hex). Nothing to migrate (R10: pre-token
+# run dirs already carry everything the token is computed from) and a stored
+# token could drift from the graph it claims to name — a derived one cannot.
+# Only the door's two graph.json writers exist (act_run at create, act_amend),
+# so seq is monotone: every graph mutation appends exactly one amends row
+# (act_run mints a run with seq 0). All CAS + write happens under the per-run
+# door lock: the runner's admission flock is held for the runner's whole
+# lifetime on the runner side, so the door cannot take it (deadlock).
+
+def _graph_revision(r):
+    """The run's current graph revision "<seq>:<sha16>", or None when the run
+    has no graph.json (unknown run / no graph to pin)."""
+    try:
+        data = (r / "graph.json").read_bytes()
+    except OSError:
+        return None
+    seq = 0
+    try:
+        with (r / "amends.jsonl").open("r", encoding="utf-8") as f:
+            seq = sum(1 for line in f if line.strip())
+    except OSError:
+        pass
+    return f"{seq}:{hashlib.sha256(data).hexdigest()[:16]}"
+
+def _revision_cas(r, args):
+    """Compare-and-set on the graph revision. Tokenless (key absent/None) =
+    today's last-writer-wins semantics, unchanged (returns None). A submitted
+    token that differs from the head returns the typed refusal — the CALLER
+    must have checked this under _graph_lock(r) and must write NOTHING on a
+    refusal; the head named in the error is the head the caller must re-read
+    and rebase against."""
+    tok = args.get("graph_revision")
+    if tok is None:
+        return None
+    head = _graph_revision(r)
+    if tok == head:
+        return None
+    return {"error": "graph_revision_stale", "yours": tok, "head": head}
+
+@contextlib.contextmanager
+def _graph_lock(r):
+    """#19: the per-run door lock held by every graph-revision CAS and every
+    graph.json mutation (act_amend's read-modify-write; the CAS-guarded inbox
+    append and gate-answer write). Locking only inside the WRITERS — the shared
+    jload primitive is untouched (it is a god node; callers stay unchanged)."""
+    with (r / "graph.lock").open("a+b") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)
+
 def _release_core(r, gate_id, answer, ui=False):
     """ONE gate-answer path for tool and UI. Stale answers never block: the answer
     file is overwritten iff absent-or-stale; the gate re-holds unless the efp
@@ -3201,7 +3581,18 @@ def act_release(args):
         # (or already was) stopped — amend or re-run instead.
         return {"error": "run is stopped/stop pending — answer refused; amend or re-run to continue"}
     gate_id = args.get("gate_id")
-    res = _release_core(r, gate_id, args.get("answer", ""))
+    # #19 (est-19k9w): optional CAS — a gate answer is a write against the
+    # CURRENT graph (its efp is computed from the live defs); answering under a
+    # revision the caller never saw is refused with NOTHING written — the hold
+    # stays exactly as it was. release never bumps the revision: it does not
+    # touch graph.json. The CAS + answer write share one door lock; the respawn
+    # happens OUTSIDE it (never hold the door lock across a spawn). The UI path
+    # (_release_core directly) is tokenless by construction, today's semantics.
+    with _graph_lock(r):
+        _stale = _revision_cas(r, args)
+        if _stale:
+            return _stale
+        res = _release_core(r, gate_id, args.get("answer", ""))
     if not res.get("ok"):
         return res
     mode = _resume_after_action(
@@ -3243,9 +3634,17 @@ def act_steer(args):
         return {"ok": False,
                 "error": f"node is {node_status} — steering not queued: a {node_status} node never spawns again, "
                          "so the text would never be delivered; amend is the correct verb to make it eligible again"}
-    with open(r / "inbox.jsonl", "a") as f:
-        f.write(json.dumps({"node": node["id"], "text": args.get("text", ""),
-                            "at": datetime.now(timezone.utc).isoformat(timespec="seconds")}) + "\n")
+    # #19 (est-19k9w): optional CAS — steering text must not be queued against a
+    # graph revision the caller never saw (the node set / defs may have moved).
+    # The append happens under the same lock as the check, and a refusal writes
+    # NOTHING: no inbox line, no steer.queued event, gate files untouched.
+    with _graph_lock(r):
+        _stale = _revision_cas(r, args)
+        if _stale:
+            return _stale
+        with open(r / "inbox.jsonl", "a") as f:
+            f.write(json.dumps({"node": node["id"], "text": args.get("text", ""),
+                                "at": datetime.now(timezone.utc).isoformat(timespec="seconds")}) + "\n")
     _steer_event(r, "steer.queued", node=node["id"],
                  chars=len(args.get("text", "") or ""))  # #17: the door logs the queue
     if node_status == "running":
@@ -3311,7 +3710,11 @@ def _frozen_committed(r, old, new_nodes):
             continue
         same = all(n.get(k) == c.get(k) for k in _ROUTE_MATCH_KEYS) or (
             bool(c.get("tier")) and n.get("model") == c["tier"]
-            and n.get("provider") in (None, c.get("provider")))
+            and n.get("provider") in (None, c.get("provider"))) or (
+            # #291 F2: the author literal 'X/Y' replays as its committed bake {X, Y}
+            # (est-2ek.1.46) whether or not the seat still routes X.
+            not n.get("provider") and not c.get("tier") and bool(c.get("provider"))
+            and n.get("model") == f"{c['provider']}/{c.get('model')}")
         if same and _common.node_rec(r, c, ob)[0] in ("done", "partial", "skipped"):
             frozen.add(n["id"])
     moved = True
@@ -3332,6 +3735,14 @@ def act_amend(args):
         return bad
     if new is None:
         return {"error": "amend needs full replacement graph or graph_path"}
+    # #19 (est-19k9w): opt-in compare-and-set on the graph revision, checked
+    # EARLY so a stale caller is refused before the expensive gates and before
+    # anything is written (a dry_run reports staleness too). Tokenless = today's
+    # last-writer-wins, unchanged. The write site re-checks under the same lock.
+    with _graph_lock(r):
+        _stale = _revision_cas(r, args)
+    if _stale:
+        return _stale
     # An amend of an include-expanded run passes the EXPANDED graph (no `include`
     # key — strip-on-expand), so this is the identity no-op; a replacement graph
     # that DOES carry includes is a fresh author form and expands before validation
@@ -3347,6 +3758,9 @@ def act_amend(args):
         bad = _unbound_include_refs(new, _includes)
         if bad:
             return bad
+    bad = _unbound_gate_argv_refs(new)    # est-2ek.1.792: same door law as run
+    if bad:
+        return bad
     bad = _validation_error(new, run_dir=r) or _profile_error(new)
     if bad:
         return bad
@@ -3398,12 +3812,29 @@ def act_amend(args):
         return {"ok": True, "dry_run": True, "models": _models, "routes": _routes, **preview,
                 "hint": "nothing written — re-run without dry_run to apply"
                         + _liveness_hint_suffix(_liveness_notes)}
-    (r / "amends.jsonl").open("a").write(
-        json.dumps({"at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-                    "old": jload(r / "graph.json"), "new": new}) + "\n")
-    tmp = r / f"graph.json.{os.getpid()}.tmp"
-    tmp.write_text(json.dumps(new, ensure_ascii=False, indent=2))
-    os.replace(tmp, r / "graph.json")
+    # #19 (est-19k9w): the write site holds the per-run door lock across the
+    # whole read-modify-write (the 09-27 alternating-writers shape: two amends
+    # each read the old graph, the later replace silently loses the earlier).
+    # The CAS token is RE-CHECKED here — between the early refuse and this lock
+    # another writer may have moved the head (check+write under one lock is the
+    # atomic unit; the early check is only the cheap pre-empt). A refusal lands
+    # BEFORE amends.jsonl / graph.json / restart.request / gate files are touched.
+    with _graph_lock(r):
+        _stale = _revision_cas(r, args)
+        if _stale:
+            return _stale
+        _base_rev = _graph_revision(r)
+        (r / "amends.jsonl").open("a").write(
+            json.dumps({"at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                        "old": jload(r / "graph.json"), "new": new,
+                        # #19: the row names the head it was written against and
+                        # whether the caller pinned it (cas:true = refused-if-stale).
+                        "base_revision": _base_rev,
+                        "cas": args.get("graph_revision") is not None}) + "\n")
+        tmp = r / f"graph.json.{os.getpid()}.tmp"
+        tmp.write_text(json.dumps(new, ensure_ascii=False, indent=2))
+        os.replace(tmp, r / "graph.json")
+        _new_rev = _graph_revision(r)
     # est-2ek.1.641: an applied amend re-proves routes through this submit's
     # ping — bake the proved-alive receipts for the NEW defs (frozen replay-skip
     # nodes keep their committed receipt: the file is merged, never rewritten).
@@ -3442,6 +3873,7 @@ def act_amend(args):
     else:
         applies = "live runner hot-reloads at its next wave boundary; the next transition wakes the owner automatically"
     return {"ok": True, "models": _models, "routes": _routes, "applies": applies,
+            "graph_revision": _new_rev,   # #19: the new head — the token a next CAS writes against
             "hint": "continuation is automatic; do not wait or poll" + _liveness_hint_suffix(_liveness_notes), **preview}
 
 def act_stop(args):
@@ -3553,6 +3985,14 @@ def _wf_command(raw_args):
     """`/wf` — the library front door. `/wf <name> [note]` supplies the note
     atomically as a launch seed, never as post-launch steering."""
     arg = (raw_args or "").strip()
+    if arg.startswith("show "):
+        detail = act_library({"name": arg[5:].strip()})
+        if "error" in detail:
+            return detail["error"]
+        entry = detail["entry"]
+        return (f"Workflow **{entry['name']}** — required inputs: "
+                + (", ".join(entry.get("params", {})) or "(none)")
+                + "\n" + entry["command"])
     out = act_library({})
     lib = out["library"]
     quarantined = out.get("quarantined") or []

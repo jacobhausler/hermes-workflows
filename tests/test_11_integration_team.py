@@ -109,7 +109,8 @@ class TeamIntegration(unittest.TestCase):
 
     def test_env_whitelist_plain_and_profiled(self):
         permitted = {'PATH', 'HOME', 'LANG', 'TERM', 'TZ', 'TMPDIR', 'HERMES_HOME',
-                     'WF_RUNS_ROOT', 'HERMES_WRITE_SAFE_ROOT', 'HERMES_QUIET_TURN_REPORT_FILE'}
+                     'WF_RUNS_ROOT', 'HERMES_WRITE_SAFE_ROOT', 'HERMES_QUIET_TURN_REPORT_FILE',
+                     'TERMINAL_CWD'}
         for profile in (None, 'e-fixture'):
             with self.subTest(profile=profile):
                 with patch.dict(os.environ, {**self.env, 'LANE_E_SECRET_TOKEN': 'never-inherit',
@@ -117,6 +118,7 @@ class TeamIntegration(unittest.TestCase):
                     rid = door.act_run({'graph': self.graph(profile=profile)})['run_id']
                 r = self.runs / rid
                 trace = self.first_trace(r)
+                self.assertEqual(trace['env']['TERMINAL_CWD'], str((r / 'work' / 'a').resolve()))
                 if profile:
                     # RATIFY F2: the env WHITELIST is mandated on routed spawns only.
                     self.assertNotIn('LANE_E_SECRET_TOKEN', trace['env'], 'profiled child inherited test secret')

@@ -36,6 +36,8 @@ Run: PYTHONPATH=/opt/hermes /opt/hermes/.venv/bin/python tests/test_proctree_61.
 import json, os, shutil, subprocess, sys, time
 from pathlib import Path
 
+from wf_test_markers import read_pid_marker   # est-jue3: one parseable-content wait family
+
 HERE = Path(__file__).resolve().parent
 BUILD = Path(os.environ.get("WF_TEST_BUILD") or HERE.parent)
 sys.path.insert(0, str(BUILD))
@@ -129,15 +131,12 @@ if callable(getattr(wf, "_proc_children_of", None)):
     kid_pid_file = HOME / "u2_kid.txt"
     proc = subprocess.Popen([sys.executable, str(cf), str(kid_pid_file)],
                             start_new_session=True)   # mirrors run_child's spawn contract
-    t_end = time.time() + 10
-    while not kid_pid_file.exists() and time.time() < t_end:
-        time.sleep(0.02)
-    kid = int(kid_pid_file.read_text())
-    t_end = time.time() + 10
-    while not gc_marker.exists() and time.time() < t_end:
-        time.sleep(0.02)
+    # est-jue3: parseable-content waits, not existence-then-int (race class of
+    # est-gzmm, fixed for the 61b markers in #267): the markers are written by
+    # an embedded child script and are visible at open(), before their bytes.
+    kid = read_pid_marker(kid_pid_file)[0]
     kids = wf._proc_children_of(kid)
-    gc = int(gc_marker.read_text())
+    gc = read_pid_marker(gc_marker)[0]
     check("U2 live grandchild found by ppid walk", gc in kids, f"kid={kid} kids={kids}")
     proc.wait(timeout=30)                      # reaps: grandchild reparents to init
     members = wf._proc_pids_by_pgid(kid)       # pgrp membership survives reparenting
