@@ -44,6 +44,10 @@ def def_hash(node, rule=FP_RULE_VERSION):
     if rule == FP_RULE_VERSION:
         node = {k: v for k, v in node.items()
                 if k not in _BUDGET_KEYS and k not in _CONCURRENCY_KEYS and k not in _POLICY_KEYS}
+    elif "resume_hint" in node:
+        # #130 did not exist in legacy records; exclude only this new prompt key.
+        # Historical budget, concurrency and route-policy semantics stay intact.
+        node = {k: v for k, v in node.items() if k != "resume_hint"}
     return hashlib.sha256(json.dumps(node, sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:16]
 
 _EFP_SEP = "\u241f"

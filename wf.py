@@ -5323,7 +5323,12 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
             if parsed is not None and perr is None else
             f"Your previous answer had no parseable json block ({perr})")
     if attempt < 1:
-        r = run_child(meta, node, byid, goal, context, schema, attempt_note=note + ". Redo the work and return valid json.", steering=steering, attempt=attempt + 1, skey=skey, inputs=inputs, index=index,
+        correction = (". Correct the answer schema without redoing finished work."
+                      if resume_preamble else ". Redo the work and return valid json.")
+        r = run_child(meta, node, byid, goal, context, schema,
+                      attempt_note=note + correction, steering=steering,
+                      attempt=attempt + 1, skey=skey, inputs=inputs, index=index,
+                      resume_preamble=resume_preamble,
                       seat_cancel=seat_cancel, seat_hold=seat_hold)
         r["ms"] = r.get("ms", 0) + ms   # wall time of BOTH attempts
         return r
