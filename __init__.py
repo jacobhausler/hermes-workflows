@@ -66,6 +66,7 @@ GRAPH_KEYS = {"name", "nodes", "description", "defaults", "model_policy",
               "concurrency", "item_concurrency",  # #100: optional run-level limits
               "requires_plugin",  # est-2ek.1.166: version handshake (coarse >=; stale => arm-time refusal)
               "result",           # est-2ek.1.158: node id whose output is the run verdict
+              "on_exit",          # #129: agent reserved for terminal postmortem
               "include"}      # composite graphs: shelved-DAG expansion annotation; STRIPPED on
                               # expand, so a committed graph.json never carries it (only the
                               # library author form does)

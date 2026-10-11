@@ -6657,6 +6657,101 @@ def write_runner_exit(run, reason, detail=None, graph=None):
     except Exception:
         pass  # an exit record is diagnostics, never a reason to die differently
 
+def _terminal_status(reason):
+    if reason in ("done", "stopped"):
+        return reason
+    if str(reason).startswith("crashed:"):
+        return "crashed"
+    if str(reason).startswith("blocked by failed ") or reason == "graph stuck":
+        return "failed"
+    return None
+
+
+def _run_on_exit(run, graph, meta, status):
+    """#129: one durable invocation; recovery harvests, never re-spawns.
+
+    Called only under runner.lock AFTER the ordinary verdict is committed and
+    the wave has settled. A claim precedes Popen; its def/spawn identity survives
+    runner death. An empty capture on recovery is a failed receipt, not a retry.
+    """
+    nid = graph.get("on_exit")
+    if not nid:
+        return
+    path = run / "on_exit.json"
+    claim = jload(path, {}) or {}
+    if claim.get("phase") == "finished":
+        return
+    byid = {n["id"]: n for n in graph["nodes"]}
+    node = byid[nid]
+    outputs, provenance, failed, classes = {}, {}, [], {}
+    for n in wfcommon.workflow_nodes(graph):
+        st, rec = node_rec(run, n, byid)
+        rec = rec or {}
+        if st in ("done", "partial"):
+            outputs[n["id"]] = rec.get("output")
+            provenance[n["id"]] = bool(rec.get("harvest"))
+        if st == "failed":
+            failed.append(n["id"])
+            classes[n["id"]] = rec.get("error_class") or "unknown"
+    facts = {"run_status": status, "failed_node_ids": failed, "error_classes": classes}
+    fresh = not path.exists()
+    if fresh:
+        claim = {"node": nid, "_def": efp(byid, node), "fp_rule_version": FP_RULE_VERSION,
+                 "spawn_count": 1, "phase": "spawned", "inputs": facts}
+        with path.open("x") as fh:
+            json.dump(claim, fh); fh.flush(); os.fsync(fh.fileno())
+    facts = claim.get("inputs") or facts
+    # Event repair covers either crash window around the claim/receipt commits.
+    events = []
+    for line in ((run / "events.jsonl").read_text() if (run / "events.jsonl").exists() else "").splitlines():
+        try: events.append(json.loads(line))
+        except ValueError: pass
+    if not any(e.get("event") == "on_exit.spawned" for e in events):
+        log(run, "on_exit.spawned", node=nid, run_status=facts["run_status"], spawn=0)
+    child_meta = {**meta, "_stop": threading.Event()}
+    try:
+        raw = jload(run / "nodes" / f"{nid}.json", {}) or {}
+        if not fresh:
+            if claim.get("node") != nid or claim.get("_def") != efp(byid, node):
+                raise RuntimeError("on_exit definition changed after its once-only claim")
+            if raw.get("status") in ("done", "partial", "failed") and record_efp_valid(raw, byid, node):
+                rec = raw
+            elif raw.get("pid") and record_efp_valid(raw, byid, node):
+                rec = _adopt_child(child_meta, node, byid, None, raw, node.get("schema"))
+            else:
+                raise RuntimeError("on_exit attempt interrupted before a committed spawn/output")
+        else:
+            inputs, error = build_inputs(run, node, outputs)
+            missing = _unmet_requires(node, outputs, provenance)
+            ok, proof_missing = publisher_gate_check(run, node, byid)
+            if error or missing or not ok:
+                rec = {"status": "failed", "error_class": "inputs" if error else "precondition",
+                       "error": error or ("precondition unmet: " + ",".join(missing or proof_missing))}
+            else:
+                inputs += "\n\n" + _inputs_block("on_exit (run facts)", facts, INPUTS_CAP)
+                rec = run_child(child_meta, node, byid, node.get("goal", ""), node.get("context", ""),
+                                node.get("schema"), inputs=inputs, skey=skey_for(run, byid, node))
+        rec = _final_quiesce(child_meta, rec, "node", {"node": nid})
+        rec = _stamp_served(child_meta, rec, node)
+        rec = _effect_gate(run, node, _lane_gate(run, node, rec))
+    except Exception as exc:
+        rec = {"status": "failed", "error_class": "crashed",
+               "error": f"on_exit: {type(exc).__name__}: {exc}"}
+    save_node(run, node, byid, rec)
+    receipt = {"node": nid, "inputs": facts, "status": rec.get("status"),
+               "output": rec.get("output"), "error_class": rec.get("error_class"), "error": rec.get("error")}
+    target = run / "on_exit_receipt.md"
+    tmp = target.with_suffix(".tmp")
+    tmp.write_text("# Workflow postmortem\n\n```json\n" + json.dumps(receipt, indent=2, default=str) + "\n```\n")
+    os.replace(tmp, target)
+    if not any(e.get("event") == "on_exit.finished" for e in events):
+        log(run, "on_exit.finished", node=nid, run_status=facts["run_status"],
+            status=rec.get("status"), error_class=rec.get("error_class"), receipt=target.name)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps({**claim, "phase": "finished"}))
+    os.replace(tmp, path)
+
+
 class Run:
     """Mutable graph snapshot; hot-reloadable at wave boundaries."""
     def __init__(self, run):
@@ -6664,8 +6759,8 @@ class Run:
         self.reload()
     def reload(self):
         self.graph = jload(self.run / "graph.json")
-        self.nodes = self.graph["nodes"]
-        self.byid = {n["id"]: n for n in self.nodes}
+        self.nodes = wfcommon.workflow_nodes(self.graph)
+        self.byid = {n["id"]: n for n in self.graph["nodes"]}
 
 def main(run_id):
     run = find_run(run_id)   # resolved runs_root first; a pre-fix run stays resumable from the launch root
@@ -6680,7 +6775,8 @@ def main(run_id):
         emit(f"WORKFLOW_FAILED {run_id} (no graph.json)")
         notify(run, "run.failed", key="pre-start: no graph.json")
         write_runner_exit(run, "crashed: no graph.json"); sys.exit(2)
-    err = validate_graph(jload(run / "graph.json")["nodes"])
+    _exit_errors = wfcommon.on_exit_errors(jload(run / "graph.json"))
+    err = validate_graph(jload(run / "graph.json")["nodes"]) or (_exit_errors[0]["msg"] if _exit_errors else None)
     if err:
         # #152: an admission death must never CONSUME a pending gate answer —
         # the answer is durable state and its consumption must not be the last
@@ -6752,7 +6848,9 @@ def main(run_id):
     # read).
     if _spawned_by == run_id and \
             not (run / "stop.request").exists() and \
-            (wfcommon.run_state(run) or {}).get("status") == "stopped":
+            (wfcommon.run_state(run) or {}).get("status") == "stopped" and \
+            (not (jload(run / "graph.json") or {}).get("on_exit") or
+             (jload(run / "on_exit.json", {}) or {}).get("phase") == "finished"):
         emit(f"WORKFLOW_STOPPED {run_id} (stop already consumed)")
         return "stopped"
     # #61c: become the subreaper of this subtree FIRST — every orphan a child
@@ -6794,8 +6892,11 @@ def main(run_id):
         write_runner_exit(run, "blocked: lane wreckage — bank the previous attempt's WIP "
                                "before re-drive (error_class lane_wreckage)", _why)
         sys.exit(2)
-    try: (run / "runner_exit.json").unlink()   # fresh verdict per runner process
-    except OSError: pass
+    prior_exit = wfcommon.runner_exit_read(run) if (jload(run / "graph.json") or {}).get("on_exit") else None
+    prior_status = _terminal_status((prior_exit or {}).get("reason"))
+    if not prior_status:
+        try: (run / "runner_exit.json").unlink()   # fresh verdict per runner process
+        except OSError: pass
     _EXIT_WRITTEN[0] = False
     _CRASH_GEN[:] = [None, None]  # fresh runner: later crashes mint a new durable generation
     ready_stamp(run)   # #8: own-pid stamp + ready-pipe announce (door observes, never guesses)
@@ -6813,6 +6914,19 @@ def main(run_id):
                                            # -> server-declared value; runner-private,
                                            # never persisted; survives outer-ladder respawns
     exit_graph = [jload(run / "graph.json")]
+    if prior_status and (prior_status == "crashed" or
+                         (jload(run / "on_exit.json", {}) or {}).get("phase") != "finished"):
+        try:
+            _run_on_exit(run, exit_graph[0], meta, prior_status)
+        except Exception as exc:
+            log(run, "on_exit.error", error=f"{type(exc).__name__}: {exc}")
+        finally:
+            try: _sweep_orphans(meta, "on_exit_recovery")
+            except Exception: pass
+        return prior_exit["reason"]
+    if prior_status:
+        try: (run / "runner_exit.json").unlink()
+        except OSError: pass
 
     def _stop_watcher():
         """Boundary-stop is honest only if in-flight children actually die AND the
@@ -7299,6 +7413,8 @@ def main(run_id):
                 continue
             if yield_to_successor:
                 reason = None
+            elif rs.graph.get("on_exit") and _terminal_status(reason) and not _reacquire_terminal_lock(run):
+                reason = None  # the successor owns postmortem recovery too
             break
     except SystemExit:
         # Defensive: a self-reported exit is a verdict, not a crash. loop() does
@@ -7325,10 +7441,16 @@ def main(run_id):
         except Exception: pass
     if reason is not None:
         write_runner_exit(run, reason, graph=exit_graph[0])
+        status = _terminal_status(reason)
+        if status and exit_graph[0].get("on_exit"):
+            try:
+                _run_on_exit(run, exit_graph[0], meta, status)
+            except Exception as exc:
+                log(run, "on_exit.error", error=f"{type(exc).__name__}: {exc}")
     return reason
 
 def finalize(run, graph, status):
-    nodes = graph["nodes"]
+    nodes = wfcommon.workflow_nodes(graph)
     lines = [f"# Workflow '{graph.get('name', 'workflow')}' — {status}"]
     # est-p318w: every node, graph order, status + output. Rendering only
     # done/partial LEAVES left a bare header whenever the sole leaf was

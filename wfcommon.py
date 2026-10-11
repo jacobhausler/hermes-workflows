@@ -1833,7 +1833,48 @@ STRUCTURAL_GRAPH_KEYS = {"name", "nodes", "description", "defaults", "model_poli
                          # a stale runner refuses LOUDLY at arm time, naming both.
                          "requires_plugin",
                          # est-2ek.1.158: the node whose output IS the run verdict.
-                         "result"}
+                         "result", "on_exit"}
+
+def workflow_nodes(graph):
+    """The ordinary DAG excludes the agent reserved for terminal cleanup (#129)."""
+    return [n for n in graph.get("nodes", []) if n.get("id") != graph.get("on_exit")]
+
+
+def on_exit_errors(graph):
+    """An exit handler is one agent, never a dependency of the ordinary DAG."""
+    if "on_exit" not in graph:
+        return []
+    ref = graph["on_exit"]
+    nodes = graph.get("nodes") or []
+    nodes = nodes if isinstance(nodes, list) else []
+    target = next((n for n in nodes if isinstance(n, dict) and n.get("id") == ref), None)
+    errors = []
+    def E(msg):
+        errors.append({"node": None, "field": "on_exit", "msg": msg})
+    if not isinstance(ref, str) or not ref.strip():
+        E("on_exit must be a non-empty agent node id")
+    elif target is None or target.get("type") != "agent":
+        E(f"on_exit {ref!r} must name an existing agent node")
+    elif "fanout" in target:
+        E("on_exit must name a single agent, not a fan-out")
+    if isinstance(ref, str):
+        if graph.get("result") == ref:
+            E("on_exit cannot also be the ordinary run result")
+        for n in nodes:
+            if not isinstance(n, dict) or n.get("id") == ref:
+                continue
+            # Block every data/order surface that could wait on a terminal-only node.
+            after, requires, inputs = n.get("after"), n.get("requires"), n.get("inputs")
+            fo = n.get("fanout")
+            heads = list(after) if isinstance(after, list) else []
+            heads += list(requires) if isinstance(requires, dict) else []
+            heads += [str(r).split(".")[0] for r in inputs] if isinstance(inputs, list) else []
+            heads += [str(fo.get("items_from", "")).split(".")[0]] if isinstance(fo, dict) else []
+            heads += re.findall(r"out\.([A-Za-z0-9_-]+)\.", str(n.get("when") or ""))
+            if ref in heads or n.get("on_fail") == ref:
+                E(f"ordinary node {n.get('id')!r} cannot depend on on_exit {ref!r}")
+    return errors
+
 
 def result_errors(graph):
     """Graph-level defects for the optional `result` key (est-2ek.1.158): it must
@@ -1976,7 +2017,7 @@ def structural_graph_errors(graph, extra_keys=()):
     # own version — same message the door and the boot guard both use.
     for e_ in requires_plugin_errors(graph):
         E(e_["field"], e_["msg"])
-    for e_ in result_errors(graph):
+    for e_ in result_errors(graph) + on_exit_errors(graph):
         E(e_["field"], e_["msg"])
     if "defaults" in graph:
         errs.extend(_defaults_errors(graph["defaults"]))
@@ -3736,10 +3777,12 @@ def run_state(r):
     status: pending|running|interrupted|held|done|failed|stopped.
     'interrupted' has unfinished work but NO verified runner; only wait/release/amend
     explicitly resume it. A later amend demotes a stopped run to interrupted."""
-    graph = jload(r / "graph.json")
-    if not graph or not graph.get("nodes"):
+    stored_graph = jload(r / "graph.json")
+    if not stored_graph or not stored_graph.get("nodes"):
         return None
-    byid = {n["id"]: n for n in graph["nodes"]}
+    # Exit-agent records are diagnostics, never part of the run's verdict math.
+    graph = {**stored_graph, "nodes": workflow_nodes(stored_graph)}
+    byid = {n["id"]: n for n in stored_graph["nodes"]}
     live = runner_alive(r)
     outputs, states, nodes, recs = {}, {}, {}, {}
     for n in graph["nodes"]:
@@ -3853,8 +3896,8 @@ def run_state(r):
         status = "stopped"
     elif verdict.startswith("blocked by failed"):
         status = "failed"
-    if status == "interrupted" and verdict.startswith("crashed:"):
-        status = "failed"  # a recorded fatal error needs an amend, not a wait/respawn loop
+    if verdict.startswith("crashed:") and (status == "interrupted" or stored_graph.get("on_exit")):
+        status = "failed"  # an exit handler must never mask the recorded crash verdict
     # sys-5lnm17 (upstream of sys-ntdq1v): WHICH nodes died, derived here from the
     # SAME efp-valid states the status verdict used — never stored, never from
     # prose. A crash verdict with no failed node reads empty (honest absence: the
@@ -3864,7 +3907,7 @@ def run_state(r):
                     for n in graph["nodes"] if states[n["id"]] == "failed"]
     return {"run_id": r.name, "name": graph.get("name"), "status": status,
             "failed_nodes": failed_nodes,
-            "held_gate": held, "nodes": nodes, "graph": graph,
+            "held_gate": held, "nodes": nodes, "graph": stored_graph,
             # 91b9a3de companion: publish the ONE liveness read this state was
             # derived from — a second runner_alive() call a few microseconds
             # later can flip across a dying runner's kernel-released flock, and

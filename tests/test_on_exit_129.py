@@ -200,6 +200,37 @@ class OnExit129(unittest.TestCase):
         self.drive(r)
         self.assertEqual(len(self.events(r, 'on_exit.finished')), 1)
 
+    def test_once_claim_without_spawn_does_not_buy_another_attempt(self):
+        r = self.make()
+        graph = json.loads((r / 'graph.json').read_text())
+        byid = {n['id']: n for n in graph['nodes']}
+        facts = {'run_status': 'done', 'failed_node_ids': [], 'error_classes': {}}
+        claim = {'node': 'post', '_def': wfcommon.efp(byid, byid['post']),
+                 'fp_rule_version': wfcommon.FP_RULE_VERSION, 'spawn_count': 1,
+                 'phase': 'spawned', 'inputs': facts}
+        (r / 'on_exit.json').write_text(json.dumps(claim))
+        (r / 'runner_exit.json').write_text(json.dumps({'reason': 'done',
+            'graph_fingerprint': wfcommon.graph_fingerprint(graph),
+            'fp_rule_version': wfcommon.FP_RULE_VERSION}))
+        self.drive(r)
+        self.assertFalse(list((r / 'logs').glob('post.a*.prompt.md')))
+        self.assertEqual(len(self.events(r, 'on_exit.spawned')), 1)
+        self.assertEqual(len(self.events(r, 'on_exit.finished')), 1)
+        self.assertIn('interrupted before', (r / 'on_exit_receipt.md').read_text())
+        self.assertEqual(wfcommon.run_state(r)['status'], 'done')
+
+    def test_amending_handler_never_reinvokes_it(self):
+        r = self.make()
+        self.drive(r)
+        receipt = (r / 'on_exit_receipt.md').read_bytes()
+        graph = json.loads((r / 'graph.json').read_text())
+        graph['nodes'][1]['goal'] = 'EXIT129 amended'
+        (r / 'graph.json').write_text(json.dumps(graph))
+        self.drive(r)
+        self.assertEqual(len(self.events(r, 'on_exit.spawned')), 1)
+        self.assertEqual((r / 'on_exit_receipt.md').read_bytes(), receipt)
+        self.assertEqual(wfcommon.run_state(r)['status'], 'done')
+
     def test_publisher_guard_is_not_bypassed_by_exit(self):
         g = self.graph()
         g['nodes'][1]['publishes'] = True

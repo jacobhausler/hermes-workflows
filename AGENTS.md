@@ -240,6 +240,12 @@ existing verbatim leniency.
 
 ### 3d. Failures, resume, amend
 
+A graph may reserve one existing agent with `on_exit:"<node id>"` for a once-only
+terminal postmortem. It is not ordinary DAG work; it receives terminal run facts
+in `## Inputs` and commits `on_exit_receipt.md` without changing the run verdict.
+See [grammar](references/grammar.md#terminal-postmortem-optional) for validation,
+publication guards, and crash recovery.
+
 - `node.failed` events carry `error_class` from the closed set defined in code
   (`wf.py ERROR_CLASSES`) — `cancelled | cap_exhausted | config_input | crashed | early_death | effect_receipt |
   fanout_empty | fatal_quota | forbidden_model | incomplete_work |
