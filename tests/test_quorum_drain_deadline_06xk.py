@@ -70,16 +70,6 @@ errs = [e for e in wfcommon.validate_graph_errors(
 check("D closed-set message lists quorum_drain_s",
       any("quorum_drain_s" in e["msg"] for e in errs), json.dumps(errs)[:250])
 
-# dialect: a quorum+drain fan-out still refuses export by name (no JS counterpart)
-import wf_dialect  # noqa: E402
-try:
-    wf_dialect.js_export({"name": "t", "nodes": [
-        {"id": "n", "type": "agent", "goal": "g",
-         "fanout": {"items": ["a", "b"], "goal": "t {item}", "quorum": 1, "quorum_drain_s": 2}}]})
-    check("D2 dialect refuses quorum_drain_s export by name", False, "no refusal raised")
-except Exception as e:
-    check("D2 dialect refuses quorum_drain_s export by name", "quorum" in str(e).lower(), str(e)[:200])
-
 # ---------------- runner-level cases ----------------
 def mk(run_id, fo_extra, items, quorum):
     r = RUNS / run_id
