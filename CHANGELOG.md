@@ -1,8 +1,18 @@
 # Changelog
 
-## 1.3.4 — 2026-10-10
+## 1.3.5 — 2026-10-11
 
-Patch line, eleven merged PRs since v1.3.3:
+Patch line, sixteen merged PRs since v1.3.3 (supersedes the untagged 1.3.4 prep
+#364 — everything below ships in this single cut):
+
+- **Heartbeat verdict per running node** — the read model now reports each live
+  node's verdict, plus a one-line `run explain` (est-zsws) (#352).
+- **CI diagram-check diff-scoped** — the check now fires only when a PR ADDS the
+  carrier PNG, so body-only PRs stop burning red compliance cycles (#373).
+- **Core-contract drift probe** — a test asserts plugin-registered hooks against
+  core `VALID_HOOKS` (nightly drift probe) (#365).
+- **Chore:** dropped the stale lowercase `.github/pull_request_template.md`
+  shadowing the real template (#368).
 
 - **Unconditional `plugin_version` stamp** — every new `run.json` reports the arming
   door's own truth (plugin.yaml via `wfcommon.plugin_version()`), not only runs that
