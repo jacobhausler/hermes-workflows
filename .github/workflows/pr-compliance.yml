@@ -24,8 +24,8 @@ jobs:
         run: |
           set -uo pipefail
           if ls docs/pr-diagrams/*.png >/dev/null 2>&1; then
-            # C8 composition law (v0.3, owner directive 2026-10-11, joint
-            # thread — see haus-docs pointer): a diagram-carrying PR must lead its
+            # C8 composition law (v0.3, owner directive 2026-10-11; joint eng
+            # protocol pointer: repo issue #174): a diagram-carrying PR must lead its
             # body with a Problem / User-story prose section — the digest
             # and the reviewer read it first. Machine checks PRESENCE;
             # whether prose+canvas actually deliver 90/90 is the reviewer's
