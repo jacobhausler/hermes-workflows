@@ -2749,6 +2749,19 @@ def _from_unknown_error(name):
         out["hint"] = "workflow library lists every entry with description+tags"
     return out
 
+def _node_id_warnings(graph):
+    """s12-adjacent readability advice only; never rename or refuse a node."""
+    warnings = []
+    for node in graph["nodes"]:
+        node_id = node["id"]
+        if len(node_id) == 1 or re.fullmatch(r"[aeiou]+", node_id, re.IGNORECASE):
+            warnings.append(
+                f"s12 node_id: {node_id!r} is single-character or vowel-only; "
+                "use a readable 1-3 word id such as 'scan_nodes' "
+                "(advisory; execution unchanged)")
+    return warnings
+
+
 def act_run(args):
     graph, bad = _input_graph(args, library=True)
     if bad:
@@ -2879,6 +2892,9 @@ def act_run(args):
                        + _liveness_hint_suffix(_liveness_notes)}
         if _include_notes:
             out["include_notes"] = _include_notes
+        warnings = _node_id_warnings(graph)
+        if warnings:
+            out["run_warnings"] = warnings
         return out
     key = args.get("lane_key")
     if key is not None:
@@ -3096,6 +3112,9 @@ def _create_run(args, graph, lib_name, models, routes, _liveness_notes, lane_pat
             "card": _card(rid), "lifecycle_notice": _lifecycle_notice(rid)}
     if include_notes:
         out["include_notes"] = include_notes   # scratch-collision warnings ride the launch
+    warnings = _node_id_warnings(graph)
+    if warnings:
+        out["run_warnings"] = warnings
     return out
 
 def _steer_event(r, ev, **kw):
