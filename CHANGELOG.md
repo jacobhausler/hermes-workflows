@@ -2,10 +2,11 @@
 
 ## 1.3.6 — 2026-10-11
 
-Patch line, one merged PR — a ponytail truth pass over the docs and the comments.
-**Zero behavior change**; shipped bytes move only in prose, comments, docstrings,
-and one door description enumeration. The docs are the contract agents code
-against, and every rotted pointer is an agent lap burned on a wrong map:
+Patch line, four merged PRs since v1.3.5 — #396 (the ponytail truth pass over
+the docs and the comments), #399 (the child-prompt line the upstream catalog
+review asked for), #354 (the stale-graph spawn guard), #395 (the compliance
+standard's C8 teeth). The docs are the contract agents code against, and
+every rotted pointer is an agent lap burned on a wrong map:
 
 - **Node-type count corrected** — README and `references/grammar.md` said three
   (`agent|gate|echo`); `join` is the shipped fourth since the 1.3.0 wave (#396).
@@ -20,6 +21,23 @@ against, and every rotted pointer is an agent lap burned on a wrong map:
   the GRAPH_REPORT census pointer aimed at its `## Summary` block, four rot-prone
   line cites replaced by symbol names, a dead doc anchor and a duplicated
   `{runs,total,counts}` removed (#396).
+- **Child prompt carries no repackaging instruction** (#399, upstream catalog
+  ask 2) — `WORK_DIR_NOTE` no longer tells `-q` children to write refused
+  inline-interpreter payloads into script files; the refusal is core's
+  (`approvals.single_query_mode`), now documented in SECURITY.md as the
+  operator's choice. Guard test inverted to assert ABSENCE; golden re-captured,
+  prompts differ ONLY by the deleted sentence.
+- **A queued spawn never launches a stale definition** (#354, est-byft8) — a
+  spawn that queued on the global agent seat and reaches the Popen instant
+  AFTER an amend moved its effective fingerprint is refused typed
+  `stale_graph`; the comparison is the replay-skip efp law itself (a
+  timeout/max_turns-only amend never refuses), the refusal releases its seat
+  ticket, and the wave boundary re-drives the node under the CURRENT
+  definition — the replay-skip promise held across a queueing window.
+- **pr-compliance v0.3 C8** (#395) — a PR carrying a diagram must now lead its
+  body with a prose `## Problem` (or User story/Why/Context) section, RED
+  without it; the exemplar carrier `docs/pr-diagrams/est-g43qp` draws the
+  broken lane above the fixed lane so the picture alone reviews 90/90.
 - **Comments that lied, told true** — `_typed_error_class` returns `cap_exhausted`
   (the docstring predated the rename); the rate-limit cap quadruples, it never
   "doubles-ish"; the settings-cache shape comment matches the stored tuple;
