@@ -3381,6 +3381,8 @@ def _account_tree(meta, node, index, spawn_no, pid, tree_seen, has_answer):
           "index": index, "pids": sorted(known), "proof": proof}
     if proof != "dead":
         log(run, ("item." if index is not None else "node.") + "tree_kill", **ev)
+        if proof == "unknown":
+            return ("fail", _proc_unreadable_record(pid, node["id"], spawn_no))
         rec = _left_live_record(pid, stuck,
                                 f"node '{node['id']}' spawn a{spawn_no} cannot be judged.",
                                 {"attempts": 1})
@@ -4042,9 +4044,10 @@ def _tree_quiesce(known, pgid, hold_s, proof_s, term_grace_s=None):
     sit OUTSIDE the group (the 06f57ea9 shape). Returns (proof, still_live):
     ('', []) when there was nothing to account for — the dead-or-empty case the
     healthy retry path must not touch; ('dead', []) once PROVEN; ('stuck', pids)
-    when the proof budget ran out (fail closed upstream, never blind-respawn) —
-    or whenever the table became unreadable (#61b B2: an unreadable /proc can
-    never produce 'dead', the proof only completes on a readable re-walk)."""
+    when the proof budget ran out (fail closed upstream, never blind-respawn);
+    ('unknown', known_pids) when the table became unreadable (#61b B2). Known
+    PIDs are attribution evidence, not proof they are still live: unreadability
+    can never produce 'dead' or a readable still-live verdict."""
     known = set(known)
     def _live():
         s = {p for p in known if _proc_alive(p)}
@@ -4060,7 +4063,7 @@ def _tree_quiesce(known, pgid, hold_s, proof_s, term_grace_s=None):
         return sorted(s)
     live = _live()
     if live is None:
-        return "stuck", sorted(known)               # cannot check death: NOT dead
+        return "unknown", sorted(known)               # cannot check death: NOT dead
     if not live:
         return "", []
     deadline = time.time() + hold_s
@@ -4068,7 +4071,7 @@ def _tree_quiesce(known, pgid, hold_s, proof_s, term_grace_s=None):
         time.sleep(0.1)
         live = _live()
         if live is None:
-            return "stuck", sorted(known)
+            return "unknown", sorted(known)
     if live:
         # SIGTERM first (B3 quarantine law): a polite exit gets a chance to
         # flush; the SIGKILL below is the fallback, not the opener. ESRCH fine.
@@ -4083,7 +4086,7 @@ def _tree_quiesce(known, pgid, hold_s, proof_s, term_grace_s=None):
             time.sleep(0.05)
             live = _live()
             if live is None:
-                return "stuck", sorted(known)
+                return "unknown", sorted(known)
     if live:
         try:
             os.killpg(pgid, signal.SIGKILL)         # dead group raises ESRCH — fine
@@ -4096,7 +4099,7 @@ def _tree_quiesce(known, pgid, hold_s, proof_s, term_grace_s=None):
     while True:
         live = _live()
         if live is None:
-            return "stuck", sorted(known)           # unreadable: never claim dead
+            return "unknown", sorted(known)           # unreadable: never claim dead
         if not live:
             return "dead", []
         if time.time() >= deadline:
@@ -4157,6 +4160,8 @@ def _isolate_prior(meta, r, ev, ev_kw):
         return None                              # drained naturally mid-check
     kw = dict(ev_kw); kw["pids"] = live; kw["proof"] = proof
     log(run, f"{ev}.tree_kill", **kw)
+    if proof == "unknown":
+        return _proc_unreadable_record(pid, ev_kw.get("node"), r.get("spawn"), r)
     if proof != "dead":
         return _left_live_record(pid, stuck,
                                  "attempt N+1 must never share a workdir with live "
@@ -4235,6 +4240,8 @@ def _final_quiesce(meta, r, ev, ev_kw):
                                  _proctree_hold_s(meta), _proctree_kill_proof_s(meta))
     kw = dict(ev_kw); kw["pids"] = live; kw["proof"] = proof; kw["final"] = True
     log(run, f"{ev}.tree_kill", **kw)
+    if proof == "unknown":
+        return _proc_unreadable_record(pid, ev_kw.get("node"), r.get("spawn"), r)
     if proof != "dead":
         return _left_live_record(pid, stuck,
                                  "the node may not commit over a still-running process "
