@@ -1,0 +1,36 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "Once-only terminal postmortem",
+    "locale": "en",
+    "animation": "none",
+    "quality_profile": "showcase",
+    "output": "work/on-exit-129.html",
+    "repository": {
+      "url": "https://github.com/jacobhausler/hermes-workflows",
+      "provider": "github",
+      "revision": "1cb5e4a1bc242c3bff9c87bad48227816c745e64"
+    }
+  },
+  "lanes": [{"id": "runner", "label": "Terminal runner — current lock owner"}],
+  "mainPath": ["ordinary", "verdict", "claim", "agent", "receipt"],
+  "nodes": [
+    {"id": "ordinary", "lane": "runner", "width": 180, "col": 0, "type": "backend", "label": "Ordinary DAG", "sublabel": "Last wave settles", "sources": [{"path": "wf.py"}]},
+    {"id": "verdict", "lane": "runner", "width": 180, "col": 1, "type": "database", "label": "Terminal verdict", "sublabel": "done / failed / stopped / crashed", "sources": [{"path": "wf.py"}, {"path": "wfcommon.py"}]},
+    {"id": "claim", "lane": "runner", "width": 180, "col": 2, "type": "security", "label": "Claim once + guards", "sublabel": "on_exit.json before spawn", "sources": [{"path": "wf.py"}]},
+    {"id": "agent", "lane": "runner", "width": 180, "col": 3, "type": "backend", "label": "Reserved agent", "sublabel": "Run facts injected as Inputs", "sources": [{"path": "wf.py"}, {"path": "wfcommon.py"}]},
+    {"id": "receipt", "lane": "runner", "width": 180, "col": 4, "type": "database", "label": "Commit postmortem", "sublabel": "on_exit_receipt.md", "sources": [{"path": "wf.py"}]}
+  ],
+  "edges": [
+    {"from": "ordinary", "to": "verdict"},
+    {"from": "verdict", "to": "claim"},
+    {"from": "claim", "to": "agent", "label": "guards pass"},
+    {"from": "agent", "to": "receipt"}
+  ],
+  "cards": [
+    {"dot": "cyan", "title": "Inputs", "items": ["run_status, failed_node_ids, error_classes", "Unknown error classes remain unknown."]},
+    {"dot": "amber", "title": "Recovery", "items": ["A durable claim forbids another invocation.", "Crash respawn harvests a claimed attempt."]},
+    {"dot": "rose", "title": "Verdict isolation", "items": ["Guard failures and handler errors are diagnostics.", "They never alter the committed terminal verdict."]}
+  ]
+}
