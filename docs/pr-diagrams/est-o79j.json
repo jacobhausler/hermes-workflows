@@ -1,0 +1,38 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "Registered jobs and silent-death receipts",
+    "quality_profile": "showcase",
+    "output": "evidence/est-o79j.html",
+    "repository": {"url": "https://github.com/jacobhausler/hermes-workflows", "revision": "fcfc4e1584d6b1f4cc67e6338aa99eb385c2446a"}
+  },
+  "lanes": [
+    {"id": "agent", "label": "Solo agent"},
+    {"id": "runner", "label": "Runner / re-drive"},
+    {"id": "death", "label": "Silent-death visibility"}
+  ],
+  "mainPath": ["register", "job", "poll", "harvest", "sweep"],
+  "nodes": [
+    {"id": "register", "lane": "agent", "col": 0, "type": "security", "label": "Verify and register", "sublabel": "live own-group descendant", "width": 170, "sources": [{"path": "wf.py", "line": 4263, "end_line": 4297}]},
+    {"id": "job", "lane": "agent", "col": 1, "type": "database", "label": "Job receipt", "sublabel": "boot + PID + artifact/log", "width": 170, "sources": [{"path": "wf.py", "line": 4298, "end_line": 4307}]},
+    {"id": "poll", "lane": "runner", "col": 2, "type": "backend", "label": "Poll accepted work", "sublabel": "no agent re-launch", "width": 170, "sources": [{"path": "wf.py", "line": 4311, "end_line": 4354}]},
+    {"id": "harvest", "lane": "runner", "col": 3, "type": "security", "label": "Harvest once", "sublabel": "typed exit + valid output", "width": 170, "sources": [{"path": "wf.py", "line": 4355, "end_line": 4375}]},
+    {"id": "sweep", "lane": "runner", "col": 4, "type": "backend", "label": "Tree proof", "sublabel": "existing safety gate", "width": 170, "sources": [{"path": "docs/registered-jobs.md", "line": 25}]},
+    {"id": "detect", "lane": "death", "col": 0, "type": "backend", "label": "Detect silent death", "sublabel": "dead runner; no exit", "width": 170, "sources": [{"path": "__init__.py", "line": 363, "end_line": 395}]},
+    {"id": "exit", "lane": "death", "col": 1, "type": "database", "label": "Typed receipts", "sublabel": "graph + claim binding", "width": 170, "sources": [{"path": "__init__.py", "line": 443, "end_line": 463}]},
+    {"id": "current", "lane": "death", "col": 2, "type": "backend", "label": "Current node truth", "sublabel": "interrupted; resumable", "width": 170, "sources": [{"path": "wfcommon.py", "line": 2985, "end_line": 3010}]}
+  ],
+  "edges": [
+    {"id": "register-job", "from": "register", "to": "job"},
+    {"id": "job-poll", "from": "job", "to": "poll", "label": "accepted"},
+    {"id": "poll-harvest", "from": "poll", "to": "harvest"},
+    {"id": "harvest-sweep", "from": "harvest", "to": "sweep"},
+    {"id": "detect-exit", "from": "detect", "to": "exit"},
+    {"id": "exit-current", "from": "exit", "to": "current"}
+  ],
+  "cards": [
+    {"dot": "cyan", "title": "Supported boundary", "items": ["Solo agent nodes only; Linux boot/start identity and verified ancestry required", "Artifact and log stay in the run; missing or invalid receipts are not success"]},
+    {"dot": "amber", "title": "Preserved evidence", "items": ["Original spawn records remain byte-intact; current truth uses bound interruption receipts", "Re-drive polls accepted work before sweep; registration does not waive tree safety"]}
+  ]
+}
