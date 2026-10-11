@@ -4104,11 +4104,19 @@ def act_amend(args):
     # node_rec), computed on the RESOLVED defs (what lands in graph.json), read-only.
     # dry_run returns here WITHOUT touching graph.json, amends.jsonl, or the runner.
     preview = amend_preview(r, new["nodes"])
+    # #366: this amend resets EVERY node whose record is a live spawn record, def or
+    # no def (node_rec reads status=running as pending, and the solo branch never
+    # adopts — only the fan-out `_spawn` calls active_child). Name that in the hint,
+    # not only in the key: the shape that hid the destruction was a response that read
+    # as "1 changed / 1 will rerun" and said nothing about the children dying.
+    _rz = preview.get("will_reset_running") or []
+    _rz_note = (f" — WARNING: {len(_rz)} RUNNING node(s) reset by this amend "
+                f"(live children die, their work re-runs from zero): {', '.join(_rz)}") if _rz else ""
     if args.get("dry_run"):
         return {"ok": True, "dry_run": True, "models": _models, "routes": _routes, **preview,
                 "graph_diff": _graph_unified_diff(old, new),
                 "hint": "nothing written — re-run without dry_run to apply"
-                        + _liveness_hint_suffix(_liveness_notes)}
+                        + _rz_note + _liveness_hint_suffix(_liveness_notes)}
     # #19 (est-19k9w): the write site holds the per-run door lock across the
     # whole read-modify-write (the 09-27 alternating-writers shape: two amends
     # each read the old graph, the later replace silently loses the earlier).
@@ -4186,7 +4194,7 @@ def act_amend(args):
         applies = "live runner hot-reloads at its next wave boundary; push delivery is optional"
     return {"ok": True, "models": _models, "routes": _routes, "applies": applies,
             "graph_revision": _new_rev,   # #19: the new head — the token a next CAS writes against
-            "hint": "continuation is automatic; wait blocks to a boundary and may resume an interrupted runner" + _liveness_hint_suffix(_liveness_notes), **preview}
+            "hint": "continuation is automatic; wait blocks to a boundary and may resume an interrupted runner" + _rz_note + _liveness_hint_suffix(_liveness_notes), **preview}
 
 def act_stop(args):
     r = run_dir(args.get("run_id"))

@@ -5108,11 +5108,23 @@ def apply_node_patch(old_graph, patch_obj):
 
 
 def amend_preview(r, new_nodes):
-    """{added, removed, changed, will_rerun, unchanged} for a proposed graph
-    against the run dir's committed graph and node records. Added nodes are work;
-    changed committed records plus their downstream nodes also rerun. Unchanged
-    done records replay-skip. Other never-committed nodes stay out unless they
-    descend from added/changed work. Read-only."""
+    """{added, removed, changed, will_rerun, unchanged, will_reset_running} for a
+    proposed graph against the run dir's committed graph and node records. Added
+    nodes are work; changed committed records plus their downstream nodes also rerun.
+    Unchanged done records replay-skip. Other never-committed nodes stay out unless
+    they descend from added/changed work. Read-only.
+
+    `will_reset_running` (#366): every node whose on-disk record is a LIVE SPAWN
+    record (status="running") at amend time. `node_rec` reads that record as pending
+    (running is never a commit), so the restart/reload this amend triggers RESETS the
+    node whatever its def says — and outside the fan-out branch the live child is
+    never adopted, so its in-flight work dies and re-runs from zero. Such a node used
+    to appear NOWHERE in this response (def-identical, so not `changed`; never
+    committed, so not `unchanged`; not downstream, so not in `will_rerun`), which let
+    the door answer `changed:[effect_receipts] will_rerun:[effect_receipts,
+    verify_lanes]` for an amend that also destroyed two running nodes' children. The
+    key names the disruption whether or not the def moved; the def-drift class stays
+    in `changed` exactly as #18 shipped it."""
     old_nodes = (jload(r / "graph.json", {}) or {}).get("nodes", [])
     old_ids = {n["id"] for n in old_nodes
                if isinstance(n, dict) and isinstance(n.get("id"), str)}
@@ -5123,17 +5135,18 @@ def amend_preview(r, new_nodes):
                if isinstance(n, dict) and isinstance(n.get("id"), str)
                and n["id"] not in new_ids]
     kids = _downstream(byid)
-    status, committed_mismatch, def_drift = {}, set(), set()
+    status, committed_mismatch, def_drift, live_reset = {}, set(), set(), set()
     for n in new_nodes:
         st, rec = node_rec(r, n, byid)
         status[n["id"]] = st
         if st == "pending" and (rec or {}).get("status") in ("done", "partial", "failed", "skipped"):
             committed_mismatch.add(n["id"])  # committed but efp-stale
         elif st == "pending" and (rec is None or rec.get("status") == "running"):
-            # never committed (pending, or RUNNING with only the spawn-time record —
-            # status=running is safe by construction, never a commit): compare the
-            # def against the frozen graph so a model/provider-only edit isn't
-            # previewed as no-work (est-c9is; running half is issue #18).
+            # never committed (pending, or RUNNING with only the spawn-time record):
+            # the reset class is named below regardless of def drift; the def compare
+            # is only about #18 (a model/provider-only edit must not preview as no-work).
+            if isinstance(rec, dict) and rec.get("status") == "running":
+                live_reset.add(n["id"])   # #366: a live child this amend resets, def or no def
             old = next((o for o in old_nodes if isinstance(o, dict) and o.get("id") == n["id"]), None)
             if isinstance(old, dict) and def_hash(old) != def_hash(n):
                 def_drift.add(n["id"])
@@ -5149,8 +5162,10 @@ def amend_preview(r, new_nodes):
     will_rerun = [n["id"] for n in new_nodes if n["id"] in will]
     unchanged = [n["id"] for n in new_nodes
                  if status[n["id"]] in ("done", "skipped", "partial") and n["id"] not in will]
+    will_reset_running = [n["id"] for n in new_nodes if n["id"] in live_reset]
     return {"added": added, "removed": removed, "changed": changed,
-            "will_rerun": will_rerun, "unchanged": unchanged}
+            "will_rerun": will_rerun, "unchanged": unchanged,
+            "will_reset_running": will_reset_running}
 
 # ---------- seat-level model floor (stdlib-only when core isn't importable) ----------
 

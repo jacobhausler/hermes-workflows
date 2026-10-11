@@ -106,5 +106,48 @@ pv_r_same = wfcommon.amend_preview(r2, [dict(n) for n in base_r])
 check("untouched RUNNING node stays out of changed/will_rerun",
       pv_r_same["changed"] == [] and pv_r_same["will_rerun"] == [], json.dumps(pv_r_same))
 
-print(f"\n{'ALL PASS' if not FAILS else 'FAILED: ' + ', '.join(FAILS)} ({10 - len(FAILS)}/10)")
+# ============================ issue #366 ============================
+# The class that response named NOWHERE: a node RUNNING when amended, def-identical,
+# and NOT downstream of anything edited. node_rec reads its spawn record as pending,
+# so the restart/reload the amend triggers RESETS it and the solo branch never adopts
+# the live child (only the fan-out `_spawn` calls active_child) — the child dies and
+# the work re-runs from zero while the response reads "1 changed / 1 will rerun".
+base_x = [agent("a", model="m-a", provider="p1"),
+          agent("b", model="m-b", provider="p2"),          # independent root, RUNNING
+          agent("c", ["b"])]
+r3 = fresh("20991006-000002-amenddefdiff", base_x)
+byid3 = {n["id"]: n for n in base_x}
+(r3 / "nodes" / "a.json").write_text(json.dumps(
+    {"status": "done", "efp": wfcommon.efp(byid3, byid3["a"]), "output": {"ok": True}}))
+(r3 / "nodes" / "b.json").write_text(json.dumps(
+    {"status": "running", "efp": wfcommon.efp(byid3, byid3["b"]), "pid": 999999,
+     "spawn_cmd": ["fake"], "log_path": "logs/b.a1.log", "skey": "s", "attempt": 1}))
+
+new_x = [dict(n) for n in base_x]
+new_x[0] = {**new_x[0], "goal": "say hi twice"}            # edit lands on a, not on b
+pv_x = wfcommon.amend_preview(r3, new_x)
+check("#366 def-identical RUNNING node named in will_reset_running",
+      pv_x["will_reset_running"] == ["b"], json.dumps(pv_x))
+check("#366 naming the reset does not invent a rerun for it (#18 semantics hold)",
+      pv_x["changed"] == ["a"] and pv_x["will_rerun"] == ["a"] and pv_x["unchanged"] == [],
+      json.dumps(pv_x))
+
+# a pure no-op amend still destroys the live child: the key must not be def-drift-only
+pv_x_same = wfcommon.amend_preview(r3, [dict(n) for n in base_x])
+check("#366 no-def-change amend still names the RUNNING node it resets",
+      pv_x_same["changed"] == [] and pv_x_same["will_rerun"] == []
+      and pv_x_same["will_reset_running"] == ["b"], json.dumps(pv_x_same))
+
+# the #18 def-drift class reports BOTH facts: it re-runs (changed) and its child dies
+pv_both = wfcommon.amend_preview(r2, [dict(n) if i != 1 else {**n, "model": "m-c", "provider": "p9"}
+                                     for i, n in enumerate(base_r)])
+check("#366 a def-edited RUNNING node lands in changed AND will_reset_running",
+      "b" in pv_both["changed"] and pv_both["will_reset_running"] == ["b"], json.dumps(pv_both))
+
+# guard: no spawn record in flight -> the key is empty (no phantom warnings)
+check("#366 a run with nothing running names nothing",
+      pv_same["will_reset_running"] == [] and pv_b["will_reset_running"] == [],
+      json.dumps({"pv_same": pv_same, "pv_b": pv_b}))
+
+print(f"\n{'ALL PASS' if not FAILS else 'FAILED: ' + ', '.join(FAILS)} ({15 - len(FAILS)}/15)")
 sys.exit(1 if FAILS else 0)
