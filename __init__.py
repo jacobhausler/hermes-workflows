@@ -2310,8 +2310,23 @@ def act_validate(args):
     if err:
         return {"ok": False, "error": err,
                 "errors": [{"node": None, "field": "model", "msg": err}]}
-    return {"ok": True, "errors": [], "resolved_routes": routes,
-            "hint": "validated only — nothing pinged or written; run it: workflow run graph=..."}
+    out = {"ok": True, "errors": [], "resolved_routes": routes,
+           "hint": "validated only — nothing pinged or written; run it: workflow run graph=..."}
+    warnings = []
+    for node in graph["nodes"]:
+        if _common.kind(node).spawns is not True:
+            continue
+        shape = node.get("shape") or _common.DEFAULT_SHAPE
+        budget = _common.SHAPE_PRESETS[shape]["max_turns"]
+        cap = node["max_turns"]  # already resolved by apply_graph_defaults
+        if cap < budget:
+            warnings.append({"node": node["id"], "field": "max_turns",
+                             "msg": f"max_turns {cap} is below shape {shape!r} p95 "
+                                    f"budget {budget}; leave max_turns unset to use "
+                                    "the preset, or keep a measured explicit cap"})
+    if warnings:
+        out["warnings"] = warnings  # non-fatal; clean graphs keep their key set
+    return out
 
 # ---------- actions ----------
 

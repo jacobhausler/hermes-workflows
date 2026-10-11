@@ -13,6 +13,12 @@
  "contract": "Green CI ledgers only (every exit == 0); rows not captured by CI are listed in rows_added_outside_ci with how they were measured. Refresh from the tip of main after each main move; see README.md.",
  "rows_added_outside_ci": [
   {
+   "test": "test_budget_shape_warning_vj8m.py",
+   "exit": 0,
+   "measured": "2026-10-11 foreground python3 tests/test_budget_shape_warning_vj8m.py: Ran 7 tests OK; python3 -m pytest tests/test_budget_shape_warning_vj8m.py -q: 7 passed, 12 subtests passed. RED at test-only commit 41798d2d3201dcfaeca7e5977c2211ff8b3d139a over main 1867366747eadda8c6aca40a7ce871c4aecedabe: 7 failures (missing warnings).",
+   "supersede_by": "next green-CI refresh (replace with the CI-captured row)"
+  },
+  {
    "exit": 0,
    "measured": "2026-10-10 local foreground run at est-06xk PR head: 23 checks, 0 FAIL, rc=0 (PYTHONPATH=/opt/hermes); RED at the test-only commit b464b8a on base caee50b (11 FAIL + traceback: unknown key fanout.quorum_drain_s, drain run never commits); the PR adds this test without a CI row",
    "supersede_by": "next green-CI refresh (replace with the CI-captured row)",
@@ -267,7 +273,7 @@
  ],
  "source_issue": 75,
  "totals": {
-  "cases": 274,
+  "cases": 275,
   "red": 0
  },
  "tracking_item": "est-9yl2"

@@ -100,6 +100,11 @@
   "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_boolean_schema_0924.py.log"
  },
  {
+  "test": "test_budget_shape_warning_vj8m.py",
+  "exit": 0,
+  "log": "rows_added_outside_ci in PROVENANCE.json"
+ },
+ {
   "test": "test_budget_cue_bbfy.py",
   "exit": 0,
   "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_budget_cue_bbfy.py.log"
