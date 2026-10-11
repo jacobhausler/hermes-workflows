@@ -202,8 +202,11 @@ const idleS = m => m && m.last_activity ? Math.max(0, Math.round(Date.now() / 10
 // 0–30 s = cooking (accent), 30–90 s = watch (warning), >90 s = stalled (danger)
 const idleTone = s => s == null ? EDGE_TONE.pending : s < 30 ? EDGE_TONE.running : s < 90 ? EDGE_TONE.held : EDGE_TONE.failed
 
-/** One dense line: `1.2k▸86 · 3⚡ · 4🔧 [· $0.012]`; live adds a heartbeat `● 4s`. */
-function Vitals({ m, live, size, cost }) {
+/** One dense line: `1.2k▸86 · 3⚡ · 4🔧 [· $0.012]`; live adds a heartbeat `● 4s`.
+ *  #133: live also carries the wall meter word — `● 4s · near-wall` — the read
+ *  model's {elapsed_s, wall_s, p95_s, meter} for a running node. Absent stays
+ *  absent (never invented); the words are the run_state vocabulary verbatim. */
+function Vitals({ m, live, size, cost, wall }) {
   if (!m) return null
   const fs = size === 'xs' ? 10 : 11
   const sep = jsx('span', { style: { opacity: 0.45 }, children: '·' })
@@ -227,6 +230,19 @@ function Vitals({ m, live, size, cost }) {
   const kids = []
   parts.forEach((p, i) => { if (i) kids.push(sep); kids.push(p) })
   if (beat) { if (kids.length) kids.push(sep); kids.push(beat) }
+  // #133: the wall meter rides right after the heartbeat, one word, tone-coded
+  // against the same EDGE_TONE palette the heartbeat already uses. Only when
+  // the read model published it — an absent meter renders nothing at all.
+  const meter = live && wall && typeof wall.meter === 'string' ? wall.meter : null
+  if (meter) {
+    if (kids.length) kids.push(sep)
+    const bound = wall.wall_s ?? wall.p95_s ?? null
+    kids.push(jsx('span', {
+      title: `elapsed ${wall.elapsed_s}s of wall ${wall.wall_s ?? '?'}s (shape p95 ${wall.p95_s ?? '?'})${bound != null ? ` — ${Math.round(100 * (wall.elapsed_s || 0) / bound)}%` : ''}`,
+      style: { color: METER_TONE[meter] || 'var(--ui-text-tertiary)', fontVariantNumeric: 'tabular-nums' },
+      children: meter
+    }))
+  }
   return jsx('span', {
     style: { display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: fs, lineHeight: 1, whiteSpace: 'nowrap', color: 'var(--ui-text-tertiary)', fontVariantNumeric: 'tabular-nums' },
     children: jsxs(Fragment, { children: kids })
@@ -1506,6 +1522,11 @@ const EDGE_TONE = {
   skipped: 'var(--ui-text-tertiary)'
 }
 
+// #133: wall-meter word tones (Vitals). Declared here, right after EDGE_TONE:
+// a top-level const here reads EDGE_TONE at module-eval time, so it must not
+// sit above the palette (TDZ). The words are the run_state meter vocab verbatim.
+const METER_TONE = { 'on-track': EDGE_TONE.running, 'near-wall': EDGE_TONE.held, 'over-p95': EDGE_TONE.failed }
+
 // ONE tone vocabulary for every reader (issue #48): the rail pill (pillModel),
 // the canvas NodeCard, the mini-DAG pill, the edges and the timeline all read
 // this table — colours come from EDGE_TONE (the single literal palette), so a
@@ -2121,7 +2142,8 @@ function Timeline({ detail }) {
       const tone = timelineTone(sp)
       const active = sel && sel.runId === detail.id && sel.nodeId === sp.id
       // read-once: the node row can vanish between the guard and the Vitals deref
-      const nmetrics = (detail.nodes || {})[sp.id]?.metrics || null
+      const nstate = (detail.nodes || {})[sp.id] || null
+      const nmetrics = nstate?.metrics || null
       return jsxs('button', {
         type: 'button',
         onClick: () => { $selNode.set(active ? null : { runId: detail.id, nodeId: sp.id }); $fanItem.set(null); $fanExpanded.set(null) },
@@ -2139,7 +2161,7 @@ function Timeline({ detail }) {
             })
           }),
           nmetrics
-            ? jsx('div', { style: { display: 'flex', justifyContent: 'flex-end' }, children: jsx(Vitals, { m: nmetrics, live: !sp.end && live, size: 'xs' }) })
+            ? jsx('div', { style: { display: 'flex', justifyContent: 'flex-end' }, children: jsx(Vitals, { m: nmetrics, live: !sp.end && live, size: 'xs', wall: !sp.end && live ? nstate?.wall : null }) })
             : null
         ]
       }, sp.id)
@@ -2326,7 +2348,7 @@ function NodePanel({ detail }) {
       (facts?.attempts ?? shown.attempts) > 1 ? jsx('span', { className: 'text-[0.6875rem] text-(--ui-text-tertiary)', children: `↻${facts.attempts}` }) : null,
       box('min-w-0 truncate text-[0.6875rem] text-(--ui-text-tertiary)',
         `${unk(def.model)} · ${unk(def.provider)} · ${unk(def.reasoning)}`),
-      shown.metrics ? jsx(Vitals, { m: shown.metrics, live, cost: true }) : null,
+      shown.metrics ? jsx(Vitals, { m: shown.metrics, live, cost: true, wall: live ? shown.wall : null }) : null,
       jsx(Button, { size: 'xs', variant: 'ghost', 'aria-label': 'Close', onClick: () => { $selNode.set(null); $fanItem.set(null) }, children: '×' })
     ),
     jsx('div', {

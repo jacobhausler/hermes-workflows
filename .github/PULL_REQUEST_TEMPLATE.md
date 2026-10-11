@@ -2,6 +2,10 @@
 
 Fixes #
 
+## pr-diagram
+<!-- Non-trivial: attach the archify PNG + cite docs/pr-diagrams/<bead>.json.
+     Trivial: pr-diagram: exempt — <what the diff is>. <why no map>. -->
+
 ## Gates
 <!-- Paste the last line of each command in CONTRIBUTING.md → "Before you push". -->
 

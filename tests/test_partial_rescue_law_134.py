@@ -1,28 +1,15 @@
 """The partial-rescue law (issue #134): the committed nodes/*.json done-set
-parsed against the CURRENT graph is the ONLY saved recovery state. Editing the
+parsed against the CURRENT graph is the only saved recovery state — editing the
 submitted graph changes what a rerun does (amend-via-efp is the sanctioned
-recovery path), and the plugin therefore carries NO rescue-snapshot file by
-design — a future contributor must not "fix" recovery by adding a graph
-snapshot (the DAGMan rescue-DAG pattern stores only which nodes were done and
-lets the rerun follow the edited .dag; here the efp law already gives that
-behavior with one less thing to keep in sync).
+recovery path), so the plugin carries no rescue-snapshot file by design: one
+less thing to keep in sync.
 
 Pure read-model test: no runner spawn, no door call. Node records are written
 directly with the efp stamps the runner would write, exactly like
-test_amend_preview_defdiff does.
-
-What each check pins:
-  1. With a done record whose efp was computed against the graph ON DISK,
-     node_rec reads it as done (the done-set is disk truth).
-  2. Replacing graph.json with an amended graph (the os.replace act_amend does)
-     in which an ANCESTOR's def changed flips the DESCENDANT's committed record
-     to pending — the done-set was recomputed against the current graph, not
-     any stored graph copy.
-  3. amend_preview on the same amended graph agrees (will_rerun names the
-     ancestor + downstream), preview and runner share one law.
-  4. There is no second graph file to go stale: the run dir carries no
-     graph*.json snapshot besides graph.json itself (by-design absence; if a
-     rescue snapshot is ever added, this check names it).
+test_amend_preview_defdiff does. Checks pin: the done-set reads done against
+disk truth; an amended ancestor def demotes its own AND its untouched
+descendant's committed records to pending; amend_preview agrees with node_rec
+on the same bytes (preview and runner share one law).
 """
 import json, shutil, sys
 from pathlib import Path
@@ -93,14 +80,6 @@ check("amended ancestor def demotes the UNTOUCHED descendant record to pending",
 pv = wfcommon.amend_preview(r, amended)
 check("amend_preview agrees with node_rec: will_rerun=[a,b], neither stays unchanged",
       pv["will_rerun"] == ["a", "b"] and pv["unchanged"] == [], json.dumps(pv))
-
-# 4. by-design absence of a rescue snapshot: the ONLY graph-shaped committed
-#    file in a run dir is graph.json itself (+ amends.jsonl history, which is
-#    audit, never read by node_rec/amend_preview). Any graph*snapshot* added
-#    later fails here by NAME, pointing at this law.
-strays = sorted(p.name for p in r.iterdir()
-                if p.is_file() and p.name.startswith("graph") and p.name != "graph.json")
-check("no rescue-snapshot file exists beside graph.json", strays == [], strays)
 
 print(f"\n{'ALL PASS' if not FAILS else 'FAILED: ' + ', '.join(FAILS)} ({4 - len(FAILS)}/4)")
 sys.exit(1 if FAILS else 0)

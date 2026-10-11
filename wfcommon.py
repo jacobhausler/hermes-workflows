@@ -98,6 +98,54 @@ def source_digest(graph):
 # overrides so a team can share one root that survives any profile's deletion; unset or
 # empty = the 1.0.15 default, byte-identical.
 
+# ---------- est-2ek.1.699: the ONE route-identity contract ----------
+# The door proves a route at submit under the author's spelling; core bills under its
+# own normalized one. Every identity comparison between those worlds (the door's
+# same-route ping law, the runner's #25 commit hold, the #641 receipt hold) goes
+# through route_ids_equal, so a proven-and-run item cannot die route_unavailable over
+# punctuation. Provider-aware and a mirror of stock core's normalize_model_name
+# (agent/anthropic_message_convert.py): only claude prefixed Anthropic ids fold, each
+# '.' to '-'; '_' is kept, Bedrock ids keep their namespace dots; every other
+# provider compares as spelled, and an aggregator's vendor namespace is part of the id.
+_BEDROCK_PREFIXES = ("global.", "us.", "eu.", "apac.", "ap.", "au.", "jp.", "ca.",
+                     "sa.", "me.", "af.", "anthropic.")
+
+def canonical_model_id(model, provider=None):
+    """Identity form of `model` on `provider`'s route; '' for absent input (absence
+    proves nothing). Lowercase, strip, peel a leading '<provider>/' only when it
+    names the route's OWN provider; Anthropic only, claude prefixed, non-Bedrock: each
+    '.' becomes '-' (as stock core bills it). A literal '(suffix)' is part of the id:
+    stock core preserves it and records the concrete model verbatim, so this contract
+    never peels it for any provider. Never rewrites what gets billed or
+    relaxes a gate."""
+    m = str(model or "").strip().lower()
+    if not m:
+        return ""
+    prov = str(provider or "").strip().lower()
+    if prov and m.startswith(prov + "/"):
+        m = m[len(prov) + 1:]
+    if prov == "anthropic" and m.startswith("claude-") and not m.startswith(_BEDROCK_PREFIXES):
+        m = m.replace(".", "-")
+    return m
+
+def route_ids_equal(a, b, provider=None):
+    """True when `a` and `b` name the same model on `provider`'s route under the
+    contract above. Empty on either side is never equal."""
+    ca, cb = canonical_model_id(a, provider), canonical_model_id(b, provider)
+    return bool(ca) and bool(cb) and ca == cb
+
+def route_provider(node, verified=None):
+    """The provider whose spelling rules apply: the RECEIPT's own (leading segment of a
+    provider-qualified `verified`), else the node's `provider`, else ''. When both are
+    present and differ the route is cross-provider: '' (nothing folds, so a
+    substitution is refused before any normalization)."""
+    prov = str((node or {}).get("provider") or "").strip().lower()
+    v = str(verified or "")
+    vp = v.partition("/")[0].strip().lower() if "/" in v else ""
+    if vp and prov and vp != prov:
+        return ""
+    return vp or prov
+
 def hermes_home():
     """Core's resolution when importable, else the raw env (1.0.15 semantics, unchanged).
 
@@ -687,6 +735,10 @@ AGENT_KEYS = {"id", "type", "after", "goal", "context", "schema", "model", "prov
               # producer: on commit done the runner mints the durable token
               # nodes/<id>.suite-proof.json (node id + committed efp).
               "publishes", "suite_proof",
+              # est-pygyy (issue #56): a publication node may DECLARE effect
+              # receipts — postconditions the runner PROVES at the commit edge
+              # before a done can stand. Absent = today's behavior byte-identical.
+              "effects",
               # jam-h23: on-death catch. 'skip' commits the failed node `skipped`
               # (join-tolerant); '<fallback-node-id>' additionally lets that agent run.
               "on_fail",
@@ -708,7 +760,14 @@ GATE_KEYS = {"id", "type", "after", "question", "options", "context", "when", "w
 ECHO_KEYS = {"id", "type", "after", "output",
              # est-2ek.1.603: an echo commits at the wave boundary WITHOUT a spawn, so
              # the publisher gate covers the echo commit path too.
-             "publishes"}
+             "publishes",
+             # est-pygyy (issue #56): the receipt gate covers the echo commit path
+             # exactly like the publisher gate — an echo that publishes must prove it.
+             "effects"}
+# est-pygyy (issue #56): the closed shape of one effect-receipt row (validated at
+# the door, enforced by wf._effect_gate at the runner's commit edge).
+EFFECT_KEYS = {"file", "sha256", "min_bytes"}
+_HEX64_OK = re.compile(r"^[0-9a-f]{64}$")
 JOIN_KEYS = {"id", "type", "after", "keys", "wait"}
 # ONE table for node kinds: closed key-set + the schedule hook. `spawns` is True
 # (agent: spawn a child when ready), False (gate: hold at the wave boundary), None
@@ -835,9 +894,11 @@ def library_entry(data):
     # a token that is invalid there is DROPPED from the read (never an error —
     # quarantine is for whole-entry shape, F-2 #62 — and the vocabulary/filter/
     # replay readers all read the normalized list). Deterministic order: the
-    # normalizer dedups preserving first-seen order. The tag grammar lives in the
-    # door (__init__.py); readers get it through the injectable hook below so the
-    # shared module keeps zero dependency on the door's import graph.
+    # normalizer dedups preserving first-seen order. The tag grammar lives HERE
+    # in the shared module (est-qeul moved it out of the door; the door's
+    # _norm_tags now delegates to norm_tags), so the read fold calls it
+    # directly — no hook, and no dependency from the shared module back onto
+    # the door's import graph.
     tags = _normalize_tags_read(meta.get("tags"))
     return {"meta": meta, "graph": graph, "description": description,
             "tags": tags, "envelope": envelope}
@@ -861,7 +922,7 @@ def grammar_errors(graph):
                         + json.dumps(list(GRAMMAR_SUPPORTED))
                         + f" (absent = {GRAMMAR_DEFAULT!r})"}]
     return []
-FANOUT_KEYS = {"items", "items_from", "goal", "schema", "quorum", "ledger"}
+FANOUT_KEYS = {"items", "items_from", "goal", "schema", "quorum", "quorum_drain_s", "ledger"}
 DEFAULTS_KEYS = {"schema", "timeout", "max_turns", "reasoning", "provider", "model", "context",
                  "require_route",   # #25: bool — fail-closed pinned routes (see AGENT_KEYS)
                  # est-2ek.1.164: the transport fallback rungs fill from graph
@@ -934,6 +995,23 @@ def _defaults_errors(d):
                                           "spawn)")
     return errs
 
+_PRE_RUN_REF = re.compile(r"\{run\.[^{}]*\}")
+
+def _preamble_baked(pre, ctx):
+    """est-2ek.1.838: is `pre` (defaults.context) already the head of `ctx`? The door
+    bakes defaults BEFORE binding run_context, so a persisted node context carries the
+    BOUND preamble while graph.json's defaults.context keeps the {run.KEY} template.
+    Each {run.KEY} slot therefore matches any non-empty text; every literal byte of
+    the preamble must still match exactly (an edited preamble is not 'baked')."""
+    if ctx.startswith(pre):
+        return True
+    parts = _PRE_RUN_REF.split(pre)
+    if len(parts) == 1:
+        return False
+    rx = "(?s:.+?)".join(re.escape(p) for p in parts)
+    # the preamble is the WHOLE context or is followed by the "\n\n" own-context seam
+    return re.match(rf"(?s){rx}(?:\n\n|\Z)", ctx) is not None
+
 def apply_graph_defaults(graph):
     """Bake run-level `defaults` + per-node `shape` presets into the agent node defs,
     called by the door BEFORE graph.json is written: the runner and every fingerprint
@@ -981,7 +1059,7 @@ def apply_graph_defaults(graph):
             if n.get("require_route") is None and "require_route" in defaults:
                 n["require_route"] = defaults["require_route"]
             pre = defaults.get("context") or ""
-            if pre and not str(n.get("context") or "").startswith(pre):
+            if pre and not _preamble_baked(pre, str(n.get("context") or "")):
                 n["context"] = pre + ("\n\n" + n["context"] if n.get("context") else "")
         nodes.append(n)
     return dict(graph, nodes=nodes)
@@ -1026,9 +1104,13 @@ def validate_graph_errors(nodes, *, admission=False):
         # prompt-only annotation; enum is ENFORCED at harvest (#107 — the old
         # law "never accept a constraint that cannot be enforced" stays TRUE:
         # enum joined the subset only once wf.validate() checks membership).
+        # #96: minItems/minLength joined the SAME way — wf.validate() now
+        # enforces both (array length; non-blank char count via v.strip(),
+        # fail-closed: a whitespace-only probe is not a probe), so the door
+        # admits exactly what the harvester can enforce, nothing more.
         for k in sorted(set(schema) - {"type", "required", "properties", "items",
-                                       "description", "enum"}):
-            E(nid, f"{field}.{k}", "unsupported schema keyword; supported: type, required, properties, items, description, enum")
+                                       "description", "enum", "minItems", "minLength"}):
+            E(nid, f"{field}.{k}", "unsupported schema keyword; supported: type, required, properties, items, description, enum, minItems, minLength")
         if "type" in schema and schema["type"] not in ("object", "array", "string", "number", "integer", "boolean"):
             E(nid, f"{field}.type", "unsupported schema type")
         if "required" in schema and (not isinstance(schema["required"], list)
@@ -1048,6 +1130,17 @@ def validate_graph_errors(nodes, *, admission=False):
                 E(nid, f"{field}.enum", "enum members must be a list of non-empty strings")
             elif schema.get("type") != "string":
                 E(nid, f"{field}.enum", "enum is only legal on type:'string' (the harvester enforces string membership only)")
+        # #96: minItems/minLength — same enforceability law as enum. The door
+        # admits a floor ONLY where wf.validate() can actually enforce it:
+        # minItems on type:'array', minLength on type:'string', each a
+        # non-negative int (bool is never a count — same bool law as #113).
+        for _kw, _t in (("minItems", "array"), ("minLength", "string")):
+            if _kw in schema:
+                mv = schema[_kw]
+                if isinstance(mv, bool) or not isinstance(mv, int) or mv < 0:
+                    E(nid, f"{field}.{_kw}", f"{_kw} must be a non-negative integer")
+                elif schema.get("type") != _t:
+                    E(nid, f"{field}.{_kw}", f"{_kw} is only legal on type:'{_t}' (the harvester enforces it only there)")
         props = schema.get("properties")
         if props is not None:
             if not isinstance(props, dict):
@@ -1189,6 +1282,45 @@ def validate_graph_errors(nodes, *, admission=False):
             elif not isinstance(n["suite_proof"], bool):
                 E(nid, "suite_proof", "suite_proof must be a boolean "
                                       "(true = committing done mints a suite proof token)")
+        if "effects" in n:
+            # est-pygyy (issue #56): declared effect receipts — the postconditions
+            # the runner PROVES at the commit edge before a done may stand. The
+            # engine never infers effects from prose; a declared receipt that cannot
+            # be proven fails the node typed (error_class effect_receipt), so the
+            # door validates the SHAPE fail-closed here: non-empty list <=8 rows,
+            # each {file, sha256?, min_bytes?} (closed keys; file is a run-dir
+            # relative path — absolute and escaping paths are refused HERE, never
+            # discovered at the commit edge).
+            ef = n["effects"]
+            if not isinstance(ef, list) or not ef:
+                E(nid, "effects", "effects must be a non-empty list of effect-receipt "
+                                  "objects {file, sha256?, min_bytes?}")
+            elif len(ef) > 8:
+                E(nid, "effects", f"effects has {len(ef)} rows; the cap is 8")
+            else:
+                for j, row in enumerate(ef):
+                    fld = f"effects[{j}]"
+                    if not isinstance(row, dict):
+                        E(nid, fld, "each effect receipt must be an object "
+                                    "{file, sha256?, min_bytes?}")
+                        continue
+                    stray = sorted(set(row) - EFFECT_KEYS)
+                    if stray:
+                        E(nid, fld, f"{fld} unknown key(s) {stray}; allowed: "
+                                    "file, sha256, min_bytes")
+                    f_ = row.get("file")
+                    if not isinstance(f_, str) or not f_.strip():
+                        E(nid, fld, f"{fld} file must be a non-empty string")
+                    elif f_.startswith("/") or "\\" in f_ or ".." in f_.split("/"):
+                        E(nid, fld, f"{fld} file {f_!r} invalid: must be a run-dir "
+                                    "relative path (no absolute path, no '..')")
+                    if "sha256" in row and not (isinstance(row["sha256"], str)
+                                                and _HEX64_OK.match(row["sha256"])):
+                        E(nid, fld, f"{fld} sha256 must be a 64-hex digest")
+                    mb = row.get("min_bytes")
+                    if mb is not None and (not isinstance(mb, int) or isinstance(mb, bool)
+                                           or mb <= 0):
+                        E(nid, fld, f"{fld} min_bytes must be a positive integer")
         for k, hi in (("timeout", 86400), ("max_turns", 200), ("run_budget", 86400)):
             v = n.get(k)
             if v is not None and (not isinstance(v, (int, float)) or isinstance(v, bool) or v <= 0 or v > hi):
@@ -1329,6 +1461,21 @@ def validate_graph_errors(nodes, *, admission=False):
                     q = fo.get("quorum")
                     if q is not None and (not isinstance(q, int) or isinstance(q, bool) or q < 1):
                         E(nid, "fanout.quorum", "fanout.quorum must be a positive int")
+                    # est-06xk (#123): drain-with-deadline is an OPT-IN modifier of
+                    # the quorum race — a number of seconds >= 0 (0 = today's
+                    # immediate SIGKILL at the quorum moment). bool is not a number
+                    # here (True would silently mean 1s); without an explicit quorum
+                    # there is no race and nothing to drain — refuse, never ignore.
+                    ds = fo.get("quorum_drain_s")
+                    if ds is not None:
+                        if isinstance(ds, bool) or not isinstance(ds, (int, float)) or not ds >= 0:
+                            E(nid, "fanout.quorum_drain_s",
+                              "fanout.quorum_drain_s must be a number >= 0 (drain-window "
+                              "seconds; 0 = cancel stragglers immediately at the quorum moment)")
+                        elif q is None:
+                            E(nid, "fanout.quorum_drain_s",
+                              "fanout.quorum_drain_s is only meaningful with an explicit "
+                              "fanout.quorum (without quorum the fan-out waits for every item)")
                     # #85: the input LEDGER is a list of per-item declarations; row
                     # CONTENT (source/artifact shape) is measured by the admission
                     # guard below the door — here only the container shape is a
@@ -1985,6 +2132,37 @@ def _include_text_fields(node):
         for i, it in enumerate(fo.get("items") or []):
             if isinstance(it, dict) and isinstance(it.get("goal"), str):
                 yield f"fanout.items[{i}].goal", ("fanout", "items", i, "goal")
+
+
+def run_context_contract(graph, params=None):
+    """Refs are the binding contract; optional envelope metadata only describes it.
+
+    Read malformed params as absent, never quarantine an otherwise usable shelf.
+    Defaults are descriptive, not implicit launch bindings. All live refs remain
+    required even if a declaration attempts to mark one optional.
+    """
+    declared = params if isinstance(params, dict) else {}
+    refs = set()
+    nodes = list(graph.get("nodes") or [])
+    defaults = graph.get("defaults")
+    if isinstance(defaults, dict) and isinstance(defaults.get("context"), str):
+        nodes.append({"context": defaults["context"]})
+    for node in nodes:
+        if isinstance(node, dict):
+            for text in _include_texts(node):
+                refs.update(_INCLUDE_RUN_REF.findall(text))
+    derived = {}
+    for key in sorted(refs):
+        spec = declared.get(key)
+        spec = spec if isinstance(spec, dict) else {}
+        derived[key] = {"required": True}
+        if isinstance(spec.get("desc"), str):
+            derived[key]["desc"] = spec["desc"]
+        if isinstance(spec.get("default"), str) and spec["default"].strip():
+            derived[key]["default"] = spec["default"]
+    keys = {k for k in declared if isinstance(k, str)}
+    return {"refs": sorted(refs), "params": derived,
+            "missing": sorted(refs - keys), "dead": sorted(keys - refs)}
 
 
 def _include_get(node, path):
@@ -3325,6 +3503,85 @@ def _active_spawns(r, n, byid):
             active.append(v)
     return active
 
+def _progress_for(r, n):
+    """#128 artifact-mtime progress channel: the write-first file IS the heartbeat.
+    The child work dir <run>/work/<node>[.<i>]/ (child_work_dir, wf.py — the dir
+    WORK_DIR_NOTE already mandates) is scanned at QUERY time for the most recently
+    modified regular file across the node's item dirs (fan-out: latest activity
+    wins). Pure read, no writes, NEVER raises: absent/unreadable artifact or a
+    stat/decode failure means an ABSENT `progress` field, never a fabricated one
+    (R2/when_error law), and absence draws no stall inference. last_line is the
+    last NEWLINE-TERMINATED line — a trailing partial line is dropped so the
+    reader never sees a torn line mid-append."""
+    try:
+        import stat as _stat
+        import time
+        base = re.sub(r"[^A-Za-z0-9_.-]", "_", str(n.get("id")))
+        work = Path(r) / "work"
+        if not base or not work.is_dir():
+            return None
+        dirs = []
+        if (work / base).is_dir():
+            dirs.append(work / base)
+        try:  # fan-out siblings <base>.<i> (runner names them via child_work_dir)
+            dirs.extend(p for p in sorted(work.iterdir())
+                        if p.is_dir() and p.name.startswith(base + "."))
+        except OSError:
+            pass
+        if not dirs:
+            return None
+        best = None  # (mtime, size, absolute path)
+        seen = 0
+        for d in dirs:
+            for dirpath, _sub, files in os.walk(d):
+                for fn in files:
+                    seen += 1
+                    if seen > 2000:  # a pathological tree never stalls status
+                        break
+                    p = Path(dirpath) / fn
+                    try:
+                        st_ = p.stat()
+                    except OSError:
+                        continue
+                    if not _stat.S_ISREG(st_.st_mode):
+                        continue
+                    if best is None or st_.st_mtime > best[0]:
+                        best = (st_.st_mtime, st_.st_size, p)
+                    if seen > 2000:
+                        break
+                if seen > 2000:
+                    break
+        if best is None:
+            return None
+        mtime, size, p = best
+        try:  # tail-read only: a growing artifact is never fully re-read
+            with open(p, "rb") as fh:
+                if size > 65536:
+                    fh.seek(-65536, os.SEEK_END)
+                    fh.readline()  # drop the window's own head: it may itself be torn
+                    data = fh.read()
+                else:
+                    data = fh.read()
+        except OSError:
+            return None
+        try:
+            text = data.decode("utf-8")
+        except UnicodeDecodeError:
+            return None  # a binary/unreadable artifact yields no key, no error
+        prog = {"artifact": str(p.relative_to(Path(r))),
+                "size": size,
+                "mtime_age_s": max(0.0, time.time() - mtime)}
+        if text.endswith("\n"):
+            lines = text[:-1].split("\n")
+            if text[:-1]:
+                prog["last_line"] = lines[-1]
+        elif "\n" in text:  # trailing PARTIAL line: drop it, last whole line wins
+            prog["last_line"] = text.rsplit("\n", 1)[0].rsplit("\n", 1)[-1]
+        # a file with NO newline-terminated line yet: honest absence of last_line
+        return prog
+    except Exception:
+        return None  # fail-safe read model: this NEVER raises into status/wait/list
+
 def active_child(r, n, byid, index=None):
     """Per-item entry point to the verification law (790c6ad): the runner's
     fan-out branch calls this BEFORE Popen on a resumed runner — a verified live
@@ -3336,6 +3593,150 @@ def active_child(r, n, byid, index=None):
     fname = f"{n['id']}" + (f".{index}" if index is not None else "")
     return _verify_spawn_rec(r, n, byid, jload(r / "nodes" / f"{fname}.json"))
 
+
+# est-2ek.1.833: the runner logs `seat.wait` when the GLOBAL agent-seat semaphore
+# is full (wf.py _seat_acquire on_wait) and writes a spawn-ledger child row the
+# moment it gets a seat and spawns. A wait with no later spawn/terminal event for
+# the same (node, index) is OPEN — status reads it instead of an unexplained
+# all-pending live run. Derive-only (A3): two files the runner already writes.
+_SEAT_WAIT_CLOSERS = frozenset(("node.done", "node.failed", "node.finished", "node.cancelled",
+                                "node.skipped", "node.spliced", "item.finished", "item.adopted",
+                                "item.harvested_at_cancel"))
+
+def open_seat_waits(r):
+    """{node_id: {(index): {since, cap, spawn}}} for seat waits not yet closed by a
+    later child spawn (spawn-ledger), node/item terminal event, or runner (re)start
+    / stop. Unreadable files are honest absence (empty), never a raise."""
+    from datetime import datetime
+    def ts(s):
+        try:
+            return datetime.fromisoformat(str(s)).timestamp()
+        except (TypeError, ValueError):
+            return None
+    rows = []
+    for fname, src in (("events.jsonl", "ev"), ("spawn-ledger.jsonl", "led")):
+        try:
+            text = (Path(r) / fname).read_text()
+        except OSError:
+            continue
+        for line in text.splitlines():
+            try:
+                e = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(e, dict) and ts(e.get("ts")) is not None:
+                rows.append((ts(e["ts"]), 0 if src == "ev" else 1, src, e))
+    rows.sort(key=lambda x: (x[0], x[1]))   # same second: the wait precedes its spawn
+    waits = {}
+    for _t, _o, src, e in rows:
+        if src == "led":
+            if e.get("role") == "child" and e.get("node"):
+                waits.pop((e["node"], e.get("index")), None)
+            continue
+        ev = e.get("event")
+        if ev in ("run.started", "run.resumed", "run.stopped"):
+            waits.clear()
+        elif ev == "seat.wait" and e.get("node"):
+            waits[(e["node"], e.get("index"))] = {"since": e.get("ts"), "cap": e.get("cap"),
+                                                  "spawn": e.get("spawn")}
+        elif ev in _SEAT_WAIT_CLOSERS and e.get("node"):
+            if ev.startswith("item.") and e.get("index") is not None:
+                waits.pop((e["node"], e.get("index")), None)
+            else:
+                for k in [k for k in waits if k[0] == e["node"]]:
+                    waits.pop(k)
+    out = {}
+    for (nid, idx), w in waits.items():
+        out.setdefault(nid, {})[idx] = w
+    return out
+
+def seat_wait_view(per_index, now_s=None):
+    """One node's open waits -> {since, age_s, cap, spawn[, waiting]} (oldest wait)."""
+    import time as _time
+    from datetime import datetime
+    oldest = min(per_index.items(), key=lambda kv: str(kv[1].get("since") or ""))[1]
+    try:
+        age = int((now_s if now_s is not None else _time.time())
+                  - datetime.fromisoformat(str(oldest.get("since"))).timestamp())
+    except (TypeError, ValueError):
+        age = None
+    view = {"since": oldest.get("since"), "age_s": age, "cap": oldest.get("cap"),
+            "spawn": oldest.get("spawn")}
+    idxs = sorted(i for i in per_index if isinstance(i, int))
+    if idxs:
+        view["waiting"] = idxs
+    return view
+
+WALL_NEAR_RATIO = 0.8   # #133: >80 % of either bound reads near-wall
+
+def _iso_epoch(s):
+    """epoch seconds off a stored ISO ts, None when unparseable (never raises)."""
+    from datetime import datetime
+    try:
+        return datetime.fromisoformat(str(s)).timestamp()
+    except (TypeError, ValueError):
+        return None
+
+def _node_extends(r):
+    """{node: [(ts_epoch, extra_s)]} from the committed node.extended events —
+    the #133 wall-meter input: the runner's ONE 50 % extend-not-kill bump (#11)
+    is already in events.jsonl, the meter only sums what is there. Malformed
+    lines, foreign nodes and rows without a numeric extra_s are ignored; an
+    unreadable ledger yields NO bumps (honest absence, never a fabricated wall)."""
+    out = {}
+    try:
+        text = (Path(r) / "events.jsonl").read_text()
+    except OSError:
+        return out
+    for line in text.splitlines():
+        if '"node.extended"' not in line:      # cheap pre-filter before the parse
+            continue
+        try:
+            e = json.loads(line)
+        except Exception:
+            continue
+        if e.get("event") != "node.extended" or not e.get("node"):
+            continue
+        ex = e.get("extra_s")
+        if isinstance(ex, (int, float)) and not isinstance(ex, bool):
+            out.setdefault(e["node"], []).append((_iso_epoch(e.get("ts")), float(ex)))
+    return out
+
+def _wall_meter(n, active, extends):
+    """#133 wall meter for ONE running node — pure arithmetic over facts the
+    runner already committed: the verified active spawn's `started` (fan-out:
+    the senior item sets the node's meter), the BAKED def `timeout`, and the
+    node.extended bumps committed at or after that spawn. p95_s is the measured
+    p95 the SHAPE_PRESETS table already holds for the node's shape; an explicit
+    timeout beyond it is the author's own wall, so the meter names both bounds.
+    One word: over-p95 (elapsed at/over either bound) / near-wall (>80 % of
+    either) / on-track. Honest absence (#128/R2 law): no parseable started, or
+    no bound at all => NO key — never a fabricated number."""
+    import time as _time
+    starts = [t for t in (_iso_epoch(a.get("started")) for a in active) if t is not None]
+    if not starts:
+        return None
+    started = min(starts)
+    timeout = n.get("timeout")
+    wall_s = (int(timeout) if isinstance(timeout, (int, float))
+              and not isinstance(timeout, bool) and timeout > 0 else None)
+    if wall_s is not None:
+        # only bumps committed by THIS spawn's life count (a pre-spawn
+        # extension belongs to a dead attempt, not to the wall we sit inside)
+        wall_s += int(sum(ex for (ts, ex) in extends.get(n.get("id"), ())
+                          if ts is None or ts >= started - 1))
+    preset = SHAPE_PRESETS.get(n.get("shape", DEFAULT_SHAPE), {}) or {}
+    p95 = preset.get("timeout")
+    p95 = (int(p95) if isinstance(p95, (int, float))
+           and not isinstance(p95, bool) and p95 > 0 else None)
+    bounds = [b for b in (wall_s, p95) if b is not None]
+    if not bounds:
+        return None
+    elapsed = int(_time.time() - started)
+    over = any(elapsed >= b for b in bounds)
+    near = any(elapsed > WALL_NEAR_RATIO * b for b in bounds)
+    return {"elapsed_s": elapsed, "wall_s": wall_s, "p95_s": p95,
+            "meter": "over-p95" if over else "near-wall" if near else "on-track"}
 
 def run_state(r):
     """Derived truth of a run dir: status, per-node status, held gate meta.
@@ -3354,6 +3755,7 @@ def run_state(r):
         if st in ("done", "partial"):   # #4: partial output IS output for when/refs
             outputs[n["id"]] = (rec or {}).get("output")
     prune_states(graph["nodes"], states)   # derived view: pruned-but-uncommitted read as skipped
+    _ext_map = [None]   # #133: the node.extended ledger, lazily parsed once per call
     for n in graph["nodes"]:
         st, rec = states[n["id"]], recs[n["id"]]
         active = _active_spawns(r, n, byid) if live and st == "pending" and kind(n).spawns is True else []
@@ -3363,6 +3765,24 @@ def run_state(r):
         if active:
             nodes[n["id"]]["active_spawn"] = active[0]
             nodes[n["id"]]["active_spawns"] = active
+            # #128: the write-first artifact under the node's child work dir is the
+            # heartbeat — derive-only, honest absence (no key when no file is visible).
+            prog = _progress_for(r, n)
+            if prog:
+                nodes[n["id"]]["progress"] = prog
+            # #133 wall meter: elapsed-vs-wall-and-p95, right now — arithmetic
+            # over the spawn's `started`, the baked def timeout, and the one
+            # node.extended bump. Honest absence: no key when nothing grounds it.
+            if _ext_map[0] is None:
+                _ext_map[0] = _node_extends(r)   # ledger parsed once per call
+            wm = _wall_meter(n, active, _ext_map[0])
+            if wm:
+                nodes[n["id"]]["wall"] = wm
+    # est-2ek.1.833: a live runner blocked on the global seat cap says so per node.
+    if live:
+        for nid, per in open_seat_waits(r).items():
+            if nid in nodes and states.get(nid) == "pending" and per:
+                nodes[nid]["seat_wait"] = seat_wait_view(per)
     # e68544a37be37657 + est-ij0: the runner's own release law (partial blocks a
     # plain edge; a dead order_only predecessor is spliced) — one function, two callers.
     deps_ok, _deps_res, _spliced = release_law(graph["nodes"], states)
@@ -3442,7 +3862,15 @@ def run_state(r):
         status = "failed"
     if status == "interrupted" and verdict.startswith("crashed:"):
         status = "failed"  # a recorded fatal error needs an amend, not a wait/respawn loop
+    # sys-5lnm17 (upstream of sys-ntdq1v): WHICH nodes died, derived here from the
+    # SAME efp-valid states the status verdict used — never stored, never from
+    # prose. A crash verdict with no failed node reads empty (honest absence: the
+    # runner died, not a node).
+    failed_nodes = [{"id": n["id"], "error": (recs[n["id"]] or {}).get("error"),
+                     "error_class": (recs[n["id"]] or {}).get("error_class")}
+                    for n in graph["nodes"] if states[n["id"]] == "failed"]
     return {"run_id": r.name, "name": graph.get("name"), "status": status,
+            "failed_nodes": failed_nodes,
             "held_gate": held, "nodes": nodes, "graph": graph,
             # 91b9a3de companion: publish the ONE liveness read this state was
             # derived from — a second runner_alive() call a few microseconds
@@ -3736,9 +4164,11 @@ def amend_preview(r, new_nodes):
         status[n["id"]] = st
         if st == "pending" and (rec or {}).get("status") in ("done", "partial", "failed", "skipped"):
             committed_mismatch.add(n["id"])  # committed but efp-stale
-        elif st == "pending" and rec is None:
-            # never committed (pending/running): compare the def against the frozen
-            # graph so a model/provider-only edit isn't previewed as no-work (est-c9is)
+        elif st == "pending" and (rec is None or rec.get("status") == "running"):
+            # never committed (pending, or RUNNING with only the spawn-time record —
+            # status=running is safe by construction, never a commit): compare the
+            # def against the frozen graph so a model/provider-only edit isn't
+            # previewed as no-work (est-c9is; running half is issue #18).
             old = next((o for o in old_nodes if isinstance(o, dict) and o.get("id") == n["id"]), None)
             if isinstance(old, dict) and def_hash(old) != def_hash(n):
                 def_drift.add(n["id"])
@@ -4017,6 +4447,77 @@ def child_metrics(run_id, home=None):
                       max(m["ended"], ended) if m["ended"] is not None and ended is not None else None)
     return out
 
+STALL_IDLE_S = 600   # #127 (jam-h1): the query-time stall threshold, tunable per call
+
+def heartbeat(metrics, progress=None, now=None, stall_s=STALL_IDLE_S):
+    """#127 (est-zsws): the ONE per-running-node heartbeat verdict, derived at query
+    time from evidence the read model ALREADY has — no new writes, no child
+    cooperation, no persisted surface (the caller splices the returned dict into
+    the status payload next to `metrics`/`progress`).
+      alive   = a verified spawn is live (the existing `live` count decides).
+      last_evidence_age_s = the FRESHEST known evidence age among the child's
+                session-row idle_s and the #128 artifact progress (mtime_age_s) —
+                a child that writes artifacts but never ticks its DB row is NOT
+                stalled; None when neither is known (honest absence, R2).
+      stalled = alive AND a KNOWN age past the threshold. A stall is NEVER
+                inferred from absence: unknown age => stalled False, always.
+    api_calls_delta_over_window stays out of v1 per the issue-plan correction:
+    child rows carry only the cumulative api_call_count, no per-call series, and
+    a delta needs persisted windows this issue forbids."""
+    ages = []
+    idle = (metrics or {}).get("idle_s")
+    if isinstance(idle, (int, float)) and not isinstance(idle, bool):
+        ages.append(max(0, int(idle)))
+    mtime_age = (progress or {}).get("mtime_age_s")
+    if isinstance(mtime_age, (int, float)) and not isinstance(mtime_age, bool):
+        ages.append(max(0, int(mtime_age)))
+    alive = bool((metrics or {}).get("live"))
+    age = min(ages) if ages else None
+    return {"alive": alive,
+            "last_evidence_age_s": age,
+            "stalled": bool(alive and age is not None and age >= stall_s)}
+
+def run_explain(out):
+    """#127 (est-zsws): ONE line telling a scheduler why the run is where it is,
+    composed ONLY from fields the status payload already carries (node statuses,
+    heartbeat verdicts, blocked_by words, parked markers). Terminal runs have
+    nothing to explain — None, never an empty slogan."""
+    status = out.get("status")
+    if status in ("done", "failed", "stopped"):
+        return None
+    nodes = out.get("nodes") or {}
+    running, stalled, pending, parked, blocked_names = 0, [], 0, 0, []
+    for nid, v in nodes.items():
+        st = v.get("status")
+        if st == "running":
+            running += 1
+            hb = v.get("heartbeat") or {}
+            if hb.get("stalled"):
+                age = hb.get("last_evidence_age_s")
+                stalled.append(f"{nid} {age}s" if age is not None else nid)
+        elif st == "pending":
+            if v.get("parked"):
+                parked += 1
+                continue
+            pending += 1
+            for b in v.get("blocked_by") or []:
+                name = str(b).split(":", 1)[0].strip()
+                if name and name not in blocked_names:
+                    blocked_names.append(name)
+    parts = []
+    if running:
+        parts.append(f"{running} running" + (f" ({len(stalled)} stalled: {', '.join(stalled)})" if stalled else ""))
+    if pending:
+        p = f"{pending} pending"
+        if blocked_names:
+            p += f" blocked by {', '.join(blocked_names)}"
+        parts.append(p)
+    if parked:
+        parts.append(f"{parked} parked")
+    if not parts:
+        return f"{status}: no running work"
+    return f"{status}: " + ", ".join(parts)
+
 def current_attempt(cm, spawns):
     """Activity only for verified spawn session titles; DB rows alone prove no liveness."""
     live = {}
@@ -4028,6 +4529,41 @@ def current_attempt(cm, spawns):
               for title, row in live.items() if row.get("last_activity") is not None]
     last, _, desc = max(recent) if recent else (None, None, None)
     return {"live": len(live), "last_activity": last, "last_desc": desc}
+
+# R8 (graphify @ 2d97807): the complete fold call set is __init__.py act_status
+# (node lines + run total; act_status itself reached only from act_wait and
+# _wait_foreign — no fold there, they delegate here) and dashboard/plugin_api.py
+# _view's three _fold_metrics sites (node line, fanout item, rollup) — no third
+# fold; scripts/ grep for api_calls|child_metrics|_fold is empty.
+def fold_child_metrics(rows):
+    """#114 (WF-04): THE ONE numeric fold + known/unknown policy for child metric
+    rows (the dicts child_metrics/run_child_metrics return). Counters sum exactly
+    as the projections always have; api_calls is OMITTED from the result whenever
+    ANY contributing row says api_calls_known: false — an unknown count is absent
+    (the existing omission convention, R2: absent reads unknown, never invented),
+    never a zero and never a partial sum advertised as exact. Pure over
+    already-read rows: no IO, no new field, persisted shapes unchanged (R10).
+    Both projection adapters (door act_status, dashboard _view) route EVERY
+    aggregation level — node line, fanout item, run total/rollup — through here
+    so the surfaces can never diverge on which levels hide an unknown.
+    Returns None for no rows (the callers' existing "no metrics" sentinel)."""
+    rows = list(rows)
+    if not rows:
+        return None
+    f = {"tokens_in": 0, "tokens_out": 0, "cache_read": 0, "reasoning": 0, "api_calls": 0,
+         "tool_calls": 0, "cost": 0.0, "attempts": 0, "children": len(rows), "live": 0,
+         "last_activity": None, "last_desc": None, "models": []}
+    known = True
+    for m in rows:
+        for k in ("tokens_in", "tokens_out", "cache_read", "reasoning", "api_calls", "tool_calls", "cost", "attempts"):
+            f[k] += m.get(k) or 0
+        if not m.get("api_calls_known", True):
+            known = False
+        if m.get("model") and m["model"] not in f["models"]:
+            f["models"].append(m["model"])
+    if not known:
+        f.pop("api_calls")
+    return f
 
 
 # ---------- est-2ek.1.641 route receipts (moved out of wf.py, outbound review
@@ -4150,12 +4686,23 @@ def _rename_hint(r, v, s):
     return f" (you wrote '{hit}'? the schema needs '{r}')"
 
 def validate(out, schema):
-    """Tiny forgiving validator: type / required / properties / items / enum.
+    """Tiny forgiving validator: type / required / properties / items / enum
+    / minItems / minLength.
     #107: `enum` membership is ENFORCED here — a str value against a
     string-membered enum (exactly what the door's schema_check admits: a
     non-empty list of non-empty strings on type:'string'), so a misspelled
     verdict takes the same typed-correction-retry path as a `type` violation
-    and the error string names the allowed set for the retry prompt."""
+    and the error string names the allowed set for the retry prompt.
+    #96: `minItems` (array length) and `minLength` (string floor) are
+    ENFORCED here on exactly the placements the door admits — type:'array' /
+    type:'string' with a non-negative int — and only AFTER the value's type
+    checked (a wrong-typed value gets the type error, never a pile-on).
+    minLength counts NON-BLANK chars (`len(v.strip())`): a whitespace-only
+    probe is not a probe — a deliberate, fail-closed deviation from JSON
+    Schema, where minLength counts raw chars. Malformed floors (non-int) are
+    ignored here, never crash: the door is the enforcement point; a
+    hand-built schema must not take the runner down. An all-blank
+    verify_list-style array now fails closed like the rest of the law."""
     errs = []
     if not schema:
         return errs
@@ -4180,6 +4727,16 @@ def validate(out, schema):
                 and all(isinstance(x, str) for x in en) and v not in en):
             errs.append(f"{path}: not an allowed value (allowed: "
                         + ", ".join(repr(x) for x in en) + ")")
+        # #96: floors, enforced only where the door admits them (right value
+        # type, non-negative int floor). bool refused: True is not a count.
+        mi = s.get("minItems")
+        if (t == "array" and isinstance(v, list) and isinstance(mi, int)
+                and not isinstance(mi, bool) and mi >= 0 and len(v) < mi):
+            errs.append(f"{path}: expected at least {mi} item(s)")
+        ml = s.get("minLength")
+        if (t == "string" and isinstance(v, str) and isinstance(ml, int)
+                and not isinstance(ml, bool) and ml >= 0 and len(v.strip()) < ml):
+            errs.append(f"{path}: expected at least {ml} non-blank char(s)")
         if isinstance(v, dict):
             for r in s.get("required", []):
                 if r not in v:

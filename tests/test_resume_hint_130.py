@@ -205,11 +205,18 @@ for v in (False, True):
 # ---- H (review B2/N6): documented where agents look; JS export reports it lossy ----
 check("H references/grammar.md documents resume_hint",
       "`resume_hint`" in (BUILD / "references" / "grammar.md").read_text())
-check("H agent-facing tool schema (__init__.py) names resume_hint",
-      "resume_hint" in (BUILD / "__init__.py").read_text())
+import importlib  # noqa: E402
+door = importlib.import_module("__init__")
+import wf_test_isolation as _iso130  # noqa: E402
+_iso130.install(door)
+check("H registered agent-facing graph schema names resume_hint",
+      "resume_hint" in door.WORKFLOW_PARAMS["properties"]["graph"]["description"])
 import wf_dialect  # noqa: E402
-check("H JS export lists resume_hint as lossy (no silent drop of an explicit false)",
-      "resume_hint" in wf_dialect._LOSSY_AGENT)
+exported = wf_dialect.export_report({"name": "hint-lossy", "nodes": [
+    {"id": "a", "type": "agent", "goal": "g", "resume_hint": False}]})
+check("H JS export warns about losing an explicit false resume_hint",
+      exported.get("ok") and {"node": "a", "key": "resume_hint", "value": False}
+      in exported.get("lossy", []) and "resume_hint" in exported["js"], str(exported))
 
 # ---- J (review N2/N4): budget skips, never truncates; log glob is node-exact ----
 import time as _t  # noqa: E402
@@ -231,6 +238,48 @@ check("J log glob is node-exact: x.audit.a0.log never rides node x's inventory",
       "FOREIGNLOG-130" not in blk and "x.audit.a0.log" not in blk)
 check("J inventory stays within budget and ends in RESUME_LINE",
       len(blk) < 6000 + 400 and blk.rstrip().endswith(wf.RESUME_LINE.strip()))
+
+# ---- K (review R10): the real amend door preserves rule-1 done records ----
+for stamped in (False, True):
+    graph = wfcommon.apply_graph_defaults({"name": "rh130-legacy", "nodes": [
+        {"id": "a", "type": "agent", "goal": "g", "max_turns": 20},
+        {"id": "b", "type": "agent", "goal": "g2", "after": ["a"]}]})
+    rr = mk("rh130-legacy-" + str(stamped), graph["nodes"])
+    ids = {n["id"]: n for n in graph["nodes"]}
+    for n in graph["nodes"]:
+        record = {"status": "done", "output": {"result": "banked"},
+                  "efp": wfcommon.efp(ids, n, rule=wfcommon.FP_RULE_LEGACY)}
+        if stamped:
+            record["fp_rule_version"] = wfcommon.FP_RULE_LEGACY
+        (rr / "nodes" / (n["id"] + ".json")).write_text(json.dumps(record))
+    original = door.act_amend({"run_id": rr.name, "graph": graph, "dry_run": True})
+    check(f"K legacy stamped={stamped} unchanged control replay-skips",
+          original.get("ok") and original.get("will_rerun") == [], str(original))
+    for flag in (False, True):
+        changed = json.loads(json.dumps(graph))
+        changed["nodes"][0]["resume_hint"] = flag
+        preview = door.act_amend({"run_id": rr.name, "graph": changed, "dry_run": True})
+        check(f"K legacy stamped={stamped} resume_hint:{flag} never unfreezes ancestors/descendants",
+              preview.get("ok") and preview.get("will_rerun") == [], str(preview))
+    changed = json.loads(json.dumps(graph)); changed["nodes"][0]["max_turns"] += 1
+    preview = door.act_amend({"run_id": rr.name, "graph": changed, "dry_run": True})
+    check(f"K legacy stamped={stamped} budget edits still unfreeze (historical law)",
+          preview.get("ok") and preview.get("will_rerun") == ["a", "b"], str(preview))
+
+# ---- L (review R8): correction sibling retains a transient retry's inventory ----
+bad_schema = {"type": "object", "properties": {"result": {
+    "type": "string", "enum": ["not-the-fixture-answer"]}}, "required": ["result"]}
+rr = mk("rh130-correction", [{"id": "a", "type": "agent", "goal": "tr correction",
+                              "schema": bad_schema, "resume_hint": True}])
+wf(rr.name, {"FAKE_MODE": "retry_hint", "FAKE_API_CALLS": "0"})
+first = (rr / "logs" / "a.a1.prompt.md").read_text()
+corrected = (rr / "logs" / "a.a2.prompt.md").read_text()
+check("L control: retry supplies the inventory and triggers schema correction",
+      HEADER in first and "failed schema validation" in corrected)
+check("L schema-correction retry retains the artifact inventory and banked file",
+      HEADER in corrected and MARK in corrected, corrected[:400])
+check("L schema-only correction never tells the child to redo finished work",
+      "Redo the work" not in corrected, corrected[-400:])
 
 print("ALL PASS" if ok else "FAILURES PRESENT")
 sys.exit(0 if ok else 1)

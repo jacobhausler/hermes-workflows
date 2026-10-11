@@ -1,6 +1,6 @@
 # Hermes Workflows
 
-![Version](https://img.shields.io/badge/version-1.3.1-blue)
+![Version](https://img.shields.io/badge/version-1.3.4-blue)
 
 **Agent-owned workflow graphs for [Hermes Agent](https://github.com/NousResearch/hermes-agent).**
 Your agent authors a JSON graph of agent nodes, fan-outs and gates; a background
@@ -51,7 +51,7 @@ One tool, action-routed — the complete surface, with the flags that matter:
 | Action | What it does |
 |---|---|
 | `run` | Launch a graph from `graph` (inline), `graph_path` (≤1 MiB local file), or `from` (library name). Optional `name`, `run_context` (seed string, or a binding map replacing `{run.KEY}` refs — malformed input is refused before anything is written; values land in prompts, so no secrets), `team`, `lane_key` (dedupe: a second run on an unfinished incumbent returns it instead of spawning), `dry_run:true` (full validation, zero writes). |
-| `status` | Read-only read model: per-node state, metrics, held gate, `node_facts` on failures, derived `next` steps — never spawns a runner. `lane_key` reads the incumbent instead. |
+| `status` | Read-only read model: per-node state, metrics, held gate, `node_facts` on failures, derived `next` steps — never spawns a runner. `lane_key` reads the incumbent instead; a lane entry whose claimed run dir no longer exists on disk reports `state: "orphaned"` (a claimed-then-lost run, not a forever-`pending` ghost). |
 | `wait` | The resume-and-watch verb: the only read action that respawns an idle runner; blocks to the next boundary (default 600 s, ceiling 1800 s), self-yielding before the host's tool deadline with a "call wait again" note. |
 | `release` | Answer a held human gate (`gate_id`, `answer`); respawns the runner when idle. A human release pre-empts a machine `wait` park. |
 | `steer` | Queue steering text for a running node (refused on gates and terminal nodes; delivery is cooperative via the child's `inbox` pull — never a mid-prompt injection). |
@@ -66,7 +66,20 @@ One tool, action-routed — the complete surface, with the flags that matter:
 | `doctor_version` | Read-only version truth for THIS install: `{live_version, newest_packaged, source_commit, drift}` — plugin.yaml vs the `install.json` provenance `pack.py` stamps at build time; one read, no network. |
 
 Plus a `/wf` slash command: bare `/wf` lists the library; `/wf <name> [note]`
-launches that graph with the note as its context seed.
+launches that graph with the note as its context seed. `/wf show <name>` (or
+`workflow {"action":"library","name":"<name>"}`) returns required inputs and
+an instantiate command. Library-sourced launches require nonempty string bindings
+for every `{run.KEY}` on the shared text surface, including echo output, gate
+options and machine argv; surviving refs refuse before any write. Inline graphs
+retain their existing behavior, including refusing unbound machine argv.
+
+Optional `save params:{KEY:{desc,default}}` stores descriptive `meta.params` in
+the envelope. Required keys derive from graph refs, not this declaration; defaults
+are suggestions in the instantiate command, never automatic launch bindings.
+Omission retains params on overwrite; `{}` clears them deliberately. Missing or
+dead declarations on an envelope save produce non-fatal `s12` save warnings
+naming the keys; a bare save's contract derives wholly from refs. Bare,
+ref-free library rows and clean save responses keep their previous key sets.
 
 ## Graph grammar in 30 seconds
 
@@ -87,7 +100,9 @@ workflow { "action": "wait", "run_id": "<run_id>" }          → repeat until te
 
 Fan-out with `quorum`, gates with `when`/`on_skip`/`wait`, `requires` output
 preconditions, `after_partial` harvest release, `inputs` selection from upstream
-output, string-field `enum`s, graph-level `defaults` (precedence: explicit node
+output, string-field `enum`s, answer-schema floors `minItems` (on `type:"array"`)
+and `minLength` (on `type:"string"`, counted on stripped chars — a whitespace-only
+string is too short), graph-level `defaults` (precedence: explicit node
 key > `shape` preset > `defaults`) and `model_policy` — the authoritative
 vocabulary is [references/grammar.md](references/grammar.md); the bundled
 authoring skill keeps a compressed working copy in [SKILL.md](SKILL.md).

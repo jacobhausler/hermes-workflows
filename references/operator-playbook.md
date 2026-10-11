@@ -80,7 +80,12 @@ for unfinished work with no verified live runner (see operations.md).
   node waits for EVERY item (no straggler cancellation) but COMMITS at majority
   (`len(items)//2 + 1`) — one flake in a lane of 3+ still commits with partial
   credit and survivors in `output.items`. Set `quorum:<n>` explicitly when you
-  want early straggler cancellation or a stricter/looser commit bar. And read
+  want early straggler cancellation or a stricter/looser commit bar. When the
+  stragglers may still land useful work, add `quorum_drain_s:<seconds>` (>= 0,
+  only legal with `quorum`): the kill is deferred by one drain window armed at
+  the quorum moment — anything that lands inside it commits, and only what is
+  still running at the deadline is cancelled. Default `0` = immediate cancel at
+  quorum. And read
   `failed_items`/`failed_detail` on a committed node — done does not mean every
   item passed.
 
