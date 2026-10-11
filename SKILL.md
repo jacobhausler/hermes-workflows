@@ -1,13 +1,13 @@
 ---
 name: workflow
 description: "Workflow fan-out audit and census: run agent graphs"
-version: 1.3.2
+version: 1.3.4
 metadata:
   hermes:
     tags: [workflows, fan-out, audit, census, orchestration]
 ---
 
-# Workflow authoring (1.3.2)
+# Workflow authoring (1.3.4)
 
 Requires Hermes Agent v2026.9.21 or newer (package >=0.21.4). A Desktop gate answer
 reaches the run owner's chat via the composer SDK; on older builds it may only insert
@@ -35,7 +35,8 @@ ending your turn right after `run` is how runs stall.
 - A node `schema` makes the runner write the reply contract into the prompt — keep
   contract prose out of goals.
 - Independent tasks: separate nodes or one `fanout` with `items`. `quorum` races:
-  once N succeed, the rest are cancelled.
+  once N succeed, the rest are cancelled — `quorum_drain_s:<s>` (default 0) gives
+  running stragglers a drain window to land before that cancel.
 - Shared settings go in a graph-level `defaults` once. Leave node budgets unset and
   name a `shape`; see [budgets](references/budgets.md). A constant travels as an
   `echo` node, never an agent spawn.

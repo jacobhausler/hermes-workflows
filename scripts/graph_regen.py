@@ -30,6 +30,13 @@ import subprocess
 import sys
 from pathlib import Path
 
+# Same-directory import (repo convention for script->script deps; see the
+# spec_from_file_location note in tests/test_graph_single_writer_153.py — the
+# shipped import-closure gate #105 does not resolve scripts/, so resolve this
+# by the script's own directory, never by cwd).
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from graph_path_ban import diff_name_status_paths  # noqa: E402  (shared -z parser)
+
 GRAPH_OUT = "graphify-out/"
 
 
@@ -57,11 +64,22 @@ def graph_diff_files(repo_dir):
     """Tracked files under graphify-out/ with a working-tree diff vs HEAD, plus
     any untracked new files there (a first regen on a tree without a committed
     graph). Untracked dirs alone are not a diff, but graph_check gates that
-    case: no committed graph is its exit-2, caught by regen()'s post-check."""
-    r = _git(repo_dir, "diff", "--name-only", "--", GRAPH_OUT)
-    if r.returncode != 0:
+    case: no committed graph is its exit-2, caught by regen()'s post-check.
+
+    est-h3yi: the tracked half parses through the shared `-z --name-status`
+    parser (graph_path_ban.diff_name_status_paths), NOT `--name-only` +
+    splitlines. The old read had the same three holes PR #275 closed in the ban
+    (est-gbim): renames inside graphify-out/ collapsed to the post-image (a
+    rename OUT of the path hid the pre-image, so FILES/commit reporting lost a
+    file that the caller's `git add graphify-out/` still removed), and
+    octal-quoted/exotic names listed wrong or forged. The FILES list feeds the
+    caller's commit, so a hidden pre-image is real damage even though
+    graph_check remains the honesty gate. NUL-split, both R/C endpoints, and
+    fail-closed: None on git failure or unparseable output — main() aborts,
+    never opens a PR on a list it cannot trust."""
+    files = diff_name_status_paths(repo_dir, pathspec=GRAPH_OUT)
+    if files is None:
         return None
-    files = [f for f in r.stdout.splitlines() if f]
     r = _git(repo_dir, "ls-files", "--others", "--exclude-standard", "--", GRAPH_OUT)
     if r.returncode != 0:
         return None

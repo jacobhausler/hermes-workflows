@@ -241,9 +241,9 @@ existing verbatim leniency.
 ### 3d. Failures, resume, amend
 
 - `node.failed` events carry `error_class` from the closed set defined in code
-  (`wf.py ERROR_CLASSES`) — `cancelled | cap_exhausted | config_input | crashed | early_death |
+  (`wf.py ERROR_CLASSES`) — `cancelled | cap_exhausted | config_input | crashed | early_death | effect_receipt |
   fanout_empty | fatal_quota | forbidden_model | incomplete_work |
-  inputs | item_record | lane_wreckage | left_live_descendants | malformed_turn | precondition | provider_400 | quorum |
+  inputs | item_record | lane_wreckage | lease_busy | left_live_descendants | malformed_turn | precondition | provider_400 | quorum |
   ratelimit |
   route_substitution_denied | route_unavailable | schema | seat_unsupported | seat_wait | spawn | timeout | transport | transport_exhausted |
   unresolved_model`, plus `unknown` as the harvest-time default when nothing matches —
@@ -278,6 +278,18 @@ existing verbatim leniency.
   reach — fails on the FIRST attempt (the retry ladder cannot beat a multi-day reset)
   and stamps the model into the seat quota cache; the door then refuses a launch on
   that model until the horizon passes (one recovery ping first).
+  `lease_busy`: a child that exited rc=130 with the CLI's own fail-closed lease notice
+  (`Stopped waiting for another Hermes process on this session. Your message was not
+  processed.`) lost the session-lease race — another Hermes process held the session
+  for the whole CLI lease wait (~30 min field-measured) and the message never reached
+  the model. A pure collision, never a verdict on the work: ONE bounded re-drive as a
+  FRESH session under the next attempt key (`#a{n+1}`, never `--continue` of the busy
+  one — that lease belongs to someone else), preceded by `node.retrying
+  error_class=lease_busy` and the 5 s bounded backoff. The tool-progress gate is
+  inverted here on purpose: the CLI's notice PROVES nothing of the attempt ran, so the
+  replay-safety evidence the other bounded classes need cannot exist; a harvestable
+  fenced answer still outranks the class (#4 harvest law runs first). A rc=130 death
+  WITHOUT the notice keeps its existing classification untouched.
   `ratelimit` (#54): a credential-window 429 — the child's stdout carries the CLI's
   own `... credentials are rate-limited for <model> ...` banner. Classified BEFORE
   transport/fatal_quota (the banner wins even when quota phrases co-occur: this death
@@ -319,6 +331,10 @@ existing verbatim leniency.
   a SIGKILL-wave child that banked nothing), the re-drive spawns as a FRESH session seeded
   instead with a harvest preamble (banked work-dir files + cleaned log tail); the
   `node.retry` event and the `attempts_log` entry stamp `fresh_session: true`.
+  `lease_busy` gets the same ONE bounded re-drive but ALWAYS as a FRESH session under the
+  next attempt key (never `--continue` the busy session) and WITHOUT the tool-progress
+  precondition — the CLI's own lease notice proves the attempt never ran; its machine-wait
+  event is `node.retrying error_class=lease_busy`.
 - A child silent for 120 s after spawn is killed as `early_death`; a child still writing its
   log when the wall fires gets one 50 % extension (`node.extended`), then dies.
 - A wall-killed child's corpse is banked (#131): `nodes/<id>[.<i>].corpus/` holds `work/`
@@ -387,6 +403,7 @@ subscription routes.
 | `SKILL.md`, `references/` | The authoring skill loaded into sessions. Portable: no host names, install paths, or provider lore |
 | `tests/` | Stdlib-only serial scripts; each prints `PASS`/`FAIL` lines, exit 0 = green. `.mjs` under Node. `tests/fake_hermes.py` is the child stand-in (`FAKE_MODE=…`) |
 | `scripts/suite.py` | Serial runner with per-test logs + `exits.json` ledger (the merge gate); `--baseline <ledger>` adds `admission.json` splitting reds into introduced vs pre-existing (exact name+exit identities; a base red is blocking, never waived — and a base red whose test was DELETED reports `missing`, which blocks too, so `rm` can't launder a red to green); zero discovery under `tests/` is a failed admission (`green:false` + `zero_discovery:true`, nonzero exit) and an invalid root exits 2 before any out-dir side effects (#112) |
+| `scripts/pr_formal_review.py` | Author-aware formal review (est-2ek.1.866): preflight compares `GET /user` vs the PR author BEFORE posting; a self-review (shared credential == author, the GitHub 422 "Can not request changes on your own pull request") NEVER attempts the doomed POST — it takes the verified fallback (findings into the ONE live marker comment — `--comment-id` PATCHes it, law 3 — with the fallback reason recorded before the trailing marker, plus the `changes-requested` label ADDED via `POST issues/{n}/labels`, never the replace-all `PATCH issues/{n}`; both read back); different identities post the real `REQUEST_CHANGES`; one credential, never forged; exit nonzero unless the write is read-back-verified |
 | `scripts/pack.py` | Release zip + `SHA256SUMS` + sidecar |
 | `scripts/graph_path_ban.py` | PR gate (#153, single-writer): fails a PR whose diff vs merge-base(origin/<base-ref>, HEAD) touches `graphify-out/`, unless head branch is the regen lane (`^chore/graph-`) and the diff is ONLY graph files |
 | `scripts/graph_regen.py` | The single writer (#153): at `--repo-dir` with `HEAD == --base-sha`, AST update + `graph_check.py --fix`, then prints `NO_CHANGES` (no PR) or `FILES` for the caller's `chore(graph):` PR — never pushes, never opens the PR itself |

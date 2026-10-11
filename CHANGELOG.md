@@ -1,5 +1,48 @@
 # Changelog
 
+## 1.3.4 — 2026-10-10
+
+Patch line, eleven merged PRs since v1.3.3:
+
+- **Unconditional `plugin_version` stamp** — every new `run.json` reports the arming
+  door's own truth (plugin.yaml via `wfcommon.plugin_version()`), not only runs that
+  declared `requires_plugin`; old dirs without the key still load (derive-only, honest
+  absence) (#356).
+- **Agent nodes honor `when` + `on_skip`** — #132 slice 1: a node whose `when` predicate
+  is false skips with its declared `on_skip` outcome instead of running (#355).
+- **Declared effect receipts gate publication-node `run.done`** — a publication node
+  cannot report done without its declared receipts (#346).
+- **Opt-in graph-revision CAS** on door `amend`/`release`/`steer` — stale revisions
+  refuse instead of clobbering (#344).
+- **Security:** the `post_exit_hook` mechanism is stripped from the shipped build
+  (upstream NousResearch/hermes-agent#133387 accepted ask) (#334).
+- **`graph_regen` fix:** shared `\0`-separated `--name-status` parser for the regen
+  diff (est-h3yi) (#314).
+- **Rate-limit-park wall pins** — M2/M3 fanout-respawn wall assertions plus mutation
+  proofs (est-xodi) (#339).
+- **Docs:** portable pre-share validation must pass with `admission=True` (closes
+  est-73vk) (#341); pack card-toolresult-hook ship card + truthful result-contract
+  doc (est-k75i) (#359).
+- **Suite:** the golden seat never wears the launching agent's session identity
+  (#325); graph refresh at 7ae1f6f (#350).
+
+## 1.3.3 — 2026-10-09
+
+Patch line: a child that dies rc=130 carrying the CLI's session-lease notice
+(`Stopped waiting for another Hermes process on this session. Your message was
+not processed.`) is now typed `lease_busy` instead of falling to `unknown` and
+failing the node: the class joins the closed `ERROR_CLASSES` set and
+`_BOUNDED_RETRY_CLASSES`, so the node gets exactly ONE bounded re-drive as a
+FRESH session under the next attempt key (never `--continue` of the still-busy
+session) after `node.retrying error_class=lease_busy`. The Oct-3 field shape:
+two runs where a freshly spawned review child printed the CLI's lease notice
+after ~1800 s of lease waiting and exited 130 — the runner knew only SIGKILL
+deaths, so the collision read as an untyped terminal failure. The tool-progress
+gate is bypassed for this class alone (the notice proves the attempt never
+ran); a rc=130 death without the notice keeps its existing classification,
+and a harvestable fenced answer still outranks the class (#4 law). Pin:
+`tests/test_lease_busy_retry.py`.
+
 ## 1.3.2 — 2026-10-09
 
 Patch line, 37 commits since v1.3.1 (merge order #274 → #272 → #275 → #285
