@@ -226,7 +226,7 @@ def profiles_by_session(home=None):
 PLUGIN_ID = "hermes-workflows"
 NO_READER = object()   # a reader answers this when it has no plugin ctx to ask
 _OWNER_SETTING_READER = None
-_RAW_SETTINGS_CACHE = {}  # path -> (mtime_ns, size, settings dict)
+_RAW_SETTINGS_CACHE = {}  # path -> ((mtime_ns, size), (settings, legacy))
 
 def set_owner_setting_reader(fn):
     """Install the door's plugin-scoped reader: fn(key) -> value | None | NO_READER."""
@@ -2057,7 +2057,7 @@ def validate_graph_full(graph):
 #   * efp stability: parent nodes not wired to an include stay byte-identical —
 #     def_hash/efp/replay-skip are untouched by construction; only rewired nodes
 #     move, which is precisely the intended re-run granularity.
-# Constants here MIRROR the door's (GRAPH_MAX_BYTES __init__.py:39); the door owns
+# Constants here MIRROR the door's (GRAPH_MAX_BYTES __init__.py:51); the door owns
 # its copies and may re-check the merged artifact with its own caps after expansion.
 INCLUDE_DEPTH_MAX = 4        # nested composites: A includes B includes C includes D
 INCLUDE_NODES_MAX = 256      # merged node-count cap (tunable)

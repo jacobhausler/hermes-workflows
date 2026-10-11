@@ -1648,7 +1648,7 @@ def _lane_hygiene_preamble(node):
 # rate-limit tokens); consequence of a false positive is only WHICH bounded
 # sleep is drawn, never whether a retry happens (class + api_calls gates hold).
 _RATE_LIMIT_TOKENS = ("rate limit", "too many requests")
-_RL_JITTER_CAPS = (5.0, 20.0, 80.0)      # cap doubles-ish per retry attempt
+_RL_JITTER_CAPS = (5.0, 20.0, 80.0)      # cap quadruples per retry attempt (5 -> 20 -> 80)
 _RL_JITTER_CEIL = 120.0                  # hard ceiling: a lane never sleeps past 2 min
 
 def _is_rate_limited(raw):
@@ -1696,7 +1696,7 @@ _QUOTA_PHRASE_TOKENS = ("usage limit", "quota exceeded", "quota exceeded for",
 _QUOTA_HORIZON_RE = re.compile(r"reset(?:s|ting)?\D{0,10}?(\d+)\s*(hour|hr|h|day|d|min|minute)")
 # est-t0vz (issue #54): the credential-window 429 — its OWN class, never transport.
 # The banner is the hermes CLI's own AuthError text, raised verbatim at
-# /opt/hermes/hermes_cli/runtime_provider.py:358
+# /opt/hermes/hermes_cli/runtime_provider.py:370
 #   `AuthError(f"Anthropic credentials are rate-limited for {model}; other Claude
 #    models remain available (see `hermes auth list`).")`  (the f-string interpolates
 #    the sent model id; the static shape is what the runner matches).
@@ -1785,14 +1785,14 @@ ERROR_CLASSES = frozenset(("provider_400", "unresolved_model", "cap_exhausted",
                            "effect_receipt"))
 _AGENT_FAIL_PREFIX = "hermes -z: agent failed:"
 # turn_failure_copy.py ends every non-retryable failure with a fixed-format trailer
-# `Provider said: <summary>`; api_error_summary.py:49 formats the summary as
+# `Provider said: <summary>`; api_error_summary.py:73 formats the summary as
 # `HTTP <status>: <body>` — a real marker line, verified live 2026-09-23 (dead model id).
 _PROVIDER_SAID = "provider said:"
 
 def _typed_error_class(report_path):
     """Typed termination from the child's quiet turn report (core PR pending; the
     HERMES_QUIET_TURN_REPORT_FILE contract), never from prose. Returns
-    ("max_turns", reason) only when the report exists and its turn_exit_reason is
+    ("cap_exhausted", reason) only when the report exists and its turn_exit_reason is
     the loop's own budget-exhaustion stamp; any absence/unparsability is honest
     nothing, and the caller keeps the prose-free `unknown`."""
     try:
@@ -2240,7 +2240,7 @@ def _classify_rc_output(out):
 #   1. the child died rc!=0 within _CONFIG_INPUT_WINDOW_MS of spawn (wall,
 #      runner-known; the report measures ~0.1s, the window is 1s with slack);
 #   2. its capture carries the config-error marker line (core emits these to
-#      stdout — hermes_cli/main.py:2074, providers.py, tools_config_providers.py).
+#      stdout — hermes_cli/main.py:2036, providers.py, tools_config_providers.py).
 # The window is the precision guard: a provider-registry failure at session START
 # dies inside it, while a child that died much later had already established a
 # working provider, so its death is not this deterministic config shape and keeps
@@ -7368,7 +7368,7 @@ def main(run_id):
     except SystemExit:
         # Defensive: a self-reported exit is a verdict, not a crash. loop() does
         # not raise SystemExit today (every self-reported exit happens before this
-        # try — enumerated at L79/L1693/L1947), but the guard keeps the invariant
+        # try — enumerate with `grep -n write_runner_exit wf.py`), but the guard keeps the invariant
         # local instead of a cross-function assumption. (write_runner_exit is
         # first-writer-wins per process, so a same-process false stamp was never
         # possible anyway.)

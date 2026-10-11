@@ -83,7 +83,7 @@ ref-free library rows and clean save responses keep their previous key sets.
 
 ## Graph grammar in 30 seconds
 
-Three node types — `agent`, `gate`, `echo` — and a closed key set per type
+Four node types — `agent`, `gate`, `echo`, `join` — and a closed key set per type
 (anything outside it is refused at submit with a per-defect error list, never
 silently ignored). The smallest useful graph:
 

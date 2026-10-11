@@ -133,9 +133,11 @@ Rules that bite:
 - **`reasoning`** rides `hermes chat --reasoning`, validated PER RESOLVED ROUTE at the
   door: the level is checked against the (provider, model) route's supported set and a
   level the route doesn't support is REFUSED at submit with the supported list named
-  (and the nearest level suggested) — never silently clamped or downgraded. Some relays
-  accept only a subset at runtime; that surfaces as `provider_400` with the server's
-  message — read it and pick from that list.
+  (and the nearest level suggested) — never silently clamped or downgraded. Some relays enum-gate a
+  narrower subset at runtime; on the server's own 400 list the runner clamps
+  `--reasoning` to the nearest supported level (never escalates) and re-drives
+  once, logged — `provider_400` stands only when nothing clamps; then read the
+  server's message and pick from that list.
 - **`after` orders AND injects.** Every direct parent's committed output lands under
   `## Inputs` automatically (8 KB per parent). Use `inputs:["a.key"]` only to pick a
   dotted path or a non-parent ancestor, or `fanout.items_from:"a.items"`. A missing
@@ -442,7 +444,7 @@ push-on-main `graph-main` job — the regen lane owns the graph (#153).
 
 The repo ships a [graphify](https://github.com/Graphify-Labs/graphify) knowledge
 graph at `graphify-out/` — every function, class, test, and doc heading
-(see `graphify-out/GRAPH_REPORT.md` line 1 for the current node/edge census — stated
+(see the `## Summary` block of `graphify-out/GRAPH_REPORT.md` for the census — stated
 figures in prose go stale; the report is regenerated with the graph), built by deterministic tree-sitter parsing (no LLM, no network); one edge
 per `(source, target, relation)` (`count` marks a collapsed multi-edge; policy in `scripts/graph_check.py`).
 Query it before you grep or open files one by one:
