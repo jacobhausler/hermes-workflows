@@ -14,6 +14,12 @@
  "rows_added_outside_ci": [
   {
    "exit": 0,
+   "measured": "2026-10-10 local foreground run at est-06xk PR head: 23 checks, 0 FAIL, rc=0 (PYTHONPATH=/opt/hermes); RED at the test-only commit b464b8a on base caee50b (11 FAIL + traceback: unknown key fanout.quorum_drain_s, drain run never commits); the PR adds this test without a CI row",
+   "supersede_by": "next green-CI refresh (replace with the CI-captured row)",
+   "test": "test_quorum_drain_deadline_06xk.py"
+  },
+  {
+   "exit": 0,
    "measured": "2026-10-08 local foreground run: RESULT PASS, exit 0; deterministic stop/liveness interleaving fails on both original PR head and main 869c4010b822aec49748080b100f214085640076 (empty capture misclassified crashed; buffered answer misclassified done)",
    "supersede_by": "next green-CI refresh (replace with the CI-captured row)",
    "test": "test_adopt_stop_race.py"
@@ -56,29 +62,9 @@
   },
   {
    "exit": 0,
-   "measured": "2026-10-09 local foreground run on PR #346 rebased onto 57058c9 (clean parity env, fresh WF_RUNS_ROOT, outside run dirs): Ran 10 tests OK, rc=0; the PR adds this test without a CI row",
-   "supersede_by": "next green-CI refresh (replace with the CI-captured row)",
-   "test": "test_effects_receipt_pygyy.py"
-  },
-  {
-   "exit": 0,
-   "measured": "2026-10-08 local foreground run (8/8 checks PASS, rc=0) on sys-5lnm17 branch; the row can only ever make CI red, never green",
-   "supersede_by": "next green-CI refresh (replace with the CI-captured row)",
-   "test": "test_failed_nodes_5lnm.py"
-  },
-  {
-   "exit": 0,
    "measured": "2026-10-08 local foreground run on chore/wr0p-fanout-empty-items: ALL PASS (10 checks, 0 failures), rc=0; repairs the ledger gap left when this PR added tests/test_fanout_empty_items_0p.py without a row (CI job 113262344177 admission introduced=1)",
    "supersede_by": "next green-CI refresh (replace with the CI-captured row)",
    "test": "test_fanout_empty_items_0p.py"
-  },
-  {
-   "added_by": "est-2ek.1.862 PR lane (author CI-pending; refreshed only from a green Serial suite job)",
-   "test": "test_golden_seat_no_inherited_identity_862.py"
-  },
-  {
-   "added_by": "est-h3yi PR lane (author CI-pending; refreshed only from a green Serial suite job)",
-   "test": "test_graph_regen_z_parser_h3yi.py"
   },
   {
    "exit": 0,
@@ -88,33 +74,9 @@
   },
   {
    "exit": 0,
-   "measured": "2026-10-09 foreground run in the fix worktree: ALL PASS (37 checks, RC=0); RED-proof at base d69a64d (T1 B-amend returns ok, FAIL -> RC=1).",
-   "supersede_by": "next green-CI refresh (replace with the CI-captured row)",
-   "test": "test_graph_revision_cas_19.py"
-  },
-  {
-   "test": "test_heartbeat_verdict_127.py",
-   "exit": 0,
-   "measured": "gates job 114201933768 (run 38048219124, PR #352 head 28499084, 2026-10-10): serial-suite tally 'test_heartbeat_verdict_127.py: 0'",
-   "added_by": "author lane (est-zsws, PR #352; refreshed only from a green Serial suite job)"
-  },
-  {
-   "exit": 0,
-   "measured": "2026-10-09 foreground runs in the fix worktree: RED at base d69a64d (AttributeError: no _is_lease_busy; class absent from both tuples), GREEN at head \u2014 18/18 checks rc=0 standalone and exit 0 inside the serial suite run; re-run green under 8 synthetic CPU hogs (the jam8-style load flake shape).",
-   "supersede_by": "next green-CI refresh (replace with the CI-captured row)",
-   "test": "test_lease_busy_retry.py"
-  },
-  {
-   "exit": 0,
    "measured": "2026-10-07 local foreground run: TOTAL 10 FAIL 0; repairs the ledger gap left when #277 merged tests/test_library_tag_read_qeul.py without a row (diagnosed by @atbrace on #283)",
    "supersede_by": "next green-CI refresh (replace with the CI-captured row)",
    "test": "test_library_tag_read_qeul.py"
-  },
-  {
-   "exit": 0,
-   "measured": "CI run 37719797358 at 1a667de6: regression exit 0; the sole suite failure was test_baseline_guard_9yl2.py because this row was absent",
-   "supersede_by": "next green-CI refresh (replace with the CI-captured row)",
-   "test": "test_literal_provider_prefix_46.py"
   },
   {
    "exit": 0,
@@ -127,12 +89,6 @@
    "measured": "2026-10-08 local foreground run on the rebased #281 head over main f3801c9 + fold fix fac89bd: Ran 4 tests OK (parity rc=0, unknown-fold rc=0)",
    "supersede_by": "next green-CI refresh (replace with the CI-captured row)",
    "test": "test_metrics_unknown_fold_114.py"
-  },
-  {
-   "test": "test_on_exit_129.py",
-   "exit": 0,
-   "measured": "2026-10-11 foreground python3 -m pytest tests/test_on_exit_129.py -q on the implementation over cec8c6d: 6 passed, rc=0; RED test-only commit 717e7cba on cec8c6d failed rc=1 (missing event pairs, done poisoned by exit failure).",
-   "supersede_by": "next green-CI refresh (replace with the CI-captured row)"
   },
   {
    "exit": 0,
@@ -148,27 +104,9 @@
   },
   {
    "exit": 0,
-   "measured": "2026-10-09 local foreground run on fix/xwvu9-post-exit-strip: RED pre-change (3 FAIL: module in shipped tree+ZIP, wf.py dispatch present), GREEN post-strip (Ran 3 tests OK, rc=0); the strip PR (est-xwvu9, upstream hermes-agent #133387 review 5467148429 accepted ask) adds this test without a CI row",
-   "supersede_by": "next green-CI refresh (replace with the CI-captured row)",
-   "test": "test_post_exit_strip_xwvu9.py"
-  },
-  {
-   "exit": 0,
    "measured": "2026-10-07 local serial run of scripts/suite.py (#128 branch); re-run 2026-10-08 after rebase onto main aca313d; the row can only ever make CI red, never green",
    "supersede_by": "next green-CI refresh (replace with the CI-captured row)",
    "test": "test_progress_channel_128.py"
-  },
-  {
-   "exit": 0,
-   "measured": "2026-10-10 local foreground run at est-06xk PR head: 23 checks, 0 FAIL, rc=0 (PYTHONPATH=/opt/hermes); RED at the test-only commit b464b8a on base caee50b (11 FAIL + traceback: unknown key fanout.quorum_drain_s, drain run never commits); the PR adds this test without a CI row",
-   "supersede_by": "next green-CI refresh (replace with the CI-captured row)",
-   "test": "test_quorum_drain_deadline_06xk.py"
-  },
-  {
-   "exit": 0,
-   "measured": "2026-10-08 foreground run in the fix worktree: DONE route_hold_optout_retry OK (RC=0); RED-proof at base 8bc661c (H1/H2/R2 FAIL -> RC=1).",
-   "supersede_by": "next green-CI refresh (replace with the CI-captured row)",
-   "test": "test_route_hold_optout_retry_w56.py"
   },
   {
    "exit": 0,
@@ -189,27 +127,9 @@
   },
   {
    "exit": 0,
-   "measured": "2026-10-09 local foreground run: 14/14 checks PASS, exit 0 (PYTHONPATH=/opt/hermes python3 tests/test_seat_cap_dotenv_gxjh6.py); full-suite run on the same tree green for all seat-family tests",
-   "supersede_by": "next green-CI refresh (replace with the CI-captured row)",
-   "test": "test_seat_cap_dotenv_gxjh6.py"
-  },
-  {
-   "exit": 0,
    "measured": "2026-10-08 local foreground run on fix/est-2ek.1.833: TOTAL 14 FAIL 0, rc=0 (RED on main at the test-only commit: TOTAL 14 FAIL 7, rc=1)",
    "supersede_by": "next green-CI refresh (replace with the CI-captured row)",
    "test": "test_seat_wait_status_833.py"
-  },
-  {
-   "exit": 0,
-   "measured": "2026-10-08 foreground run in the fix worktree: DONE self_review_422_1866 OK (RC=0); RED-proof at base 8bc661c (module missing -> FAIL).",
-   "supersede_by": "next green-CI refresh (replace with the CI-captured row)",
-   "test": "test_self_review_422_1866.py"
-  },
-  {
-   "exit": 0,
-   "measured": "2026-10-09 local foreground run on fix/w33-spawn-enoent: RED at base 96ee587 (legs A+B reproduce the est-ulwpg typed spawn death ms=0 attempts=1 byte-for-byte; leg C green), GREEN at fix head: 11 PASS / 0 FAIL rc=0; spawn-family siblings seat_popen_exception/postpopen_cleanup/cancel_at_ticket/11_runner_profile/spawn_ledger/lane_hygiene all rc=0",
-   "supersede_by": "next green-CI refresh (replace with the CI-captured row)",
-   "test": "test_spawn_enoent_retry_w33.py"
   },
   {
    "exit": 0,
@@ -237,15 +157,26 @@
   },
   {
    "exit": 0,
-   "measured": "2026-10-10 local foreground run in lane drive-est-0sj4 @ 7f2c35d: 13/13 PASS, FAILURES: 0, exit 0 (est-0sj4 acceptance: plain run.json stamps plugin_version==plugin.yaml; status echoes; old dir omits; amend preserves; unreadable plugin.yaml keeps absent)",
+   "measured": "2026-10-09 local foreground run (cd tests && PYTHONPATH=/opt/hermes:.. python3 test_wall_meter_133.py): RESULT GREEN, 18 checks / 0 failed, exit 0; RED at the test-only commit 2a2d789 (13 of 18 failed \u2014 the `wall` key absent); the PR (#133 wall meter) adds this test without a CI row",
    "supersede_by": "next green-CI refresh (replace with the CI-captured row)",
-   "test": "test_unconditional_version_stamp.py"
+   "test": "test_wall_meter_133.py"
   },
   {
-   "test": "test_upstream_hook_contract.py",
    "exit": 0,
-   "measured": "2026-10-10 local foreground run at the gate-cure head: 3 PASS lines (1 parsed plugin hook 'transform_llm_output' found among 44 extracted core VALID_HOOKS names), rc=0 (PYTHONPATH=/opt/hermes); SKIP + rc=0 when hermes_cli is unimportable (proven in a stripped env, the suite-runs-without-core case); CI run 38052460596 green at head 217a2b6 with this row",
-   "added_by": "author lane (est-a91h7, PR #365 gate-cure; measured locally + green ci run 38052460596)"
+   "measured": "2026-10-08 local foreground run (8/8 checks PASS, rc=0) on sys-5lnm17 branch; the row can only ever make CI red, never green",
+   "supersede_by": "next green-CI refresh (replace with the CI-captured row)",
+   "test": "test_failed_nodes_5lnm.py"
+  },
+  {
+   "added_by": "author lane (est-2ek.1.699, PR #296)",
+   "measured": "2026-10-08 lane run: 240 cases, 0 red (65/65 checks in-file)",
+   "test": "tests/test_route_identity_699.py"
+  },
+  {
+   "exit": 0,
+   "measured": "CI run 37719797358 at 1a667de6: regression exit 0; the sole suite failure was test_baseline_guard_9yl2.py because this row was absent",
+   "supersede_by": "next green-CI refresh (replace with the CI-captured row)",
+   "test": "test_literal_provider_prefix_46.py"
   },
   {
    "exit": 0,
@@ -255,9 +186,65 @@
   },
   {
    "exit": 0,
-   "measured": "2026-10-09 local foreground run (cd tests && PYTHONPATH=/opt/hermes:.. python3 test_wall_meter_133.py): RESULT GREEN, 18 checks / 0 failed, exit 0; RED at the test-only commit 2a2d789 (13 of 18 failed \u2014 the `wall` key absent); the PR (#133 wall meter) adds this test without a CI row",
+   "measured": "2026-10-09 local foreground run on fix/w33-spawn-enoent: RED at base 96ee587 (legs A+B reproduce the est-ulwpg typed spawn death ms=0 attempts=1 byte-for-byte; leg C green), GREEN at fix head: 11 PASS / 0 FAIL rc=0; spawn-family siblings seat_popen_exception/postpopen_cleanup/cancel_at_ticket/11_runner_profile/spawn_ledger/lane_hygiene all rc=0",
    "supersede_by": "next green-CI refresh (replace with the CI-captured row)",
-   "test": "test_wall_meter_133.py"
+   "test": "test_spawn_enoent_retry_w33.py"
+  },
+  {
+   "exit": 0,
+   "measured": "2026-10-08 foreground run in the fix worktree: DONE self_review_422_1866 OK (RC=0); RED-proof at base 8bc661c (module missing -> FAIL).",
+   "supersede_by": "next green-CI refresh (replace with the CI-captured row)",
+   "test": "test_self_review_422_1866.py"
+  },
+  {
+   "exit": 0,
+   "measured": "2026-10-08 foreground run in the fix worktree: DONE route_hold_optout_retry OK (RC=0); RED-proof at base 8bc661c (H1/H2/R2 FAIL -> RC=1).",
+   "supersede_by": "next green-CI refresh (replace with the CI-captured row)",
+   "test": "test_route_hold_optout_retry_w56.py"
+  },
+  {
+   "exit": 0,
+   "measured": "2026-10-09 local foreground run: 14/14 checks PASS, exit 0 (PYTHONPATH=/opt/hermes python3 tests/test_seat_cap_dotenv_gxjh6.py); full-suite run on the same tree green for all seat-family tests",
+   "supersede_by": "next green-CI refresh (replace with the CI-captured row)",
+   "test": "test_seat_cap_dotenv_gxjh6.py"
+  },
+  {
+   "exit": 0,
+   "measured": "2026-10-09 foreground runs in the fix worktree: RED at base d69a64d (AttributeError: no _is_lease_busy; class absent from both tuples), GREEN at head \u2014 18/18 checks rc=0 standalone and exit 0 inside the serial suite run; re-run green under 8 synthetic CPU hogs (the jam8-style load flake shape).",
+   "supersede_by": "next green-CI refresh (replace with the CI-captured row)",
+   "test": "test_lease_busy_retry.py"
+  },
+  {
+   "added_by": "est-2ek.1.862 PR lane (author CI-pending; refreshed only from a green Serial suite job)",
+   "test": "test_golden_seat_no_inherited_identity_862.py"
+  },
+  {
+   "exit": 0,
+   "measured": "2026-10-09 local foreground run on fix/xwvu9-post-exit-strip: RED pre-change (3 FAIL: module in shipped tree+ZIP, wf.py dispatch present), GREEN post-strip (Ran 3 tests OK, rc=0); the strip PR (est-xwvu9, upstream hermes-agent #133387 review 5467148429 accepted ask) adds this test without a CI row",
+   "supersede_by": "next green-CI refresh (replace with the CI-captured row)",
+   "test": "test_post_exit_strip_xwvu9.py"
+  },
+  {
+   "exit": 0,
+   "measured": "2026-10-09 foreground run in the fix worktree: ALL PASS (37 checks, RC=0); RED-proof at base d69a64d (T1 B-amend returns ok, FAIL -> RC=1).",
+   "supersede_by": "next green-CI refresh (replace with the CI-captured row)",
+   "test": "test_graph_revision_cas_19.py"
+  },
+  {
+   "exit": 0,
+   "measured": "2026-10-09 local foreground run on PR #346 rebased onto 57058c9 (clean parity env, fresh WF_RUNS_ROOT, outside run dirs): Ran 10 tests OK, rc=0; the PR adds this test without a CI row",
+   "supersede_by": "next green-CI refresh (replace with the CI-captured row)",
+   "test": "test_effects_receipt_pygyy.py"
+  },
+  {
+   "added_by": "est-h3yi PR lane (author CI-pending; refreshed only from a green Serial suite job)",
+   "test": "test_graph_regen_z_parser_h3yi.py"
+  },
+  {
+   "exit": 0,
+   "measured": "2026-10-10 local foreground run in lane drive-est-0sj4 @ 7f2c35d: 13/13 PASS, FAILURES: 0, exit 0 (est-0sj4 acceptance: plain run.json stamps plugin_version==plugin.yaml; status echoes; old dir omits; amend preserves; unreadable plugin.yaml keeps absent)",
+   "supersede_by": "next green-CI refresh (replace with the CI-captured row)",
+   "test": "test_unconditional_version_stamp.py"
   },
   {
    "exit": 0,
@@ -266,9 +253,22 @@
    "test": "test_when_on_agent_engine.py"
   },
   {
-   "added_by": "author lane (est-2ek.1.699, PR #296)",
-   "measured": "2026-10-08 lane run: 240 cases, 0 red (65/65 checks in-file)",
-   "test": "tests/test_route_identity_699.py"
+   "test": "test_heartbeat_verdict_127.py",
+   "exit": 0,
+   "measured": "gates job 114201933768 (run 38048219124, PR #352 head 28499084, 2026-10-10): serial-suite tally 'test_heartbeat_verdict_127.py: 0'",
+   "added_by": "author lane (est-zsws, PR #352; refreshed only from a green Serial suite job)"
+  },
+  {
+   "test": "test_upstream_hook_contract.py",
+   "exit": 0,
+   "measured": "2026-10-10 local foreground run at the gate-cure head: 3 PASS lines (1 parsed plugin hook 'transform_llm_output' found among 44 extracted core VALID_HOOKS names), rc=0 (PYTHONPATH=/opt/hermes); SKIP + rc=0 when hermes_cli is unimportable (proven in a stripped env, the suite-runs-without-core case); CI run 38052460596 green at head 217a2b6 with this row",
+   "added_by": "author lane (est-a91h7, PR #365 gate-cure; measured locally + green ci run 38052460596)"
+  },
+  {
+   "test": "test_on_exit_129.py",
+   "exit": 0,
+   "measured": "2026-10-11 foreground python3 -m pytest tests/test_on_exit_129.py -q on the implementation over cec8c6d: 8 passed, rc=0; RED test-only commit 717e7cba on cec8c6d failed rc=1 (missing event pairs, done poisoned by exit failure).",
+   "supersede_by": "next green-CI refresh (replace with the CI-captured row)"
   }
  ],
  "source_issue": 75,
