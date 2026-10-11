@@ -263,11 +263,23 @@
    "exit": 0,
    "measured": "2026-10-10 local foreground run at the gate-cure head: 3 PASS lines (1 parsed plugin hook 'transform_llm_output' found among 44 extracted core VALID_HOOKS names), rc=0 (PYTHONPATH=/opt/hermes); SKIP + rc=0 when hermes_cli is unimportable (proven in a stripped env, the suite-runs-without-core case); CI run 38052460596 green at head 217a2b6 with this row",
    "added_by": "author lane (est-a91h7, PR #365 gate-cure; measured locally + green ci run 38052460596)"
+  },
+  {
+   "test": "test_detach_redrive_o79j.py",
+   "exit": 0,
+   "measured": "2026-10-11 local foreground python3 -m pytest tests/test_reap_receipt_o79j.py tests/test_detach_redrive_o79j.py: 2 passed, rc=0; both RED at exact main cec8c6df64ede22ed23ab032e89b8bfa8ed0b4a6 before repair (2 failed, rc=1).",
+   "supersede_by": "next green-CI refresh (replace with the CI-captured row)"
+  },
+  {
+   "test": "test_reap_receipt_o79j.py",
+   "exit": 0,
+   "measured": "2026-10-11 local foreground python3 -m pytest tests/test_reap_receipt_o79j.py tests/test_detach_redrive_o79j.py: 2 passed, rc=0; both RED at exact main cec8c6df64ede22ed23ab032e89b8bfa8ed0b4a6 before repair (2 failed, rc=1).",
+   "supersede_by": "next green-CI refresh (replace with the CI-captured row)"
   }
  ],
  "source_issue": 75,
  "totals": {
-  "cases": 274,
+  "cases": 276,
   "red": 0
  },
  "tracking_item": "est-9yl2"

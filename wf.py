@@ -4256,6 +4256,127 @@ def _final_quiesce(meta, r, ev, ev_kw):
         r["error_class"] = "left_live_descendants"
     return r
 
+def _job_path(run, node):
+    return Path(run) / "jobs" / f"{node['id']}.json"
+
+
+def register_job(run, node, byid, pid, artifact, log_path):
+    """Child-side detach contract: register an own live process before exiting.
+
+    Linux identity and ancestry are required; this is not a tree-safety exemption.
+    The runner waits for the registered family to finish BEFORE its usual tree
+    proof. Re-drive performs the same wait before the prior-generation sweep.
+    """
+    if node.get("fanout") or not re.fullmatch(r"[A-Za-z0-9_-]+", node["id"]):
+        raise ValueError("registered jobs currently require a solo agent node")
+    run = Path(run).resolve()
+    spawn = active_child(run, node, byid)
+    own = _subtree_of(spawn["pid"]) if spawn else None
+    if own is not None and spawn:
+        own.add(spawn["pid"])
+    caller, ancestry = os.getpid(), set()
+    while caller > 0 and caller not in ancestry and len(ancestry) < 100:
+        ancestry.add(caller)
+        caller = int(Path(f"/proc/{caller}/stat").read_text().rsplit(")", 1)[1].split()[1])
+        if spawn and caller == spawn["pid"]:
+            ancestry.add(caller)
+            break
+    if not spawn or own is None or pid not in own or spawn["pid"] not in ancestry:
+        raise ValueError(f"job and registrant must belong to the verified node spawn "
+                         f"(run={run}, spawn_pid={spawn.get('pid') if spawn else None}, "
+                         f"job_pid={pid}, caller_pid={os.getpid()})")
+    tick = _proc_boottime(pid)
+    if tick is None or not _proc_alive(pid) or os.getpgid(pid) != pid:
+        raise ValueError("job must be live with a readable identity and its own process group")
+    boot = Path("/proc/sys/kernel/random/boot_id").read_text().strip()
+    artifact, log_path = Path(artifact).resolve(), Path(log_path).resolve()
+    for path in (artifact, log_path):
+        if not path.is_relative_to(run) or path == run:
+            raise ValueError("job artifact and log must stay inside the run directory")
+    if artifact.exists() or artifact == log_path or not log_path.is_file():
+        raise ValueError("artifact must be fresh and log must already exist separately")
+    p = _job_path(run, node)
+    p.parent.mkdir(exist_ok=True)
+    rec = {"status": "registered", "pid": pid, "boottime": tick, "boot_id": boot,
+           "registered_ns": time.time_ns(), "artifact": str(artifact), "log_path": str(log_path),
+           "efp": efp(byid, node), "fp_rule_version": FP_RULE_VERSION,
+           "spawn_pid": spawn["pid"], "members": {str(pid): tick}}
+    # Exclusive creation: a repeated agent cannot replace accepted live work.
+    with p.open("x") as f:
+        json.dump(rec, f); f.flush(); os.fsync(f.fileno())
+    log(run, "job.registered", node=node["id"], pid=pid, artifact=str(artifact), log_path=str(log_path))
+    return rec
+
+
+def _poll_registered_job(meta, node, byid):
+    """No Popen and no agent deadline: observe identity, then harvest a receipt.
+
+    Missing/malformed artifacts never imply success. The own-family process-tree
+    proof still runs afterwards; no kill boundary is weakened by registration.
+    """
+    run = meta["_run"]
+    p = _job_path(run, node)
+    if not p.exists():
+        return None
+    rec = jload(p) or {}
+    failure = lambda why, cls="config_input": {"status": "failed", "error_class": cls,
+                                                "error": why, "ms": 0}
+    if not wfcommon.record_efp_valid(rec, byid, node):
+        return failure("registered job fingerprint is stale or invalid; explicit owner reconciliation required")
+    if rec.get("status") == "harvested":
+        return rec.get("result") or failure("registered job has no durable harvest")
+    try:
+        if rec["boot_id"] != Path("/proc/sys/kernel/random/boot_id").read_text().strip():
+            return failure("registered job boot identity changed", "crashed")
+        members = rec["members"]
+        while True:
+            if (run / "stop.request").exists() or (meta.get("_stop") and meta["_stop"].is_set()):
+                return failure("cancelled while polling registered job", "cancelled")
+            pid = rec["pid"]
+            tick = _proc_boottime(pid)
+            if _proc_alive(pid):
+                if tick != rec["boottime"]:
+                    return failure("registered job pid identity changed", "crashed")
+                family = _subtree_of(pid)
+                if family is None:
+                    return failure("registered job tree is unreadable", "left_live_descendants")
+                for member in family:
+                    mt = _proc_boottime(member)
+                    if mt is None:
+                        return failure("registered family identity unreadable", "left_live_descendants")
+                    members[str(member)] = mt
+            live = [int(member) for member, mt in members.items()
+                    if _proc_alive(int(member)) and _proc_boottime(int(member)) == mt]
+            if not live:
+                break
+            tmp = p.with_name(f"{p.name}.{os.getpid()}.tmp")
+            tmp.write_text(json.dumps(rec)); os.replace(tmp, p)
+            time.sleep(.1)
+        artifact = Path(rec["artifact"])
+        if not artifact.resolve().is_relative_to(Path(run).resolve()):
+            return failure("registered artifact escaped run directory")
+        answer = jload(artifact)
+        if not isinstance(answer, dict) or type(answer.get("exit_code")) is not int:
+            result = failure("job exited without a typed artifact exit receipt", "crashed")
+        elif artifact.stat().st_mtime_ns < rec["registered_ns"]:
+            result = failure("job artifact predates registration", "effect_receipt")
+        elif answer["exit_code"] != 0:
+            result = failure(f"registered job exited rc={answer['exit_code']}", "unknown")
+        elif validate(answer.get("output"), node.get("schema")):
+            result = failure("registered job artifact output failed node schema", "schema")
+        else:
+            result = {"status": "done", "output": answer["output"], "ms": 0}
+        result["detached_job"] = {k: rec[k] for k in
+                                  ("pid", "boottime", "boot_id", "artifact", "log_path")}
+        rec.update(status="harvested", result=result)
+        tmp = p.with_name(f"{p.name}.{os.getpid()}.tmp")
+        tmp.write_text(json.dumps(rec)); os.replace(tmp, p)
+        log(run, "job.harvested", node=node["id"], pid=pid, status=result["status"])
+        return result
+    except (OSError, ValueError, KeyError, TypeError) as e:
+        return failure(f"registered job receipt unreadable: {type(e).__name__}: {e}", "crashed")
+
+
 def _adopt_child(meta, node, byid, index, child, schema, fo_cancel=None):
     harvest_schema = strip_engine_disclosure(schema, (node or {}).get("substrate_substituted"))  # #116
     """790c6ad: ADOPT a verified live orphan instead of re-spawning it (the
@@ -5221,6 +5342,7 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
         if eclass == "ratelimit":   # est-t0vz: keep the verbatim banner for the park's
             rec["ratelimit_banner"] = marker   # give-up text + model extraction
         return rec
+    detached = _poll_registered_job(meta, node, byid) if rc == 0 and index is None else None
     parsed, perr = extract_json(out)
     # #61 completeness gate — ABOVE every exit-0 verdict, done and correction-
     # retry alike: before an exit-0 spawn is believed at all, its own process
@@ -5259,6 +5381,8 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
                              "silent done (#61)",
                     "error_class": "left_live_descendants", "ms": ms,
                     "final": final_reply, **hv, **extra, **sk, **evd}
+    if detached is not None:
+        return {**detached, **sk, **evd}
     valid_answer = False
     errs = None
     if parsed is not None and perr is None:
@@ -6218,6 +6342,9 @@ def run_agent_node(run, meta, byid, node, outputs, steering):
             def spawn(resume_preamble="", model_override=None):
                 sk = solo_key if not first["done"] else skey_for(run, byid, node)
                 first["done"] = True
+                detached = _poll_registered_job(meta, node, byid)
+                if detached is not None:
+                    return detached
                 return run_child(meta, node, byid, node.get("goal", ""), node.get("context", ""),
                                  node.get("schema"), steering=steering, skey=sk, inputs=inputs_txt,
                                  resume_preamble=resume_preamble, model_override=model_override)
@@ -6772,6 +6899,13 @@ def main(run_id):
     # Log-and-schedule over an alive predecessor is the exact shape the
     # reviewer's fault injection punished (new child + committed done over a
     # live prior tree).
+    boot_graph = jload(run / "graph.json")
+    boot_byid = {n["id"]: n for n in boot_graph["nodes"]}
+    for job_node in boot_graph["nodes"]:
+        # Accepted work is polled, never swept/re-launched. Once it is dead,
+        # the unchanged sweep proves every leftover predecessor is quiescent.
+        if job_node.get("type") == "agent" and not job_node.get("fanout"):
+            _poll_registered_job(meta, job_node, boot_byid)
     sweep = _boot_sweep(meta)
     if sweep is not None and sweep.get("proof") not in ("clean", "dead"):
         emit(f"WORKFLOW_FAILED {run_id} (boot sweep {sweep.get('proof')}: "
@@ -7347,6 +7481,16 @@ def finalize(run, graph, status):
     notify(run, f"run.{status}", graph={"nodes": nodes})
 
 if __name__ == "__main__":
+    if len(sys.argv) == 7 and sys.argv[1] == "register-job":
+        r = find_run(sys.argv[2])
+        graph = jload(r / "graph.json") or {}
+        byid = {n["id"]: n for n in graph.get("nodes", [])}
+        n = byid.get(sys.argv[3])
+        if r.name != sys.argv[2] or not n or n.get("type") != "agent":
+            raise SystemExit("register-job requires an exact run and agent node id")
+        register_job(r, n, byid, int(sys.argv[4]), sys.argv[5], sys.argv[6])
+        print("WORKFLOW_JOB_REGISTERED " + n["id"])
+        sys.exit(0)
     if len(sys.argv) < 3 or sys.argv[1] != "run":
         print("usage: wf.py run <run_id>"); sys.exit(2)
     # 5c37b19 guard 2 (belt-and-braces): a runner whose cwd was deleted mid-life dies
