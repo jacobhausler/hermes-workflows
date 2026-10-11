@@ -4,8 +4,7 @@
   "meta": {
     "title": "Registered jobs and silent-death receipts",
     "quality_profile": "showcase",
-    "output": "evidence/est-o79j.html",
-    "repository": {"url": "https://github.com/jacobhausler/hermes-workflows", "revision": "fcfc4e1584d6b1f4cc67e6338aa99eb385c2446a"}
+    "output": "evidence/est-o79j.html"
   },
   "lanes": [
     {"id": "agent", "label": "Solo agent"},
