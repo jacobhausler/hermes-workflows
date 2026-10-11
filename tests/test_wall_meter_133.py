@@ -27,6 +27,7 @@ import sys
 import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -212,8 +213,80 @@ try:
           "T8 wall rides alongside the existing active_spawn projection",
           json.dumps(sorted(status["nodes"]["lane"])))
 
+    # ---- T9 malformed committed extension rows never break the read model ----
+    malformed = [
+        ["node.extended"], "node.extended",
+        {"event": "node.extended", "node": ["lane"], "extra_s": 30},
+        {"event": ["node.extended"], "node": "lane", "extra_s": 30},
+        *[{"event": "node.extended", "node": "lane", "extra_s": ex}
+          for ex in (True, "30", None, {}, float("nan"), float("inf"), -30, 10**400)],
+        {"event": "node.extended", "node": "lane", "extra_s": 30,
+         "ts": "not-a-date"},
+    ]
+    for i, bad in enumerate(malformed):
+        # A valid event after the malformed row also proves the parser continues.
+        row = {"ts": iso(70), **bad} if isinstance(bad, dict) else bad
+        rm = mk(f"w133-malformed-{i}", [NODE(timeout=60)],
+                [{"ts": iso(101), "event": "run.started"}, row,
+                 {"ts": iso(70), "event": "node.extended", "node": "lane", "extra_s": 30}])
+        try:
+            with patch_active([spawn(iso(100))]):
+                sm = wfcommon.run_state(rm)
+            wm = sm["nodes"]["lane"].get("wall") or {}
+            check(wm.get("wall_s") == 90 and wm.get("meter") == "over-p95",
+                  f"T9 malformed extension {i} ignored; valid bump survives", json.dumps(wm))
+        except Exception as exc:
+            check(False, f"T9 malformed extension {i} never raises", repr(exc))
+
+    # The last-event reader shares the snapshot and must ignore non-object tails.
+    rt = mk("w133-malformed-tail", [NODE(timeout=60)],
+            [{"ts": iso(101), "event": "run.started"}, ["node.extended"]])
+    try:
+        with patch_active([spawn(iso(100))]):
+            st = wfcommon.run_state(rt)
+        check(st["status"] == "running" and st["nodes"]["lane"]["wall"]["wall_s"] == 60,
+              "T9 non-object tail does not crash status", json.dumps(st["nodes"]["lane"]))
+    except Exception as exc:
+        check(False, "T9 non-object tail never raises", repr(exc))
+
+    # ---- T10 one events.jsonl snapshot serves meters, seat waits and status ----
+    ri = mk("w133-single-read", [NODE(timeout=60), {**NODE(timeout=60), "id": "peer"}],
+            [{"ts": iso(101), "event": "run.started"},
+             {"ts": iso(70), "event": "node.extended", "node": "lane", "extra_s": 30},
+             {"ts": iso(5), "event": "seat.wait", "node": "lane", "cap": 2}])
+    reads = []
+    read_text = Path.read_text
+    def count_events(path, *args, **kwargs):
+        if path == ri / "events.jsonl":
+            reads.append(path)
+        return read_text(path, *args, **kwargs)
+    with patch.object(Path, "read_text", count_events), patch_active([spawn(iso(100))]):
+        si = wfcommon.run_state(ri)
+    check(len(reads) == 1, "T10 exactly one events.jsonl read per running poll", str(len(reads)))
+    check(si["nodes"]["lane"]["wall"]["wall_s"] == 90
+          and si["nodes"]["peer"]["wall"]["wall_s"] == 60
+          and si["nodes"]["lane"]["seat_wait"]["cap"] == 2,
+          "T10 shared snapshot retains both node meters and open seat wait")
+    check(wfcommon.open_seat_waits(ri)["lane"][None]["cap"] == 2,
+          "T10 standalone seat-wait reader stays compatible")
+
+    # Missing/unreadable events are honest absence, not a read-model exception.
+    def unreadable_events(path, *args, **kwargs):
+        if path == ri / "events.jsonl":
+            raise PermissionError("fixture unreadable events")
+        return read_text(path, *args, **kwargs)
+    try:
+        with patch.object(Path, "read_text", unreadable_events), patch_active([spawn(iso(100))]):
+            su = wfcommon.run_state(ri)
+        check(su["nodes"]["lane"]["wall"]["wall_s"] == 60
+              and "seat_wait" not in su["nodes"]["lane"],
+              "T10 unreadable ledger yields no extension or seat wait")
+    except Exception as exc:
+        check(False, "T10 unreadable ledger never raises", repr(exc))
+
     print(f"RESULT {'GREEN' if fail == 0 else 'RED'} ({ok} checks, {fail} failed)")
-    sys.exit(0 if fail == 0 else 1)
+    if __name__ == "__main__":
+        sys.exit(0 if fail == 0 else 1)
 finally:
     for _fd in HELD_FDS:
         try:
@@ -221,3 +294,8 @@ finally:
         except OSError:
             pass
     shutil.rmtree(HOME, ignore_errors=True)
+
+
+def test_wall_meter_contract():
+    """The same stdlib script's behavioral checks are also collectible by pytest."""
+    assert fail == 0, f"wall meter: {fail} failed checks (see captured PASS/FAIL output)"
