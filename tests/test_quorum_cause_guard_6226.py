@@ -71,7 +71,7 @@ class QuorumCauseGuard(unittest.TestCase):
     def child(self, goal, late_event=False):
         r = self.make_run("child")
         n = {"id": "work", "type": "agent", "goal": goal, "timeout": 10}
-        meta = {"_run": r, "_procs": {}, "_procs_lock": threading.RLock(),
+        meta = {"_run": r, "_procs": {}, "_spawn_n": {}, "_procs_lock": threading.RLock(),
                 "_stop": threading.Event(), "hermes_bin": str(self.bin), "max_seats": 0}
         event = threading.Event()
         release = wf._seat_release
