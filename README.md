@@ -44,6 +44,21 @@ not re-paid.
 <td width="50%"><img src="assets/branch-gate.png" alt="A judge node feeding two complementary machine gates; each gate opens its own arm"><br><sub><b>Branch on verdict.</b> Two complementary <code>when</code> gates on one judge; each arm runs only when its gate opens.</sub></td>
 </tr></table>
 
+## Offline checkout drift probe
+
+Run `python3 scripts/drift_check.py --repo /path/to/checkout` on demand (the
+script's checkout is the default). No fetch, network refresh, daemon, or cron.
+`upstream_latest` means the nearest reachable local release tag selected by
+`git describe --tags`, not proof of the remote's newest release. The final stdout
+line reports `installed_version`, `upstream_latest`, `local_only_commits`,
+`trailers_missing`, and `verdict`; unknown error counts stay `unknown`.
+
+Exit 0 means `clean`; exit 1 means drift (`version_mismatch`, `trailers_missing`,
+then `local_only`, in that precedence). Commits after the tag need `(est-…)` or
+`#NN` tracker references in their messages. Exit 2 means `error`, including an
+absent installed-version changelog heading, missing tag, or unreadable git state.
+The probe only reads plugin.yaml, CHANGELOG.md, and git describe/rev-list/log.
+
 ## The `workflow` tool
 
 One tool, action-routed — the complete surface, with the flags that matter:

@@ -151,6 +151,7 @@ INCLUDE_FILES = (
     # tests/test_self_review_422_1866.py exec-modules this at import
     # (spec_from_file_location) — the exact est-4vnq finding-4 shape. Stdlib-only,
     # so the ZIP side stays honest.
+    "scripts/drift_check.py",  # #125: on-demand offline CLI and its shipped acceptance test
     "scripts/pr_formal_review.py",
     "scripts/suite.py",
     ".graphifyignore",

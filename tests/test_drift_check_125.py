@@ -117,6 +117,13 @@ class DriftCheck(unittest.TestCase):
         with patch.dict(os.environ, GIT_DIR='/does/not/exist', GIT_WORK_TREE='/wrong'):
             self.assert_report('clean', 0)
 
+    def test_invalid_args_keep_error_digest(self):
+        for args in (['--repo'], ['--unknown']):
+            proc = subprocess.run([sys.executable, str(ROOT / 'scripts/drift_check.py'), *args],
+                                  capture_output=True, text=True)
+            self.assertEqual(proc.returncode, 2)
+            self.assertTrue(proc.stdout.rstrip().endswith('verdict=error'))
+
     def test_default_repo_is_script_parent(self):
         (self.repo / 'scripts').mkdir()
         shutil.copyfile(ROOT / 'scripts/drift_check.py', self.repo / 'scripts/drift_check.py')

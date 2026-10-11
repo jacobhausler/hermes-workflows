@@ -2094,6 +2094,56 @@ def plugin_version():
     m = re.search(r"(?m)^version:\s*(\S+)\s*$", text)
     return m.group(1) if m else ""
 
+def drift_report(repo_dir):
+    """Offline #125 probe against the nearest reachable LOCAL release tag.
+
+    Does not claim remote freshness. Reads only; error outranks version_mismatch,
+    then trailers_missing, then local_only. Counts describe tag..HEAD commits.
+    """
+    report: dict = dict(installed_version="unknown", upstream_latest="unknown",
+                  local_only_commits=None, trailers_missing=None, verdict="error")
+    try:
+        repo = Path(repo_dir).resolve()
+        manifest = (repo / "plugin.yaml").read_text()
+        m = re.search(r"(?m)^version:[ \t]*['\"]?(\d+(?:\.\d+)+)['\"]?[ \t]*$", manifest)
+        if not m:
+            raise ValueError("installed_version_missing_or_invalid")
+        report["installed_version"] = m.group(1)
+        changelog = (repo / "CHANGELOG.md").read_text()
+        if not re.search(r"(?m)^##[ \t]+\[?" + re.escape(m.group(1))
+                         + r"(?:\]|[ \t]|$)", changelog):
+            raise ValueError("changelog_heading_missing")
+        # Ignore caller-selected git state and forbid partial-clone lazy fetching.
+        env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+        env.update(GIT_NO_LAZY_FETCH="1", GIT_TERMINAL_PROMPT="0")
+        def git(verb, *args):
+            # The only subprocess boundary: no network verbs, shell, or user argv.
+            if verb not in ("describe", "rev-list", "log"):
+                raise ValueError("git_verb_not_allowed")
+            return subprocess.run(["git", verb, *args], cwd=repo, env=env,
+                                  capture_output=True, text=True, check=True,
+                                  timeout=15).stdout.strip()
+        tag = git("describe", "--tags", "--abbrev=0", "--match", "v[0-9]*",
+                  "--match", "[0-9]*", "HEAD")
+        latest = tag.removeprefix("v")
+        if not re.fullmatch(r"\d+(?:\.\d+)+", latest):
+            raise ValueError("release_tag_invalid")
+        report["upstream_latest"] = latest
+        span = tag + "..HEAD"
+        count = int(git("rev-list", "--count", span, "--"))
+        messages = git("log", "--format=%B%x00", span, "--").split("\0")
+        messages = [msg for msg in messages if msg.strip()]
+        if len(messages) != count:
+            raise ValueError("commit_log_count_mismatch")
+        missing = sum(not re.search(r"\(est-[^)\s]+\)|#\d+\b", msg) for msg in messages)
+        report.update(local_only_commits=count, trailers_missing=missing)
+        report["verdict"] = ("version_mismatch" if m.group(1) != latest else
+                             "trailers_missing" if missing else "local_only" if count else "clean")
+    except (OSError, ValueError, UnicodeError, subprocess.SubprocessError) as exc:
+        report["error"] = f"{type(exc).__name__}: {exc}"
+    return report
+
+
 def version_tuple(v):
     """Dot-integer tuple for coarse >= comparison; None when not parseable
     ('99.0.0' -> (99, 0, 0); 'latest' -> None)."""
