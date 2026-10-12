@@ -1159,11 +1159,12 @@ CONTRACT = ("Finish your answer with ONE fenced ```json block holding your resul
 # items, and this line carries a per-item absolute path (test_inputs_0923).
 # When a safe root is in force (HERMES_WRITE_SAFE_ROOT non-empty), run_child makes
 # this dir writable: it appends the child's OWN work dir, nothing wider (fb 625a3241).
+# Upstream catalog review (NousResearch/hermes-agent#133387, ask 2): no standing
+# instruction to repackage a payload the single-query approval refused — the
+# refusal is core's guard (approvals.single_query_mode: deny); loosening it is
+# the operator's documented choice, never the plugin's workaround.
 WORK_DIR_NOTE = ("Your working directory {WORK_DIR} is durable; write your artifact "
-                 "there first and append as you go.\n"
-                 "Single-query approvals may refuse inline interpreters (python -c/-e, "
-                 "heredoc scripts) and execute_code; write a script file in your work "
-                 "directory and run it instead, within the same approval and write boundaries.")
+                 "there first and append as you go.")
 
 JSON_FENCE = re.compile(r"```json\s*\n(.*?)\n```", re.S)
 
@@ -1648,7 +1649,7 @@ def _lane_hygiene_preamble(node):
 # rate-limit tokens); consequence of a false positive is only WHICH bounded
 # sleep is drawn, never whether a retry happens (class + api_calls gates hold).
 _RATE_LIMIT_TOKENS = ("rate limit", "too many requests")
-_RL_JITTER_CAPS = (5.0, 20.0, 80.0)      # cap doubles-ish per retry attempt
+_RL_JITTER_CAPS = (5.0, 20.0, 80.0)      # cap quadruples per retry attempt (5 -> 20 -> 80)
 _RL_JITTER_CEIL = 120.0                  # hard ceiling: a lane never sleeps past 2 min
 
 def _is_rate_limited(raw):
@@ -1696,7 +1697,7 @@ _QUOTA_PHRASE_TOKENS = ("usage limit", "quota exceeded", "quota exceeded for",
 _QUOTA_HORIZON_RE = re.compile(r"reset(?:s|ting)?\D{0,10}?(\d+)\s*(hour|hr|h|day|d|min|minute)")
 # est-t0vz (issue #54): the credential-window 429 — its OWN class, never transport.
 # The banner is the hermes CLI's own AuthError text, raised verbatim at
-# /opt/hermes/hermes_cli/runtime_provider.py:358
+# /opt/hermes/hermes_cli/runtime_provider.py:370
 #   `AuthError(f"Anthropic credentials are rate-limited for {model}; other Claude
 #    models remain available (see `hermes auth list`).")`  (the f-string interpolates
 #    the sent model id; the static shape is what the runner matches).
@@ -1727,6 +1728,10 @@ ERROR_CLASSES = frozenset(("provider_400", "unresolved_model", "cap_exhausted",
                            "incomplete_work", "early_death", "cancelled",
                            "schema", "spawn", "inputs",
                            "quorum", "fanout_empty", "crashed", "unknown",
+                           # est-byft8: a queued spawn refused at the Popen instant
+                           # because an amend/delete moved its effective fingerprint
+                           # while it waited for a seat; the wave reloads and re-drives.
+                           "stale_graph",
                            # est-2ek.1.660: a (re-)drive refused at startup because a
                            # declared lane still carries the dead attempt's
                            # uncommitted TRACKED wreckage — bank it, then re-drive.
@@ -1781,14 +1786,14 @@ ERROR_CLASSES = frozenset(("provider_400", "unresolved_model", "cap_exhausted",
                            "effect_receipt"))
 _AGENT_FAIL_PREFIX = "hermes -z: agent failed:"
 # turn_failure_copy.py ends every non-retryable failure with a fixed-format trailer
-# `Provider said: <summary>`; api_error_summary.py:49 formats the summary as
+# `Provider said: <summary>`; api_error_summary.py:73 formats the summary as
 # `HTTP <status>: <body>` — a real marker line, verified live 2026-09-23 (dead model id).
 _PROVIDER_SAID = "provider said:"
 
 def _typed_error_class(report_path):
     """Typed termination from the child's quiet turn report (core PR pending; the
     HERMES_QUIET_TURN_REPORT_FILE contract), never from prose. Returns
-    ("max_turns", reason) only when the report exists and its turn_exit_reason is
+    ("cap_exhausted", reason) only when the report exists and its turn_exit_reason is
     the loop's own budget-exhaustion stamp; any absence/unparsability is honest
     nothing, and the caller keeps the prose-free `unknown`."""
     try:
@@ -2236,7 +2241,7 @@ def _classify_rc_output(out):
 #   1. the child died rc!=0 within _CONFIG_INPUT_WINDOW_MS of spawn (wall,
 #      runner-known; the report measures ~0.1s, the window is 1s with slack);
 #   2. its capture carries the config-error marker line (core emits these to
-#      stdout — hermes_cli/main.py:2074, providers.py, tools_config_providers.py).
+#      stdout — hermes_cli/main.py:2036, providers.py, tools_config_providers.py).
 # The window is the precision guard: a provider-registry failure at session START
 # dies inside it, while a child that died much later had already established a
 # working provider, so its death is not this deterministic config shape and keeps
@@ -4482,6 +4487,56 @@ def _adopt_child(meta, node, byid, index, child, schema, fo_cancel=None):
         rec["ratelimit_banner"] = marker
     return rec
 
+def _stale_spawn_refusal(run, node, byid):
+    """est-byft8: the launch-instant staleness check for a QUEUED spawn.
+
+    A spawn may sit on a contended global agent seat for minutes; an amend
+    (or delete) landing during that queue window moves the node's effective
+    fingerprint after the prompt was composed. The queued definition must
+    NEVER launch. The comparison is the runner's OWN staleness law — the
+    effective fingerprint (wfcommon.efp: own def minus budgets + ancestor
+    efps), exactly what replay-skip uses to decide a committed record is
+    stale — so "would a reload re-drive this node?" and "is this queued
+    spawn stale?" can never disagree.
+
+    Returns None to proceed (unchanged def, or any unreadable/uncomputable
+    input — the guard catches DETECTED staleness and never invents a death),
+    or a record dict for the typed refusal. graph.json is only ever replaced
+    atomically (os.replace), so the read is always whole."""
+    try:
+        queued = efp(byid, node)
+    except Exception:
+        return None
+    try:
+        g2 = jload(run / "graph.json")
+    except Exception:
+        return None
+    if not (isinstance(g2, dict) and isinstance(g2.get("nodes"), list) and g2["nodes"]):
+        return None
+    cur = {}
+    for n in g2["nodes"]:
+        if isinstance(n, dict) and n.get("id"):
+            cur[n["id"]] = n
+    if not cur:
+        return None
+    nid = node.get("id")
+    if nid in cur:
+        try:
+            now_efp = efp(cur, cur[nid])
+        except Exception:
+            return None
+        if now_efp == queued:
+            return None
+        why = f"amended since this spawn was queued (efp {queued} -> {now_efp})"
+    else:
+        why = f"deleted from the graph since this spawn was queued (queued efp {queued})"
+    return {"status": "failed", "error_class": "stale_graph",
+            "error": (f"stale_graph: node {nid} was {why}; the queued spawn refuses to launch "
+                      f"old work — the wave boundary reloads the graph and re-drives the node "
+                      f"under the current definition"),
+            "ms": 0}
+
+
 def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering=None, attempt=0, skey=None,
               inputs="", index=None, resume_preamble="", reasoning_override=None,
               seat_cancel=None, seat_hold=None, seat_admit_lock=None, model_override=None):
@@ -4778,6 +4833,17 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
                     return {"status": "failed", "error": "cancelled at launch instant"
                             + ("" if meta["_stop"].is_set() else " (quorum already met)"),
                             "error_class": "cancelled", "ms": 0, **route}
+                # est-byft8: launch-instant STALENESS recheck — a queued spawn that
+                # waited on the seat across an amend must never launch its old
+                # prompt. Refuse typed (seat freed by the finally), never Popen; the
+                # wave boundary consumes restart.request, reloads, and the replay-skip
+                # efp law re-drives the node under the CURRENT definition. Same lock
+                # as the cancel recheck: stop wins over stale; an amend landing after
+                # this instant is a live-child event, unchanged law for everyone.
+                _stale = _stale_spawn_refusal(run, node, byid)
+                if _stale is not None:
+                    logf.close()
+                    return {**_stale, "spawn": spawn_no, "attempts": 1, **route}
                 tokens.append(token)     # registered BEFORE Popen — a spawn that
                                          # dies mid-launch still owns its survivors
                 # est-ulwpg (witness 20261009-072611-fb-closeout-batch): the wd
@@ -7419,7 +7485,7 @@ def main(run_id):
     except SystemExit:
         # Defensive: a self-reported exit is a verdict, not a crash. loop() does
         # not raise SystemExit today (every self-reported exit happens before this
-        # try — enumerated at L79/L1693/L1947), but the guard keeps the invariant
+        # try — enumerate with `grep -n write_runner_exit wf.py`), but the guard keeps the invariant
         # local instead of a cross-function assumption. (write_runner_exit is
         # first-writer-wins per process, so a same-process false stamp was never
         # possible anyway.)

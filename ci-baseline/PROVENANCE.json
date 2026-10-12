@@ -265,6 +265,10 @@
    "added_by": "author lane (est-a91h7, PR #365 gate-cure; measured locally + green ci run 38052460596)"
   },
   {
+   "test": "test_stale_queued_spawn_byft8.py",
+   "added_by": "est-byft8 PR lane (author CI-pending; refreshed only from a green Serial suite job)"
+  },
+  {
    "test": "test_on_exit_129.py",
    "exit": 0,
    "measured": "2026-10-11 foreground python3 -m pytest tests/test_on_exit_129.py -q on the implementation over cec8c6d: 8 passed, rc=0; RED test-only commit 717e7cba on cec8c6d failed rc=1 (missing event pairs, done poisoned by exit failure).",
@@ -273,7 +277,7 @@
  ],
  "source_issue": 75,
  "totals": {
-  "cases": 275,
+  "cases": 276,
   "red": 0
  },
  "tracking_item": "est-9yl2"

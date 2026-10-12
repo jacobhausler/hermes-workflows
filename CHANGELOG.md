@@ -1,5 +1,51 @@
 # Changelog
 
+## 1.3.6 — 2026-10-11
+
+Patch line, four merged PRs since v1.3.5 — #396 (the ponytail truth pass over
+the docs and the comments), #399 (the child-prompt line the upstream catalog
+review asked for), #354 (the stale-graph spawn guard), #395 (the compliance
+standard's C8 teeth). The docs are the contract agents code against, and
+every rotted pointer is an agent lap burned on a wrong map:
+
+- **Node-type count corrected** — README and `references/grammar.md` said three
+  (`agent|gate|echo`); `join` is the shipped fourth since the 1.3.0 wave (#396).
+- **`reasoning` runtime-subset law updated to est-flah** — a relay's own enum-400
+  list triggers ONE logged clamp to the nearest supported level (never escalates)
+  and a re-drive; `provider_400` stands only when nothing clamps (#396).
+- **Grammar made complete** — `defaults` and the agent-field lists gain
+  `fallback_models` and `tier`; the `when` literal set gains `None`; the door's
+  run/amend description matches `DEFAULTS_KEYS` (#396).
+- **Dead pointers swept** — five line cites into core re-pointed (runtime_provider,
+  api_error_summary, main.py marker, GRAPH_MAX_BYTES, steer-var bake/reader sites),
+  the GRAPH_REPORT census pointer aimed at its `## Summary` block, four rot-prone
+  line cites replaced by symbol names, a dead doc anchor and a duplicated
+  `{runs,total,counts}` removed (#396).
+- **Child prompt carries no repackaging instruction** (#399, upstream catalog
+  ask 2) — `WORK_DIR_NOTE` no longer tells `-q` children to write refused
+  inline-interpreter payloads into script files; the refusal is core's
+  (`approvals.single_query_mode`), now documented in SECURITY.md as the
+  operator's choice. Guard test inverted to assert ABSENCE; golden re-captured,
+  prompts differ ONLY by the deleted sentence.
+- **A queued spawn never launches a stale definition** (#354, est-byft8) — a
+  spawn that queued on the global agent seat and reaches the Popen instant
+  AFTER an amend moved its effective fingerprint is refused typed
+  `stale_graph`; the comparison is the replay-skip efp law itself (a
+  timeout/max_turns-only amend never refuses), the refusal releases its seat
+  ticket, and the wave boundary re-drives the node under the CURRENT
+  definition — the replay-skip promise held across a queueing window.
+- **pr-compliance v0.3 C8** (#395) — a PR carrying a diagram must now lead its
+  body with a prose `## Problem` (or User story/Why/Context) section, RED
+  without it; the exemplar carrier `docs/pr-diagrams/est-g43qp` draws the
+  broken lane above the fixed lane so the picture alone reviews 90/90.
+- **Comments that lied, told true** — `_typed_error_class` returns `cap_exhausted`
+  (the docstring predated the rename); the rate-limit cap quadruples, it never
+  "doubles-ish"; the settings-cache shape comment matches the stored tuple;
+  `post_exit_hook` docstrings now say the runner stopped dispatching it at the
+  est-xwvu9 strip — tests exercise it, the shipped build never does (#396).
+- **Prompt honesty** — `WORK_DIR_NOTE` drops the single-query repackaging
+  instruction that the engine never honored (catalog review 2, #399).
+
 ## 1.3.5 — 2026-10-11
 
 Patch line, sixteen merged PRs since v1.3.3 (supersedes the untagged 1.3.4 prep
