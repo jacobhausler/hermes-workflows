@@ -265,6 +265,10 @@
    "added_by": "author lane (est-a91h7, PR #365 gate-cure; measured locally + green ci run 38052460596)"
   },
   {
+   "test": "test_stale_queued_spawn_byft8.py",
+   "added_by": "est-byft8 PR lane (author CI-pending; refreshed only from a green Serial suite job)"
+  },
+  {
    "test": "test_detach_redrive_o79j.py",
    "exit": 0,
    "measured": "2026-10-11 local foreground python3 -m pytest tests/test_reap_receipt_o79j.py tests/test_detach_redrive_o79j.py: 2 passed, rc=0; both RED at exact main cec8c6df64ede22ed23ab032e89b8bfa8ed0b4a6 before repair (2 failed, rc=1).",
@@ -279,7 +283,7 @@
  ],
  "source_issue": 75,
  "totals": {
-  "cases": 276,
+  "cases": 277,
   "red": 0
  },
  "tracking_item": "est-9yl2"

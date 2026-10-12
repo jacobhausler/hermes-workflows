@@ -133,9 +133,11 @@ Rules that bite:
 - **`reasoning`** rides `hermes chat --reasoning`, validated PER RESOLVED ROUTE at the
   door: the level is checked against the (provider, model) route's supported set and a
   level the route doesn't support is REFUSED at submit with the supported list named
-  (and the nearest level suggested) — never silently clamped or downgraded. Some relays
-  accept only a subset at runtime; that surfaces as `provider_400` with the server's
-  message — read it and pick from that list.
+  (and the nearest level suggested) — never silently clamped or downgraded. Some relays enum-gate a
+  narrower subset at runtime; on the server's own 400 list the runner clamps
+  `--reasoning` to the nearest supported level (never escalates) and re-drives
+  once, logged — `provider_400` stands only when nothing clamps; then read the
+  server's message and pick from that list.
 - **`after` orders AND injects.** Every direct parent's committed output lands under
   `## Inputs` automatically (8 KB per parent). Use `inputs:["a.key"]` only to pick a
   dotted path or a non-parent ancestor, or `fanout.items_from:"a.items"`. A missing
@@ -245,7 +247,7 @@ existing verbatim leniency.
   fanout_empty | fatal_quota | forbidden_model | incomplete_work |
   inputs | item_record | lane_wreckage | lease_busy | left_live_descendants | malformed_turn | precondition | provider_400 | quorum |
   ratelimit |
-  route_substitution_denied | route_unavailable | schema | seat_unsupported | seat_wait | spawn | timeout | transport | transport_exhausted |
+  route_substitution_denied | route_unavailable | schema | seat_unsupported | seat_wait | spawn | stale_graph | timeout | transport | transport_exhausted |
   unresolved_model`, plus `unknown` as the harvest-time default when nothing matches —
   plus `attempts`. Read the class, not the prose. `cancelled` (a `stop`, or a fan-out
   straggler at quorum) is never a failure: the run reads `stopped`, and a `wait` re-drives it.
@@ -269,6 +271,15 @@ existing verbatim leniency.
   degradation). An adopted orphan whose tree outlives it never commits a clean `done`
   — the completeness error rides WITH the answer (`partial` + this class). The class
   is terminal — never re-driven by either retry ladder.
+  `stale_graph` (est-byft8): a spawn that queued on the global agent seat and reached
+  the Popen instant AFTER an amend moved its effective fingerprint is refused typed —
+  the queued definition never launches. The comparison is the replay-skip efp law
+  itself (budgets are not work: a timeout/max_turns-only amend never refuses), so a
+  reload would re-drive exactly the nodes the guard refuses. The wave boundary then
+  consumes `restart.request`, reloads, and re-drives the node under the CURRENT
+  definition; the refusal releases its seat ticket and is outside both retry ladders.
+  An unreadable `graph.json` at the check fails OPEN (the guard catches detected
+  staleness, never invents a death).
   `config_input` (est-tmuu, operator-verified 2026-10-02): a child that dies rc!=0 within
   ~1 s of spawn AND whose capture carries a provider/alias config-error marker (`Unknown
   provider '<alias>' …`) is a deterministic INPUT error, not transient transport — the node
@@ -433,7 +444,7 @@ push-on-main `graph-main` job — the regen lane owns the graph (#153).
 
 The repo ships a [graphify](https://github.com/Graphify-Labs/graphify) knowledge
 graph at `graphify-out/` — every function, class, test, and doc heading
-(see `graphify-out/GRAPH_REPORT.md` line 1 for the current node/edge census — stated
+(see the `## Summary` block of `graphify-out/GRAPH_REPORT.md` for the census — stated
 figures in prose go stale; the report is regenerated with the graph), built by deterministic tree-sitter parsing (no LLM, no network); one edge
 per `(source, target, relation)` (`count` marks a collapsed multi-edge; policy in `scripts/graph_check.py`).
 Query it before you grep or open files one by one:
