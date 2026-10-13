@@ -17,8 +17,10 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(HERE))
-tmp_dir = tempfile.TemporaryDirectory(prefix=".tmp-2del-", dir=HERE / "tests")
-atexit.register(tmp_dir.cleanup)
+tmp_dir = tempfile.TemporaryDirectory(prefix=".tmp-2del-", dir=HERE / "tests", ignore_cleanup_errors=True)
+def _cleanup():
+    import shutil; shutil.rmtree(tmp_dir.name, ignore_errors=True)
+atexit.register(_cleanup)
 home = Path(tmp_dir.name)
 os.environ["HERMES_HOME"] = str(home)
 os.environ["WF_RUNS_ROOT"] = str(home / "workflows")

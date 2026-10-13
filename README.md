@@ -57,6 +57,7 @@ One tool, action-routed — the complete surface, with the flags that matter:
 | `steer` | Queue steering text for a running node (refused on gates and terminal nodes; delivery is cooperative via the child's `inbox` pull — never a mid-prompt injection). |
 | `inbox` | Child-side pull of steering lines baked for this spawn — exactly-once per spawn. Parent-side `kind:"submissions"` lists `submit` items newest-first. |
 | `amend` | Replace the graph mid-run with the whole new graph (`dry_run:true` previews `will_rerun` without writing). Fingerprint-valid unchanged nodes replay-skip. |
+| `diff` | Confirm an amend before applying it: the amend door with `dry_run` FORCED — accepts `patch` or a full graph and returns the preview plus a unified `graph_diff`; touches nothing. |
 | `stop` | Request a stop at the next boundary; in-flight children are killed; stop ≠ failure — cancelled work re-drives on resume, and a `lane_key` is freed for the next dispatch. |
 | `list` | All runs (capped page + full-census counts, per-run provenance rollup when present). |
 | `save` | Shelve a graph in the library under a name (overwrite = current best): `description`, `tags` (1–10, flat or `facet:value`; reuse `library`'s `tag_vocab` verbatim), optional `source` attribution writes provenance (owner, digest, timestamp) — attribution, never access control. |
