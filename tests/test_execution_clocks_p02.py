@@ -40,6 +40,15 @@ class Clocks(unittest.TestCase):
     def rows(self, filename, rows):
         (self.r / filename).write_text("".join(json.dumps(row) + "\n" for row in rows))
 
+    def test_dynamic_inventory_is_unknown_not_zero_completion(self):
+        self.n["fanout"] = {"items_from": "source.items"}
+        (self.r / "graph.json").write_text(json.dumps({"nodes": [self.n]}))
+        with patch.object(c, "runner_alive", return_value=False):
+            counts = c.run_state(self.r)["nodes"]["probe"]["item_counts"]
+        self.assertIsNone(counts["total"])
+        self.assertIsNone(counts["done"])
+        self.assertIsNone(counts["unknown"])
+
     def test_cancelled_queue_does_not_remain_active(self):
         self.rows("events.jsonl", [
             {"ts": ts(100), "event": "seat.wait", "node": "probe", "index": None, "cap": 1},

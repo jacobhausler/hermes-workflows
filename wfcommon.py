@@ -3956,8 +3956,9 @@ def run_state(r):
             if wm:
                 nodes[n["id"]]["wall"] = wm
     # est-2ek.1.833: a live runner blocked on the global seat cap says so per node.
+    waits = open_seat_waits(r, events_text) if live else {}
     if live:
-        for nid, per in open_seat_waits(r, events_text).items():
+        for nid, per in waits.items():
             if nid in nodes and states.get(nid) == "pending" and per:
                 nodes[nid]["seat_wait"] = seat_wait_view(per)
     # e68544a37be37657 + est-ij0: the runner's own release law (partial blocks a
@@ -4051,7 +4052,7 @@ def run_state(r):
                      "error_class": (recs[n["id"]] or {}).get("error_class")}
                     for n in graph["nodes"] if states[n["id"]] == "failed"]
     import time as _time
-    waits = open_seat_waits(r, events_text) if live else {}
+    clock_now = _time.time()
     ledger = []
     try:
         for line in (r / "spawn-ledger.jsonl").read_text().splitlines():
@@ -4066,7 +4067,7 @@ def run_state(r):
     for n in graph["nodes"]:
         nid = n["id"]
         clock = execution_clocks(
-            n, nodes[nid], waits.get(nid, {}) if states[nid] == "pending" else {}, _time.time(), ledger)
+            n, nodes[nid], waits.get(nid, {}) if states[nid] == "pending" else {}, clock_now, ledger)
         rec = recs[nid] or {}
         if status == "stopped" and clock["phase"] in ("pending", "queued"):
             clock["phase"] = "stopped"
@@ -4079,7 +4080,7 @@ def run_state(r):
         if held and held.get("id") == nid:
             hm = jload(r / "gates" / f"{nid}.held.json", {}) or {}
             since = hm.get("since") if record_efp_valid(hm, byid, n, "_def") else None
-            elapsed = max(0, _time.time() - since) if isinstance(since, (int, float)) else None
+            elapsed = max(0, clock_now - since) if isinstance(since, (int, float)) else None
             timeout = n.get("hold_timeout")
             remaining = max(0, timeout - elapsed) if isinstance(timeout, (int, float)) and elapsed is not None else None
             clock["phase"] = "held"
@@ -4093,7 +4094,8 @@ def run_state(r):
             items = fanout.get("items")
             counts = {"basis": "literal fanout items" if isinstance(items, list) else "dynamic items unknown",
                       "total": len(items) if isinstance(items, list) else None,
-                      **{key: 0 for key in ("done", "partial", "failed", "cancelled", "unknown")}}
+                      **{key: 0 if isinstance(items, list) else None
+                         for key in ("done", "partial", "failed", "cancelled", "unknown")}}
             for index in range(len(items)) if isinstance(items, list) else ():
                 item = jload(r / "nodes" / f"{nid}.{index}.json", {}) or {}
                 state = item.get("status") if record_efp_valid(item, byid, n) else None
