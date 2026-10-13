@@ -3594,9 +3594,14 @@ def _active_spawns(r, n, byid):
         records.extend(sorted((r / "nodes").glob(f"{n['id']}.[0-9]*.json")))
     active = []
     for path in records:
-        v = _verify_spawn_rec(r, n, byid, jload(path))
-        if v:
-            active.append(v)
+        rec = jload(path)
+        v = _verify_spawn_rec(r, n, byid, rec)
+        if v and isinstance(rec, dict):
+            # Keep the verified attempt title for liveness/session joins, and
+            # the exact stored key for the ledger's distinct representation.
+            item = re.fullmatch(re.escape(n["id"]) + r"\.([0-9]+)\.json", path.name)
+            active.append({**v, "ledger_skey": rec["skey"],
+                           "index": int(item[1]) if item else None})
     return active
 
 def _progress_for(r, n):
@@ -3894,11 +3899,11 @@ def execution_clocks(n, view, waits, now_s, ledger=(), ledger_available=True):
                       "configured_timeout_s": wall,
                       "remaining_upper_bound_s": remaining})
     active = []
-    live_keys = set()
+    live_keys = {}
     for sp in view.get("active_spawns", []):
         start = _iso_epoch(sp.get("started"))
         elapsed = max(0, now_s - start) if start is not None else None
-        live_keys.add((sp.get("pid"), sp.get("skey")))
+        live_keys[(sp.get("pid"), sp.get("ledger_skey", sp.get("skey")))] = start
         active.append({"index": sp.get("index"), "elapsed_s": elapsed,
                        "configured_remaining_s": max(0, wall - elapsed)
                        if elapsed is not None and isinstance(wall, (int, float)) else None,
@@ -3930,9 +3935,13 @@ def execution_clocks(n, view, waits, now_s, ledger=(), ledger_available=True):
                 observed += max(0, stamp - pending.pop(key))
             else:
                 unknown += 1
-    unknown += len(live_keys - pending.keys())
+    # The writer stamps the spawn record before appending its ledger start.
+    # An older open interval with a reused PID/bare key is not this attempt.
+    matched = {key for key, start in pending.items()
+               if live_keys.get(key) is not None and start >= live_keys[key]}
+    unknown += len(live_keys.keys() - matched)
     for key, start in pending.items():
-        if key in live_keys:
+        if key in matched:
             observed += max(0, now_s - start)
         else:
             unknown += 1

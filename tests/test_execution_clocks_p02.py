@@ -6,6 +6,7 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -14,6 +15,7 @@ HOME = tempfile.TemporaryDirectory(prefix="p02-home-", dir=ROOT)
 os.environ["HERMES_HOME"] = HOME.name
 os.environ["WF_RUNS_ROOT"] = str(Path(HOME.name) / "workflows")
 import wfcommon as c
+import wf
 spec = importlib.util.spec_from_file_location("p02_door", ROOT / "__init__.py")
 door = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(door)
@@ -39,6 +41,100 @@ class Clocks(unittest.TestCase):
 
     def rows(self, filename, rows):
         (self.r / filename).write_text("".join(json.dumps(row) + "\n" for row in rows))
+
+    def spawn(self, pid, start, attempt=0, index=None, ledger=True):
+        """Real producer contract, without launching any child processes."""
+        skey = f"wf:test:probe{'' if index is None else '.' + str(index)}.deadbeef"
+        title = f"{skey}#a{attempt}"
+        wf.write_spawn_record(self.r, self.n, {"probe": self.n}, index, attempt,
+                              ["hermes", "chat", "--continue", title],
+                              self.r / "child.log", pid, skey, ts(start))
+        if ledger:
+            self.ledger("child", pid, skey, start, index)
+        return title, skey
+
+    def ledger(self, role, pid, skey, stamp, index=None):
+        with patch.object(wf, "now", return_value=ts(stamp)):
+            wf.ledger_row(self.r, role, pid, node="probe", index=index, skey=skey)
+
+    def live_state(self, titles, now=250):
+        # Only the OS liveness boundary and clock are simulated; writers,
+        # fingerprint checks, _verify_spawn_rec and _active_spawns stay real.
+        def ps(argv, **kwargs):
+            return SimpleNamespace(stdout="S hermes chat --continue " + titles[int(argv[3])])
+        with patch.object(c, "runner_alive", return_value=True), \
+             patch.object(c.os, "kill"), patch.object(c.subprocess, "run", side_effect=ps), \
+             patch("time.time", return_value=now):
+            return c.run_state(self.r)
+
+    def test_real_spawn_retry_reconciles_verified_title_with_ledger(self):
+        pid = 999999991
+        _, skey = self.spawn(pid, 100)
+        self.ledger("child_end", pid, skey, 150)
+        # PID reuse and the same bare key must still identify a new interval.
+        title, _ = self.spawn(pid, 200, attempt=1)
+        view = self.live_state({pid: title})["nodes"]["probe"]
+        self.assertEqual(view["active_spawns"][0]["skey"], title)
+        self.assertEqual(view["active_spawns"][0]["attempt"], 1)
+        self.assertEqual(view["clocks"]["work"]["observed_s"], 100)
+        self.assertEqual(view["clocks"]["work"]["attempts_observed"], 2)
+        self.assertEqual(view["clocks"]["work"]["unknown_intervals"], 0)
+        self.assertEqual(view["clocks"]["active"][0]["elapsed_s"], 50)
+        self.assertIsNone(view["clocks"]["active"][0]["index"])
+        # A previous attempt's title is not proof of current PID identity.
+        view = self.live_state({pid: skey + "#a0"})["nodes"]["probe"]
+        self.assertEqual(view["clocks"]["active"], [])
+        self.assertEqual(view["clocks"]["work"]["observed_s"], 50)
+        self.assertEqual(view["clocks"]["work"]["unknown_intervals"], 1)
+
+    def test_real_spawn_missing_retry_start_does_not_reuse_old_pid_interval(self):
+        pid = 999999991
+        _, skey = self.spawn(pid, 100)
+        title, _ = self.spawn(pid, 200, attempt=1, ledger=False)
+        work = self.live_state({pid: title})["nodes"]["probe"]["clocks"]["work"]
+        self.assertEqual(work["observed_s"], 0)
+        self.assertEqual(work["unknown_intervals"], 2)  # old open + missing live start
+        self.assertEqual(work["attempts_observed"], 1)
+        self.ledger("child_end", pid, skey, 150)
+        work = self.live_state({pid: title})["nodes"]["probe"]["clocks"]["work"]
+        self.assertEqual(work["observed_s"], 50)
+        self.assertEqual(work["unknown_intervals"], 1)
+        (self.r / "spawn-ledger.jsonl").unlink()
+        work = self.live_state({pid: title})["nodes"]["probe"]["clocks"]["work"]
+        self.assertEqual(work["observed_s"], 0)
+        self.assertEqual(work["unknown_intervals"], 1)
+        self.assertEqual(work["completeness"], "unknown")
+        self.assertTrue(work["lower_bound"])
+
+    def test_real_spawn_ledger_append_can_follow_record_timestamp(self):
+        _, skey = self.spawn(999999991, 100)
+        title, _ = self.spawn(999999992, 200, attempt=1, ledger=False)
+        self.ledger("child", 999999992, skey, 200.25)
+        view = self.live_state({999999992: title})["nodes"]["probe"]
+        self.assertEqual(view["clocks"]["work"]["observed_s"], 49.75)
+        self.assertEqual(view["clocks"]["work"]["attempts_observed"], 2)
+        self.assertEqual(view["clocks"]["work"]["unknown_intervals"], 1)
+        self.assertEqual(view["clocks"]["active"][0]["elapsed_s"], 50)
+
+    def test_real_fanout_active_clocks_keep_canonical_item_indexes(self):
+        self.n["fanout"] = {"items": ["one", "two"]}
+        (self.r / "graph.json").write_text(json.dumps({"nodes": [self.n]}))
+        first, _ = self.spawn(999999991, 100, index=0)
+        second, _ = self.spawn(999999992, 200, attempt=1, index=1)
+        view = self.live_state({999999991: first, 999999992: second})["nodes"]["probe"]
+        active = view["clocks"]["active"]
+        self.assertEqual([row["index"] for row in active], [0, 1])
+        self.assertEqual([row["index"] for row in view["active_spawns"]], [0, 1])
+        self.assertEqual([row["elapsed_s"] for row in active], [150, 50])
+        self.assertEqual([row["configured_remaining_s"] for row in active], [750, 850])
+        self.assertEqual(view["clocks"]["work"]["observed_s"], 200)
+        self.assertEqual(view["clocks"]["work"]["unknown_intervals"], 0)
+        # Identity projection is read-only: the real writer's persisted shape
+        # still carries neither an item index nor a ledger-key alias.
+        for path in (self.r / "nodes").glob("*.json"):
+            rec = json.loads(path.read_text())
+            self.assertNotIn("index", rec)
+            self.assertNotIn("ledger_skey", rec)
 
     def test_missing_accounting_evidence_is_explicit(self):
         for mode in ("missing", "unreadable", "invalid_utf8", "orphan", "live"):
