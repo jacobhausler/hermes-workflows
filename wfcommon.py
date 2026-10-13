@@ -28,7 +28,9 @@ _CONCURRENCY_KEYS = ("concurrency", "item_concurrency")
 # node must not un-freeze on replay. The node's real model/provider DO participate —
 # a substitution changes the work's route, and the hash sees it (unlike route_verified,
 # which annotates a route that never moved).
-_POLICY_KEYS = ("require_route", "route_verified", "substrate_substituted")
+# #130: `resume_hint` only shapes the RE-RUN prompt (prompt-side policy), never the
+# work — flipping it on an amend must not un-freeze committed nodes.
+_POLICY_KEYS = ("require_route", "route_verified", "substrate_substituted", "resume_hint")
 FP_RULE_LEGACY = 1  # before b79fa21: budgets participated in def_hash
 FP_RULE_VERSION = 2  # b79fa21: exclude budgets
 FP_RULES = (FP_RULE_LEGACY, FP_RULE_VERSION)
@@ -42,6 +44,10 @@ def def_hash(node, rule=FP_RULE_VERSION):
     if rule == FP_RULE_VERSION:
         node = {k: v for k, v in node.items()
                 if k not in _BUDGET_KEYS and k not in _CONCURRENCY_KEYS and k not in _POLICY_KEYS}
+    elif "resume_hint" in node:
+        # #130 did not exist in legacy records; exclude only this new prompt key.
+        # Historical budget, concurrency and route-policy semantics stay intact.
+        node = {k: v for k, v in node.items() if k != "resume_hint"}
     return hashlib.sha256(json.dumps(node, sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:16]
 
 _EFP_SEP = "\u241f"
@@ -717,6 +723,9 @@ AGENT_KEYS = {"id", "type", "after", "goal", "context", "schema", "model", "prov
               # harvest-on-death `partial` ancestor — a plain after-edge blocks on one
               # (typed fail at the wave boundary, never a silent release, never a spawn).
               "profile", "requires", "after_partial",
+              # #130: `resume_hint` (bool; absent = auto when the durable work dir holds a
+              # prior attempt's artifacts) — prompt-side dead-attempt inventory on re-runs.
+              "resume_hint",
               # est-ij0: `order_only` (list, subset of `after`) marks ORDERING-only
               # predecessors (a convoy chain): no data flows over them, and a dead one
               # (failed, or never-runnable behind a failed data edge) is SPLICED out —
@@ -1505,6 +1514,8 @@ def validate_graph_errors(nodes, *, admission=False):
                 # #25: boolean only — an unknown truthy value must not silently
                 # disable (or enable) the fail-closed route gate.
                 E(nid, "require_route", f"require_route {n['require_route']!r} must be a boolean")
+            if n.get("resume_hint") is not None and not isinstance(n.get("resume_hint"), bool):
+                E(nid, "resume_hint", f"resume_hint {n['resume_hint']!r} must be a boolean")   # #130
             if n.get("schema") is not None:
                 if not isinstance(n["schema"], dict):
                     E(nid, "schema", "schema must be an object")
@@ -3034,6 +3045,13 @@ def node_rec(r, n, byid):
     reads `done` — the child's nonzero exit is history, the answer is the fact."""
     rec = jload(r / "nodes" / f"{n['id']}.json")
     st = (rec or {}).get("status")
+    if st == "running":
+        interruption = jload(r / "interruptions" / f"{n['id']}.json") or {}
+        claim = {k: rec.get(k) for k in ("pid", "skey", "attempt", "efp", "fp_rule_version")}
+        if interruption.get("claim") == claim and record_efp_valid(rec, byid, n) \
+                and not _verify_spawn_rec(r, n, byid, rec):
+            rec = {**rec, "status": "interrupted", "error_class": "crashed",
+                   "interruption": {k: v for k, v in interruption.items() if k != "claim"}}
     if st == "failed" and (rec or {}).get("error_class") == "cancelled":
         return "pending", rec   # stop != failure (#7): a resume re-drives cancelled work
     if st in ("done", "partial", "failed", "skipped"):

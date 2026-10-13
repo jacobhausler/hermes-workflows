@@ -1370,6 +1370,21 @@
   "exit": 0
  },
  {
+  "test": "test_detach_redrive_o79j.py",
+  "exit": 0,
+  "log": "rows_added_outside_ci in PROVENANCE.json"
+ },
+ {
+  "test": "test_reap_receipt_o79j.py",
+  "exit": 0,
+  "log": "rows_added_outside_ci in PROVENANCE.json"
+ },
+ {
+  "test": "test_resume_hint_130.py",
+  "exit": 0,
+  "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_resume_hint_130.py.log"
+ },
+ {
   "test": "test_on_exit_129.py",
   "exit": 0,
   "log": "local-foreground/test_on_exit_129.py.log"

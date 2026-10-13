@@ -269,15 +269,33 @@
    "added_by": "est-byft8 PR lane (author CI-pending; refreshed only from a green Serial suite job)"
   },
   {
+   "test": "test_detach_redrive_o79j.py",
+   "exit": 0,
+   "measured": "2026-10-11 local foreground python3 -m pytest tests/test_reap_receipt_o79j.py tests/test_detach_redrive_o79j.py: 2 passed, rc=0; both RED at exact main cec8c6df64ede22ed23ab032e89b8bfa8ed0b4a6 before repair (2 failed, rc=1).",
+   "supersede_by": "next green-CI refresh (replace with the CI-captured row)"
+  },
+  {
+   "test": "test_reap_receipt_o79j.py",
+   "exit": 0,
+   "measured": "2026-10-11 local foreground python3 -m pytest tests/test_reap_receipt_o79j.py tests/test_detach_redrive_o79j.py: 2 passed, rc=0; both RED at exact main cec8c6df64ede22ed23ab032e89b8bfa8ed0b4a6 before repair (2 failed, rc=1).",
+   "supersede_by": "next green-CI refresh (replace with the CI-captured row)"
+  },
+  {
+   "test": "test_resume_hint_130.py",
+   "exit": 0,
+   "measured": "2026-10-08 local foreground run (38/38 PASS, rc=0) on feat/resume-hint-130 after review fixes; the row can only ever make CI red, never green",
+   "supersede_by": "next green-CI refresh (replace with the CI-captured row)"
+  },
+  {
    "test": "test_on_exit_129.py",
    "exit": 0,
-   "measured": "2026-10-11 foreground python3 -m pytest tests/test_on_exit_129.py -q on the implementation over cec8c6d: 8 passed, rc=0; RED test-only commit 717e7cba on cec8c6d failed rc=1 (missing event pairs, done poisoned by exit failure).",
+   "measured": "2026-10-11 foreground python3 -m pytest tests/test_on_exit_129.py -q on the implementation over cec8c6d: 8 passed, rc=0; RED test-only commit 717e7cba on cec8c6d failed rc=1.",
    "supersede_by": "next green-CI refresh (replace with the CI-captured row)"
   }
  ],
  "source_issue": 75,
  "totals": {
-  "cases": 276,
+  "cases": 279,
   "red": 0
  },
  "tracking_item": "est-9yl2"
