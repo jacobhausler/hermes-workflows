@@ -4263,6 +4263,72 @@ def residue(nodes, states, blocked, unconverged, outputs):
         verdicts[nid] = {"status": states.get(nid), "verdict": v if isinstance(v, str) else None}
     return {"data_dead": data_dead, "order_dead": order_dead, "verdicts": verdicts}
 
+def apply_node_patch(old_graph, patch_obj):
+    """est-2del: per-node patch for amend — change a couple of fields without
+    resubmitting the whole (multi-KB) graph. Pure + fail-closed:
+
+      - patch_obj is {"nodes": {id: {field: value}}, "name": str}? — `nodes` is
+        the ONLY structural key; anything else is refused, so a typo'd patch
+        can never silently drop authoring (adding NEW nodes stays full-graph
+        work: patch edits, it does not author).
+      - a node's patch is a SHALLOW field merge; a field value of null deletes
+        the field; patching `id` or patching an unknown node id is refused by
+        name (no silent no-op, no re-keying).
+      - "name", when present, replaces the graph name.
+    Returns a NEW graph (deep-copied nodes, original order); never mutates.
+    Raises ValueError with a named reason — the door turns it into a typed
+    refusal before anything is written."""
+    import copy as _copy
+    if not isinstance(patch_obj, dict):
+        raise ValueError("patch must be an object")
+    unknown = sorted(set(patch_obj) - {"nodes", "name"})
+    if unknown:
+        raise ValueError(f"patch keys {unknown} not allowed (only 'nodes' and 'name')")
+    nodes = patch_obj.get("nodes")
+    if nodes is None and "name" not in patch_obj:
+        raise ValueError("patch is empty: needs nodes and/or name")
+    if nodes is not None:
+        if not isinstance(nodes, dict) or not nodes:
+            raise ValueError("patch.nodes must be a non-empty object of node id -> field updates")
+    if not isinstance(old_graph, dict) or not isinstance(old_graph.get("nodes"), list):
+        raise ValueError("committed graph has no nodes to patch")
+    byid = {}
+    for n in old_graph["nodes"]:
+        if isinstance(n, dict) and isinstance(n.get("id"), str):
+            byid[n["id"]] = n
+    new_nodes = []
+    seen = set()
+    for n in old_graph["nodes"]:
+        nid = n.get("id") if isinstance(n, dict) else None
+        if isinstance(nid, str) and nodes and nid in nodes:
+            upd = nodes[nid]
+            seen.add(nid)
+            if not isinstance(upd, dict) or not upd:
+                raise ValueError(f"patch.nodes.{nid} must be a non-empty object of field updates")
+            if "id" in upd:
+                raise ValueError(f"patch.nodes.{nid} cannot change the node id")
+            m = _copy.deepcopy(n)
+            for k, v in upd.items():
+                if v is None:
+                    m.pop(k, None)
+                else:
+                    m[k] = _copy.deepcopy(v)
+            new_nodes.append(m)
+        else:
+            new_nodes.append(_copy.deepcopy(n))
+    if nodes:
+        missing = sorted(set(nodes) - seen)
+        if missing:
+            raise ValueError(f"patch names unknown node ids {missing} (patch edits existing nodes only; adding nodes needs the full graph)")
+    out = _copy.deepcopy(old_graph)
+    out["nodes"] = new_nodes
+    if "name" in patch_obj:
+        if not isinstance(patch_obj["name"], str) or not patch_obj["name"]:
+            raise ValueError("patch.name must be a non-empty string")
+        out["name"] = patch_obj["name"]
+    return out
+
+
 def amend_preview(r, new_nodes):
     """{added, removed, changed, will_rerun, unchanged} for a proposed graph
     against the run dir's committed graph and node records. Added nodes are work;
