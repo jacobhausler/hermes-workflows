@@ -18,6 +18,10 @@ Use the `workflow` tool when a task needs independent lanes, a human gate, or a
 resumable graph; for one or two independent calls, delegate instead. The authoring
 agent owns the graph and its side effects; the dashboard is a reader, not an executor.
 
+The registered tool ID is `workflow` (toolset `workflows`). If deferred, use the
+host discovery catalog and describe/call its exact returned ID. If absent, report
+that fact; do not guess aliases, launch a replacement or mutate configuration.
+
 ## Smallest working graph
 
 Build `{ "name": "check", "nodes": [{"id":"inspect","type":"agent","goal":"Inspect the
@@ -72,15 +76,14 @@ ending your turn right after `run` is how runs stall.
   derived, never a guess. Before `amend` or stop, read the failed node's `node_facts`
   (error_class from the closed set; `cancelled` is never a failure) and committed
   outputs. `amend` submits the WHOLE replacement graph; `run`/`amend` `dry_run:true`
-  write nothing; `stop` is terminal. Details: [operations](references/operations.md).
+  preview without launching/replacing graphs, but can ping routes and check quota.
+  `stop` is terminal. Details: [operations](references/operations.md).
 - Lint before launching with `workflow{action:"validate", graph:…}` — the door's
   whole validation, zero writes, no liveness ping.
-- Shelf: `save` reusable graphs with `tags` reused verbatim from `library`'s
-  `tag_vocab` — never coin unseen tags; resaving without `tags` keeps them.
-  `library` lists; `run` with `from:<name>` replays. Off-shelf graphs go to `submit`
-  with `why_not_library` (>=80 chars): quarantine for review, never the shelf.
-  `save` +`source:` is attribution, never access control. Details:
-  [grammar](references/grammar.md).
+- Optional recipes: `library` lists; `run` with `from:<name>` replays; `save`
+  explicitly shelves reusable graphs. One-off `run` needs no library lookup,
+  tags, save or `why_not_library`. Explicit study-only `submit` retains its
+  receipt requirement. [grammar](references/grammar.md).
 - No double-dispatch for pollers: `run` with `lane_key:<key>` — while an UNFINISHED
   incumbent holds the key, a second `run` is deduped, never spawns. `needs_resume`
   means `wait` it — never replace it; `stop` is the explicit abandonment. Keys are
@@ -89,10 +92,9 @@ ending your turn right after `run` is how runs stall.
 - Report a finished run by metrics (token in/out, api calls, tool calls), not the
   dollar figure: `estimated_cost_usd` is a price-table estimate (subscription routes
   report `included`) and reads badly as spend.
-- Put the `card` line alone on its own line, in plain prose (never in backticks or a
-  fence — a code-blocked directive renders as dead text, not a card), in the reply
-  that launches a run and the one that reports it. The desktop strip shows every run
-  of this chat regardless.
+- Cards are optional desktop presentation; CLI text and returned run IDs suffice.
+  Completion is execution state, not task verification or authority for more work.
+  Push notifications are best-effort; `wait` is the blocking/resuming path.
 - `graph_path` replaces embedding on run/save/amend/validate: a caller-authorized
   absolute JSON file, exactly one graph source. [grammar](references/grammar.md).
   File-shareable graphs: [portable](references/portable.md).

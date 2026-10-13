@@ -214,7 +214,7 @@ def _validation_error(graph, run_dir=None):
         return None
     first = errs[0]
     head = first["msg"] if first["node"] is None else f"node {first['node']}: {first['msg']}"
-    return {"error": f"graph invalid: {head}", "errors": errs}
+    return {"error": f"graph invalid: {head}", "error_class": "graph_invalid", "errors": errs}
 
 HERE = Path(__file__).resolve().parent
 
@@ -713,8 +713,8 @@ WORKFLOW_PARAMS = {
         "run_context": {"type": ["string", "object"], "description": "run only: non-empty string seed appended to every first-wave agent (including agents behind gate-only paths), OR non-empty map of identifier keys to non-empty strings replacing only explicit {run.KEY} in node goals/contexts, fan-out goals/item goals and gate questions. Library-sourced launches also render profile, echo string output, gate options and wait.until_argv; every surviving ref refuses before any write. Inline argv retains its existing unbound-placeholder refusal. Missing keys/malformed bindings reject before any run write — as does a seed against a graph with {run.KEY} refs, or a JSON-encoded map passed as a string. Values are persisted in prompts; do not supply secrets. A seed cannot replace baked literals."},
         "description": {"type": "string", "description": "save: one-line purpose shown by library/list."},
         "params": {"type": "object", "additionalProperties": {"type": "object"}, "description": "save: optional meta.params descriptions/default suggestions for run_context keys. Required keys derive from graph refs, never this metadata. Omission retains prior params; {} deliberately clears them. Missing/dead declarations warn, never prevent saving."},
-        "tags": {"type": "array", "items": {"type": "string"}, "description": "save (optional): 1-10 discovery tags — legacy flat tokens (lowercase alnum [-_.] <=32) or faceted `facet:value` (facets: use_case, repo, domain, risk, note; values [a-z0-9._-] <=48; e.g. use_case:code-review). Call `library` first and reuse its tag_vocab values VERBATIM — never coin a tag you have not seen. Resaving without tags keeps the entry's existing tags; stored in the meta envelope. library (optional): filter to entries carrying ALL listed tags (same 1-10 law as save — an empty array errors on BOTH verbs; omit tags for no filter); an empty result's tag_match_counts says which term starved."},
-        "why_not_library": {"type": "string", "description": "submit (REQUIRED, >=80 chars): why no library graph covered this task — name the entries you checked and the shape you needed. The receipt is what makes hand-rolling honest."},
+        "tags": {"type": "array", "items": {"type": "string"}, "description": "save (optional): 1-10 discovery tags — legacy flat tokens (lowercase alnum [-_.] <=32) or faceted `facet:value` (facets: use_case, repo, domain, risk, note; values [a-z0-9._-] <=48; e.g. use_case:code-review). For explicit curation, library exposes tag_vocab for optional reuse. Resaving without tags keeps the entry's existing tags; stored in the meta envelope. library (optional): filter to entries carrying ALL listed tags (same 1-10 law as save — an empty array errors on BOTH verbs; omit tags for no filter); an empty result's tag_match_counts says which term starved."},
+        "why_not_library": {"type": "string", "description": "submit (REQUIRED, >=80 chars): why no library graph covered this task — name the entries you checked and the shape you needed. Only explicit study submissions require this field; ordinary run does not."},
         "lane": {"type": "string", "description": "submit (optional, <=128 chars): lane label carried beside the submission for the quartermaster's triage; no scheduling effect."},
         "kind": {"type": "string", "enum": ["submissions"], "description": "inbox (optional): 'submissions' = list workflow submit study items newest-first (read-only; promotion is a human decision). Omit inside a child spawn to pull baked steering as before."},
         "team": {"type": "string", "description": "run (optional, <=64 chars): team label stamped into run.json and shown by list; no effect on scheduling."},
@@ -2237,12 +2237,10 @@ def act_library(args):
                                      for k, v in row["params"].items()}
         return {"entry": dict(row, instantiate=launch,
                               command="workflow " + json.dumps(launch, ensure_ascii=False))}
-    # The 1.1 hint stays verbatim for the bare/empty library (golden-solo byte law);
-    # the submit nudge rides along once the library carries #50 discovery entries —
-    # the moment the reader is in the discovery-first world.
+    # Preserve the bare-library hint; populated recipes remain optional reuse.
     hinted = "workflow run from=<name> replays one; workflow save graph=... shelves a new one"
     if any(("id" in r) for r in rows):
-        hinted += "; a hand-rolled graph the library doesn't cover: workflow submit with why_not_library"
+        hinted += "; one-off graphs can run directly without saving or submitting"
     # #70: tag_vocab is the WHOLE-library {tag: count} — it rides every response once
     # the library carries tags (golden-bytes law: nothing to teach, nothing echoed).
     # The anti-drift loop: the agent sees the live taxonomy on the list call it
@@ -2359,13 +2357,8 @@ _card_enforcement.bind(_common, _card)
 
 
 def _lifecycle_notice(rid):
-    """#157 (belt): the paste contract as a RESULT FIELD, not only hint prose.
-    A hint the model skims past is how a perfectly running workflow goes
-    invisible; this compact field keeps the exact directive line plus a
-    one-line reminder prompt-visible in every run launch payload. The hint
-    stays the copy-exact inducement; this is the suspenders beside it."""
-    return (f'{_card(rid)} — the desktop card renders from this line; '
-            'paste it standalone in your reply')
+    """Optional presentation, never an execution or reply prerequisite."""
+    return f'{_card(rid)} — optional desktop card; plain text and run_id also work'
 
 _RUN_REF = re.compile(r"\{run\.([^{}]*)\}")
 _RUN_KEY = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
@@ -2757,23 +2750,16 @@ def act_inbox(args):
                     "human-gated loop; consume off-box, door never auto-joins"}
 
 def _from_unknown_error(name):
-    """#50: the nudge IS the error text. `run from=<unknown>` names up to 3 closest
-    library entries (difflib over ALL listed names, general/ included — the same
-    walk `library` answers with, so the two never disagree) and points a genuinely
-    uncovered hand-rolled graph at `workflow submit` with the why-not-library
-    receipt. Fail-open on the fuzz itself: a nameless library still nudges toward
-    submit; the list is a courtesy, the contract is the error."""
+    """Name the missing recipe and optional alternatives without curation duties.
+    Closest names come from the same library walk used by explicit discovery."""
     rows, _skipped, _quarantined = _library_rows()
     names = [r["name"] for r in rows]
     closest = difflib.get_close_matches(str(name or ""), names, n=3)
     err = (f"no library graph named {name!r}"
            + (f"; closest: {', '.join(closest)}" if closest else
               ("; the library is empty" if not names else "")))
-    out = {"error": err + ". hand-rolled? workflow submit with why_not_library "
-                          "(the graph is quarantined for study, never auto-saved)",
-           "closest": closest}
-    if names:
-        out["hint"] = "workflow library lists every entry with description+tags"
+    out = {"error": err, "error_class": "library_not_found", "closest": closest,
+           "hint": "workflow library lists recipes; run with graph or graph_path launches a one-off without saving"}
     return out
 
 def act_run(args):
@@ -2923,8 +2909,7 @@ def act_run(args):
                             "state": incumbent["state"], "runner_live": incumbent["runner_live"],
                             "needs_resume": incumbent["needs_resume"],
                             "last_event_ts": incumbent["last_event_ts"],
-                            # #157 belt: a dedupe still owes the paste — the
-                            # incumbent run's card is the visible artifact.
+                            # Keep the incumbent's optional card presentation.
                             "lifecycle_notice": _lifecycle_notice(incumbent["run_id"]),
                             "hint": f"wait run_id={incumbent['run_id']} resumes it"}
             return _create_run(args, graph, lib_name, models, routes, _liveness_notes, path,
@@ -3110,15 +3095,8 @@ def _create_run(args, graph, lib_name, models, routes, _liveness_notes, lane_pat
             "no run was durably created (check the launch path's root resolution, "
             "esp. a stub/non-registering door carrying settings.runs_root)")
     out = {"run_id": rid, "models": models, "routes": routes, "hint":
-            # Copy-exact inducement (papercut #70): the hint IS the paste line —
-            # no paraphrase, no fallback. The card is agent-authored by ruling.
-            # The liveness suffix rides BEHIND the paste line (prefix stays copy-exact).
-            # The plain-text clause rides BEHIND the card (field case 2026-10-02: agents
-            # "paste" by code-blocking, and markdown eats a fenced directive — the card
-            # renders only as bare prose; quoting the syntax in code stays legitimate).
-            f'PASTE this line alone in your reply, then call wait: {_card(rid)}'
-            ' — plain prose only: never wrap the card in backticks or a code fence'
-            ' (a code-blocked directive renders as dead text, not a card)'
+            'Run accepted. Use wait for blocking observation; it may resume interrupted work. '
+            'Push delivery and desktop cards are optional.'
             + _liveness_hint_suffix(_liveness_notes),
             "card": _card(rid), "lifecycle_notice": _lifecycle_notice(rid)}
     if include_notes:
@@ -3191,15 +3169,16 @@ def act_status(args):
                                                                      # #133: the wall meter rides identically —
                                                                      # {elapsed_s, wall_s, p95_s, meter}, absent
                                                                      # when nothing grounds it
-                                                                     "progress", "wall") if kk in v}
+                                                                     "progress", "wall", "clocks", "item_counts") if kk in v}
                                            for k, v in st["nodes"].items()},
            "done": st["done"], "skipped": st["skipped"], "total": st["total"],
-           # O1: the card to paste into the report rides on EVERY status (and via
-           # act_wait, every wait) — the inducement never depends on the agent recalling it.
+           # Optional desktop presentation; plain status remains sufficient.
            "card": _card(st["run_id"]),
            # #19: the graph head rides EVERY status read (derived, never stored —
            # status is where a CAS caller reads the token before a guarded write).
            "graph_revision": _graph_revision(r)}
+    if "accounting" in st:
+        out["accounting"] = st["accounting"]
     if resolved_via:   # #58: the run lives outside the caller's resolved root — loud, not silent
         out["resolved_via"] = resolved_via
         out["resolved_via_note"] = ("run resolved under a sibling root (dispatch-time home "
@@ -3627,9 +3606,9 @@ def act_release(args):
                               .get("status") in ("done", "skipped")))
     if mode == "respawned":
         res["auto_resumed"] = True
-        hint = "runner respawned; the next transition wakes the owner automatically"
+        hint = "runner respawned; push delivery is optional, use wait for blocking observation"
     else:
-        hint = "answer recorded; the live runner commits it at its boundary and the next transition wakes the owner automatically"
+        hint = "answer recorded; the live runner commits it at its boundary; push delivery is optional, use wait for blocking observation"
     return {**res, "hint": hint}
 
 def act_steer(args):
@@ -3898,10 +3877,10 @@ def act_amend(args):
     if mode == "respawned":
         applies = "runner respawned; efp replay-skip re-runs changed nodes and everything downstream"
     else:
-        applies = "live runner hot-reloads at its next wave boundary; the next transition wakes the owner automatically"
+        applies = "live runner hot-reloads at its next wave boundary; push delivery is optional"
     return {"ok": True, "models": _models, "routes": _routes, "applies": applies,
             "graph_revision": _new_rev,   # #19: the new head — the token a next CAS writes against
-            "hint": "continuation is automatic; do not wait or poll" + _liveness_hint_suffix(_liveness_notes), **preview}
+            "hint": "continuation is automatic; wait blocks to a boundary and may resume an interrupted runner" + _liveness_hint_suffix(_liveness_notes), **preview}
 
 def act_stop(args):
     r = run_dir(args.get("run_id"))
@@ -4058,7 +4037,7 @@ def _wf_command(raw_args):
             f"Agent: call `workflow{{action:\"run\", from:\"{replay_name}\""
             + (f", run_context:{json.dumps(note)}" if note else "")
             + "}`"
-            + ", emit `::workflow{id=\"<run_id>\"}` on its own line, then `wait` and answer gates via clarify.")
+            + "; then `wait` and answer human gates only with the human's decision. Cards are optional.")
 
 def register(ctx):
     global _CTX

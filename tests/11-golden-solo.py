@@ -48,6 +48,13 @@ SANCTIONED_ENV_DELTA = {'HERMES_WF_RUN_DIR',                        # F1; exclud
 
 def normalize(value, paths):
     if isinstance(value, dict):
+        # P02 adds read-only telemetry; persisted files remain in the golden.
+        # Behavior/unknown/accounting contracts live in test_execution_clocks_p02.
+        if 'runner_live' in value and isinstance(value.get('nodes'), dict):
+            value = {k: v for k, v in value.items() if k != 'accounting'}
+            value['nodes'] = {nid: {k: v for k, v in row.items()
+                                    if k not in ('clocks', 'item_counts')}
+                              for nid, row in value['nodes'].items()}
         if 'env_keys' in value and 'argv' in value:   # spawn trace record
             value = dict(value, env_keys=[k for k in value['env_keys']
                                           if (k in RUNNER_ENV_CORE or k.startswith('HERMES_WF_'))

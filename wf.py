@@ -448,24 +448,17 @@ def _wake_safe(value):
 # break out of the field or read as instruction prose) — exactly what makes a wake
 # actionable: inspect status/gates once, act, stop, never poll.
 _WAKE_TEMPLATES = {
-    "gate.held": "Your workflow run is HELD at a human gate and needs your answer. "
-                 "Inspect its status or gates view once, relay the gate's question and "
-                 "options verbatim to the human (clarify) and NEVER choose an option "
-                 "yourself, then answer with ONE workflow release action carrying the "
-                 "human's decision and stop. The run resumes on its own.",
-    "run.failed": "Your workflow run FAILED. Inspect its status once (failed nodes, "
-                  "exit records and error details are there), apply ONE corrective "
-                  "amend/repair/resume action, then stop. Do not poll or wait: the "
-                  "next transition — including completion — wakes this session.",
-    "run.done": "Your workflow run is DONE. summary.md is written; status shows the "
-                "node outputs. Read it once and CLOSE THE LOOP: the run's outputs are "
-                "inputs, not the deliverable. If the run was a triage/discovery stage, "
-                "every finding it confirmed must land in tracked work (file or claim "
-                "the tracked work item) and its execution leg must be dispatched or "
-                "completed before this turn ends — a done run whose findings produce "
-                "no action is a FAILED run. Land execution legs as PRs through the "
-                "review lane — never push commits directly to main. Do not poll or "
-                "wait: nothing further is being awaited.",
+    "gate.held": "The workflow is HELD at a human gate. Status contains the question "
+                 "and options; release requires the human's decision. This notification "
+                 "does not authorize choosing an answer or additional work.",
+    "run.failed": "The workflow execution FAILED. Status contains failed nodes, exit "
+                  "records and original error details. This notification does not authorize "
+                  "repair, resume or a new launch. Push delivery is optional; wait is the "
+                  "blocking path and may resume an interrupted run.",
+    "run.done": "The workflow execution is DONE. Status contains node outputs; summary.md "
+                "contains the run summary. Execution completion is not verification of the "
+                "user's task and does not authorize additional work. Research-only work "
+                "can end with its report; no dispatch, publication or curation is required.",
 }
 
 def _wake_owner_text(run_id, event):

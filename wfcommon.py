@@ -3845,6 +3845,66 @@ def _wall_meter(n, active, extends):
     return {"elapsed_s": elapsed, "wall_s": wall_s, "p95_s": p95,
             "meter": "over-p95" if over else "near-wall" if near else "on-track"}
 
+def execution_clocks(n, view, waits, now_s, ledger=()):
+    """Read-only clocks; queue callback time is later than admission-clock start.
+
+    Consequently its remaining value is an upper bound, never a dispatch ETA.
+    The runner has per-attempt walls, not a task-total authorization ceiling.
+    """
+    wall = n.get("timeout")
+    queue = []
+    for index, row in waits.items():
+        start = _iso_epoch(row.get("since"))
+        elapsed = max(0, now_s - start) if start is not None else None
+        remaining = (max(0, wall - elapsed) if elapsed is not None
+                     and isinstance(wall, (int, float)) and not isinstance(wall, bool) else None)
+        queue.append({"index": index, "elapsed_s": elapsed,
+                      "configured_timeout_s": wall,
+                      "remaining_upper_bound_s": remaining})
+    active = []
+    live_keys = set()
+    for sp in view.get("active_spawns", []):
+        start = _iso_epoch(sp.get("started"))
+        elapsed = max(0, now_s - start) if start is not None else None
+        live_keys.add((sp.get("pid"), sp.get("skey")))
+        active.append({"index": sp.get("index"), "elapsed_s": elapsed,
+                       "configured_remaining_s": max(0, wall - elapsed)
+                       if elapsed is not None and isinstance(wall, (int, float)) else None,
+                       "effective_remaining_s": None})
+    # Each child/child_end pair is one attempt, not a node-start-to-now timer.
+    # Unclosed non-live attempts are unknown, never extended to the present.
+    pending, observed, attempts, seen = {}, 0, 0, set()
+    for row in ledger:
+        if row.get("node") != n["id"]:
+            continue
+        if type(row.get("pid")) is not int or not isinstance(row.get("skey"), str):
+            continue
+        key = (row["pid"], row["skey"])
+        stamp = _iso_epoch(row.get("ts"))
+        if stamp is None:
+            continue
+        if row.get("role") == "child":
+            identity = (key, stamp)
+            if identity in seen:
+                continue
+            seen.add(identity)
+            pending[key] = stamp
+            attempts += 1
+        elif row.get("role") == "child_end" and key in pending:
+            observed += max(0, stamp - pending.pop(key))
+    unknown = 0
+    for key, start in pending.items():
+        if key in live_keys:
+            observed += max(0, now_s - start)
+        else:
+            unknown += 1
+    return {"phase": "active" if active else "queued" if queue else view["status"],
+            "queue": queue, "active": active,
+            "work": {"observed_s": observed, "attempts_observed": attempts, "coverage": "best_effort",
+                     "unknown_intervals": unknown, "basis": "spawn-ledger intervals; cumulative across attempts"},
+            "task_total_ceiling": "not_enforced"}
+
+
 def run_state(r):
     """Derived truth of a run dir: status, per-node status, held gate meta.
     status: pending|running|interrupted|held|done|failed|stopped.
@@ -3990,7 +4050,62 @@ def run_state(r):
     failed_nodes = [{"id": n["id"], "error": (recs[n["id"]] or {}).get("error"),
                      "error_class": (recs[n["id"]] or {}).get("error_class")}
                     for n in graph["nodes"] if states[n["id"]] == "failed"]
-    return {"run_id": r.name, "name": graph.get("name"), "status": status,
+    import time as _time
+    waits = open_seat_waits(r, events_text) if live else {}
+    ledger = []
+    try:
+        for line in (r / "spawn-ledger.jsonl").read_text().splitlines():
+            try:
+                row = json.loads(line)
+                if isinstance(row, dict):
+                    ledger.append(row)
+            except ValueError:
+                continue
+    except (OSError, UnicodeError):
+        pass
+    for n in graph["nodes"]:
+        nid = n["id"]
+        clock = execution_clocks(
+            n, nodes[nid], waits.get(nid, {}) if states[nid] == "pending" else {}, _time.time(), ledger)
+        rec = recs[nid] or {}
+        if status == "stopped" and clock["phase"] in ("pending", "queued"):
+            clock["phase"] = "stopped"
+        if states[nid] in ("failed", "partial") and rec.get("error_class") in ("seat_wait", "timeout", "cap_exhausted"):
+            clock["phase"] = "expired"
+            clock["exhaustion_reason"] = {"seat_wait": "queue_timeout", "timeout": "work_timeout",
+                                          "cap_exhausted": "turn_cap"}[rec["error_class"]]
+            if rec.get("error_class") == "seat_wait":
+                clock["queue_elapsed_s"] = rec["ms"] / 1000 if isinstance(rec.get("ms"), (int, float)) else None
+        if held and held.get("id") == nid:
+            hm = jload(r / "gates" / f"{nid}.held.json", {}) or {}
+            since = hm.get("since") if record_efp_valid(hm, byid, n, "_def") else None
+            elapsed = max(0, _time.time() - since) if isinstance(since, (int, float)) else None
+            timeout = n.get("hold_timeout")
+            remaining = max(0, timeout - elapsed) if isinstance(timeout, (int, float)) and elapsed is not None else None
+            clock["phase"] = "held"
+            clock["hold"] = {"elapsed_s": elapsed, "remaining_s": remaining,
+                             "ceiling": "configured" if timeout is not None else "unbounded",
+                             "expired": remaining == 0 if remaining is not None else None,
+                             "expiry_action": "default_option" if n.get("default_option") else "keep_holding"}
+        nodes[nid]["clocks"] = clock
+        fanout = n.get("fanout")
+        if fanout:
+            items = fanout.get("items")
+            counts = {"basis": "literal fanout items" if isinstance(items, list) else "dynamic items unknown",
+                      "total": len(items) if isinstance(items, list) else None,
+                      **{key: 0 for key in ("done", "partial", "failed", "cancelled", "unknown")}}
+            for index in range(len(items)) if isinstance(items, list) else ():
+                item = jload(r / "nodes" / f"{nid}.{index}.json", {}) or {}
+                state = item.get("status") if record_efp_valid(item, byid, n) else None
+                if state == "failed" and item.get("error_class") == "cancelled":
+                    state = "cancelled"
+                counts[state if state in ("done", "partial", "failed", "cancelled") else "unknown"] += 1
+            nodes[nid]["item_counts"] = counts
+    accounting = {"task_total_ceiling": "not_enforced",
+                  "basis": "observed child-seconds; sum across nodes, items and attempts, not elapsed wall time",
+                  "observed_work_s": sum(v["clocks"]["work"]["observed_s"] for v in nodes.values()),
+                  "unknown_intervals": sum(v["clocks"]["work"]["unknown_intervals"] for v in nodes.values())}
+    return {"run_id": r.name, "name": graph.get("name"), "status": status, "accounting": accounting,
             "failed_nodes": failed_nodes,
             "held_gate": held, "nodes": nodes, "graph": stored_graph,
             # 91b9a3de companion: publish the ONE liveness read this state was

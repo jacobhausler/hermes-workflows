@@ -98,7 +98,8 @@ workflow { "action": "stop",   "run_id": "<id>" }         → terminal, not roll
 
 `wait` blocks while a verified runner is live and self-yields ~330 s with a
 "call wait again" note to stay under the harness tool deadline. **Stay in the loop.**
-Ending your turn after `run` is the single most common way a workflow stalls.
+Push delivery is best-effort, not guaranteed. `wait` can resume an interrupted run;
+`status` is read-only. Completion grants no new authority, and cards/curation are optional.
 
 ### 3b. Minimal graph
 
@@ -376,10 +377,10 @@ publication guards, and crash recovery.
   `dry_run:true` previews `{added, removed, changed, will_rerun, unchanged}`.
   Amending a `pending` node changes what spawns next; amending a `done` node
   invalidates it.
-- To lint a graph before launching it: `run` with `dry_run:true` performs static
-  validation, binding, profile/model-policy checks and model resolution, then
-  returns `{ok, dry_run, models, routes}` writing NOTHING — no run dir, no lane
-  entry, no runner. It does not ping providers, inspect quota or enforce live routes.
+- For a static preview without provider pings, use `validate`. `run` with
+  `dry_run:true` also performs route liveness pings, quota checks and live-route
+  enforcement, but creates no run directory, lane entry or runner. It returns
+  `{ok, dry_run, models, routes}`; it is not an offline validation substitute.
 - To resume a lane that died at its wall with work already banked: amend its `goal`
   to a *resume* prompt that names what is already committed and forbids redoing it.
   Cold re-runs of a timed-out research lane time out again.
