@@ -3845,7 +3845,39 @@ def _wall_meter(n, active, extends):
     return {"elapsed_s": elapsed, "wall_s": wall_s, "p95_s": p95,
             "meter": "over-p95" if over else "near-wall" if near else "on-track"}
 
-def execution_clocks(n, view, waits, now_s, ledger=()):
+# Telemetry is a bounded prefix, not an authorization or a complete audit.
+CLOCK_LEDGER_MAX_BYTES = 4 * 1024 * 1024
+
+
+def _clock_ledger(r, node_ids):
+    """One bounded snapshot/index per state read; partial coverage stays explicit."""
+    indexed = {nid: [] for nid in node_ids}
+    coverage = {"status": "unavailable", "bytes_read": 0,
+                "max_bytes": CLOCK_LEDGER_MAX_BYTES, "scope": "current nodes; prefix"}
+    try:
+        with (r / "spawn-ledger.jsonl").open("rb") as stream:
+            data = stream.read(CLOCK_LEDGER_MAX_BYTES)
+            partial = stream.tell() < os.fstat(stream.fileno()).st_size
+        coverage.update(status="partial" if partial else "read", bytes_read=len(data))
+        if partial:
+            data = data[:data.rfind(b"\n") + 1]
+        for line in data.splitlines():
+            try:
+                row = json.loads(line)
+                if not isinstance(row, dict):
+                    coverage["status"] = "partial"
+                    continue
+                nid = row.get("node")
+                if isinstance(nid, str) and nid in indexed:
+                    indexed[nid].append(row)
+            except (ValueError, UnicodeError):
+                coverage["status"] = "partial"
+    except (OSError, UnicodeError):
+        pass
+    return indexed, coverage
+
+
+def execution_clocks(n, view, waits, now_s, ledger=(), ledger_available=True):
     """Read-only clocks; queue callback time is later than admission-clock start.
 
     Consequently its remaining value is an upper bound, never a dispatch ETA.
@@ -3874,6 +3906,7 @@ def execution_clocks(n, view, waits, now_s, ledger=()):
     # Each child/child_end pair is one attempt, not a node-start-to-now timer.
     # Unclosed non-live attempts are unknown, never extended to the present.
     pending, observed, attempts, seen = {}, 0, 0, set()
+    unknown = 0
     for row in ledger:
         if row.get("node") != n["id"]:
             continue
@@ -3888,11 +3921,16 @@ def execution_clocks(n, view, waits, now_s, ledger=()):
             if identity in seen:
                 continue
             seen.add(identity)
+            if key in pending:
+                unknown += 1
             pending[key] = stamp
             attempts += 1
-        elif row.get("role") == "child_end" and key in pending:
-            observed += max(0, stamp - pending.pop(key))
-    unknown = 0
+        elif row.get("role") == "child_end":
+            if key in pending:
+                observed += max(0, stamp - pending.pop(key))
+            else:
+                unknown += 1
+    unknown += len(live_keys - pending.keys())
     for key, start in pending.items():
         if key in live_keys:
             observed += max(0, now_s - start)
@@ -3901,11 +3939,13 @@ def execution_clocks(n, view, waits, now_s, ledger=()):
     return {"phase": "active" if active else "queued" if queue else view["status"],
             "queue": queue, "active": active,
             "work": {"observed_s": observed, "attempts_observed": attempts, "coverage": "best_effort",
-                     "unknown_intervals": unknown, "basis": "spawn-ledger intervals; cumulative across attempts"},
+                     "unknown_intervals": unknown if ledger_available or unknown else None,
+                     "completeness": "unknown", "lower_bound": True,
+                     "basis": "spawn-ledger intervals; cumulative across attempts"},
             "task_total_ceiling": "not_enforced"}
 
 
-def run_state(r):
+def run_state(r, *, telemetry=True):
     """Derived truth of a run dir: status, per-node status, held gate meta.
     status: pending|running|interrupted|held|done|failed|stopped.
     'interrupted' has unfinished work but NO verified runner; only wait/release/amend
@@ -4051,62 +4091,67 @@ def run_state(r):
     failed_nodes = [{"id": n["id"], "error": (recs[n["id"]] or {}).get("error"),
                      "error_class": (recs[n["id"]] or {}).get("error_class")}
                     for n in graph["nodes"] if states[n["id"]] == "failed"]
-    import time as _time
-    clock_now = _time.time()
-    ledger = []
-    try:
-        for line in (r / "spawn-ledger.jsonl").read_text().splitlines():
-            try:
-                row = json.loads(line)
-                if isinstance(row, dict):
-                    ledger.append(row)
-            except ValueError:
-                continue
-    except (OSError, UnicodeError):
-        pass
-    for n in graph["nodes"]:
-        nid = n["id"]
-        clock = execution_clocks(
-            n, nodes[nid], waits.get(nid, {}) if states[nid] == "pending" else {}, clock_now, ledger)
-        rec = recs[nid] or {}
-        if status == "stopped" and clock["phase"] in ("pending", "queued"):
-            clock["phase"] = "stopped"
-        if states[nid] in ("failed", "partial") and rec.get("error_class") in ("seat_wait", "timeout", "cap_exhausted"):
-            clock["phase"] = "expired"
-            clock["exhaustion_reason"] = {"seat_wait": "queue_timeout", "timeout": "work_timeout",
-                                          "cap_exhausted": "turn_cap"}[rec["error_class"]]
-            if rec.get("error_class") == "seat_wait":
-                clock["queue_elapsed_s"] = rec["ms"] / 1000 if isinstance(rec.get("ms"), (int, float)) else None
-        if held and held.get("id") == nid:
-            hm = jload(r / "gates" / f"{nid}.held.json", {}) or {}
-            since = hm.get("since") if record_efp_valid(hm, byid, n, "_def") else None
-            elapsed = max(0, clock_now - since) if isinstance(since, (int, float)) else None
-            timeout = n.get("hold_timeout")
-            remaining = max(0, timeout - elapsed) if isinstance(timeout, (int, float)) and elapsed is not None else None
-            clock["phase"] = "held"
-            clock["hold"] = {"elapsed_s": elapsed, "remaining_s": remaining,
-                             "ceiling": "configured" if timeout is not None else "unbounded",
-                             "expired": remaining == 0 if remaining is not None else None,
-                             "expiry_action": "default_option" if n.get("default_option") else "keep_holding"}
-        nodes[nid]["clocks"] = clock
-        fanout = n.get("fanout")
-        if fanout:
-            items = fanout.get("items")
-            counts = {"basis": "literal fanout items" if isinstance(items, list) else "dynamic items unknown",
-                      "total": len(items) if isinstance(items, list) else None,
-                      **{key: 0 if isinstance(items, list) else None
-                         for key in ("done", "partial", "failed", "cancelled", "unknown")}}
-            for index in range(len(items)) if isinstance(items, list) else ():
-                item = jload(r / "nodes" / f"{nid}.{index}.json", {}) or {}
-                state = item.get("status") if record_efp_valid(item, byid, n) else None
-                if state == "failed" and item.get("error_class") == "cancelled":
-                    state = "cancelled"
-                counts[state if state in ("done", "partial", "failed", "cancelled") else "unknown"] += 1
-            nodes[nid]["item_counts"] = counts
-    accounting = {"task_total_ceiling": "not_enforced",
-                  "basis": "observed child-seconds; sum across nodes, items and attempts, not elapsed wall time",
-                  "observed_work_s": sum(v["clocks"]["work"]["observed_s"] for v in nodes.values()),
-                  "unknown_intervals": sum(v["clocks"]["work"]["unknown_intervals"] for v in nodes.values())}
+    accounting = {}
+    if telemetry:
+        import time as _time
+        clock_now = _time.time()
+        ledger, ledger_coverage = _clock_ledger(r, nodes)
+        ledger_available = ledger_coverage["status"] == "read"
+        for n in graph["nodes"]:
+            nid = n["id"]
+            clock = execution_clocks(
+                n, nodes[nid], waits.get(nid, {}) if states[nid] == "pending" else {}, clock_now, ledger[nid], ledger_available)
+            rec = recs[nid] or {}
+            if status == "stopped" and clock["phase"] in ("pending", "queued"):
+                clock["phase"] = "stopped"
+            if states[nid] in ("failed", "partial") and rec.get("error_class") in ("seat_wait", "timeout", "cap_exhausted"):
+                clock["phase"] = "expired"
+                clock["exhaustion_reason"] = {"seat_wait": "queue_timeout", "timeout": "work_timeout",
+                                              "cap_exhausted": "turn_cap"}[rec["error_class"]]
+                if rec.get("error_class") == "seat_wait":
+                    clock["queue_elapsed_s"] = rec["ms"] / 1000 if isinstance(rec.get("ms"), (int, float)) else None
+            if held and held.get("id") == nid:
+                hm = jload(r / "gates" / f"{nid}.held.json", {}) or {}
+                since = hm.get("since") if record_efp_valid(hm, byid, n, "_def") else None
+                elapsed = max(0, clock_now - since) if isinstance(since, (int, float)) else None
+                timeout = n.get("hold_timeout")
+                remaining = max(0, timeout - elapsed) if isinstance(timeout, (int, float)) and elapsed is not None else None
+                clock["phase"] = "held"
+                clock["hold"] = {"elapsed_s": elapsed, "remaining_s": remaining,
+                                 "ceiling": "configured" if timeout is not None else "unbounded",
+                                 "expired": remaining == 0 if remaining is not None else None,
+                                 "expiry_action": "default_option" if n.get("default_option") else "keep_holding"}
+            nodes[nid]["clocks"] = clock
+            fanout = n.get("fanout")
+            if fanout:
+                items = fanout.get("items")
+                counts = {"basis": "literal fanout items" if isinstance(items, list) else "dynamic items unknown",
+                          "total": len(items) if isinstance(items, list) else None,
+                          **{key: 0 if isinstance(items, list) else None
+                             for key in ("done", "partial", "failed", "cancelled", "unknown")}}
+                for index in range(len(items)) if isinstance(items, list) else ():
+                    item = jload(r / "nodes" / f"{nid}.{index}.json", {}) or {}
+                    state = item.get("status") if record_efp_valid(item, byid, n) else None
+                    if state in ("failed", "partial") and item.get("error_class") in ("seat_wait", "timeout", "cap_exhausted"):
+                        reason = {"seat_wait": "queue_timeout", "timeout": "work_timeout", "cap_exhausted": "turn_cap"}[item["error_class"]]
+                        group = clock.setdefault("item_expirations", {}).setdefault(reason, {"count": 0})
+                        group["count"] += 1
+                        if reason == "queue_timeout":
+                            ms = item.get("ms")
+                            if isinstance(ms, (int, float)) and not isinstance(ms, bool) and ms >= 0:
+                                group["observed_queue_s"] = group.get("observed_queue_s", 0) + ms / 1000
+                            else:
+                                group["unknown_durations"] = group.get("unknown_durations", 0) + 1
+                    if state == "failed" and item.get("error_class") == "cancelled":
+                        state = "cancelled"
+                    counts[state if state in ("done", "partial", "failed", "cancelled") else "unknown"] += 1
+                nodes[nid]["item_counts"] = counts
+        unknown_counts = [v["clocks"]["work"]["unknown_intervals"] for v in nodes.values()]
+        accounting = {"task_total_ceiling": "not_enforced", "coverage": "best_effort",
+                      "completeness": "unknown", "lower_bound": True, "ledger": ledger_coverage,
+                      "basis": "observed child-seconds; sum across nodes, items and attempts, not elapsed wall time",
+                      "observed_work_s": sum(v["clocks"]["work"]["observed_s"] for v in nodes.values()),
+                      "unknown_intervals": sum(unknown_counts) if all(x is not None for x in unknown_counts) else None}
     return {"run_id": r.name, "name": graph.get("name"), "status": status, "accounting": accounting,
             "failed_nodes": failed_nodes,
             "held_gate": held, "nodes": nodes, "graph": stored_graph,

@@ -1,6 +1,6 @@
 # Run operations and read model
 
-Use `workflow{action:"run", graph:<object>}` (or `from:<saved-name>`, or `graph_path:<absolute-local-JSON-file>`), then `status` and `wait` with the returned `run_id`. For a reusable graph, `save` first and `run from:<name>` next; `library` lists it richly (name, description, tags, provenance, path-relative id). Optional study-only `submit` takes `why_not_library` (>=80 chars); ordinary one-off execution needs no lookup, tags, save or submission — it quarantines under `runs_root()/inbox`, never the library; `inbox` lists submissions newest-first for a human-gated promotion review. `graph_path` is for an unsaved caller-authorized local file on run/save/amend, not a remote path. `/wf` is an optional library front end.
+Use `workflow{action:"run", graph:<object>}` (or `from:<saved-name>`, or `graph_path:<absolute-local-JSON-file>`), then `status` and `wait` with the returned `run_id`. For a reusable graph, `save` first and `run from:<name>` next; `library` lists it richly (name, description, tags, provenance, path-relative id). Optional study-only `submit` takes `why_not_library` (>=80 chars) and quarantines the submission under `runs_root()/inbox`, never the library; `inbox` lists submissions newest-first for a human-gated promotion review. Ordinary one-off `run` executes without lookup, tags, save or submission. `graph_path` is for an unsaved caller-authorized local file on run/save/amend, not a remote path. `/wf` is an optional library front end.
 
 A run may be running, held, interrupted, done, failed or stopped. Running requires a live process with the exact runner command and run identity; a persisted PID or parked marker is not sufficient. Held gates and interrupted runs do not count as running. List responses include full-census `counts` and `total` even when the recent-runs page is truncated. `interrupted` means unfinished work with no live runner: inspect saved outputs and uncertain side effects before explicitly resuming with `wait`. A recorded fatal runner crash is `failed` and needs correction/amend rather than repeated wait/respawn. Every `status`/`wait` payload carries the derived `next` — do what it says and `wait` again until it is empty; alongside it rides the derived `failed_nodes` (`[{id, error, error_class}]`) — WHICH nodes died, derived from the same efp-valid committed states the status verdict used, never stored; a crash verdict with no failed node reads `[]` (honest absence: the runner died, not a node) (`wait` self-yields with a "call wait again" note before a terminal state to stay inside the host deadline). On a held gate `next` names the gate and its options: ask the owner, then `release` with the exact answer. A machine gate may park without a child; read its check attempt, last exit/tail and deadline.
 
@@ -33,15 +33,26 @@ Desktop cards use `::workflow{id="<run_id>"}` and are optional presentation. Pla
   configured timeout and `remaining_upper_bound_s`. The event follows admission-clock
   start, so this is an upper bound, not an exact deadline or dispatch ETA.
   A `seat_wait` death reports `exhaustion_reason: queue_timeout`; its `ms` is queue
-  duration, not child work. The existing runner gives queue and spawn separate walls.
+  duration, not child work. Fingerprint-valid literal fan-out item records also
+  supply grouped `item_expirations` reason counts and observed queue-seconds
+  (unknown duration counts when needed), without relabeling a mixed node as
+  expired. Stale items are excluded; dynamic inventory remains unknown.
+  The existing runner gives queue and spawn separate walls.
 - `active[]` starts only from verified spawns. `configured_remaining_s` subtracts
   elapsed time from the baked timeout, not from an invented task-total budget.
   `effective_remaining_s` is null: credential parks and extensions can alter the
   enforced attempt deadline, which the existing records do not fully expose.
 - `work` sums observed child/child_end ledger intervals across attempts. Open
   intervals count through now only for verified live children; others increment
-  `unknown_intervals`. `coverage: best_effort` is deliberate: missing ledger rows
-  cannot prove zero actual work. These are child-seconds, not elapsed wall time.
+  `unknown_intervals`; orphan ends and verified active children without starts
+  also count as known gaps. An unavailable/partial ledger with no countable gaps
+  reports null, not zero. Counts describe known gaps, never prove completeness.
+  Node and run accounting explicitly retain `coverage: best_effort`,
+  `completeness: unknown` and `lower_bound: true`. These are child-seconds,
+  not elapsed wall time; missing evidence cannot prove zero actual work.
+  Each read indexes a single prefix of at most 4 MiB, with `accounting.ledger`
+  reporting bytes, budget and read/partial/unavailable status. Partial lines are
+  excluded. Ordinary list/census projections skip telemetry they do not return.
 - `hold` uses the fingerprint-valid held marker. Missing starts remain unknown.
   No `hold_timeout` means `unbounded`. An expired timeout without `default_option`
   **keeps holding**; expiration is not cancellation, release or an answer.

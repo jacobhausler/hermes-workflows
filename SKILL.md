@@ -18,9 +18,10 @@ Use the `workflow` tool when a task needs independent lanes, a human gate, or a
 resumable graph; for one or two independent calls, delegate instead. The authoring
 agent owns the graph and its side effects; the dashboard is a reader, not an executor.
 
-The registered tool ID is `workflow` (toolset `workflows`). If deferred, use the
-host discovery catalog and describe/call its exact returned ID. If absent, report
-that fact; do not guess aliases, launch a replacement or mutate configuration.
+The registered tool ID is `workflow` (toolset `workflows`). If the host exposes a
+searchable deferred catalog, describe/call its exact returned ID. If no available
+entry or discovery capability exists, report that boundary; do not guess aliases,
+launch a replacement or mutate configuration.
 
 ## Smallest working graph
 

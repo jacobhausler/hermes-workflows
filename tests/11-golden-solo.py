@@ -46,8 +46,53 @@ RUNNER_ENV_CORE = {'HERMES_HOME', 'HERMES_QUIET_TURN_REPORT_FILE', 'HERMES_WRITE
 SANCTIONED_ENV_DELTA = {'HERMES_WF_RUN_DIR',                        # F1; excluded both sides, counted under F1(1)
                         'HERMES_WF_PROCTREE_SIDECAR', 'HERMES_WF_PROCTREE_SPAWN'}  # #61c; excluded both sides
 
+def normalize_fanout_starts(rows):
+    """Only commute empty first bakes with independent same-node item starts.
+
+    wf.py's one() logs item.started in worker threads before run_child bakes
+    that worker's steer. ex.map supplies no cross-worker ordering: item 0 can
+    bake before item 1 starts. Empty spawn_no=0 bakes carry no steering payload
+    or item identity. Preserve every row, and never cross a finish, nonempty
+    bake, retry bake, other node, or a bake preceding the first start.
+    """
+    result = []
+    i = 0
+    while i < len(rows):
+        first = rows[i]
+        if first.get('event') != 'item.started':
+            result.append(first)
+            i += 1
+            continue
+        j = i
+        while j < len(rows):
+            row = rows[j]
+            if row.get('node') != first.get('node') or not (
+                row.get('event') == 'item.started' or
+                (row.get('event') == 'steer.baked' and row.get('spawn_no') == 0
+                 and row.get('n_lines') == 0)):
+                break
+            j += 1
+        batch = rows[i:j]
+        balance = 0
+        causal = True
+        for row in batch:
+            balance += 1 if row['event'] == 'item.started' else -1
+            causal = causal and balance >= 0
+        if not causal:
+            result.extend(batch)  # never hide a bake with no preceding start
+            i = j
+            continue
+        result.extend(sorted((r for r in batch if r['event'] == 'item.started'),
+                             key=lambda r: r.get('index', -1)))
+        result.extend(r for r in batch if r['event'] == 'steer.baked')
+        i = j
+    return result
+
+
 def normalize(value, paths):
     if isinstance(value, dict):
+        if isinstance(value.get('events.jsonl'), list):
+            value = dict(value, **{'events.jsonl': normalize_fanout_starts(value['events.jsonl'])})
         # P02 adds read-only telemetry; persisted files remain in the golden.
         # Behavior/unknown/accounting contracts live in test_execution_clocks_p02.
         if 'runner_live' in value and isinstance(value.get('nodes'), dict):

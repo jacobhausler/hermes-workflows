@@ -1388,5 +1388,15 @@
   "test": "test_on_exit_129.py",
   "exit": 0,
   "log": "local-foreground/test_on_exit_129.py.log"
+ },
+ {
+  "test": "test_agent_experience_p01.py",
+  "exit": 0,
+  "log": "linux-candidate-r2/ci-out/test_agent_experience_p01.py.log"
+ },
+ {
+  "test": "test_execution_clocks_p02.py",
+  "exit": 0,
+  "log": "linux-candidate-r2/ci-out/test_execution_clocks_p02.py.log"
  }
 ]

@@ -291,11 +291,23 @@
    "exit": 0,
    "measured": "2026-10-11 foreground python3 -m pytest tests/test_on_exit_129.py -q on the implementation over cec8c6d: 8 passed, rc=0; RED test-only commit 717e7cba on cec8c6d failed rc=1.",
    "supersede_by": "next green-CI refresh (replace with the CI-captured row)"
+  },
+  {
+   "test": "test_agent_experience_p01.py",
+   "exit": 0,
+   "measured": "Isolated Linux qualification at 76ee7fa889e570e02362ea2b3c13b45ba04064e6, Python 3.12.14 / Node 22.20.0, core d337b736aa1e8ebecfab043842d13e4a2d2f48a3: this module exited 0. Full candidate run was 277 pass / 4 fail, exit 1, NOT all-green. Original ledger SHA256 ffd23dacb9f2abcc0197eaa51b1ce65384a9e8321740ffe87ab6332d6bc331fe. Evidence: linux-candidate-r2/ci-out/test_agent_experience_p01.py.log",
+   "supersede_by": "next independently measured green full-suite refresh"
+  },
+  {
+   "test": "test_execution_clocks_p02.py",
+   "exit": 0,
+   "measured": "Isolated Linux qualification at 76ee7fa889e570e02362ea2b3c13b45ba04064e6, Python 3.12.14 / Node 22.20.0, core d337b736aa1e8ebecfab043842d13e4a2d2f48a3: this module exited 0. Full candidate run was 277 pass / 4 fail, exit 1, NOT all-green. Original ledger SHA256 ffd23dacb9f2abcc0197eaa51b1ce65384a9e8321740ffe87ab6332d6bc331fe. Evidence: linux-candidate-r2/ci-out/test_execution_clocks_p02.py.log",
+   "supersede_by": "next independently measured green full-suite refresh"
   }
  ],
  "source_issue": 75,
  "totals": {
-  "cases": 279,
+  "cases": 281,
   "red": 0
  },
  "tracking_item": "est-9yl2"

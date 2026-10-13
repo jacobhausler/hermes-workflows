@@ -3907,7 +3907,7 @@ def act_list(_args):
     # roots multiply hits), never raw per-root iterdir.
     scanned = _common.iter_run_dirs(roots, reverse=True)
     for r in scanned:
-        st = run_state(r)
+        st = run_state(r, telemetry=False)
         if st and st["run_id"] not in seen:
             seen.add(st["run_id"])
             row = {"run_id": st["run_id"], "name": st["name"], "status": st["status"],
