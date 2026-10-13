@@ -1366,6 +1366,20 @@
   "log": "rows_added_outside_ci in PROVENANCE.json"
  },
  {
+  "test": "test_stale_queued_spawn_byft8.py",
+  "exit": 0
+ },
+ {
+  "test": "test_detach_redrive_o79j.py",
+  "exit": 0,
+  "log": "rows_added_outside_ci in PROVENANCE.json"
+ },
+ {
+  "test": "test_reap_receipt_o79j.py",
+  "exit": 0,
+  "log": "rows_added_outside_ci in PROVENANCE.json"
+ },
+ {
   "test": "test_resume_hint_130.py",
   "exit": 0,
   "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_resume_hint_130.py.log"

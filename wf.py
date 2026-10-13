@@ -1159,11 +1159,12 @@ CONTRACT = ("Finish your answer with ONE fenced ```json block holding your resul
 # items, and this line carries a per-item absolute path (test_inputs_0923).
 # When a safe root is in force (HERMES_WRITE_SAFE_ROOT non-empty), run_child makes
 # this dir writable: it appends the child's OWN work dir, nothing wider (fb 625a3241).
+# Upstream catalog review (NousResearch/hermes-agent#133387, ask 2): no standing
+# instruction to repackage a payload the single-query approval refused — the
+# refusal is core's guard (approvals.single_query_mode: deny); loosening it is
+# the operator's documented choice, never the plugin's workaround.
 WORK_DIR_NOTE = ("Your working directory {WORK_DIR} is durable; write your artifact "
-                 "there first and append as you go.\n"
-                 "Single-query approvals may refuse inline interpreters (python -c/-e, "
-                 "heredoc scripts) and execute_code; write a script file in your work "
-                 "directory and run it instead, within the same approval and write boundaries.")
+                 "there first and append as you go.")
 
 JSON_FENCE = re.compile(r"```json\s*\n(.*?)\n```", re.S)
 
@@ -1648,7 +1649,7 @@ def _lane_hygiene_preamble(node):
 # rate-limit tokens); consequence of a false positive is only WHICH bounded
 # sleep is drawn, never whether a retry happens (class + api_calls gates hold).
 _RATE_LIMIT_TOKENS = ("rate limit", "too many requests")
-_RL_JITTER_CAPS = (5.0, 20.0, 80.0)      # cap doubles-ish per retry attempt
+_RL_JITTER_CAPS = (5.0, 20.0, 80.0)      # cap quadruples per retry attempt (5 -> 20 -> 80)
 _RL_JITTER_CEIL = 120.0                  # hard ceiling: a lane never sleeps past 2 min
 
 def _is_rate_limited(raw):
@@ -1696,7 +1697,7 @@ _QUOTA_PHRASE_TOKENS = ("usage limit", "quota exceeded", "quota exceeded for",
 _QUOTA_HORIZON_RE = re.compile(r"reset(?:s|ting)?\D{0,10}?(\d+)\s*(hour|hr|h|day|d|min|minute)")
 # est-t0vz (issue #54): the credential-window 429 — its OWN class, never transport.
 # The banner is the hermes CLI's own AuthError text, raised verbatim at
-# /opt/hermes/hermes_cli/runtime_provider.py:358
+# /opt/hermes/hermes_cli/runtime_provider.py:370
 #   `AuthError(f"Anthropic credentials are rate-limited for {model}; other Claude
 #    models remain available (see `hermes auth list`).")`  (the f-string interpolates
 #    the sent model id; the static shape is what the runner matches).
@@ -1727,6 +1728,10 @@ ERROR_CLASSES = frozenset(("provider_400", "unresolved_model", "cap_exhausted",
                            "incomplete_work", "early_death", "cancelled",
                            "schema", "spawn", "inputs",
                            "quorum", "fanout_empty", "crashed", "unknown",
+                           # est-byft8: a queued spawn refused at the Popen instant
+                           # because an amend/delete moved its effective fingerprint
+                           # while it waited for a seat; the wave reloads and re-drives.
+                           "stale_graph",
                            # est-2ek.1.660: a (re-)drive refused at startup because a
                            # declared lane still carries the dead attempt's
                            # uncommitted TRACKED wreckage — bank it, then re-drive.
@@ -1781,14 +1786,14 @@ ERROR_CLASSES = frozenset(("provider_400", "unresolved_model", "cap_exhausted",
                            "effect_receipt"))
 _AGENT_FAIL_PREFIX = "hermes -z: agent failed:"
 # turn_failure_copy.py ends every non-retryable failure with a fixed-format trailer
-# `Provider said: <summary>`; api_error_summary.py:49 formats the summary as
+# `Provider said: <summary>`; api_error_summary.py:73 formats the summary as
 # `HTTP <status>: <body>` — a real marker line, verified live 2026-09-23 (dead model id).
 _PROVIDER_SAID = "provider said:"
 
 def _typed_error_class(report_path):
     """Typed termination from the child's quiet turn report (core PR pending; the
     HERMES_QUIET_TURN_REPORT_FILE contract), never from prose. Returns
-    ("max_turns", reason) only when the report exists and its turn_exit_reason is
+    ("cap_exhausted", reason) only when the report exists and its turn_exit_reason is
     the loop's own budget-exhaustion stamp; any absence/unparsability is honest
     nothing, and the caller keeps the prose-free `unknown`."""
     try:
@@ -2236,7 +2241,7 @@ def _classify_rc_output(out):
 #   1. the child died rc!=0 within _CONFIG_INPUT_WINDOW_MS of spawn (wall,
 #      runner-known; the report measures ~0.1s, the window is 1s with slack);
 #   2. its capture carries the config-error marker line (core emits these to
-#      stdout — hermes_cli/main.py:2074, providers.py, tools_config_providers.py).
+#      stdout — hermes_cli/main.py:2036, providers.py, tools_config_providers.py).
 # The window is the precision guard: a provider-registry failure at session START
 # dies inside it, while a child that died much later had already established a
 # working provider, so its death is not this deterministic config shape and keeps
@@ -4305,6 +4310,127 @@ def _final_quiesce(meta, r, ev, ev_kw):
         r["error_class"] = "left_live_descendants"
     return r
 
+def _job_path(run, node):
+    return Path(run) / "jobs" / f"{node['id']}.json"
+
+
+def register_job(run, node, byid, pid, artifact, log_path):
+    """Child-side detach contract: register an own live process before exiting.
+
+    Linux identity and ancestry are required; this is not a tree-safety exemption.
+    The runner waits for the registered family to finish BEFORE its usual tree
+    proof. Re-drive performs the same wait before the prior-generation sweep.
+    """
+    if node.get("fanout") or not re.fullmatch(r"[A-Za-z0-9_-]+", node["id"]):
+        raise ValueError("registered jobs currently require a solo agent node")
+    run = Path(run).resolve()
+    spawn = active_child(run, node, byid)
+    own = _subtree_of(spawn["pid"]) if spawn else None
+    if own is not None and spawn:
+        own.add(spawn["pid"])
+    caller, ancestry = os.getpid(), set()
+    while caller > 0 and caller not in ancestry and len(ancestry) < 100:
+        ancestry.add(caller)
+        caller = int(Path(f"/proc/{caller}/stat").read_text().rsplit(")", 1)[1].split()[1])
+        if spawn and caller == spawn["pid"]:
+            ancestry.add(caller)
+            break
+    if not spawn or own is None or pid not in own or spawn["pid"] not in ancestry:
+        raise ValueError(f"job and registrant must belong to the verified node spawn "
+                         f"(run={run}, spawn_pid={spawn.get('pid') if spawn else None}, "
+                         f"job_pid={pid}, caller_pid={os.getpid()})")
+    tick = _proc_boottime(pid)
+    if tick is None or not _proc_alive(pid) or os.getpgid(pid) != pid:
+        raise ValueError("job must be live with a readable identity and its own process group")
+    boot = Path("/proc/sys/kernel/random/boot_id").read_text().strip()
+    artifact, log_path = Path(artifact).resolve(), Path(log_path).resolve()
+    for path in (artifact, log_path):
+        if not path.is_relative_to(run) or path == run:
+            raise ValueError("job artifact and log must stay inside the run directory")
+    if artifact.exists() or artifact == log_path or not log_path.is_file():
+        raise ValueError("artifact must be fresh and log must already exist separately")
+    p = _job_path(run, node)
+    p.parent.mkdir(exist_ok=True)
+    rec = {"status": "registered", "pid": pid, "boottime": tick, "boot_id": boot,
+           "registered_ns": time.time_ns(), "artifact": str(artifact), "log_path": str(log_path),
+           "efp": efp(byid, node), "fp_rule_version": FP_RULE_VERSION,
+           "spawn_pid": spawn["pid"], "members": {str(pid): tick}}
+    # Exclusive creation: a repeated agent cannot replace accepted live work.
+    with p.open("x") as f:
+        json.dump(rec, f); f.flush(); os.fsync(f.fileno())
+    log(run, "job.registered", node=node["id"], pid=pid, artifact=str(artifact), log_path=str(log_path))
+    return rec
+
+
+def _poll_registered_job(meta, node, byid):
+    """No Popen and no agent deadline: observe identity, then harvest a receipt.
+
+    Missing/malformed artifacts never imply success. The own-family process-tree
+    proof still runs afterwards; no kill boundary is weakened by registration.
+    """
+    run = meta["_run"]
+    p = _job_path(run, node)
+    if not p.exists():
+        return None
+    rec = jload(p) or {}
+    failure = lambda why, cls="config_input": {"status": "failed", "error_class": cls,
+                                                "error": why, "ms": 0}
+    if not wfcommon.record_efp_valid(rec, byid, node):
+        return failure("registered job fingerprint is stale or invalid; explicit owner reconciliation required")
+    if rec.get("status") == "harvested":
+        return rec.get("result") or failure("registered job has no durable harvest")
+    try:
+        if rec["boot_id"] != Path("/proc/sys/kernel/random/boot_id").read_text().strip():
+            return failure("registered job boot identity changed", "crashed")
+        members = rec["members"]
+        while True:
+            if (run / "stop.request").exists() or (meta.get("_stop") and meta["_stop"].is_set()):
+                return failure("cancelled while polling registered job", "cancelled")
+            pid = rec["pid"]
+            tick = _proc_boottime(pid)
+            if _proc_alive(pid):
+                if tick != rec["boottime"]:
+                    return failure("registered job pid identity changed", "crashed")
+                family = _subtree_of(pid)
+                if family is None:
+                    return failure("registered job tree is unreadable", "left_live_descendants")
+                for member in family:
+                    mt = _proc_boottime(member)
+                    if mt is None:
+                        return failure("registered family identity unreadable", "left_live_descendants")
+                    members[str(member)] = mt
+            live = [int(member) for member, mt in members.items()
+                    if _proc_alive(int(member)) and _proc_boottime(int(member)) == mt]
+            if not live:
+                break
+            tmp = p.with_name(f"{p.name}.{os.getpid()}.tmp")
+            tmp.write_text(json.dumps(rec)); os.replace(tmp, p)
+            time.sleep(.1)
+        artifact = Path(rec["artifact"])
+        if not artifact.resolve().is_relative_to(Path(run).resolve()):
+            return failure("registered artifact escaped run directory")
+        answer = jload(artifact)
+        if not isinstance(answer, dict) or type(answer.get("exit_code")) is not int:
+            result = failure("job exited without a typed artifact exit receipt", "crashed")
+        elif artifact.stat().st_mtime_ns < rec["registered_ns"]:
+            result = failure("job artifact predates registration", "effect_receipt")
+        elif answer["exit_code"] != 0:
+            result = failure(f"registered job exited rc={answer['exit_code']}", "unknown")
+        elif validate(answer.get("output"), node.get("schema")):
+            result = failure("registered job artifact output failed node schema", "schema")
+        else:
+            result = {"status": "done", "output": answer["output"], "ms": 0}
+        result["detached_job"] = {k: rec[k] for k in
+                                  ("pid", "boottime", "boot_id", "artifact", "log_path")}
+        rec.update(status="harvested", result=result)
+        tmp = p.with_name(f"{p.name}.{os.getpid()}.tmp")
+        tmp.write_text(json.dumps(rec)); os.replace(tmp, p)
+        log(run, "job.harvested", node=node["id"], pid=pid, status=result["status"])
+        return result
+    except (OSError, ValueError, KeyError, TypeError) as e:
+        return failure(f"registered job receipt unreadable: {type(e).__name__}: {e}", "crashed")
+
+
 def _adopt_child(meta, node, byid, index, child, schema, fo_cancel=None):
     harvest_schema = strip_engine_disclosure(schema, (node or {}).get("substrate_substituted"))  # #116
     """790c6ad: ADOPT a verified live orphan instead of re-spawning it (the
@@ -4530,6 +4656,56 @@ def _adopt_child(meta, node, byid, index, child, schema, fo_cancel=None):
     if eclass == "ratelimit":   # est-t0vz: adopted deaths keep the banner too
         rec["ratelimit_banner"] = marker
     return rec
+
+def _stale_spawn_refusal(run, node, byid):
+    """est-byft8: the launch-instant staleness check for a QUEUED spawn.
+
+    A spawn may sit on a contended global agent seat for minutes; an amend
+    (or delete) landing during that queue window moves the node's effective
+    fingerprint after the prompt was composed. The queued definition must
+    NEVER launch. The comparison is the runner's OWN staleness law — the
+    effective fingerprint (wfcommon.efp: own def minus budgets + ancestor
+    efps), exactly what replay-skip uses to decide a committed record is
+    stale — so "would a reload re-drive this node?" and "is this queued
+    spawn stale?" can never disagree.
+
+    Returns None to proceed (unchanged def, or any unreadable/uncomputable
+    input — the guard catches DETECTED staleness and never invents a death),
+    or a record dict for the typed refusal. graph.json is only ever replaced
+    atomically (os.replace), so the read is always whole."""
+    try:
+        queued = efp(byid, node)
+    except Exception:
+        return None
+    try:
+        g2 = jload(run / "graph.json")
+    except Exception:
+        return None
+    if not (isinstance(g2, dict) and isinstance(g2.get("nodes"), list) and g2["nodes"]):
+        return None
+    cur = {}
+    for n in g2["nodes"]:
+        if isinstance(n, dict) and n.get("id"):
+            cur[n["id"]] = n
+    if not cur:
+        return None
+    nid = node.get("id")
+    if nid in cur:
+        try:
+            now_efp = efp(cur, cur[nid])
+        except Exception:
+            return None
+        if now_efp == queued:
+            return None
+        why = f"amended since this spawn was queued (efp {queued} -> {now_efp})"
+    else:
+        why = f"deleted from the graph since this spawn was queued (queued efp {queued})"
+    return {"status": "failed", "error_class": "stale_graph",
+            "error": (f"stale_graph: node {nid} was {why}; the queued spawn refuses to launch "
+                      f"old work — the wave boundary reloads the graph and re-drives the node "
+                      f"under the current definition"),
+            "ms": 0}
+
 
 def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering=None, attempt=0, skey=None,
               inputs="", index=None, resume_preamble="", reasoning_override=None,
@@ -4827,6 +5003,17 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
                     return {"status": "failed", "error": "cancelled at launch instant"
                             + ("" if meta["_stop"].is_set() else " (quorum already met)"),
                             "error_class": "cancelled", "ms": 0, **route}
+                # est-byft8: launch-instant STALENESS recheck — a queued spawn that
+                # waited on the seat across an amend must never launch its old
+                # prompt. Refuse typed (seat freed by the finally), never Popen; the
+                # wave boundary consumes restart.request, reloads, and the replay-skip
+                # efp law re-drives the node under the CURRENT definition. Same lock
+                # as the cancel recheck: stop wins over stale; an amend landing after
+                # this instant is a live-child event, unchanged law for everyone.
+                _stale = _stale_spawn_refusal(run, node, byid)
+                if _stale is not None:
+                    logf.close()
+                    return {**_stale, "spawn": spawn_no, "attempts": 1, **route}
                 tokens.append(token)     # registered BEFORE Popen — a spawn that
                                          # dies mid-launch still owns its survivors
                 # est-ulwpg (witness 20261009-072611-fb-closeout-batch): the wd
@@ -5270,6 +5457,7 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
         if eclass == "ratelimit":   # est-t0vz: keep the verbatim banner for the park's
             rec["ratelimit_banner"] = marker   # give-up text + model extraction
         return rec
+    detached = _poll_registered_job(meta, node, byid) if rc == 0 and index is None else None
     parsed, perr = extract_json(out)
     # #61 completeness gate — ABOVE every exit-0 verdict, done and correction-
     # retry alike: before an exit-0 spawn is believed at all, its own process
@@ -5308,6 +5496,8 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
                              "silent done (#61)",
                     "error_class": "left_live_descendants", "ms": ms,
                     "final": final_reply, **hv, **extra, **sk, **evd}
+    if detached is not None:
+        return {**detached, **sk, **evd}
     valid_answer = False
     errs = None
     if parsed is not None and perr is None:
@@ -6275,6 +6465,9 @@ def run_agent_node(run, meta, byid, node, outputs, steering):
             def spawn(resume_preamble="", model_override=None):
                 sk = solo_key if not first["done"] else skey_for(run, byid, node)
                 first["done"] = True
+                detached = _poll_registered_job(meta, node, byid)
+                if detached is not None:
+                    return detached
                 return run_child(meta, node, byid, node.get("goal", ""), node.get("context", ""),
                                  node.get("schema"), steering=steering, skey=sk, inputs=inputs_txt,
                                  resume_preamble=resume_preamble, model_override=model_override)
@@ -6829,6 +7022,13 @@ def main(run_id):
     # Log-and-schedule over an alive predecessor is the exact shape the
     # reviewer's fault injection punished (new child + committed done over a
     # live prior tree).
+    boot_graph = jload(run / "graph.json")
+    boot_byid = {n["id"]: n for n in boot_graph["nodes"]}
+    for job_node in boot_graph["nodes"]:
+        # Accepted work is polled, never swept/re-launched. Once it is dead,
+        # the unchanged sweep proves every leftover predecessor is quiescent.
+        if job_node.get("type") == "agent" and not job_node.get("fanout"):
+            _poll_registered_job(meta, job_node, boot_byid)
     sweep = _boot_sweep(meta)
     if sweep is not None and sweep.get("proof") not in ("clean", "dead"):
         emit(f"WORKFLOW_FAILED {run_id} (boot sweep {sweep.get('proof')}: "
@@ -7360,7 +7560,7 @@ def main(run_id):
     except SystemExit:
         # Defensive: a self-reported exit is a verdict, not a crash. loop() does
         # not raise SystemExit today (every self-reported exit happens before this
-        # try — enumerated at L79/L1693/L1947), but the guard keeps the invariant
+        # try — enumerate with `grep -n write_runner_exit wf.py`), but the guard keeps the invariant
         # local instead of a cross-function assumption. (write_runner_exit is
         # first-writer-wins per process, so a same-process false stamp was never
         # possible anyway.)
@@ -7404,6 +7604,16 @@ def finalize(run, graph, status):
     notify(run, f"run.{status}", graph={"nodes": nodes})
 
 if __name__ == "__main__":
+    if len(sys.argv) == 7 and sys.argv[1] == "register-job":
+        r = find_run(sys.argv[2])
+        graph = jload(r / "graph.json") or {}
+        byid = {n["id"]: n for n in graph.get("nodes", [])}
+        n = byid.get(sys.argv[3])
+        if r.name != sys.argv[2] or not n or n.get("type") != "agent":
+            raise SystemExit("register-job requires an exact run and agent node id")
+        register_job(r, n, byid, int(sys.argv[4]), sys.argv[5], sys.argv[6])
+        print("WORKFLOW_JOB_REGISTERED " + n["id"])
+        sys.exit(0)
     if len(sys.argv) < 3 or sys.argv[1] != "run":
         print("usage: wf.py run <run_id>"); sys.exit(2)
     # 5c37b19 guard 2 (belt-and-braces): a runner whose cwd was deleted mid-life dies

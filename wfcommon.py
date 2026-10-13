@@ -232,7 +232,7 @@ def profiles_by_session(home=None):
 PLUGIN_ID = "hermes-workflows"
 NO_READER = object()   # a reader answers this when it has no plugin ctx to ask
 _OWNER_SETTING_READER = None
-_RAW_SETTINGS_CACHE = {}  # path -> (mtime_ns, size, settings dict)
+_RAW_SETTINGS_CACHE = {}  # path -> ((mtime_ns, size), (settings, legacy))
 
 def set_owner_setting_reader(fn):
     """Install the door's plugin-scoped reader: fn(key) -> value | None | NO_READER."""
@@ -2068,7 +2068,7 @@ def validate_graph_full(graph):
 #   * efp stability: parent nodes not wired to an include stay byte-identical —
 #     def_hash/efp/replay-skip are untouched by construction; only rewired nodes
 #     move, which is precisely the intended re-run granularity.
-# Constants here MIRROR the door's (GRAPH_MAX_BYTES __init__.py:39); the door owns
+# Constants here MIRROR the door's (GRAPH_MAX_BYTES __init__.py:51); the door owns
 # its copies and may re-check the merged artifact with its own caps after expansion.
 INCLUDE_DEPTH_MAX = 4        # nested composites: A includes B includes C includes D
 INCLUDE_NODES_MAX = 256      # merged node-count cap (tunable)
@@ -3004,6 +3004,13 @@ def node_rec(r, n, byid):
     reads `done` — the child's nonzero exit is history, the answer is the fact."""
     rec = jload(r / "nodes" / f"{n['id']}.json")
     st = (rec or {}).get("status")
+    if st == "running":
+        interruption = jload(r / "interruptions" / f"{n['id']}.json") or {}
+        claim = {k: rec.get(k) for k in ("pid", "skey", "attempt", "efp", "fp_rule_version")}
+        if interruption.get("claim") == claim and record_efp_valid(rec, byid, n) \
+                and not _verify_spawn_rec(r, n, byid, rec):
+            rec = {**rec, "status": "interrupted", "error_class": "crashed",
+                   "interruption": {k: v for k, v in interruption.items() if k != "claim"}}
     if st == "failed" and (rec or {}).get("error_class") == "cancelled":
         return "pending", rec   # stop != failure (#7): a resume re-drives cancelled work
     if st in ("done", "partial", "failed", "skipped"):
@@ -3607,7 +3614,7 @@ _SEAT_WAIT_CLOSERS = frozenset(("node.done", "node.failed", "node.finished", "no
                                 "node.skipped", "node.spliced", "item.finished", "item.adopted",
                                 "item.harvested_at_cancel"))
 
-def open_seat_waits(r):
+def open_seat_waits(r, events_text=None):
     """{node_id: {(index): {since, cap, spawn}}} for seat waits not yet closed by a
     later child spawn (spawn-ledger), node/item terminal event, or runner (re)start
     / stop. Unreadable files are honest absence (empty), never a raise."""
@@ -3620,8 +3627,8 @@ def open_seat_waits(r):
     rows = []
     for fname, src in (("events.jsonl", "ev"), ("spawn-ledger.jsonl", "led")):
         try:
-            text = (Path(r) / fname).read_text()
-        except OSError:
+            text = events_text if src == "ev" and events_text is not None else (Path(r) / fname).read_text()
+        except (OSError, UnicodeError):
             continue
         for line in text.splitlines():
             try:
@@ -3638,6 +3645,8 @@ def open_seat_waits(r):
                 waits.pop((e["node"], e.get("index")), None)
             continue
         ev = e.get("event")
+        if not isinstance(ev, str):
+            continue
         if ev in ("run.started", "run.resumed", "run.stopped"):
             waits.clear()
         elif ev == "seat.wait" and e.get("node"):
@@ -3681,16 +3690,17 @@ def _iso_epoch(s):
     except (TypeError, ValueError):
         return None
 
-def _node_extends(r):
+def _node_extends(r, events_text=None):
     """{node: [(ts_epoch, extra_s)]} from the committed node.extended events —
     the #133 wall-meter input: the runner's ONE 50 % extend-not-kill bump (#11)
     is already in events.jsonl, the meter only sums what is there. Malformed
     lines, foreign nodes and rows without a numeric extra_s are ignored; an
     unreadable ledger yields NO bumps (honest absence, never a fabricated wall)."""
+    import math
     out = {}
     try:
-        text = (Path(r) / "events.jsonl").read_text()
-    except OSError:
+        text = events_text if events_text is not None else (Path(r) / "events.jsonl").read_text()
+    except (OSError, UnicodeError):
         return out
     for line in text.splitlines():
         if '"node.extended"' not in line:      # cheap pre-filter before the parse
@@ -3699,11 +3709,19 @@ def _node_extends(r):
             e = json.loads(line)
         except Exception:
             continue
-        if e.get("event") != "node.extended" or not e.get("node"):
+        if not isinstance(e, dict) or e.get("event") != "node.extended":
             continue
-        ex = e.get("extra_s")
-        if isinstance(ex, (int, float)) and not isinstance(ex, bool):
-            out.setdefault(e["node"], []).append((_iso_epoch(e.get("ts")), float(ex)))
+        node, ex, ts = e.get("node"), e.get("extra_s"), _iso_epoch(e.get("ts"))
+        if not isinstance(node, str) or not node or ts is None:
+            continue
+        if not isinstance(ex, (int, float)) or isinstance(ex, bool):
+            continue
+        try:
+            ex = float(ex)
+        except (ValueError, OverflowError):
+            continue
+        if math.isfinite(ex) and ex >= 0:
+            out.setdefault(node, []).append((ts, ex))
     return out
 
 def _wall_meter(n, active, extends):
@@ -3752,6 +3770,10 @@ def run_state(r):
         return None
     byid = {n["id"]: n for n in graph["nodes"]}
     live = runner_alive(r)
+    try:
+        events_text = (r / "events.jsonl").read_text()
+    except (OSError, UnicodeError):
+        events_text = ""
     outputs, states, nodes, recs = {}, {}, {}, {}
     for n in graph["nodes"]:
         st, rec = node_rec(r, n, byid)
@@ -3778,27 +3800,26 @@ def run_state(r):
             # over the spawn's `started`, the baked def timeout, and the one
             # node.extended bump. Honest absence: no key when nothing grounds it.
             if _ext_map[0] is None:
-                _ext_map[0] = _node_extends(r)   # ledger parsed once per call
+                _ext_map[0] = _node_extends(r, events_text)   # shared poll snapshot
             wm = _wall_meter(n, active, _ext_map[0])
             if wm:
                 nodes[n["id"]]["wall"] = wm
     # est-2ek.1.833: a live runner blocked on the global seat cap says so per node.
     if live:
-        for nid, per in open_seat_waits(r).items():
+        for nid, per in open_seat_waits(r, events_text).items():
             if nid in nodes and states.get(nid) == "pending" and per:
                 nodes[nid]["seat_wait"] = seat_wait_view(per)
     # e68544a37be37657 + est-ij0: the runner's own release law (partial blocks a
     # plain edge; a dead order_only predecessor is spliced) — one function, two callers.
     deps_ok, _deps_res, _spliced = release_law(graph["nodes"], states)
     last = None
-    try:
-        for line in (r / "events.jsonl").read_text().splitlines()[-20:]:
-            try:
-                last = json.loads(line)
-            except Exception:
-                continue
-    except FileNotFoundError:
-        pass
+    for line in events_text.splitlines()[-20:]:
+        try:
+            event = json.loads(line)
+        except Exception:
+            continue
+        if isinstance(event, dict):
+            last = event
     status = "running" if live else "interrupted"
     held = None
     if (last or {}).get("event") == "run.stopped":
