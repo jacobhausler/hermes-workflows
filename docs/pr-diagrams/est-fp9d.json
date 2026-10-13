@@ -4,11 +4,7 @@
   "meta": {
     "title": "Resume hint: keep banked work through retries",
     "quality_profile": "showcase",
-    "output": "diagram/est-fp9d.html",
-    "repository": {
-      "url": "https://github.com/jacobhausler/hermes-workflows.git",
-      "revision": "fd5887f9ab6b5ac67e65fc7ca4e60900c2d69dc7"
-    }
+    "output": "diagram/est-fp9d.html"
   },
   "lanes": [
     {
