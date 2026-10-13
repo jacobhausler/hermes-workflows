@@ -333,5 +333,44 @@ else:
               r.returncode == 0 and "NO_CHANGES" in r.stdout,
               f"rc={r.returncode} out={r.stdout.strip()[-160:]}")
 
+# ---- est-0an45: duty anchor normalization (no graphify binary needed) ----
+import importlib.util
+spec = importlib.util.spec_from_file_location("graph_regen_0an45", str(ROOT / "scripts" / "graph_regen.py"))
+gr = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(gr)
+with tempfile.TemporaryDirectory() as td2:
+    repo2 = Path(td2) / "repo2"
+    (repo2 / "scripts").mkdir(parents=True)
+    git(repo2, "init", "-q")
+    git(repo2, "config", "user.email", "t@t.local")
+    git(repo2, "config", "user.name", "t")
+    (repo2 / "scripts" / "graph_check.py").write_text("# stub\n")
+    (repo2 / "graphify-out").mkdir()
+    (repo2 / "graphify-out" / ".graphify_root").write_text(".")
+    (repo2 / "graphify-out" / "graph.json").write_text('{"nodes": []}')
+    commit_all(repo2, "seed")
+    sha2 = git(repo2, "rev-parse", "HEAD").strip()
+    # stub the heavy seams: regen simulates the upstream seat-path stamp
+    def fake_regen(r):
+        (r / "graphify-out" / ".graphify_root").write_text("/home/somewhere/seat/repo")
+        (r / "graphify-out" / "graph.json").write_text('{"nodes": [1]}')
+        return True, "stub", False
+    gr.head_sha = lambda r: sha2
+    gr.regen = fake_regen
+    gr.graph_check = lambda r: (0, "stub ok")
+    import contextlib, io
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        rc = gr.main(["--repo-dir", str(repo2), "--base-sha", sha2], env={})
+    anchored = (repo2 / "graphify-out" / ".graphify_root").read_text()
+    check("est-0an45: seat-path anchor normalized to '.' before the diff decision",
+          rc == 0 and anchored == "." and "FILES" in buf.getvalue()
+          and ".graphify_root" not in buf.getvalue(),
+          f"rc={rc} anchor={anchored!r} out={buf.getvalue().strip()[-160:]}")
+    diff2 = git(repo2, "diff", "--", "graphify-out/")
+    check("est-0an45: FILES diff carries no absolute seat path",
+          "/home/somewhere" not in diff2 and "graph.json" in buf.getvalue(),
+          diff2[:160])
+
 print("ALL PASS" if not fails else f"FAIL {fails}")
 sys.exit(1 if fails else 0)
