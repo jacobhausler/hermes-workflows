@@ -418,6 +418,11 @@
     "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_graph_gate.py.log"
   },
   {
+    "test": "test_graph_orphan_deletion_231.py",
+    "exit": 0,
+    "log": "rows_added_outside_ci in PROVENANCE.json"
+  },
+  {
     "test": "test_graph_regen_z_parser_h3yi.py",
     "exit": 0
   },
