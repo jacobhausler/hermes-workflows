@@ -1,13 +1,13 @@
 ---
 name: workflow
 description: "Workflow fan-out audit and census: run agent graphs"
-version: 1.3.6
+version: 1.3.7
 metadata:
   hermes:
     tags: [workflows, fan-out, audit, census, orchestration]
 ---
 
-# Workflow authoring (1.3.6)
+# Workflow authoring (1.3.7)
 
 Requires Hermes Agent v2026.9.21 or newer (package >=0.21.4). A Desktop gate answer
 reaches the run owner's chat via the composer SDK; on older builds it may only insert
@@ -76,8 +76,9 @@ ending your turn right after `run` is how runs stall.
   payload carries `next` — do what `next` says, `wait` until it is empty; `next` is
   derived, never a guess. Before `amend` or stop, read the failed node's `node_facts`
   (error_class from the closed set; `cancelled` is never a failure) and committed
-  outputs. `amend` submits the WHOLE replacement graph; `run`/`amend` `dry_run:true`
-  preview without launching/replacing graphs, but can ping routes and check quota.
+  outputs. `amend` accepts a WHOLE replacement graph or node-scoped `patch`;
+  `diff` forces amend's dry-run preview. `run`/`amend` `dry_run:true` preview
+  without launching/replacing graphs, but can ping routes and check quota.
   `stop` is terminal. Details: [operations](references/operations.md).
 - Lint before launching with `workflow{action:"validate", graph:…}` — the door's
   whole validation, zero writes, no liveness ping.

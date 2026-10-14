@@ -237,6 +237,15 @@ def _profile_evidence(node):
     name = node.get("profile")
     return {"profile": name, "profile_home": str(profile_home(name))} if name else {}
 
+def _quorum_death_label(explicit_quorum, quorum, n_items):
+    """est-4sx: a null-quorum fan-out dies on the runner's IMPLICIT majority
+    (len(items)//2+1, sprint101 #12) — bare 'quorum not met' reads as if the
+    graph declared a bar it never declared. Name the real death."""
+    if explicit_quorum:
+        return "quorum not met"
+    return f"fanout_timeout_majority_unmet (implicit majority {quorum}/{n_items}; quorum not declared)"
+
+
 def _lane_gate(run, node, r):
     """fb-digest-29d (64c6772b): a node that declares `repo: <path>` owns a git
     lane, and a committed done/partial must mean the lane is CLEAN. The dad50be0
@@ -3665,9 +3674,12 @@ def _aux_run(cmd, timeout=None, **kw):
     timeout + 2*kill-grace, always — an unbounded communicate() here parked
     the runner's machine-gate deadline in review (#80 finding 3)."""
     kw.pop("start_new_session", None)              # ours is non-negotiable
-    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                         text=True, start_new_session=True, **kw)
     with _aux_lock:
+        # #283 review B1(b).3: spawn+registration ATOMIC under _aux_lock — the
+        # zombie reaper re-checks _aux_pids under the same lock before any
+        # waitpid, so it can never take this child's exit status in the gap.
+        p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                             text=True, start_new_session=True, **kw)
         _aux_pids.add(p.pid)
     try:
         try:
@@ -3775,6 +3787,101 @@ def _reap_zombie(pid):
         os.waitpid(pid, os.WNOHANG)
     except (ChildProcessError, OSError):
         pass
+
+def _owned_child_pids(meta):
+    """Every pid the runner owns a wait() on: seat handles in meta['_procs']
+    and aux probes in _aux_pids. CALLER HOLDS meta['_procs_lock'] then
+    _aux_lock (the order seat spawn already uses: _procs_lock is held across
+    _sidecar_live_registered, which takes _aux_lock)."""
+    mine = {getattr(h, "pid", None) for h in meta["_procs"].values()}
+    mine |= _aux_pids
+    return {p for p in mine if isinstance(p, int)}
+
+def _adopted_zombie_pids(meta):
+    """Pids of ZOMBIES whose parent is THIS process (the subreaper's adopted
+    pool) that the runner does NOT own (seat _procs / aux _aux_pids). This is
+    a lock-free pre-filter only — _reap_adopted_zombies re-checks ownership
+    under the locks before any waitpid (#283 review B1). Receipt 2026-10-07 burn-down:
+    PR_SET_CHILD_SUBREAPER adopts every double-fork descendant of a seat, and
+    _reap_zombie ran ONLY on boot sweeps / kill paths — a healthy run never
+    reaped its pool. Eight-hour lanes accumulated thousands of adopted zombies
+    each (a box-wide census found 7,674 of them `git`), the load average
+    tripled, and each runner burned ~0.65 cores
+    spinning /proc walks that grow O(zombies) every 0.25 s tick. Excluding
+    tracked Popen pids is INTEGRITY, not hygiene: waitpid'ing a Popen child out
+    from under its polling thread makes subprocess report ChildProcessError ->
+    returncode 0, a FALSE GREEN seat verdict. After the owning thread pops its
+    handle the child is dead and already reaped: a late reap is a harmless
+    ChildProcessError."""
+    me = os.getpid()
+    with meta["_procs_lock"]:
+        with _aux_lock:
+            owned = _owned_child_pids(meta)
+    out = []
+    try:
+        for pid in os.listdir('/proc'):
+            if not pid.isdigit():
+                continue
+            try:
+                with open(f'/proc/{pid}/stat') as f:
+                    head, _, rest = f.read().rpartition(') ')
+                if rest.split()[0] != 'Z' or int(rest.split()[1]) != me:
+                    continue
+            except (OSError, IndexError, ValueError):
+                continue
+            if int(pid) in owned:
+                continue
+            out.append(int(pid))
+    except OSError:
+        return []
+    return out
+
+def _reap_adopted_zombies(meta):
+    """One drain pass. The scan is a stale snapshot by construction, so the
+    ownership check and the waitpid happen TOGETHER under meta['_procs_lock']
+    then _aux_lock (#283 review B1): seat spawn does Popen+register under
+    _procs_lock and _aux_run does Popen+register under _aux_lock, so a child
+    is either already in the live owned set here or does not exist yet — the
+    reaper can never take the exit status a seat/aux owner is waiting for.
+    Returns the number of pids reaped."""
+    cands = _adopted_zombie_pids(meta)
+    if not cands:
+        return 0
+    n = 0
+    with meta["_procs_lock"]:
+        with _aux_lock:
+            owned = _owned_child_pids(meta)
+            for z in cands:
+                if z in owned:
+                    continue        # registered since the scan: its owner reaps
+                try:
+                    if os.waitpid(z, os.WNOHANG)[0] == z:
+                        n += 1
+                except (ChildProcessError, OSError):
+                    pass
+    return n
+
+def _start_reaper(meta):
+    """Daemon reaper — drains the adopted-orphan zombie pool every second
+    while the run lives (the boot-sweep-only reaping is the leak: load average
+    39 on 20 cores with ~8.8k zombies, receipt 2026-10-07). Never touches
+    a pid the runner owns (_procs seats, _aux_pids probes: verdict
+    integrity). Only runs when this process IS the subreaper (#283 review
+    B2): without it nothing is adopted and the reaper could only ever reap
+    the runner's own direct children. Returns the thread, or None."""
+    if not meta.get("_subreaper"):
+        return None
+    def loop():
+        stop = meta["_stop"]
+        while not stop.is_set():
+            try:
+                _reap_adopted_zombies(meta)
+            except Exception:
+                pass            # hygiene is best-effort: never kill the thread
+            stop.wait(1.0)
+    t = threading.Thread(target=loop, daemon=True, name="zombie-reaper")
+    t.start()
+    return t
 
 def _wait_pids_dead(pids, proof_s):
     """#61c: /proc-verify every pid is dead within the budget. (True, []) when
@@ -6424,7 +6531,7 @@ def run_agent_node(run, meta, byid, node, outputs, steering):
                                                      + "; ".join(f"[{f['index']}] {f['error']}" for f in fails)[:900],
                                             "failed_detail": fails,
                                             "output": {"items": merged, "all_results": results}})
-                log(run, "node.failed", node=nid, error="quorum not met", failed_detail=fails,
+                log(run, "node.failed", node=nid, error=_quorum_death_label(bool(explicit_quorum), quorum, len(items)), failed_detail=fails,
                      error_class="quorum", attempts=1)
             else:
                 merged_rec = _lane_gate(run, node, {"status": "done",
@@ -7160,6 +7267,15 @@ def main(run_id):
     meta["_procs"] = {}
     meta["_procs_lock"] = threading.Lock()
     meta["_stop"] = threading.Event()
+    # Continuous zombie hygiene (BELOW the meta init it reads): subreaper
+    # adoption means every double-fork descendant that dies lands in THIS
+    # process's child table; boot-sweep-only reaping let healthy lanes
+    # accumulate thousands of zombies (receipt 2026-10-07: 8.8k zombies,
+    # load 39 on 20 cores, every runner burning ~0.65 cores on O(pool) /proc
+    # walks). The daemon drains the pool every second; it never reaps a pid
+    # the runner owns (_procs seats / _aux_pids probes: verdict integrity),
+    # and it does not start at all unless meta["_subreaper"] (#283 review B2).
+    _start_reaper(meta)
     # est-2ek.1.666: termination cleanup wired on EVERY exit path (atexit +
     # SIGTERM-clean-and-reraise) — a runner that leaves must not leave its
     # agent-node child mutating real state unsupervised.
