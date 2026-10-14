@@ -45,7 +45,10 @@ sys.modules["door_qeul"] = door
 _ispec.loader.exec_module(door)
 
 LIB = Path(_home) / "library"
-GRAPH = {"nodes": [{"id": "a", "kind": "solo"}]}
+# est-2ek.1.828 follow: synthetic fixture must carry current door grammar
+# (type: agent|gate|echo) — under continuous discovery admission a fixture
+# that the save door would reject is quarantined, as any real entry would be.
+GRAPH = {"nodes": [{"id": "a", "type": "echo"}]}
 
 def write_entry(name, tags):
     LIB.mkdir(parents=True, exist_ok=True)
