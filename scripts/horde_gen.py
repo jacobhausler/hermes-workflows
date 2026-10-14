@@ -16,9 +16,11 @@ workflow graph JSON + wave manifest, with the five W19 process-defect fixes
       schema AND into the worker law text. Verdict strings outside the enum
       are rejected by the reducer, ending vocab sprawl (65 receipts / 20
       phrasings at W19).
-  DEFECT-4 (this file): every comment append goes through dup_guard() — an
-      EXACT-LINE check (`bd comments <id>` | grep -Fxq) BEFORE the write, not
-      a post-hoc count. Duplicate stamps/refusals cannot be emitted.
+  DEFECT-4 (this file): dup_guard() performs an EXACT-LINE check (indentation-
+      stripped — bd renders comment bodies indented 4 spaces) BEFORE writes;
+      append_comment() is the only sanctioned append path (dup_guard has a
+      real call site), and `horde_gen.py guard --bead <ID> --line '<text>'`
+      exposes the check to worker shell text (exit 0 append-safe, 1 dup).
   DEFECT-5 (this file): the reclaim header uses the SCOPED `--id` form only
       (`bd reclaim --id <ID> --json`); the positional form is rejected by the
       deployed bd build (est-9mx4m) and the docs/header now align.
@@ -71,7 +73,7 @@ LAW = (
     "DEFECT-5 reclaim form (scoped only): `timeout 60 bd reclaim --id <ID> --json`; then comment 'RECLAIM-horde: expired <assignee> lease returned to ready' via dup_guard. "
     "DEFECT-1: before ANY reclaim, read `bd comments <ID>`; holder note naming an OPEN PR or live lease => reclaim-refused, do not strip live leases. "
     "Closes: only on a premise probe THIS worker ran (gh pr view / df / file / service), and close_reason MUST quote the probe; live premise => handback-premise-live. "
-    "DEFECT-4: BEFORE any comment append run dup_guard (below); exact-line already present => skip append, keep receipt write-free. "
+    "DEFECT-4: BEFORE any comment append run `horde_gen.py guard --bead <ID> --line '<text>'` (exit 1 = exact-line dup already present => skip append, keep receipt write-free). "
     "DEFECT-2: receipt MUST list every write in writes[]; a missing/extra write is a false receipt. "
     "DEFECT-3: verdict only from the closed enum. Net-zero-birth: spawn zero beads. Shield: est-2ek.* prefix and the orphans file are untouchable (refused-shield); owner-assigned => refused-owner-gate."
 )
@@ -83,9 +85,20 @@ def bd(*args, timeout=60):
                           capture_output=True, text=True).stdout
 
 def dup_guard(bead_id, line):
-    """DEFECT-4: exact-line dup-check BEFORE append. True => safe to append."""
+    """DEFECT-4: exact-line dup-check BEFORE append. True => safe to append.
+    W21 verify-lap fix: bd indents stored comment bodies 4 spaces — compare
+    lines STRIPPED, and match is exact-line, not substring."""
     existing = bd("comments", bead_id)
-    return ("\n" + line) not in ("\n" + existing) and not any(l == line for l in existing.splitlines())
+    want = line.strip()
+    return not any(l.strip() == want for l in existing.splitlines())
+
+def append_comment(bead_id, line):
+    """DEFECT-4 wiring: the ONLY sanctioned append path — dup_guard is a call
+    site, not a suggestion. Returns True if appended, False if dup-suppressed."""
+    if dup_guard(bead_id, line):
+        bd("comment", bead_id, line)
+        return True
+    return False
 
 def _age_h(iso):
     try:
@@ -186,15 +199,27 @@ def reduce_run(args):
                 if not isinstance(w, list):
                     reds.append((dp, "DEFECT-2 writes[] missing", str(w)[:40])); continue
                 bid = r.get("bead_id")
-                if bid and any(x["kind"] in ("comment", "close", "update") for x in w):
+                if bid:
                     ds = re.findall(r"20\d\d-\d\d-\d\d[T ]\d\d:\d\d", bd("comments", bid))
                     fresh = sum(1 for d in ds
                                 if datetime.datetime.fromisoformat(d.replace(" ", "T")[:16] + "+00:00") >= start)
                     declared = sum(1 for x in w if x["kind"] == "comment")
                     if declared and not fresh:
                         reds.append((dp, "DEFECT-2 false-receipt: declared comments, store shows none since wave start", bid))
+                    # W21 fix: the reverse lie — receipt claims a mutation-family
+                    # verdict (or zero writes) while the store shows fresh comments.
+                    mutating = declared or any(x["kind"] in ("close", "update", "claim", "reclaim") for x in w) \
+                        or v in ("closed", "blocked-reasoned", "live-respected-stamped", "handback-premise-live", "reclaim-refused")
+                    if fresh and not mutating:
+                        reds.append((dp, "DEFECT-2 no-mutation lie: store shows fresh comments, receipt declares none", bid))
+                    elif declared and fresh and declared != fresh:
+                        reds.append((dp, f"DEFECT-2 count divergence: declared {declared} vs store {fresh}", bid))
     print(json.dumps({"checked_run": run, "reds": reds}, indent=1))
     return 1 if reds else 0
+
+def guard_cli(args):
+    """DEFECT-4 worker entrypoint: exit 0 => append-safe, exit 1 => exact-line dup."""
+    sys.exit(0 if dup_guard(args.bead, args.line) else 1)
 
 def main():
     ap = argparse.ArgumentParser()
@@ -204,6 +229,8 @@ def main():
     e.add_argument("--model", default="claude-haiku-5-5"); e.add_argument("--out")
     e.set_defaults(fn=emit)
     r = sub.add_parser("reduce"); r.add_argument("run_dir"); r.set_defaults(fn=reduce_run)
+    g = sub.add_parser("guard"); g.add_argument("--bead", required=True)
+    g.add_argument("--line", required=True); g.set_defaults(fn=guard_cli)
     a = ap.parse_args()
     sys.exit(a.fn(a))
 
