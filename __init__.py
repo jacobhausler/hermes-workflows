@@ -66,6 +66,7 @@ GRAPH_KEYS = {"name", "nodes", "description", "defaults", "model_policy",
               "concurrency", "item_concurrency",  # #100: optional run-level limits
               "requires_plugin",  # est-2ek.1.166: version handshake (coarse >=; stale => arm-time refusal)
               "result",           # est-2ek.1.158: node id whose output is the run verdict
+              "on_exit",          # #129: agent reserved for terminal postmortem
               "include"}      # composite graphs: shelved-DAG expansion annotation; STRIPPED on
                               # expand, so a committed graph.json never carries it (only the
                               # library author form does)
@@ -355,10 +356,10 @@ def _reap_silent_death(r):
     append, in order, one `runner.reaped` (previous pid + observed reason) and one
     `node.interrupted` per node record claiming a running child whose pid fails
     the ONE verification law (_verify_spawn_rec: a verifiably-live child is
-    ADOPTED, never interrupted). Evidence is observed from files only (dead pid +
-    absent/foreign runner_exit.json), and the falsely-claimed records are left
-    byte-intact — the events are the record; a reaper must not erase the crime
-    scene. Best-effort: a reaper that itself throws never blocks the resume."""
+    ADOPTED, never interrupted). A graph-bound exit receipt and claim-bound
+    interruption receipts expose typed current truth; original spawn bytes stay
+    cold and reads remain pure. Best-effort: a reaper that itself throws never
+    blocks the resume."""
     try:
         pid = None
         try:
@@ -380,6 +381,9 @@ def _reap_silent_death(r):
         # verdict, and act_wait's rx gate owns it, no reaping.
         rx = _common.runner_exit_read(r) or {}
         reason = rx.get("reason")
+        saved_rx = _common.jload(r / "runner_exit.json") or {}
+        if reason == "interrupted: silent runner death":
+            reason = saved_rx.get("observed_reason", "crashed (no exit record)")
         # est-6226: a RECORDED external kill (the runner's own SIGTERM handler
         # wrote the external tag before re-raising) is equally a silent death
         # needing a loud reap — the wave shape records the verdict but no
@@ -407,7 +411,8 @@ def _reap_silent_death(r):
         # host gateway log within +/-120 s of the last event ts / wf.pid mtime),
         # the event says so. Never fatal: an absent/unreadable log keeps the
         # bare reason byte-identical (S2-S4 pins in tests/test_reaper_reason_8).
-        if _gw_restart_window_match(r, _death_anchor(r)):
+        if _gw_restart_window_match(r, _death_anchor(r)) and \
+                "; gw-restart window match" not in reason:
             reason = reason + "; gw-restart window match"
         events = [{"ts": now_iso, "event": "runner.reaped", "prev_pid": pid, "reason": reason}]
         for n in graph.get("nodes", []):
@@ -436,6 +441,27 @@ def _reap_silent_death(r):
                     # and never colliding with a real node named "fan0".
                     ev["index"] = int(idx) if idx.isdigit() else idx
                 events.append(ev)
+                # Keep original spawn evidence cold; expose current typed truth
+                # through a claim-bound interruption receipt (never a new spawn).
+                ir = r / "interruptions" / p.name
+                ir.parent.mkdir(exist_ok=True)
+                receipt = {"status": "interrupted", "error_class": "crashed",
+                           "at": now_iso, "of_runner": pid,
+                           "claim": {k: rec.get(k) for k in
+                                     ("pid", "skey", "attempt", "efp", "fp_rule_version")}}
+                tmp = ir.with_name(f"{ir.name}.{os.getpid()}.tmp")
+                tmp.write_text(json.dumps(receipt))
+                os.replace(tmp, ir)
+        if reason.startswith("crashed (no exit record)"):
+            receipt = {"reason": "interrupted: silent runner death", "error_class": "crashed",
+                       "prev_pid": pid, "observed_reason": reason, "at": now_iso,
+                       "graph_fingerprint": _common.graph_fingerprint(graph),
+                       "fp_rule_version": _common.FP_RULE_VERSION}
+            rp = r / "runner_exit.json"
+            if not saved_rx.get("reason"):
+                tmp = rp.with_name(f"{rp.name}.{os.getpid()}.tmp")
+                tmp.write_text(json.dumps(receipt))
+                os.replace(tmp, rp)
         _strip = lambda e: json.dumps({k: v for k, v in e.items() if k != "ts"},
                                       sort_keys=True)
         seen = set()
@@ -698,10 +724,11 @@ WORKFLOW_PARAMS = {
         "graph": {
             "type": "object",
             "description": (
-            "For run/amend: {name, nodes:[...], defaults:{schema, timeout, max_turns, reasoning, provider, model, context, require_route}} where `defaults` fills agent node keys the author left unset (explicit node keys always win; defaults.context is the shared preamble prepended once to each agent's own context) and where node = {id, type:'agent'|'gate'|'echo'|'join', after:[node ids], goal, context, "
+            "For run/amend: {name, nodes:[...], defaults:{schema, timeout, max_turns, reasoning, provider, model, context, require_route, fallback_models}} where `defaults` fills agent node keys the author left unset (explicit node keys always win; defaults.context is the shared preamble prepended once to each agent's own context) and where node = {id, type:'agent'|'gate'|'echo'|'join', after:[node ids], goal, context, "
             "schema (json-schema for child output), model, provider (optional explicit Hermes provider paired with model; passed as --provider; when unset it is INHERITED from a provider-qualified model alias/tier), toolsets, max_turns, timeout (s wall-clock kill, default 900), shape (recon|build|review|publish \u2014 fills max_turns/timeout from the measured p95 census presets when the author left them unset; "
             "explicit keys win), repo (optional path \u2014 absolute, or run-dir-relative \u2014 of the git lane this node owns: a done/partial whose lane still has uncommitted TRACKED changes commits as failed error_class incomplete_work instead of a false hand-off (the dad50be0 shape: fix green but uncommitted, downstream verifies the mutant); commit in the lane, then amend/re-run re-drives), run_budget (s, "
-            "child's own budget), reasoning (a hermes reasoning effort: none|minimal|low|medium|high|xhigh|max|ultra \u2014 passed to the child as --reasoning; levels are validated PER ROUTE at the door against the resolved (provider, model) route's supported set, with the supported list and nearest level in the error \u2014 no silent downgrade), require_route (bool, "
+            "child's own budget), reasoning (a hermes reasoning effort: none|minimal|low|medium|high|xhigh|max|ultra \u2014 passed to the child as --reasoning; levels are validated PER ROUTE at the door against the resolved (provider, model) route's supported set, with the supported list and nearest level in the error \u2014 no silent downgrade), "
+            "resume_hint (bool, optional; prompt-side only: on a RE-RUN spawn (transient retry, rate-limit park, bounded re-drive) the runner prepends a dead-attempt artifact inventory (work-dir files, this node's prior spawn logs, runner.log; size/mtime/last lines). absent = auto: fires only when the durable work dir already holds a prior attempt's files; true = always; false = never, prompts stay pre-#130; never part of the fingerprint), require_route (bool, "
             "default TRUE on nodes that pin an explicit model: the door's submit ping affirmatively proving the pinned route dead \u2014 or answered from the fallback ladder \u2014 refuses the launch instead of silently billing another model; set false to opt into the ladder explicitly; the ping proving a route alive additionally binds the runner's served-model hold; "
             "when the owner declares an estate `confidence_substrate` (plugin settings / workflows config), a proved-dead pin resolves to the first ping-alive declared rung instead of refusing \u2014 "
             "engine-stamped substitution with a machine-injected result-schema disclosure (#116); no config = the refusal, verbatim; the sibling `route_verified` proof annotation is DOOR-BAKED only \u2014 never author-writable, "
@@ -3241,6 +3268,8 @@ def act_status(args):
                                         if k not in ("argv", "spawn_cmd")}
             out["nodes"][nid]["active_spawn"] = _trim(v["active_spawn"])
             out["nodes"][nid]["active_spawns"] = [_trim(sp) for sp in v.get("active_spawns") or []]
+        if v.get("metrics"):
+            out["nodes"][nid]["metrics"] = v["metrics"]
         if v.get("blocked_by"):
             out["nodes"][nid]["blocked_by"] = v["blocked_by"]
         if v.get("parked"):
@@ -3327,7 +3356,7 @@ def act_status(args):
                 line["idle_s"] = int(_t.time() - la) if la is not None else None
                 line["last"] = current["last_desc"]
                 line["last_tool_at"] = la  # #18: the epoch of the last verified activity
-            out["nodes"][nid]["metrics"] = line
+            out["nodes"][nid]["metrics"] = {**out["nodes"][nid].get("metrics", {}), **line}
             # #127 (est-zsws): the heartbeat verdict rides EVERY running node's
             # status line — derived from the fold just built plus the #128
             # progress artifact age. Read model only: no writes, no key for a

@@ -215,6 +215,11 @@
   "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_deleted_cwd_resume_5c37b19.py.log"
  },
  {
+  "test": "test_detach_redrive_o79j.py",
+  "exit": 0,
+  "log": "rows_added_outside_ci in PROVENANCE.json"
+ },
+ {
   "test": "test_diagram_law.py",
   "exit": 0,
   "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_diagram_law.py.log"
@@ -712,6 +717,11 @@
   "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_old_door_resume_152.py.log"
  },
  {
+  "test": "test_on_exit_129.py",
+  "exit": 0,
+  "log": "local-foreground/test_on_exit_129.py.log"
+ },
+ {
   "test": "test_on_fail_h23.py",
   "exit": 0,
   "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_on_fail_h23.py.log"
@@ -907,6 +917,11 @@
   "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_ratelimit_park_walls_159c.py.log"
  },
  {
+  "test": "test_reap_receipt_o79j.py",
+  "exit": 0,
+  "log": "rows_added_outside_ci in PROVENANCE.json"
+ },
+ {
   "test": "test_reaper_reason_8.py",
   "exit": 0,
   "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_reaper_reason_8.py.log"
@@ -930,6 +945,11 @@
   "test": "test_resume_fresh_session_102.py",
   "exit": 0,
   "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_resume_fresh_session_102.py.log"
+ },
+ {
+  "test": "test_resume_hint_130.py",
+  "exit": 0,
+  "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_resume_hint_130.py.log"
  },
  {
   "test": "test_review_fixes.py",
@@ -1185,6 +1205,10 @@
   "test": "test_sprint101w2_D2-steer-liveness.py",
   "exit": 0,
   "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_sprint101w2_D2-steer-liveness.py.log"
+ },
+ {
+  "test": "test_stale_queued_spawn_byft8.py",
+  "exit": 0
  },
  {
   "test": "test_status_next.py",

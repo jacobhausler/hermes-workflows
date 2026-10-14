@@ -152,6 +152,17 @@ def main(argv=None, env=None):
         print(f"graph_regen: ABORT — post-fix graph_check not OK (rc={rc}):\n{verify}")
         return 1
 
+    # est-0an45: the upstream builder may stamp its seat's absolute path into
+    # graphify-out/.graphify_root; the committed contract value is "." (main,
+    # since 61d8cf6). Normalize before the diff decision so a duty refresh can
+    # never red test_personal_path_scrub_867, and fail closed if we cannot.
+    anchor = repo / "graphify-out" / ".graphify_root"
+    try:
+        anchor.write_text(".")
+    except OSError as exc:
+        print(f"graph_regen: ABORT — cannot normalize {anchor}: {exc}")
+        return 1
+
     files = graph_diff_files(repo)
     if files is None:
         print("graph_regen: ABORT — git diff failed"); return 1
