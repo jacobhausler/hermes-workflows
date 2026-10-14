@@ -297,11 +297,17 @@
       "measured": "2026-10-13 local foreground run at PR head: ALL PASS (6 checks), rc=0, /opt/hermes python stdlib-only; the PR adds this test without a CI row",
       "supersede_by": "next green-CI refresh (replace with the CI-captured row)",
       "test": "test_null_quorum_death_label_4sx.py"
+    },
+    {
+      "exit": 0,
+      "measured": "2026-10-13 local foreground run at lane head: ALL PASS (8 checks), rc=0; the PR adds this test without a CI row",
+      "supersede_by": "next green-CI refresh (replace with the CI-captured row)",
+      "test": "test_shelf_discovery_validation_828.py"
     }
   ],
   "source_issue": 75,
   "totals": {
-    "cases": 280,
+    "cases": 281,
     "red": 0
   },
   "tracking_item": "est-9yl2"

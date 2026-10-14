@@ -2196,7 +2196,30 @@ def _library_rows():
                                     "reason": entry.get("invalid", "invalid: unreadable")})
                 continue
             graph = entry["graph"]
-            nodes = graph["nodes"]
+            # est-2ek.1.828 (owner ruling 16, proposal
+            # work/clinker/proposals/est-2ek.1.828-discovery-validation.md):
+            # continuous discovery-time admission — the SAME installed structural
+            # validator that guards save/run, applied AFTER envelope normalization
+            # and defaults fill. A shelf entry whose graph fails the door lands in
+            # the existing typed `skipped`/`quarantined` outputs (fail-closed on
+            # the entry, fail-open on the walk; the row never lists, never
+            # replays from discovery). No route/model liveness ping is ever a
+            # discovery side effect; passing entries — including bare legacy
+            # bytes — stay byte-identical rows.
+            try:
+                _g = _common.apply_graph_defaults(graph)
+            except ValueError as _e:
+                _g, _bad = None, f"invalid: defaults/shape: {_e}"
+            else:
+                _bad = _validation_error(_g)
+            if _g is None or _bad:
+                skipped.append(rel)
+                _r = _bad if isinstance(_bad, str) else json.dumps(
+                    (_bad or {}).get("errors", [_bad])[:3], default=str)
+                quarantined.append({"id": rel, "name": name,
+                                    "reason": f"invalid: structural: {_r}"[:300]})
+                continue
+            nodes = _g["nodes"]
             row = {"name": name,
                    "nodes": len(nodes),
                    "gates": sum(1 for n in nodes if n.get("type") == "gate"),
