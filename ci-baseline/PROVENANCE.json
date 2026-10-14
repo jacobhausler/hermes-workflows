@@ -294,14 +294,20 @@
     },
     {
       "exit": 0,
-      "measured": "2026-10-13 local foreground run at PR head: ALL PASS (15 checks), rc=0; neighbour amend/door families green; the PR adds this test without a CI row",
+      "measured": "2026-10-13 local foreground run at PR head: ALL PASS (6 checks), rc=0, /opt/hermes python stdlib-only; the PR adds this test without a CI row",
       "supersede_by": "next green-CI refresh (replace with the CI-captured row)",
-      "test": "test_patch_amend_diff_2del.py"
+      "test": "test_null_quorum_death_label_4sx.py"
+    },
+    {
+      "test": "test_graph_orphan_deletion_231.py",
+      "exit": 0,
+      "measured": "2026-10-10 local foreground run after rebase onto main 1867366747eadda8c6aca40a7ce871c4aecedabe: 24 PASS, ALL PASS, rc=0; RED at fa37192 (11 FAIL, rc=1); includes tracked/deleted space, tab, LF, CR and Unicode paths plus fabricated suffix rejection; source-only est-i24i repair",
+      "supersede_by": "next green-CI refresh (replace with the CI-captured row)"
     }
   ],
   "source_issue": 75,
   "totals": {
-    "cases": 280,
+    "cases": 282,
     "red": 0
   },
   "tracking_item": "est-9yl2"
