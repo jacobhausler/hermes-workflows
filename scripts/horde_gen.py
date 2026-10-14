@@ -16,11 +16,13 @@ workflow graph JSON + wave manifest, with the five W19 process-defect fixes
       schema AND into the worker law text. Verdict strings outside the enum
       are rejected by the reducer, ending vocab sprawl (65 receipts / 20
       phrasings at W19).
-  DEFECT-4 (this file): dup_guard() performs an EXACT-LINE check (indentation-
-      stripped — bd renders comment bodies indented 4 spaces) BEFORE writes;
-      append_comment() is the only sanctioned append path (dup_guard has a
-      real call site), and `horde_gen.py guard --bead <ID> --line '<text>'`
-      exposes the check to worker shell text (exit 0 append-safe, 1 dup).
+  DEFECT-4 (this file): dup_guard() checks STRUCTURED comment bodies via
+      `bd comments --json` (display output is wrapped at ~80 cols and must
+      never be a match target); a line is a dup if it appears inside any
+      stored comment body; unreadable store FAILS CLOSED. append_comment()
+      is the only sanctioned append path and `horde_gen.py guard --bead <ID>
+      --line '<text>'` (exit 0 append-safe, 1 dup/unreadable) is the worker
+      shell form.
   DEFECT-5 (this file): the reclaim header uses the SCOPED `--id` form only
       (`bd reclaim --id <ID> --json`); the positional form is rejected by the
       deployed bd build (est-9mx4m) and the docs/header now align.
@@ -84,13 +86,47 @@ def bd(*args, timeout=60):
     return subprocess.run(["timeout", str(timeout), "bd", "-C", STORE, "--actor", ACTOR, *args],
                           capture_output=True, text=True).stdout
 
+def comments_json(bead_id):
+    """Structured comments — display output is NOT a parser target: bd wraps at
+    ~80 cols and indents bodies. Returns parsed comment dicts, or None when the
+    store is unreadable (callers MUST fail closed — DEFECT-4 lesson, W22 lap)."""
+    out = bd("comments", bead_id, "--json")
+    i = out.find("[") if out.find("[") >= 0 else out.find("{")
+    if i < 0:
+        return None
+    try:
+        parsed = json.loads(out[i:])
+    except Exception:
+        return None
+    return parsed if isinstance(parsed, list) else [parsed]
+
+def _comment_texts(c):
+    if isinstance(c, str):
+        return [c]
+    if isinstance(c, dict):
+        vals = []
+        for k in ("content", "body", "text", "comment"):
+            v = c.get(k)
+            if isinstance(v, str):
+                vals.append(v)
+        return vals or [json.dumps(c)]
+    return [str(c)]
+
 def dup_guard(bead_id, line):
-    """DEFECT-4: exact-line dup-check BEFORE append. True => safe to append.
-    W21 verify-lap fix: bd indents stored comment bodies 4 spaces — compare
-    lines STRIPPED, and match is exact-line, not substring."""
-    existing = bd("comments", bead_id)
+    """DEFECT-4: exact-line dup-check BEFORE append, on STRUCTURED comments.
+    W22 fix: display text is wrapped/indented and cannot be matched against;
+    a line counts as stored if it appears inside ANY comment body. Unreadable
+    store FAILS CLOSED (False = do not append) — fail-open on error is how
+    tonight's duplicates happened."""
+    parsed = comments_json(bead_id)
+    if parsed is None:
+        return False
     want = line.strip()
-    return not any(l.strip() == want for l in existing.splitlines())
+    for c in parsed:
+        for text in _comment_texts(c):
+            if want in text or text.strip() == want:
+                return False
+    return True
 
 def append_comment(bead_id, line):
     """DEFECT-4 wiring: the ONLY sanctioned append path — dup_guard is a call
@@ -200,20 +236,20 @@ def reduce_run(args):
                     reds.append((dp, "DEFECT-2 writes[] missing", str(w)[:40])); continue
                 bid = r.get("bead_id")
                 if bid:
-                    ds = re.findall(r"20\d\d-\d\d-\d\d[T ]\d\d:\d\d", bd("comments", bid))
-                    fresh = sum(1 for d in ds
-                                if datetime.datetime.fromisoformat(d.replace(" ", "T")[:16] + "+00:00") >= start)
-                    declared = sum(1 for x in w if x["kind"] == "comment")
-                    if declared and not fresh:
-                        reds.append((dp, "DEFECT-2 false-receipt: declared comments, store shows none since wave start", bid))
-                    # W21 fix: the reverse lie — receipt claims a mutation-family
-                    # verdict (or zero writes) while the store shows fresh comments.
-                    mutating = declared or any(x["kind"] in ("close", "update", "claim", "reclaim") for x in w) \
-                        or v in ("closed", "blocked-reasoned", "live-respected-stamped", "handback-premise-live", "reclaim-refused")
-                    if fresh and not mutating:
-                        reds.append((dp, "DEFECT-2 no-mutation lie: store shows fresh comments, receipt declares none", bid))
-                    elif declared and fresh and declared != fresh:
-                        reds.append((dp, f"DEFECT-2 count divergence: declared {declared} vs store {fresh}", bid))
+                    cj = comments_json(bid)
+                    if cj is None:
+                        reds.append((dp, "DEFECT-2 unreadable-store: reducer fails closed, receipt unverified", bid))
+                    else:
+                        texts = [t for c in cj for t in _comment_texts(c)]
+                        fresh = sum(1 for t in texts
+                                    for d in re.findall(r"20\d\d-\d\d-\d\d[T ]\d\d:\d\d", t)
+                                    if datetime.datetime.fromisoformat(d.replace(" ", "T")[:16] + "+00:00") >= start)
+                        declared = sum(1 for x in w if x["kind"] == "comment")
+                        # W22 fix: NO verdict-family exemption — any declared-vs-store
+                        # divergence is the lie, in either direction. Verdict words are
+                        # self-reported; the store delta is the ground truth.
+                        if declared != fresh:
+                            reds.append((dp, f"DEFECT-2 divergence: receipt declares {declared} comment writes, store shows {fresh} since wave start (verdict={v})", bid))
     print(json.dumps({"checked_run": run, "reds": reds}, indent=1))
     return 1 if reds else 0
 
