@@ -1,5 +1,50 @@
 # Changelog
 
+## 1.3.7 — 2026-10-14
+
+Patch line, sixteen merged PRs since v1.3.6 — the runner's deepest hardening
+wave yet (zombie hygiene, typed silent-death receipts, fail-safe wall events),
+a door amend/diff surface, effect-gated publication, and two audit-mandated
+regimes retired. Every `git log v1.3.6..HEAD` row re-derives from the merge
+commits; authorship of record is listed under **Attribution** below.
+
+**Runner and engine**
+
+- Continuous zombie hygiene for the subreaper pool (#283, @atbrace)
+- External jobs are registered and silent deaths reap typed receipts (#394)
+- Once-only graph `on_exit` postmortem (#129 → #391)
+- `resume_hint`: dead-attempt artifact inventory on every re-run path (#130 → #284)
+- Read model: fail-safe wall events and one snapshot per poll (#385)
+- Null-quorum fan-out death now names the real cause (#410)
+- Publication nodes gate `run.done` on external-effect receipts (#56 → #403)
+
+**Door and graph**
+
+- Patch surface for amend plus `action=diff` confirm surface (est-2del → #412)
+- PR-owned source deletions permitted without graph rewrites (est-i24i → #378)
+- Regen normalizes `.graphify_root` to contract `'.'` (est-0an45 → #409)
+
+**Hardening and tests**
+
+- Card-hook abandon-safety and cheap `register()` for the upstream v0.21.5
+  plugin contract (#304)
+- Behavioral error-class coverage and dead-fixture cleanup (est-pbwn → #377)
+
+**Retirements (audit)**
+
+- The mandatory all-green `ci-baseline` registry is retired (audit M01 → #351);
+  admission now compares against exits measured on the merge-base
+- The committed code-navigation regime is retired (audit M02 → #319, @atbrace)
+
+Routine graph refreshes ride along (#408, #404).
+
+Attribution — all sixteen merges are `Author: agent` trailers on the squash
+commits; the GitHub actor of record for every one is the org owner account,
+with @atbrace co-authoring the two peer-estate PRs (#283, #319).
+
+- #283 — @atbrace.
+- #319 — @atbrace.
+
 ## 1.3.6 — 2026-10-11
 
 Patch line, four merged PRs since v1.3.5 — #396 (the ponytail truth pass over
