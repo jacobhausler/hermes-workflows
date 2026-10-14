@@ -704,8 +704,8 @@ WORKFLOW_PARAMS = {
     "properties": {
         "action": {
             "type": "string",
-            "enum": ["run", "status", "wait", "release", "steer", "inbox", "amend", "stop", "list", "save", "submit", "library", "doctor_version", "validate"],
-            "description": "run=launch a graph; wait=read state, RESPAWNING an idle runner if work is pending (blocks to the next boundary when one is live); status=read-model of a run; release=answer a held human gate; steer=queue steering text for a node; inbox=(child-side, cooperative) pull late steering lines baked for THIS spawn — call once at a natural seam; amend=replace the graph (invalidates changed nodes + all downstream by fingerprint); stop=request stop; list=all runs; save=shelve a graph in the library under a name (from run_id or inline graph); library=list shelved graphs richly (name, description, tags, provenance, path-relative id). validate=dry-run the door's validation pipeline (defaults fill + defect collection + model/route policy) with no ping and no writes; returns {ok, errors:[{node,field,msg}], resolved_routes}. run from=<name> replays a shelved graph. submit=quarantine a hand-rolled graph for study (requires why_not_library >=80 chars; never joins the library — the quartermaster's human-gated loop decides); inbox kind=submissions lists them newest-first. doctor_version=read-only version truth for THIS install: {live_version, newest_packaged, source_commit, drift} comparing plugin.yaml against the install.json provenance that pack.py stamps at build time \u2014 one read, no network.",
+            "enum": ["run", "status", "wait", "release", "steer", "inbox", "amend", "diff", "stop", "list", "save", "submit", "library", "doctor_version", "validate"],
+            "description": "run=launch a graph; wait=read state, RESPAWNING an idle runner if work is pending (blocks to the next boundary when one is live); status=read-model of a run; release=answer a held human gate; steer=queue steering text for a node; inbox=(child-side, cooperative) pull late steering lines baked for THIS spawn — call once at a natural seam; amend=replace the graph (invalidates changed nodes + all downstream by fingerprint), or pass patch to edit a few node fields without resubmitting the whole graph; diff=confirm surface: runs the amend door with dry_run FORCED (accepts patch or graph), returns the preview + graph_diff and touches nothing; stop=request stop; list=all runs; save=shelve a graph in the library under a name (from run_id or inline graph); library=list shelved graphs richly (name, description, tags, provenance, path-relative id). validate=dry-run the door's validation pipeline (defaults fill + defect collection + model/route policy) with no ping and no writes; returns {ok, errors:[{node,field,msg}], resolved_routes}. run from=<name> replays a shelved graph. submit=quarantine a hand-rolled graph for study (requires why_not_library >=80 chars; never joins the library — the quartermaster's human-gated loop decides); inbox kind=submissions lists them newest-first. doctor_version=read-only version truth for THIS install: {live_version, newest_packaged, source_commit, drift} comparing plugin.yaml against the install.json provenance that pack.py stamps at build time \u2014 one read, no network.",
         },
         "run_id": {"type": "string", "description": "Run id (required for every action except run/list)."},
         "name": {"type": "string", "description": "run: overrides graph.name (default workflow); save: library name overrides graph.name (lowercase, [-_.]); library: return one entry with refs-derived required params and an instantiate command. amend: set graph.name in the replacement graph; omitting it retains the run name."},
@@ -765,7 +765,8 @@ WORKFLOW_PARAMS = {
         "gate_id": {"type": "string", "description": "release: gate node id."},
         "node": {"type": "string", "description": "steer: target node id (pending node picks it up at spawn; a LIVE child pulls it at its next seam via its own inbox call — the prompt is never rewritten)."},
         "text": {"type": "string", "description": "steer: the steering message."},
-        "dry_run": {"type": "boolean", "description": "amend: true = validate + preview {added, removed, changed, will_rerun, unchanged} ONLY — nothing is written, the runner is not touched. Normal amends echo the same lists. run: true = the same pre-launch gates (validate, bind, profile, policy, model resolve, route ping, quota, route enforcement) return {ok, dry_run, models, routes} and NOTHING is written — no run dir, no lane entry, no spawned runner."},
+        "dry_run": {"type": "boolean", "description": "amend: true = validate + preview {added, removed, changed, will_rerun, unchanged, graph_diff} ONLY — nothing is written, the runner is not touched. Normal amends echo the same lists. run: true = the same pre-launch gates (validate, bind, profile, policy, model resolve, route ping, quota, route enforcement) return {ok, dry_run, models, routes} and NOTHING is written — no run dir, no lane entry, no spawned runner."},
+        "patch": {"type": "object", "description": "amend/diff: per-node field patch instead of resubmitting the whole graph: {\"nodes\": {\"<existing id>\": {\"<field>\": value}}, \"name\": str?} — shallow merge per node, null deletes a field; unknown ids, id changes, new nodes, and other top-level keys are refused by name. Exclusive with graph/graph_path. The patched graph goes through the FULL amend door (validation, CAS, frozen replay, preview); amends.jsonl still records the resolved full graph."},
         "timeout": {"type": "number", "description": "wait: max seconds to block while a runner is live (default 600, capped 1800). Self-yields ~330s segments under the harness tool deadline with status+note — call wait again until terminal."},
         "detail": {"type": "string", "enum": ["full"], "description": "status/wait: 'full' attaches every committed node output and full spawn argv; the default is compact — mid-run waits carry output pointers (keys+bytes) only, terminal payloads always include outputs."},
     },
@@ -3753,15 +3754,44 @@ def _frozen_committed(r, old, new_nodes):
                 moved = True
     return ob, frozen
 
+def _graph_unified_diff(old, new, max_lines=400):
+    """est-2del: the diff text inside the confirm surface — unified diff of the
+    pretty-printed graphs (stable key order). Capped; cap is named."""
+    import difflib
+    def pretty(g):
+        return json.dumps(g, indent=2, sort_keys=True, default=str).splitlines()
+    d = list(difflib.unified_diff(pretty(old), pretty(new),
+                                  fromfile="graph.json", tofile="proposed", n=3, lineterm=""))
+    cap = len(d) > max_lines
+    return {"lines": d[:max_lines], "truncated": cap,
+            "changed_lines": sum(1 for ln in d if ln[:1] in "+-" and ln[:3] not in ("+++", "---"))}
+
+
+def act_diff(args):
+    """est-2del action=diff: the confirm surface for an amend — same door, same
+    gates, dry_run FORCED true. Accepts patch or graph; returns the preview
+    (added/removed/changed/will_rerun) plus graph_diff; touches nothing."""
+    return act_amend(dict(args or {}, dry_run=True))
+
+
 def act_amend(args):
     r = run_dir(args.get("run_id"))
     if not (r / "graph.json").exists():
         return {"error": "unknown run_id"}
+    _patch = args.get("patch")
+    if _patch is not None and (args.get("graph") or args.get("graph_path")):
+        return {"error": "patch and graph/graph_path are exclusive — patch edits the "
+                         "committed graph in place; send one or the other"}
     new, bad = _input_graph(args)
     if bad:
         return bad
+    if _patch is not None:
+        try:
+            new = _common.apply_node_patch(jload(r / "graph.json") or {}, _patch)
+        except ValueError as e:
+            return {"error": f"patch: {e}"}
     if new is None:
-        return {"error": "amend needs full replacement graph or graph_path"}
+        return {"error": "amend needs full replacement graph, graph_path, or patch"}
     # #19 (est-19k9w): opt-in compare-and-set on the graph revision, checked
     # EARLY so a stale caller is refused before the expensive gates and before
     # anything is written (a dry_run reports staleness too). Tokenless = today's
@@ -3837,6 +3867,7 @@ def act_amend(args):
     preview = amend_preview(r, new["nodes"])
     if args.get("dry_run"):
         return {"ok": True, "dry_run": True, "models": _models, "routes": _routes, **preview,
+                "graph_diff": _graph_unified_diff(old, new),
                 "hint": "nothing written — re-run without dry_run to apply"
                         + _liveness_hint_suffix(_liveness_notes)}
     # #19 (est-19k9w): the write site holds the per-run door lock across the
@@ -3989,7 +4020,7 @@ def act_doctor_version(args):
 
 
 ACTIONS = {"run": act_run, "status": act_status, "wait": act_wait, "release": act_release,
-           "steer": act_steer, "inbox": act_inbox, "amend": act_amend, "stop": act_stop, "list": act_list,
+           "steer": act_steer, "inbox": act_inbox, "amend": act_amend, "diff": act_diff, "stop": act_stop, "list": act_list,
            "save": act_save, "submit": act_submit, "library": act_library,
            "doctor_version": act_doctor_version, "validate": act_validate}
 

@@ -792,6 +792,11 @@
     "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_partial_rescue_law_134.py.log"
   },
   {
+    "test": "test_patch_amend_diff_2del.py",
+    "exit": 0,
+    "log": "/home/runner/work/hermes-workflows/hermes-workflows/ci-out/test_patch_amend_diff_2del.py.log"
+  },
+  {
     "test": "test_personal_path_scrub_867.py",
     "exit": 0,
     "log": "Local foreground python3 tests/test_personal_path_scrub_867.py on rebased #248 @ main 3b45625: DONE personal_path_scrub_867 OK, exit 0"

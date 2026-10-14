@@ -71,7 +71,8 @@ ending your turn right after `run` is how runs stall.
   payload carries `next` — do what `next` says, `wait` until it is empty; `next` is
   derived, never a guess. Before `amend` or stop, read the failed node's `node_facts`
   (error_class from the closed set; `cancelled` is never a failure) and committed
-  outputs. `amend` submits the WHOLE replacement graph; `run`/`amend` `dry_run:true`
+  outputs. `amend` submits the WHOLE replacement graph or a node-scoped
+  `patch` (field edits without resubmitting); `diff` = amend preview with dry_run forced; `run`/`amend` `dry_run:true`
   write nothing; `stop` is terminal. Details: [operations](references/operations.md).
 - Lint before launching with `workflow{action:"validate", graph:…}` — the door's
   whole validation, zero writes, no liveness ping.
