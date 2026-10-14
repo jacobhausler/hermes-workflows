@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.3.8 — 2026-10-14
+
+Patch release for P01/P02 (#418), preserving the v1.3.7 runner, patch/diff,
+card-hook safety and retired baseline/navigation behavior.
+
+- **Factual workflow guidance:** launch, wait and completion messages describe
+  observed state without granting new authority. Cards and curation are optional;
+  waiting can resume interrupted work. Static validation remains distinct from
+  route-probing launch dry runs.
+- **Read-only execution clocks:** a shared snapshot and bounded ledger index
+  project observed timing into status and dashboard responses using existing
+  spawn/item records. Missing evidence and dynamic totals stay explicitly unknown.
+- **Best-effort boundary:** equal-timestamp PID reuse is not complete attempt
+  provenance. No new scheduling, cancellation, authorization or persisted producer
+  contract is introduced.
+- Regression coverage includes malformed/missing evidence, stale identity,
+  fractional timestamps, retries and fan-out joins. S01 is not included.
+
 ## 1.3.7 — 2026-10-14
 
 Patch line, sixteen merged PRs since v1.3.6 — the runner's deepest hardening
