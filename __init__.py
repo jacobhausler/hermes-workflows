@@ -4051,6 +4051,9 @@ def _wf_command(raw_args):
     """`/wf` — the library front door. `/wf <name> [note]` supplies the note
     atomically as a launch seed, never as post-launch steering."""
     arg = (raw_args or "").strip()
+    # est-kg3y: `library show <name>` is the acceptance spelling of the same discovery.
+    if arg.startswith("library show "):
+        arg = arg[len("library "):]
     if arg.startswith("show "):
         detail = act_library({"name": arg[5:].strip()})
         if "error" in detail:

@@ -299,6 +299,15 @@ check("P2 pasted legacy <KEY> placeholders refused on a library launch (no write
 txt = hw._wf_command("show declared")
 check("P3 /wf show gives each required input's desc and says to fill before running",
       "the suite command" in txt and "fill" in txt.lower() and "run_context" in txt, txt[:400])
+# est-kg3y acceptance spells the discovery `library show <name>`: same output,
+# and an unknown name must never fall through to a launch.
+txt_lib = hw._wf_command("library show declared")
+check("P4 `library show <name>` prints the same inputs + instantiate command as /wf show",
+      txt_lib == txt and "the suite command" in txt_lib, txt_lib[:300])
+before_p4 = (len(spawns), dirs())
+txt_lib_u = hw._wf_command("library show no-such-graph")
+check("P4b `library show <unknown>` names the unknown graph and launches nothing",
+      "no-such-graph" in txt_lib_u and (len(spawns), dirs()) == before_p4, txt_lib_u[:200])
 
 # ---------- 2c. s12 as lint rows: validate reads a library envelope (dag_lint parity)
 v = call(action="validate", graph_path=str(LIB / "declared.json"))
