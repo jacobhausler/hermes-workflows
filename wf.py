@@ -237,6 +237,15 @@ def _profile_evidence(node):
     name = node.get("profile")
     return {"profile": name, "profile_home": str(profile_home(name))} if name else {}
 
+def _quorum_death_label(explicit_quorum, quorum, n_items):
+    """est-4sx: a null-quorum fan-out dies on the runner's IMPLICIT majority
+    (len(items)//2+1, sprint101 #12) — bare 'quorum not met' reads as if the
+    graph declared a bar it never declared. Name the real death."""
+    if explicit_quorum:
+        return "quorum not met"
+    return f"fanout_timeout_majority_unmet (implicit majority {quorum}/{n_items}; quorum not declared)"
+
+
 def _lane_gate(run, node, r):
     """fb-digest-29d (64c6772b): a node that declares `repo: <path>` owns a git
     lane, and a committed done/partial must mean the lane is CLEAN. The dad50be0
@@ -6431,7 +6440,7 @@ def run_agent_node(run, meta, byid, node, outputs, steering):
                                                      + "; ".join(f"[{f['index']}] {f['error']}" for f in fails)[:900],
                                             "failed_detail": fails,
                                             "output": {"items": merged, "all_results": results}})
-                log(run, "node.failed", node=nid, error="quorum not met", failed_detail=fails,
+                log(run, "node.failed", node=nid, error=_quorum_death_label(bool(explicit_quorum), quorum, len(items)), failed_detail=fails,
                      error_class="quorum", attempts=1)
             else:
                 merged_rec = _lane_gate(run, node, {"status": "done",
