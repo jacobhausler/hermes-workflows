@@ -1,7 +1,7 @@
 """est-55z04: a node pinned to a seat alias WITH an explicit provider ({model:'bigseat',
 provider:'example-provider'}) must PING and REPORT the alias TARGET id, not the bare alias.
 Before the fix, the alias expansion ran only under `not provider`, so the route fell back to
-the bare alias ('haiku' -> HTTP 404 model: haiku). Stdlib only, no network (ping stubbed)."""
+the bare alias ('bigseat' -> HTTP 404 model: bigseat). Stdlib only, no network (ping stubbed)."""
 import importlib, atexit, os, sys, tempfile
 from pathlib import Path
 
