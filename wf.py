@@ -3095,12 +3095,34 @@ def _seat_release(ticket):
     try: ticket.unlink()
     except OSError: pass
 
+def _spawn_floor_from_logs(run, node, index):
+    """est-hls8y: the highest a<N> whose logs/<node>[.<i>].a<N>.log already exists
+    in this run dir, or -1. A resumed runner is a new process, so the in-memory
+    counter starts empty; without this floor the resumed spawn reuses a0 and
+    truncates the attempt it resumes from."""
+    if run is None:
+        return -1
+    d = Path(run) / "logs"
+    if not d.is_dir():
+        return -1
+    pat = re.compile(re.escape(_spawn_stem(node, index, 0)[:-1]) + r"(\d+)\.log")
+    hi = -1
+    for p in d.iterdir():
+        m = pat.fullmatch(p.name)
+        if m:
+            hi = max(hi, int(m.group(1)))
+    return hi
+
 def _next_spawn_no(meta, node, index):
     """One counter per (node, item) — every Popen gets a fresh spawn number so
-    log names, session titles, and spawn-record `attempt` are unique per spawn."""
+    log names, session titles, and spawn-record `attempt` are unique per spawn.
+    est-hls8y: the first use of a key seeds from the logs already on disk, so a
+    resumed run never reuses a spawn number that owns a log."""
     key = f"{node['id']}:{index}"
     with meta["_procs_lock"]:
-        n = meta["_spawn_n"].get(key, -1) + 1
+        if key not in meta["_spawn_n"]:
+            meta["_spawn_n"][key] = _spawn_floor_from_logs(meta.get("_run"), node, index)
+        n = meta["_spawn_n"][key] + 1
         meta["_spawn_n"][key] = n
     return n
 
@@ -5044,7 +5066,7 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
                 meta["_procs"].pop(reg_key, None)
 
     try:
-        logf = open(lp, "w", encoding="utf-8", errors="replace")
+        logf = open(lp, "a", encoding="utf-8", errors="replace")   # est-hls8y: append, never truncate a prior attempt
     except OSError:
         _seat_release(seat)
         raise
