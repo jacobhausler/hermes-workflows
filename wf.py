@@ -457,24 +457,17 @@ def _wake_safe(value):
 # break out of the field or read as instruction prose) — exactly what makes a wake
 # actionable: inspect status/gates once, act, stop, never poll.
 _WAKE_TEMPLATES = {
-    "gate.held": "Your workflow run is HELD at a human gate and needs your answer. "
-                 "Inspect its status or gates view once, relay the gate's question and "
-                 "options verbatim to the human (clarify) and NEVER choose an option "
-                 "yourself, then answer with ONE workflow release action carrying the "
-                 "human's decision and stop. The run resumes on its own.",
-    "run.failed": "Your workflow run FAILED. Inspect its status once (failed nodes, "
-                  "exit records and error details are there), apply ONE corrective "
-                  "amend/repair/resume action, then stop. Do not poll or wait: the "
-                  "next transition — including completion — wakes this session.",
-    "run.done": "Your workflow run is DONE. summary.md is written; status shows the "
-                "node outputs. Read it once and CLOSE THE LOOP: the run's outputs are "
-                "inputs, not the deliverable. If the run was a triage/discovery stage, "
-                "every finding it confirmed must land in tracked work (file or claim "
-                "the tracked work item) and its execution leg must be dispatched or "
-                "completed before this turn ends — a done run whose findings produce "
-                "no action is a FAILED run. Land execution legs as PRs through the "
-                "review lane — never push commits directly to main. Do not poll or "
-                "wait: nothing further is being awaited.",
+    "gate.held": "The workflow is HELD at a human gate. Status contains the question "
+                 "and options; release requires the human's decision. This notification "
+                 "does not authorize choosing an answer or additional work.",
+    "run.failed": "The workflow execution FAILED. Status contains failed nodes, exit "
+                  "records and original error details. This notification does not authorize "
+                  "repair, resume or a new launch. Push delivery is optional; wait is the "
+                  "blocking path and may resume an interrupted run.",
+    "run.done": "The workflow execution is DONE. Status contains node outputs; summary.md "
+                "contains the run summary. Execution completion is not verification of the "
+                "user's task and does not authorize additional work. Research-only work "
+                "can end with its report; no dispatch, publication or curation is required.",
 }
 
 def _wake_owner_text(run_id, event):
@@ -3451,6 +3444,8 @@ def _account_tree(meta, node, index, spawn_no, pid, tree_seen, has_answer):
           "index": index, "pids": sorted(known), "proof": proof}
     if proof != "dead":
         log(run, ("item." if index is not None else "node.") + "tree_kill", **ev)
+        if proof == "unknown":
+            return ("fail", _proc_unreadable_record(pid, node["id"], spawn_no))
         rec = _left_live_record(pid, stuck,
                                 f"node '{node['id']}' spawn a{spawn_no} cannot be judged.",
                                 {"attempts": 1})
@@ -3681,9 +3676,12 @@ def _aux_run(cmd, timeout=None, **kw):
     timeout + 2*kill-grace, always — an unbounded communicate() here parked
     the runner's machine-gate deadline in review (#80 finding 3)."""
     kw.pop("start_new_session", None)              # ours is non-negotiable
-    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                         text=True, start_new_session=True, **kw)
     with _aux_lock:
+        # #283 review B1(b).3: spawn+registration ATOMIC under _aux_lock — the
+        # zombie reaper re-checks _aux_pids under the same lock before any
+        # waitpid, so it can never take this child's exit status in the gap.
+        p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                             text=True, start_new_session=True, **kw)
         _aux_pids.add(p.pid)
     try:
         try:
@@ -3791,6 +3789,101 @@ def _reap_zombie(pid):
         os.waitpid(pid, os.WNOHANG)
     except (ChildProcessError, OSError):
         pass
+
+def _owned_child_pids(meta):
+    """Every pid the runner owns a wait() on: seat handles in meta['_procs']
+    and aux probes in _aux_pids. CALLER HOLDS meta['_procs_lock'] then
+    _aux_lock (the order seat spawn already uses: _procs_lock is held across
+    _sidecar_live_registered, which takes _aux_lock)."""
+    mine = {getattr(h, "pid", None) for h in meta["_procs"].values()}
+    mine |= _aux_pids
+    return {p for p in mine if isinstance(p, int)}
+
+def _adopted_zombie_pids(meta):
+    """Pids of ZOMBIES whose parent is THIS process (the subreaper's adopted
+    pool) that the runner does NOT own (seat _procs / aux _aux_pids). This is
+    a lock-free pre-filter only — _reap_adopted_zombies re-checks ownership
+    under the locks before any waitpid (#283 review B1). Receipt 2026-10-07 burn-down:
+    PR_SET_CHILD_SUBREAPER adopts every double-fork descendant of a seat, and
+    _reap_zombie ran ONLY on boot sweeps / kill paths — a healthy run never
+    reaped its pool. Eight-hour lanes accumulated thousands of adopted zombies
+    each (a box-wide census found 7,674 of them `git`), the load average
+    tripled, and each runner burned ~0.65 cores
+    spinning /proc walks that grow O(zombies) every 0.25 s tick. Excluding
+    tracked Popen pids is INTEGRITY, not hygiene: waitpid'ing a Popen child out
+    from under its polling thread makes subprocess report ChildProcessError ->
+    returncode 0, a FALSE GREEN seat verdict. After the owning thread pops its
+    handle the child is dead and already reaped: a late reap is a harmless
+    ChildProcessError."""
+    me = os.getpid()
+    with meta["_procs_lock"]:
+        with _aux_lock:
+            owned = _owned_child_pids(meta)
+    out = []
+    try:
+        for pid in os.listdir('/proc'):
+            if not pid.isdigit():
+                continue
+            try:
+                with open(f'/proc/{pid}/stat') as f:
+                    head, _, rest = f.read().rpartition(') ')
+                if rest.split()[0] != 'Z' or int(rest.split()[1]) != me:
+                    continue
+            except (OSError, IndexError, ValueError):
+                continue
+            if int(pid) in owned:
+                continue
+            out.append(int(pid))
+    except OSError:
+        return []
+    return out
+
+def _reap_adopted_zombies(meta):
+    """One drain pass. The scan is a stale snapshot by construction, so the
+    ownership check and the waitpid happen TOGETHER under meta['_procs_lock']
+    then _aux_lock (#283 review B1): seat spawn does Popen+register under
+    _procs_lock and _aux_run does Popen+register under _aux_lock, so a child
+    is either already in the live owned set here or does not exist yet — the
+    reaper can never take the exit status a seat/aux owner is waiting for.
+    Returns the number of pids reaped."""
+    cands = _adopted_zombie_pids(meta)
+    if not cands:
+        return 0
+    n = 0
+    with meta["_procs_lock"]:
+        with _aux_lock:
+            owned = _owned_child_pids(meta)
+            for z in cands:
+                if z in owned:
+                    continue        # registered since the scan: its owner reaps
+                try:
+                    if os.waitpid(z, os.WNOHANG)[0] == z:
+                        n += 1
+                except (ChildProcessError, OSError):
+                    pass
+    return n
+
+def _start_reaper(meta):
+    """Daemon reaper — drains the adopted-orphan zombie pool every second
+    while the run lives (the boot-sweep-only reaping is the leak: load average
+    39 on 20 cores with ~8.8k zombies, receipt 2026-10-07). Never touches
+    a pid the runner owns (_procs seats, _aux_pids probes: verdict
+    integrity). Only runs when this process IS the subreaper (#283 review
+    B2): without it nothing is adopted and the reaper could only ever reap
+    the runner's own direct children. Returns the thread, or None."""
+    if not meta.get("_subreaper"):
+        return None
+    def loop():
+        stop = meta["_stop"]
+        while not stop.is_set():
+            try:
+                _reap_adopted_zombies(meta)
+            except Exception:
+                pass            # hygiene is best-effort: never kill the thread
+            stop.wait(1.0)
+    t = threading.Thread(target=loop, daemon=True, name="zombie-reaper")
+    t.start()
+    return t
 
 def _wait_pids_dead(pids, proof_s):
     """#61c: /proc-verify every pid is dead within the budget. (True, []) when
@@ -4112,9 +4205,10 @@ def _tree_quiesce(known, pgid, hold_s, proof_s, term_grace_s=None):
     sit OUTSIDE the group (the 06f57ea9 shape). Returns (proof, still_live):
     ('', []) when there was nothing to account for — the dead-or-empty case the
     healthy retry path must not touch; ('dead', []) once PROVEN; ('stuck', pids)
-    when the proof budget ran out (fail closed upstream, never blind-respawn) —
-    or whenever the table became unreadable (#61b B2: an unreadable /proc can
-    never produce 'dead', the proof only completes on a readable re-walk)."""
+    when the proof budget ran out (fail closed upstream, never blind-respawn);
+    ('unknown', known_pids) when the table became unreadable (#61b B2). Known
+    PIDs are attribution evidence, not proof they are still live: unreadability
+    can never produce 'dead' or a readable still-live verdict."""
     known = set(known)
     def _live():
         s = {p for p in known if _proc_alive(p)}
@@ -4130,7 +4224,7 @@ def _tree_quiesce(known, pgid, hold_s, proof_s, term_grace_s=None):
         return sorted(s)
     live = _live()
     if live is None:
-        return "stuck", sorted(known)               # cannot check death: NOT dead
+        return "unknown", sorted(known)               # cannot check death: NOT dead
     if not live:
         return "", []
     deadline = time.time() + hold_s
@@ -4138,7 +4232,7 @@ def _tree_quiesce(known, pgid, hold_s, proof_s, term_grace_s=None):
         time.sleep(0.1)
         live = _live()
         if live is None:
-            return "stuck", sorted(known)
+            return "unknown", sorted(known)
     if live:
         # SIGTERM first (B3 quarantine law): a polite exit gets a chance to
         # flush; the SIGKILL below is the fallback, not the opener. ESRCH fine.
@@ -4153,7 +4247,7 @@ def _tree_quiesce(known, pgid, hold_s, proof_s, term_grace_s=None):
             time.sleep(0.05)
             live = _live()
             if live is None:
-                return "stuck", sorted(known)
+                return "unknown", sorted(known)
     if live:
         try:
             os.killpg(pgid, signal.SIGKILL)         # dead group raises ESRCH — fine
@@ -4166,7 +4260,7 @@ def _tree_quiesce(known, pgid, hold_s, proof_s, term_grace_s=None):
     while True:
         live = _live()
         if live is None:
-            return "stuck", sorted(known)           # unreadable: never claim dead
+            return "unknown", sorted(known)           # unreadable: never claim dead
         if not live:
             return "dead", []
         if time.time() >= deadline:
@@ -4227,6 +4321,8 @@ def _isolate_prior(meta, r, ev, ev_kw):
         return None                              # drained naturally mid-check
     kw = dict(ev_kw); kw["pids"] = live; kw["proof"] = proof
     log(run, f"{ev}.tree_kill", **kw)
+    if proof == "unknown":
+        return _proc_unreadable_record(pid, ev_kw.get("node"), r.get("spawn"), r)
     if proof != "dead":
         return _left_live_record(pid, stuck,
                                  "attempt N+1 must never share a workdir with live "
@@ -4305,6 +4401,8 @@ def _final_quiesce(meta, r, ev, ev_kw):
                                  _proctree_hold_s(meta), _proctree_kill_proof_s(meta))
     kw = dict(ev_kw); kw["pids"] = live; kw["proof"] = proof; kw["final"] = True
     log(run, f"{ev}.tree_kill", **kw)
+    if proof == "unknown":
+        return _proc_unreadable_record(pid, ev_kw.get("node"), r.get("spawn"), r)
     if proof != "dead":
         return _left_live_record(pid, stuck,
                                  "the node may not commit over a still-running process "
@@ -7176,6 +7274,15 @@ def main(run_id):
     meta["_procs"] = {}
     meta["_procs_lock"] = threading.Lock()
     meta["_stop"] = threading.Event()
+    # Continuous zombie hygiene (BELOW the meta init it reads): subreaper
+    # adoption means every double-fork descendant that dies lands in THIS
+    # process's child table; boot-sweep-only reaping let healthy lanes
+    # accumulate thousands of zombies (receipt 2026-10-07: 8.8k zombies,
+    # load 39 on 20 cores, every runner burning ~0.65 cores on O(pool) /proc
+    # walks). The daemon drains the pool every second; it never reaps a pid
+    # the runner owns (_procs seats / _aux_pids probes: verdict integrity),
+    # and it does not start at all unless meta["_subreaper"] (#283 review B2).
+    _start_reaper(meta)
     # est-2ek.1.666: termination cleanup wired on EVERY exit path (atexit +
     # SIGTERM-clean-and-reraise) — a runner that leaves must not leave its
     # agent-node child mutating real state unsupervised.

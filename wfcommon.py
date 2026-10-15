@@ -3594,9 +3594,14 @@ def _active_spawns(r, n, byid):
         records.extend(sorted((r / "nodes").glob(f"{n['id']}.[0-9]*.json")))
     active = []
     for path in records:
-        v = _verify_spawn_rec(r, n, byid, jload(path))
-        if v:
-            active.append(v)
+        rec = jload(path)
+        v = _verify_spawn_rec(r, n, byid, rec)
+        if v and isinstance(rec, dict):
+            # Keep the verified attempt title for liveness/session joins, and
+            # the exact stored key for the ledger's distinct representation.
+            item = re.fullmatch(re.escape(n["id"]) + r"\.([0-9]+)\.json", path.name)
+            active.append({**v, "ledger_skey": rec["skey"],
+                           "index": int(item[1]) if item else None})
     return active
 
 def _progress_for(r, n):
@@ -3845,7 +3850,111 @@ def _wall_meter(n, active, extends):
     return {"elapsed_s": elapsed, "wall_s": wall_s, "p95_s": p95,
             "meter": "over-p95" if over else "near-wall" if near else "on-track"}
 
-def run_state(r):
+# Telemetry is a bounded prefix, not an authorization or a complete audit.
+CLOCK_LEDGER_MAX_BYTES = 4 * 1024 * 1024
+
+
+def _clock_ledger(r, node_ids):
+    """One bounded snapshot/index per state read; partial coverage stays explicit."""
+    indexed = {nid: [] for nid in node_ids}
+    coverage = {"status": "unavailable", "bytes_read": 0,
+                "max_bytes": CLOCK_LEDGER_MAX_BYTES, "scope": "current nodes; prefix"}
+    try:
+        with (r / "spawn-ledger.jsonl").open("rb") as stream:
+            data = stream.read(CLOCK_LEDGER_MAX_BYTES)
+            partial = stream.tell() < os.fstat(stream.fileno()).st_size
+        coverage.update(status="partial" if partial else "read", bytes_read=len(data))
+        if partial:
+            data = data[:data.rfind(b"\n") + 1]
+        for line in data.splitlines():
+            try:
+                row = json.loads(line)
+                if not isinstance(row, dict):
+                    coverage["status"] = "partial"
+                    continue
+                nid = row.get("node")
+                if isinstance(nid, str) and nid in indexed:
+                    indexed[nid].append(row)
+            except (ValueError, UnicodeError):
+                coverage["status"] = "partial"
+    except (OSError, UnicodeError):
+        pass
+    return indexed, coverage
+
+
+def execution_clocks(n, view, waits, now_s, ledger=(), ledger_available=True):
+    """Read-only clocks; queue callback time is later than admission-clock start.
+
+    Consequently its remaining value is an upper bound, never a dispatch ETA.
+    The runner has per-attempt walls, not a task-total authorization ceiling.
+    """
+    wall = n.get("timeout")
+    queue = []
+    for index, row in waits.items():
+        start = _iso_epoch(row.get("since"))
+        elapsed = max(0, now_s - start) if start is not None else None
+        remaining = (max(0, wall - elapsed) if elapsed is not None
+                     and isinstance(wall, (int, float)) and not isinstance(wall, bool) else None)
+        queue.append({"index": index, "elapsed_s": elapsed,
+                      "configured_timeout_s": wall,
+                      "remaining_upper_bound_s": remaining})
+    active = []
+    live_keys = {}
+    for sp in view.get("active_spawns", []):
+        start = _iso_epoch(sp.get("started"))
+        elapsed = max(0, now_s - start) if start is not None else None
+        live_keys[(sp.get("pid"), sp.get("ledger_skey", sp.get("skey")))] = start
+        active.append({"index": sp.get("index"), "elapsed_s": elapsed,
+                       "configured_remaining_s": max(0, wall - elapsed)
+                       if elapsed is not None and isinstance(wall, (int, float)) else None,
+                       "effective_remaining_s": None})
+    # Each child/child_end pair is one attempt, not a node-start-to-now timer.
+    # Unclosed non-live attempts are unknown, never extended to the present.
+    pending, observed, attempts, seen = {}, 0, 0, set()
+    unknown = 0
+    for row in ledger:
+        if row.get("node") != n["id"]:
+            continue
+        if type(row.get("pid")) is not int or not isinstance(row.get("skey"), str):
+            continue
+        key = (row["pid"], row["skey"])
+        stamp = _iso_epoch(row.get("ts"))
+        if stamp is None:
+            continue
+        if row.get("role") == "child":
+            identity = (key, stamp)
+            if identity in seen:
+                continue
+            seen.add(identity)
+            if key in pending:
+                unknown += 1
+            pending[key] = stamp
+            attempts += 1
+        elif row.get("role") == "child_end":
+            if key in pending:
+                observed += max(0, stamp - pending.pop(key))
+            else:
+                unknown += 1
+    # The writer stamps the spawn record before appending its ledger start.
+    # An older open interval with a reused PID/bare key is not this attempt.
+    matched = {key for key, start in pending.items()
+               if live_keys.get(key) is not None and start >= live_keys[key]}
+    unknown += len(live_keys.keys() - matched)
+    for key, start in pending.items():
+        if key in matched:
+            observed += max(0, now_s - start)
+        else:
+            unknown += 1
+    return {"phase": "active" if active else "queued" if queue else view["status"],
+            "queue": queue, "active": active,
+            "work": {"observed_s": observed, "attempts_observed": attempts, "coverage": "best_effort",
+                     "unknown_intervals": unknown if ledger_available or unknown else None,
+                     "completeness": "unknown", "lower_bound": True,
+                     "basis": "spawn-ledger intervals; cumulative across attempts"},
+            "task_total_ceiling": "not_enforced"}
+
+
+def run_state(r, *, telemetry=True):
     """Derived truth of a run dir: status, per-node status, held gate meta.
     status: pending|running|interrupted|held|done|failed|stopped.
     'interrupted' has unfinished work but NO verified runner; only wait/release/amend
@@ -3896,8 +4005,9 @@ def run_state(r):
             if wm:
                 nodes[n["id"]]["wall"] = wm
     # est-2ek.1.833: a live runner blocked on the global seat cap says so per node.
+    waits = open_seat_waits(r, events_text) if live else {}
     if live:
-        for nid, per in open_seat_waits(r, events_text).items():
+        for nid, per in waits.items():
             if nid in nodes and states.get(nid) == "pending" and per:
                 nodes[nid]["seat_wait"] = seat_wait_view(per)
     # e68544a37be37657 + est-ij0: the runner's own release law (partial blocks a
@@ -3990,7 +4100,68 @@ def run_state(r):
     failed_nodes = [{"id": n["id"], "error": (recs[n["id"]] or {}).get("error"),
                      "error_class": (recs[n["id"]] or {}).get("error_class")}
                     for n in graph["nodes"] if states[n["id"]] == "failed"]
-    return {"run_id": r.name, "name": graph.get("name"), "status": status,
+    accounting = {}
+    if telemetry:
+        import time as _time
+        clock_now = _time.time()
+        ledger, ledger_coverage = _clock_ledger(r, nodes)
+        ledger_available = ledger_coverage["status"] == "read"
+        for n in graph["nodes"]:
+            nid = n["id"]
+            clock = execution_clocks(
+                n, nodes[nid], waits.get(nid, {}) if states[nid] == "pending" else {}, clock_now, ledger[nid], ledger_available)
+            rec = recs[nid] or {}
+            if status == "stopped" and clock["phase"] in ("pending", "queued"):
+                clock["phase"] = "stopped"
+            if states[nid] in ("failed", "partial") and rec.get("error_class") in ("seat_wait", "timeout", "cap_exhausted"):
+                clock["phase"] = "expired"
+                clock["exhaustion_reason"] = {"seat_wait": "queue_timeout", "timeout": "work_timeout",
+                                              "cap_exhausted": "turn_cap"}[rec["error_class"]]
+                if rec.get("error_class") == "seat_wait":
+                    clock["queue_elapsed_s"] = rec["ms"] / 1000 if isinstance(rec.get("ms"), (int, float)) else None
+            if held and held.get("id") == nid:
+                hm = jload(r / "gates" / f"{nid}.held.json", {}) or {}
+                since = hm.get("since") if record_efp_valid(hm, byid, n, "_def") else None
+                elapsed = max(0, clock_now - since) if isinstance(since, (int, float)) else None
+                timeout = n.get("hold_timeout")
+                remaining = max(0, timeout - elapsed) if isinstance(timeout, (int, float)) and elapsed is not None else None
+                clock["phase"] = "held"
+                clock["hold"] = {"elapsed_s": elapsed, "remaining_s": remaining,
+                                 "ceiling": "configured" if timeout is not None else "unbounded",
+                                 "expired": remaining == 0 if remaining is not None else None,
+                                 "expiry_action": "default_option" if n.get("default_option") else "keep_holding"}
+            nodes[nid]["clocks"] = clock
+            fanout = n.get("fanout")
+            if fanout:
+                items = fanout.get("items")
+                counts = {"basis": "literal fanout items" if isinstance(items, list) else "dynamic items unknown",
+                          "total": len(items) if isinstance(items, list) else None,
+                          **{key: 0 if isinstance(items, list) else None
+                             for key in ("done", "partial", "failed", "cancelled", "unknown")}}
+                for index in range(len(items)) if isinstance(items, list) else ():
+                    item = jload(r / "nodes" / f"{nid}.{index}.json", {}) or {}
+                    state = item.get("status") if record_efp_valid(item, byid, n) else None
+                    if state in ("failed", "partial") and item.get("error_class") in ("seat_wait", "timeout", "cap_exhausted"):
+                        reason = {"seat_wait": "queue_timeout", "timeout": "work_timeout", "cap_exhausted": "turn_cap"}[item["error_class"]]
+                        group = clock.setdefault("item_expirations", {}).setdefault(reason, {"count": 0})
+                        group["count"] += 1
+                        if reason == "queue_timeout":
+                            ms = item.get("ms")
+                            if isinstance(ms, (int, float)) and not isinstance(ms, bool) and ms >= 0:
+                                group["observed_queue_s"] = group.get("observed_queue_s", 0) + ms / 1000
+                            else:
+                                group["unknown_durations"] = group.get("unknown_durations", 0) + 1
+                    if state == "failed" and item.get("error_class") == "cancelled":
+                        state = "cancelled"
+                    counts[state if state in ("done", "partial", "failed", "cancelled") else "unknown"] += 1
+                nodes[nid]["item_counts"] = counts
+        unknown_counts = [v["clocks"]["work"]["unknown_intervals"] for v in nodes.values()]
+        accounting = {"task_total_ceiling": "not_enforced", "coverage": "best_effort",
+                      "completeness": "unknown", "lower_bound": True, "ledger": ledger_coverage,
+                      "basis": "observed child-seconds; sum across nodes, items and attempts, not elapsed wall time",
+                      "observed_work_s": sum(v["clocks"]["work"]["observed_s"] for v in nodes.values()),
+                      "unknown_intervals": sum(unknown_counts) if all(x is not None for x in unknown_counts) else None}
+    return {"run_id": r.name, "name": graph.get("name"), "status": status, "accounting": accounting,
             "failed_nodes": failed_nodes,
             "held_gate": held, "nodes": nodes, "graph": stored_graph,
             # 91b9a3de companion: publish the ONE liveness read this state was
@@ -4262,6 +4433,72 @@ def residue(nodes, states, blocked, unconverged, outputs):
         v = out.get("verdict") if isinstance(out, dict) else None
         verdicts[nid] = {"status": states.get(nid), "verdict": v if isinstance(v, str) else None}
     return {"data_dead": data_dead, "order_dead": order_dead, "verdicts": verdicts}
+
+def apply_node_patch(old_graph, patch_obj):
+    """est-2del: per-node patch for amend — change a couple of fields without
+    resubmitting the whole (multi-KB) graph. Pure + fail-closed:
+
+      - patch_obj is {"nodes": {id: {field: value}}, "name": str}? — `nodes` is
+        the ONLY structural key; anything else is refused, so a typo'd patch
+        can never silently drop authoring (adding NEW nodes stays full-graph
+        work: patch edits, it does not author).
+      - a node's patch is a SHALLOW field merge; a field value of null deletes
+        the field; patching `id` or patching an unknown node id is refused by
+        name (no silent no-op, no re-keying).
+      - "name", when present, replaces the graph name.
+    Returns a NEW graph (deep-copied nodes, original order); never mutates.
+    Raises ValueError with a named reason — the door turns it into a typed
+    refusal before anything is written."""
+    import copy as _copy
+    if not isinstance(patch_obj, dict):
+        raise ValueError("patch must be an object")
+    unknown = sorted(set(patch_obj) - {"nodes", "name"})
+    if unknown:
+        raise ValueError(f"patch keys {unknown} not allowed (only 'nodes' and 'name')")
+    nodes = patch_obj.get("nodes")
+    if nodes is None and "name" not in patch_obj:
+        raise ValueError("patch is empty: needs nodes and/or name")
+    if nodes is not None:
+        if not isinstance(nodes, dict) or not nodes:
+            raise ValueError("patch.nodes must be a non-empty object of node id -> field updates")
+    if not isinstance(old_graph, dict) or not isinstance(old_graph.get("nodes"), list):
+        raise ValueError("committed graph has no nodes to patch")
+    byid = {}
+    for n in old_graph["nodes"]:
+        if isinstance(n, dict) and isinstance(n.get("id"), str):
+            byid[n["id"]] = n
+    new_nodes = []
+    seen = set()
+    for n in old_graph["nodes"]:
+        nid = n.get("id") if isinstance(n, dict) else None
+        if isinstance(nid, str) and nodes and nid in nodes:
+            upd = nodes[nid]
+            seen.add(nid)
+            if not isinstance(upd, dict) or not upd:
+                raise ValueError(f"patch.nodes.{nid} must be a non-empty object of field updates")
+            if "id" in upd:
+                raise ValueError(f"patch.nodes.{nid} cannot change the node id")
+            m = _copy.deepcopy(n)
+            for k, v in upd.items():
+                if v is None:
+                    m.pop(k, None)
+                else:
+                    m[k] = _copy.deepcopy(v)
+            new_nodes.append(m)
+        else:
+            new_nodes.append(_copy.deepcopy(n))
+    if nodes:
+        missing = sorted(set(nodes) - seen)
+        if missing:
+            raise ValueError(f"patch names unknown node ids {missing} (patch edits existing nodes only; adding nodes needs the full graph)")
+    out = _copy.deepcopy(old_graph)
+    out["nodes"] = new_nodes
+    if "name" in patch_obj:
+        if not isinstance(patch_obj["name"], str) or not patch_obj["name"]:
+            raise ValueError("patch.name must be a non-empty string")
+        out["name"] = patch_obj["name"]
+    return out
+
 
 def amend_preview(r, new_nodes):
     """{added, removed, changed, will_rerun, unchanged} for a proposed graph

@@ -104,7 +104,8 @@ def _node_log_tail(r, nid, index, attempt, kind, tail):
             "bytes": len(data), "content": data.decode("utf-8", errors="replace")}
 
 def _view(r, full=False):
-    st = _workflow_common().run_state(r)
+    common = _workflow_common()
+    st = common.run_state(r) if full else common.run_state(r, telemetry=False)
     if not st:
         return None
     view = {"id": st["run_id"], "name": st["name"], "status": st["status"],
