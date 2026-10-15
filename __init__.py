@@ -772,6 +772,7 @@ WORKFLOW_PARAMS = {
         "gate_id": {"type": "string", "description": "release: gate node id."},
         "node": {"type": "string", "description": "steer: target node id (pending node picks it up at spawn; a LIVE child pulls it at its next seam via its own inbox call — the prompt is never rewritten)."},
         "text": {"type": "string", "description": "steer: the steering message."},
+        "cmd": {"type": "string", "enum": ["kill"], "description": "steer: cmd=kill = node-targeted lane kill (node required): that lane's in-flight children are SIGKILLed and the node finishes failed with error_class=killed; sibling nodes and the run keep going. Never queues steering text."},
         "dry_run": {"type": "boolean", "description": "amend: true = validate + preview {added, removed, changed, will_rerun, unchanged, graph_diff} ONLY — nothing is written, the runner is not touched. Normal amends echo the same lists. run: true = the same pre-launch gates (validate, bind, profile, policy, model resolve, route ping, quota, route enforcement) return {ok, dry_run, models, routes} and NOTHING is written — no run dir, no lane entry, no spawned runner."},
         "patch": {"type": "object", "description": "amend/diff: per-node field patch instead of resubmitting the whole graph: {\"nodes\": {\"<existing id>\": {\"<field>\": value}}, \"name\": str?} — shallow merge per node, null deletes a field; unknown ids, id changes, new nodes, and other top-level keys are refused by name. Exclusive with graph/graph_path. The patched graph goes through the FULL amend door (validation, CAS, frozen replay, preview); amends.jsonl still records the resolved full graph."},
         "timeout": {"type": "number", "description": "wait: max seconds to block while a runner is live (default 600, capped 1800). Self-yields ~330s segments under the harness tool deadline with status+note — call wait again until terminal."},
@@ -3688,6 +3689,13 @@ def act_release(args):
     return {**res, "hint": hint}
 
 def act_steer(args):
+    # est-cl7t: steering admission for a lane kill. cmd=kill is NOT steering text —
+    # it is the node-targeted kill (act_kill). Without this door an empty
+    # steering line was queued silently and the lane ran to done.
+    if args.get("cmd") not in (None, "", "kill"):
+        return {"ok": False, "error": f"unknown steer cmd {args.get('cmd')!r}; only cmd=kill (lane kill) is admitted"}
+    if args.get("cmd") == "kill":
+        return act_kill(args)
     r = run_dir(args.get("run_id"))
     graph = jload(r / "graph.json")
     if not graph:
