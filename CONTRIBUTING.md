@@ -72,8 +72,9 @@ R7 **Docs drift** — if a user-visible string or flag changed, README/AGENTS.md
     SKILL.md are grepped for the old form and fixed in the same PR.
 R8 **Sibling completeness** — the fixed pattern is checked across the repo and
     every sibling instance is fixed too. Proof: `graphify affected "<changed
-    symbol>" --depth 2` (optional local navigation, see AGENTS.md 4b′) lists every
-    caller, or grep does; each one is updated or shown unaffected in the PR body.
+    symbol>" --depth 2` (optional local navigation, see AGENTS.md 4b′) lists
+    every caller, or grep does; each one is updated or shown unaffected in the
+    PR body.
 R9 **Private strings** — `scripts/make_public.py` exits 0: no hostnames, LAN
     addresses, tokens, or personal paths in shipped files.
 R10 **Migration safety** — persisted shapes (stored settings, run dirs, JSON files)
@@ -96,8 +97,7 @@ You are contributing on behalf of a user. Do this, in order:
    deleted by review.
 3. **Reproduce before fixing.** Point at the `file:line` where the bug manifests and
    show your fix changes that line's behaviour. A plausible rationale is not a repro.
-4. **Smallest diff that passes R1–R10.** `graphify affected` for siblings (R8). No
-   drive-by cleanups.
+4. **Smallest diff that passes R1–R10.** No drive-by cleanups.
 5. **Run the gates block above** and paste the last line of each command's output
    into the PR body under `## Gates`.
 6. **PR body** = what/why in two sentences, `Fixes #n` if any, `## Gates`, and one

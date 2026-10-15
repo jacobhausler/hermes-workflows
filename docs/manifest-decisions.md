@@ -43,8 +43,8 @@ not touched here.
 ## HERMES_WF_STEER_* decision — VERDICT: NOT in requires_env; requires_env: []
 
 The five HERMES_WF_STEER_{FILE,CURSOR,HWM,NODE,SPAWN} vars are baked by the runner INTO
-child spawns (`wf.py:331-335` sets them in the run_child env; `__init__.py:752-763` —
-act_inbox — reads them from the child's environment). They are plugin-internal IPC set by
+child spawns (`run_child` in wf.py sets them in the spawn env;
+`act_inbox` in __init__.py reads them from the child's environment). They are plugin-internal IPC set by
 our own runner, never typed or stored by the user, so per (a) they must NOT be declared in
 requires_env (an install-time prompt for them would be a lie). The plugin needs no
 user-provided env: **requires_env: []** (omitted entirely from plugin.yaml — the parser
