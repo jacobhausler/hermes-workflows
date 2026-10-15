@@ -93,6 +93,21 @@ def normalize(value, paths):
     if isinstance(value, dict):
         if isinstance(value.get('events.jsonl'), list):
             value = dict(value, **{'events.jsonl': normalize_fanout_starts(value['events.jsonl'])})
+        # est-syim (#126) default-on save provenance: provenance.version is the plugin
+        # release that stamped the entry — the repo's own plugin.yaml version, bumping
+        # every release. Sanctioned delta exactly like run.json `plugin_version`
+        # (ra-plan#125 est-ciin): pinning it would re-freeze a volatile; the PRESENCE
+        # law is proven by tests/test_provenance_contract_126.py T1e, not by the golden.
+        # graph_revision "<seq>:<sha16>" is a digest OVER those stamped bytes, so it
+        # inherits the volatility — the seq (amend count) stays pinned; only the
+        # derived content-hash normalizes. CAS/token behaviour is proven by
+        # tests/test_graph_revision_cas_19.py, not by the golden.
+        if 'provenance' in value and isinstance(value['provenance'], dict):
+            value = dict(value, provenance={k: v for k, v in value['provenance'].items()
+                                            if k != 'version'})
+        if isinstance(value.get('graph_revision'), str):
+            _rev = re.sub(r'(^\d+:)[0-9a-f]{16}$', r'\1<REV>', value['graph_revision'])
+            value = dict(value, graph_revision=_rev)
         # P02 adds read-only telemetry; persisted files remain in the golden.
         # Behavior/unknown/accounting contracts live in test_execution_clocks_p02.
         if 'runner_live' in value and isinstance(value.get('nodes'), dict):
