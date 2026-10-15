@@ -52,20 +52,56 @@ def def_hash(node, rule=FP_RULE_VERSION):
 
 _EFP_SEP = "\u241f"
 
-def efp(byid, node, _seen=None, *, rule=FP_RULE_VERSION):
+def efp(byid, node, _seen=None, *, rule=FP_RULE_VERSION, memo=None):
     """Effective fingerprint: own def + every ancestor's effective fingerprint.
     An amended node (or any ancestor) changes the efp of everything downstream, so
-    downstream results are stale and nodes downstream re-run or re-hold — transitively."""
+    downstream results are stale and nodes downstream re-run or re-hold — transitively.
+
+    DAG-memoized: pass a shared `memo` dict (one per live `byid` table) and each
+    node's effective fingerprint computes once per (id, rule) instead of once per
+    path reaching it. Diamond-shaped graphs are exponential without it — an N-wide
+    join layer costs 2^N def_hash re-hashes of the SAME nodes — which is what made
+    a listing over real runs hash a quarter-million node definitions. `memo=None`
+    (the default) is the classic path, byte-identical to before; a fresh empty
+    dict is a live memo. Callers that mix several
+    graphs into one `byid` (or mutate node defs while the table lives) pass no memo.
+    Memo values are pure functions of the graph, so a table holding one graph may
+    share one memo across every read of it.
+    """
     _seen = _seen or set()
+    if memo is None:
+        return _efp(byid, node, _seen, rule, None)[0]
+    hit = memo.get((node["id"], rule))
+    if hit is not None:
+        return hit
+    val, tainted = _efp(byid, node, _seen, rule, memo)
+    if not tainted:
+        memo[(node["id"], rule)] = val
+    return val
+
+def _efp(byid, node, _seen, rule, memo):
+    """efp's walk: (value, tainted). `tainted` marks a value whose computation
+    depended on a cycle cut (a node already in `_seen` — the "?" law firing on a
+    malformed cyclic byid), so the result is walk-path-dependent and NEVER
+    enters the memo; an un-tainted value is a pure function of the node's
+    acyclic closure and a memo hit is therefore byte-identical to recomputing
+    it. Values, cycle law included, are identical to the un-memoized walk."""
     nid = node["id"]
     if nid in _seen:
-        return "?"  # unreachable for validated (acyclic) graphs
+        return "?", True  # unreachable for validated (acyclic) graphs
     _seen = _seen | {nid}
+    if memo is not None:
+        hit = memo.get((nid, rule))
+        if hit is not None:
+            return hit, False
     parts = [def_hash(node, rule)]
+    tainted = False
     for a in sorted(node.get("after", [])):
         if a in byid:
-            parts.append(efp(byid, byid[a], _seen, rule=rule))
-    return hashlib.sha256(_EFP_SEP.join(parts).encode()).hexdigest()[:16]
+            v, t = _efp(byid, byid[a], _seen, rule, memo)
+            parts.append(v)
+            tainted = tainted or t
+    return hashlib.sha256(_EFP_SEP.join(parts).encode()).hexdigest()[:16], tainted
 
 
 def graph_fingerprint(graph, *, rule=FP_RULE_VERSION):
@@ -75,7 +111,8 @@ def graph_fingerprint(graph, *, rule=FP_RULE_VERSION):
         return None
     try:
         byid = {n["id"]: n for n in nodes}
-        facts = {str(n["id"]): efp(byid, n, rule=rule) for n in nodes}
+        fp_memo = {}   # same single-graph read as run_state: one shared memo
+        facts = {str(n["id"]): efp(byid, n, rule=rule, memo=fp_memo) for n in nodes}
         raw = json.dumps(facts, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
         return hashlib.sha256(raw.encode()).hexdigest()[:16]
     except Exception:
@@ -3001,10 +3038,10 @@ def fingerprint_valid(stored, actual, rule):
     matches = [v for v in FP_RULES if stored is not None and stored == actual(v)]
     return len(matches) >= 1
 
-def record_efp_valid(rec, byid, node, field="efp"):
+def record_efp_valid(rec, byid, node, field="efp", memo=None):
     return isinstance(rec, dict) and ("fp_rule_version" not in rec or
                                       (type(rec["fp_rule_version"]) is int and rec["fp_rule_version"] in FP_RULES)) and fingerprint_valid(
-        rec.get(field), lambda rule: efp(byid, node, rule=rule), rec.get("fp_rule_version"))
+        rec.get(field), lambda rule: efp(byid, node, rule=rule, memo=memo), rec.get("fp_rule_version"))
 
 def runner_exit_read(r, pid_path=None):
     """Graph-bound runner verdict, or a crash when a previous pid lacks identity.
@@ -3039,18 +3076,27 @@ def is_external_kill(reason):
 
 # ---------- node state (the ONE validity rule: stored efp == current efp) ----------
 
-def _legacy_chain_unchanged(r, n, byid):
+def _legacy_chain_unchanged(r, n, byid, memo=None):
     """A pre-efp record is valid ONLY if the stored def_hash matches AND every
     ancestor was itself committed in the legacy era (its record also lacks efp)
     with a matching def_hash — chain-checked recursively. 'Done right now' is NOT
     proof of 'unchanged since this commit': an amended ancestor that re-ran must
     NOT resurrect stale downstream records or gate answers (MF2)."""
+    # The chain walk is itself exponential on diamonds; `memo` is a per-WALK
+    # visited map (False/True per ancestor), NOT the efp memo — pass no memo
+    # when `byid` may mix graphs.
+    if memo is not None and n["id"] in memo:
+        return memo[n["id"]]
     rec = jload(r / "nodes" / f"{n['id']}.json")
     if not rec or "efp" in rec or not fingerprint_valid(
             rec.get("def_hash"), lambda rule: def_hash(n, rule), rec.get("fp_rule_version")):
-        return False
-    return all(a not in byid or _legacy_chain_unchanged(r, byid[a], byid)
+        result = False
+    else:
+        result = all(a not in byid or _legacy_chain_unchanged(r, byid[a], byid, memo)
                for a in n.get("after", []))
+    if memo is not None:
+        memo[n["id"]] = result
+    return result
 
 def _answer_harvest_valid(n, rec):
     """Honest status (jam-aus): a committed record whose answer validates against the
@@ -3078,7 +3124,7 @@ def _answer_harvest_valid(n, rec):
     schema = n.get("schema") or (n.get("fanout") or {}).get("schema")
     return not validate(out, schema)
 
-def node_rec(r, n, byid):
+def node_rec(r, n, byid, memo=None, legacy_memo=None):
     """Return (status, rec): done|partial|failed|pending. Stale (efp mismatch after an
     amend) == pending — its stored result must never be presented as current.
     Legacy (pre-efp) records carried def_hash only; a bare stamp is a downgrade
@@ -3092,18 +3138,18 @@ def node_rec(r, n, byid):
     if st == "running":
         interruption = jload(r / "interruptions" / f"{n['id']}.json") or {}
         claim = {k: rec.get(k) for k in ("pid", "skey", "attempt", "efp", "fp_rule_version")}
-        if interruption.get("claim") == claim and record_efp_valid(rec, byid, n) \
+        if interruption.get("claim") == claim and record_efp_valid(rec, byid, n, memo=memo) \
                 and not _verify_spawn_rec(r, n, byid, rec):
             rec = {**rec, "status": "interrupted", "error_class": "crashed",
                    "interruption": {k: v for k, v in interruption.items() if k != "claim"}}
     if st == "failed" and (rec or {}).get("error_class") == "cancelled":
         return "pending", rec   # stop != failure (#7): a resume re-drives cancelled work
     if st in ("done", "partial", "failed", "skipped"):
-        if record_efp_valid(rec, byid, n):
+        if record_efp_valid(rec, byid, n, memo=memo):
             if st == "failed" and _answer_harvest_valid(n, rec):
                 return "done", rec
             return st, rec
-        if "efp" not in rec and _legacy_chain_unchanged(r, n, byid):
+        if "efp" not in rec and _legacy_chain_unchanged(r, n, byid, legacy_memo):
             return st, rec
         return "pending", rec
     return "pending", rec
@@ -3261,11 +3307,11 @@ def explain_stale(r, nid, index=None):
                 return f"stale because {x}: {', '.join(fields)} changed at {ts}"
     return "stale: definition drift (no amend on record)"
 
-def gate_answer_valid(r, gate, byid):
+def gate_answer_valid(r, gate, byid, memo=None, legacy_memo=None):
     ans = jload(r / "gates" / f"{gate['id']}.json")
     if ans is None:
         return None
-    if record_efp_valid(ans, byid, gate, "_def"):
+    if record_efp_valid(ans, byid, gate, "_def", memo=memo):
         return ans
     if "fp_rule_version" in ans:
         return None
@@ -3275,7 +3321,7 @@ def gate_answer_valid(r, gate, byid):
         # and a chain of equally verified pre-efp ancestor commits.
         if not fingerprint_valid(ans.get("_def"), lambda rule: def_hash(gate, rule), None):
             return None
-        return ans if all(a not in byid or _legacy_chain_unchanged(r, byid[a], byid)
+        return ans if all(a not in byid or _legacy_chain_unchanged(r, byid[a], byid, legacy_memo)
                           for a in gate.get("after", [])) else None
     return None
 
@@ -3965,6 +4011,11 @@ def run_state(r, *, telemetry=True):
     # Exit-agent records are diagnostics, never part of the run's verdict math.
     graph = {**stored_graph, "nodes": workflow_nodes(stored_graph)}
     byid = {n["id"]: n for n in stored_graph["nodes"]}
+    # One shared efp memo for this graph's read: every node hash below covers a
+    # single stored graph whose defs nothing here mutates, so ancestor hashes
+    # computed for one node's law-check are exactly the values every other
+    # node's check needs (diamond graphs make the un-memoized walk exponential).
+    fp_memo, legacy_memo = {}, {}
     live = runner_alive(r)
     try:
         events_text = (r / "events.jsonl").read_text()
@@ -3972,7 +4023,7 @@ def run_state(r, *, telemetry=True):
         events_text = ""
     outputs, states, nodes, recs = {}, {}, {}, {}
     for n in graph["nodes"]:
-        st, rec = node_rec(r, n, byid)
+        st, rec = node_rec(r, n, byid, fp_memo, legacy_memo)
         states[n["id"]] = st; recs[n["id"]] = rec
         if st in ("done", "partial"):   # #4: partial output IS output for when/refs
             outputs[n["id"]] = (rec or {}).get("output")
@@ -4032,16 +4083,16 @@ def run_state(r, *, telemetry=True):
     else:
         gate = next((n for n in graph["nodes"] if kind(n).spawns is False
                      and states[n["id"]] == "pending" and deps_ok(n)), None)
-        if gate and gate.get("wait") and gate_answer_valid(r, gate, byid) is None:
+        if gate and gate.get("wait") and gate_answer_valid(r, gate, byid, fp_memo, legacy_memo) is None:
             # machine-answered gate: the runner is polling it — 'running', never 'held'.
             # Its blockage is self-explaining via nodes[id].parked (P4 + jury tweak).
             pk = jload(r / "gates" / f"{gate['id']}.parked.json", {}) or {}
-            if live and record_efp_valid(pk, byid, gate, "_def"):
+            if live and record_efp_valid(pk, byid, gate, "_def", memo=fp_memo):
                 nodes[gate["id"]]["parked"] = {k: v for k, v in pk.items() if k != "_def"}
             elif live:
                 nodes[gate["id"]]["parked"] = {"kind": "timer" if not gate["wait"].get("until_argv") else "check", "attempt": 0}
             gate = None
-        if gate and gate_answer_valid(r, gate, byid) is None:
+        if gate and gate_answer_valid(r, gate, byid, fp_memo, legacy_memo) is None:
             try:
                 cond = when_true(gate, outputs)
                 held = {"id": gate["id"], "question": gate.get("question"),
