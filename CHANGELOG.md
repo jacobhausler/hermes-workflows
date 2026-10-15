@@ -1,5 +1,82 @@
 # Changelog
 
+## Unreleased
+
+- **Operator scar-laws port (docs-only):** fifteen generalizable lessons from a
+  retiring usage skill fold into the docs they belong to, one hardened line
+  each — twelve authoring and recovery laws in `references/operator-playbook.md`
+  (machine-gate probe polarity, error-but-launched dedupe, amend re-queue
+  fingerprint law, cold-start re-runs, index-not-proof premises, no
+  maker-authored green, seat-wait disposition, census-never-quorum, closed
+  verdict enums, decorative-gate ban, control-plane credential containment,
+  parser-first recount diagnosis), two run-lifecycle laws in
+  `references/operations.md` (frozen launch meta, ephemeral run dirs), and the
+  launch-agnostic reusable-graph law in `references/grammar.md`. No engine
+  change.
+
+## 1.3.8 — 2026-10-14
+
+Patch release for P01/P02 (#418), preserving the v1.3.7 runner, patch/diff,
+card-hook safety and retired baseline/navigation behavior.
+
+- **Factual workflow guidance:** launch, wait and completion messages describe
+  observed state without granting new authority. Cards and curation are optional;
+  waiting can resume interrupted work. Static validation remains distinct from
+  route-probing launch dry runs.
+- **Read-only execution clocks:** a shared snapshot and bounded ledger index
+  project observed timing into status and dashboard responses using existing
+  spawn/item records. Missing evidence and dynamic totals stay explicitly unknown.
+- **Best-effort boundary:** equal-timestamp PID reuse is not complete attempt
+  provenance. No new scheduling, cancellation, authorization or persisted producer
+  contract is introduced.
+- Regression coverage includes malformed/missing evidence, stale identity,
+  fractional timestamps, retries and fan-out joins. S01 is not included.
+
+## 1.3.7 — 2026-10-14
+
+Patch line, sixteen merged PRs since v1.3.6 — the runner's deepest hardening
+wave yet (zombie hygiene, typed silent-death receipts, fail-safe wall events),
+a door amend/diff surface, effect-gated publication, and two audit-mandated
+regimes retired. Every `git log v1.3.6..HEAD` row re-derives from the merge
+commits; authorship of record is listed under **Attribution** below.
+
+**Runner and engine**
+
+- Continuous zombie hygiene for the subreaper pool (#283, @atbrace)
+- External jobs are registered and silent deaths reap typed receipts (#394)
+- Once-only graph `on_exit` postmortem (#129 → #391)
+- `resume_hint`: dead-attempt artifact inventory on every re-run path (#130 → #284)
+- Read model: fail-safe wall events and one snapshot per poll (#385)
+- Null-quorum fan-out death now names the real cause (#410)
+- Publication nodes gate `run.done` on external-effect receipts (#56 → #403)
+
+**Door and graph**
+
+- Patch surface for amend plus `action=diff` confirm surface (est-2del → #412)
+- PR-owned source deletions permitted without graph rewrites (est-i24i → #378)
+- Regen normalizes `.graphify_root` to contract `'.'` (est-0an45 → #409)
+
+**Hardening and tests**
+
+- Card-hook abandon-safety and cheap `register()` for the upstream v0.21.5
+  plugin contract (#304)
+- Behavioral error-class coverage and dead-fixture cleanup (est-pbwn → #377)
+
+**Retirements (audit)**
+
+- The mandatory all-green `ci-baseline` registry is retired (audit M01 → #351);
+  admission now compares against exits measured on the merge-base
+- The committed code-navigation regime is retired (audit M02 → #319, @atbrace)
+
+Routine graph refreshes ride along (#408, #404).
+
+Attribution — all sixteen merges are `Author: agent` trailers on the squash
+commits; the GitHub actor of record for every one is the org owner account,
+with @atbrace co-authoring the two peer-estate PRs (#283, #319).
+
+- #283 — @atbrace.
+- #319 — @atbrace.
+
 ## 1.3.6 — 2026-10-11
 
 Patch line, four merged PRs since v1.3.5 — #396 (the ponytail truth pass over

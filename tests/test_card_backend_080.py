@@ -76,8 +76,8 @@ class CardBackend(unittest.TestCase):
             self.assertEqual(out["card"], f'::workflow{{id="{rid}"}}')
             self.assertEqual(CARD.fullmatch(out["card"]).group(1), rid)
             # Copy-exact inducement (papercut #70): the hint IS the paste line.
-            self.assertIn(out["card"], out["hint"])
-            self.assertIn("PASTE this line alone in your reply", out["hint"])
+            self.assertIn(out["card"], out["lifecycle_notice"])
+            self.assertIn("desktop cards are optional", out["hint"])
         finally:
             clear_session_vars(tokens)
 
