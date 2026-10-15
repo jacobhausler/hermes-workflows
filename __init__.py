@@ -1073,6 +1073,16 @@ def _resolve_models(nodes, committed=None, keep=()) -> tuple[str | None, dict | 
         # the route table — pinged AND reported — speaks the real model id, est-2ek.1.318),
         # else the baked literal. The node def keeps the alias verbatim.
         route_model = im if (tier or m in known) and im else m
+        # est-55z04: an explicit provider SKIPS the alias expansion above (`not provider`), so a
+        # seat alias pinned WITH provider fell back to the bare alias ('haiku' -> HTTP 404 on the
+        # liveness ping). Expand the seat alias target for the route/ping when its provider
+        # matches the pinned one; a foreign-provider target is left alone (no guessing).
+        if provider and m and not tier and not frozen and m in _seat_aliases():
+            _tp, _, _tm = str(_seat_aliases()[m] or "").partition("/")
+            if _tm and _tp == provider:
+                route_model = _tm
+            elif not _tm and _tp:
+                route_model = _tp
         routes[n["id"]] = {
             # requested = what the AUTHOR wrote (an inherited provider is not a request);
             # resolved = the effective route (alias target, else node def after resolution).
