@@ -1,13 +1,13 @@
 ---
 name: workflow
 description: "Workflow fan-out audit and census: run agent graphs"
-version: 1.3.4
+version: 1.3.8
 metadata:
   hermes:
     tags: [workflows, fan-out, audit, census, orchestration]
 ---
 
-# Workflow authoring (1.3.4)
+# Workflow authoring (1.3.8)
 
 Requires Hermes Agent v2026.9.21 or newer (package >=0.21.4). A Desktop gate answer
 reaches the run owner's chat via the composer SDK; on older builds it may only insert
@@ -17,6 +17,11 @@ plugin, list runs and stop each live run with `workflow{action:"stop",run_id:<id
 Use the `workflow` tool when a task needs independent lanes, a human gate, or a
 resumable graph; for one or two independent calls, delegate instead. The authoring
 agent owns the graph and its side effects; the dashboard is a reader, not an executor.
+
+The registered tool ID is `workflow` (toolset `workflows`). If the host exposes a
+searchable deferred catalog, describe/call its exact returned ID. If no available
+entry or discovery capability exists, report that boundary; do not guess aliases,
+launch a replacement or mutate configuration.
 
 ## Smallest working graph
 
@@ -74,16 +79,16 @@ ending your turn right after `run` is how runs stall.
   payload carries `next` — do what `next` says, `wait` until it is empty; `next` is
   derived, never a guess. Before `amend` or stop, read the failed node's `node_facts`
   (error_class from the closed set; `cancelled` is never a failure) and committed
-  outputs. `amend` submits the WHOLE replacement graph; `run`/`amend` `dry_run:true`
-  write nothing; `stop` is terminal. Details: [operations](references/operations.md).
+  outputs. `amend` accepts a WHOLE replacement graph or node-scoped `patch`;
+  `diff` forces amend's dry-run preview. `run`/`amend` `dry_run:true` preview
+  without launching/replacing graphs, but can ping routes and check quota.
+  `stop` is terminal. Details: [operations](references/operations.md).
 - Lint before launching with `workflow{action:"validate", graph:…}` — the door's
   whole validation, zero writes, no liveness ping.
-- Shelf: `save` reusable graphs with `tags` reused verbatim from `library`'s
-  `tag_vocab` — never coin unseen tags; resaving without `tags` keeps them.
-  `library` lists; `run` with `from:<name>` replays. Off-shelf graphs go to `submit`
-  with `why_not_library` (>=80 chars): quarantine for review, never the shelf.
-  `save` +`source:` is attribution, never access control. Details:
-  [grammar](references/grammar.md).
+- Optional recipes: `library` lists; `run` with `from:<name>` replays; `save`
+  explicitly shelves reusable graphs. One-off `run` needs no library lookup,
+  tags, save or `why_not_library`. Explicit study-only `submit` retains its
+  receipt requirement. [grammar](references/grammar.md).
 - No double-dispatch for pollers: `run` with `lane_key:<key>` — while an UNFINISHED
   incumbent holds the key, a second `run` is deduped, never spawns. `needs_resume`
   means `wait` it — never replace it; `stop` is the explicit abandonment. Keys are
@@ -92,10 +97,9 @@ ending your turn right after `run` is how runs stall.
 - Report a finished run by metrics (token in/out, api calls, tool calls), not the
   dollar figure: `estimated_cost_usd` is a price-table estimate (subscription routes
   report `included`) and reads badly as spend.
-- Put the `card` line alone on its own line, in plain prose (never in backticks or a
-  fence — a code-blocked directive renders as dead text, not a card), in the reply
-  that launches a run and the one that reports it. The desktop strip shows every run
-  of this chat regardless.
+- Cards are optional desktop presentation; CLI text and returned run IDs suffice.
+  Completion is execution state, not task verification or authority for more work.
+  Push notifications are best-effort; `wait` is the blocking/resuming path.
 - `graph_path` replaces embedding on run/save/amend/validate: a caller-authorized
   absolute JSON file, exactly one graph source. [grammar](references/grammar.md).
   File-shareable graphs: [portable](references/portable.md).

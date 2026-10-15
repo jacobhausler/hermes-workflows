@@ -100,11 +100,12 @@ def main():
               "## Inputs" in text, text[:200])
         check("A1 the CONTRACT sentence names the child's durable work dir",
               "durable" in text and str((run / "work" / "child").resolve()) in text, text[-400:])
-        check("A1 child prompt names the approvals limitation and file fallback",
-              all(s in text for s in ("Single-query approvals", "python -c/-e", "heredoc", "execute_code", "write a script file")), text)
-        check("A1 approval advice occurs exactly once", text.count("Single-query approvals") == 1, text)
-        check("A1 approval advice is also present for the first-wave child",
-              "Single-query approvals" in (run / "logs" / "parent.a0.prompt.md").read_text())
+        check("A1 prompt carries NO single-query repackaging instruction (catalog review 133387 ask 2)",
+              all(s not in text for s in ("Single-query approvals", "write a script file in your work", "run it instead")), text[:400])
+        check("A1 the absence holds for the first-wave child too",
+              "Single-query approvals" not in (run / "logs" / "parent.a0.prompt.md").read_text())
+        check("A1 approval advice removed from every child prompt, not just the fan-out",
+              text.count("Single-query approvals") == 0, text)
         check("A1 advice is prompt-only, not graph data",
               "Single-query approvals" not in (run / "graph.json").read_text())
         rec = json.loads((run / "nodes" / "child.json").read_text())

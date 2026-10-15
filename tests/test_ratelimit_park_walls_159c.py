@@ -37,7 +37,11 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 BUILD = HERE.parent
-HOME = HERE / "home-159c"
+# est-qp8dj: fixture dir unique per pid — concurrent legs of one fan-out (or a
+# stray runner racing a re-run) previously shared home-159c and stomped each
+# other via the line-54 rmtree. atexit sweep keeps the repo tree clean.
+import atexit
+HOME = HERE / f"home-159c.{os.getpid()}"
 RUNS = HOME / "workflows"
 os.environ["HERMES_HOME"] = str(HOME)
 os.environ["WF_RUNS_ROOT"] = str(Path(os.environ["HERMES_HOME"]) / "workflows")  # est-2ek.1.762 pin: HERMES_HOME alone is not a sandbox
@@ -53,6 +57,7 @@ def check(label, cond, detail=""):
 
 if HOME.exists(): shutil.rmtree(HOME)
 HOME.mkdir(parents=True); RUNS.mkdir()
+atexit.register(shutil.rmtree, HOME, ignore_errors=True)  # est-qp8dj sweep
 FAKE = str(HERE / "fake")
 
 def mk(run_id, nodes, **meta):
@@ -87,6 +92,14 @@ att = HOME / "att-w1"; shutil.rmtree(att, ignore_errors=True)
 r = mk("w1-fit", [{"id": "a", "type": "agent", "goal": "GO w1-fit", "timeout": 2}],
        ratelimit_interval=1.95, ratelimit_jitter=0.0, retry_budget=6, node_timeout=2)
 env = {"FAKE_MODE": "ratelimit", "FAKE_RL_FAILS": "1", "FAKE_ATTEMPT_DIR": str(att)}
+# est-qp8dj: measured spawn floor — the dt bound must scale with the box, not
+# assume an unloaded laptop. `_boot` = one bare interpreter round-trip under
+# the CURRENT load; bound = max(1.5, wall-budget + 2x boot). A straggler-
+# wait regression parks ~300s and is still caught by two orders of magnitude.
+_b0 = time.time()
+subprocess.run([sys.executable, "-c", "pass"], timeout=30)
+_boot = time.time() - _b0
+_W1_BOUND = max(1.5, 2.0 + 2.0 * _boot)
 t0 = time.time(); out = runx("w1-fit", env); dt = time.time() - t0
 rec = rec_of(r)
 rl_ev = [e for e in events(r) if e.get("event") == "item.retrying" or
@@ -99,7 +112,7 @@ check("W1: honest give-up with the verbatim banner + ratelimit_gave_up",
       and rec.get("error") == BANNER_GIVEUP and rec.get("ratelimit_gave_up") is True,
       json.dumps({k: rec.get(k) for k in ("status", "error_class", "error", "ratelimit_gave_up")}))
 check("W1: wall honored — run finished far below the 2s budget it refused to overshoot",
-      dt < 1.5, f"wall={dt:.2f}s")
+      dt < _W1_BOUND, f"wall={dt:.2f}s bound={_W1_BOUND:.2f}s boot={_boot:.2f}s")  # est-qp8dj: spawn-proportional bound
 check("W1: WORKFLOW_FAILED", "WORKFLOW_FAILED" in out, out[:60])
 
 # ---------- W-FIT (unit): the park's fit law is worst-case-jitter bounded and ----------

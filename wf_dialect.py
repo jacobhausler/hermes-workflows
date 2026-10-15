@@ -1105,7 +1105,8 @@ def js_import(source, node_check=True):
 
 _AGENT_EXACT = {"id", "type", "after", "goal", "schema", "model", "inputs", "fanout", "context"}
 _LOSSY_AGENT = ("provider", "toolsets", "max_turns", "timeout", "run_budget", "reasoning", "tier",
-                "shape", "repo", "require_route", "route_verified", "profile", "requires")
+                "shape", "repo", "require_route", "route_verified", "profile", "requires",
+                "resume_hint")
 _LOSSY_GATE = ("hold_timeout", "on_skip", "requires", "context", "wait", "when")
 _LOSSY_FANOUT = ("schema",)   # only when per-item goals (parallel form carries schema per element anyway)
 
@@ -1355,10 +1356,10 @@ class _Exporter:
 
     def node_context(self, n):
         """Effective `context` of an agent node = wfcommon.apply_graph_defaults semantics
-        (wfcommon.py:420-422), folded AT EXPORT: defaults.context is prepended unless the node's
+        (wfcommon.apply_graph_defaults), folded AT EXPORT: defaults.context is prepended unless the node's
         own context already starts with it (a door-loaded graph arrives normalised; a raw
         fixture/CLI graph does not — both must export the same bytes). Applies to plain
-        agents AND fan-outs: wf.py passes node.context to every fan-out child (wf.py:1661)."""
+        agents AND fan-outs: wf.py passes node.context to every fan-out child (wf.py `run_child` fan-out sites)."""
         ctx = str(n.get("context") or "")
         pre = str(self.defaults.get("context") or "")
         if pre and not ctx.startswith(pre):
@@ -1527,7 +1528,7 @@ class _Exporter:
                 stage_lines.append("  // LOSSY: {index} placeholder has no counterpart inside pipeline(); left literal")
             extra = self.prompt_text_refs(n, skip=[stages[i - 1]] if i else [h for h in [str(fo.get("items_from", "")).partition(".")[0]] if h])
             ctx = self.node_context(n)
-            if ctx:   # F1 (#36): node/defaults context rides in every item prompt, raw (never item-formatted), as wf.py:1661 passes it
+            if ctx:   # F1 (#36): node/defaults context rides in every item prompt, raw (never item-formatted), as wf.py `run_child` passes it
                 text += "\n\n" + _run_args(ctx)
             if extra:
                 text += "\n\n" + _INPUTS_MARK + "\n" + extra
@@ -1564,7 +1565,7 @@ class _Exporter:
         fo = n["fanout"]
         refs = self.prompt_text_refs(n, skip=[])
         schema = self.fanout_schema(n)
-        ctx = self.node_context(n)   # F1 (#36): same fold as prompt_text; wf.py:1661 gives it to every item
+        ctx = self.node_context(n)   # F1 (#36): same fold as prompt_text; wf.py `run_child` gives it to every item
         elems = []
         for i, it in enumerate(fo["items"]):
             own = it.get("goal") if isinstance(it, dict) and isinstance(it.get("goal"), str) and it["goal"].strip() else None
