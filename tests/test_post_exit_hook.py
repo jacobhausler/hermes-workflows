@@ -81,6 +81,24 @@ class PostExitHookTest(unittest.TestCase):
             self.assertEqual(hook.dispatch(self.run_dir, "done"), rec)
             no_relaunch.assert_not_called()
 
+    def test_receipt_launching_before_first_attempt(self):
+        # est-fdulo (b): a submitted-but-unreceipted dispatch must never be invisible,
+        # so receipt state=launching exists BEFORE the first launchctl call.
+        hook.register(self.run_dir, self.script, "0")
+        seen = []
+        class Failure:
+            returncode, stderr, stdout = 1, "stubbed", ""
+        def launch(argv, **kwargs):
+            rp = self.run_dir / hook.RECEIPT
+            seen.append((argv[1], json.loads(rp.read_text())["state"] if rp.exists() else None))
+            return Failure()
+        with patch.object(hook.subprocess, "run", side_effect=launch), \
+                patch.object(hook, "_detached") as detached:
+            hook.dispatch(self.run_dir, "done", launchctl="/bin/launchctl", poll_seconds=0)
+        detached.assert_called_once()
+        self.assertTrue(seen, "no launch attempt made")
+        self.assertEqual(seen[0], ("submit", "launching"))
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

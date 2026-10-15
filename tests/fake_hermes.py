@@ -404,6 +404,53 @@ if _FAKE_MODE == "toolcall_text_541" and "TOOLCALL541" in q:
         sys.exit(rc)
     print("```json\n" + json.dumps({"result": "redriven"}) + "\n```")
     sys.exit(0)
+if _FAKE_MODE == "cap_harvest_ggqs" and "CAPHARV" in q:
+    # est-ggqs (#256 claim 1): the turn-cap death that ALREADY printed a schema-valid
+    # fenced answer — typed max_iterations stamp in the -Q turn report, exit 2, so the
+    # runner commits partial + error_class=cap_exhausted via _harvest_death.
+    # Drive 1 registers a state.db row with tool_call_count > 0 (the bounded-retry
+    # progress evidence) unless FAKE_NO_PROGRESS=1. FAKE_ATTEMPT_DIR counts drives:
+    # drive 2+ answers clean (exit 0) — unless FAKE_REDRIVE_DIES=1 (drive 2+ dies with
+    # NO answer, transport marker). FAKE_REMAINING=1 declares a `## Remaining` tail;
+    # FAKE_DECLARED=<s> stamps a child-declared terminal status into the answer.
+    cnt = 0
+    if os.environ.get("FAKE_ATTEMPT_DIR"):
+        os.makedirs(os.environ["FAKE_ATTEMPT_DIR"], exist_ok=True)
+        p = os.path.join(os.environ["FAKE_ATTEMPT_DIR"], "attempts")
+        cnt = int(open(p).read()) if os.path.exists(p) else 0
+        open(p, "w").write(str(cnt + 1))
+    if cnt == 0:
+        if os.environ.get("FAKE_NO_PROGRESS") != "1" and "--continue" in args:
+            import sqlite3
+            title = args[args.index("--continue") + 1]
+            c = sqlite3.connect(os.path.join(_FAKE_HOME, "state.db"))
+            c.execute("create table if not exists sessions (id text primary key, title text, model text, billing_provider text, input_tokens int, output_tokens int, "
+                      "cache_read_tokens int, reasoning_tokens int, api_call_count int, tool_call_count int, estimated_cost_usd real, "
+                      "last_activity_at real, last_activity_description text, ended_at real, started_at real)")
+            t = time.time()
+            c.execute("insert or replace into sessions values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                      ("f-" + title, title, "fake", "fake", 0, 0, 0, 0, 35, 35, 0.0, t, "", t, t))
+            c.commit(); c.close()
+        _rp = os.environ.get("HERMES_QUIET_TURN_REPORT_FILE")
+        if _rp:
+            with open(_rp, "w") as f:
+                json.dump({"pid": os.getpid(), "exit_code": 2, "error": "budget",
+                           "reply": "census written; turn budget spent",
+                           "turn_exit_reason": "max_iterations_reached(35/35)"}, f)
+        if os.environ.get("FAKE_REMAINING") == "1":
+            print("## Remaining")
+            print("- reconcile the last two hosts")
+            print("")
+        _ans = {"result": "census-complete"}
+        if os.environ.get("FAKE_DECLARED"):
+            _ans["status"] = os.environ["FAKE_DECLARED"]
+        print("```json\n" + json.dumps(_ans) + "\n```")
+        sys.exit(2)
+    if os.environ.get("FAKE_REDRIVE_DIES") == "1":
+        print("hermes -z: agent failed: openai.APIConnectionError. Connection error.")
+        sys.exit(2)
+    print("```json\n" + json.dumps({"result": "redriven-clean"}) + "\n```")
+    sys.exit(0)
 if _FAKE_MODE == "die_after_json" and "DIETEST" in q:   # #4: dies AFTER a valid fenced answer
     print("```json\n" + json.dumps({"result": "harvested"}) + "\n```")
     sys.exit(1)

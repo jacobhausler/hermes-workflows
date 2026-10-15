@@ -246,8 +246,9 @@ class CardLedger(unittest.TestCase):
 
     # ---- registration + scan is gone (API shape) ------------------------------
     def test_register_wires_three_hooks(self):
-        self.assertEqual(set(self.ctx.hooks),
-                         {"post_tool_call", "pre_llm_call", "transform_llm_output"})
+        # the ledger's three hooks are wired; PR-3's default-off admission/witness hooks
+        # (post_gateway_admission, pre_gateway_dispatch) ride the same register() and are not this lane's.
+        self.assertTrue({"post_tool_call", "pre_llm_call", "transform_llm_output"} <= set(self.ctx.hooks))
 
     def test_scan_entrypoints_are_gone(self):
         ce, cl = self.hw._card_enforcement, self.hw._card_ledger

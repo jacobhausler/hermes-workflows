@@ -169,6 +169,38 @@ lands, the branch collapses and that doc deletes itself.
 - Python 3 (stdlib only — the plugin imports nothing outside Hermes)
 - Node for the desktop half's tests only; the app loads `plugin.js` uncompiled
 
+## Starter set: run something today (`general/`)
+
+You don't have to author a graph first. Five scrubbed, estate-neutral starter
+graphs ship *with the plugin* under `library/general/`, so a fresh install can
+run a real DAG out of the box:
+
+```jsonc
+{ "task": {"from": "general/report-and-verify"} }
+```
+
+| Address | Reach for it when |
+|---|---|
+| `general/pr-review-light` | an open PR needs an advisory second read before a human looks |
+| `general/issue-triage` | a queue needs a standing rule applied unattended (the `{run.KEY}` seed-contract exemplar) |
+| `general/test-first-feature-slice` | one behavior is worth a red-green-proof slice |
+| `general/fan-out-audit-census` | a tree needs a per-file audit with an honest tally (the 8 KB per-parent input cap, taught by example) |
+| `general/report-and-verify` | a producer will drop a report later and you want zero tokens while waiting (machine `wait` gate exemplar) |
+
+Resolution order for `from: general/<name>`: your **runs-root library first**
+(`<runs_root>/library/general/<name>.json`), legacy launch root second, the
+**packaged set last**. Every graph routes agents through model *tiers*
+(`worker`/`manager`) — none names a vendor model — and each declares its seed
+params in `meta.params`.
+
+**Customize:** copy a packaged JSON to your own shelf (or tune it and
+`save name=general/<name>`); your copy shadows the packaged one at the same
+address, and the door never writes the packaged files.
+**Share back:** tuned graphs are welcome upstream — see the submit flow in
+issue #50 ("share your tuned graph back"): fork, drop the envelope under
+`library/general/`, run the scrub gate, open a PR. Per-graph author notes
+live in [`library/general/README.md`](library/general/README.md).
+
 ## For agents and contributors
 
 [AGENTS.md](AGENTS.md) is the front door: repo map, operate/contribute

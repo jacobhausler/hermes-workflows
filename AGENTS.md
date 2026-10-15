@@ -342,9 +342,13 @@ publication guards, and crash recovery.
   `status: partial` with the death cause kept as `error_class`; the harvest stays readable, but a
   plain after-edge does NOT release onto it — the descendant fails typed `blocked_by_partial_ancestor`
   unless it opts in with `after_partial: true` (leaf close-out and the node's own fanout partial-credit
-  merge are unaffected).
+  merge are unaffected). A producer may opt its own schema-valid harvest into `done` with
+  `harvest_policy: "validate"` (default `strict`; the death stays on the record as `error_class` +
+  `clamped`) — see [references/grammar.md](references/grammar.md).
 - `transport | early_death | cap_exhausted | timeout` deaths with tool progress get ONE
   automatic re-drive with a machine resume preamble (`node.retry`); permfails never retry.
+  A harvested `partial` of those classes takes the same re-drive (est-ggqs, #256); an
+  answer-less re-drive keeps the harvest.
   If the prior attempt's session persisted NO messages (#102 — the pretense-resume shape:
   a SIGKILL-wave child that banked nothing), the re-drive spawns as a FRESH session seeded
   instead with a harvest preamble (banked work-dir files + cleaned log tail); the

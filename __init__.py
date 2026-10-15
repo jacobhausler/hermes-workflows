@@ -33,6 +33,13 @@ assert _ce_spec is not None and _ce_spec.loader is not None
 _card_enforcement = importlib.util.module_from_spec(_ce_spec)
 _ce_spec.loader.exec_module(_card_enforcement)
 
+# PR-3: admission-gate index + dispatch witness — bound by path like its siblings.
+_gi_spec = importlib.util.spec_from_file_location("_hermes_workflows_gate_index",
+                                                  Path(__file__).resolve().parent / "gate_index.py")
+assert _gi_spec is not None and _gi_spec.loader is not None
+_gate_index = importlib.util.module_from_spec(_gi_spec)
+_gi_spec.loader.exec_module(_gate_index)
+
 
 def _coerce_graph(graph):
     """The door only ever sees `graph` as a parsed object from the tool schema, but a
@@ -1779,14 +1786,27 @@ def _lane_shelf_guard(p):
                      "(est-2ek.1.599; shelf waves 26-31; r4 realpath-only containment)",
             "error_class": "lane_shelf_write"}
 
+def _packaged_general_root():
+    """#51: the PACKAGED curated starter set shipped WITH the plugin — the repo's
+    library/general/ directory, which sits next to __init__.py in any install.
+    Read-only at runtime (act_save always lands on library_root()); it is the
+    FALLBACK the door resolves `general/<name>` to when every private root misses.
+    Resolution order: runs_root library > legacy launch-root library > packaged."""
+    return Path(__file__).resolve().parent / "library" / _GENERAL_PREFIX
+
 def _lib_read(name):
     """READ resolver mirroring find_run: resolved first, legacy only for an EXISTING
-    graph absent from the resolved root. Returns the path whether or not it exists
+    graph absent from the resolved root, and — for `general/<name>` (#51) — the
+    packaged starter set LAST. Returns the path whether or not it exists
     (callers keep their own None/not-exists handling on the primary shape)."""
     p = _lib_path(name)
     if not p.exists():
         n = str(name or "").strip().lower()
-        if LIB_OK.match(n):
+        if n.startswith(_GENERAL_PREFIX) and LIB_OK.match(n[len(_GENERAL_PREFIX):]):
+            packaged = _packaged_general_root() / f"{n[len(_GENERAL_PREFIX):]}.json"
+            if packaged != p and packaged.exists():
+                return packaged
+        elif LIB_OK.match(n):
             legacy = _common.launch_runs_root() / "library" / f"{n}.json"
             if legacy != p and legacy.exists():
                 return legacy
@@ -1794,10 +1814,11 @@ def _lib_read(name):
 
 def _lib_rel_name(p):
     """#50: the replayable name for a library path — `general/<stem>` inside the
-    curated public subdir, plain `<stem>` everywhere else (what `_lib_path` and
-    `library` both answer to)."""
-    return (str(p.relative_to(library_root()))[:-5] if p.parent == library_root() / _GENERAL_PREFIX
-            else p.stem)
+    curated public subdir (private shelf OR the #51 packaged set), plain `<stem>`
+    everywhere else (what `_lib_path` and `library` both answer to)."""
+    if p.parent == library_root() / _GENERAL_PREFIX or p.parent == _packaged_general_root():
+        return _GENERAL_PREFIX + p.stem
+    return p.stem
 def _library_reader():
     """The include resolver's library reader: a closure over _lib_read — the SAME
     resolver `from=<name>` uses (resolved root first, legacy launch root second).
@@ -2197,7 +2218,30 @@ def _library_rows():
                                     "reason": entry.get("invalid", "invalid: unreadable")})
                 continue
             graph = entry["graph"]
-            nodes = graph["nodes"]
+            # est-2ek.1.828 (owner ruling 16, proposal
+            # work/clinker/proposals/est-2ek.1.828-discovery-validation.md):
+            # continuous discovery-time admission — the SAME installed structural
+            # validator that guards save/run, applied AFTER envelope normalization
+            # and defaults fill. A shelf entry whose graph fails the door lands in
+            # the existing typed `skipped`/`quarantined` outputs (fail-closed on
+            # the entry, fail-open on the walk; the row never lists, never
+            # replays from discovery). No route/model liveness ping is ever a
+            # discovery side effect; passing entries — including bare legacy
+            # bytes — stay byte-identical rows.
+            try:
+                _g = _common.apply_graph_defaults(graph)
+            except ValueError as _e:
+                _g, _bad = None, f"invalid: defaults/shape: {_e}"
+            else:
+                _bad = _validation_error(_g)
+            if _g is None or _bad:
+                skipped.append(rel)
+                _r = _bad if isinstance(_bad, str) else json.dumps(
+                    (_bad or {}).get("errors", [_bad])[:3], default=str)
+                quarantined.append({"id": rel, "name": name,
+                                    "reason": f"invalid: structural: {_r}"[:300]})
+                continue
+            nodes = _g["nodes"]
             row = {"name": name,
                    "nodes": len(nodes),
                    "gates": sum(1 for n in nodes if n.get("type") == "gate"),
@@ -2354,6 +2398,21 @@ def act_validate(args):
                 "errors": [{"node": None, "field": "model", "msg": err}]}
     out = {"ok": True, "errors": [], "resolved_routes": routes,
            "hint": "validated only — nothing pinged or written; run it: workflow run graph=..."}
+    # est-vj8m (#256 ask 2), UNION with s12 (#421): shape-p95 budget advisory
+    # rides the SAME warnings channel, appended AFTER defaults fill so
+    # max_turns is the resolved cap. Dict-typed (node/field/msg) per the pin;
+    # s12 rows stay plain strings in the same list.
+    for node in graph["nodes"]:
+        if _common.kind(node).spawns is not True:
+            continue
+        shape = node.get("shape") or _common.DEFAULT_SHAPE
+        budget = _common.SHAPE_PRESETS[shape]["max_turns"]
+        cap = node["max_turns"]  # already resolved by apply_graph_defaults
+        if cap < budget:
+            warnings.append({"node": node["id"], "field": "max_turns",
+                             "msg": f"max_turns {cap} is below shape {shape!r} p95 "
+                                    f"budget {budget}; leave max_turns unset to use "
+                                    "the preset, or keep a measured explicit cap"})
     if warnings:
         out["warnings"] = warnings
     return out
@@ -3267,6 +3326,7 @@ def act_status(args):
                                   "respawn_eligible": True}
     if st["held_gate"]:
         out["gate"] = st["held_gate"]
+        _gi_note_open(r, st["held_gate"])   # PR-3: flag-gated, best-effort, never raises
     for nid, v in st["nodes"].items():
         rec = jload(r / "nodes" / f"{nid}.json")
         # est-2ek.1.95: the stop_reason's class rides ONLY off the via node's own
@@ -3611,6 +3671,7 @@ def _release_core(r, gate_id, answer, ui=False):
     p = r / "gates" / f"{gate_id}.json"
     tmp = p.with_name(f"{gate_id}.json.{os.getpid()}.tmp"); tmp.write_text(json.dumps(rec, ensure_ascii=False))
     os.replace(tmp, p)
+    _gi_note_close(r, gate_id)   # PR-3: flag-gated, best-effort, never raises
     return {"ok": True}
 
 def act_release(args):
@@ -3955,6 +4016,7 @@ def act_stop(args):
     if st and st["status"] in ("done", "failed", "stopped"):
         return {"ok": True, "already": st["status"]}
     (r / "stop.request").write_text(datetime.now(timezone.utc).isoformat(timespec="seconds"))
+    _gi_note_close(r, None)   # PR-3: every open gate of a stopped run closes
     mode = _resume_after_action(r, consumed=lambda: not (r / "stop.request").exists())
     if mode == "respawned":
         return {"ok": True, "note": "runner spawned to consume the stop marker"}
@@ -4052,6 +4114,159 @@ def handle(args, **kwargs):
         import traceback
         return json.dumps({"error": f"{type(e).__name__}: {e}", "trace": traceback.format_exc()[-800:]})
 
+# ---------- PR-3: zero-turn gate answers on the admission lane ----------
+# Scope law — HUMAN-TYPED ANSWERS ONLY. Spiked at hermes-agent origin/main 20c9da14eb:
+# `post_gateway_admission` fires from gateway/run_inbound_consumer.py::run_post_admission_hook,
+# called at gateway/run_inbound.py:1363 under `if not is_internal:`. Gateway wakes never reach
+# it (push platforms admit a synthetic MessageEvent(internal=True); api_server sessions get
+# gateway/wake.py self-POSTing /v1/chat/completions, which runs the turn directly). So this
+# handler can only ever see text a human typed, and CANNOT impersonate a wake: wake-delivered
+# text is out of scope by the core's contract. Hook contract (same file's docstring): kwargs are
+# session_key, platform, source (dict), message_id, text; a result `{"action": "handled",
+# "reply": <str, optional>}` skips the agent turn; ANYTHING else — None, another shape, a raise,
+# a timeout — is fail-open and the ordinary agent turn runs. Both hooks are flag-gated, default
+# off, read at CALL time (no restart): settings.admission_gates / settings.dispatch_witness.
+# pre_gateway_dispatch (gateway/run_inbound.py:73) passes event, gateway, session_store; the
+# witness returns None (= allow) and only records.
+
+_RELEASE_CMD = re.compile(r"^\s*wf\s+release\s+(\S+)\s+(\S+)\s+(.+?)\s*$", re.I | re.S)
+
+
+def _flag(key):
+    """Owner flag read at call time; only an explicit true enables (default off)."""
+    try:
+        v = _common.owner_setting(key)
+    except Exception:
+        return False
+    if isinstance(v, str):
+        return v.strip().lower() in ("1", "true", "yes", "on")
+    return v is True
+
+
+def _gi_note_open(r, held):
+    """status/wait surfaced a held gate to its OWNING session: index it (flag-gated)."""
+    try:
+        if not _flag("admission_gates") or not isinstance(held, dict) or not held.get("id"):
+            return
+        r = Path(r)
+        root = runs_root()
+        if r.resolve().parent != Path(root).resolve():
+            return                      # sibling/nested root: not this door's index
+        sid, skey = _session_env("HERMES_SESSION_ID"), _session_env("HERMES_SESSION_KEY")
+        if not (sid and skey):
+            return
+        owner = (jload(r / "run.json", {}) or {}).get("owner") or {}
+        if owner.get("session_id") != sid:
+            return
+        _gate_index.note_open(root, r.name, held["id"], skey, sid, held.get("options") or [])
+    except Exception:
+        pass
+
+
+def _gi_note_close(r, gate_id):
+    try:
+        if _flag("admission_gates"):
+            _gate_index.note_close(Path(r).parent, Path(r).name, gate_id)
+    except Exception:
+        pass
+
+
+def _gate_still_held(run_id, gate_id):
+    """The index is a hint; the run's own read model is the truth. UI/other-door answers never
+    close an index row, so every use re-verifies the hold."""
+    st = run_state(run_dir(run_id)) or {}
+    hg = st.get("held_gate") or {}
+    return st.get("status") == "held" and hg.get("id") == gate_id
+
+
+def _session_open_gates(root, session_key):
+    live = []
+    for row in _gate_index.open_rows(root, session_key):
+        try:
+            held = _gate_still_held(row["run_id"], row["gate_id"])
+        except Exception:
+            continue                    # unreadable: conservative, leave the row alone
+        if held:
+            live.append(row)
+        else:
+            _gate_index.note_close(root, row["run_id"], row["gate_id"])
+    return live
+
+
+def _admission_handler(event=None, gateway=None, session_store=None, **kw):
+    """post_gateway_admission: release a held gate from a human-typed answer, zero turns.
+    Returns core's `{"action": "handled", "reply": ...}` or None (ordinary turn) — None on
+    flag-off (before any index read), no/ambiguous match, and ANY failure."""
+    try:
+        if not _flag("admission_gates"):
+            return None
+        text = kw.get("text")
+        if text is None:
+            text = getattr(event, "text", None)
+        skey = kw.get("session_key") or getattr(event, "session_key", None)
+        if not isinstance(text, str) or not text.strip() or not isinstance(skey, str) or not skey:
+            return None
+        rows = _session_open_gates(runs_root(), skey)
+        if not rows:
+            return None
+        m = _RELEASE_CMD.match(text)
+        if m:
+            run, gate, answer = m.groups()
+            row = next((x for x in rows if x["run_id"] == run and x["gate_id"] == gate), None)
+            if row is None:
+                return None
+        elif len(rows) == 1:            # bare answers need exactly ONE open gate
+            row, answer, t = rows[0], None, text.strip()
+            opts = row.get("options") or []
+            if re.fullmatch(r"[0-9]+", t):
+                if 1 <= int(t) <= len(opts):
+                    answer = opts[int(t) - 1]
+            else:
+                answer = next((o for o in opts if o.strip().lower() == t.lower()), None)
+            if answer is None:
+                return None
+        else:
+            return None
+        res = act_release({"run_id": row["run_id"], "gate_id": row["gate_id"], "answer": answer})
+        if not (isinstance(res, dict) and res.get("ok")):
+            return None
+        return {"action": "handled",
+                "reply": f'Workflow "{row["run_id"]}": gate "{row["gate_id"]}" released '
+                         f'with "{answer}" (zero-turn admission path).'}
+    except Exception:
+        return None
+
+
+def _dispatch_witness(event=None, gateway=None, session_store=None, **kw):
+    """pre_gateway_dispatch observer: one correlation row per inbound. No control returned."""
+    try:
+        if _flag("dispatch_witness"):
+            _gate_index.witness_append(runs_root(), _gate_index.witness_row(event))
+    except Exception:
+        pass
+    return None
+
+
+def _wf_gates(_arg=""):
+    if not _flag("admission_gates"):
+        return ("Admission gates are off (set plugins.entries.hermes-workflows.settings."
+                "admission_gates: true). A gate is answered by an ordinary turn.")
+    skey = _session_env("HERMES_SESSION_KEY")
+    if not skey:
+        return "No session key in this context — cannot list this session's open gates."
+    rows = _session_open_gates(runs_root(), skey)
+    if not rows:
+        return "No open gates indexed for this session."
+    lines = [f"Open gates for this session ({len(rows)}):"]
+    for x in rows:
+        opts = x.get("options") or []
+        lines.append(f'- run "{x["run_id"]}" gate "{x["gate_id"]}"'
+                     + (": " + " ".join(f"{i}) {o}" for i, o in enumerate(opts, 1)) if opts else ": free text"))
+    lines.append("A bare option (or its number) answers the gate only when exactly one is open; "
+                 "`wf release <run> <gate> <answer>` always works.")
+    return "\n".join(lines)
+
+
 def _wf_command(raw_args):
     """`/wf` — the library front door. `/wf <name> [note]` supplies the note
     atomically as a launch seed, never as post-launch steering."""
@@ -4080,6 +4295,8 @@ def _wf_command(raw_args):
                          "(the door refuses an empty value by name):")
         lines.append(entry["command"])
         return "\n".join(lines)
+    if arg in ("gates", "gate"):
+        return _wf_gates()
     out = act_library({})
     lib = out["library"]
     quarantined = out.get("quarantined") or []
@@ -4146,5 +4363,12 @@ def register(ctx):
     ctx.register_hook("post_tool_call", _card_enforcement._post_tool_call)
     ctx.register_hook("pre_llm_call", _card_enforcement._pre_llm_call)
     ctx.register_hook("transform_llm_output", _card_enforcement._card_hook)
+    # PR-3: both default-off (flags read at call time); a core without the hook just ignores.
+    for _hook, _fn in (("post_gateway_admission", _admission_handler),
+                       ("pre_gateway_dispatch", _dispatch_witness)):
+        try:
+            ctx.register_hook(_hook, _fn)
+        except Exception:
+            pass
     ctx.register_command("wf", _wf_command, description="Workflow library: `/wf` lists, `/wf <name> [note]` replays a shelved graph",
                          args_hint="[name] [note]", argument_mode="text")

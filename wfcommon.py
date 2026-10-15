@@ -752,7 +752,13 @@ AGENT_KEYS = {"id", "type", "after", "goal", "context", "schema", "model", "prov
               # (<=8 rungs, billing guard); every other error class never
               # falls back. Validated by shape below; honored by
               # wf._fallback_ladder.
-              "fallback_models"}
+              "fallback_models",
+              # est-ggqs: per-node clamp policy for a harvest-on-death `partial`
+              # (HARVEST_POLICIES). 'strict' (= absent) keeps the after-edge block;
+              # 'validate' commits a schema-valid, self-declared-complete harvest
+              # `done` with the death kept visible (wf._harvest_clamp). Solo only.
+              "harvest_policy"}
+HARVEST_POLICIES = ("strict", "validate")   # est-ggqs: agent `harvest_policy` values
 GATE_KEYS = {"id", "type", "after", "question", "options", "context", "when", "wait", "on_skip",
              "default_option", "hold_timeout",
              # 1.1 (RATIFY F4): gates take output preconditions too; gates obey the same
@@ -1289,6 +1295,21 @@ def validate_graph_errors(nodes, *, admission=False):
             elif not isinstance(n["after_partial"], bool):
                 E(nid, "after_partial", "after_partial must be a boolean "
                                         "(true = this node consumes a partial ancestor's harvest)")
+        if "harvest_policy" in n:
+            # est-ggqs: closed value set; a fan-out aggregate already merges harvest
+            # credit (partial items count done), so the key means nothing there —
+            # refused by name instead of silently ignored.
+            hp = n["harvest_policy"]
+            if not isinstance(hp, str) or hp not in HARVEST_POLICIES:
+                E(nid, "harvest_policy", f"harvest_policy {hp!r} invalid: must be one of "
+                                         + json.dumps(list(HARVEST_POLICIES))
+                                         + " (strict = a harvest-on-death partial blocks plain "
+                                           "after-edges; validate = a schema-valid, "
+                                           "self-declared-complete harvest commits done)")
+            elif n.get("fanout"):
+                E(nid, "harvest_policy", "harvest_policy is meaningless on a fan-out node "
+                                         "(the aggregate already merges harvested items as "
+                                         "done credit); set it on solo agent nodes")
         if "order_only" in n:
             # est-ij0: ordering-only edges are a declared SUBSET of after — the cycle,
             # topo and downstream machinery keep reading `after` unchanged.
