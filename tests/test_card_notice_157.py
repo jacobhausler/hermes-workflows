@@ -66,16 +66,16 @@ class LifecycleNotice(unittest.TestCase):
         try:
             out = self.launch()
             rid = out["run_id"]
-            # The hint stays the copy-exact inducement (belt AND suspenders).
-            self.assertIn("PASTE this line alone in your reply", out["hint"])
+            # Presentation never becomes a launch/report prerequisite.
+            self.assertIn("desktop cards are optional", out["hint"])
             self.assertEqual(out["card"], f'::workflow{{id="{rid}"}}')
             # The notice is a compact field: exact directive line + one-line reminder.
             self.assertIn("lifecycle_notice", out, json.dumps(out)[:200])
             notice = out["lifecycle_notice"]
             self.assertIn(f'::workflow{{id="{rid}"}}', notice)
             self.assertRegex(notice, r'^::workflow\{id="' + re.escape(rid) + r'"\} — ')
-            self.assertIn("the desktop card renders from this line", notice)
-            self.assertIn("paste it standalone", notice)
+            self.assertIn("optional desktop card", notice)
+            self.assertIn("plain text and run_id also work", notice)
             # One line: it must survive copy into a reply as a single paragraph.
             self.assertNotIn("\n", notice.strip())
         finally:

@@ -54,6 +54,19 @@ for unfinished work with no verified live runner (see operations.md).
   the start** (the `profile` node field plus the target's `workflow_team.json`
   consent — see operations.md). A review node running under the same profile that
   wrote the change answers for its own work — don't burn a node on it.
+- **Never let a lane author its own passing evidence.** A verdict is an exit
+  code at a pinned commit; a waiver is an artifact the lane cannot mint. A new
+  test must fail on the pre-change HEAD before it counts as coverage, and a
+  repair re-runs the FULL suite — not the targeted test that just failed.
+- **A run summary and a child's receipt are an index, not proof.** Fresh-read
+  every premise you bake into a successor goal — a head sha, a merge state, a
+  pushed branch — and re-verify claimed outputs against ground truth before
+  trusting a completion stamp.
+- **Amend re-queues a failed or expired node only when its effective
+  fingerprint moves.** Budget keys (`timeout`, `max_turns`) never move it, so a
+  budgets-only amend leaves a dead node dead: change a definition-bearing field,
+  and confirm the node is listed in `will_rerun` via `dry_run`/`diff` before
+  replacing the graph.
 
 ## Fleet children (audits, censuses, sweeps)
 
@@ -80,9 +93,35 @@ for unfinished work with no verified live runner (see operations.md).
   node waits for EVERY item (no straggler cancellation) but COMMITS at majority
   (`len(items)//2 + 1`) — one flake in a lane of 3+ still commits with partial
   credit and survivors in `output.items`. Set `quorum:<n>` explicitly when you
-  want early straggler cancellation or a stricter/looser commit bar. And read
+  want early straggler cancellation or a stricter/looser commit bar. When the
+  stragglers may still land useful work, add `quorum_drain_s:<seconds>` (>= 0,
+  only legal with `quorum`): the kill is deferred by one drain window armed at
+  the quorum moment — anything that lands inside it commits, and only what is
+  still running at the deadline is cancelled. Default `0` = immediate cancel at
+  quorum. And read
   `failed_items`/`failed_detail` on a committed node — done does not mean every
   item passed.
+- **A launch that answered with an error may still have launched.** When a
+  `run` response dies in parse/transport, check `list` or
+  `status lane_key=<key>` before re-issuing; launch pollers with a `lane_key` so
+  a retry dedupes against the incumbent instead of double-spawning.
+- **Never set `quorum` on a fan-out whose contract is an every-item verdict** —
+  census, drift probe, per-repo audit. The first N completions cancel the
+  stragglers and the aggregate commits `done` with a silent coverage hole
+  indistinguishable from green; control cost with a cheaper item instead of a
+  race.
+- **Force every child through a schema with one closed status enum** (e.g.
+  `confirmed|drifted|unknown|blocked`): a fixed vocabulary is what makes the
+  consolidator's tally mechanical; free-text verdicts are unmergeable and invite
+  interpretive synthesis at the one step that must be arithmetic.
+- **Fleet lanes never hold a control-plane credential.** The parent keeps the
+  token, lanes are forbidden from calling the control plane, and each lane
+  records WHERE a call would have been needed — parallel mutation of a shared
+  control plane is prevented, not cleaned up.
+- **Suspect the parser before the fleet:** when a parent's mechanical recount
+  over lane artifacts returns MISSING/0 for EVERY file, dump one raw artifact,
+  fit the regex to its actual shape, and re-run the recount before declaring the
+  wave failed.
 
 ## Babysitting (read the status model, not `ps`)
 
@@ -105,6 +144,17 @@ for unfinished work with no verified live runner (see operations.md).
   investigation, amend only the failed handoff with an explicit fenced-JSON
   result contract. CLI banners around bare JSON can make a substantively
   finished review fail schema parsing.
+- **A node re-run is a cold start:** the child restarts from zero with no memory
+  of the dead attempt's side effects. Keep nodes small and idempotent; make
+  side-effecting goals re-check external state before acting.
+- **`seat_wait` is admission starvation, not a defect** — it spent zero tokens
+  waiting. Re-drive when seats free and stagger same-seat waves; never edit the
+  def to chase it, and treat a per-run seat-cap override as admission against
+  the same shared registry, not an isolated reservation.
+- **Author world-observation machine gates by probe polarity:** exit 0 on ANY
+  decisive verdict (good or bad), 1 while undecided, 2 on probe error itself.
+  An exit-0-only-on-green probe makes a red reality poll until the gate timeout
+  and the run gets a failed gate, not a verdict.
 
 ## Ergonomics
 
@@ -124,3 +174,6 @@ for unfinished work with no verified live runner (see operations.md).
   raising the timeout alone does not make a child write its conclusions.
 - For a graph you'd build the same way again: `save` it with a trigger
   description (plus `source` for provenance). One-offs stay in their run dir.
+- **Put a human gate only where the owner can actually veto.** A decorative
+  gate self-releases on `hold_timeout`+`default_option` anyway — it adds
+  ceremony and stall risk, not safety.

@@ -46,8 +46,60 @@ RUNNER_ENV_CORE = {'HERMES_HOME', 'HERMES_QUIET_TURN_REPORT_FILE', 'HERMES_WRITE
 SANCTIONED_ENV_DELTA = {'HERMES_WF_RUN_DIR',                        # F1; excluded both sides, counted under F1(1)
                         'HERMES_WF_PROCTREE_SIDECAR', 'HERMES_WF_PROCTREE_SPAWN'}  # #61c; excluded both sides
 
+def normalize_fanout_starts(rows):
+    """Only commute empty first bakes with independent same-node item starts.
+
+    wf.py's one() logs item.started in worker threads before run_child bakes
+    that worker's steer. ex.map supplies no cross-worker ordering: item 0 can
+    bake before item 1 starts. Empty spawn_no=0 bakes carry no steering payload
+    or item identity. Preserve every row, and never cross a finish, nonempty
+    bake, retry bake, other node, or a bake preceding the first start.
+    """
+    result = []
+    i = 0
+    while i < len(rows):
+        first = rows[i]
+        if first.get('event') != 'item.started':
+            result.append(first)
+            i += 1
+            continue
+        j = i
+        while j < len(rows):
+            row = rows[j]
+            if row.get('node') != first.get('node') or not (
+                row.get('event') == 'item.started' or
+                (row.get('event') == 'steer.baked' and row.get('spawn_no') == 0
+                 and row.get('n_lines') == 0)):
+                break
+            j += 1
+        batch = rows[i:j]
+        balance = 0
+        causal = True
+        for row in batch:
+            balance += 1 if row['event'] == 'item.started' else -1
+            causal = causal and balance >= 0
+        if not causal:
+            result.extend(batch)  # never hide a bake with no preceding start
+            i = j
+            continue
+        result.extend(sorted((r for r in batch if r['event'] == 'item.started'),
+                             key=lambda r: r.get('index', -1)))
+        result.extend(r for r in batch if r['event'] == 'steer.baked')
+        i = j
+    return result
+
+
 def normalize(value, paths):
     if isinstance(value, dict):
+        if isinstance(value.get('events.jsonl'), list):
+            value = dict(value, **{'events.jsonl': normalize_fanout_starts(value['events.jsonl'])})
+        # P02 adds read-only telemetry; persisted files remain in the golden.
+        # Behavior/unknown/accounting contracts live in test_execution_clocks_p02.
+        if 'runner_live' in value and isinstance(value.get('nodes'), dict):
+            value = {k: v for k, v in value.items() if k != 'accounting'}
+            value['nodes'] = {nid: {k: v for k, v in row.items()
+                                    if k not in ('clocks', 'item_counts')}
+                              for nid, row in value['nodes'].items()}
         if 'env_keys' in value and 'argv' in value:   # spawn trace record
             value = dict(value, env_keys=[k for k in value['env_keys']
                                           if (k in RUNNER_ENV_CORE or k.startswith('HERMES_WF_'))
@@ -59,6 +111,11 @@ def normalize(value, paths):
                                         # the est-2ek.1.765 fanout law COMMITTED the per-item records,
                                         # so their commit moment rides the record — volatile, like every
                                         # other wall clock in this set)
+                 'plugin_version',      # ra-plan#125-1/2 (est-ciin): unconditional provenance stamp —
+                                        # sanctioned delta like `started`: its VALUE is the repo's own
+                                        # plugin.yaml version (bumps every release), so pinning it would
+                                        # re-freeze a volatile; its PRESENCE is proven by the coarse
+                                        # tests/test_unconditional_version_stamp.py, not by the golden.
                  'session_id','ui_session_id'}}   # harness session stamp = owner provenance, volatile
     if isinstance(value, list):
         return [normalize(v, paths) for v in value]
@@ -79,6 +136,23 @@ def _core_home(path):
         yield
     finally:
         hc.reset_hermes_home_override(token)
+
+
+def _reset_session_context():
+    """est-2ek.1.862: neutralize the core session-identity ContextVars for the
+    golden capture. get_session_env prefers a BOUND ContextVar over os.environ,
+    so on a host where gateway.session_context is importable and a session was
+    ever bound in this process, stripping env alone would still stamp the owner
+    keys. reset_session_vars puts every var back to _UNSET ("never bound here")
+    which makes get_session_env fall through to the — now stripped — environment.
+    On a standalone plugin host without the gateway the ImportError path is the
+    status quo: _session_env already reads os.environ only, env-stripping is the
+    whole story."""
+    try:
+        from gateway.session_context import reset_session_vars
+    except ImportError:
+        return
+    reset_session_vars()
 
 
 def capture(root, after_save=None):
@@ -106,6 +180,18 @@ def capture(root, after_save=None):
         env['HERMES_WRITE_SAFE_ROOT'] = str(td/'safe')
         for key in ('WF_RUNS_ROOT','FAKE_MODE','FAKE_API_CALLS','FAKE_LOG','FAKE_PROMPT_LOG','FAKE_ARGV_LOG'):
             env.pop(key,None)
+        # est-2ek.1.862: the golden seat is the FROZEN v1.0.15 seat — no owner
+        # identity. The door stamps run.json.owner.{session_id,ui_session_id,
+        # platform} from _session_env; an API-inherited HERMES_SESSION_PLATFORM
+        # leaked through the dict-merge below and made the frozen baseline
+        # (owner.platform null) seat-red / CI-green. Strip the identity keys from
+        # the child seat AND neutralize the core ContextVar channel (it outranks
+        # os.environ when bound), so a capture launched from a Hermes seat sees
+        # exactly the clean-runner seat on every machine.
+        for key in [k for k in env if k.startswith('HERMES_SESSION_')
+                    or k.startswith('HERMES_UI_SESSION_')]:
+            env.pop(key, None)
+        _reset_session_context()
         paths = [(str(Path(__file__).resolve().parents[1]),'<REPO>'),(str(root),'<REPO>'), (str(td),'<TEMP>')]
         # The child runs retain their original seat-default identity (no launch_root).
         # Shield them from an inherited core-home override without altering HERMES_HOME.
@@ -180,7 +266,15 @@ def capture(root, after_save=None):
                     'list':listing, 'library':library,
                     'spawn_argv_env_keys':spawns,
                     'verdict':verdict,
-                    'run_json_keys':sorted(files['run.json'])}, paths)
+                    'run_json_keys':[k for k in sorted(files['run.json'])
+                                     if k != 'plugin_version'],     # est-ciin: same sanctioned delta —
+                                                                     # the frozen baseline predates the
+                                                                     # unconditional stamp; presence is
+                                                                     # proven by the coarse test
+                                                                     # (list entries are strings, so the
+                                                                     # dict-key exclusion alone can't
+                                                                     # drop a key NAME from this row)
+                    }, paths)
     return result
 
 

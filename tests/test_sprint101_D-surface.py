@@ -75,9 +75,9 @@ try:
     src = (ROOT / "__init__.py").read_text(encoding="utf-8")
     check("no card_rule key remains in __init__.py", '"card_rule"' not in src)
     # O1 copy-exact hint (papercut #70): the hint names the paste line verbatim.
-    check("hint is the copy-exact paste line",
-          out.get("hint", "").startswith("PASTE this line alone in your reply")
-          and CARD(rid) in out.get("hint", ""), repr(out.get("hint"))[:200])
+    check("hint makes cards optional",
+          "desktop cards are optional" in out.get("hint", "")
+          and CARD(rid) in out.get("lifecycle_notice", ""), repr(out.get("hint"))[:200])
 
     # ---- 2: any reading session gets the card in the payload -----------------
     os.environ["HERMES_SESSION_ID"] = "watcher"

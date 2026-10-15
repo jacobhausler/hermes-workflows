@@ -1,5 +1,235 @@
 # Changelog
 
+## Unreleased
+
+- **Operator scar-laws port (docs-only):** fifteen generalizable lessons from a
+  retiring usage skill fold into the docs they belong to, one hardened line
+  each — twelve authoring and recovery laws in `references/operator-playbook.md`
+  (machine-gate probe polarity, error-but-launched dedupe, amend re-queue
+  fingerprint law, cold-start re-runs, index-not-proof premises, no
+  maker-authored green, seat-wait disposition, census-never-quorum, closed
+  verdict enums, decorative-gate ban, control-plane credential containment,
+  parser-first recount diagnosis), two run-lifecycle laws in
+  `references/operations.md` (frozen launch meta, ephemeral run dirs), and the
+  launch-agnostic reusable-graph law in `references/grammar.md`. No engine
+  change.
+
+## 1.3.8 — 2026-10-14
+
+Patch release for P01/P02 (#418), preserving the v1.3.7 runner, patch/diff,
+card-hook safety and retired baseline/navigation behavior.
+
+- **Factual workflow guidance:** launch, wait and completion messages describe
+  observed state without granting new authority. Cards and curation are optional;
+  waiting can resume interrupted work. Static validation remains distinct from
+  route-probing launch dry runs.
+- **Read-only execution clocks:** a shared snapshot and bounded ledger index
+  project observed timing into status and dashboard responses using existing
+  spawn/item records. Missing evidence and dynamic totals stay explicitly unknown.
+- **Best-effort boundary:** equal-timestamp PID reuse is not complete attempt
+  provenance. No new scheduling, cancellation, authorization or persisted producer
+  contract is introduced.
+- Regression coverage includes malformed/missing evidence, stale identity,
+  fractional timestamps, retries and fan-out joins. S01 is not included.
+
+## 1.3.7 — 2026-10-14
+
+Patch line, sixteen merged PRs since v1.3.6 — the runner's deepest hardening
+wave yet (zombie hygiene, typed silent-death receipts, fail-safe wall events),
+a door amend/diff surface, effect-gated publication, and two audit-mandated
+regimes retired. Every `git log v1.3.6..HEAD` row re-derives from the merge
+commits; authorship of record is listed under **Attribution** below.
+
+**Runner and engine**
+
+- Continuous zombie hygiene for the subreaper pool (#283, @atbrace)
+- External jobs are registered and silent deaths reap typed receipts (#394)
+- Once-only graph `on_exit` postmortem (#129 → #391)
+- `resume_hint`: dead-attempt artifact inventory on every re-run path (#130 → #284)
+- Read model: fail-safe wall events and one snapshot per poll (#385)
+- Null-quorum fan-out death now names the real cause (#410)
+- Publication nodes gate `run.done` on external-effect receipts (#56 → #403)
+
+**Door and graph**
+
+- Patch surface for amend plus `action=diff` confirm surface (est-2del → #412)
+- PR-owned source deletions permitted without graph rewrites (est-i24i → #378)
+- Regen normalizes `.graphify_root` to contract `'.'` (est-0an45 → #409)
+
+**Hardening and tests**
+
+- Card-hook abandon-safety and cheap `register()` for the upstream v0.21.5
+  plugin contract (#304)
+- Behavioral error-class coverage and dead-fixture cleanup (est-pbwn → #377)
+
+**Retirements (audit)**
+
+- The mandatory all-green `ci-baseline` registry is retired (audit M01 → #351);
+  admission now compares against exits measured on the merge-base
+- The committed code-navigation regime is retired (audit M02 → #319, @atbrace)
+
+Routine graph refreshes ride along (#408, #404).
+
+Attribution — all sixteen merges are `Author: agent` trailers on the squash
+commits; the GitHub actor of record for every one is the org owner account,
+with @atbrace co-authoring the two peer-estate PRs (#283, #319).
+
+- #283 — @atbrace.
+- #319 — @atbrace.
+
+## 1.3.6 — 2026-10-11
+
+Patch line, four merged PRs since v1.3.5 — #396 (the ponytail truth pass over
+the docs and the comments), #399 (the child-prompt line the upstream catalog
+review asked for), #354 (the stale-graph spawn guard), #395 (the compliance
+standard's C8 teeth). The docs are the contract agents code against, and
+every rotted pointer is an agent lap burned on a wrong map:
+
+- **Node-type count corrected** — README and `references/grammar.md` said three
+  (`agent|gate|echo`); `join` is the shipped fourth since the 1.3.0 wave (#396).
+- **`reasoning` runtime-subset law updated to est-flah** — a relay's own enum-400
+  list triggers ONE logged clamp to the nearest supported level (never escalates)
+  and a re-drive; `provider_400` stands only when nothing clamps (#396).
+- **Grammar made complete** — `defaults` and the agent-field lists gain
+  `fallback_models` and `tier`; the `when` literal set gains `None`; the door's
+  run/amend description matches `DEFAULTS_KEYS` (#396).
+- **Dead pointers swept** — five line cites into core re-pointed (runtime_provider,
+  api_error_summary, main.py marker, GRAPH_MAX_BYTES, steer-var bake/reader sites),
+  the GRAPH_REPORT census pointer aimed at its `## Summary` block, four rot-prone
+  line cites replaced by symbol names, a dead doc anchor and a duplicated
+  `{runs,total,counts}` removed (#396).
+- **Child prompt carries no repackaging instruction** (#399, upstream catalog
+  ask 2) — `WORK_DIR_NOTE` no longer tells `-q` children to write refused
+  inline-interpreter payloads into script files; the refusal is core's
+  (`approvals.single_query_mode`), now documented in SECURITY.md as the
+  operator's choice. Guard test inverted to assert ABSENCE; golden re-captured,
+  prompts differ ONLY by the deleted sentence.
+- **A queued spawn never launches a stale definition** (#354, est-byft8) — a
+  spawn that queued on the global agent seat and reaches the Popen instant
+  AFTER an amend moved its effective fingerprint is refused typed
+  `stale_graph`; the comparison is the replay-skip efp law itself (a
+  timeout/max_turns-only amend never refuses), the refusal releases its seat
+  ticket, and the wave boundary re-drives the node under the CURRENT
+  definition — the replay-skip promise held across a queueing window.
+- **pr-compliance v0.3 C8** (#395) — a PR carrying a diagram must now lead its
+  body with a prose `## Problem` (or User story/Why/Context) section, RED
+  without it; the exemplar carrier `docs/pr-diagrams/est-g43qp` draws the
+  broken lane above the fixed lane so the picture alone reviews 90/90.
+- **Comments that lied, told true** — `_typed_error_class` returns `cap_exhausted`
+  (the docstring predated the rename); the rate-limit cap quadruples, it never
+  "doubles-ish"; the settings-cache shape comment matches the stored tuple;
+  `post_exit_hook` docstrings now say the runner stopped dispatching it at the
+  est-xwvu9 strip — tests exercise it, the shipped build never does (#396).
+- **Prompt honesty** — `WORK_DIR_NOTE` drops the single-query repackaging
+  instruction that the engine never honored (catalog review 2, #399).
+
+## 1.3.5 — 2026-10-11
+
+Patch line, sixteen merged PRs since v1.3.3 (supersedes the untagged 1.3.4 prep
+#364 — everything below ships in this single cut):
+
+- **Heartbeat verdict per running node** — the read model now reports each live
+  node's verdict, plus a one-line `run explain` (est-zsws) (#352).
+- **CI diagram-check diff-scoped** — the check now fires only when a PR ADDS the
+  carrier PNG, so body-only PRs stop burning red compliance cycles (#373).
+- **Core-contract drift probe** — a test asserts plugin-registered hooks against
+  core `VALID_HOOKS` (nightly drift probe) (#365).
+- **Chore:** dropped the stale lowercase `.github/pull_request_template.md`
+  shadowing the real template (#368).
+
+- **Unconditional `plugin_version` stamp** — every new `run.json` reports the arming
+  door's own truth (plugin.yaml via `wfcommon.plugin_version()`), not only runs that
+  declared `requires_plugin`; old dirs without the key still load (derive-only, honest
+  absence) (#356).
+- **Agent nodes honor `when` + `on_skip`** — #132 slice 1: a node whose `when` predicate
+  is false skips with its declared `on_skip` outcome instead of running (#355).
+- **Declared effect receipts gate publication-node `run.done`** — a publication node
+  cannot report done without its declared receipts (#346).
+- **Opt-in graph-revision CAS** on door `amend`/`release`/`steer` — stale revisions
+  refuse instead of clobbering (#344).
+- **Security:** the `post_exit_hook` mechanism is stripped from the shipped build
+  (upstream NousResearch/hermes-agent#133387 accepted ask) (#334).
+- **`graph_regen` fix:** shared `\0`-separated `--name-status` parser for the regen
+  diff (est-h3yi) (#314).
+- **Rate-limit-park wall pins** — M2/M3 fanout-respawn wall assertions plus mutation
+  proofs (est-xodi) (#339).
+- **Docs:** portable pre-share validation must pass with `admission=True` (closes
+  est-73vk) (#341); pack card-toolresult-hook ship card + truthful result-contract
+  doc (est-k75i) (#359).
+- **Suite:** the golden seat never wears the launching agent's session identity
+  (#325); graph refresh at 7ae1f6f (#350).
+
+## 1.3.3 — 2026-10-09
+
+Patch line: a child that dies rc=130 carrying the CLI's session-lease notice
+(`Stopped waiting for another Hermes process on this session. Your message was
+not processed.`) is now typed `lease_busy` instead of falling to `unknown` and
+failing the node: the class joins the closed `ERROR_CLASSES` set and
+`_BOUNDED_RETRY_CLASSES`, so the node gets exactly ONE bounded re-drive as a
+FRESH session under the next attempt key (never `--continue` of the still-busy
+session) after `node.retrying error_class=lease_busy`. The Oct-3 field shape:
+two runs where a freshly spawned review child printed the CLI's lease notice
+after ~1800 s of lease waiting and exited 130 — the runner knew only SIGKILL
+deaths, so the collision read as an untyped terminal failure. The tool-progress
+gate is bypassed for this class alone (the notice proves the attempt never
+ran); a rc=130 death without the notice keeps its existing classification,
+and a harvestable fenced answer still outranks the class (#4 law). Pin:
+`tests/test_lease_busy_retry.py`.
+
+## 1.3.2 — 2026-10-09
+
+Patch line, 37 commits since v1.3.1 (merge order #274 → #272 → #275 → #285
+→ #300 → #289 → #294 → #293 → #299 → #290 → #292 → #303 → #280 → #301 → #286
+→ #309 → #311 → #318 → #313 → #315 → #305 → #235 → #281 → #253 → #282 → #307
+→ #296 → #298 → #287 → #312 → #248 → #306 → #327 → #328 → #322 → #291 → #295): the
+wall-meter/read-model wave (per-running-node wall seconds, artifact-mtime
+progress channel, failed_nodes[] surfacing, bank-the-corpse on wall-kill),
+the provider/route-identity fixes (seat-routed provider/model literals,
+alias-pinned ping, billed-model ledger), the door admission hardenings
+(schema minItems/minLength, baked-empty fanout refusal, fsync+verify run
+dir, surviving-template refusal at amend), the shelf-to-launch contract,
+and the graph-level `result:` verdict node. No new tool surface.
+
+Merges since the tag, in brief:
+
+- 851174d #274 — docs(runs): keep find_run docstring to the operative contract
+- 4647aec #272 — test(proctree): parseable-content pid/record waits in sibling fixtures
+- 0a44455 #275 — fix(ci): graph_path_ban sees renames + quoted paths — -z name-status
+- d9a53dc #285 — ci(baseline): ledger row for test_library_tag_read_qeul.py — heals main admission guard
+- b172aab #300 — fix(runner): disclose single-query tool approval limits
+- 10c56d9 #289 — fix(runner): pin child TERMINAL_CWD to its work dir
+- a884eb9 #294 — docs(tool): workflow tool description carries the use/avoid sentence and names delegate_task
+- 7f04d95 #293 — fix(door): refuse a surviving {run.KEY} in gate wait.until_argv at run/amend
+- 6d181fd #299 — fix(suite): isolate inherited workflow identity
+- cde1530 #290 — fix(runner): node record lists every billed model; route hold names final vs mid-session
+- 8073d93 #292 — feat(grammar): optional graph-level result: <node id> — status/wait name the verdict node
+- 8152edb #303 — docs(grammar): scope the result: contract
+- 0d91f80 #280 — wfcommon: reject baked-empty fanout.items:[] at the door
+- aca313d #301 — fix(dashboard): loadable hidden API entry
+- 869c401 #286 — feat(runner): bank-the-corpse on wall-kill — deterministic <node>.corpus/ + node.banked event
+- a11a427 #309 @atbrace — fix(suite): refused invocation invalidates stale green receipts on the --baseline fail path (audit M11)
+- 5801d11 #311 @atbrace — test: drop the self-proving stray-file check from the partial-rescue law test (audit M08)
+- f3801c9 #318 — docs: one owner per check truth — contributor guide halves, skill sheds its second copy (M05/M06)
+- 2f63070 #313 — fix(runner): truthful corpse sizes, protected opens, measured provenance
+- 1d6a66f #315 — docs(wfcommon): cut the dead injectable-hook claim from the tag READ fold
+- 0abd168 #305 — fix: status/next expose global seat back-pressure
+- 8bc661c #235 — feat(#733): dead-on-arrival finalize for stuck running node records
+- bb7e163 #281 — test(parity): dual-surface fold parity contract test, test-only
+- f45b79a #253 — feat(door): est-kg3y — shelf-to-launch contract: library run_context validation + meta.params surfacing + s12
+- dfc388e #282 — read model: artifact-mtime progress channel — run_state publishes {artifact, size, mtime_age_s, last_line} for running nodes
+- f549709 #307 — fix(runner): summary.md lists every node's status + output
+- e48a3e8 #296 — fix: provider-aware route-identity contract
+- 703ccb0 #298 — fix(pack): exclude checkout-only tests from release ZIP
+- 19b43d6 #287 — fix(door): alias-pinned nodes ping and report the alias target id, not the bare alias
+- 3b45625 #312 — fix(door,harvest): admit + enforce schema minItems/minLength, fail closed on blank lists
+- 69ed113 #248 — fix(door): est-2ek.1.199 — fsync+verify the run dir before run_id returns; orphaned-run lane status
+- 7d8e6bb #306 — fix: defaults.context bake is idempotent across a run_context-bound amend
+- 96ee587 #327 — fix(amend): preview flags def drift on RUNNING never-committed nodes (issue #18)
+- 94fd074 #328 — feat(read-model,door,desktop): #133 wall meter — per-running-node wall seconds
+- 92b8f67 #322 @atbrace-hermes — feat(read model): populate failed_nodes[] in run_state + status/wait (sys-5lnm17)
+- 8632839 #291 — fix(door): bake the provider of a seat-routed provider/model literal at submit
+- aeb89ff #295 — fix(runner): wall extension accepts the child's own session row as proof of life (est-2ek.1.595)
+
 ## 1.3.1 — 2026-10-07
 
 Patch line, 46 commits since v1.3.0 (merge order #214 → #215 → #218 → #217 → #219

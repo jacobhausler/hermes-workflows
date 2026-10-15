@@ -132,8 +132,9 @@ check("malformed enum inside items names its dotted path",
 errs = V(agent_node({"type": "object", "patternProperties": {}}))
 kw_err = [e for e in errs if "unsupported schema keyword" in e["msg"]]
 check("patternProperties still refused — the subset stays closed", bool(kw_err), json.dumps(errs))
-check("the supported list names enum now (and only adds enum)",
-      kw_err and kw_err[0]["msg"].endswith("supported: type, required, properties, items, description, enum"),
+check("the supported list names enum now (and only adds enum; #96 added minItems/minLength)",
+      kw_err and kw_err[0]["msg"].endswith(
+          "supported: type, required, properties, items, description, enum, minItems, minLength"),
       kw_err[0]["msg"] if kw_err else "no keyword error")
 
 # ============ 4. prompt-side: enum literals reach the child's prompt ============
@@ -261,10 +262,12 @@ check("door: legacy grammar untouched (type/required/properties/items/descriptio
       V(agent_node({"type": "object", "required": ["ok"], "description": "x",
                     "properties": {"ok": {"type": "boolean"},
                                    "tags": {"type": "array", "items": {"type": "string"}}}})) == [])
-check("door: legacy unsupported-keyword refusal keeps its exact field naming",
-      any(e["node"] == "a" and e["field"] == "schema.minItems"
+check("door: legacy unsupported-keyword refusal keeps its exact field naming"
+      " (#96 re-pin: minItems/minLength are admitted+enforced now — maxItems is the"
+      " still-unsupported keyword proving the subset stays closed)",
+      any(e["node"] == "a" and e["field"] == "schema.maxItems"
           and "unsupported schema keyword" in e["msg"]
-          for e in V(agent_node({"type": "array", "minItems": 1}))))
+          for e in V(agent_node({"type": "array", "maxItems": 2}))))
 
 print()
 if ok:

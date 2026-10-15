@@ -59,8 +59,11 @@ class ConcurrencyBake100(unittest.TestCase):
 
     def test_absent_is_original_meta_shape(self):
         meta, _ = self.launch()
+        # ra-plan#125-1 (est-0sj4): EVERY run stamps plugin_version (derived from
+        # plugin.yaml), so the stamp joins the base key set; the concurrency keys
+        # stay absent, which is what this test pins.
         self.assertEqual(set(meta), {"name", "hermes_bin", "started", "fp_rule_version",
-                                     "owner", "launch_root"}, meta)
+                                     "owner", "launch_root", "plugin_version"}, meta)
         self.assertEqual(meta["launch_root"], str(self.root / "runs"))
         self.assertNotIn("concurrency", meta)
         self.assertNotIn("item_concurrency", meta)

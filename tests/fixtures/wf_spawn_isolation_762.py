@@ -7,8 +7,8 @@ The runs-root resolver precedence (#42) is
 so HERMES_HOME alone is NOT a sandbox: a child that inherits the invoking
 process's WF_RUNS_ROOT writes its run dir wherever the LANE was launched from.
 On a production host that lane root IS the estate library — this is exactly how
-774 of 1227 unique dirs under /home/hermes/.hermes/workflows ended up as
-zero-log test fixtures (feedback census spool key 9cfe87a0199e5e1b, est-2ek.1.762).
+774 of 1227 unique dirs under the estate production runs root
+(~/.hermes/workflows) ended up as zero-log test fixtures (feedback census spool key 9cfe87a0199e5e1b, est-2ek.1.762).
 
 The law this helper enforces (same shape as merged test_wake_hermetic_env.py
 #250 and est-aywd #257): a spawned runner child must carry BOTH

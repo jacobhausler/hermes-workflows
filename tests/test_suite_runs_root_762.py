@@ -2,7 +2,7 @@
 isolated runs root (the suite-leak tripwire).
 
 Failure mode pinned (feedback census spool key 9cfe87a0199e5e1b): 774 of 1227
-unique dirs under the PRODUCTION runs root /home/hermes/.hermes/workflows were
+unique dirs under the PRODUCTION runs root (~/.hermes/workflows) were
 zero-log test fixtures (live / new-title / steering / p25 families; symlinked
 profile roots multiply hits). Root cause: the runs-root resolver precedence
 (#42) is

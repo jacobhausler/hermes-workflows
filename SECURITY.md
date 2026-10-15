@@ -20,8 +20,17 @@ Include, as best you can:
 ## Supported versions
 
 Security fixes are accepted against the **latest release only** — currently
-`v1.3.1` (see [`CHANGELOG.md`](CHANGELOG.md) and the tags). Fixes ship in the
+`v1.3.8` (see [`CHANGELOG.md`](CHANGELOG.md) and the tags). Fixes ship in the
 next release cut; older tags are not patched retroactively.
+
+## Child approvals posture
+
+Single-query (`-q`/`-Q`) children run under the host's core approval policy. A
+deployment may refuse inline interpreter payloads (`python -c`, heredocs) and
+`execute_code` in that mode because the payload cannot be scanned before
+execution. That refusal is core's, configured by the operator via
+`approvals.single_query_mode`; the plugin never instructs a child to
+repackage a refused payload into a file to sidestep it.
 
 ## Response time
 
