@@ -172,6 +172,14 @@ try:
     finally:
         door._common.set_owner_setting_reader(_prev_reader)
         door._CTX = _prev_ctx
+
+    # P5 structural law: the only registrations added beyond the door are the config-gated
+    # approval pair in approval_bridge.py (default OFF).
+    _ab_src = (ROOT / "approval_bridge.py").read_text(encoding="utf-8")
+    check("the only added registrations are the config-gated approval pair in approval_bridge.py",
+          _ab_src.count("register_hook") == 2
+          and 'ctx.register_hook("pre_approval_request"' in _ab_src
+          and 'ctx.register_hook("post_approval_response"' in _ab_src)
 finally:
     door._spawn_runner = _orig_spawn
     shutil.rmtree(HOME, ignore_errors=True)

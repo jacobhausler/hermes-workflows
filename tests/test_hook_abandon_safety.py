@@ -191,8 +191,10 @@ class HookAbandonSafety(unittest.TestCase):
         # P1 structural law (sprint-101 D-surface #5): the hook gate adds ONE more
         # cached ctx read. The LAW is the cheap one-pass budget above; the count
         # tracks the shipped config surface (model_tiers + enabled_hooks), never a
-        # frozen literal.
-        self.assertEqual(self.ctx.config_reads, 2, "two cached config reads (model_tiers + hook allow-list)")
+        # frozen literal. The P5 default-off approval-bridge gate is the one
+        # sanctioned extra read (plugin-relative get_config answering None off);
+        # a lane adding another gate read amends this line.
+        self.assertEqual(self.ctx.config_reads, 3, "three cached config reads (model_tiers + hook allow-list + P5 bridge allow-list)")
         self.assertEqual([t["name"] for t in self.ctx.tools], ["workflow"])
         self.assertNotIn("override", self.ctx.tools[0],
                          "override=True is operator-gated (PluginToolOverrideError)")

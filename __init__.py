@@ -4763,5 +4763,27 @@ def register(ctx):
             ctx.register_hook("subagent_stop", _subagent_accounting.harvest)
     except Exception:
         pass  # fail-open: accounting absent, plugin intact
+
+    # P5 native-approval bridge (config-gated, DEFAULT OFF): when settings
+    # hooks_bridge_allow lists 'approval_bridge', held human gates are ALSO
+    # presented on the host's native approval channel and approve-shape answers
+    # map to a release through this door's own act_release path. The emitted
+    # text is the run's runner-authored wake row verbatim — the bridge authors
+    # no gate prose. Off = a defs-only module exec + one in-memory settings read
+    # and nothing else: no registration, no thread. Degrades silently; desktop/tool
+    # release untouched.
+    if "_approval_bridge" not in globals():
+        globals()["_approval_bridge"] = None
+        try:
+            _ab_spec = importlib.util.spec_from_file_location(
+                "_hermes_workflows_approval_bridge", HERE / "approval_bridge.py")
+            _ab_mod = importlib.util.module_from_spec(_ab_spec)
+            _ab_spec.loader.exec_module(_ab_mod)
+            globals()["_approval_bridge"] = _ab_mod
+        except Exception:
+            pass
+    if globals()["_approval_bridge"] is not None:
+        globals()["_approval_bridge"].maybe_enable(
+            ctx, {"runs_root": runs_root, "act_release": act_release}, _common)
     ctx.register_command("wf", _wf_command, description="Workflow library: `/wf` lists, `/wf <name> [note]` replays a shelved graph",
                          args_hint="[name] [note]", argument_mode="text")
