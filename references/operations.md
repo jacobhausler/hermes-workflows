@@ -116,3 +116,20 @@ A read-only pass over the tool's defaults — what a first-time agent would wish
 ## Library provenance
 
 `save` accepts an optional `source` (≤200 chars). When supplied — or when the save happens under a named profile — the library entry records `{owner, source, saved_at, source_digest}`; a default-profile save without `source` writes exactly the pre-1.1 bytes, and legacy entries list as always. `library` shows the fields only when present; `run from:<name>` copies the stamp into run.json as `graph_source`. Provenance is attribution, never permission: no veto, no ACL, no migration of old entries.
+
+## Global agent-seat admission (pool-level)
+
+Admission arbitrates against the POOL, not the inheriting process: the first
+admission into a seats dir records its resolved cap in `<seats>/.cap` (first
+writer wins, serialized by the pool's `.lock` flock — the recording and the
+count-then-admit are one cross-process atomic step) and every admission after
+it — nested child runners included, whose inherited env may carry a stale,
+missing or default `WORKFLOW_MAX_SEATS` — counts tickets against that RECORDED
+value, never its own environment. Env/.env files (read fresh, est-gxjh6) seed
+the first acquirer only. A run.json `max_seats` acts as a per-run CEILING under
+the pool cap: the run may hold fewer seats than the pool allows, never more.
+`WORKFLOW_MAX_SEATS=0` stays a LOCAL disable of the semaphore and never touches
+pool state. Operators change a live pool's cap by removing `<seats>/.cap` while
+the pool is idle (the next first acquirer re-seeds it). A corrupt `.cap` is
+re-seeded, never trusted, never fatal; an unwritable pool degrades to each
+caller arbitrating its own seed.
