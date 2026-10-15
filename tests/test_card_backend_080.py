@@ -104,7 +104,8 @@ class CardBackend(unittest.TestCase):
             def get_config(self, _, default): return default
         ctx = Context()
         wf.register(ctx)
-        self.assertEqual(set(ctx.hooks), {"transform_llm_output"})
+        self.assertEqual(set(ctx.hooks), {"transform_llm_output", "post_gateway_admission",
+                                          "pre_gateway_dispatch"})   # PR-3: both default-off
         self.assertIs(ctx.hooks["transform_llm_output"],
                       wf._card_enforcement._card_hook)
 
