@@ -133,3 +133,11 @@ scripts/vendor/archify/renderers/shared/generated-brand-marks.mjs
 # future stray hit elsewhere in these files still fires. GUARD, per AGENTS.md rule 4.
 .github/PULL_REQUEST_TEMPLATE.md:6
 .github/workflows/pr-compliance.yml:32
+
+# ---- est-o8c6o (2026-10-11): the diff-scoped gate re-worded the ::error:: line ----
+# est-q2nwx's line anchor (:32) went stale because the diff-scope re-word moved the
+# citation line and kept the same mandated standard citation. Anchored by the citation
+# phrase itself instead of a line number, so any future re-word that keeps the citation
+# stays guarded and any stray hit WITHOUT the citation still fires. GUARD, per AGENTS.md
+# rule 4 - same class as est-q2nwx.
+regex:haus-docs rules/pr-diagram-standard

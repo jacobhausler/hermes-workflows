@@ -268,9 +268,9 @@ class DoorLib50(unittest.TestCase):
         self.assertIn("no library graph", err)
         self.assertIn("closest:", err)
         self.assertIn("audit-notes", err)                    # fuzzy over library names
-        self.assertIn("hand-rolled", err)
-        self.assertIn("submit", err)
-        self.assertIn("why_not_library", err)
+        self.assertEqual(r.get("error_class"), "library_not_found")
+        self.assertIn("run", r["hint"])
+        self.assertNotIn("why_not_library", err)
         self.assertIsInstance(r.get("closest"), list)
         self.assertLessEqual(len(r["closest"]), 3)
         # general/ names participate in the fuzzy match set
@@ -281,8 +281,9 @@ class DoorLib50(unittest.TestCase):
         r = door.act_run({"from": "whatever"})
         err = r.get("error", "")
         self.assertIn("no library graph", err)
-        self.assertIn("submit", err)
-        self.assertIn("why_not_library", err)
+        self.assertEqual(r.get("error_class"), "library_not_found")
+        self.assertIn("run", r["hint"])
+        self.assertNotIn("why_not_library", err)
 
     def test_general_save_echoes_replayable_name(self):
         # #50 review gap: saving `general/<name>` must echo the FULL replayable name
