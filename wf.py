@@ -936,10 +936,12 @@ def notify(run, event, key=None, graph=None):
     try:
         if not run.is_dir():
             return
-        _ob = _outbound_bridge()               # P1: the operator mirror fires at notify's
-        if _ob is not None:                    # OWN point and fail-opens inside mirror();
-            _ob.mirror(run, event, key, graph) # owner-null runs still mirror — the endpoint
-        # is the operator's, not the session's.    is typed, never silent
+        # P1: the operator mirror fires at notify()'s OWN point and fail-opens inside
+        # mirror(). Owner-null runs still mirror — the endpoint is the operator's, not
+        # the session's, and events.jsonl carries the transition either way.
+        _ob = _outbound_bridge()
+        if _ob is not None:
+            _ob.mirror(run, event, key, graph)
         meta = jload(run / "run.json", {}) or {}
         owner = meta.get("owner")
         # Defensive on shape (R10): the wake needs the door's dict stamp

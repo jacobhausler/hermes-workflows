@@ -314,7 +314,15 @@ def mirror(run, event, key=None, graph=None):
                 if not rec["delivered"]:
                     rec.update(error_class="http_status", error=f"HTTP {status}")
         except urllib.error.HTTPError as e:
-            rec.update(delivered=False, error_class="http_status", error=f"HTTP {e.code}")
+            # _NoRedirect.redirect_request returns None, so urllib's error handler
+            # RE-RAISES the 3xx as an HTTPError: the redirect lands HERE, not in the
+            # status pre-check above (kept as seam defense for an opener that does
+            # return the code). Redirect law: never followed, never a delivery.
+            if 300 <= e.code < 400:
+                rec.update(delivered=False, error_class="redirect",
+                           error=f"HTTP {e.code} redirect not followed (undelivered)")
+            else:
+                rec.update(delivered=False, error_class="http_status", error=f"HTTP {e.code}")
         except (socket.timeout, TimeoutError):
             # A read timeout is NOT a delivery (wake's F5 law): we never saw a
             # status line, so the retry must stay live under the SAME id.
