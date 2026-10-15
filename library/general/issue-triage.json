@@ -1,0 +1,83 @@
+{
+  "meta": {
+    "description": "Queue triage against a standing rule: intake open items, classify urgent/routine/ambiguous verbatim per the rule, notify the owner only when urgent. Read-only end to end.",
+    "tags": ["use_case:triage", "domain:queue", "starter", "seeded"],
+    "params": {
+      "work_queue": {"desc": "where open items live: a file path, tracker command, or URL"},
+      "decision_rule": {"desc": "the owner's standing triage rule, applied verbatim"},
+      "owner_notify": {"desc": "how a human is reached: a command, channel name, or file to write"}
+    }
+  },
+  "graph": {
+    "grammar": "wf/1",
+    "name": "issue-triage",
+    "description": "THE run_context seed-contract exemplar of the starter set: every seeded value below is a {run.KEY} reference the door binds at launch, and this description IS the key contract a reader (or a `library show` listing) consults before launching. SEED CONTRACT (run_context map, ALL THREE keys required, values plain text - a value containing '{' or '}' breaks re-rendering and the launch refuses; values are persisted into prompts, so put no secrets in them): 'work_queue' = where the open items live (a file path, a tracker command, or a URL your tools can read - intake only reads it); 'decision_rule' = the owner's standing triage rule, quoted verbatim into the classifier; 'owner_notify' = how a human is reached when urgent items exist (a command, a channel name, or a file to write). LAUNCH: run from:'general/issue-triage' run_context:{'work_queue':'...','decision_rule':'...','owner_notify':'...'}. A launch that omits any key (or leaves a ref unbound) refuses BEFORE any write or spawn - that refusal is the contract enforcing itself, not a bug. NODE MAP: intake (enumerate open items) -> classify (apply the rule verbatim; anything the rule does not clearly cover is ambiguous, never forced) -> lap-report (one human touch, only when urgent). ROUTE SEMANTICS: routine items are NOT executed here - this lap only decides; the report names what waits. Every node is read-only toward your tracker.",
+    "provenance": {
+      "owner": "hermes-workflows",
+      "source": "hermes-workflows/library/general/issue-triage.json"
+    },
+    "defaults": {
+      "timeout": 900,
+      "context": "You are one lane of a queue triage. Ground rules: read-only unless your goal says to notify; the owner's standing rule is applied as written, never improved; every classification cites the field or evidence that drove it; keep the answer to the schema; one fenced json block as the final message; never print secrets."
+    },
+    "nodes": [
+      {
+        "id": "intake",
+        "type": "agent",
+        "model": "worker",
+        "shape": "recon",
+        "schema": {
+          "type": "object",
+          "required": ["items", "count"],
+          "properties": {
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["id", "summary"],
+                "properties": {"id": {"type": "string"}, "summary": {"type": "string"}}
+              }
+            },
+            "count": {"type": "integer"},
+            "notes": {"type": "string"}
+          }
+        },
+        "goal": "Enumerate the OPEN items in the work queue: {run.work_queue}. Read with whatever read-only tools you have; skip items closed or answered out-of-band. Return up to 20 items, each reduced to one line. Reply with ONLY fenced json {\"items\": [{\"id\": \"<stable identifier>\", \"summary\": \"<one line>\"}], \"count\": <int>, \"notes\": \"<anything unreadable or skipped, with reason>\"}"
+      },
+      {
+        "id": "classify",
+        "type": "agent",
+        "model": "worker",
+        "shape": "review",
+        "after": ["intake"],
+        "schema": {
+          "type": "object",
+          "required": ["urgent", "routine", "ambiguous"],
+          "properties": {
+            "urgent": {"type": "array", "items": {"type": "object", "required": ["id", "reason"], "properties": {"id": {"type": "string"}, "reason": {"type": "string"}}}},
+            "routine": {"type": "array", "items": {"type": "string"}},
+            "ambiguous": {"type": "array", "items": {"type": "object", "required": ["id", "why"], "properties": {"id": {"type": "string"}, "why": {"type": "string"}}}}
+          }
+        },
+        "goal": "Classify every item in your Inputs (intake's roster) against the owner's standing rule, applied verbatim:\n{run.decision_rule}\nThree buckets only. urgent = the rule clearly demands a human now; routine = the rule clearly covers ordinary handling; ambiguous = the rule does not clearly cover it - NEVER force such an item into another bucket. Each entry names the item id and the rule clause or evidence that drove it. Reply with ONLY fenced json {\"urgent\": [{\"id\": \"..\", \"reason\": \"<rule clause>\"}], \"routine\": [\"<id>\"], \"ambiguous\": [{\"id\": \"..\", \"why\": \"<what the rule does not cover>\"}]}"
+      },
+      {
+        "id": "lap-report",
+        "type": "agent",
+        "model": "manager",
+        "shape": "publish",
+        "after": ["classify"],
+        "schema": {
+          "type": "object",
+          "required": ["notified", "urgent_count", "report"],
+          "properties": {
+            "notified": {"type": "boolean"},
+            "urgent_count": {"type": "integer"},
+            "report": {"type": "string"}
+          }
+        },
+        "goal": "Write the triage lap report from classify's committed answer (your Inputs). If - and ONLY if - the urgent bucket is non-empty, deliver exactly ONE notification via the owner's channel: {run.owner_notify}. If that channel is a command, run it once with the urgent list; if a file, append one dated line; if a channel name you cannot reach, set notified:false and say so in report. report = three short sections (urgent / routine / ambiguous-with-questions) that the owner can act from without opening the queue. Reply with ONLY fenced json {\"notified\": <bool - true only after the notification actually went out>, \"urgent_count\": <int>, \"report\": \"<the report text>\"}"
+      }
+    ]
+  }
+}

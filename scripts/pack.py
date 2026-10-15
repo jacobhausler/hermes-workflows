@@ -88,6 +88,18 @@ INCLUDE_FILES = (
     # mandatory new-file pack-surface gate). Pinned by tests/test_packaging.py's
     # ZIP-membership assertion — an unshipped doc is invisible to every install.
     "docs/card-toolresult-hook.md",
+    # #51 (est-6cym): the PACKAGED curated starter set ships with the plugin —
+    # the door's `_packaged_general_root()` resolves next to __init__.py, and
+    # tests/test_door_general_51.py (shipped via the tests glob) asserts the
+    # set loads from that address. Unshipped = every fresh install loses the
+    # cold-shelf `from: general/<name>` fallback AND the suite dies (the exact
+    # est-4vnq finding-4 shape). Explicit listing, per pack.py's no-wholesale law.
+    "library/general/README.md",
+    "library/general/pr-review-light.json",
+    "library/general/issue-triage.json",
+    "library/general/test-first-feature-slice.json",
+    "library/general/fan-out-audit-census.json",
+    "library/general/report-and-verify.json",
     "examples/basics/approve-publish.json",
     "examples/review/blind-council.workflow.json",
     "examples/basics/branch-on-verdict.json",

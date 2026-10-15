@@ -1779,14 +1779,27 @@ def _lane_shelf_guard(p):
                      "(est-2ek.1.599; shelf waves 26-31; r4 realpath-only containment)",
             "error_class": "lane_shelf_write"}
 
+def _packaged_general_root():
+    """#51: the PACKAGED curated starter set shipped WITH the plugin — the repo's
+    library/general/ directory, which sits next to __init__.py in any install.
+    Read-only at runtime (act_save always lands on library_root()); it is the
+    FALLBACK the door resolves `general/<name>` to when every private root misses.
+    Resolution order: runs_root library > legacy launch-root library > packaged."""
+    return Path(__file__).resolve().parent / "library" / _GENERAL_PREFIX
+
 def _lib_read(name):
     """READ resolver mirroring find_run: resolved first, legacy only for an EXISTING
-    graph absent from the resolved root. Returns the path whether or not it exists
+    graph absent from the resolved root, and — for `general/<name>` (#51) — the
+    packaged starter set LAST. Returns the path whether or not it exists
     (callers keep their own None/not-exists handling on the primary shape)."""
     p = _lib_path(name)
     if not p.exists():
         n = str(name or "").strip().lower()
-        if LIB_OK.match(n):
+        if n.startswith(_GENERAL_PREFIX) and LIB_OK.match(n[len(_GENERAL_PREFIX):]):
+            packaged = _packaged_general_root() / f"{n[len(_GENERAL_PREFIX):]}.json"
+            if packaged != p and packaged.exists():
+                return packaged
+        elif LIB_OK.match(n):
             legacy = _common.launch_runs_root() / "library" / f"{n}.json"
             if legacy != p and legacy.exists():
                 return legacy
@@ -1794,10 +1807,11 @@ def _lib_read(name):
 
 def _lib_rel_name(p):
     """#50: the replayable name for a library path — `general/<stem>` inside the
-    curated public subdir, plain `<stem>` everywhere else (what `_lib_path` and
-    `library` both answer to)."""
-    return (str(p.relative_to(library_root()))[:-5] if p.parent == library_root() / _GENERAL_PREFIX
-            else p.stem)
+    curated public subdir (private shelf OR the #51 packaged set), plain `<stem>`
+    everywhere else (what `_lib_path` and `library` both answer to)."""
+    if p.parent == library_root() / _GENERAL_PREFIX or p.parent == _packaged_general_root():
+        return _GENERAL_PREFIX + p.stem
+    return p.stem
 def _library_reader():
     """The include resolver's library reader: a closure over _lib_read — the SAME
     resolver `from=<name>` uses (resolved root first, legacy launch root second).
