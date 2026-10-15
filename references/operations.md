@@ -22,6 +22,8 @@ Use a terminal, decision-only agent node with no automatically runnable work des
 
 Desktop cards use `::workflow{id="<run_id>"}` and are optional presentation. Plain CLI text and run IDs suffice. The existing desktop card hook may append cards; agents need not paste them. Backend and desktop installations are separate.
 
+**Card ledger.** Owed cards are tracked in `<runs_root>/card-ledger.json` (`{session_id: {run_id: {state: pending|held, ts, name}}}`, atomic writes, a corrupt file reads as empty), kept by hooks rather than a run-dir scan: `post_tool_call` adds a run on every `workflow` launch, marks `held` gate reports, and drops it on `done|failed|stopped`/`stop`; `pre_llm_call` reminds the model of owed cards only while the ledger holds some; `transform_llm_output` appends up to 3 cards (newest first) and drops each entry once the text is selected. The old age-window setting (`card_window_minutes`) is gone, replaced by the ledger; entries surviving a gateway restart ship late. Every hook is fail-open.
+
 `profile` routes an agent node to a named target profile, not a fan-out item: the child gets the TARGET's SOUL, memory, `.env` and tools. This is delegation, not isolation. Before launching, the target owner writes `<target_profile_home>/workflow_team.json` as `{"accept_from":["<launcher-profile-name>"]}`; the launcher name comes from the launching process's own HERMES_HOME (for the default profile, use `"default"`), never from a graph argument. The target must have `config.yaml`; `default` may launch but is never a target. Without target-owned consent validation fails before any run write/spawn; a target deleted before Popen fails with `error_class:"spawn"`, never silently falling back to the launcher.
 
 ## Execution clocks (read-only)

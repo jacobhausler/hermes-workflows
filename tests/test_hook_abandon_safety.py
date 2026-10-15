@@ -78,25 +78,21 @@ class HookAbandonSafety(unittest.TestCase):
         self.register_secs = time.perf_counter() - t0
         self.hook = self.ctx.hooks["transform_llm_output"]
         self.runs = Path(os.environ["WF_RUNS_ROOT"])
+        self.runs.mkdir(parents=True, exist_ok=True)
 
     def tearDown(self):
         self.env.stop()
         self.home.cleanup()
 
     def mk_run(self, rid, sid="S"):
-        r = self.runs / rid
-        (r / "nodes").mkdir(parents=True)
-        started = (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat(timespec="seconds")
-        (r / "run.json").write_text(json.dumps(
-            {"name": "t", "started": started, "owner": {"session_id": sid}}))
-        return r
+        """Owe a card: the launch hook's ledger row (no run dir is ever scanned)."""
+        self.hw._card_ledger.add(sid, rid, "t")
+        return rid
 
-    def markers(self, r):
-        p = r / "events.jsonl"
-        if not p.exists():
-            return 0
-        return sum(1 for ln in p.read_text().splitlines()
-                   if ln.strip() and json.loads(ln).get("event") == "card.echoed")
+    def markers(self, rid):
+        """1 once the card's ledger entry is dropped (shipped), 0 while still owed."""
+        owed = [r for r, _ in self.hw._card_ledger.entries("S")]
+        return 0 if rid in owed else 1
 
     def fire(self, turn, text="All done."):
         return self.hook(response_text=text, session_id="S", turn_id=turn,
@@ -149,24 +145,24 @@ class HookAbandonSafety(unittest.TestCase):
             again = self.fire(turn)
             self.assertIsNone(again, f"card double-shipped on {turn}: {again!r}")
 
-    # ---- (b) ordering: the claim outlives the marker write -------------------
-    def test_marker_is_durable_before_the_inmemory_claim_drops(self):
+    # ---- (b) ordering: the claim outlives the ledger drop --------------------
+    def test_ledger_drop_is_durable_before_the_inmemory_claim_drops(self):
         r = self.mk_run("r-ord")
         seen = {}
-        real_mark = self.ce._mark
+        led = self.ce._LEDGER
+        real_drop = led.drop
 
-        def spying_mark(run_dir, sid, turn):
-            # A concurrent (abandoned) worker scanning at this instant must find
-            # the run still covered by the in-memory claim: no marker on disk yet.
-            seen["offered"] = [rid for rid, _ in self.ce._outstanding(
-                "S", datetime.now(timezone.utc))]
-            real_mark(run_dir, sid, turn)
+        def spying_drop(sid, rid):
+            # A concurrent (abandoned) worker reading the ledger at this instant must
+            # find the run still covered by the in-memory claim: nothing re-offered.
+            seen["offered"] = self.ce._owed("S")
+            return real_drop(sid, rid)
 
-        with mock.patch.object(self.ce, "_mark", spying_mark):
+        with mock.patch.object(led, "drop", spying_drop):
             self.assertIsNotNone(self.select(self.fire("t1")))
         self.assertEqual(seen.get("offered"), [], "run re-offered mid-confirm")
         self.assertEqual(self.markers(r), 1)
-        self.assertEqual(self.ce._outstanding("S", datetime.now(timezone.utc)), [])
+        self.assertEqual(self.ce._owed("S"), [])
 
     # ---- (b) a concurrent reconcile racing on the same key stays quiet --------
     def test_reconcile_tolerates_entry_vanishing_under_it(self):

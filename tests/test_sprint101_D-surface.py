@@ -95,11 +95,13 @@ try:
                 "_visible_cards", "_LAUNCHED", "_HELD", "_HELD_TTL_SECONDS",
                 "_LAUNCH_LOCK", "_VISIBLE_CARD_RE", "_CARD_ATTR_RE"):
         check(f"symbol {sym} no longer exists on the door", not hasattr(door, sym))
-    # #157 re-armed exactly ONE hook (the card-enforcement last-resort shipper);
-    # the O1 law still holds for the deleted auto-card machine: no other hook.
-    check("exactly one register_hook call remains, the #157 card-enforcement hook",
-          src.count("register_hook") == 1
-          and 'register_hook("transform_llm_output"' in src)
+    # The card ledger owns exactly THREE hooks (post_tool_call records launches,
+    # pre_llm_call reminds, transform_llm_output ships); the O1 law still holds for
+    # the deleted auto-card machine: no other hook.
+    check("exactly three register_hook calls remain, the card-ledger hooks",
+          src.count("register_hook") == 3
+          and all(f'register_hook("{h}"' in src
+                  for h in ("post_tool_call", "pre_llm_call", "transform_llm_output")))
 finally:
     door._spawn_runner = _orig_spawn
     shutil.rmtree(HOME, ignore_errors=True)
