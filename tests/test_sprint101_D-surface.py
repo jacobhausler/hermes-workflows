@@ -75,9 +75,9 @@ try:
     src = (ROOT / "__init__.py").read_text(encoding="utf-8")
     check("no card_rule key remains in __init__.py", '"card_rule"' not in src)
     # O1 copy-exact hint (papercut #70): the hint names the paste line verbatim.
-    check("hint is the copy-exact paste line",
-          out.get("hint", "").startswith("PASTE this line alone in your reply")
-          and CARD(rid) in out.get("hint", ""), repr(out.get("hint"))[:200])
+    check("hint makes cards optional",
+          "desktop cards are optional" in out.get("hint", "")
+          and CARD(rid) in out.get("lifecycle_notice", ""), repr(out.get("hint"))[:200])
 
     # ---- 2: any reading session gets the card in the payload -----------------
     os.environ["HERMES_SESSION_ID"] = "watcher"
@@ -97,9 +97,11 @@ try:
         check(f"symbol {sym} no longer exists on the door", not hasattr(door, sym))
     # #157 re-armed exactly ONE hook (the card-enforcement last-resort shipper);
     # the O1 law still holds for the deleted auto-card machine: no other hook.
-    check("exactly one register_hook call remains, the #157 card-enforcement hook",
-          src.count("register_hook") == 1
-          and 'register_hook("transform_llm_output"' in src)
+    # PR-3 adds exactly one more call site: the flag-gated (default-off) admission/witness loop.
+    check("register_hook sites: the #157 card hook + the PR-3 default-off admission/witness loop",
+          src.count("register_hook") == 2
+          and src.count('register_hook("transform_llm_output"') == 1
+          and 'for _hook, _fn in (("post_gateway_admission", _admission_handler),' in src)
 finally:
     door._spawn_runner = _orig_spawn
     shutil.rmtree(HOME, ignore_errors=True)

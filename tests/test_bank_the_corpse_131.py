@@ -25,7 +25,7 @@ mtime, newest first; `last_written` = the newest). One `node.banked` event, and 
 
 Run: python3 tests/test_bank_the_corpse_131.py
 """
-import json, os, re, shutil, subprocess, sys, tempfile, threading
+import json, os, shutil, subprocess, sys, tempfile, threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
@@ -365,15 +365,9 @@ try:
 finally:
     shutil.rmtree(HOME, ignore_errors=True)
 
-provenance = json.loads((BUILD / "ci-baseline" / "PROVENANCE.json").read_text())
-# Once a green-CI refresh supersedes this outside-CI row, no local quote remains.
-evidence = [row for row in provenance["rows_added_outside_ci"]
-            if row["test"] == Path(__file__).name]
-measured = evidence[0]["measured"] if len(evidence) == 1 else ""
-count = re.search(r"\bTOTAL (\d+) FAIL (\d+)\b", measured)
-check("N3 PROVENANCE count matches the actual runtime ledger including this check",
-      not evidence or (len(evidence) == 1 and count is not None and int(count[1]) == len(checks) + 1),
-      measured)
+# N3 deleted with the ci-baseline regime (M01): its only subject was the
+# PROVENANCE row this PR removes; without the ledger there is nothing to
+# cross-check, and a vacuous check is the M08 disease by construction.
 print(f"TOTAL {len(checks)} FAIL {sum(not passed for passed in checks)}")
 print("ALL PASS" if ok else "SOME FAILED")
 sys.exit(0 if ok else 1)

@@ -1,7 +1,8 @@
 """Runner-owned, durable handoff for an external post-exit script.
 
-The registration is data written by a node; ONLY the runner dispatches it after
-its children have been swept. The external script must live outside the run tree.
+The registration is data written by a node. The runner stopped dispatching this
+at est-xwvu9 (mechanism stripped from the shipped build); `dispatch()` remains
+exercised by tests and kept source-only. The external script must live outside the run tree.
 The receipt records the runner PID and every launch attempt, never a child's claim.
 """
 import json
@@ -90,7 +91,8 @@ def _detached(argv, log):
 
 
 def dispatch(run, reason, *, launchctl="/bin/launchctl", poll_seconds=3):
-    """Called by the admitted runner after exit verdict and child cleanup.
+    """Historically called by the admitted runner after exit verdict and child
+cleanup; the runner no longer dispatches (est-xwvu9) — tests exercise it directly.
 
     A failed handoff is a durable RED receipt; it never converts a workflow's
     failed/held verdict into an install. Existing dispatch receipts are replay-safe.
@@ -134,6 +136,7 @@ def dispatch(run, reason, *, launchctl="/bin/launchctl", poll_seconds=3):
             [launchctl, "bootstrap", f"gui/{os.getuid()}", str(plist)],
             [launchctl, "load", "-w", str(plist)],
         ]
+        save("launching")  # est-fdulo (b): receipt exists before the first launch attempt
         for cmd in attempts:
             try:
                 proc = subprocess.run(cmd, capture_output=True, text=True, timeout=15)

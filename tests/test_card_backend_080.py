@@ -76,8 +76,8 @@ class CardBackend(unittest.TestCase):
             self.assertEqual(out["card"], f'::workflow{{id="{rid}"}}')
             self.assertEqual(CARD.fullmatch(out["card"]).group(1), rid)
             # Copy-exact inducement (papercut #70): the hint IS the paste line.
-            self.assertIn(out["card"], out["hint"])
-            self.assertIn("PASTE this line alone in your reply", out["hint"])
+            self.assertIn(out["card"], out["lifecycle_notice"])
+            self.assertIn("desktop cards are optional", out["hint"])
         finally:
             clear_session_vars(tokens)
 
@@ -104,7 +104,8 @@ class CardBackend(unittest.TestCase):
             def get_config(self, _, default): return default
         ctx = Context()
         wf.register(ctx)
-        self.assertEqual(set(ctx.hooks), {"transform_llm_output"})
+        self.assertEqual(set(ctx.hooks), {"transform_llm_output", "post_gateway_admission",
+                                          "pre_gateway_dispatch"})   # PR-3: both default-off
         self.assertIs(ctx.hooks["transform_llm_output"],
                       wf._card_enforcement._card_hook)
 

@@ -217,6 +217,16 @@ if _FAKE_MODE == "quota":          # #24: subscription-quota 429 with a reset ho
     print('Provider said: HTTP 429: {"error": {"message": "ChatGPT or Codex '
           'Subscription usage limit reached, resets in ~109 hours"}}')
     sys.exit(1)
+if _FAKE_MODE == "rlhint130":   # #130: rate-limit park respawn — banks a work file, then the
+    # parked respawn answers ONLY when its prompt carried the artifact inventory.
+    if "RESUME-HINT-ARTIFACT-130" in q and "size=" in q and "mtime=" in q:
+        print("```json\n" + json.dumps({"result": "parked-hint-130"}) + "\n```")
+        sys.exit(0)
+    with open("hint130.md", "w") as f:
+        f.write("RESUME-HINT-ARTIFACT-130 banked before the rate-limit window\n")
+    print("hermes -z: agent failed: Anthropic credentials are rate-limited for "
+          "claude-fable-5-1; other Claude models remain available (see `hermes auth list`).")
+    sys.exit(1)
 # ---- committee wf159c pins. Placed ABOVE the est-t0vz block on purpose: both
 # ---- mode names start with "ratelimit" and would otherwise be hijacked by its
 # ---- startswith() dispatch; they carry their own counter, same file shape. ----
@@ -394,6 +404,53 @@ if _FAKE_MODE == "toolcall_text_541" and "TOOLCALL541" in q:
         sys.exit(rc)
     print("```json\n" + json.dumps({"result": "redriven"}) + "\n```")
     sys.exit(0)
+if _FAKE_MODE == "cap_harvest_ggqs" and "CAPHARV" in q:
+    # est-ggqs (#256 claim 1): the turn-cap death that ALREADY printed a schema-valid
+    # fenced answer — typed max_iterations stamp in the -Q turn report, exit 2, so the
+    # runner commits partial + error_class=cap_exhausted via _harvest_death.
+    # Drive 1 registers a state.db row with tool_call_count > 0 (the bounded-retry
+    # progress evidence) unless FAKE_NO_PROGRESS=1. FAKE_ATTEMPT_DIR counts drives:
+    # drive 2+ answers clean (exit 0) — unless FAKE_REDRIVE_DIES=1 (drive 2+ dies with
+    # NO answer, transport marker). FAKE_REMAINING=1 declares a `## Remaining` tail;
+    # FAKE_DECLARED=<s> stamps a child-declared terminal status into the answer.
+    cnt = 0
+    if os.environ.get("FAKE_ATTEMPT_DIR"):
+        os.makedirs(os.environ["FAKE_ATTEMPT_DIR"], exist_ok=True)
+        p = os.path.join(os.environ["FAKE_ATTEMPT_DIR"], "attempts")
+        cnt = int(open(p).read()) if os.path.exists(p) else 0
+        open(p, "w").write(str(cnt + 1))
+    if cnt == 0:
+        if os.environ.get("FAKE_NO_PROGRESS") != "1" and "--continue" in args:
+            import sqlite3
+            title = args[args.index("--continue") + 1]
+            c = sqlite3.connect(os.path.join(_FAKE_HOME, "state.db"))
+            c.execute("create table if not exists sessions (id text primary key, title text, model text, billing_provider text, input_tokens int, output_tokens int, "
+                      "cache_read_tokens int, reasoning_tokens int, api_call_count int, tool_call_count int, estimated_cost_usd real, "
+                      "last_activity_at real, last_activity_description text, ended_at real, started_at real)")
+            t = time.time()
+            c.execute("insert or replace into sessions values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                      ("f-" + title, title, "fake", "fake", 0, 0, 0, 0, 35, 35, 0.0, t, "", t, t))
+            c.commit(); c.close()
+        _rp = os.environ.get("HERMES_QUIET_TURN_REPORT_FILE")
+        if _rp:
+            with open(_rp, "w") as f:
+                json.dump({"pid": os.getpid(), "exit_code": 2, "error": "budget",
+                           "reply": "census written; turn budget spent",
+                           "turn_exit_reason": "max_iterations_reached(35/35)"}, f)
+        if os.environ.get("FAKE_REMAINING") == "1":
+            print("## Remaining")
+            print("- reconcile the last two hosts")
+            print("")
+        _ans = {"result": "census-complete"}
+        if os.environ.get("FAKE_DECLARED"):
+            _ans["status"] = os.environ["FAKE_DECLARED"]
+        print("```json\n" + json.dumps(_ans) + "\n```")
+        sys.exit(2)
+    if os.environ.get("FAKE_REDRIVE_DIES") == "1":
+        print("hermes -z: agent failed: openai.APIConnectionError. Connection error.")
+        sys.exit(2)
+    print("```json\n" + json.dumps({"result": "redriven-clean"}) + "\n```")
+    sys.exit(0)
 if _FAKE_MODE == "die_after_json" and "DIETEST" in q:   # #4: dies AFTER a valid fenced answer
     print("```json\n" + json.dumps({"result": "harvested"}) + "\n```")
     sys.exit(1)
@@ -424,6 +481,18 @@ if _FAKE_MODE == "retry_progress" and "RESUME" in q:    # #5: transport death WI
         sys.exit(2)
     print("```json\n" + json.dumps({"result": "resumed"}) + "\n```")
     sys.exit(0)
+if _FAKE_MODE == "retry_hint":   # #130: transport death (0 api calls) that BANKED a work file;
+    # the transient respawn answers ONLY when its prompt carried the artifact inventory.
+    if "RESUME-HINT-ARTIFACT-130" in q and "size=" in q and "mtime=" in q:
+        print("```json\n" + json.dumps({"result": "resumed-hint-130"}) + "\n```")
+        sys.exit(0)
+    try:
+        with open("hint130.md", "w") as f:
+            f.write("RESUME-HINT-ARTIFACT-130 banked before the transport death\n")
+    except OSError:
+        pass
+    print("hermes -z: agent failed: openai.APIConnectionError. Connection error.")
+    sys.exit(2)
 if _FAKE_MODE == "lease_busy":
     # lease-busy (2026-10-03 field shape): attempt 1 prints the CLI's dead-session
     # banner + the CLI's fail-closed lease notice verbatim and exits 130 (the CLI's
