@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+- **Operator scar-laws port (docs-only):** fifteen generalizable lessons from a
+  retiring usage skill fold into the docs they belong to, one hardened line
+  each — twelve authoring and recovery laws in `references/operator-playbook.md`
+  (machine-gate probe polarity, error-but-launched dedupe, amend re-queue
+  fingerprint law, cold-start re-runs, index-not-proof premises, no
+  maker-authored green, seat-wait disposition, census-never-quorum, closed
+  verdict enums, decorative-gate ban, control-plane credential containment,
+  parser-first recount diagnosis), two run-lifecycle laws in
+  `references/operations.md` (frozen launch meta, ephemeral run dirs), and the
+  launch-agnostic reusable-graph law in `references/grammar.md`. No engine
+  change.
+
 ## 1.3.8 — 2026-10-14
 
 Patch release for P01/P02 (#418), preserving the v1.3.7 runner, patch/diff,
