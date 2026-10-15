@@ -65,6 +65,8 @@ GRAPH_KEYS = {"name", "nodes", "description", "defaults", "model_policy",
               "concurrency", "item_concurrency",  # #100: optional run-level limits
               "requires_plugin",  # est-2ek.1.166: version handshake (coarse >=; stale => arm-time refusal)
               "result",           # est-2ek.1.158: node id whose output is the run verdict
+              "run_context",  # #126 (est-syim): binding contract {required?, defaults?}; validated by
+                              # wfcommon.run_context_contract_errors, enforced at run launch
               "include"}      # composite graphs: shelved-DAG expansion annotation; STRIPPED on
                               # expand, so a committed graph.json never carries it (only the
                               # library author form does)
@@ -679,7 +681,7 @@ WORKFLOW_PARAMS = {
         "run_id": {"type": "string", "description": "Run id (required for every action except run/list)."},
         "name": {"type": "string", "description": "run: overrides graph.name (default workflow); save: library name overrides graph.name (lowercase, [-_.]). amend: set graph.name in the replacement graph; omitting it retains the run name."},
         "from": {"type": "string", "description": "run: library graph name to replay (instead of graph or graph_path)."},
-        "run_context": {"type": ["string", "object"], "description": "run only: non-empty string seed appended to every first-wave agent (including agents behind gate-only paths), OR non-empty map of identifier keys to non-empty strings replacing only explicit {run.KEY} in node goals/contexts, fan-out goals/item goals and gate questions. Missing keys/malformed bindings reject before any run write — as does a seed against a graph with {run.KEY} refs, or a JSON-encoded map passed as a string. Values are persisted in prompts; do not supply secrets. A seed cannot replace baked literals."}, 
+        "run_context": {"type": ["string", "object"], "description": "run only: non-empty string seed appended to every first-wave agent (including agents behind gate-only paths), OR non-empty map of identifier keys to non-empty strings replacing only explicit {run.KEY} in node goals/contexts, fan-out goals/item goals and gate questions. Missing keys/malformed bindings reject before any run write — as does a seed against a graph with {run.KEY} refs, or a JSON-encoded map passed as a string. Values are persisted in prompts; do not supply secrets. A seed cannot replace baked literals. A graph may declare its binding contract as the graph-level run_context key {required:[KEY...], defaults:{KEY:val}} — a missing required key rejects before any run write with error_type missing_run_context_keys."}, 
         "description": {"type": "string", "description": "save: one-line purpose shown by library/list."},
         "tags": {"type": "array", "items": {"type": "string"}, "description": "save (optional): 1-10 discovery tags — legacy flat tokens (lowercase alnum [-_.] <=32) or faceted `facet:value` (facets: use_case, repo, domain, risk, note; values [a-z0-9._-] <=48; e.g. use_case:code-review). Call `library` first and reuse its tag_vocab values VERBATIM — never coin a tag you have not seen. Resaving without tags keeps the entry's existing tags; stored in the meta envelope. library (optional): filter to entries carrying ALL listed tags (same 1-10 law as save — an empty array errors on BOTH verbs; omit tags for no filter); an empty result's tag_match_counts says which term starved."},
         "why_not_library": {"type": "string", "description": "submit (REQUIRED, >=80 chars): why no library graph covered this task — name the entries you checked and the shape you needed. The receipt is what makes hand-rolling honest."},
@@ -687,7 +689,8 @@ WORKFLOW_PARAMS = {
         "kind": {"type": "string", "enum": ["submissions"], "description": "inbox (optional): 'submissions' = list workflow submit study items newest-first (read-only; promotion is a human decision). Omit inside a child spawn to pull baked steering as before."},
         "team": {"type": "string", "description": "run (optional, <=64 chars): team label stamped into run.json and shown by list; no effect on scheduling."},
         "lane_key": {"type": "string", "description": "run (optional, <=128 chars): in-flight registry key — a second run with the same key while the incumbent is unfinished is deduped (no spawn; returns the incumbent's run_id); status lane_key=<key> reads the incumbent instead of run_id. Keys are global per runs root; prefix with <team>/ yourself."},
-        "source": {"type": "string", "description": "save (optional, <=200 chars): where this graph came from (repo path, URL, skill) — records opt-in provenance {owner, source, saved_at, source_digest} in the library entry."},
+        "owner": {"type": "string", "description": "save (optional, <=64 chars): provenance owner override; defaults to the launcher profile. Every save now stamps provenance {owner, version, source, saved_at, source_digest} (#126 default-on)."}, 
+        "source": {"type": "string", "description": "save (optional, <=200 chars): where this graph came from (repo path, URL, skill) — every save stamps provenance {owner, version, source, saved_at, source_digest} (#126 default-on; attribution, never access control)."},
         "graph_path": {"type": "string", "description": "run/save/amend/validate: absolute path to a caller-supplied local regular UTF-8 JSON graph file (max 1 MiB, no final symlink). Choose exactly one of graph, graph_path, or run's from / save's run_id. Validated before any write or spawn."},
         "graph": {
             "type": "object",
@@ -1941,6 +1944,12 @@ def act_save(args):
     source = args.get("source")
     if source is not None and (not isinstance(source, str) or not source.strip() or len(source) > 200):
         return {"error": "source must be a non-empty string of at most 200 characters"}
+    # #126 (est-syim): provenance is DEFAULT-ON — `owner` is an optional override of the
+    # launcher-profile default, never a way to skip the stamp.
+    owner_arg = args.get("owner")
+    if owner_arg is not None and (not isinstance(owner_arg, str) or not owner_arg.strip()
+                                  or len(owner_arg) > 64):
+        return {"error": "owner must be a non-empty string of at most 64 characters"}
     desc = args.get("description")
     if desc is not None and (not isinstance(desc, str) or not desc.strip() or len(desc) > DESC_MAX):
         return {"error": f"description must be a non-empty string of at most {DESC_MAX} characters"}
@@ -2017,11 +2026,16 @@ def act_save(args):
                     tags = []
     p.parent.mkdir(parents=True, exist_ok=True)
     graph = dict(graph, name=p.stem)
-    owner = _common.launcher_profile()
-    if source is not None or owner != "default":
-        graph["provenance"] = {"owner": owner, "source": source,
-                               "saved_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-                               "source_digest": _common.source_digest(graph)}
+    # #126 (est-syim, owner ruling 2026-10-15): DEFAULT-ON provenance retires the RATIFY F5
+    # opt-in save law — EVERY save stamps {owner, version, source, saved_at, source_digest};
+    # `version` (the plugin release that wrote the entry) is always present. Pre-existing
+    # entries keep loading verbatim (golden-solo bytes unchanged; no migration).
+    owner = (owner_arg.strip() if isinstance(owner_arg, str) and owner_arg.strip()
+             else _common.launcher_profile())
+    graph["provenance"] = {"owner": owner, "version": _common.plugin_version(),
+                           "source": source,
+                           "saved_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                           "source_digest": _common.source_digest(graph)}
     if desc is not None or tags is not None:
         # #50 envelope: meta carries discovery fields the wf/1 grammar has no key
         # for; the inner graph stays validator-clean. The normalizer loads either.
@@ -2356,6 +2370,31 @@ def _bind_run_context(graph, binding):
     return dict(graph, nodes=nodes)
 
 
+def _run_context_contract(graph, binding):
+    """#126 (est-syim): resolve a graph's run_context contract against the launch binding.
+    Returns (effective_binding_or_None, None) on success, (None, typed_error) on refusal.
+    Contract defaults fill only where the launch is silent; a launch binding overrides
+    them. A seed (string) binding can never satisfy a contract — contracts speak map.
+    The refusal is a TYPED door error enumerating the missing keys, raised BEFORE any
+    run write."""
+    contract = graph.get("run_context")
+    if isinstance(binding, str):
+        return None, {"error": "run_context seed cannot satisfy a graph run_context "
+                               "contract — pass a map binding the contract's required keys",
+                      "field": "run_context", "error_type": "run_context_contract_seed"}
+    eff = dict(contract.get("defaults") or {})
+    if isinstance(binding, dict):
+        eff.update(binding)
+    missing = [k for k in (contract.get("required") or []) if k not in eff]
+    if missing:
+        return None, {"error": f"run_context contract: missing required key(s) "
+                               f"{json.dumps(missing)} — bind them in run_context or add "
+                               "contract defaults",
+                      "field": "run_context", "error_type": "missing_run_context_keys",
+                      "missing_run_context_keys": missing}
+    return (eff or None), None
+
+
 def _profile_error(graph):
     """1.1 (RATIFY F2): node `profile:` validation — AFTER `{run.KEY}` rendering, BEFORE any
     write/spawn. Launcher identity comes from the door's own HERMES_HOME, else the owner's
@@ -2684,6 +2723,14 @@ def act_run(args):
         graph = _common.apply_graph_defaults(graph)
     except ValueError as e:
         return {"error": f"graph invalid: defaults/shape: {e}"}
+    if graph.get("run_context") is not None:
+        # #126 (est-syim): machine-readable binding contract — enforced CLOSED before any
+        # run write; typed missing-key error enumerates the missing bindings.
+        _eff, _cerr = _run_context_contract(graph, args.get("run_context"))
+        if _cerr:
+            return _cerr
+        if _eff is not None:
+            args = dict(args, run_context=_eff)
     if "run_context" in args:
         try:
             graph = _bind_run_context(graph, args["run_context"])

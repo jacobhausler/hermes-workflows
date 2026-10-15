@@ -723,9 +723,11 @@ def kind(node):
     non-spawning fallback for an unknown type (never raises — the read model must
     not crash on a legacy graph; the validator owns rejection)."""
     return NODE_TYPES.get(node.get("type", "agent")) or NodeKind(frozenset(), "none")
-# 1.1 (RATIFY F5): opt-in library provenance block, written by the door's `save` ONLY when
-# `source` is supplied or the saving door runs under a named profile. Top-level graph key.
-PROVENANCE_KEYS = {"owner", "source", "saved_at", "source_digest"}
+# 1.1 (RATIFY F5) opt-in provenance RETIRED by est-syim (#126, owner ruling 2026-10-15):
+# the door's `save` stamps the block on EVERY save (DEFAULT-ON); `version` (plugin release)
+# joins the key set and is always present. Pre-1.4 entries keep loading verbatim — no
+# migration, no rewrites, golden-solo bytes unchanged. Top-level graph key.
+PROVENANCE_KEYS = {"owner", "version", "source", "saved_at", "source_digest"}
 
 # ---------- library entry normalizer (#50, R10 migration law) ----------
 # A library file is either the 1.1 BARE form (the graph object itself — the bytes
@@ -1686,7 +1688,12 @@ STRUCTURAL_GRAPH_KEYS = {"name", "nodes", "description", "defaults", "model_poli
                          # a stale runner refuses LOUDLY at arm time, naming both.
                          "requires_plugin",
                          # est-2ek.1.158: the node whose output IS the run verdict.
-                         "result"}
+                         "result",
+                         # #126 (est-syim): machine-readable {run.KEY} binding contract —
+                         # {required?: [ids], defaults?: {id: non-empty str}}; shape
+                         # validated here (run_context_contract_errors), enforced at run
+                         # launch BEFORE any run write (typed missing-key refusal).
+                         "run_context"}
 
 def result_errors(graph):
     """Graph-level defects for the optional `result` key (est-2ek.1.158): it must
@@ -1802,6 +1809,75 @@ def model_policy_errors(policy):
                     "list of non-empty strings")
     return msgs
 
+_RUN_CONTRACT_KEY = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
+_RUN_CONTRACT_REF = re.compile(r"\{run\.([^{}]*)\}")
+
+def _run_contract_refer_keys(graph):
+    """The {run.KEY} names referenced by a graph's OPERATIVE text — the exact fields
+    _bind_run_context renders (goal/context/question/profile + fan-out goal/item goals)."""
+    out = set()
+    nodes = graph.get("nodes")
+    if not isinstance(nodes, list):
+        return out
+    for n in nodes:
+        if not isinstance(n, dict):
+            continue
+        texts = [n.get(f) for f in ("goal", "context", "question", "profile")]
+        fo = n.get("fanout")
+        if isinstance(fo, dict):
+            texts.append(fo.get("goal"))
+            texts += [i.get("goal") for i in fo.get("items", []) if isinstance(i, dict)]
+        for t in texts:
+            if isinstance(t, str):
+                for m in _RUN_CONTRACT_REF.finditer(t):
+                    out.add(m.group(1))
+    return out
+
+def run_context_contract_errors(graph):
+    """#126 (est-syim): defects for the optional top-level `run_context` CONTRACT block —
+    a machine-readable declaration of the {run.KEY} bindings a graph needs at launch.
+    Shape: {required?: [identifier...], defaults?: {identifier: non-empty string}} — the
+    SAME identifier grammar the launch binding uses. Every declared required key must be
+    referenced as {run.KEY} in operative text (an unreferenced requirement is a typo,
+    refused at save/submit like every other contract defect). Absent key = no check:
+    a plain graph stays byte-identical."""
+    if not isinstance(graph, dict) or "run_context" not in graph:
+        return []
+    c = graph["run_context"]
+    errs = []
+    def E(field, msg):
+        errs.append({"node": None, "field": field, "msg": msg})
+    if not isinstance(c, dict) or not c:
+        E("run_context", "run_context contract must be a non-empty object "
+                         "(required and/or defaults)")
+        return errs
+    for key in sorted(set(c) - {"required", "defaults"}):
+        E(f"run_context.{key}", 'unknown key; allowed: ["defaults", "required"]')
+    if "required" in c:
+        req = c["required"]
+        if (not isinstance(req, list) or not req
+                or not all(isinstance(k, str) and _RUN_CONTRACT_KEY.match(k) for k in req)):
+            E("run_context.required", "required must be a non-empty list of identifier strings")
+        elif len(set(req)) != len(req):
+            E("run_context.required", "required keys must be unique")
+        else:
+            unref = [k for k in req if k not in _run_contract_refer_keys(graph)]
+            if unref:
+                E("run_context.required",
+                  f"declared required key(s) {unref} never referenced as {{run.KEY}} in "
+                  "operative text (goal/context/question/profile/fan-out) — bind what you declare")
+    if "defaults" in c:
+        d = c["defaults"]
+        if not isinstance(d, dict) or not d:
+            E("run_context.defaults", "defaults must be a non-empty object of identifier -> non-empty string")
+        else:
+            for k in sorted(d):
+                if not isinstance(k, str) or not _RUN_CONTRACT_KEY.match(k):
+                    E("run_context.defaults", f"invalid key {k!r}: expected identifier")
+                elif not isinstance(d[k], str) or not d[k].strip():
+                    E("run_context.defaults", f"defaults[{k!r}] must be a non-empty string")
+    return errs
+
 def structural_graph_errors(graph, extra_keys=()):
     """Graph-level (non-node) defects as [{node:None, field, msg}] — the exact
     checks the door historically ran, moved verbatim so submitted graphs AND each
@@ -1830,6 +1906,8 @@ def structural_graph_errors(graph, extra_keys=()):
     for e_ in requires_plugin_errors(graph):
         E(e_["field"], e_["msg"])
     for e_ in result_errors(graph):
+        E(e_["field"], e_["msg"])
+    for e_ in run_context_contract_errors(graph):
         E(e_["field"], e_["msg"])
     if "defaults" in graph:
         errs.extend(_defaults_errors(graph["defaults"]))
