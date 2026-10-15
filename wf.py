@@ -3261,6 +3261,29 @@ def child_parent_watch(interval=CHILD_BELT_POLL_S, grace_s=CHILD_BELT_GRACE_S):
                 os._exit(70)                  # EX_TEMPFAIL — never exit clean
         time.sleep(interval)
 
+def _lane_killed(run, nid):
+    """est-cl7t: a node-targeted lane kill (act_kill) marker exists for this node."""
+    return (run / "kill" / f"{nid}.json").exists()
+
+def _lane_kill_sweep(run, meta):
+    """est-cl7t: SIGKILL every in-flight child registered under a killed node.
+    Registry keys are "<node_id>:..."; sibling lanes are untouched and the run-level
+    stop Event / stop.request are never set, so the run keeps going."""
+    kd = run / "kill"
+    if not kd.is_dir():
+        return
+    for kf in kd.glob("*.json"):
+        pre = kf.stem + ":"
+        with meta["_procs_lock"]:
+            for key, p in list(meta["_procs"].items()):
+                if not str(key).startswith(pre):
+                    continue
+                try:
+                    os.killpg(os.getpgid(p.pid), signal.SIGKILL)
+                except Exception:
+                    try: p.kill()
+                    except Exception: pass
+
 def _kill_registered_children(meta, reason):
     """killpg EVERY registered child (each is its own group leader —
     start_new_session at spawn), SIGTERM grace then SIGKILL, /proc-proven via
@@ -4585,7 +4608,7 @@ def _adopt_child(meta, node, byid, index, child, schema, fo_cancel=None):
         started=child.get("started"), attempt=child.get("attempt"))
     try:
         while True:
-            if meta["_stop"].is_set():
+            if meta["_stop"].is_set() or _lane_killed(run, nid):
                 _kill_adopted(pid)
                 cancelled = True
                 was_alive = True
@@ -4646,6 +4669,9 @@ def _adopt_child(meta, node, byid, index, child, schema, fo_cancel=None):
            "spawn": child.get("attempt"), "skey": skey_base, "adopted": True,
            "attempts": (child.get("attempt") or 0) + 1}
     if cancelled:
+        if _lane_killed(run, nid) and not meta["_stop"].is_set():
+            return {"status": "failed", "error": "killed by lane kill (action=kill)",
+                    "error_class": "killed", "raw": "", "ms": ms, **evd}
         return {"status": "failed", "error": "cancelled by stop", "error_class": "cancelled",
                 "raw": "", "ms": ms, **evd}
     try:
@@ -4986,7 +5012,7 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
     # by the node wall; expiry is a typed seat_wait failure, never a blind spawn.
     _seat_wall = node.get("timeout", meta.get("node_timeout", 900))
     _seat_w0 = time.time()
-    _cancelled = (lambda: meta["_stop"].is_set()
+    _cancelled = (lambda: meta["_stop"].is_set() or _lane_killed(run, node["id"])
                   or (seat_cancel is not None and seat_cancel.is_set()))
     while seat_hold:                       # a prior attempt's deferred seat
         _seat_release(seat_hold.pop())
@@ -5059,6 +5085,10 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
                 # the watcher's scan WILL see it) — no window for a post-stop launch.
                 # est-g255 P255-1: the fan-out quorum cancel is honoured HERE too —
                 # _cancel_stragglers takes this lock BEFORE its scan (r2 R1).
+                if _lane_killed(run, node["id"]):
+                    logf.close()
+                    return {"status": "failed", "error": "killed by lane kill before spawn",
+                            "error_class": "killed", "ms": 0, **route}
                 if _cancelled():
                     logf.close()
                     return {"status": "failed", "error": "cancelled before spawn"
@@ -5390,6 +5420,11 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
     _tree_live = sorted(p for p in (tree_seen - {proc.pid}) if _proc_alive(p))
     if _tree_live:
         evd["tree_pids"] = _tree_live
+    if (rc or 0) != 0 and _lane_killed(run, node["id"]):
+        # est-cl7t: node-targeted lane kill — terminal and readable, never retried
+        return {"status": "failed", "error": "killed by lane kill (action=kill)",
+                "error_class": "killed", "raw": (out or "")[-2000:], "ms": ms,
+                "final": final_reply, **sk, **evd}
     if early_death:
         return {"status": "failed",
                 "error": f"early_death: child produced no output within {first_msg_s}s of spawn "
@@ -6431,9 +6466,10 @@ def run_agent_node(run, meta, byid, node, outputs, steering):
                     # sprint101 #12: per-item prompt = node goal + item goal, so the
                     # shared mission travels with every item (no 'unused' placeholder).
                     goal = node["goal"] + "\n\n" + goal
-                if meta["_stop"].is_set() or fo_cancel.is_set():
+                if meta["_stop"].is_set() or fo_cancel.is_set() or _lane_killed(run, nid):
                     r = {"status": "failed", "item": item, "error": "stopped before launch",
-                         "error_class": "cancelled", "attempts": 0, "attempts_log": [], "ms": 0}
+                         "error_class": "killed" if _lane_killed(run, nid) else "cancelled",
+                         "attempts": 0, "attempts_log": [], "ms": 0}
                     with lock:
                         results[i] = r
                     # est-2ek.1.765 single-writer ordering: the canonical record
@@ -6450,6 +6486,9 @@ def run_agent_node(run, meta, byid, node, outputs, steering):
                     return
                 held = []   # est-g255 P255-1: this item's deferred seat (run_child seat_hold)
                 def _spawn(resume_preamble="", model_override=None):
+                    if _lane_killed(run, nid):
+                        return {"status": "failed", "error": "killed by lane kill before launch",
+                                "error_class": "killed", "ms": 0}
                     if meta["_stop"].is_set() or fo_cancel.is_set():
                         return {"status": "failed", "error": "cancelled at quorum",
                                 "error_class": "cancelled", "ms": 0}
@@ -7406,6 +7445,8 @@ def main(run_id):
                 try: _sweep_orphans(meta, "stop")
                 except Exception: pass
                 return
+            try: _lane_kill_sweep(run, meta)   # est-cl7t: node-targeted kills only
+            except Exception: pass
             time.sleep(2)
 
     threading.Thread(target=_stop_watcher, daemon=True).start()

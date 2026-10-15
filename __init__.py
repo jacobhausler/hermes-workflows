@@ -711,7 +711,7 @@ WORKFLOW_PARAMS = {
     "properties": {
         "action": {
             "type": "string",
-            "enum": ["run", "status", "wait", "release", "steer", "inbox", "amend", "diff", "stop", "list", "save", "submit", "library", "doctor_version", "validate"],
+            "enum": ["run", "status", "wait", "release", "steer", "inbox", "amend", "diff", "stop", "kill", "list", "save", "submit", "library", "doctor_version", "validate"],
             "description": "run=launch a graph; wait=read state, RESPAWNING an idle runner if work is pending (blocks to the next boundary when one is live); status=read-model of a run; release=answer a held human gate; steer=queue steering text for a node; inbox=(child-side, cooperative) pull late steering lines baked for THIS spawn — call once at a natural seam; amend=replace the graph (invalidates changed nodes + all downstream by fingerprint), or pass patch to edit a few node fields without resubmitting the whole graph; diff=confirm surface: runs the amend door with dry_run FORCED (accepts patch or graph), returns the preview + graph_diff and touches nothing; stop=request stop; list=all runs; save=shelve a graph in the library under a name (from run_id or inline graph); library=list shelved graphs richly (name, description, tags, provenance, path-relative id). validate=dry-run the door's validation pipeline (defaults fill + defect collection + model/route policy) with no ping and no writes; returns {ok, errors:[{node,field,msg}], resolved_routes}. run from=<name> replays a shelved graph. submit=quarantine a hand-rolled graph for study (requires why_not_library >=80 chars; never joins the library — the quartermaster's human-gated loop decides); inbox kind=submissions lists them newest-first. doctor_version=read-only version truth for THIS install: {live_version, newest_packaged, source_commit, drift} comparing plugin.yaml against the install.json provenance that pack.py stamps at build time \u2014 one read, no network.",
         },
         "run_id": {"type": "string", "description": "Run id (required for every action except run/list)."},
@@ -4002,6 +4002,33 @@ def act_stop(args):
         return {"ok": True, "note": "runner spawned to consume the stop marker"}
     return {"ok": True, "note": "stop recorded; the live runner consumes it at its next boundary"}
 
+def act_kill(args):
+    """est-cl7t: node-targeted lane kill (action=kill). SIGKILLs the
+    in-flight children of ONE node and fails that node with error_class=killed.
+    Sibling nodes and the run keep going: no stop.request, no run-wide stop."""
+    run_id, nid = args.get("run_id"), args.get("node")
+    if not run_id:
+        return {"error": "run_id required"}
+    if not isinstance(nid, str) or not nid:
+        return {"error": "node required (the lane to kill)"}
+    r = run_dir(run_id)
+    if not (r / "graph.json").exists():
+        return {"error": "unknown run_id"}
+    graph = jload(r / "graph.json", {}) or {}
+    if nid not in {n.get("id") for n in graph.get("nodes") or []}:
+        return {"error": f"unknown node {nid!r} in run {run_id}"}
+    st = run_state(r)
+    if st and st["status"] in ("done", "failed", "stopped"):
+        return {"ok": True, "already": st["status"]}
+    kd = r / "kill"
+    kd.mkdir(exist_ok=True)
+    marker = kd / f"{nid}.json"
+    marker.write_text(json.dumps({"node": nid, "at": datetime.now(timezone.utc).isoformat(timespec="seconds")}))
+    return {"ok": True, "node": nid,
+            "note": "lane kill recorded; the live runner SIGKILLs this node's in-flight children "
+                    "within ~2s and the node finishes failed with error_class=killed; sibling nodes "
+                    "and the run continue. The kill marker stays for this run: a killed lane stays killed."}
+
 def act_list(_args):
     roots = [runs_root()]
     legacy = _common.launch_runs_root()
@@ -4075,7 +4102,7 @@ def act_doctor_version(args):
 
 
 ACTIONS = {"run": act_run, "status": act_status, "wait": act_wait, "release": act_release,
-           "steer": act_steer, "inbox": act_inbox, "amend": act_amend, "diff": act_diff, "stop": act_stop, "list": act_list,
+           "steer": act_steer, "inbox": act_inbox, "amend": act_amend, "diff": act_diff, "stop": act_stop, "kill": act_kill, "list": act_list,
            "save": act_save, "submit": act_submit, "library": act_library,
            "doctor_version": act_doctor_version, "validate": act_validate}
 
