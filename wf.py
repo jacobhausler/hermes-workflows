@@ -2885,6 +2885,73 @@ def _max_seats(meta):
         return f
     return SEATS_DEFAULT
 
+def _seat_pool_cap(seats, seed=None, ceiling=None):
+    """est-mg5o2: the POOL-RECORDED global seat cap — one truth per seats dir.
+
+    The per-process resolution in _max_seats (run.json / env / .env / default)
+    only SEEDS the pool: the first admission records its cap in <seats>/.cap
+    and every admission after it — including nested child runners whose
+    inherited env carries a stale, missing or default cap — arbitrates against
+    the RECORDED value, not the inheriting process's environment. Measured
+    defect (est-mg5o2, 2026-10-11): eight live runners under a fleet cap of 12
+    held the estate pool at 6/12 and the fleet near ONE concurrent request
+    because each spawn re-resolved the cap against its own inherited env.
+
+    seed=None => READ-ONLY: the recorded cap, or None when the pool has none
+    yet (never writes — the seat.wait event / seat_wait error use this).
+    A positive seed records once — first writer wins, cross-process: writers
+    are serialized by the <seats>/.lock flock _seat_acquire holds when it
+    calls this, and the file is replaced atomically. A corrupt/unparsable
+    file is re-seeded, never trusted, never fatal; an unwritable pool falls
+    back to arbitrating the caller's own seed (honest degradation).
+    ceiling (run.json meta max_seats — a per-RUN declaration, not env) acts as
+    a CEILING under the pool cap: the run may hold fewer seats than the pool
+    allows, never more. WORKFLOW_MAX_SEATS=0 disables the semaphore LOCALLY
+    and never touches pool state (_seat_acquire returns before this runs).
+    Operators change a live pool's cap by removing <seats>/.cap while idle."""
+    f = Path(seats) / ".cap"
+    cap_v = None
+    try:
+        v = int(f.read_text(encoding="utf-8").strip())
+        if v > 0:
+            cap_v = v
+    except (OSError, ValueError):
+        cap_v = None                       # absent/corrupt: re-seedable, not fatal
+    if cap_v is None and isinstance(seed, int) and 0 < seed:
+        try:
+            tmp = f.with_name(f".cap.{os.getpid()}.{uuid.uuid4().hex[:8]}.tmp")
+            tmp.write_text(str(seed), encoding="utf-8")
+            os.replace(str(tmp), str(f))   # atomic: readers never see a partial cap
+            cap_v = seed
+        except OSError:
+            cap_v = seed                   # unrecordable pool: arbitrate locally
+    if (cap_v is not None and isinstance(ceiling, int) and not isinstance(ceiling, bool)
+            and 0 < ceiling < cap_v):
+        return ceiling                     # per-run ceiling rides UNDER the pool truth
+    return cap_v
+
+def _seat_pool_seed():
+    """est-mg5o2: the process-side SEED for the pool cap — the legacy per-process
+    resolution MINUS the per-run declaration: env WORKFLOW_MAX_SEATS, then the
+    .env files read fresh (est-gxjh6), then SEATS_DEFAULT. run.json meta
+    max_seats is deliberately NOT a seed: a run may hold fewer seats than the
+    pool allows, but a single run's declaration never sets the pool's global
+    truth. Only the FIRST admission into an unrecorded pool records this seed;
+    every admission after it arbitrates against the recorded value."""
+    try:
+        e = os.environ.get("WORKFLOW_MAX_SEATS")
+        if e is not None:
+            return int(e)
+    except ValueError:
+        pass
+    f = _seat_cap_from_env_files()
+    return f if f is not None else SEATS_DEFAULT
+
+def _seat_pool_ceiling(meta):
+    """run.json meta max_seats as a pool CEILING: positive int or None."""
+    v = meta.get("max_seats")
+    return v if isinstance(v, int) and not isinstance(v, bool) and v > 0 else None
+
 def _seats_dir():
     d = os.environ.get("WF_SEATS_DIR", "")
     return Path(d) if d else runs_root() / ".seats"
@@ -2974,10 +3041,18 @@ _SEAT_UNSUPPORTED = object()
 SEAT_LOCK_POLL_S = 0.02
 
 def _seat_acquire(seats, name, cap, bounded_s, on_wait=None, abort=None,
-                  admit_lock=None):
+                  admit_lock=None, pool_seed=None, pool_ceiling=None):
     """Wait until a seat is free (<= bounded_s), returning the ticket Path; None
     on bounded-wait expiry / abort(); _SEAT_UNSUPPORTED when full and our
     ancestry is unknowable. cap <= 0 disables the semaphore.
+    est-mg5o2: when pool_seed is supplied, admission arbitrates against the
+    POOL-RECORDED cap (<seats>/.cap, first writer wins) instead of the caller's
+    per-process cap — the caller's cap is only the fallback when the pool holds
+    no truth; pool_seed seeds an unrecorded pool; pool_ceiling (run.json
+    max_seats) caps THIS run under the pool truth. The arbitration runs under
+    the .lock flock, so first-writer-wins and count-then-admit are one
+    cross-process atomic step — a nested child runner whose inherited env
+    carries a stale/missing cap joins the pool's arithmetic, not its own.
     est-g255 P255-2: the wait is bounded and cancellable THROUGH lock
     contention — the registry lock is taken by a non-blocking poll that checks
     deadline/abort between tries, and both are rechecked after the lock is
@@ -3046,6 +3121,15 @@ def _seat_acquire(seats, name, cap, bounded_s, on_wait=None, abort=None,
                 try:
                     if _out():
                         return None
+                    if pool_seed is not None:
+                        # est-mg5o2: the POOL's recorded cap arbitrates — read
+                        # (and seeded once) under the flock we hold right now,
+                        # so first-writer-wins is a cross-process fact and the
+                        # stale inherited env never re-resolves the global.
+                        _pc = _seat_pool_cap(seats, seed=pool_seed,
+                                             ceiling=pool_ceiling)
+                        if _pc is not None:
+                            cap = _pc
                     if _seat_live_tickets(seats, anc) < cap:
                         if _out():          # ATOMIC cancel recheck: same lock
                                           # the cancel-setter takes pre-set
@@ -4994,8 +5078,10 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
         _seats_dir(), f"{run.name}.{node['id']}", _max_seats(meta),
         _seat_wall if isinstance(_seat_wall, (int, float)) else None,
         on_wait=lambda: log(run, "seat.wait", node=node["id"], index=index,
-                            spawn=spawn_no, cap=_max_seats(meta)),
-        abort=_cancelled, admit_lock=seat_admit_lock)
+                            spawn=spawn_no,
+                            cap=_seat_pool_cap(_seats_dir()) or _max_seats(meta)),
+        abort=_cancelled, admit_lock=seat_admit_lock,
+        pool_seed=_seat_pool_seed(), pool_ceiling=_seat_pool_ceiling(meta))
     if seat is _SEAT_UNSUPPORTED:
         return {"status": "failed",
                 "error": "seat_unsupported: the global agent-seat semaphore is full and this "
@@ -5010,9 +5096,11 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
             return {"status": "failed", "error": "cancelled while waiting for an agent seat"
                     + ("" if meta["_stop"].is_set() else " (quorum already met)"),
                     "error_class": "cancelled", "ms": 0, **route}
+        _capv = _seat_pool_cap(_seats_dir())   # est-mg5o2: report the pool truth
         return {"status": "failed",
                 "error": f"seat_wait: no global agent seat freed within {_seat_wall}s "
-                         f"(cap={_max_seats(meta)}; WORKFLOW_MAX_SEATS / run.json max_seats)",
+                         f"(cap={_capv if _capv is not None else _max_seats(meta)}; "
+                         f"pool .cap / WORKFLOW_MAX_SEATS / run.json max_seats ceiling)",
                 "error_class": "seat_wait", "ms": int((time.time() - _seat_w0) * 1000),
                 "spawn": spawn_no, "attempts": 1, **route}
     t0 = time.time()
