@@ -17,12 +17,17 @@ Laws pinned (spec P1):
     carriers (run.json / graph meta) may opt in against an operator url.
  6. EVENT FILTER: a present filter skips non-matching transitions without any
     row or attempt.
+ 7. DURABLE CACHE + OWNER-NULL: the delivered set lives in outbound.jsonl, NOT in
+    process memory — a fresh interpreter re-notifying a DELIVERED instance POSTs
+    nothing and still ships a genuinely new instance; an owner-null run mirrors
+    too (the endpoint is the operator's, not the session's).
 Run: python3 tests/test_hooks_outbound_bridge.py
 """
 import importlib.util
 import json
 import os
 import shutil
+import subprocess
 import sys
 import threading
 import time
@@ -43,7 +48,7 @@ spec.loader.exec_module(wf)
 # The sanctioned owner-settings seam (same one the door installs): this rig
 # answers outbound_bridge directly and NO_READER for everything else, so the
 # raw config.yaml fallback stays wfcommon's own untouched path.
-_CFG = {"outbound_bridge": None}
+_CFG: dict = {"outbound_bridge": None}
 
 def _reader(key):
     if key == "outbound_bridge":
@@ -271,6 +276,45 @@ try:
           and not (r12 / "events.jsonl").exists())
     wf.notify(r12, "gate.held", key="gF:d", graph=GRAPH)
     check("filter: a matching transition ships", len(_Sink.hits) == hits_before + 1)
+
+    # ---- 7: the cache is DISK, not memory + owner-null mirrors -----------------
+    _CFG["outbound_bridge"] = {"enabled": True, "url": f"http://127.0.0.1:{port2}/hook",
+                               "bearer": BEARER, "timeout_s": 5}
+    child = HOME / "child_mirror.py"          # a stand-in for a respawned runner
+    child.write_text(
+        "import importlib.util, json, os, pathlib\n"
+        "root = pathlib.Path(os.environ['HO_ROOT'])\n"
+        "sp = importlib.util.spec_from_file_location('wf_ho_child', root / 'wf.py')\n"
+        "wf = importlib.util.module_from_spec(sp); sp.loader.exec_module(wf)\n"
+        "cfg = {'enabled': True, 'url': os.environ['HO_URL'], 'bearer': os.environ['HO_BEARER'],\n"
+        "       'timeout_s': 5}\n"
+        "wf.wfcommon.set_owner_setting_reader(\n"
+        "    lambda k: cfg if k == 'outbound_bridge' else wf.wfcommon.NO_READER)\n"
+        "run = pathlib.Path(os.environ['HO_RUN'])\n"
+        "wf.notify(run, 'gate.held', key=os.environ['HO_KEY'],\n"
+        "          graph=json.loads((run / 'graph.json').read_text()))\n")
+    r13 = mk_run("ho-xproc", owner=None)      # owner-null: no session to wake
+    hits_before = len(_Sink.hits)
+    wf.notify(r13, "gate.held", key="gP:d", graph=GRAPH)
+    check("owner-null run still mirrors: the endpoint is the operator's, not the session's",
+          len(_Sink.hits) == hits_before + 1
+          and jl(r13 / "outbound.jsonl")[-1].get("delivered") is True)
+    cenv = dict(os.environ, HO_ROOT=str(ROOT), HO_URL=f"http://127.0.0.1:{port2}/hook",
+                HO_BEARER=BEARER, HO_RUN=str(r13), HO_KEY="gP:d")
+    cp = subprocess.run([sys.executable, str(child)], env=cenv, capture_output=True, timeout=90)
+    check("dedupe survives respawn: a zero-memory process re-notifying a DELIVERED "
+          "instance POSTs nothing, rows nothing (cache = outbound.jsonl)",
+          cp.returncode == 0 and len(_Sink.hits) == hits_before + 1
+          and len(jl(r13 / "outbound.jsonl")) == 1,
+          (cp.stderr.decode()[:200] if cp.returncode else ""))
+    cp2 = subprocess.run([sys.executable, str(child)],
+                         env=dict(cenv, HO_KEY="gQ:d"), capture_output=True, timeout=90)
+    rows13 = jl(r13 / "outbound.jsonl")
+    check("the cache never blocks a live transition: a new instance from a fresh "
+          "process ships and lands a second row",
+          cp2.returncode == 0 and len(_Sink.hits) == hits_before + 2 and len(rows13) == 2
+          and rows13[0]["id"] != rows13[1]["id"] and rows13[1].get("delivered") is True,
+          (cp2.stderr.decode()[:200] if cp2.returncode else ""))
 
 finally:
     if _srv[0] is not None:
