@@ -866,6 +866,48 @@ def _wake_identity(run, event, key, graph=None):
         return f"{event}|failed:{','.join(failed)}@{gfp}|r{rev}"
     return None
 
+# ---------- P1: the outbound bridge (default OFF; hooks_outbound.py) ----------
+# ONE seam drives both halves of a lifecycle transition: notify() owns the
+# owner-session wake; the bridge mirrors the SAME instance to the operator's
+# configured endpoint when — and only when — the owner setting enables it.
+# Private spec-load under a prefixed module name (the wfcommon/card_enforcement
+# hygiene: no sys.path mutation, no generic name joining sys.modules). A missing
+# or broken hooks_outbound.py means NO bridge: the run loop is byte-identical.
+_OUTBOUND = None
+_OUTBOUND_TRIED = False
+
+def _outbound_bridge():
+    """Load + bind hooks_outbound once, lazily; None = no bridge (feature off by
+    absence or by a broken file — both the same byte-identical degradation)."""
+    global _OUTBOUND, _OUTBOUND_TRIED
+    if _OUTBOUND_TRIED:
+        return _OUTBOUND
+    _OUTBOUND_TRIED = True
+    try:
+        _p = Path(__file__).resolve().parent / "hooks_outbound.py"
+        if not _p.is_file():
+            return None
+        _spec = importlib.util.spec_from_file_location("_hermes_workflows_hooks_outbound", _p)
+        if _spec is None or _spec.loader is None:
+            return None
+        _mod = importlib.util.module_from_spec(_spec)
+        _spec.loader.exec_module(_mod)
+        _mod.bind(wfcommon, _wake_identity, log)   # ONE discriminant fn, the runner's own log voice
+        _OUTBOUND = _mod
+    except Exception:
+        _OUTBOUND = None
+    return _OUTBOUND
+
+def _wake_tid(run_name, event, disc):
+    """The wake/outbound instance id — ONE recipe (sha256(run|event|discriminant)
+    [:32], the B3 identity). With the bridge present the recipe lives in
+    hooks_outbound and is called there; without it the identical formula runs
+    inline, so wake identity never moves whether or not the feature is shipped."""
+    _ob = _outbound_bridge()
+    if _ob is not None:
+        return _ob.instance_id(run_name, event, disc)
+    return hashlib.sha256(f"{run_name}\0{event}\0{disc}".encode()).hexdigest()[:32]
+
 def notify(run, event, key=None, graph=None):
     """Push ONE lifecycle transition instance to the owner session stamp. Owner-null
     (tests, CLI, tool hosts without a session env) writes NOTHING — the door's
@@ -894,6 +936,10 @@ def notify(run, event, key=None, graph=None):
     try:
         if not run.is_dir():
             return
+        _ob = _outbound_bridge()               # P1: the operator mirror fires at notify's
+        if _ob is not None:                    # OWN point and fail-opens inside mirror();
+            _ob.mirror(run, event, key, graph) # owner-null runs still mirror — the endpoint
+        # is the operator's, not the session's.    is typed, never silent
         meta = jload(run / "run.json", {}) or {}
         owner = meta.get("owner")
         # Defensive on shape (R10): the wake needs the door's dict stamp
@@ -912,7 +958,7 @@ def notify(run, event, key=None, graph=None):
             return                       # event outside the finite map: NO wake, fail-silent
         text = _wake_safe(text)          # second net: the fixed templates carry no secret,
         # but the run name is caller-supplied and every persisted field runs the redactor.
-        tid = hashlib.sha256(f"{run.name}\0{event}\0{disc}".encode()).hexdigest()[:32]
+        tid = _wake_tid(run.name, event, disc)
         _rows, delivered = _wake_ledger_read(run)
         if tid in delivered:
             return                       # delivered instance: zero rows, zero POSTs

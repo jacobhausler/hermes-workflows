@@ -4445,13 +4445,44 @@ def _wf_command(raw_args):
             + "}`"
             + "; then `wait` and answer human gates only with the human's decision. Cards are optional.")
 
+def _hook_surface():
+    """THE plugin's hook surface: (name, handler) pairs. One source for both the
+    register() gate below and the structural test's expected count
+    (tests/test_sprint101_D-surface.py) — the count law says count from config,
+    never a literal."""
+    return (("post_tool_call", _card_enforcement._post_tool_call),
+            ("pre_llm_call", _card_enforcement._pre_llm_call),
+            ("transform_llm_output", _card_enforcement._card_hook),
+            ("post_gateway_admission", _admission_handler),
+            ("pre_gateway_dispatch", _dispatch_witness))
+
+# The card ledger's three hooks: registered at literal, allow-list-gated sites in register().
+_CARD_HOOKS = ("post_tool_call", "pre_llm_call", "transform_llm_output")
+
+def _hook_allowlist():
+    """Hook NAMES this process may register: settings.enabled_hooks when the
+    operator set it. UNSET returns the shipped surface unchanged (byte-
+    identical); a LIST returns the surface INTERSECTED with it; anything
+    malformed returns NOTHING — fail-closed: a broken allow-list never silently
+    widens (or keeps) the hook surface."""
+    try:
+        raw = _common.owner_setting("enabled_hooks")
+    except Exception:
+        return []
+    if raw is None:
+        return [h for h, _f in _hook_surface()]
+    if not isinstance(raw, list) or not all(isinstance(x, str) and x for x in raw):
+        return []
+    return [h for h, _f in _hook_surface() if h in raw]
+
 def register(ctx):
     # Core v0.21.5 runs import + register() on a deadline worker
     # (plugins.load_timeout_seconds, default 10s); on overrun it calls
     # ctx._abandon_load() and every later register_* is silently ignored.
     # Keep this body cheap and non-blocking: measured ~0.1s import, register()
-    # < 1ms — one cached config read (model_tiers) and in-memory registrations,
-    # no subprocess/network/run-dir scan (card_enforcement's/card_ledger's module exec is
+    # < 1ms — two cached config reads (model_tiers, enabled_hooks) and in-memory
+    # registrations, no subprocess/network/run-dir scan (card_enforcement's/card_ledger's
+    # module exec is
     # defs only; its I/O runs at hook time). Never pass override=True to
     # register_tool: it is operator-gated (PluginToolOverrideError). Pinned by
     # tests/test_hook_abandon_safety.py.
@@ -4468,15 +4499,29 @@ def register(ctx):
     # Hook-led card ledger (card_ledger.py): post_tool_call records workflow
     # launches, pre_llm_call reminds, transform_llm_output ships (#157) — all
     # fail-open, no run-dir scan.
-    ctx.register_hook("post_tool_call", _card_enforcement._post_tool_call)
-    ctx.register_hook("pre_llm_call", _card_enforcement._pre_llm_call)
-    ctx.register_hook("transform_llm_output", _card_enforcement._card_hook)
-    # PR-3: both default-off (flags read at call time); a core without the hook just ignores.
-    for _hook, _fn in (("post_gateway_admission", _admission_handler),
-                       ("pre_gateway_dispatch", _dispatch_witness)):
-        try:
-            ctx.register_hook(_hook, _fn)
-        except Exception:
-            pass
+    # STRUCTURAL LAW (P1): every hook registration flows through register() gated
+    # by the owner's config allow-list — the live count comes FROM CONFIG, never
+    # from a literal here or in a test. The quoted name stays literal at each site
+    # so the upstream drift probe (tests/test_upstream_hook_contract.py) parses it.
+    _hooks = _hook_allowlist()
+    if "post_tool_call" in _hooks:
+        ctx.register_hook("post_tool_call", _card_enforcement._post_tool_call)
+    if "pre_llm_call" in _hooks:
+        ctx.register_hook("pre_llm_call", _card_enforcement._pre_llm_call)
+    if "transform_llm_output" in _hooks:
+        ctx.register_hook("transform_llm_output", _card_enforcement._card_hook)
+    # PR-3: both default-off (flags read at call time); a core without the hook just
+    # ignores. Folded under the allow-list law at the P1 rebase: the loop stays
+    # variable-named ON PURPOSE — the pinned CI core (v2026.9.21) predates
+    # post_gateway_admission, so a quoted literal here would make the upstream drift
+    # probe RED there; the loop's gate is pinned by tests/test_sprint101_D-surface.py.
+    for _hook, _fn in _hook_surface():
+        if _hook in _CARD_HOOKS:
+            continue                      # registered above, literal, for the drift probe
+        if _hook in _hooks:
+            try:
+                ctx.register_hook(_hook, _fn)
+            except Exception:
+                pass
     ctx.register_command("wf", _wf_command, description="Workflow library: `/wf` lists, `/wf <name> [note]` replays a shelved graph",
                          args_hint="[name] [note]", argument_mode="text")
