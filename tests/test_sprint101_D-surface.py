@@ -97,9 +97,11 @@ try:
         check(f"symbol {sym} no longer exists on the door", not hasattr(door, sym))
     # #157 re-armed exactly ONE hook (the card-enforcement last-resort shipper);
     # the O1 law still holds for the deleted auto-card machine: no other hook.
-    check("exactly one register_hook call remains, the #157 card-enforcement hook",
-          src.count("register_hook") == 1
-          and 'register_hook("transform_llm_output"' in src)
+    # PR-3 adds exactly one more call site: the flag-gated (default-off) admission/witness loop.
+    check("register_hook sites: the #157 card hook + the PR-3 default-off admission/witness loop",
+          src.count("register_hook") == 2
+          and src.count('register_hook("transform_llm_output"') == 1
+          and 'for _hook, _fn in (("post_gateway_admission", _admission_handler),' in src)
 finally:
     door._spawn_runner = _orig_spawn
     shutil.rmtree(HOME, ignore_errors=True)

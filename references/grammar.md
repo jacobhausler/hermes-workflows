@@ -1,6 +1,6 @@
 # Graph grammar and authoring boundaries
 
-Workflow 1.3.8. Minimal form: `workflow{action:"run", graph:{"name":"check","nodes":[{"id":"a","type":"agent","goal":"Return a fenced JSON object with key ok=true"}]}}`. The run action's `name` overrides `graph.name`; otherwise the graph name is used, then `workflow`.
+Workflow 1.3.9. Minimal form: `workflow{action:"run", graph:{"name":"check","nodes":[{"id":"a","type":"agent","goal":"Return a fenced JSON object with key ok=true"}]}}`. The run action's `name` overrides `graph.name`; otherwise the graph name is used, then `workflow`.
 
 ## Per-run concurrency (optional)
 
@@ -82,6 +82,10 @@ goals, echo string output, gate options and `wait.until_argv`. Replacement is
 single-pass; values carrying surviving refs are refused, and values with braces
 in fan-out templates remain refused. Inline graphs preserve their existing
 leniency on ordinary text, but unbound machine argv still refuses.
+
+Keep a reusable graph launch-agnostic: per-launch ids, paths and dates bind as
+`{run.KEY}` refs through this contract and never ride baked into operative
+goal/context text — only provenance metadata may carry launch-specific values.
 
 ## Composite graphs (include)
 
