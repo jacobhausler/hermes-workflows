@@ -66,8 +66,7 @@ ending your turn right after `run` is how runs stall.
   the launcher in `accept_from`; `default` is never a target.
 - `requires` on an agent/gate fails the node (`error_class:"precondition"`, zero
   spawns) when an ancestor's committed output lacks a listed path — the run FAILS,
-  never skips quietly; skip-on-missing uses `when` + `on_skip:"prune"` on the
-  agent or gate itself.
+  never skips quietly; skip-on-missing is `when` + `on_skip:"prune"` on the node itself.
 - After-edges block on a `partial` (harvest-on-death) ancestor
   (`blocked_by_partial_ancestor`); consume the harvest with `after_partial:true`.
 
