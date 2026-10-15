@@ -140,7 +140,7 @@ def _acquire(r):
 r6 = mkrun("xa1-transient", seed_graph=True)
 lk6 = r6 / "runner.lock"
 held_ev = threading.Event()
-release_at = []
+collide_ev = threading.Event()
 
 def _probe_holder():
     # O_CREAT here is the HOLDER (a stand-in runner admission), not the read-only
@@ -148,20 +148,36 @@ def _probe_holder():
     fd = os.open(str(lk6), os.O_RDWR | os.O_CREAT, 0o644)
     fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
     held_ev.set()
-    deadline = time.monotonic() + 0.012   # ~probe width: inside the retry budget
-    while time.monotonic() < deadline:
-        pass
+    # #44 (N30 re-port): the release is COORDINATED, not wall-clock. The old
+    # `deadline = now + 0.012` busy-window raced thread-start on loaded runners
+    # (start delay ate ~7ms of the 12ms; the carrier's CI died on the
+    # `elapsed >= 0.008` vacuity floor the red this race produces). The holder
+    # now releases when it SEES the admission's first retry sleep: the collision
+    # is guaranteed to precede the release (no vacuous first-try win), and the
+    # release lands inside the bounded retry budget (survival guaranteed).
+    collide_ev.wait(2.0)
     os.close(fd)
 
 th = threading.Thread(target=_probe_holder); th.start(); held_ev.wait(5)
+_a1_slept = []
+_a1_real_sleep = _wf.time.sleep
+def _a1_spy_sleep(secs):
+    _a1_slept.append(secs)
+    collide_ev.set()          # release the transient window: the retry happened
+    _a1_real_sleep(secs)
+_wf.time.sleep = _a1_spy_sleep
 t0 = time.monotonic()
-kind, emitted = _acquire(r6)
+try:
+    kind, emitted = _acquire(r6)
+finally:
+    _wf.time.sleep = _a1_real_sleep
 elapsed = time.monotonic() - t0
 th.join()
 check(kind == "acquired", "admission survives a transient probe window (A1: bounded LOCK_NB retry)",
       f"kind={kind} emitted={emitted!r}")
-check(elapsed >= 0.008, "the retry was actually exercised (first attempt collided)",
-      f"elapsed={elapsed:.3f}s — vacuous pass if ~0")
+check(len(_a1_slept) >= 1, "the retry was actually exercised (first attempt collided)",
+      f"retry sleeps={_a1_slept!r}, elapsed={elapsed:.3f}s — vacuous pass if no retry sleep")
+check(elapsed < 0.5, "survival stays inside the bounded retry budget", f"elapsed={elapsed:.3f}s")
 try:
     os.close(_wf._LOCK_FD)
 except Exception:
