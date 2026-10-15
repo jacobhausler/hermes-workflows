@@ -98,7 +98,8 @@ workflow { "action": "stop",   "run_id": "<id>" }         → terminal, not roll
 
 `wait` blocks while a verified runner is live and self-yields ~330 s with a
 "call wait again" note to stay under the harness tool deadline. **Stay in the loop.**
-Ending your turn after `run` is the single most common way a workflow stalls.
+Push delivery is best-effort, not guaranteed. `wait` can resume an interrupted run;
+`status` is read-only. Completion grants no new authority, and cards/curation are optional.
 
 ### 3b. Minimal graph
 
@@ -133,9 +134,11 @@ Rules that bite:
 - **`reasoning`** rides `hermes chat --reasoning`, validated PER RESOLVED ROUTE at the
   door: the level is checked against the (provider, model) route's supported set and a
   level the route doesn't support is REFUSED at submit with the supported list named
-  (and the nearest level suggested) — never silently clamped or downgraded. Some relays
-  accept only a subset at runtime; that surfaces as `provider_400` with the server's
-  message — read it and pick from that list.
+  (and the nearest level suggested) — never silently clamped or downgraded. Some relays enum-gate a
+  narrower subset at runtime; on the server's own 400 list the runner clamps
+  `--reasoning` to the nearest supported level (never escalates) and re-drives
+  once, logged — `provider_400` stands only when nothing clamps; then read the
+  server's message and pick from that list.
 - **`after` orders AND injects.** Every direct parent's committed output lands under
   `## Inputs` automatically (8 KB per parent). Use `inputs:["a.key"]` only to pick a
   dotted path or a non-parent ancestor, or `fanout.items_from:"a.items"`. A missing
@@ -240,12 +243,18 @@ existing verbatim leniency.
 
 ### 3d. Failures, resume, amend
 
+A graph may reserve one existing agent with `on_exit:"<node id>"` for a once-only
+terminal postmortem. It is not ordinary DAG work; it receives terminal run facts
+in `## Inputs` and commits `on_exit_receipt.md` without changing the run verdict.
+See [grammar](references/grammar.md#terminal-postmortem-optional) for validation,
+publication guards, and crash recovery.
+
 - `node.failed` events carry `error_class` from the closed set defined in code
   (`wf.py ERROR_CLASSES`) — `cancelled | cap_exhausted | config_input | crashed | early_death | effect_receipt |
   fanout_empty | fatal_quota | forbidden_model | incomplete_work |
   inputs | item_record | lane_wreckage | lease_busy | left_live_descendants | malformed_turn | precondition | provider_400 | quorum |
   ratelimit |
-  route_substitution_denied | route_unavailable | schema | seat_unsupported | seat_wait | spawn | timeout | transport | transport_exhausted |
+  route_substitution_denied | route_unavailable | schema | seat_unsupported | seat_wait | spawn | stale_graph | timeout | transport | transport_exhausted |
   unresolved_model`, plus `unknown` as the harvest-time default when nothing matches —
   plus `attempts`. Read the class, not the prose. `cancelled` (a `stop`, or a fan-out
   straggler at quorum) is never a failure: the run reads `stopped`, and a `wait` re-drives it.
@@ -269,6 +278,15 @@ existing verbatim leniency.
   degradation). An adopted orphan whose tree outlives it never commits a clean `done`
   — the completeness error rides WITH the answer (`partial` + this class). The class
   is terminal — never re-driven by either retry ladder.
+  `stale_graph` (est-byft8): a spawn that queued on the global agent seat and reached
+  the Popen instant AFTER an amend moved its effective fingerprint is refused typed —
+  the queued definition never launches. The comparison is the replay-skip efp law
+  itself (budgets are not work: a timeout/max_turns-only amend never refuses), so a
+  reload would re-drive exactly the nodes the guard refuses. The wave boundary then
+  consumes `restart.request`, reloads, and re-drives the node under the CURRENT
+  definition; the refusal releases its seat ticket and is outside both retry ladders.
+  An unreadable `graph.json` at the check fails OPEN (the guard catches detected
+  staleness, never invents a death).
   `config_input` (est-tmuu, operator-verified 2026-10-02): a child that dies rc!=0 within
   ~1 s of spawn AND whose capture carries a provider/alias config-error marker (`Unknown
   provider '<alias>' …`) is a deterministic INPUT error, not transient transport — the node
@@ -359,10 +377,10 @@ existing verbatim leniency.
   `dry_run:true` previews `{added, removed, changed, will_rerun, unchanged}`.
   Amending a `pending` node changes what spawns next; amending a `done` node
   invalidates it.
-- To lint a graph before launching it: `run` with `dry_run:true` performs static
-  validation, binding, profile/model-policy checks and model resolution, then
-  returns `{ok, dry_run, models, routes}` writing NOTHING — no run dir, no lane
-  entry, no runner. It does not ping providers, inspect quota or enforce live routes.
+- For a static preview without provider pings, use `validate`. `run` with
+  `dry_run:true` also performs route liveness pings, quota checks and live-route
+  enforcement, but creates no run directory, lane entry or runner. It returns
+  `{ok, dry_run, models, routes}`; it is not an offline validation substitute.
 - To resume a lane that died at its wall with work already banked: amend its `goal`
   to a *resume* prompt that names what is already committed and forbids redoing it.
   Cold re-runs of a timed-out research lane time out again.
@@ -405,8 +423,6 @@ subscription routes.
 | `scripts/suite.py` | Serial runner with per-test logs + `exits.json` ledger (the merge gate); `--baseline <ledger>` adds `admission.json` splitting reds into introduced vs pre-existing (exact name+exit identities; a base red is blocking, never waived — and a base red whose test was DELETED reports `missing`, which blocks too, so `rm` can't launder a red to green); zero discovery under `tests/` is a failed admission (`green:false` + `zero_discovery:true`, nonzero exit) and an invalid root exits 2 before any out-dir side effects (#112) |
 | `scripts/pr_formal_review.py` | Author-aware formal review (est-2ek.1.866): preflight compares `GET /user` vs the PR author BEFORE posting; a self-review (shared credential == author, the GitHub 422 "Can not request changes on your own pull request") NEVER attempts the doomed POST — it takes the verified fallback (findings into the ONE live marker comment — `--comment-id` PATCHes it, law 3 — with the fallback reason recorded before the trailing marker, plus the `changes-requested` label ADDED via `POST issues/{n}/labels`, never the replace-all `PATCH issues/{n}`; both read back); different identities post the real `REQUEST_CHANGES`; one credential, never forged; exit nonzero unless the write is read-back-verified |
 | `scripts/pack.py` | Release zip + `SHA256SUMS` + sidecar |
-| `scripts/graph_path_ban.py` | PR gate (#153, single-writer): fails a PR whose diff vs merge-base(origin/<base-ref>, HEAD) touches `graphify-out/`, unless head branch is the regen lane (`^chore/graph-`) and the diff is ONLY graph files |
-| `scripts/graph_regen.py` | The single writer (#153): at `--repo-dir` with `HEAD == --base-sha`, AST update + `graph_check.py --fix`, then prints `NO_CHANGES` (no PR) or `FILES` for the caller's `chore(graph):` PR — never pushes, never opens the PR itself |
 | `scripts/make_public.py` | Publish-tree exporter with a private-string audit gate (`scripts/.scrub-guards` allow-list) |
 | `docs/` | Patched-core guide, manifest decisions, catalog entry + PR body, scrub audit |
 
@@ -420,52 +436,23 @@ node --experimental-strip-types tests/test_edge_routing.mjs
 python3 scripts/suite.py . ci-out                 # full serial suite → ci-out/exits.json (merge gate)
 hermes plugins validate .                         # manifest + SDK-surface + security scan
 python3 scripts/make_public.py /tmp/public-tree   # private-string audit; must print "0 scrub hits"
-python3 scripts/graph_path_ban.py                 # PR diff touches no graphify-out/ (single-writer, #153)
 ```
 
 A change is done when: its targeted test is green, the full suite is green, validate
-prints `Validation passed.`, the scrub audit prints `0 scrub hits`, and the path-ban
-prints `OK`. CI runs the same gates ([.github/workflows/ci.yml](.github/workflows/ci.yml));
-the knowledge-graph honesty gate (`scripts/graph_check.py`) runs there only as the
-push-on-main `graph-main` job — the regen lane owns the graph (#153).
+prints `Validation passed.`, and the scrub audit prints `0 scrub hits`. CI runs the
+same gates ([.github/workflows/ci.yml](.github/workflows/ci.yml)).
 
-### 4b′. Navigate with the knowledge graph
+### 4b′. Navigate with the knowledge graph (optional)
 
-The repo ships a [graphify](https://github.com/Graphify-Labs/graphify) knowledge
-graph at `graphify-out/` — every function, class, test, and doc heading
-(see `graphify-out/GRAPH_REPORT.md` line 1 for the current node/edge census — stated
-figures in prose go stale; the report is regenerated with the graph), built by deterministic tree-sitter parsing (no LLM, no network); one edge
-per `(source, target, relation)` (`count` marks a collapsed multi-edge; policy in `scripts/graph_check.py`).
-Query it before you grep or open files one by one:
-
-```sh
-uv tool install graphifyy                                      # once; the CLI is `graphify`
-graphify query "how does a failed node get its error_class"    # scoped subgraph for a question
-graphify path "act_run" "run_child" --undirected               # how two symbols connect
-graphify explain "run_state"                                   # one symbol + every neighbour
-graphify god-nodes --top 12                                    # the hubs everything flows through
-```
-
-`graphify-out/GRAPH_REPORT.md` is the broad-architecture view (community hubs,
-surprising cross-file links). Every edge is tagged `EXTRACTED` (read from source) or
-`INFERRED` (resolved by graphify) so you know what was found vs guessed.
-
-Keeping it current (**single-writer, #153**: PRs never touch `graphify-out/` — CI's
-`scripts/graph_path_ban.py` enforces it; only the main-owned regen lane
-(`scripts/graph_regen.py` via `ra-graph-regen`, branch `chore/graph-<sha7>`) writes
-it, and `scripts/graph_check.py` runs as a push-on-main job proving main graph ==
-main source):
-
-| you did | run |
-|---|---|
-| changed any `.py`/`.js`/`.md` in a PR | nothing — main's graph refreshes itself after merge (the bot's regen lane; do NOT run `graphify update` in a PR branch) |
-| maintain main / the regen lane | `python3 scripts/graph_regen.py --repo-dir <clone> --base-sha <main sha>` (AST-only update + `graph_check.py --fix`; prints NO_CHANGES or FILES for the caller's PR — never pushes) |
-| want to check without rewriting | `python3 scripts/graph_check.py` (`--fix` rewrites — regen lane only) |
-| added/renamed whole subsystems | `graphify label . --missing-only` names new communities — the ONLY LLM step; any OpenAI-compatible endpoint works (`OPENAI_BASE_URL`, `OPENAI_MODEL`, `GRAPHIFY_MAX_OUTPUT_TOKENS=16000` for thinking models). Never run in CI; weekly on the regen lane |
-
-Committed: `graph.json`, `GRAPH_REPORT.md`, `manifest.json`, `.graphify_labels.json(.sig)`,
-`.graphify_analysis.json`, `.graphify_root`. Ignored: `graph.html`, `cache/`, `cost.json`,
-dated backups. `.graphifyignore` excludes `graphify-out/` and `.github/` from the corpus.
+[`graphify`](https://github.com/Graphify-Labs/graphify) builds a code-navigation
+graph locally (`uv tool install graphifyy` → `graphify update .` in a scratch
+checkout): `graphify query "<question>"`, `graphify path "act_run" "run_child"
+--undirected`, `graphify affected "<symbol>" --depth 2`, `graphify god-nodes`.
+It is an exploration aid, not a gate: the output is never committed, CI never
+builds it, and a `graphify-out/` in your PR diff is deleted by review. Source
+and tests are the spec. (`.graphifyignore` ships so local runs skip generated
+noise; `scripts/graph_diagram.py` + `diagram_readme.py` are unrelated — they
+draw the example workflow diagrams in `examples/README.md`, which DO ship.)
 
 ### 4c. Rules
 
