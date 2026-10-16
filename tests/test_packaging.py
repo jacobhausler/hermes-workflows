@@ -165,6 +165,10 @@ def main() -> None:
                           "examples/release/release-lifecycle.workflow.json", "examples/release/issue-to-pr.workflow.json",
                           "examples/release/submit-pr.workflow.json",
                           "examples/basics/exchange-run.workflow.json"})
+            # P1 (PR #432): wf.py loads hooks_outbound.py by FILE PATH, so the import-closure
+            # probe below cannot see it — pin the ZIP membership directly.
+            check("hooks_outbound.py ships in the ZIP (wf.py spec-loads it; the shipped bridge test needs it)",
+                  root + "hooks_outbound.py" in members)
             checksum_text = archive.read(root + "SHA256SUMS").decode("utf-8")
             rows = [line.split("  ", 1) for line in checksum_text.splitlines()]
             check("SHA256SUMS verifies every pinned source entry",

@@ -83,6 +83,11 @@ INCLUDE_FILES = (
     "gate_index.py",  # PR-3: imported by __init__.py at bind time
     "docs/admission-gates.md",
     "card_enforcement.py",  # #157: imported by __init__.py at bind time — a packaged plugin without it dies at import
+    # P1 (PR #432): wf.py spec-loads this by file path (_outbound_bridge) — absent from the ZIP, a
+    # packaged install silently loses the outbound bridge (bridge resolves None) and the shipped
+    # tests/test_hooks_outbound_bridge.py (tests glob) crashes at the unpacked root: the exact
+    # est-4vnq finding-4 shape. Stdlib-only, so the ZIP side stays honest.
+    "hooks_outbound.py",
     "dashboard/manifest.json",
     "dashboard/index.js",  # hidden API plugin still needs the web host's script/registration contract
     "dashboard/plugin_api.py",
