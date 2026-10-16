@@ -1,13 +1,13 @@
 ---
 name: workflow
 description: "Workflow fan-out audit and census: run agent graphs"
-version: 1.3.8
+version: 1.3.9
 metadata:
   hermes:
     tags: [workflows, fan-out, audit, census, orchestration]
 ---
 
-# Workflow authoring (1.3.8)
+# Workflow authoring (1.3.9)
 
 Requires Hermes Agent v2026.9.21 or newer (package >=0.21.4). A Desktop gate answer
 reaches the run owner's chat via the composer SDK; on older builds it may only insert
@@ -66,7 +66,9 @@ ending your turn right after `run` is how runs stall.
   spawns) when an ancestor's committed output lacks a listed path — the run FAILS,
   never skips quietly; skip-on-missing is a `when` gate with `on_skip:"prune"`.
 - After-edges block on a `partial` (harvest-on-death) ancestor
-  (`blocked_by_partial_ancestor`); consume the harvest with `after_partial:true`.
+  (`blocked_by_partial_ancestor`); consume the harvest with `after_partial:true`; a solo producer may instead set `harvest_policy: "validate"` so its own
+  schema-valid, self-declared-complete harvest commits `done` with the death kept on the
+  record. Details: [grammar](references/grammar.md).
 
 ## Run and handoff
 

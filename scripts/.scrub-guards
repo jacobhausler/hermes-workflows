@@ -134,6 +134,25 @@ scripts/vendor/archify/renderers/shared/generated-brand-marks.mjs
 .github/PULL_REQUEST_TEMPLATE.md:6
 .github/workflows/pr-compliance.yml:32
 
+# ---- est-13z1: the bead-close read-back gate (PR #360) ----
+# `bead_close` is the SHIPPED PUBLIC GRAMMAR key and `bd -C <store> show <id> --json`
+# is the runner's own enforcement argv — both are load-bearing public contract, the
+# same GUARD class as the effect-receipt `effects` rows they mirror. The estate-vocab
+# regex (`\bbd\b|\bbeads?\b`) fires on the contract naming; neutralizing it would ship
+# a gate that names nothing. Line-anchored (not file-guarded): a future stray hit
+# elsewhere in these files still fires. GUARD, per AGENTS.md rule 4.
+# est-867 follow-up (main red at ee5018d): the est-13z1 and est-q2nwx/est-o8c6o
+# hits were pinned by file:LINE and every later wf.py edit shifted them — the exact
+# rot est-o8c6o already diagnosed. Re-anchored by FEATURE TOKEN per the playbook
+# (a stray hit without a feature token still fires; the est-867 fixture proves it):
+# bead/bd = the shipped public bead_close grammar naming; haus-docs = the joint-eng
+# protocol citation surface (issue #174). GUARD, per AGENTS.md rule 4.
+regex:bead
+regex:\bbd\b
+regex:est-13z1
+regex:haus-docs
+tests/fake_bd_close_13z1.py
+tests/test_bead_close_claim_13z1.py
 # ---- est-o8c6o (2026-10-11): the diff-scoped gate re-worded the ::error:: line ----
 # est-q2nwx's line anchor (:32) went stale because the diff-scope re-word moved the
 # citation line and kept the same mandated standard citation. Anchored by the citation

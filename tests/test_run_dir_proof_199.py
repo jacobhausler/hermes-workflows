@@ -142,7 +142,11 @@ class RunDirProof199(unittest.TestCase):
         rid = out["run_id"]
         r = self.root / rid
         self.assertEqual(
-            {"run_id", "models", "routes", "hint", "card", "lifecycle_notice"},
+            {"run_id", "models", "routes", "hint", "card", "lifecycle_notice",
+             # est-6ihr6 s12 advisory: G's node id "x" is single-character, so
+             # the non-fatal nudge rides this launch (advisory row only — the
+             # durability proof and control flow are untouched).
+             "run_warnings"},
             set(out))
         self.assertTrue((r / "graph.json").exists() and (r / "run.json").exists())
         self.assertTrue(fsynced, "no fsync calls — the durability proof is a no-op")

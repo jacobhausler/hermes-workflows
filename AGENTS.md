@@ -250,11 +250,11 @@ See [grammar](references/grammar.md#terminal-postmortem-optional) for validation
 publication guards, and crash recovery.
 
 - `node.failed` events carry `error_class` from the closed set defined in code
-  (`wf.py ERROR_CLASSES`) — `cancelled | cap_exhausted | config_input | crashed | early_death | effect_receipt |
+  (`wf.py ERROR_CLASSES`) — `bead_close | cancelled | cap_exhausted | config_input | crashed | early_death | effect_receipt |
   fanout_empty | fatal_quota | forbidden_model | incomplete_work |
   inputs | item_record | lane_wreckage | lease_busy | left_live_descendants | malformed_turn | precondition | provider_400 | quorum |
   ratelimit |
-  route_substitution_denied | route_unavailable | schema | seat_unsupported | seat_wait | spawn | stale_graph | timeout | transport | transport_exhausted |
+  route_substitution_denied | route_unavailable | schema | seat_cap | seat_unsupported | seat_wait | spawn | stale_graph | timeout | transport | transport_exhausted |
   unresolved_model`, plus `unknown` as the harvest-time default when nothing matches —
   plus `attempts`. Read the class, not the prose. `cancelled` (a `stop`, or a fan-out
   straggler at quorum) is never a failure: the run reads `stopped`, and a `wait` re-drives it.
@@ -264,6 +264,10 @@ publication guards, and crash recovery.
   lending ancestor — refused at once instead of deadlocking to `seat_wait`; nested runners on such
   a host are unsupported (set `WORKFLOW_MAX_SEATS=0` there). A fan-out item waiting on a seat when
   `quorum` is met ends `cancelled` and never spawns.
+  `seat_cap` (est-2ek.1.856): the seat-cap knob (`WORKFLOW_MAX_SEATS` env or config
+  `workflows.max_seats`) named a non-integer or a value outside [4, 16]. The door refuses the
+  whole launch before any write or spawn; an already-running runner fails the node. Never
+  retried, never silently defaulted to `SEATS_DEFAULT`.
   `left_live_descendants` (#61): the runner is process-tree aware — an exit-0 spawn is
   believed only when its own process group is empty (the /proc walk behind liveness). A
   child that BACKGROUNDED the real work (detached suite) and printed progress chatter is
@@ -342,9 +346,13 @@ publication guards, and crash recovery.
   `status: partial` with the death cause kept as `error_class`; the harvest stays readable, but a
   plain after-edge does NOT release onto it — the descendant fails typed `blocked_by_partial_ancestor`
   unless it opts in with `after_partial: true` (leaf close-out and the node's own fanout partial-credit
-  merge are unaffected).
+  merge are unaffected). A producer may opt its own schema-valid harvest into `done` with
+  `harvest_policy: "validate"` (default `strict`; the death stays on the record as `error_class` +
+  `clamped`) — see [references/grammar.md](references/grammar.md).
 - `transport | early_death | cap_exhausted | timeout` deaths with tool progress get ONE
   automatic re-drive with a machine resume preamble (`node.retry`); permfails never retry.
+  A harvested `partial` of those classes takes the same re-drive (est-ggqs, #256); an
+  answer-less re-drive keeps the harvest.
   If the prior attempt's session persisted NO messages (#102 — the pretense-resume shape:
   a SIGKILL-wave child that banked nothing), the re-drive spawns as a FRESH session seeded
   instead with a harvest preamble (banked work-dir files + cleaned log tail); the
@@ -413,7 +421,7 @@ subscription routes.
 
 | Path | Owns |
 |---|---|
-| `__init__.py` | The tool door: schema, action dispatch (`run/status/wait/release/steer/inbox/amend/stop/list/save/library`), model-tier resolution, preflight, compact/full payload shaping |
+| `__init__.py` | The tool door: schema, action dispatch (`run/status/wait/release/release_lock/steer/inbox/amend/stop/list/save/library`), model-tier resolution, preflight, compact/full payload shaping |
 | `wf.py` | The background runner: scheduling, child spawn (`-Q` contract), retry gate, typed error classification, steer baking, tier stamping |
 | `wfcommon.py` | The read model: run state, fingerprints (`efp`), node records, metrics join, liveness. Read-only over a run directory |
 | `dashboard/plugin_api.py` | Dashboard routes (API-only; the manifest hides the tab) |
