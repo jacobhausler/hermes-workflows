@@ -13,6 +13,16 @@
   for unmapped classes rot (5 dead rows attributed in the census). Pinned by
   `tests/test_wake_catchall_jbcrw.py`.
 
+- **Zombie-reap settle at the #61 gate (#448):** a spawn caught mid-reap no
+  longer reads as a live descendant. The commit-edge quiesce honors its own
+  dead-or-empty contract (`proof == ""` returns the record untouched — a
+  banked-complete node commits through harvest-on-death instead of dead-lettering
+  under a manufactured `left_live_descendants`; the nightly #427 lane lost a
+  complete answer to exactly this race, where the guard quoted the live tree as
+  `[]`). Every stuck verdict now rides a bounded settle (2 re-checks x 0.5 s,
+  waitpid first): a /proc row that vanishes with an ESRCH re-ask, or an empty
+  `ps` row, is reaped-class death; fail-closed stands only for pids still
+  non-zombie live after the settle, and the g255 unknown-state law is untouched.
 - **Operator scar-laws port (docs-only):** fifteen generalizable lessons from a
   retiring usage skill fold into the docs they belong to, one hardened line
   each — twelve authoring and recovery laws in `references/operator-playbook.md`

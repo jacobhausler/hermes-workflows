@@ -281,7 +281,12 @@ publication guards, and crash recovery.
   the process table cannot be read (machines without procfs keep the honest-empty
   degradation). An adopted orphan whose tree outlives it never commits a clean `done`
   — the completeness error rides WITH the answer (`partial` + this class). The class
-  is terminal — never re-driven by either retry ladder.
+  is terminal — never re-driven by either retry ladder. #448 closes the reaping-race
+  false-red: zombie, vanished-row-with-ESRCH and drained-during-check all count as
+  REAPED (a bounded settle precedes every stuck verdict; the commit-edge quiesce's
+  dead-or-empty result returns the record untouched, so a banked-complete node
+  commits instead of dead-lettering); fail-closed stands only for a tree still
+  non-zombie live after the settle.
   `stale_graph` (est-byft8): a spawn that queued on the global agent seat and reached
   the Popen instant AFTER an amend moved its effective fingerprint is refused typed —
   the queued definition never launches. The comparison is the replay-skip efp law

@@ -3793,7 +3793,14 @@ class _AdoptedHandle:
 def _proc_alive(pid):
     """Liveness for a child THIS process did not spawn (cannot waitpid): os.kill 0
     + /proc state, zombie = dead. Same identity law as wfcommon._verify_spawn_rec,
-    minus the argv check (identity was verified at adoption time)."""
+    minus the argv check (identity was verified at adoption time). #448 closes the
+    mid-reap false-live: when the /proc row vanishes between os.kill 0 and the
+    read, a kernel re-ask that now returns ESRCH is a REAPED-CLASS death (the
+    process exited inside the race window — the exact shape that dead-lettered a
+    banked-complete node); an empty `ps` row likewise means the pid is GONE.
+    A pid that STILL exists behind an unreadable row keeps the g255 law: unknown
+    state is not death — the ps fallback decides, fail-open only when even ps is
+    dead."""
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
@@ -3803,13 +3810,25 @@ def _proc_alive(pid):
     try:
         state = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[0]
         return not state.startswith("Z")
+    except FileNotFoundError:
+        # Row gone: re-ask the kernel. ESRCH → the process exited in the race
+        # window, reaped-class death (#448). Still there → the platform simply
+        # has no procfs for us to read (or an instant mid-exit); the ps
+        # fallback below decides — never a verdict on a missing row alone.
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
     except (OSError, IndexError):
-        try:  # macOS/BSD: no procfs
-            row = subprocess.run(["ps", "-o", "stat=", "-p", str(pid)],
-                                 capture_output=True, text=True, timeout=2).stdout
-            return not row.strip().startswith("Z")
-        except Exception:
-            return True   # os.kill 0 proved existence; unknown state is not death
+        pass                      # unreadable row: the ps fallback below decides
+    try:  # macOS/BSD: no procfs (or an unreadable row) — ps is the only channel
+        row = subprocess.run(["ps", "-o", "stat=", "-p", str(pid)],
+                             capture_output=True, text=True, timeout=2).stdout.strip()
+        return bool(row) and not row.startswith("Z")   # #448: empty row = gone
+    except Exception:
+        return True   # os.kill 0 proved existence; unknown state is not death
 
 def _kill_adopted(pid):
     try:
@@ -4581,10 +4600,32 @@ def _start_reaper(meta):
     t.start()
     return t
 
+PROCREE_SETTLE_CHECKS = 2      # #448: re-checks between the last SIGKILL and the
+PROCREE_SETTLE_GAP_S = 0.5     # fail-closed verdict — the reap window is sub-second
+
+def _reap_settle(pids):
+    """#448: a BOUNDED settle between the SIGKILL and any fail-closed verdict.
+    A pid caught mid-reap (exited between the /proc read and the parent's
+    wait(), or the row vanishing under os.kill 0) is the same race as an
+    already-dead tree — it is NOT a live descendant. Re-wait (the runner can
+    reap its own children), re-read /proc state, and only call a pid stuck
+    when it is still NON-zombie live after the settle window. Returns the
+    still-live list ([] = every pid reaped)."""
+    pids = sorted({p for p in pids if isinstance(p, int)})
+    for _ in range(PROCREE_SETTLE_CHECKS):
+        if not pids:
+            break
+        time.sleep(PROCREE_SETTLE_GAP_S)
+        for p in pids:
+            _reap_zombie(p)
+        pids = [p for p in pids if _proc_alive(p)]
+    return pids
+
 def _wait_pids_dead(pids, proof_s):
     """#61c: /proc-verify every pid is dead within the budget. (True, []) when
     PROVEN dead; (False, still_live) on timeout — never True on an unreadable
-    read (#61b B2 law)."""
+    read (#61b B2 law). #448: at the deadline the stuck verdict rides the
+    bounded reap settle first — a mid-reap race proves dead, never stuck."""
     pids = sorted({p for p in pids if isinstance(p, int)})
     if not pids:
         return True, []
@@ -4594,6 +4635,8 @@ def _wait_pids_dead(pids, proof_s):
         if not live:
             return True, []
         if time.time() >= deadline:
+            if not _reap_settle(live):          # #448: settle before fail-closed
+                return True, []
             return False, live
         time.sleep(0.05)
 
@@ -4960,6 +5003,10 @@ def _tree_quiesce(known, pgid, hold_s, proof_s, term_grace_s=None):
         if not live:
             return "dead", []
         if time.time() >= deadline:
+            # #448: the stuck verdict rides a bounded reap settle — a pid caught
+            # mid-reap (exited, wait() not yet landed) is reaped-class, not live.
+            if not _reap_settle(live):
+                return "dead", []
             return "stuck", live
         time.sleep(0.1)
 
@@ -5099,6 +5146,15 @@ def _final_quiesce(meta, r, ev, ev_kw):
     log(run, f"{ev}.tree_kill", **kw)
     if proof == "unknown":
         return _proc_unreadable_record(pid, ev_kw.get("node"), r.get("spawn"), r)
+    if proof == "":
+        # #448: the tree drained between this guard's liveness sample and the
+        # quiesce's first pass — REAPED, not live (the same dead-or-empty
+        # contract _account_tree and _isolate_prior already honor). The record
+        # keeps its own verdict: a banked-complete node commits through the
+        # existing harvest-on-death law instead of dead-lettering under a
+        # manufactured left_live_descendants (the #427 nightly shape, where
+        # the guard itself quoted the live tree as []).
+        return r
     if proof != "dead":
         return _left_live_record(pid, stuck,
                                  "the node may not commit over a still-running process "
