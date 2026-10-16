@@ -140,7 +140,11 @@ def main() -> None:
   # hook is stripped from the shipped build; kept here for
   # our own distribution path, executed by the source-only
   # tests/test_post_exit_hook.py.
-  "post_exit_hook.py"})
+  "post_exit_hook.py",
+  # est-a5obt (PR #414): estate horde generator — speaks bd-store takeover law
+  # at an estate-private store; source-only like make_public.py, declared in
+  # pack.py SOURCE_ONLY_SCRIPTS.
+  "horde_gen.py"})
             else:
                 print("SKIP pack-list repo-side half: no .git — running from an "
                       "unpacked ZIP/archive, where the premise does not exist")

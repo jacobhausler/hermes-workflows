@@ -187,6 +187,19 @@ SOURCE_ONLY_TESTS = {
     "tests/test_post_exit_hook.py": "executes source-only scripts/post_exit_hook.py (stripped from the shipped build, est-xwvu9)",
 }
 
+# Source-only SCRIPTS: repository/estate CI tooling that never travels in the
+# release ZIP. Declared here so the pack-list contract's no-silent-middle half
+# (tests/test_packaging.py) has a reason-of-record: the shipped surface must
+# not name estate-private tooling.
+SOURCE_ONLY_SCRIPTS = {
+    "scripts/make_public.py": "the publish auditor itself (names the forbidden vocabulary by role)",
+    "scripts/lane_recover.py": "estate lane recovery tooling (source-only tests execute it)",
+    "scripts/post_exit_hook.py": "stripped from the shipped build (est-xwvu9); own distribution path only",
+    # est-a5obt (PR #414): estate wave-generator speaking bd-store vocabulary
+    # and takeover law at an estate-private store — same class as make_public.py.
+    "scripts/horde_gen.py": "estate horde generator (bd-store takeover tooling; not release surface)",
+}
+
 
 def collect_sources() -> list[tuple[str, bytes]]:
     paths = {Path(name) for name in INCLUDE_FILES}
@@ -197,6 +210,7 @@ def collect_sources() -> list[tuple[str, bytes]]:
         paths.update(path.relative_to(ROOT) for path in matches)
 
     paths.difference_update(Path(name) for name in SOURCE_ONLY_TESTS)
+    paths.difference_update(Path(name) for name in SOURCE_ONLY_SCRIPTS)
     sources: list[tuple[str, bytes]] = []
     for rel in sorted(paths, key=lambda p: p.as_posix()):
         path = ROOT / rel

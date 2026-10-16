@@ -43,8 +43,8 @@ import argparse, datetime, json, os, re, subprocess, sys
 STORE = os.environ.get("HORDE_STORE")          # bd store path (required env)
 ACTOR = os.environ.get("HORDE_ACTOR", "horde") # bd actor identity
 ORPHANS_FILE = os.environ.get("HORDE_ORPHANS_FILE", "")  # optional shield list
-SHELF_PREFIX = "est-2ek."          # clankville personal — hands off
-IDLE_TAKEOVER_H = 24               # owner stale-claim law, msg 1559533626339762207
+SHELF_PREFIX = "est-2ek."          # personal shelf — hands off
+IDLE_TAKEOVER_H = 24               # owner stale-claim law
 COMMENT_LIVE_H = 24                # comment-activity law
 
 # DEFECT-3: closed verdict vocabulary. Extend ONLY via review-lane PR.
@@ -71,7 +71,7 @@ RECEIPT_SCHEMA = {
 LAW = (
     f"HORDE LAW (actor {ACTOR}): store `timeout 60 bd -C {STORE} --actor {ACTOR}`; --json stdout alone 2>/dev/null. "
     "Fresh show first (closed => already-gone STOP). COMMENT-ACTIVITY LAW FIRST: any comment younger than 24h => row LIVE => stamp only (live-respected-stamped), no take. "
-    "Takeover basis msg 1559533626339762207: assigned-but-idle >=24h is fair game via GUARDED take `update <ID> -a zap --if-assignee <holder>` (never --force). "
+    "Takeover basis (owner stale-claim law): assigned-but-idle >=24h is fair game via GUARDED take `update <ID> -a zap --if-assignee <holder>` (never --force). "
     "DEFECT-5 reclaim form (scoped only): `timeout 60 bd reclaim --id <ID> --json`; then comment 'RECLAIM-horde: expired <assignee> lease returned to ready' via dup_guard. "
     "DEFECT-1: before ANY reclaim, read `bd comments <ID>`; holder note naming an OPEN PR or live lease => reclaim-refused, do not strip live leases. "
     "Closes: only on a premise probe THIS worker ran (gh pr view / df / file / service), and close_reason MUST quote the probe; live premise => handback-premise-live. "
@@ -146,9 +146,21 @@ def _age_h(iso):
         return -1.0
 
 def _newest_comment_h(bead_id):
-    ds = re.findall(r"20\d\d-\d\d-\d\d[T ]\d\d:\d\d", bd("comments", bead_id))
+    """Newest-comment age in hours. W23 (reject ask 3): FAILS CLOSED — an
+    unreadable store reads as LIVE (0.0) so takeover never proceeds on
+    audit-blindness; the old default=1e9 read as comment-dead and took over
+    rows it could not read. A readable store with ZERO comments is lawful
+    comment-dead (inf). Dates come from the STRUCTURED comments payload
+    (comments_json), never the wrapped display text (W22 lesson)."""
+    parsed = comments_json(bead_id)
+    if parsed is None:
+        return 0.0
+    if not parsed:
+        return float("inf")
+    ds = re.findall(r"20\d\d-\d\d-\d\d[T ]\d\d:\d\d",
+                    "\n".join(json.dumps(c, default=str) for c in parsed))
     ages = [_age_h(d.replace(" ", "T")[:16] + ":00Z") for d in ds]
-    return min((a for a in ages if a >= 0), default=1e9)
+    return min((a for a in ages if a >= 0), default=0.0)
 
 def scan_candidates():
     """Live-store takeover candidates: idle>=24h, non-zap, non-owner, non-shield,
@@ -186,7 +198,7 @@ def scan_candidates():
         if _newest_comment_h(bid) < COMMENT_LIVE_H:
             continue                     # comment-activity law: LIVE
         out.append({"bead_id": bid, "disposition": "STALE-TAKEOVER",
-                    "why": f"idle>=24h holder {asg} comment-dead; basis msg 1559533626339762207"})
+                    "why": f"idle>=24h holder {asg} comment-dead; basis: owner stale-claim law"})
     return out
 
 def emit(args):
@@ -206,8 +218,11 @@ def emit(args):
                       "goal": "Execute one row per fan-out item per HORDE LAW; final message = one receipt JSON.",
                       "context": LAW, "schema": RECEIPT_SCHEMA,
                       "fanout": {"items": its, "goal": "Process assigned row per node law."}})
-    graph = {"name": f"inferno-{args.wave}-horde", "defaults": {"model": args.model,
-             "max_turns": 22, "schema": RECEIPT_SCHEMA}, "concurrency": 8, "nodes": nodes}
+    graph = {"name": f"inferno-{args.wave}-horde", "concurrency": 8, "nodes": nodes}
+    defaults = {"max_turns": 22, "schema": RECEIPT_SCHEMA}
+    if args.model:                           # model-alias law: no vendor default —
+        defaults["model"] = args.model       # omitting routes via the seat default
+    graph["defaults"] = defaults
     out = args.out or f"inferno-{args.wave}-horde.graph.json"
     json.dump(graph, open(out, "w"), indent=1)
     json.dump(items, open(out.replace(".graph.json", ".manifest.json"), "w"), indent=1)
@@ -262,7 +277,7 @@ def main():
     sub = ap.add_subparsers(dest="cmd", required=True)
     e = sub.add_parser("emit"); e.add_argument("--wave", required=True)
     e.add_argument("--lanes", type=int, default=4); e.add_argument("--max-items", type=int, default=12)
-    e.add_argument("--model", default="claude-haiku-5-5"); e.add_argument("--out")
+    e.add_argument("--model", default=None); e.add_argument("--out")
     e.set_defaults(fn=emit)
     r = sub.add_parser("reduce"); r.add_argument("run_dir"); r.set_defaults(fn=reduce_run)
     g = sub.add_parser("guard"); g.add_argument("--bead", required=True)
