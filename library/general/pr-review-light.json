@@ -1,0 +1,71 @@
+{
+  "meta": {
+    "description": "Two-lens read-only review of an open PR: collect the diff, review the riskiest files for regressions and missing tests, synthesize one advisory verdict. Posts nothing, merges nothing.",
+    "tags": ["use_case:review", "domain:pr", "starter", "read-only"],
+    "params": {
+      "repo_dir": {"desc": "absolute path of the git clone holding the base"},
+      "pr_ref": {"desc": "a ref already fetchable in that clone naming the PR head"},
+      "base_ref": {"desc": "the ref to diff against (usually the default branch)"}
+    }
+  },
+  "graph": {
+    "grammar": "wf/1",
+    "name": "pr-review-light",
+    "description": "Lightweight PR review loop that runs on any git checkout. NODE MAP: collect (writes the unified diff and picks the riskiest changed files) -> lens (parallel per-file review lanes) -> synth (one verdict). SEED CONTRACT (run_context map, ALL keys required, plain text, no braces in values): 'repo_dir' = absolute path of the git checkout holding the PR's base; 'pr_ref' = a ref already fetchable in that clone (a remote branch name or fetched PR ref) naming the head to review; 'base_ref' = the ref to diff against (usually main). LAUNCH: run from:'general/pr-review-light' run_context:{'repo_dir':'/abs/path/to/clone','pr_ref':'origin/feature-x','base_ref':'origin/main'}. REVIEW-ONLY LAW: no node posts to a tracker, pushes, or merges; the verdict is advisory text you deliver yourself. Scratch rides the run dir ($HERMES_WF_RUN_DIR is exported to every child), so nothing is written outside it and concurrent dispatches never collide. Tiers used: worker (collect + lanes), manager (synthesis) - map both in the seat's settings.models. This graph also shows the fan-out pattern over a string list: lens lanes dispatch one per file collect named, reading file contents and diff hunks from disk rather than trusting injected prose.",
+    "provenance": {
+      "owner": "hermes-workflows",
+      "source": "hermes-workflows/library/general/pr-review-light.json"
+    },
+    "defaults": {
+      "timeout": 900,
+      "context": "You are one lane of a read-only PR review. Ground rules: never mutate the repo, the index, or any remote; ground every claim in a file you actually read; keep the answer to the schema; one fenced json block as the final message; never print secrets."
+    },
+    "nodes": [
+      {
+        "id": "collect",
+        "type": "agent",
+        "model": "worker",
+        "shape": "recon",
+        "goal": "Prepare the review packet for PR head {run.pr_ref} against {run.base_ref} in the clone at {run.repo_dir}. 1) Resolve both refs with git (rev-parse / rev-list --count) and capture the merge-base. 2) Write the unified diff (git diff <merge-base>...{run.pr_ref}) verbatim to $HERMES_WF_RUN_DIR/diff.patch. 3) List changed files. 4) Pick UP TO 6 files most worth a reviewer's minutes (logic and tests over docs and generated files). Reply with ONLY fenced json {\"diff_path\": \"<absolute path of diff.patch>\", \"base\": \"<merge-base sha>\", \"head\": \"<head sha>\", \"files\": [\"<repo-relative paths, review order>\"], \"notes\": \"<one line: size, anything unreadable or skipped and why>\"}"
+      },
+      {
+        "id": "lens",
+        "type": "agent",
+        "model": "worker",
+        "shape": "review",
+        "after": ["collect"],
+        "fanout": {
+          "items_from": "collect.files",
+          "goal": "Review exactly ONE changed file: '{item}' (repo clone: {run.repo_dir}, full diff: collect's committed answer names diff_path - read the hunks for this file from it, never from memory). Judge two questions only: (1) can this change break an existing behavior, and where; (2) does the change carry or need a test that catches its failure mode. Read the file itself, not just the hunks, before calling a risk real. Reply with ONLY fenced json {\"file\": \"{item}\", \"findings\": [\"<each a one-line finding grounded in a line or hunk you read>\"], \"risk\": \"low|medium|high\"}",
+          "schema": {
+            "type": "object",
+            "required": ["file", "findings", "risk"],
+            "properties": {
+              "file": {"type": "string"},
+              "findings": {"type": "array", "items": {"type": "string"}},
+              "risk": {"type": "string", "enum": ["low", "medium", "high"]}
+            }
+          }
+        }
+      },
+      {
+        "id": "synth",
+        "type": "agent",
+        "model": "manager",
+        "shape": "review",
+        "after": ["lens"],
+        "inputs": ["collect"],
+        "schema": {
+          "type": "object",
+          "required": ["verdict", "must_fix", "report"],
+          "properties": {
+            "verdict": {"type": "string", "enum": ["approve", "comment", "request_changes"]},
+            "must_fix": {"type": "array", "items": {"type": "string"}},
+            "report": {"type": "string"}
+          }
+        },
+        "goal": "Synthesize the review. Your Inputs carry collect's packet (diff_path, base, head) and every lens answer for its one file. Re-read diff.patch yourself for anything the must-fix list claims - an ungrounded finding is dropped, not hedged. Then write ONE review: verdict (request_changes only for must-fix findings), must_fix as concrete file:line-shaped asks, nits as the rest, report as the PR-body-shaped review a maintainer can paste (what was reviewed, what is safe, what must change). Reply with ONLY the fenced json."
+      }
+    ]
+  }
+}

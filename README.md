@@ -54,6 +54,7 @@ One tool, action-routed — the complete surface, with the flags that matter:
 | `status` | Read-only read model: per-node state, metrics, held gate, `node_facts` on failures, derived `next` steps — never spawns a runner. `lane_key` reads the incumbent instead; a lane entry whose claimed run dir no longer exists on disk reports `state: "orphaned"` (a claimed-then-lost run, not a forever-`pending` ghost). |
 | `wait` | The resume-and-watch verb: the only read action that respawns an idle runner; blocks to the next boundary (default 600 s, ceiling 1800 s), self-yielding before the host's tool deadline with a "call wait again" note. |
 | `release` | Answer a held human gate (`gate_id`, `answer`); respawns the runner when idle. A human release pre-empts a machine `wait` park. |
+| `release_lock` | Operator escape hatch for a wedged `runner.lock`: renames the stranded inode aside under the admission heal-barrier and hands the lane a fresh lock path. REFUSES unless zero live holders are proven (kernel ledger + dead lease) — never heals on EACCES or a live holder. |
 | `steer` | Queue steering text for a running node (refused on gates and terminal nodes; delivery is cooperative via the child's `inbox` pull — never a mid-prompt injection). |
 | `inbox` | Child-side pull of steering lines baked for this spawn — exactly-once per spawn. Parent-side `kind:"submissions"` lists `submit` items newest-first. |
 | `amend` | Replace the graph mid-run with the whole new graph (`dry_run:true` previews `will_rerun` without writing). Fingerprint-valid unchanged nodes replay-skip. |
@@ -168,6 +169,38 @@ lands, the branch collapses and that doc deletes itself.
   Older 0.21.3 deployments are below this declared floor and will skip plugin admission.
 - Python 3 (stdlib only — the plugin imports nothing outside Hermes)
 - Node for the desktop half's tests only; the app loads `plugin.js` uncompiled
+
+## Starter set: run something today (`general/`)
+
+You don't have to author a graph first. Five scrubbed, estate-neutral starter
+graphs ship *with the plugin* under `library/general/`, so a fresh install can
+run a real DAG out of the box:
+
+```jsonc
+{ "task": {"from": "general/report-and-verify"} }
+```
+
+| Address | Reach for it when |
+|---|---|
+| `general/pr-review-light` | an open PR needs an advisory second read before a human looks |
+| `general/issue-triage` | a queue needs a standing rule applied unattended (the `{run.KEY}` seed-contract exemplar) |
+| `general/test-first-feature-slice` | one behavior is worth a red-green-proof slice |
+| `general/fan-out-audit-census` | a tree needs a per-file audit with an honest tally (the 8 KB per-parent input cap, taught by example) |
+| `general/report-and-verify` | a producer will drop a report later and you want zero tokens while waiting (machine `wait` gate exemplar) |
+
+Resolution order for `from: general/<name>`: your **runs-root library first**
+(`<runs_root>/library/general/<name>.json`), legacy launch root second, the
+**packaged set last**. Every graph routes agents through model *tiers*
+(`worker`/`manager`) — none names a vendor model — and each declares its seed
+params in `meta.params`.
+
+**Customize:** copy a packaged JSON to your own shelf (or tune it and
+`save name=general/<name>`); your copy shadows the packaged one at the same
+address, and the door never writes the packaged files.
+**Share back:** tuned graphs are welcome upstream — see the submit flow in
+issue #50 ("share your tuned graph back"): fork, drop the envelope under
+`library/general/`, run the scrub gate, open a PR. Per-graph author notes
+live in [`library/general/README.md`](library/general/README.md).
 
 ## For agents and contributors
 

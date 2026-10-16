@@ -26,7 +26,7 @@ amend_preview = _common.amend_preview
 quote_json_parse_error = _common.quote_json_parse_error
 kind = _common.kind   # the door consults the ONE node-kind table (wfcommon.NODE_TYPES) via this
 
-# #157: card enforcement — bind our OWN wfcommon (never a sys.path sibling).
+# #157: card enforcement + ledger — bind our OWN modules (never a sys.path sibling).
 _ce_spec = importlib.util.spec_from_file_location("_hermes_workflows_card_enforcement",
                                                   Path(__file__).resolve().parent / "card_enforcement.py")
 assert _ce_spec is not None and _ce_spec.loader is not None
@@ -711,8 +711,8 @@ WORKFLOW_PARAMS = {
     "properties": {
         "action": {
             "type": "string",
-            "enum": ["run", "status", "wait", "release", "steer", "inbox", "amend", "diff", "stop", "list", "save", "submit", "library", "doctor_version", "validate"],
-            "description": "run=launch a graph; wait=read state, RESPAWNING an idle runner if work is pending (blocks to the next boundary when one is live); status=read-model of a run; release=answer a held human gate; steer=queue steering text for a node; inbox=(child-side, cooperative) pull late steering lines baked for THIS spawn — call once at a natural seam; amend=replace the graph (invalidates changed nodes + all downstream by fingerprint), or pass patch to edit a few node fields without resubmitting the whole graph; diff=confirm surface: runs the amend door with dry_run FORCED (accepts patch or graph), returns the preview + graph_diff and touches nothing; stop=request stop; list=all runs; save=shelve a graph in the library under a name (from run_id or inline graph); library=list shelved graphs richly (name, description, tags, provenance, path-relative id). validate=dry-run the door's validation pipeline (defaults fill + defect collection + model/route policy) with no ping and no writes; returns {ok, errors:[{node,field,msg}], resolved_routes}. run from=<name> replays a shelved graph. submit=quarantine a hand-rolled graph for study (requires why_not_library >=80 chars; never joins the library — the quartermaster's human-gated loop decides); inbox kind=submissions lists them newest-first. doctor_version=read-only version truth for THIS install: {live_version, newest_packaged, source_commit, drift} comparing plugin.yaml against the install.json provenance that pack.py stamps at build time \u2014 one read, no network.",
+            "enum": ["run", "status", "wait", "release", "release_lock", "steer", "inbox", "amend", "diff", "stop", "list", "save", "submit", "library", "doctor_version", "validate"],
+            "description": "run=launch a graph; wait=read state, RESPAWNING an idle runner if work is pending (blocks to the next boundary when one is live; when the lock is PROVEN wedged — Errno 11 with the kernel ledger showing zero holders and the admission lease dead — wait heals it first, the #44 escape hatch); status=read-model of a run; release=answer a held human gate; release_lock=operator hatch for a wedged runner.lock (#44): renames the stranded inode aside under the admission heal-barrier and hands the lane a fresh lock path — REFUSES unless zero live holders are proven (never heals on EACCES or a live holder); steer=queue steering text for a node; inbox=(child-side, cooperative) pull late steering lines baked for THIS spawn — call once at a natural seam; amend=replace the graph (invalidates changed nodes + all downstream by fingerprint), or pass patch to edit a few node fields without resubmitting the whole graph; diff=confirm surface: runs the amend door with dry_run FORCED (accepts patch or graph), returns the preview + graph_diff and touches nothing; stop=request stop; list=all runs; save=shelve a graph in the library under a name (from run_id or inline graph); library=list shelved graphs richly (name, description, tags, provenance, path-relative id). validate=dry-run the door's validation pipeline (defaults fill + defect collection + model/route policy) with no ping and no writes; returns {ok, errors:[{node,field,msg}], resolved_routes}. run from=<name> replays a shelved graph. submit=quarantine a hand-rolled graph for study (requires why_not_library >=80 chars; never joins the library — the quartermaster's human-gated loop decides); inbox kind=submissions lists them newest-first. doctor_version=read-only version truth for THIS install: {live_version, newest_packaged, source_commit, drift} comparing plugin.yaml against the install.json provenance that pack.py stamps at build time \u2014 one read, no network.",
         },
         "run_id": {"type": "string", "description": "Run id (required for every action except run/list)."},
         "name": {"type": "string", "description": "run: overrides graph.name (default workflow); save: library name overrides graph.name (lowercase, [-_.]); library: return one entry with refs-derived required params and an instantiate command. amend: set graph.name in the replacement graph; omitting it retains the run name."},
@@ -1788,14 +1788,27 @@ def _lane_shelf_guard(p):
                      "(est-2ek.1.599; shelf waves 26-31; r4 realpath-only containment)",
             "error_class": "lane_shelf_write"}
 
+def _packaged_general_root():
+    """#51: the PACKAGED curated starter set shipped WITH the plugin — the repo's
+    library/general/ directory, which sits next to __init__.py in any install.
+    Read-only at runtime (act_save always lands on library_root()); it is the
+    FALLBACK the door resolves `general/<name>` to when every private root misses.
+    Resolution order: runs_root library > legacy launch-root library > packaged."""
+    return Path(__file__).resolve().parent / "library" / _GENERAL_PREFIX
+
 def _lib_read(name):
     """READ resolver mirroring find_run: resolved first, legacy only for an EXISTING
-    graph absent from the resolved root. Returns the path whether or not it exists
+    graph absent from the resolved root, and — for `general/<name>` (#51) — the
+    packaged starter set LAST. Returns the path whether or not it exists
     (callers keep their own None/not-exists handling on the primary shape)."""
     p = _lib_path(name)
     if not p.exists():
         n = str(name or "").strip().lower()
-        if LIB_OK.match(n):
+        if n.startswith(_GENERAL_PREFIX) and LIB_OK.match(n[len(_GENERAL_PREFIX):]):
+            packaged = _packaged_general_root() / f"{n[len(_GENERAL_PREFIX):]}.json"
+            if packaged != p and packaged.exists():
+                return packaged
+        elif LIB_OK.match(n):
             legacy = _common.launch_runs_root() / "library" / f"{n}.json"
             if legacy != p and legacy.exists():
                 return legacy
@@ -1803,10 +1816,11 @@ def _lib_read(name):
 
 def _lib_rel_name(p):
     """#50: the replayable name for a library path — `general/<stem>` inside the
-    curated public subdir, plain `<stem>` everywhere else (what `_lib_path` and
-    `library` both answer to)."""
-    return (str(p.relative_to(library_root()))[:-5] if p.parent == library_root() / _GENERAL_PREFIX
-            else p.stem)
+    curated public subdir (private shelf OR the #51 packaged set), plain `<stem>`
+    everywhere else (what `_lib_path` and `library` both answer to)."""
+    if p.parent == library_root() / _GENERAL_PREFIX or p.parent == _packaged_general_root():
+        return _GENERAL_PREFIX + p.stem
+    return p.stem
 def _library_reader():
     """The include resolver's library reader: a closure over _lib_read — the SAME
     resolver `from=<name>` uses (resolved root first, legacy launch root second).
@@ -2386,6 +2400,21 @@ def act_validate(args):
                 "errors": [{"node": None, "field": "model", "msg": err}]}
     out = {"ok": True, "errors": [], "resolved_routes": routes,
            "hint": "validated only — nothing pinged or written; run it: workflow run graph=..."}
+    # est-vj8m (#256 ask 2), UNION with s12 (#421): shape-p95 budget advisory
+    # rides the SAME warnings channel, appended AFTER defaults fill so
+    # max_turns is the resolved cap. Dict-typed (node/field/msg) per the pin;
+    # s12 rows stay plain strings in the same list.
+    for node in graph["nodes"]:
+        if _common.kind(node).spawns is not True:
+            continue
+        shape = node.get("shape") or _common.DEFAULT_SHAPE
+        budget = _common.SHAPE_PRESETS[shape]["max_turns"]
+        cap = node["max_turns"]  # already resolved by apply_graph_defaults
+        if cap < budget:
+            warnings.append({"node": node["id"], "field": "max_turns",
+                             "msg": f"max_turns {cap} is below shape {shape!r} p95 "
+                                    f"budget {budget}; leave max_turns unset to use "
+                                    "the preset, or keep a measured explicit cap"})
     if warnings:
         out["warnings"] = warnings
     return out
@@ -2405,7 +2434,12 @@ def _card(rid):
 
 # #157: ONE card grammar — the enforcement module ships exactly what the tool
 # result carries, injected here rather than duplicated there.
-_card_enforcement.bind(_common, _card)
+_cl_spec = importlib.util.spec_from_file_location("_hermes_workflows_card_ledger",
+                                                  Path(__file__).resolve().parent / "card_ledger.py")
+_card_ledger = importlib.util.module_from_spec(_cl_spec)
+_cl_spec.loader.exec_module(_card_ledger)
+_card_ledger.bind(_common.runs_root)
+_card_enforcement.bind(_card_ledger, _card)
 
 
 def _lifecycle_notice(rid):
@@ -2814,6 +2848,19 @@ def _from_unknown_error(name):
            "hint": "workflow library lists recipes; run with graph or graph_path launches a one-off without saving"}
     return out
 
+def _node_id_warnings(graph):
+    """s12-adjacent readability advice only; never rename or refuse a node."""
+    warnings = []
+    for node in graph["nodes"]:
+        node_id = node["id"]
+        if len(node_id) == 1 or re.fullmatch(r"[aeiou]+", node_id, re.IGNORECASE):
+            warnings.append(
+                f"s12 node_id: {node_id!r} is single-character or vowel-only; "
+                "use a readable 1-3 word id such as 'scan_nodes' "
+                "(advisory; execution unchanged)")
+    return warnings
+
+
 def act_run(args):
     graph, bad = _input_graph(args, library=True)
     if bad:
@@ -2915,6 +2962,18 @@ def act_run(args):
     bad = _unbound_gate_argv_refs(graph)
     if bad:
         return bad
+    # est-2ek.1.856 (B3): the seat-cap knobs are validated where they can still
+    # refuse — an invalid WORKFLOW_MAX_SEATS / config workflows.max_seats refuses
+    # the launch BEFORE any run directory is written or child spawned. Without
+    # this the typo only surfaced at the first node's spawn (a failed node), and
+    # 8/8 lanes shipped with the cap never read at all (the w54 field report).
+    try:
+        _common.seat_max_seats()
+    except _common.SeatCapError as e:
+        return {"error": f"invalid seat cap: {e} "
+                        "(WORKFLOW_MAX_SEATS env or config workflows.max_seats; an integer "
+                        f"in [{_common.SEAT_CAP_FLOOR}, {_common.SEAT_CAP_CEILING}], or unset "
+                        "for the default; the per-run opt-out stays graph max_seats: 0)"}
     # 1.1 (RATIFY F2): profile validation runs on the RENDERED graph ({run.KEY} resolved).
     bad = _profile_error(graph)
     if bad:
@@ -2954,6 +3013,9 @@ def act_run(args):
                        + _liveness_hint_suffix(_liveness_notes)}
         if _include_notes:
             out["include_notes"] = _include_notes
+        warnings = _node_id_warnings(graph)
+        if warnings:
+            out["run_warnings"] = warnings
         return out
     key = args.get("lane_key")
     if key is not None:
@@ -3108,6 +3170,13 @@ def _create_run(args, graph, lib_name, models, routes, _liveness_notes, lane_pat
     _pv = _common.plugin_version()
     if _pv:
         meta["plugin_version"] = _pv
+    # est-2ek.1.856 deep review D2: the advertised per-run seat-cap opt-out is
+    # baked where the runner reads it — run.json meta max_seats (the structural
+    # pass has already validated the value: integer in [4,16] or the explicit 0
+    # off-sentinel; _max_seats honours meta over env/config). Absent = key never
+    # written: a plain run keeps the exact golden key set.
+    if "max_seats" in graph:
+        meta["max_seats"] = graph["max_seats"]
     # Composite runs record which shelf bytes they expanded from (author-form
     # provenance) and any non-fatal resolver notes (scratch collisions). Empty =
     # key omitted: a plain run keeps the exact pre-include run.json key set.
@@ -3163,6 +3232,9 @@ def _create_run(args, graph, lib_name, models, routes, _liveness_notes, lane_pat
             "card": _card(rid), "lifecycle_notice": _lifecycle_notice(rid)}
     if include_notes:
         out["include_notes"] = include_notes   # scratch-collision warnings ride the launch
+    warnings = _node_id_warnings(graph)
+    if warnings:
+        out["run_warnings"] = warnings
     return out
 
 def _steer_event(r, ev, **kw):
@@ -3241,6 +3313,12 @@ def act_status(args):
            "graph_revision": _graph_revision(r)}
     if "accounting" in st:
         out["accounting"] = st["accounting"]
+    if st.get("runner_lock") and st["runner_lock"] not in ("busy", "free"):
+        # #44: legibility of the recoverable wedge / EACCES-ambiguous lock —
+        # honest absence for the two ordinary states (golden key sets unchanged).
+        out["runner_lock"] = st["runner_lock"]
+        if st.get("runner_lock_detail"):
+            out["runner_lock_detail"] = st["runner_lock_detail"]
     if resolved_via:   # #58: the run lives outside the caller's resolved root — loud, not silent
         out["resolved_via"] = resolved_via
         out["resolved_via_note"] = ("run resolved under a sibling root (dispatch-time home "
@@ -3488,6 +3566,21 @@ def act_wait(args):
     top_alive = None
     if st["status"] in ("running", "pending", "interrupted"):
         top_alive = bool(st.get("runner_live"))   # A2 one-read law: THE ONE read
+        if not top_alive and st.get("runner_lock") == "wedged":
+            # #44 escape hatch (automatic half): the lock says HELD while the
+            # kernel ledger proves ZERO holders and the admission lease is proven
+            # dead — nothing can ever progress on that shape, so wait heals it
+            # BEFORE the respawn below. The heal is the single safety authority
+            # (wfcommon.heal_wedged_runner_lock): it REFUSES on EACCES (B1), on
+            # any live holder, and on the lease-absent legacy shape (that one
+            # only the explicit operator verb carries authority over). A refused
+            # heal falls through to the honest status answer — never a false
+            # respawn over a live holder (the flock admission still makes even a
+            # raced spawn a harmless WORKFLOW_BUSY loser).
+            _wedge_heal = _common.heal_wedged_runner_lock(r)
+            if _wedge_heal.get("reason") == "healed":
+                st = run_state(r)
+                top_alive = bool(st.get("runner_live"))
         if not top_alive:
             _respawn_runner(r)  # only this explicit wait resumes unfinished work
     cap = min(float(args.get("timeout", 600)), 1800)
@@ -3674,6 +3767,35 @@ def act_release(args):
     else:
         hint = "answer recorded; the live runner commits it at its boundary; push delivery is optional, use wait for blocking observation"
     return {**res, "hint": hint}
+
+def act_release_lock(args):
+    """#44 (issue ask 2): the operator escape hatch for a wedged runner.lock.
+    The field shape: Errno 11 forever with the kernel ledger proving zero
+    holders and the admission lease dead — wait-resume impossible without
+    copying directories. Delegates to the SINGLE safety authority
+    (wfcommon.heal_wedged_runner_lock): refuses unless the wedge is proven;
+    never heals on EACCES (B1) or against a live/advancing holder (B2 — the
+    final re-verification under the admission heal-barrier); renames the
+    stranded inode aside (evidence kept), never unlinks. Read-only verbs
+    (status/list) NEVER heal; only this verb and wait's wedged-gate do."""
+    r, st, resolved_via = _resolve_read_run(args.get("run_id"))
+    if not st:
+        return {"error": "unknown run_id"}
+    if resolved_via:   # #58 same law as wait: write verbs never cross roots
+        return {"ok": False, "error": "run lives under a sibling root — release_lock "
+                "must be issued from the owning home"}
+    res = _common.heal_wedged_runner_lock(r)
+    out = {**res, "run_id": st["run_id"]}
+    if res.get("ok"):
+        out["hint"] = ("lane re-locked fresh; `wait` resumes unfinished work"
+                       if res.get("reason") == "healed"
+                       else "no wedge present; nothing to do")
+    else:
+        out["hint"] = ("refused: the holder is not proven dead (live ledger row, "
+                       "EACCES-ambiguous, or legacy lease-absent shape). A LEGACY "
+                       "pre-lease dir needs the owner's explicit force — see "
+                       "references/operations.md; do NOT retry-loop this verb.")
+    return out
 
 def act_steer(args):
     r = run_dir(args.get("run_id"))
@@ -3958,8 +4080,23 @@ def act_amend(args):
             meta["include_notes"] = _include_notes
         else:
             meta.pop("include_notes", None)
-    if meta.get("name") != new["name"] or _includes or _include_notes:
+    _name_changed = meta.get("name") != new["name"]
+    if _name_changed or _includes or _include_notes:
         meta["name"] = new["name"]
+    # est-2ek.1.856 deep review D2: run.json's meta max_seats is the CURRENT
+    # graph's truth — SET-OR-REMOVE like the include notes: an amend that
+    # declares max_seats bakes it, an amend whose graph drops the key must drop
+    # it from run.json too (a stale opt-out surviving a graph swap would leave
+    # the runner honouring a cap its own graph no longer declares).
+    _MS_MISSING = object()                            # one sentinel, compared by identity
+    _ms_before = meta.get("max_seats", _MS_MISSING)   # pre-amend truth, before mutation
+    _ms_now = new.get("max_seats", _MS_MISSING)
+    if _ms_now is not _MS_MISSING:
+        meta["max_seats"] = new["max_seats"]
+    else:
+        meta.pop("max_seats", None)
+    if (_name_changed or _includes or _include_notes
+            or _ms_before != _ms_now):
         mtmp = r / f"run.json.{os.getpid()}.tmp"
         mtmp.write_text(json.dumps(meta, ensure_ascii=False))
         os.replace(mtmp, r / "run.json")
@@ -4001,8 +4138,12 @@ def act_list(_args):
     # unique by RUN-DIR NAME across every scanned root (symlinked/profile
     # roots multiply hits), never raw per-root iterdir.
     scanned = _common.iter_run_dirs(roots, reverse=True)
+    # #44 (PR #47 C2 law, applied to the door census too): ONE batch probe child
+    # for the whole listing — run_state consumes the pre-observed lock state
+    # instead of spawning one probe child per row.
+    _lock_states = _common.runner_lock_states(scanned)
     for r in scanned:
-        st = run_state(r, telemetry=False)
+        st = run_state(r, telemetry=False, lock_state=_lock_states.get(r))
         if st and st["run_id"] not in seen:
             seen.add(st["run_id"])
             row = {"run_id": st["run_id"], "name": st["name"], "status": st["status"],
@@ -4063,6 +4204,7 @@ def act_doctor_version(args):
 
 
 ACTIONS = {"run": act_run, "status": act_status, "wait": act_wait, "release": act_release,
+           "release_lock": act_release_lock,
            "steer": act_steer, "inbox": act_inbox, "amend": act_amend, "diff": act_diff, "stop": act_stop, "list": act_list,
            "save": act_save, "submit": act_submit, "library": act_library,
            "doctor_version": act_doctor_version, "validate": act_validate}
@@ -4311,7 +4453,7 @@ def register(ctx):
     # ctx._abandon_load() and every later register_* is silently ignored.
     # Keep this body cheap and non-blocking: measured ~0.1s import, register()
     # < 1ms — one cached config read (model_tiers) and in-memory registrations,
-    # no subprocess/network/run-dir scan (card_enforcement's module exec is
+    # no subprocess/network/run-dir scan (card_enforcement's/card_ledger's module exec is
     # defs only; its I/O runs at hook time). Never pass override=True to
     # register_tool: it is operator-gated (PluginToolOverrideError). Pinned by
     # tests/test_hook_abandon_safety.py.
@@ -4325,8 +4467,11 @@ def register(ctx):
             " — pick per node by how hard the step is. "
             "Unset = seat default. run echoes the resolved {node: model} table.")
     ctx.register_tool(name="workflow", toolset="workflows", schema=WORKFLOW_SCHEMA, handler=handle)
-    # #157: last-resort card shipper (core fires this once per turn before the
-    # assistant row persists; fail-open, marker-ledgered — see card_enforcement.py).
+    # Hook-led card ledger (card_ledger.py): post_tool_call records workflow
+    # launches, pre_llm_call reminds, transform_llm_output ships (#157) — all
+    # fail-open, no run-dir scan.
+    ctx.register_hook("post_tool_call", _card_enforcement._post_tool_call)
+    ctx.register_hook("pre_llm_call", _card_enforcement._pre_llm_call)
     ctx.register_hook("transform_llm_output", _card_enforcement._card_hook)
     # PR-3: both default-off (flags read at call time); a core without the hook just ignores.
     for _hook, _fn in (("post_gateway_admission", _admission_handler),

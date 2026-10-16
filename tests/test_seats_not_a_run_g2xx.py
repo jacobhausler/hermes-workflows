@@ -3,13 +3,13 @@
 
 The seat semaphore (test_seat_live_g2xx.py) keeps its tickets under
 <runs_root>/.seats. Every runs-root enumeration — the door's `list`, the
-dashboard read model, the card-enforcement outstanding scan — must skip it (and
+dashboard read model — must skip it (and
 any other dot-dir) by construction, through ONE shared helper
 (wfcommon.iter_run_dirs), not by the accident that .seats happens to lack a
 graph.json today. The adversarial case below plants a graph.json INSIDE .seats:
 a name-blind enumeration would list it as a run.
 
-est-g255 P255-6 (zap): the enumeration of the dashboard and the card scan is
+est-g255 P255-6 (zap): the enumeration of the dashboard is
 asserted BEHAVIOURALLY (each read model is driven against the same adversarial
 fixture and its own answer is inspected) — no test reads product source text or
 pins helper spelling (CONTRIBUTING R6). The helper contract stays pinned
@@ -53,9 +53,7 @@ GRAPH = {"name": "s", "nodes": [NODE]}
 NOW_ISO = datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 # one real-shaped run + an adversarial .seats dir that LOOKS like a run —
-# including a launch-shaped run.json OWNED by the card scan's probe session, so
-# a name-blind enumeration would not merely list it, it would surface a phantom
-# card obligation and a phantom dashboard run.
+# a name-blind enumeration would surface a phantom dashboard run.
 run = RUNS / "20261006-000000-s"
 (run / "nodes").mkdir(parents=True)
 (run / "graph.json").write_text(json.dumps(GRAPH))
@@ -96,16 +94,6 @@ dl = dash._list_runs()
 dids = [v.get("id") for v in dl.get("runs", [])]
 check("dashboard _list_runs omits the adversarial .seats run", ".seats" not in dids, dids)
 check("dashboard _list_runs keeps the real run", run.name in dids, dids)
-
-# (4) card enforcement outstanding scan, BEHAVIOURALLY: probe with the session
-# that OWNS the planted .seats/run.json — a name-blind enumeration would raise
-# a phantom card obligation for .seats. The real run is owned by nobody, so a
-# correct scan answers with NOTHING.
-card = load("card_p255_6", "card_enforcement.py")
-card.bind(wfcommon, lambda r: "::workflow{id=\"%s\"}" % r.name)
-hits = card._outstanding("sess-p255-6", datetime.now(timezone.utc))
-hit_ids = [rid for rid, _ in hits]
-check("card _outstanding omits the adversarial .seats run", ".seats" not in hit_ids, hit_ids)
 
 shutil.rmtree(HOME, ignore_errors=True)
 print("ALL PASS" if ok else "SOME FAIL")
