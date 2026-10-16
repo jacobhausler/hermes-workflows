@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **Wake-router class coverage + catch-all (est-jbcrw, dead-landing census
+  verdict 4):** `notify()` can no longer return silently for an event outside
+  `_WAKE_TEMPLATES`. A closed registry `_WAKE_EVENTS` names every event a call
+  site may pass; an unmapped class wakes on a fixed runner-authored catch-all
+  body (AUTHORITY LAW r5 unchanged — the text table is still the only author,
+  the key rides only as the Idempotency-Key), the probe row is typed
+  `catchall`, and the runner prints `WORKFLOW_WAKE_UNMAPPED_EVENT` on stdout so
+  a class gap is loud in the field. The old fail-silent rule let scripted wakes
+  for unmapped classes rot (5 dead rows attributed in the census). Pinned by
+  `tests/test_wake_catchall_jbcrw.py`.
+
 - **Operator scar-laws port (docs-only):** fifteen generalizable lessons from a
   retiring usage skill fold into the docs they belong to, one hardened line
   each — twelve authoring and recovery laws in `references/operator-playbook.md`

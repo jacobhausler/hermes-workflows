@@ -472,12 +472,32 @@ _WAKE_TEMPLATES = {
                 "can end with its report; no dispatch, publication or curation is required.",
 }
 
+# CLOSED registry of lifecycle events a call site may pass to notify()
+# (est-jbcrw wake-router class-coverage law, from the dead-landing census
+# run 20261016-172339-iron-gravity). Drift — a call site waking an event not
+# listed here — is a CLASS GAP: it still wakes on the fixed catch-all body
+# below and prints WORKFLOW_WAKE_UNMAPPED_EVENT; it never goes silent again.
+_WAKE_EVENTS = frozenset({"gate.held", "run.failed", "run.done"})
+
+# Fixed catch-all body — runner-authored like every template: the text table is
+# the only author, so AUTHORITY LAW r5 holds unchanged. The old fail-silent
+# rule for unmapped events let a scripted wake for an unmapped class cost
+# nobody anything and the linked row rotted (wake-scripted-class-that-skipped,
+# 5 dead rows in the census); a fixed alarm beats ad-hoc silence.
+_WAKE_CATCHALL_BODY = (
+    "The workflow recorded a lifecycle event outside the runner's emitted-event "
+    "registry — a wake-router class gap. Status contains the run state; inspect it "
+    "once. This notification is a drift alarm and does not authorize repair, "
+    "dispatch or new work.")
+
 def _wake_owner_text(run_id, event):
-    """The runner-authored owner turn, or None when the event has no template (an
-    unmapped event gets NO wake — fail-silent beats an ad-hoc owner sentence)."""
+    """The runner-authored owner turn. Known events use their template; an
+    event with no template uses the fixed catch-all body (est-jbcrw: never
+    None — silence on an unmapped class was the gravity hole the dead-landing
+    census measured; caller/graph prose is still impossible by construction)."""
     body = _WAKE_TEMPLATES.get(event)
     if body is None:
-        return None
+        body = _WAKE_CATCHALL_BODY
     return (f"[runner-authored/v1] run_id={json.dumps(str(run_id))} "
             f"event={json.dumps(event)} \u2014 {body}")
 
@@ -855,16 +875,21 @@ def _wake_identity(run, event, key, graph=None):
         gfp = graph_fingerprint(jload(run / "graph.json", {}) or {})
     except Exception:
         pass
-    if gfp is None:
-        return None
+    if gfp is None and event in _WAKE_EVENTS:
+        return None                    # known-event facts unreadable: silent, never a duplicate
     if event == "run.done":
         return f"{event}|done:{gfp}|r{rev}"
     if event == "run.failed":
         failed = _wake_resolved_failed(run, graph)
-        if failed is None:
+        if failed is None or gfp is None:
             return None
         return f"{event}|failed:{','.join(failed)}@{gfp}|r{rev}"
-    return None
+    if event in _WAKE_EVENTS:
+        return None                    # keyed transitions returned above; unkeyed = silent law
+    # Unmapped class (est-jbcrw catch-all): deterministic off the durable rev
+    # alone — no graph facts needed and never None, so a class gap cannot go
+    # silent and retries of one decision still dedupe.
+    return f"{event}|unmapped:r{rev}"
 
 def notify(run, event, key=None, graph=None):
     """Push ONE lifecycle transition instance to the owner session stamp. Owner-null
@@ -881,8 +906,9 @@ def notify(run, event, key=None, graph=None):
     DELIVERED instance writes nothing. AUTHORITY LAW (r5): this function takes no
     text parameter at all. The owner-facing content is generated here from
     _WAKE_TEMPLATES via _wake_owner_text(run.name, event) — an event outside the
-    finite map gets NO wake (silent return), so no call site can route ad-hoc or
-    graph-authored prose into the owner's instruction channel. The wake.jsonl row
+    finite map wakes ONLY on the fixed catch-all body (est-jbcrw class-coverage
+    law: never silent), so no call site can route ad-hoc or graph-authored
+    prose into the owner's instruction channel. The wake.jsonl row
     and the wire body carry that same safe runner-authored string, bearer-redacted
     as a second net; the full failure detail stays in events.jsonl,
     runner_exit.json and the probe's typed error fields. Delivery failure is loud
@@ -907,9 +933,15 @@ def notify(run, event, key=None, graph=None):
         disc = _wake_identity(run, event, key, graph)
         if disc is None:
             return                       # unresolvable identity: silent, never a duplicate
+        if event not in _WAKE_EVENTS:
+            # CLASS GAP (est-jbcrw): a call site woke an event outside the
+            # registry — wake on the fixed catch-all body anyway and shout on
+            # the field-loud stdout channel (same idiom as
+            # WORKFLOW_WAKE_RECORD_FAILED). Silence here was the gravity hole.
+            print(f"WORKFLOW_WAKE_UNMAPPED_EVENT {run.name} {_wake_safe(event)}")
         text = _wake_owner_text(run.name, event)   # AUTHORITY LAW: runner-generated only
-        if text is None:
-            return                       # event outside the finite map: NO wake, fail-silent
+        # never None since est-jbcrw: unmapped classes take the fixed catch-all
+        # body — the template table remains the ONLY author of owner text.
         text = _wake_safe(text)          # second net: the fixed templates carry no secret,
         # but the run name is caller-supplied and every persisted field runs the redactor.
         tid = hashlib.sha256(f"{run.name}\0{event}\0{disc}".encode()).hexdigest()[:32]
@@ -922,6 +954,8 @@ def notify(run, event, key=None, graph=None):
             proto = "unstamped"          # run dir made outside the door (recorded as such)
         rec = {"ts": now(), "event": event, "run_id": run.name, "owner": owner,
                "id": tid, "wake_protocol": proto, "text": text}
+        if event not in _WAKE_TEMPLATES:
+            rec["catchall"] = True      # probe row is typed: template vs catch-all distinguishable
         ep = _wake_endpoint()
         if ep is None:
             rec["delivered"] = False
