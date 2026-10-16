@@ -18,8 +18,8 @@ touches pool state.
 
 Acceptance per row: the arbiter honors the pool-recorded cap AND a two-runner
 test — two independent runner processes against ONE .seats dir, combined live
-tickets <= the pool cap, while each process's own env (stale-small here) does
-NOT cap it (the measured starvation shape).
+tickets <= the pool cap, while each process's own env (stale-small here, at the
+validator's floor of 4) does NOT cap it (the measured starvation shape).
 
 Run: cd tests && python3 test_pool_seat_cap_mg5o2.py
 """
@@ -198,18 +198,22 @@ check("per-run max_seats=2 admits 2 of the 4-seat pool and no more", len(held4) 
 for t in held4: wf._seat_release(t)
 
 # ============ (4) TWO-RUNNER acceptance: two independent processes, ONE
-#                .seats dir, pool-recorded cap 4; A's env says 2, B's env says
-#                1 (the inherited-stale-env starvation shape). Old code: A max
-#                2, B max 1 (near one request at a time). New code: the pool
-#                arbitrates — both hold up to the ceiling the pool allows and
-#                the combined live count never crosses 4.
-seats = BUILD / "seats-2r"; seed_cap(seats, 4)
+#                .seats dir, pool-recorded cap 9; each runner's inherited env
+#                says 4 — the smallest cap the landed validator (est-2ek.1.856,
+#                floor 4) accepts as a stale-small operator value. Old code:
+#                each runner capped at its own 4 (the pool sat under-admitted
+#                despite idle capacity). New code: the pool arbitrates — both
+#                hold PAST their own env and the combined live count never
+#                crosses 9. Demand is 5 + 5 = pool cap + 1: maximum pressure
+#                with no mutual-starvation state (each partial hold leaves a
+#                seat free), so both runners always finish.
+seats = BUILD / "seats-2r"; seed_cap(seats, 9)
 repA, repB = BUILD / "2r-A.jsonl", BUILD / "2r-B.jsonl"
 gate = str(BUILD / "gate1")
-pA = run_child(seats, "A2R", "holdN", 3, 2.0, 10, repA,
-               env_extra={"WORKFLOW_MAX_SEATS": "2"}, gate=gate)
-pB = run_child(seats, "B2R", "holdN", 2, 1.5, 10, repB,
-               env_extra={"WORKFLOW_MAX_SEATS": "1"}, gate=gate)
+pA = run_child(seats, "A2R", "holdN", 5, 2.0, 10, repA,
+               env_extra={"WORKFLOW_MAX_SEATS": "4"}, gate=gate)
+pB = run_child(seats, "B2R", "holdN", 5, 1.5, 10, repB,
+               env_extra={"WORKFLOW_MAX_SEATS": "4"}, gate=gate)
 until = threading.Event(); samples = []
 obs = observer(seats, until, samples)
 time.sleep(0.05); Path(gate).write_text("go")
@@ -217,12 +221,12 @@ rcA, rcB = pA.wait(60), pB.wait(60)
 until.set(); obs.join(5)
 a_rows, b_rows = read_rows(repA), read_rows(repB)
 a_peak, b_peak = peak_k(a_rows), peak_k(b_rows)
-check("runner A (env=2) reached 3 live tickets — the inherited env no longer caps admission",
-      a_peak >= 3, f"peak={a_peak} rows={a_rows}")
-check("runner B (env=1, nested-stale shape) reached 2 live tickets",
-      b_peak >= 2, f"peak={b_peak} rows={b_rows}")
-check("TWO-RUNNER combined live tickets never crossed the pool cap of 4",
-      max(samples) <= 4, f"observed max live={max(samples)}")
+check("runner A (env=4) reached 5 live tickets — the inherited env no longer caps admission",
+      a_peak >= 5, f"peak={a_peak} rows={a_rows}")
+check("runner B (env=4, nested-stale shape) reached 5 live tickets",
+      b_peak >= 5, f"peak={b_peak} rows={b_rows}")
+check("TWO-RUNNER combined live tickets never crossed the pool cap of 9",
+      max(samples) <= 9, f"observed max live={max(samples)}")
 check("clean hand-back — no stray tickets after both runners exited",
       len(list(seats.glob("*.json"))) == 0)
 
