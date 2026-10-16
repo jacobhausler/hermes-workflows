@@ -26,7 +26,7 @@ amend_preview = _common.amend_preview
 quote_json_parse_error = _common.quote_json_parse_error
 kind = _common.kind   # the door consults the ONE node-kind table (wfcommon.NODE_TYPES) via this
 
-# #157: card enforcement — bind our OWN wfcommon (never a sys.path sibling).
+# #157: card enforcement + ledger — bind our OWN modules (never a sys.path sibling).
 _ce_spec = importlib.util.spec_from_file_location("_hermes_workflows_card_enforcement",
                                                   Path(__file__).resolve().parent / "card_enforcement.py")
 assert _ce_spec is not None and _ce_spec.loader is not None
@@ -2433,7 +2433,12 @@ def _card(rid):
 
 # #157: ONE card grammar — the enforcement module ships exactly what the tool
 # result carries, injected here rather than duplicated there.
-_card_enforcement.bind(_common, _card)
+_cl_spec = importlib.util.spec_from_file_location("_hermes_workflows_card_ledger",
+                                                  Path(__file__).resolve().parent / "card_ledger.py")
+_card_ledger = importlib.util.module_from_spec(_cl_spec)
+_cl_spec.loader.exec_module(_card_ledger)
+_card_ledger.bind(_common.runs_root)
+_card_enforcement.bind(_card_ledger, _card)
 
 
 def _lifecycle_notice(rid):
@@ -4481,7 +4486,7 @@ def register(ctx):
     # ctx._abandon_load() and every later register_* is silently ignored.
     # Keep this body cheap and non-blocking: measured ~0.1s import, register()
     # < 1ms — one cached config read (model_tiers) and in-memory registrations,
-    # no subprocess/network/run-dir scan (card_enforcement's module exec is
+    # no subprocess/network/run-dir scan (card_enforcement's/card_ledger's module exec is
     # defs only; its I/O runs at hook time). Never pass override=True to
     # register_tool: it is operator-gated (PluginToolOverrideError). Pinned by
     # tests/test_hook_abandon_safety.py.
@@ -4495,8 +4500,11 @@ def register(ctx):
             " — pick per node by how hard the step is. "
             "Unset = seat default. run echoes the resolved {node: model} table.")
     ctx.register_tool(name="workflow", toolset="workflows", schema=WORKFLOW_SCHEMA, handler=handle)
-    # #157: last-resort card shipper (core fires this once per turn before the
-    # assistant row persists; fail-open, marker-ledgered — see card_enforcement.py).
+    # Hook-led card ledger (card_ledger.py): post_tool_call records workflow
+    # launches, pre_llm_call reminds, transform_llm_output ships (#157) — all
+    # fail-open, no run-dir scan.
+    ctx.register_hook("post_tool_call", _card_enforcement._post_tool_call)
+    ctx.register_hook("pre_llm_call", _card_enforcement._pre_llm_call)
     ctx.register_hook("transform_llm_output", _card_enforcement._card_hook)
     # PR-3: both default-off (flags read at call time); a core without the hook just ignores.
     for _hook, _fn in (("post_gateway_admission", _admission_handler),

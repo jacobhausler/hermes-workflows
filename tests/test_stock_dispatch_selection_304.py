@@ -111,6 +111,7 @@ class StockDispatchSelection(unittest.TestCase):
         self.hw.register(self.ctx)
         self.hook = self.ctx.hooks["transform_llm_output"]
         self.runs = Path(os.environ["WF_RUNS_ROOT"])
+        self.runs.mkdir(parents=True, exist_ok=True)
         self.assertIsNone(self.ce._witness, "shipped default: no witness seam bound")
 
     def tearDown(self):
@@ -118,19 +119,14 @@ class StockDispatchSelection(unittest.TestCase):
         self.home.cleanup()
 
     def mk_run(self, rid, sid="S"):
-        r = self.runs / rid
-        (r / "nodes").mkdir(parents=True)
-        started = (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat(timespec="seconds")
-        (r / "run.json").write_text(json.dumps(
-            {"name": "t", "started": started, "owner": {"session_id": sid}}))
-        return r
+        """Owe a card: the launch hook's ledger row (no run dir is ever scanned)."""
+        self.hw._card_ledger.add(sid, rid, "t")
+        return rid
 
-    def markers(self, r):
-        p = r / "events.jsonl"
-        if not p.exists():
-            return 0
-        return sum(1 for ln in p.read_text().splitlines()
-                   if ln.strip() and json.loads(ln).get("event") == "card.echoed")
+    def markers(self, rid):
+        """1 once the card's ledger entry is dropped (shipped), 0 while still owed."""
+        owed = [r for r, _ in self.hw._card_ledger.entries("S")]
+        return 0 if rid in owed else 1
 
     def fire(self, turn, text="All done."):
         return self.hook(response_text=text, session_id="S", turn_id=turn,

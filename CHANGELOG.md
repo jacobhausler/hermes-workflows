@@ -523,6 +523,8 @@ Detailed entries (Unreleased work folded in):
   never eaten. The model's paste stays the primary path; `desktop/plugin.js`
   is untouched (no tool-result render slot exists in the plugin SDK — the
   render-from-record half of #157-A is desktop/core work).
+  Discovery half superseded: the runs-root scan, the dedupe census and the `card_window_minutes`
+  knob are replaced by the hook-led pending ledger (`card_ledger.py`; see references/operations.md).
 
 - #166c — the scrub audit's suffix set covers every shipped text shape: .yml and
   .txt joined AUDIT_SUFFIXES (the shipped ci.yml exported forbidden lines with

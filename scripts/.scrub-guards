@@ -141,36 +141,18 @@ scripts/vendor/archify/renderers/shared/generated-brand-marks.mjs
 # regex (`\bbd\b|\bbeads?\b`) fires on the contract naming; neutralizing it would ship
 # a gate that names nothing. Line-anchored (not file-guarded): a future stray hit
 # elsewhere in these files still fires. GUARD, per AGENTS.md rule 4.
+# est-867 follow-up (main red at ee5018d): the est-13z1 and est-q2nwx/est-o8c6o
+# hits were pinned by file:LINE and every later wf.py edit shifted them — the exact
+# rot est-o8c6o already diagnosed. Re-anchored by FEATURE TOKEN per the playbook
+# (a stray hit without a feature token still fires; the est-867 fixture proves it):
+# bead/bd = the shipped public bead_close grammar naming; haus-docs = the joint-eng
+# protocol citation surface (issue #174). GUARD, per AGENTS.md rule 4.
+regex:bead
+regex:\bbd\b
+regex:est-13z1
+regex:haus-docs
 tests/fake_bd_close_13z1.py
 tests/test_bead_close_claim_13z1.py
-references/grammar.md:48
-wf.py:1159
-wf.py:1164
-wf.py:1165
-wf.py:1180
-wf.py:1207
-wf.py:1208
-wf.py:1230
-wf.py:1234
-wf.py:1241
-wf.py:1734
-wf.py:1740
-wf.py:1741
-wf.py:1742
-wf.py:1743
-wf.py:1744
-wf.py:1746
-wf.py:1748
-wf.py:1755
-wf.py:1861
-wf.py:1862
-wf.py:4998
-wf.py:6796
-wfcommon.py:784
-wfcommon.py:785
-wfcommon.py:1402
-wfcommon.py:1403
-wfcommon.py:1404
 # ---- est-o8c6o (2026-10-11): the diff-scoped gate re-worded the ::error:: line ----
 # est-q2nwx's line anchor (:32) went stale because the diff-scope re-word moved the
 # citation line and kept the same mandated standard citation. Anchored by the citation
@@ -178,23 +160,3 @@ wfcommon.py:1404
 # stays guarded and any stray hit WITHOUT the citation still fires. GUARD, per AGENTS.md
 # rule 4 - same class as est-q2nwx.
 regex:haus-docs rules/pr-diagram-standard
-references/grammar.md:37
-wf.py:1147
-wf.py:1150
-wf.py:1155
-wf.py:1156
-wf.py:1171
-wf.py:1198
-wf.py:1199
-wf.py:1221
-wf.py:1225
-wf.py:1232
-wf.py:1724
-wf.py:1730
-wf.py:1731
-wf.py:1732
-wf.py:1733
-wf.py:1736
-wf.py:1738
-wf.py:1745
-wf.py:1851

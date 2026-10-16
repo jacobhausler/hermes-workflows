@@ -79,6 +79,7 @@ INCLUDE_FILES = (
     "README.md",
     "SKILL.md",
     "__init__.py",
+    "card_ledger.py",  # imported by __init__.py at bind time (hook-led card ledger)
     "gate_index.py",  # PR-3: imported by __init__.py at bind time
     "docs/admission-gates.md",
     "card_enforcement.py",  # #157: imported by __init__.py at bind time — a packaged plugin without it dies at import
