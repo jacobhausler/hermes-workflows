@@ -5467,6 +5467,27 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
     # default cwd from $TERMINAL_CWD, which dict(os.environ, ...) inherits from the
     # host. Pin it so a terminal call with no workdir lands in the node's workspace.
     env["TERMINAL_CWD"] = wd
+    # est-mg5o2 (spawn half of the launch-path fix): the seat cap is AUTHORITATIVE
+    # AT SPAWN. A long-lived runner inherits its launcher's WORKFLOW_MAX_SEATS —
+    # a gateway booted before the operator set the .env knob hands every nested
+    # child a stale cap, and seat_max_seats precedence (env > .env) then makes
+    # that child arbitrate against the STALE inheritance instead of the fresh
+    # env-file read est-gxjh6 added (measured: estate pool held 6/12 at an
+    # 8-squad launch under WORKFLOW_MAX_SEATS=12 in .env, "zero to ONE requests
+    # at once"). So a child's env never rides the parent's inherited key: an
+    # env-file value OVERWRITES it, and with no env-file value the key is
+    # STRIPPED so the child resolves fresh (config workflows.max_seats / default)
+    # — inheritance can never shadow the pool knob in a nested runner. The
+    # documented local-disable sentinel "0" deliberately keeps riding: it only
+    # disables the semaphore locally and never arbitrates (est-2ek.1.856 law);
+    # stripping it would silently flip nested runners from disabled to capped.
+    # The routed branch below already forwards neither (keep-set excludes the
+    # key), so delegated children always resolved from their own env files.
+    _cap_fresh = _seat_cap_from_env_files()
+    if _cap_fresh is not None:
+        env["WORKFLOW_MAX_SEATS"] = str(_cap_fresh)
+    elif env.get("WORKFLOW_MAX_SEATS") != "0":
+        env.pop("WORKFLOW_MAX_SEATS", None)
     if route:
         # Delegation is not isolation. The target's -p resolves against the common
         # root, never the launcher's named-profile home. Do not forward launcher
