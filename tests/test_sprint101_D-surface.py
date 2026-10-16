@@ -95,15 +95,20 @@ try:
                 "_visible_cards", "_LAUNCHED", "_HELD", "_HELD_TTL_SECONDS",
                 "_LAUNCH_LOCK", "_VISIBLE_CARD_RE", "_CARD_ATTR_RE"):
         check(f"symbol {sym} no longer exists on the door", not hasattr(door, sym))
-    # The card ledger owns exactly THREE hooks (post_tool_call records launches,
-    # pre_llm_call reminds, transform_llm_output ships); PR-3 adds exactly one more call
-    # site: the flag-gated (default-off) admission/witness loop. The O1 law still holds for
-    # the deleted auto-card machine: no other hook.
-    check("register_hook sites: the three card-ledger hooks + the PR-3 default-off admission/witness loop",
-          src.count("register_hook") == 4
-          and all(f'register_hook("{h}"' in src
-                  for h in ("post_tool_call", "pre_llm_call", "transform_llm_output"))
-          and 'for _hook, _fn in (("post_gateway_admission", _admission_handler),' in src)
+    # #157 re-armed the card-enforcement last-resort shipper; the O1 law for the
+    # deleted auto-card machine is now held STRUCTURALLY, not by a pinned literal
+    # count (a count==N law dies the moment a second deliberately gated hook lands —
+    # the hooks batch adds config-gated ones): the card hook is present, the auto-card
+    # machine's own hook (on_session_end) stays dead, and no hook name is registered
+    # twice. Gated additions each carry their own allow-list test in their lane.
+    _re = __import__("re")
+    _hk = _re.findall(r"""ctx\.register_hook\(\s*['"]([A-Za-z0-9_]+)['"]""", src)
+    check("#157 card-enforcement hook still registered", "transform_llm_output" in _hk)
+    check("deleted auto-card hook on_session_end stays dead", "on_session_end" not in _hk)
+    check("no hook name is registered twice", len(_hk) == len(set(_hk)))
+    _needles = ['register_hook("' + _h + '"' for _h in ("post_tool_call", "pre_llm_call", "transform_llm_output")]
+    check("card-ledger hooks all present", all(_n in src for _n in _needles))
+    check("PR-3 admission/witness loop present", 'for _hook, _fn in (("post_gateway_admission", _admission_handler),' in src)
 finally:
     door._spawn_runner = _orig_spawn
     shutil.rmtree(HOME, ignore_errors=True)

@@ -4478,5 +4478,21 @@ def register(ctx):
             ctx.register_hook(_hook, _fn)
         except Exception:
             pass
+    # P3: subagent accounting — DEFAULT OFF; registers only when settings.hooks_allow
+    # lists 'subagent_accounting' (fail-closed gate). Harvest law, spool path (the
+    # interface), and honest coverage live in subagent_accounting.py. Cost: one module
+    # exec + one cached settings read — far inside the load deadline above.
+    try:
+        _sa_spec = importlib.util.spec_from_file_location(
+            "_hermes_workflows_subagent_accounting", HERE / "subagent_accounting.py")
+        if _sa_spec is None or _sa_spec.loader is None:
+            raise RuntimeError("subagent_accounting.py not loadable")
+        _subagent_accounting = importlib.util.module_from_spec(_sa_spec)
+        _sa_spec.loader.exec_module(_subagent_accounting)
+        _subagent_accounting.bind(_common)
+        if _subagent_accounting.enabled():
+            ctx.register_hook("subagent_stop", _subagent_accounting.harvest)
+    except Exception:
+        pass  # fail-open: accounting absent, plugin intact
     ctx.register_command("wf", _wf_command, description="Workflow library: `/wf` lists, `/wf <name> [note]` replays a shelved graph",
                          args_hint="[name] [note]", argument_mode="text")
