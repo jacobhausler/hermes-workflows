@@ -69,6 +69,8 @@ admission_ledger_errors = wfcommon.admission_ledger_errors   # #85: artifact-adm
 FP_RULE_VERSION = wfcommon.FP_RULE_VERSION
 record_efp_valid = wfcommon.record_efp_valid
 seat_forbidden_models = wfcommon.seat_forbidden_models
+seat_max_seats = wfcommon.seat_max_seats
+SeatCapError = wfcommon.SeatCapError
 runs_root = wfcommon.runs_root
 hermes_root = wfcommon.hermes_root
 profile_home = wfcommon.profile_home
@@ -1023,32 +1025,130 @@ def _reacquire_terminal_lock(run):
     return True
 
 
+def _proc_boottime_of(pid):
+    """Kernel boottime (field 22) of a pid — the lease identity that survives pid
+    reuse. Reuses _proc_boottime (defined below the seat law); None on any read
+    failure — the lease then degrades to pid-only, never to a fake number."""
+    try:
+        return _proc_boottime(pid)
+    except Exception:
+        return None
+
+def _lease_heartbeat(run):
+    """#44: the admitted holder re-stamps runner.lease['at'] (atomic replace).
+    A live holder MUST heartbeat; the read model only ever calls a lease DEAD
+    when the stamp is older than LEASE_STALE_S and the pid identity fails — so
+    a cross-mount sibling (whose /proc/locks row may be invisible to us) stays
+    LIVE through its own bytes, exactly as the 91b9a3de law demands."""
+    try:
+        rec = jload(run / wfcommon.RUNNER_LEASE, {}) or {}
+        if rec.get("pid") != os.getpid():
+            return                                   # someone else owns the lease now
+        rec["at"] = time.time()
+        tmp = run / f"{wfcommon.RUNNER_LEASE}.{os.getpid()}.tmp"
+        tmp.write_text(json.dumps(rec))
+        os.replace(tmp, run / wfcommon.RUNNER_LEASE)  # atomic publish
+    except OSError:
+        pass                                          # legibility, never fatal
+
+def _write_lease(run):
+    """Admission-side lease stamp: pid + kernel boottime + heartbeat clock."""
+    try:
+        rec = {"pid": os.getpid(), "boottime": _proc_boottime_of(os.getpid()),
+               "at": time.time()}
+        tmp = run / f"{wfcommon.RUNNER_LEASE}.{os.getpid()}.tmp"
+        tmp.write_text(json.dumps(rec))
+        os.replace(tmp, run / wfcommon.RUNNER_LEASE)  # atomic publish
+    except OSError:
+        pass
+
 def acquire_lock(run):
     """Single-runner admission. An advisory flock held for the process lifetime IS
     the ownership proof: the kernel drops it on ANY exit (clean, SIGKILL, crash),
     so there is no stale-file window, no read-empty-pid-then-unlink race, no
-    retry fall-through without proof. Lockfile content is informational only."""
+    retry fall-through without proof. Lockfile content is informational only.
+
+    #44 — admission vs an operator heal, closed WITHOUT taxing the A1 µs budget:
+      * The heal-barrier (runner.lock.heal) is honored when it EXISTS (a heal in
+        progress serializes us out) but never CREATED here — creating a new inode
+        costs ~10ms on the overlayfs and would push admission past the transient
+        probe window the A1 bounded-retry pins (measured: 10.7ms barrier-open ate
+        the 12ms window; only the first create pays, existing opens are ~0.2ms).
+      * The stranded-replace race (a heal renames the path between our open and
+        our flock) closes ATOMICALLY instead of by pre-locking: after winning the
+        flock we compare os.fstat(fd) against os.stat(lock path) — a rename under
+        us shows a different inode at the path, the flock we hold is on the
+        stranded corpse, and we release and RETRY the whole admission (bounded
+        3 rounds). A holder is never displaced: the orphan keeps the old inode,
+        the fresh path is lockable — the field itself proves a new file locks.
+      * Lease: the winner stamps pid + kernel boottime + heartbeat; a heartbeat
+        thread keeps 'at' fresh while the process lives. The read model calls a
+        lease dead ONLY when both proofs fail (pid invisible AND heartbeat stale,
+        or boottime mismatch = kernel-proven pid reuse)."""
     global _LOCK_FD
     lk = run / "runner.lock"
-    fd = os.open(lk, os.O_CREAT | os.O_RDWR, 0o644)
-    # A1 (91b9a3de review, 09-29): the read-only liveness probe fleet-wide takes
-    # LOCK_EX for ~8µs and releases; an admission landing inside that window is
-    # microsecond collision with a PROBE, not contention with a real runner.
-    # Bounded LOCK_NB retry (3 × 10ms) before declaring WORKFLOW_BUSY — a genuine
-    # holder never releases, so the honest exit still comes after ~30ms.
-    for _ in range(3):
+    for _stranded_retry in range(3):
+        # #44 barrier (honor-if-present, never create — see docstring). EACCES or
+        # any failure of the barrier itself is fail-OPEN: admission proceeds
+        # exactly as the base law (a weird barrier file must not lose a lane it
+        # used to win; the atomic same-inode check below is the safety net).
+        barrier_fd = None
         try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            break
+            barrier_fd = os.open(str(run / "runner.lock.heal"), os.O_RDWR)
+            fcntl.flock(barrier_fd, fcntl.LOCK_EX)
         except OSError:
-            time.sleep(0.01)
-    else:
-        os.close(fd)
-        emit(f"WORKFLOW_BUSY {run.name} (another runner holds the flock)")
-        sys.exit(0)
-    os.ftruncate(fd, 0)
-    os.write(fd, str(os.getpid()).encode())
-    _LOCK_FD = fd  # never closed; exit releases
+            if barrier_fd is not None:
+                try: os.close(barrier_fd)
+                except OSError: pass
+                barrier_fd = None
+        try:
+            fd = os.open(lk, os.O_CREAT | os.O_RDWR, 0o644)
+            # A1 (91b9a3de review, 09-29): the read-only liveness probe fleet-wide
+            # takes LOCK_EX for ~8µs and releases; an admission landing inside that
+            # window is microsecond collision with a PROBE, not contention with a
+            # real runner. Bounded LOCK_NB retry (3 × 10ms) before declaring
+            # WORKFLOW_BUSY — a genuine holder never releases, so the honest exit
+            # still comes after ~30ms.
+            for _ in range(3):
+                try:
+                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except OSError:
+                    time.sleep(0.01)
+            else:
+                os.close(fd)
+                emit(f"WORKFLOW_BUSY {run.name} (another runner holds the flock)")
+                sys.exit(0)
+            # #44 B2 atomic re-verification under our OWN fd: the flock above is
+            # only ownership of the inode it names. If the path now resolves to a
+            # different inode, a heal replaced the lane between our open and our
+            # win — our fd is a corpse. Release, re-loop; bounded 3 rounds, then
+            # the honest exit (a churn-loop is a bug elsewhere, not a lock win).
+            try:
+                path_ino = os.stat(lk)
+                ours = os.fstat(fd)
+                same = (path_ino.st_dev, path_ino.st_ino) == (ours.st_dev, ours.st_ino)
+            except OSError:
+                same = False
+            if same:
+                os.ftruncate(fd, 0)
+                os.write(fd, str(os.getpid()).encode())
+                _LOCK_FD = fd  # never closed; exit releases
+                _write_lease(run)   # #44: identity the read model can verify
+                return
+            try:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+            except OSError:
+                pass
+            os.close(fd)
+        finally:
+            if barrier_fd is not None:
+                try: fcntl.flock(barrier_fd, fcntl.LOCK_UN)
+                except OSError: pass
+                try: os.close(barrier_fd)
+                except OSError: pass
+    emit(f"WORKFLOW_BUSY {run.name} (lock path churning under admission)")
+    sys.exit(0)
 
 _READY_FD_ENV = "HERMES_WF_READY_FD"  # #8: inheritable announce pipe fd, door -> runner
 
@@ -1150,6 +1250,101 @@ def _effect_gate(run, node, rec):
                "error_class": "effect_receipt",
                "effect_receipts": proven,
                **({"metrics": rec["metrics"]} if external else {}),
+               "output": rec.get("output"), "ms": rec.get("ms")}
+    return rec
+
+# ---------- bead-close read-back gate (est-13z1) ----------
+# The incident (run 20261008-013428-ra-pr-deep-283, node reconcile): the child's
+# answer claimed "est-o90l closed"; the node committed done, run.done fired, and
+# the bd read-back right after said the bead was still in_progress — an open
+# tracker nobody owns, exactly the false-locator class est-ym08 AC-3 refuses for
+# artifacts. Prompt law cannot fix this (the assignee guard makes an honest-
+# looking false claim easy to emit), so the RUNNER owns the check, same law as
+# the effect-receipt gate above and the lane gate: when a node whose purpose is
+# closing a bead CLAIMS closure, the runner reads the estate store ITSELF
+# (`bd -C <store> show <id> --json`, fixed argv through _aux_run) and records the
+# measured row as `bead_close_receipt`. Anything but an observed
+# status == "closed" demotes done/partial to failed error_class "bead_close" —
+# a proven-fail, deliberately absent from both retry ladders. The runner NEVER
+# fabricates an ok row and NEVER anchors to the child's prose: a reply carrying
+# `close-pending` is the honest non-claim (the lane-child law: return
+# 'close-pending: <reason>' and never claim closure), so no claim, no read, and
+# the record is untouched. Honest degradation: no `bead_close` key = every
+# existing graph byte-identical (golden EMPTY).
+
+_BEAD_PENDING_RE = re.compile(r"close[-_ ]?pending", re.I)
+
+def _declares_close_pending(out):
+    """True when the committed output carries the honest non-claim token —
+    `close-pending` (in any key, in prose, anywhere in the serialized reply).
+    The BEAD LAW tells a blocked child to return 'close-pending: <reason>'
+    and NEVER claim closure: nothing was asserted, so there is nothing to
+    read back — the record stays pristine and the store is never probed."""
+    if out is None:
+        return False
+    try:
+        blob = out if isinstance(out, str) else json.dumps(out, ensure_ascii=False, default=str)
+    except Exception:
+        blob = str(out)
+    return bool(_BEAD_PENDING_RE.search(blob))
+
+def _bead_close_gate(run, node, rec):
+    decl = node.get("bead_close")
+    if not isinstance(decl, dict) or rec.get("status") not in ("done", "partial"):
+        return rec                        # undeclared / non-committing: untouched
+    if _declares_close_pending(rec.get("output")):
+        return rec                        # honest non-claim: no read, record pristine
+    # Declared node committing without the honest escape: the runner verifies
+    # the store ITSELF — whether or not the output claims closure (test_d:
+    # closed-without-claim still PASSes from the read-back; the check anchors
+    # to the store, never to the prose).
+    bid = str(decl.get("id", "")).strip()
+    store = str(decl.get("store", "")).strip()
+    row = {"store": store, "id": bid, "actor": decl.get("actor"),
+           "observed_status": None, "assignee": None, "probe_rc": None, "ok": False}
+    try:
+        # #80 R3 / #61c: the runner's OWN probe goes through _aux_run (registered
+        # pid, bounded, own process group) with the fixed bd read-back argv.
+        p = _aux_run(["bd", "-C", store, "show", bid, "--json"], timeout=10)
+        row["probe_rc"] = p.returncode
+        if p.returncode == 0:
+            found = None
+            try:
+                parsed = json.loads(p.stdout)
+            except Exception:
+                parsed = None
+            rows = parsed if isinstance(parsed, list) else [parsed] if isinstance(parsed, dict) else []
+            for cand in rows:
+                if isinstance(cand, dict) and cand.get("id") == bid:
+                    found = cand
+                    break
+            if found is not None:
+                row["observed_status"] = found.get("status")
+                row["assignee"] = found.get("assignee")
+        if row["observed_status"] == "closed":
+            row["ok"] = True
+            reason = ""
+        elif row["observed_status"] is not None:
+            reason = f"observed status {row['observed_status']!r} in the store"
+        elif row["probe_rc"] == 1:
+            reason = "bead not found in the store (bd exit 1)"
+        elif row["probe_rc"] is None:
+            reason = "store read-back could not run"
+        else:
+            reason = f"store read-back unparseable (bd exit {row['probe_rc']})"
+    except Exception as e:
+        reason = f"store read-back could not run: {type(e).__name__}"
+    rec = dict(rec, bead_close_receipt=row)
+    if not row["ok"]:
+        rec = {"status": "failed",
+               "error": f"bead_close_unproven: {bid}: {reason} — the node's output "
+                        "claims the bead was closed; the runner read the estate "
+                        "store itself and it is not closed (assignee "
+                        f"{row['assignee']!r}). Close it with --actor matching the "
+                        "assignee, or return 'close-pending: <reason>' and never "
+                        "claim closure.",
+               "error_class": "bead_close",
+               "bead_close_receipt": row,
                "output": rec.get("output"), "ms": rec.get("ms")}
     return rec
 
@@ -1636,6 +1831,32 @@ LANE_HYGIENE_LINES = (
 )
 LANE_HYGIENE_TOKEN = LANE_HYGIENE_LINES[0]   # the gate token tests grep for
 
+# est-13z1: the BEAD LAW for drain-wave children — prompt-side ONLY (the runner
+# never trusts it: a claimed closure is read back from the store at the commit
+# edge by _bead_close_gate). Rendered as a GOAL SUFFIX (the goal keeps line 1;
+# nothing from '## Inputs' onward changes), so the fan-out identity law holds.
+# Only nodes carrying a `bead_close` declaration pay the bytes.
+BEAD_LAW_LINES = (
+    "## Bead-close law (machine preamble)",
+    "- A bead is CLOSED only when `bd -C <store> show <id> --json` reads back "
+    "`status: closed` — your prose, the wave summary, or a `bd close` tool result "
+    "are not proof. Read the bead back after closing and paste the read-back.",
+    "- Close with `--actor` matching the bead's current assignee (the dispatching "
+    "bot); a close attempt whose actor differs from the assignee is refused by the "
+    "store's assignee guard. Check `assignee` from `bd show` BEFORE choosing the actor.",
+    "- If you cannot close (guard refused, owner decision, another bot's seat): "
+    "return `close-pending: <reason>` in your answer and NEVER claim the bead was "
+    "closed. The runner reads the store itself at commit — a `closed` claim the "
+    "store contradicts fails the node with error_class `bead_close`.",
+)
+BEAD_LAW_TOKEN = BEAD_LAW_LINES[0]   # the gate token tests grep for
+
+def _bead_law_preamble(node):
+    """BEAD LAW preamble for nodes declaring a `bead_close` (\"\" otherwise).
+    Prompt-side only — never written to graph.json or a node record, so def-hash
+    is neutral; the enforcement is the commit-edge read-back, not these bytes."""
+    return "\n".join(BEAD_LAW_LINES) if isinstance(node.get("bead_close"), dict) else ""
+
 def _is_build_lane(node):
     """The build shape: `shape: "build"` declared, or a `repo:` lane declared (the
     64c6772b lane-gate surface). DEFAULT_SHAPE fills budgets, never this law:
@@ -1737,6 +1958,12 @@ ERROR_CLASSES = frozenset(("provider_400", "unresolved_model", "cap_exhausted",
                            "incomplete_work", "early_death", "cancelled",
                            "schema", "spawn", "inputs",
                            "quorum", "fanout_empty", "crashed", "unknown",
+                           # est-13z1: the node's output claims an estate bead was
+                           # closed; the runner read the store itself (`bd show`)
+                           # and it is NOT closed. A proven-fail like
+                           # effect_receipt/lane_wreckage — never retried, since
+                           # the store says what it says.
+                           "bead_close",
                            # est-byft8: a queued spawn refused at the Popen instant
                            # because an amend/delete moved its effective fingerprint
                            # while it waited for a seat; the wave reloads and re-drives.
@@ -1745,6 +1972,13 @@ ERROR_CLASSES = frozenset(("provider_400", "unresolved_model", "cap_exhausted",
                            # declared lane still carries the dead attempt's
                            # uncommitted TRACKED wreckage — bank it, then re-drive.
                            "lane_wreckage",
+                           # est-2ek.1.856 (B3): the seat-cap knob (WORKFLOW_MAX_SEATS
+                           # env / config workflows.max_seats) named a non-integer or
+                           # a value outside [4, 16]. The door refuses the whole launch
+                           # with it; a runner that sees it flip invalid mid-run fails
+                           # the node with it. Operator input error: never retried,
+                           # never silently defaulted.
+                           "seat_cap",
                            # committed by the seat floor / policy gate
                            # (wf forbidden_model sites) and by unmet input deps
                            # (_fail_precondition). AGENTS.md cites this set as
@@ -2826,6 +3060,39 @@ def _proof_of_life(lp, proc, hb, tree_pids):
 # One ticket file per held seat; the count + create is serialized by an flock on
 # <seats>/.lock. A ticket whose pids are all verifiably dead is pruned at acquire.
 SEATS_DEFAULT = 4
+# est-2ek.1.856 (FIFO): a waiter that finds the semaphore full registers a
+# queue marker under <seats>/queue/ (NOT a ticket — the ticket glob above never
+# sees the subdir). Admission requires `live < cap` AND no strictly-older live
+# marker (order key (enqueued, uuid)); the blind flock poll made first-poller
+# win, so a long-waiting node starved behind a churn of short runs (field
+# report 2026-10-08 12:19Z: accept_probe sat seat.wait 17 min while short-run
+# cron re-launches re-took every freed seat). Markers gate FAIRNESS only — never
+# capacity; the bounded wait + typed seat_wait stay the outer bound.
+SEAT_QUEUE_DIR = "queue"
+SEAT_QUEUE_HB_S = 0.5      # own-marker heartbeat refresh cadence
+SEAT_QUEUE_LIVE_S = 8.0    # a marker is a live waiter while pid lives AND hb is this fresh
+SEAT_QUEUE_PRUNE_S = 20.0  # owner liveness has failed this long -> marker pruned (reconfirmed)
+
+def _seat_prune_ledger(seats, kind, name, row, reason):
+    """est-2ek.1.857: dropping someone else's ticket/marker is LOUD. Every
+    external unlink appends one line to <seats>/.pruned.jsonl (ts, pruner pid,
+    kind, ticket name, row snapshot, reason) — the 857 field report was
+    undebuggable precisely because the prune was silent. Best-effort: a ledger
+    failure never blocks admission; the file rotates once at ~1 MiB."""
+    try:
+        p = Path(seats) / ".pruned.jsonl"
+        try:
+            if p.exists() and p.stat().st_size > 1_048_576:
+                os.replace(p, Path(str(p) + ".1"))
+        except OSError:
+            pass
+        rec = {"ts": round(time.time(), 3), "pruner": os.getpid(),
+               "kind": kind, "ticket": name, "reason": reason,
+               "row": row if isinstance(row, dict) else str(row)[:400]}
+        with open(p, "a", encoding="utf-8") as f:
+            f.write(json.dumps(rec, default=str) + "\n")
+    except OSError:
+        pass
 
 def _seat_cap_from_env_files():
     """Operator-set WORKFLOW_MAX_SEATS from the Hermes .env files (est-gxjh6).
@@ -2871,20 +3138,17 @@ def _seat_cap_from_env_files():
     return None
 
 def _max_seats(meta):
-    v = meta.get("max_seats")
-    if isinstance(v, int) and not isinstance(v, bool):
-        return v
-    try:                                            # explicit env wins (export/CLI shape)
-        e = os.environ.get("WORKFLOW_MAX_SEATS")
-        if e is not None:
-            return int(e)
-    except ValueError:
-        pass
-    f = _seat_cap_from_env_files()                  # else read the .env fresh (est-gxjh6)
-    if f is not None:
-        return f
-    return SEATS_DEFAULT
-
+    # est-2ek.1.856: the operator knobs (WORKFLOW_MAX_SEATS env, config
+    # workflows.max_seats) are validated in ONE place — wfcommon.seat_max_seats
+    # (floor/ceiling + the typed SeatCapError), resolved at every call so a
+    # config change takes effect on the next node, same law as the seat model
+    # floor. An invalid value RAISES here; the spawn path fails it closed as
+    # error_class=seat_cap, it is never a silent SEATS_DEFAULT. The explicit
+    # per-run meta max_seats (the door's knob, 0 disables) still wins untouched.
+    return seat_max_seats(meta.get("max_seats")
+                          if isinstance(meta.get("max_seats"), int)
+                          and not isinstance(meta.get("max_seats"), bool) else None,
+                          dotenv_reader=_seat_cap_from_env_files)
 def _seats_dir():
     d = os.environ.get("WF_SEATS_DIR", "")
     return Path(d) if d else runs_root() / ".seats"
@@ -2939,8 +3203,14 @@ def _seat_live_tickets(seats, anc=()):
     same _seat_holder_live test (alive + boottime equal, #80). A contradicted
     (recycled) child boottime is a stranger wearing the ancestor's pid: no
     lend, the ticket counts. A live runner holder keeps the ticket occupied, so
-    a stale child pin must never buy a capacity exemption."""
+    a stale child pin must never buy a capacity exemption.
+    est-2ek.1.857 (over-admit): a SINGLE death verdict is never load-bearing.
+    Candidates for pruning are re-confirmed after a short settle (the same
+    liveness law, re-run); any holder that reconfirms alive keeps its ticket
+    AND counts as live (an unconfirmed verdict is unknown, and unknown is
+    never undercounted). Every external unlink is logged to .pruned.jsonl."""
     live = 0
+    doomed = []            # (ticket_path, row|None, holders) — first-pass dead
     for t in seats.glob("*.json"):
         try:
             row = json.loads(t.read_text())
@@ -2957,13 +3227,28 @@ def _seat_live_tickets(seats, anc=()):
             live += 1  # unreadable: uncertain capacity, kept and counted
             continue
         if not any(_seat_holder_live(p, b) for p, b in holders):
-            try: t.unlink()
-            except OSError: pass
+            doomed.append((t, row, holders))     # est-857: not yet — reconfirm
             continue
         if (child is not None and anc is not None and len(holders) > 1
                 and child in anc and _seat_holder_live(child, child_bt)):
             continue   # lent: the SAME proven-live child sits in our ancestry
         live += 1
+    if doomed:
+        # One settle, then re-run the identical law over every candidate. A
+        # holder that flips back to alive at reconfirmation was a transient
+        # mis-sample (the 857 shape: LIVE tickets unlinked wholesale, cap void):
+        # keep the ticket and count it. Only a candidate dead on BOTH passes is
+        # pruned — loudly.
+        time.sleep(0.05)
+        for t, row, holders in doomed:
+            if any(_seat_holder_live(p, b) for p, b in holders):
+                live += 1                        # mis-sample: never drop a live seat
+                continue
+            try:
+                t.unlink()
+                _seat_prune_ledger(seats, "ticket", t.name, row, "holders-dead-2of2")
+            except OSError:
+                pass
     return live
 
 # est-g255 P255-5: the semaphore is full and this process's ancestry cannot be
@@ -2972,6 +3257,136 @@ def _seat_live_tickets(seats, anc=()):
 # silently burning the whole bounded wait as if the cap were merely busy.
 _SEAT_UNSUPPORTED = object()
 SEAT_LOCK_POLL_S = 0.02
+
+def _seat_queue_register(own, name, enq, uid):
+    """est-2ek.1.856: create (once) this waiter's queue marker under <seats>/
+    queue/. Call-site holds the .lock flock, so marker creation is linearizable
+    with the count + ticket write. `enq` is the waiter's arrival time (stable
+    across retries); (enqueued, uuid) is its queue position."""
+    try:
+        own.parent.mkdir(parents=True, exist_ok=True)
+        if own.is_file():
+            return True
+        tmp = own.with_name(own.name + ".tmp")
+        tmp.write_text(json.dumps({"pid": os.getpid(),
+                                   "boottime": _proc_boottime(os.getpid()),
+                                   "uuid": uid, "name": str(name),
+                                   "enqueued": round(enq, 3),
+                                   "ts": round(time.time(), 3),
+                                   "hb": round(time.time(), 3)}))
+        os.replace(tmp, own)
+        return True
+    except OSError:
+        return False
+
+def _seat_queue_beat(own, last_hb):
+    """Refresh the own-marker heartbeat at ~SEAT_QUEUE_HB_S cadence (best
+    effort — an owner whose marker vanished re-registers next loop)."""
+    now_s = time.time()
+    if now_s - last_hb < SEAT_QUEUE_HB_S:
+        return last_hb
+    try:
+        row = json.loads(own.read_text())
+        row["hb"] = round(now_s, 3)
+        tmp = own.with_name(own.name + ".tmp")
+        tmp.write_text(json.dumps(row))
+        os.replace(tmp, own)
+    except (OSError, ValueError):
+        pass
+    return now_s
+
+def _seat_queue_remove(own):
+    """A waiter removes its OWN marker at admit/expiry/abort — never another's
+    (that path is _seat_queue_prune, reconfirmed and ledgered)."""
+    try:
+        own.unlink()
+    except OSError:
+        pass
+
+def _seat_queue_scan(seats, own, my_key, anc, now_s):
+    """(older_live, prune_candidates) for one admission decision. `older_live`
+    is True when a LIVE marker exists whose (enqueued, uuid) is strictly older
+    than mine — the queue is the arbiter, the flock-poll race is not. An
+    unreadable marker is uncertain capacity: it blocks until its mtime ages
+    past SEAT_QUEUE_PRUNE_S (never a silently-dropped fairness claim). A dead
+    owner or a heartbeat older than SEAT_QUEUE_PRUNE_S (a wedged waiter cannot
+    wedge the queue forever) is a prune CANDIDATE — the caller reconfirms and
+    logs. A marker owned by an ANCESTOR of this process is lent, never
+    blocking (same law as _seat_live_tickets, est-g255 P255-5)."""
+    qd = seats / SEAT_QUEUE_DIR
+    older, cands = False, []
+    try:
+        markers = sorted(qd.glob("*.json"))
+    except OSError:
+        return False, []
+    for m in markers:
+        if m == own:
+            continue
+        try:
+            row = json.loads(m.read_text())
+            opid = int(row["pid"])
+            enq = float(row.get("enqueued", row.get("ts", 0)))
+            uid = str(row.get("uuid") or m.name)
+        except FileNotFoundError:
+            continue
+        except (OSError, ValueError, TypeError, AttributeError, KeyError):
+            try:
+                mt = m.stat().st_mtime
+            except OSError:
+                continue
+            if now_s - mt > SEAT_QUEUE_PRUNE_S:
+                cands.append((m, None, None, "corrupt"))
+            else:
+                older = True                      # unreadable: cannot rule out older
+            continue
+        if anc is not None and opid in anc:
+            continue                              # lent: our own ancestry is waiting on us
+        try:
+            hb = row.get("hb")
+            hb = float(hb) if isinstance(hb, (int, float)) else m.stat().st_mtime
+        except OSError:
+            continue
+        alive_owner = _proc_alive(opid)
+        if alive_owner and (now_s - hb) <= SEAT_QUEUE_LIVE_S:
+            if (enq, uid) < my_key:
+                older = True
+        elif not alive_owner or (now_s - hb) > SEAT_QUEUE_PRUNE_S:
+            cands.append((m, row, opid,
+                          "dead-owner" if not alive_owner else "hb-stale"))
+        # else: alive owner with an aging heartbeat (between LIVE_S and PRUNE_S)
+        # — neither blocking nor prunable yet; it self-heals at both bounds.
+    return older, cands
+
+def _seat_queue_prune(seats, cands):
+    """est-2ek.1.857 law for markers too: a single death verdict never deletes
+    anyone's claim. Re-run the liveness check after a settle; a candidate whose
+    owner reconfirms alive (or whose heartbeat refreshed) is kept. Pruned
+    markers land in the .pruned.jsonl ledger — loud."""
+    if not cands:
+        return
+    time.sleep(0.05)
+    for m, row, opid, kind in cands:
+        try:
+            row2 = json.loads(m.read_text())
+        except Exception:
+            row2 = row
+        if kind == "dead-owner":
+            if opid is None or _proc_alive(opid):
+                continue                          # mis-sample or corrupt-row revived: keep
+        elif kind in ("hb-stale", "corrupt"):
+            try:
+                hb2 = (row2 or {}).get("hb")
+                hb2 = (float(hb2) if isinstance(hb2, (int, float))
+                       else (row2 or {}).get("ts") or m.stat().st_mtime)
+            except OSError:
+                continue                          # vanished: nothing to prune
+            if time.time() - hb2 <= SEAT_QUEUE_PRUNE_S:
+                continue                          # heartbeat refreshed: real waiter
+        try:
+            m.unlink()
+            _seat_prune_ledger(seats, "queue-marker", m.name, row2, kind)
+        except OSError:
+            pass
 
 def _seat_acquire(seats, name, cap, bounded_s, on_wait=None, abort=None,
                   admit_lock=None):
@@ -2992,7 +3407,13 @@ def _seat_acquire(seats, name, cap, bounded_s, on_wait=None, abort=None,
     est-g255 r3 (zap probes: parent-admit-lock-probes.json): a bare
     `with admit_lock:` blocked on Lock.acquire() past bounded_s and past an
     abort; the acquisition is now a poll of admit_lock.acquire(timeout=...)
-    that checks _out() between tries, mirroring the non-blocking flock poll."""
+    that checks _out() between tries, mirroring the non-blocking flock poll.
+    est-2ek.1.856 (FIFO): first-poller-wins starved long waiters behind
+    short-run churn. A waiter that finds the door shut registers a queue
+    marker; admission then requires live < cap AND no strictly-older live
+    marker (order key (enqueued, uuid)). Markers gate fairness only — never
+    capacity; the own marker is removed at every exit (admit, expiry, abort,
+    unsupported) under the same under-lock recheck contract as tickets."""
     seats = Path(seats)
     seats.mkdir(parents=True, exist_ok=True)
     if cap is None or cap <= 0:
@@ -3003,75 +3424,96 @@ def _seat_acquire(seats, name, cap, bounded_s, on_wait=None, abort=None,
     anc = _ancestors()                      # fixed for this process's life
     waited = False
     safe = re.sub(r"[^A-Za-z0-9_.-]", "_", str(name))[:60]
-    while True:
-        # est-g255 r2 R1: the cancel-setter synchronizes on admit_lock BEFORE
-        # setting its Event (see the fan-out's _cancel_stragglers), so holding
-        # it here — then rechecking abort() under it AND the .lock flock —
-        # makes ticket creation atomic against a cancel landing at any earlier
-        # moment: either the setter won (abort True under our recheck -> no
-        # ticket) or the ticket exists and the setter's scan sees this holder.
-        # est-g255 r3: the acquisition itself must honor the same bounded
-        # contract — a bare `with admit_lock:` blocked on Lock.acquire() past
-        # bounded_s and past an abort (zap probes parent-admit-lock-probes-
-        # json). Poll admit_lock.acquire(timeout=...) and check _out() between
-        # tries; a bounded wait that expires or aborts while the mutex is
-        # contended returns None exactly like the flock path. When no mutex
-        # is supplied the spawn path keeps its nullcontext (unchanged).
-        if admit_lock is None:
-            al_acquired = False
-        else:
-            al_acquired = False
-            while not al_acquired:
-                if _out():
-                    return None
-                remaining = t_end - time.time()
-                al_acquired = admit_lock.acquire(
-                    timeout=SEAT_LOCK_POLL_S if remaining == float("inf")
-                    else max(0.0, min(SEAT_LOCK_POLL_S, remaining)))
-                if al_acquired:
-                    break
-                if _out():
-                    return None
-        try:
-            fd = os.open(str(seats / ".lock"), os.O_RDWR | os.O_CREAT, 0o644)
-            try:
-                while True:
-                    try:
-                        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                        break
-                    except BlockingIOError:
-                        if _out():
-                            return None
-                        time.sleep(SEAT_LOCK_POLL_S)
-                try:
+    uid = uuid.uuid4().hex[:8]
+    enq = time.time()                       # arrival: stable across every retry loop
+    own = seats / SEAT_QUEUE_DIR / f"{safe}.{os.getpid()}.{uid}.json"
+    my_key = (round(enq, 3), uid)
+    last_hb = 0.0
+    try:
+        while True:
+            # est-g255 r2 R1: the cancel-setter synchronizes on admit_lock BEFORE
+            # setting its Event (see the fan-out's _cancel_stragglers), so holding
+            # it here — then rechecking abort() under it AND the .lock flock —
+            # makes ticket creation atomic against a cancel landing at any earlier
+            # moment: either the setter won (abort True under our recheck -> no
+            # ticket) or the ticket exists and the setter's scan sees this holder.
+            # est-g255 r3: the acquisition itself must honor the same bounded
+            # contract — a bare `with admit_lock:` blocked on Lock.acquire() past
+            # bounded_s and past an abort (zap probes parent-admit-lock-probes-
+            # json). Poll admit_lock.acquire(timeout=...) and check _out() between
+            # tries; a bounded wait that expires or aborts while the mutex is
+            # contended returns None exactly like the flock path. When no mutex
+            # is supplied the spawn path keeps its nullcontext (unchanged).
+            if admit_lock is None:
+                al_acquired = False
+            else:
+                al_acquired = False
+                while not al_acquired:
                     if _out():
                         return None
-                    if _seat_live_tickets(seats, anc) < cap:
-                        if _out():          # ATOMIC cancel recheck: same lock
-                                          # the cancel-setter takes pre-set
+                    remaining = t_end - time.time()
+                    al_acquired = admit_lock.acquire(
+                        timeout=SEAT_LOCK_POLL_S if remaining == float("inf")
+                        else max(0.0, min(SEAT_LOCK_POLL_S, remaining)))
+                    if al_acquired:
+                        break
+                    if _out():
+                        return None
+            try:
+                fd = os.open(str(seats / ".lock"), os.O_RDWR | os.O_CREAT, 0o644)
+                try:
+                    while True:
+                        try:
+                            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                            break
+                        except BlockingIOError:
+                            if _out():
+                                return None
+                            time.sleep(SEAT_LOCK_POLL_S)
+                    try:
+                        if _out():
                             return None
-                        t = seats / f"{safe}.{os.getpid()}.{uuid.uuid4().hex[:8]}.json"
-                        tmp = t.with_name(t.name + ".tmp")
-                        tmp.write_text(json.dumps({"pid": os.getpid(), "name": str(name),
-                                                   "boottime": _proc_boottime(os.getpid()),
-                                                   "ts": round(time.time(), 3)}))
-                        os.replace(tmp, t)
-                        return t
-                    if anc is None:
-                        return _SEAT_UNSUPPORTED
+                        live = _seat_live_tickets(seats, anc)
+                        older, cands = _seat_queue_scan(seats, own, my_key, anc,
+                                                        time.time())
+                        _seat_queue_prune(seats, cands)
+                        if live >= cap or older:
+                            # the door is shut for someone: take our place in the
+                            # queue FIRST (under the same flock), then decide —
+                            # an admitted newcomer can never jump a live marker.
+                            _seat_queue_register(own, name, enq, uid)
+                        if live < cap and not older:
+                            if _out():          # ATOMIC cancel recheck: same lock
+                                              # the cancel-setter takes pre-set
+                                return None
+                            t = seats / f"{safe}.{os.getpid()}.{uid}.json"
+                            tmp = t.with_name(t.name + ".tmp")
+                            tmp.write_text(json.dumps({"pid": os.getpid(), "name": str(name),
+                                                       "boottime": _proc_boottime(os.getpid()),
+                                                       "ts": round(time.time(), 3)}))
+                            os.replace(tmp, t)
+                            return t
+                        if live >= cap and anc is None:
+                            return _SEAT_UNSUPPORTED
+                    finally:
+                        fcntl.flock(fd, fcntl.LOCK_UN)
                 finally:
-                    fcntl.flock(fd, fcntl.LOCK_UN)
+                    os.close(fd)
             finally:
-                os.close(fd)
-        finally:
-            if al_acquired:
-                admit_lock.release()
-        if not waited and on_wait:
-            waited = True
-            on_wait()
-        if _out():
-            return None
-        time.sleep(0.2)
+                if al_acquired and admit_lock is not None:
+                    admit_lock.release()
+            if not waited and on_wait:
+                waited = True
+                on_wait()
+            if _out():
+                return None
+            last_hb = _seat_queue_beat(own, last_hb)
+            time.sleep(0.2)
+    finally:
+        # every exit frees the queue: admitted (the seat is ours — no longer a
+        # waiter), expired, aborted, or refused. A waiter never leaves a marker
+        # that would gate admissions after it is gone.
+        _seat_queue_remove(own)
 
 def _seat_bind(ticket, child_pid):
     """Record the seat's child pid (+ its start tick): the ticket stays held
@@ -4894,7 +5336,14 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
     preamble = "\n\n".join(p for p in (_lane_hygiene_preamble(node),
                                         _respawn_effects_preamble(run, meta, byid, node),
                                         resume_preamble) if p)
-    prompt = ((preamble + "\n\n" + goal) if preamble else goal) + ("\n\n" + context if context else "")
+    # est-13z1: the BEAD LAW rides as a GOAL SUFFIX, never a prefix — the goal
+    # keeps line 1 (spawn-counting/first-line tools and item identity rely on
+    # the goal's own opening), and everything from '## Inputs' onward stays
+    # byte-identical across fan-out items, same law as WORK_DIR_NOTE.
+    _bl = _bead_law_preamble(node)
+    prompt = ((preamble + "\n\n" + goal) if preamble else goal) \
+        + (("\n\n" + _bl) if _bl else "") \
+        + ("\n\n" + context if context else "")
     # A4: the runner states each child's durable work dir (replaces the old
     # write-first authoring rule). It lands in the GOAL half, before '## Inputs':
     # the fan-out identity law holds everything from '## Inputs' onward
@@ -5016,11 +5465,26 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
                   or (seat_cancel is not None and seat_cancel.is_set()))
     while seat_hold:                       # a prior attempt's deferred seat
         _seat_release(seat_hold.pop())
+    try:
+        _seat_cap = _max_seats(meta)
+    except SeatCapError as e:
+        # est-2ek.1.856 (B3) runner half: the door refuses this launch before any
+        # write/spawn; a runner that launched while the knob was valid and finds
+        # it invalid at the acquire instant (operator edited config mid-run)
+        # fails the NODE closed with the typed class — never a silent default,
+        # never a blind spawn.
+        return {"status": "failed",
+                "error": f"seat_cap: invalid seat cap — {e} "
+                        "(WORKFLOW_MAX_SEATS env or config workflows.max_seats; an integer "
+                        f"in [{wfcommon.SEAT_CAP_FLOOR}, {wfcommon.SEAT_CAP_CEILING}] "
+                        "or unset; the per-run opt-out is run.json max_seats: 0)",
+                "error_class": "seat_cap", "ms": int((time.time() - _seat_w0) * 1000),
+                "spawn": spawn_no, "attempts": 1, **route}
     seat = _seat_acquire(
-        _seats_dir(), f"{run.name}.{node['id']}", _max_seats(meta),
+        _seats_dir(), f"{run.name}.{node['id']}", _seat_cap,
         _seat_wall if isinstance(_seat_wall, (int, float)) else None,
         on_wait=lambda: log(run, "seat.wait", node=node["id"], index=index,
-                            spawn=spawn_no, cap=_max_seats(meta)),
+                            spawn=spawn_no, cap=_seat_cap),
         abort=_cancelled, admit_lock=seat_admit_lock)
     if seat is _SEAT_UNSUPPORTED:
         return {"status": "failed",
@@ -5036,9 +5500,25 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
             return {"status": "failed", "error": "cancelled while waiting for an agent seat"
                     + ("" if meta["_stop"].is_set() else " (quorum already met)"),
                     "error_class": "cancelled", "ms": 0, **route}
+        # est-2ek.1.856 deep review D1: the cap printed in the seat_wait row is
+        # RE-RESOLVED here — the wait can outlive a valid-knob instant, and an
+        # operator edit landing mid-wait must not raise SeatCapError out of
+        # run_child (the caller's harvest would swallow it as `crashed`, an
+        # untyped death). Same law as the acquire-instant catch above: the
+        # broken knob fails the NODE typed seat_cap, naming itself.
+        try:
+            _seat_cap_now = _max_seats(meta)
+        except SeatCapError as e:
+            return {"status": "failed",
+                    "error": f"seat_cap: invalid seat cap — {e} "
+                            "(WORKFLOW_MAX_SEATS env or config workflows.max_seats; an integer "
+                            f"in [{wfcommon.SEAT_CAP_FLOOR}, {wfcommon.SEAT_CAP_CEILING}] "
+                            "or unset; the per-run opt-out is run.json max_seats: 0)",
+                    "error_class": "seat_cap", "ms": int((time.time() - _seat_w0) * 1000),
+                    "spawn": spawn_no, "attempts": 1, **route}
         return {"status": "failed",
                 "error": f"seat_wait: no global agent seat freed within {_seat_wall}s "
-                         f"(cap={_max_seats(meta)}; WORKFLOW_MAX_SEATS / run.json max_seats)",
+                         f"(cap={_seat_cap_now}; WORKFLOW_MAX_SEATS / run.json max_seats)",
                 "error_class": "seat_wait", "ms": int((time.time() - _seat_w0) * 1000),
                 "spawn": spawn_no, "attempts": 1, **route}
     t0 = time.time()
@@ -6669,6 +7149,7 @@ def run_agent_node(run, meta, byid, node, outputs, steering):
                                       "record_problems": problems,
                                       "output": {"items": merged, "all_results": results}}
                 merged_rec = _effect_gate(run, node, merged_rec)  # #56: receipts proven at commit
+                merged_rec = _bead_close_gate(run, node, merged_rec)  # est-13z1: a claimed close in ANY item output is read back from the store at commit
                 save_node(run, node, byid, merged_rec)
                 if merged_rec["status"] == "done":
                     log(run, "node.finished", node=nid, done=len(merged), failed=len(failed),
@@ -6697,6 +7178,7 @@ def run_agent_node(run, meta, byid, node, outputs, steering):
             r = _lane_gate(run, node, r)   # 64c6772b: a declared lane must be clean at commit
             r = _harvest_clamp(node, r)    # est-ggqs: per-node clamp policy (default strict)
             r = _effect_gate(run, node, r)  # #56: declared effect receipts must be PROVEN at commit
+            r = _bead_close_gate(run, node, r)  # est-13z1: a claimed bead close must be READ BACK from the store at commit
             save_node(run, node, byid, r)
             if r["status"] in ("done", "partial"):   # #4: a harvested partial IS committed output
                 # #61b B3: when the tracked tree set was non-empty, the solo
@@ -7450,6 +7932,17 @@ def main(run_id):
             time.sleep(2)
 
     threading.Thread(target=_stop_watcher, daemon=True).start()
+    # #44 lease heartbeat: while THIS process lives, the lease's 'at' stays fresh
+    # (one beat / 30s << LEASE_STALE_S 120s). The beat dies with the process — a
+    # dead holder CANNOT keep its lease fresh (the kernel dropped its flock at
+    # death; the beat stops too), which is what makes the wedged classification
+    # provable. Daemon thread: never keeps the runner alive on its own.
+    def _lease_beat():
+        while True:
+            try: _lease_heartbeat(run)
+            except Exception: pass
+            time.sleep(30.0)
+    threading.Thread(target=_lease_beat, daemon=True).start()
     first = not (run / "events.jsonl").exists()
     # #8 item 3: crash-respawn idempotence — when a prior runner of this run
     # already logged (events.jsonl exists — the reaper's revival), write the
@@ -7592,10 +8085,11 @@ def main(run_id):
                 # (same boundary-commit law as the publisher gate above).
                 _erec = _effect_gate(run, n, {"status": "done", "output": n.get("output"),
                                               "ms": 0})
+                _erec = _bead_close_gate(run, n, _erec)   # est-13z1: an echo's close claim is read back too
                 save_node(run, n, rs.byid, _erec)
                 if _erec["status"] != "done":
                     log(run, "node.failed", node=n["id"], error=_erec["error"],
-                        error_class="effect_receipt", attempts=0)
+                        error_class=_erec.get("error_class", "effect_receipt"), attempts=0)
                     states[n["id"]] = "failed"
                     continue
                 log(run, "node.done", node=n["id"], echo=True)
@@ -7992,8 +8486,28 @@ if __name__ == "__main__":
         register_job(r, n, byid, int(sys.argv[4]), sys.argv[5], sys.argv[6])
         print("WORKFLOW_JOB_REGISTERED " + n["id"])
         sys.exit(0)
+    # #44 (issue ask 2): the owner escape hatch rides the SAME entry point —
+    # `wf.py release-lock <run_id>` heals a PROVEN-wedged runner.lock (zero live
+    # holders on the kernel ledger + dead lease) so wait-resume recovers without
+    # copying directories. Refuses everything else (live holder, EACCES-ambiguous,
+    # legacy lease-absent shape): wfcommon.heal_wedged_runner_lock is the single
+    # safety authority; this door only renders its verdict.
+    if len(sys.argv) == 3 and sys.argv[1] == "release-lock":
+        _rl_run = wfcommon.find_run(sys.argv[2])
+        if not jload(_rl_run / "graph.json", {}):
+            print(f"REFUSED {sys.argv[2]} (unknown run — no graph.json)")
+            sys.exit(1)
+        _rl = wfcommon.heal_wedged_runner_lock(_rl_run)
+        if _rl.get("ok"):
+            print(("RELEASED " if _rl.get("reason") == "healed" else "FREE ")
+                  + f"{_rl_run.name} ({_rl.get('reason')}"
+                  + (f", stranded={Path(_rl['stranded']).name}" if _rl.get("stranded") else "")
+                  + ")")
+            sys.exit(0)
+        print(f"REFUSED {_rl_run.name} ({_rl.get('reason')})")
+        sys.exit(1)
     if len(sys.argv) < 3 or sys.argv[1] != "run":
-        print("usage: wf.py run <run_id>"); sys.exit(2)
+        print("usage: wf.py run <run_id> | wf.py release-lock <run_id>"); sys.exit(2)
     # 5c37b19 guard 2 (belt-and-braces): a runner whose cwd was deleted mid-life dies
     # on the FIRST relative-path/cwd-touching call. HERE is durable — the same dir
     # __init__.py pins as the spawn cwd — so recover there before main() can raise.
