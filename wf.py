@@ -2367,7 +2367,14 @@ def _filter_child_toolsets(run, meta, node):
     est-2ek.1.166 toolsets slice (spool c258f0730346b426): a hostile shape
     (dict/int/nested element) is refused at the DOOR and at graph load, but
     this seam still fails CLOSED to None on any non-List[str]/comma-string —
-    a spawn-time AttributeError/TypeError is never the author's experience."""
+    a spawn-time AttributeError/TypeError is never the author's experience.
+    issue #427 amends the contract's tail: a DECLARED-EMPTY selection (`[]` /
+    empty comma-string) is REFUSED at graph load by validate_graph_errors —
+    -t cannot express zero toolsets and omission BROADENS, so silently
+    returning None there contradicted the opening sentence. None here still
+    means no selection to pass: undeclared, hostile shape, or an empty
+    selection persisted before the #427 gate (warned via node.clamped, never
+    silent)."""
     ts = node.get("toolsets")
     if ts is None:
         return None
@@ -2377,6 +2384,21 @@ def _filter_child_toolsets(run, meta, node):
         return None                                  # hostile shape: fail closed
     names = [s.strip() for s in (ts if isinstance(ts, list) else str(ts).split(",")) if str(s).strip()]
     if not names:
+        # issue #427: DECLARED-but-empty (`[]` / empty/whitespace/comma-only
+        # string) is a real minimisation that -t cannot express: an empty flag
+        # value collapses in the core to "use config defaults" and an OMITTED
+        # flag broadens — both spellings fail the author's ask OPEN. The door
+        # (wfcommon.validate_graph_errors) now refuses this shape at graph
+        # load, so it reaches here only via a graph persisted before the gate
+        # (old-run resume): record one node.clamped warning — the broadening
+        # becomes visible in the event log instead of silent — then fail
+        # closed to None like every other un-honorable shape.
+        if run and ts is not None:
+            _clamp_warn(run, meta, node, "toolsets", repr(ts),
+                        "(omitted — empty selection; refused at graph load "
+                        "since #427, this graph predates the gate; the child "
+                        "BROADENS to the seat's default toolsets)",
+                        _lane_label(node), [])
         return None
     if any(n.lower() in ("all", "*") for n in names):
         return names                                   # the child's own all-semantics

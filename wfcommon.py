@@ -1284,7 +1284,12 @@ def validate_graph_errors(nodes, *, admission=False):
             # (the reported PathLike/TypeError death). Refuse every non-List[str]
             # / comma-string shape at the door, naming node+key+value; the
             # honored shapes stay exactly the runner's (list of strings,
-            # comma-string, and the empty list = the author's own ask).
+            # comma-string). #427 amends the tail: a declared-EMPTY selection
+            # is now REFUSED too — -t cannot express zero toolsets (the core
+            # collapses an empty flag value to "use config defaults") and an
+            # omitted -t BROADENS to the seat's defaults, so honoring [] failed
+            # the author's minimisation silently OPEN (boundary probe: 4
+            # declared tools -> 41 defaults).
             ts = n["toolsets"]
             shape_ok = (isinstance(ts, str)
                         or (isinstance(ts, list)
@@ -1293,6 +1298,18 @@ def validate_graph_errors(nodes, *, admission=False):
                 E(nid, "toolsets", f"toolsets {ts!r} invalid: must be a list of "
                                     "non-empty toolset-name strings (or a comma-"
                                     "separated string)")
+            elif (isinstance(ts, list) and not ts) or (
+                    isinstance(ts, str) and not any(
+                        s.strip() for s in ts.split(","))):
+                # issue #427: declared but EMPTY ([] / empty/whitespace/comma-
+                # only string) means "no tools" — inexpressible at -t, and the
+                # only available spelling (omission) silently broadens.
+                E(nid, "toolsets", f"toolsets {ts!r} declares an EMPTY selection "
+                                    "the runner cannot honor: an omitted -t "
+                                    "BROADENS to the seat's default toolsets. "
+                                    "Name at least one toolset, or use "
+                                    'toolsets "none" to opt out explicitly '
+                                    "(flag omitted, seat defaults apply).")
         if "after_partial" in n:
             # e68544a37be37657: agent/gate-only key; bool only — an unvalidated
             # truthy is never enough to open a harvest edge. Echo rejects it
