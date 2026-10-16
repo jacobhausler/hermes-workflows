@@ -93,7 +93,7 @@ def main() -> None:
                       # part of the shipped surface — desktop contributors read it from
                       # the package. Mandatory new-file pack-surface gate: an unshipped
                       # doc is invisible to every install.
-                      "docs/card-toolresult-hook.md", "SHA256SUMS")))
+                      "docs/card-toolresult-hook.md", "docs/orphan-held.md", "orphan_watch.py", "SHA256SUMS")))
             check("fake child retains executable mode in ZIP",
                   (archive.getinfo(root + "tests/fake").external_attr >> 16) & 0o111 == 0o111)
             # est-4vnq finding 4 (pack-list omission, made explicit — pack_choice=INCLUDED):
