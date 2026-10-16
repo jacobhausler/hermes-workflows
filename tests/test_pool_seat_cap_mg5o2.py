@@ -110,6 +110,7 @@ elif mode == "hammer":
 
 def run_child(seats, name, mode, n, hold, bounded, rep, env_extra=None, gate=""):
     env = dict(os.environ)
+    env["WF_RUNS_ROOT"] = str(BUILD / "runs")  # est-2ek.1.762: pin child runs root to this test's scratch — never inherit the lane root
     if env_extra is not None:
         env.update(env_extra)
     for k in ("WORKFLOW_MAX_SEATS",):
