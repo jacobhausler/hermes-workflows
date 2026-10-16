@@ -1,0 +1,70 @@
+{
+  "meta": {
+    "description": "Request a report, park at zero tokens on a machine wait gate until a file-based signal lands, then verify independently. A machine timeout is a failure, never an approval.",
+    "tags": ["use_case:verify", "domain:handoff", "starter", "wait-gate"]
+  },
+  "graph": {
+    "grammar": "wf/1",
+    "name": "report-and-verify",
+    "description": "File-handoff review behind a MACHINE WAIT GATE - the canonical until_argv exemplar of the starter set. No run_context seeds: everything parameterized rides the handoff files. THE MACHINE-GATE LAW this graph encodes: (1) a gate with wait:{until_argv,every_s,timeout_s} parks the run at ZERO tokens, re-running a check until it exits 0; (2) until_argv is FIXED argv - never a shell string, never a pipeline; (3) {run.KEY} renders into goals, contexts, fan-out goals and gate QUESTIONS but NOT into until_argv - a placeholder left in argv reaches the machine as a literal token and dies 'program not found' forever, so parameterized data crosses on FILES, not in argv; (4) timeout_s expiration FAILS the gate with the last probe output as its answer - the run never proceeds on silence, machine timeout is failure not approval; (5) exit 0 releases once. HANDOFF CONTRACT (the producer side is outside this graph - any cron job, peer agent, or human): ROOT = ${WF_RAV_ROOT:-$HERMES_HOME/wf-report-verify}; read ROOT/request.json; write the answer to ROOT/report.md; then write the exact string 'ok' to ROOT/ready. The probe reads those fixed names under ROOT resolved from the ENVIRONMENT, which is what keeps argv fixed and the dispatch parameter-free. NODE MAP: prepare (fresh ROOT, writes request.json, clears stale signals) -> await-report (machine gate, polls every 30s, fails the run at 900s) -> verify (independent reader: checks report.md against the request's requirements; the producer's prose is not evidence). Retarget by editing the ask text below or pointing WF_RAV_ROOT at a staging root for tests. A cron scheduler may double-dispatch: give the launch a lane_key if that matters to you.",
+    "provenance": {
+      "owner": "hermes-workflows",
+      "source": "hermes-workflows/library/general/report-and-verify.json"
+    },
+    "defaults": {
+      "timeout": 900,
+      "context": "You are one lane of a report hand-off. Ground rules: touch only the agreed handoff root; never fabricate the producer's answer; every judgement cites the bytes you read; keep the answer to the schema; one fenced json block as the final message; never print secrets."
+    },
+    "nodes": [
+      {
+        "id": "prepare",
+        "type": "agent",
+        "model": "worker",
+        "shape": "build",
+        "schema": {
+          "type": "object",
+          "required": ["root", "request_path", "stale_cleared"],
+          "properties": {
+            "root": {"type": "string"},
+            "request_path": {"type": "string"},
+            "stale_cleared": {"type": "boolean"}
+          }
+        },
+        "goal": "Open the report handoff. ROOT = ${WF_RAV_ROOT:-$HERMES_HOME/wf-report-verify} (resolve it with your shell; do not invent a different path - the machine gate and the producer both read exactly this). 1) mkdir -p ROOT. 2) Delete stale signals: ROOT/ready and ROOT/report.md (a leftover ready marker would release the gate on a PREVIOUS lap's content). 3) Write ROOT/request.json containing exactly this request as valid json: {\"ask\": \"What changed since the last report, and what is still broken?\", \"requirements\": [\"answer both parts of the ask\", \"stay under 200 lines\", \"cite concrete paths or commands for every breakage\"], \"protocol\": \"write the answer to report.md, then write the exact string ok to ready\"}. 4) Read request.json back and check it parses. Reply with ONLY fenced json {\"root\": \"<resolved ROOT>\", \"request_path\": \"<ROOT/request.json>\", \"stale_cleared\": <true only if both files were removed or never existed>}"
+      },
+      {
+        "id": "await-report",
+        "type": "gate",
+        "after": ["prepare"],
+        "context": "Machine gate - no human question. Parked until the producer writes ROOT/report.md and a ROOT/ready file containing ok. Timeout at 900s FAILS this run; that is the design (a missing report is a failure, not an approval).",
+        "wait": {
+          "until_argv": [
+            "/usr/bin/python3",
+            "-c",
+            "import os,sys,pathlib\nR=pathlib.Path(os.environ['WF_RAV_ROOT']) if os.environ.get('WF_RAV_ROOT') else pathlib.Path(os.environ.get('HERMES_HOME') or '~/.hermes').expanduser()/'wf-report-verify'\ntry:\n    r=(R/'ready').read_text().strip()\n    b=(R/'report.md').read_text()\nexcept OSError as e:\n    print('not-ready: '+type(e).__name__, file=sys.stderr)\n    sys.exit(1)\nif r=='ok' and b.strip():\n    print('report-and-verify: released, report.md '+str(len(b.encode('utf-8')))+' bytes')\n    sys.exit(0)\nprint('report-and-verify: signal invalid (ready=%r, report bytes=%d)'%(r[:20], len(b.strip())), file=sys.stderr)\nsys.exit(1)"
+          ],
+          "every_s": 30,
+          "timeout_s": 900
+        }
+      },
+      {
+        "id": "verify",
+        "type": "agent",
+        "model": "manager",
+        "shape": "review",
+        "after": ["await-report"],
+        "inputs": ["prepare"],
+        "schema": {
+          "type": "object",
+          "required": ["verified", "failed_requirements", "report_excerpt"],
+          "properties": {
+            "verified": {"type": "boolean"},
+            "failed_requirements": {"type": "array", "items": {"type": "string"}},
+            "report_excerpt": {"type": "string"}
+          }
+        },
+        "goal": "The wait gate released - ROOT/report.md exists and ROOT/ready said ok (prepare's committed answer names ROOT). Now JUDGE the report as an independent reader: read ROOT/request.json and ROOT/report.md yourself. Check EVERY requirement in the request against the actual bytes (both parts answered, length limit honored, breakages cite concrete paths). A release signal proves the file landed, nothing more - the producer grading itself is not evidence. verified=true only when no requirement fails; failed_requirements names each miss with the requirement it missed. report_excerpt: the report's own first ~15 lines, verbatim. Reply with ONLY fenced json {\"verified\": <bool>, \"failed_requirements\": [\"<requirement: what missed>\"], \"report_excerpt\": \"<verbatim excerpt>\"}"
+      }
+    ]
+  }
+}

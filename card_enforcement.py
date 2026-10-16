@@ -6,15 +6,18 @@ agent/turn_finalizer.py apply_llm_output_transform — the first hook returning 
 non-empty string wins and that string becomes the persisted+streamed text). This
 module is the last-resort shipper: when a turn's text carries NO parseable
 ``::workflow{id="<run_id>"}`` directive, the cards for runs THIS session launched
-inside the recency window are appended as bare lines, so the desktop directive
-renderer (desktop/plugin.js DirectiveCard) renders even when the model never
-pastes. The model's paste stays the primary path — this hook only fills silence.
+and still owes (the pending ledger) are appended as bare lines, so the desktop
+directive renderer (desktop/plugin.js DirectiveCard) renders even when the model
+never pastes. The model's paste stays the primary path — this hook only fills silence.
 
 Design notes:
-* ONE-SHOT LEDGER (zero new files): a run's card counts as shipped when its
-  events.jsonl carries a ``card.echoed`` marker (appended on CONFIRMATION,
-  below; a failed write costs only a re-ship next turn, never a lost turn).
-  run.json stays byte-identical.
+* HOOK-LED LEDGER (card_ledger.py, ``<runs_root>/card-ledger.json``): discovery
+  is event-driven, never a scan. ``post_tool_call`` records every ``workflow``
+  launch (and held/terminal reports), ``pre_llm_call`` reminds the model of
+  owed cards, and this shipper READS the ledger. A card counts as shipped when
+  its ledger entry is dropped on CONFIRMATION (below; a failed write costs only
+  a re-ship next turn, never a lost turn). Nothing enumerates run directories;
+  entries left over from before a gateway restart simply ship late.
 * SHIPPED MEANS SELECTED (#168 P1): core's dispatch (plugins_dispatch.invoke_hook)
   fires EVERY transform_llm_output callback and apply_llm_output_transform keeps
   the FIRST non-empty string — so a return value is a HOPE, not a shipment.
@@ -57,15 +60,14 @@ Design notes:
   nothing". A broken ledger must never eat the user's reply.
 * The unknown surface (falsy platform) is never guessed: no surface, no append.
 
-Path resolution is NOT reimplemented: the door injects its bound wfcommon
-instance via bind() and every root comes from the existing resolvers
-(runs_root / profiles_root+profile_home / launch_runs_root legacy).
+Path resolution is NOT reimplemented: the door injects its bound ledger via
+bind(); the ledger root comes from the existing runs_root resolver.
 """
 import json
 import logging
+import os
 import re
 import weakref
-from datetime import datetime, timezone
 from typing import Any, Callable, Optional
 
 _LOG = logging.getLogger(__name__)
@@ -76,24 +78,20 @@ _LOG = logging.getLogger(__name__)
 # measured — the ledger makes every later card ship on a later turn anyway.
 MAX_CARDS_PER_TURN = 3
 
-DEFAULT_WINDOW_MINUTES = 30          # launched this recently = the launch turn's window
-WINDOW_SETTING = "card_window_minutes"  # plugins.entries.hermes-workflows.settings.<k>
-TERMINAL_STALE_MINUTES = 10          # done-and-stale runs are past the ship moment: never spam
-
 _DIRECTIVE = re.compile(r'::workflow\{id="([A-Za-z0-9._-]+)"\}')
 _FENCE_MARK = ("```", "~~~")
 _INLINE_CODE = re.compile(r"`[^`\n]*`")
 
-_COMMON: Any = None   # the door's bound wfcommon (bind())
+_LEDGER: Any = None   # the door's bound card_ledger module (bind())
 _CARD: Optional[Callable[[str], str]] = None   # the door's _card helper (bind()) — one card grammar, no fork
-# In-memory proposal ledger (#168 P1): (session_id, run_id) ->
-# {"dir": run dir, "turn_id": str, "ref": weakref to the proposed text}.
-# Nothing reaches events.jsonl until a proposal is CONFIRMED selected; a
+# In-memory proposal table (#168 P1): (session_id, run_id) ->
+# {"turn_id": str, "ref": weakref to the proposed text}.
+# Nothing leaves the ledger until a proposal is CONFIRMED selected; a
 # proposal whose text died unconfirmed is dropped so the card replays.
 _PENDING: dict = {}
 # Paste retirement (#168 P2): (session_id, run_id) whose bare directive was
 # seen in this session's turn text — delivered through the paste route, so
-# the owed card retires WITHOUT a card.echoed marker.
+# the owed card retires (its ledger entry is dropped).
 _RETIRED = set()
 # (session_id, turn_id) -> True once this hook proposed text for that turn:
 # a second proposal in the same turn (duplicate registration / in-turn retry)
@@ -102,10 +100,10 @@ _PROPOSED = {}
 _witness: Optional[Callable[..., bool]] = None   # durable-row probe (test seam)
 
 
-def bind(common, card_fn):
-    """Wire the door's shared read model and card grammar into this module."""
-    global _COMMON, _CARD
-    _COMMON, _CARD = common, card_fn
+def bind(ledger, card_fn):
+    """Wire the door's card ledger and card grammar into this module."""
+    global _LEDGER, _CARD
+    _LEDGER, _CARD = ledger, card_fn
 
 
 def _strip_code(text):
@@ -148,146 +146,103 @@ def _open_fence(text):
     return open_mark
 
 
-def _age_minutes(ts, now):
-    """Minutes before `now` of an ISO ts; None when unparseable (unreadable clock
-    = not discoverable, fail-open)."""
-    if not isinstance(ts, str) or not ts:
-        return None
-    try:
-        dt = datetime.fromisoformat(ts)
-    except ValueError:
-        return None
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    return (now - dt).total_seconds() / 60.0
+def _session():
+    return os.environ.get("HERMES_SESSION_ID", "")
 
 
-def _events(r):
-    """events.jsonl lines as dicts; torn/unreadable lines are skipped, never fatal."""
-    try:
-        lines = (r / "events.jsonl").read_text(encoding="utf-8").splitlines()
-    except OSError:
-        return []
+def _owed(session_id):
+    """Run ids this session still owes a card for, newest first — read from the
+    ledger, never discovered. A pasted (retired) run or a live proposal is skipped."""
     out = []
-    for line in lines:
-        try:
-            e = json.loads(line)
-        except ValueError:
+    for rid, _ent in _LEDGER.entries(session_id):
+        if (session_id, rid) in _RETIRED or (session_id, rid) in _PENDING:
             continue
-        if isinstance(e, dict):
-            out.append(e)
+        out.append(rid)
     return out
 
 
-def _roots():
-    """Every runs root this session's launches could have landed in — the resolved
-    root, EVERY profile root (a profile-scoped gateway lands runs under its own
-    home), and the legacy launch root. Existing resolvers only; deduped."""
-    roots = [_COMMON.runs_root(), _COMMON.launch_runs_root()]
-    try:
-        pr = _COMMON.profiles_root()
-        if pr.is_dir():
-            for child in sorted(pr.iterdir()):
-                if child.is_dir():
-                    # A profile-scoped gateway resolves hermes_home() to its own
-                    # home, so its runs land under <profile_home>/workflows —
-                    # answered by the SAME resolver, not a re-typed path law.
-                    roots.append(_COMMON.effective_runs_root(
-                        {"WF_RUNS_ROOT": "", "HERMES_HOME": str(child)}))
-    except OSError:
-        pass
-    seen, out = set(), []
-    for p in roots:
-        key = str(p)
-        if key not in seen:
-            seen.add(key)
-            out.append(p)
-    return out
+_TERMINAL = ("done", "failed", "stopped")
 
 
-def _terminal_stale(r, now):
-    """A run whose completion (run.done) happened more than TERMINAL_STALE_MINUTES
-    ago is past the ship moment — the card belongs to the launch turn, and old
-    runs must never be spammed. Completion is read from events.jsonl (the
-    runner's record) or the run.done marker file's mtime."""
-    done_ages = [a for e in _events(r) if e.get("event") == "run.done"
-                 and (a := _age_minutes(e.get("ts"), now)) is not None]
-    if done_ages:
-        return min(done_ages) > TERMINAL_STALE_MINUTES
-    try:
-        marker = (r / "run.done")
-        if marker.exists():
-            age = (now.timestamp() - marker.stat().st_mtime) / 60.0
-            return age > TERMINAL_STALE_MINUTES
-    except OSError:
-        pass
-    return False
-
-
-def _outstanding(session_id, now):
-    """Run ids launched by this session, inside the window, card still unshipped —
-    newest first (started desc)."""
-    window = DEFAULT_WINDOW_MINUTES
-    try:
-        cfg = _COMMON.owner_setting(WINDOW_SETTING)
-        if type(cfg) is int and 0 < cfg <= 24 * 60:
-            window = cfg
-    except Exception:
-        pass
-    hits = []
-    # est-2ek.1.762 census hygiene: one pass through wfcommon.iter_run_dirs —
-    # unique by run-dir NAME across every root this session could have hit
-    # (symlinked profile roots multiply hits; the same launch must not be
-    # proposed three times).
-    for r in _COMMON.iter_run_dirs(_roots()):
+def _as_dict(v):
+    if isinstance(v, dict):
+        return v
+    if isinstance(v, str):
         try:
-            meta = _COMMON.jload(r / "run.json")
-            if not isinstance(meta, dict):
-                continue
-            owner = meta.get("owner") or {}
-            if not isinstance(owner, dict) or owner.get("session_id") != session_id:
-                continue
-            age = _age_minutes(meta.get("started") or meta.get("started_at"), now)
-            if age is None or age < 0 or age > window:
-                continue
-            if any(e.get("event") == "card.echoed" for e in _events(r)):
-                continue
-            if (session_id, r.name) in _RETIRED or (session_id, r.name) in _PENDING:
-                continue          # pasted (retired) or a live proposal covers it
-            if _terminal_stale(r, now):
-                continue
-            hits.append((age, r.name, r))
-        except Exception:
-            continue        # a torn run dir is invisible, never an exception upward
-    hits.sort(key=lambda t: (t[0], t[1]))   # ascending age = newest launch first
-    return [(rid, r) for _, rid, r in hits]
+            d = json.loads(v)
+        except ValueError:
+            return None
+        return d if isinstance(d, dict) else None
+    return None
 
 
-def _mark(r, session_id, turn_id):
-    """Append the card.echoed marker. Best-effort: a failed write means the card
-    ships once more next turn — never raise, never lose the text."""
+def _post_tool_call(tool_name="", args=None, result=None, session_id="", **_):
+    """post_tool_call callback: keep the ledger in step with `workflow` calls.
+
+    Cheap guard first — this fires for EVERY tool call. Never raises, returns None."""
     try:
-        with (r / "events.jsonl").open("a", encoding="utf-8") as f:
-            f.write(json.dumps(
-                {"ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-                 "event": "card.echoed",
-                 "session_id": session_id, "turn_id": turn_id},
-                ensure_ascii=False) + "\n")
+        if tool_name != "workflow" or _LEDGER is None:
+            return None
+        res = _as_dict(result)
+        if not res or res.get("error"):
+            return None
+        rid = res.get("run_id")
+        if not isinstance(rid, str) or not rid:
+            return None
+        sid = session_id or _session()
+        if not sid:
+            return None
+        a = _as_dict(args) or {}
+        action = a.get("action")
+        status = res.get("status")
+        if action == "stop" or status in _TERMINAL:
+            _LEDGER.drop(sid, rid)
+        elif status == "held" or res.get("held_gate"):
+            _LEDGER.set_state(sid, rid, "held")
+        elif action == "release":
+            _LEDGER.set_state(sid, rid, "pending")
+        elif action == "run":
+            graph = a.get("graph") if isinstance(a.get("graph"), dict) else {}
+            _LEDGER.add(sid, rid, a.get("name") or graph.get("name") or res.get("name") or "")
     except Exception as exc:
-        _LOG.debug("card.echoed marker failed for %s: %s", r, exc)
+        _LOG.debug("card ledger post_tool_call skipped (fail-open): %s", exc)
+    return None
 
 
-def _confirm(session_id, run_id, run_dir, turn_id):
-    """Write the card.echoed marker for a proposal proven SELECTED, THEN release
-    the in-memory claim. Order is deliberate (ABANDON-SAFE rule 3): the core may
-    have abandoned a worker that is still scanning _outstanding concurrently;
-    releasing first opens a window where neither the claim nor the marker covers
-    the run and that worker re-proposes it — a double-ship. Marker-write failure
-    still clears: a dead ledger must not suppress forever (re-ships next turn)."""
+def _pre_llm_call(session_id="", **_):
+    """pre_llm_call callback: remind the model of owed cards, only when some exist."""
+    try:
+        if _LEDGER is None:
+            return None
+        sid = session_id or _session()
+        if not sid:
+            return None
+        lines = []
+        for rid, ent in _LEDGER.entries(sid):
+            if (sid, rid) in _RETIRED:
+                continue
+            lines.append(f"workflow run {rid} ({ent.get('name') or 'workflow'}) finished but has "
+                         f"no card in chat yet \u2014 attach its card this turn")
+        if not lines:
+            return None
+        return {"context": "\n".join(lines[:MAX_CARDS_PER_TURN * 3])}
+    except Exception as exc:
+        _LOG.debug("card ledger pre_llm_call skipped (fail-open): %s", exc)
+        return None
+
+
+def _confirm(session_id, run_id, turn_id):
+    """Drop the ledger entry for a proposal proven SELECTED, THEN release the
+    in-memory claim. Order is deliberate (ABANDON-SAFE rule 3): the core may
+    have abandoned a worker that is still reading the ledger concurrently;
+    releasing first opens a window where neither the claim nor the entry's
+    absence covers the run and that worker re-proposes it — a double-ship. A
+    failed ledger write still clears the claim: a dead ledger must not suppress
+    forever (re-ships next turn)."""
     key = (session_id, run_id)
-    _mark(run_dir, session_id, turn_id)
+    _LEDGER.drop(session_id, run_id)
     entry = _PENDING.get(key)
-    if entry is not None and entry.get("dir") == run_dir:
+    if entry is not None:
         _PENDING.pop(key, None)
 
 
@@ -318,7 +273,7 @@ def _reconcile(session_id, turn_id):
                 # unshipped: drop the claim so the card replays, never stamp.
                 ok = False
             if ok:
-                _confirm(session_id, rid, entry["dir"], entry.get("turn_id", ""))
+                _confirm(session_id, rid, entry.get("turn_id", ""))
             else:
                 _PENDING.pop(key, None)     # never selected: replayable, not lost
         except Exception as exc:
@@ -344,7 +299,7 @@ class _CardText(str):
 
     def __new__(cls, text, entries, session_id, turn_id):
         self = str.__new__(cls, text)
-        self._ce_entries = entries          # [(run_id, run dir)]
+        self._ce_entries = entries          # [run_id]
         self._ce_session = session_id
         self._ce_turn = turn_id
         self._ce_done = False
@@ -362,8 +317,8 @@ class _CardText(str):
         # Selection IS delivery (ABANDON-SAFE rule 2): ledger our own cards from
         # what this text carries, never from _PENDING — a racing abandoned
         # worker may own the claim now, and skipping the marker would re-ship.
-        for rid, r in entries:
-            _confirm(sid, rid, r, turn)
+        for rid in entries:
+            _confirm(sid, rid, turn)
 
     def __bool__(self):
         try:
@@ -393,19 +348,19 @@ def _propose(response_text, take, session_id, turn_id):
     """Build the augmented text as a _CardText and register the proposals. The
     weakref callback (not a __del__ hook) drops an unconfirmed proposal the
     moment core discards the text, keeping the card replayable."""
-    text = response_text.rstrip() + "\n\n" + "\n\n".join(_CARD(rid) for rid, _ in take)
+    text = response_text.rstrip() + "\n\n" + "\n\n".join(_CARD(rid) for rid in take)
     open_mark = _open_fence(response_text)
     if open_mark:                           # fence trap (#168 P3): never ship buried
         text = response_text.rstrip() + "\n\n" + open_mark + "\n\n" + \
-            "\n\n".join(_CARD(rid) for rid, _ in take)
-    obj = _CardText(text, [(rid, r) for rid, r in take], session_id, turn_id)
+            "\n\n".join(_CARD(rid) for rid in take)
+    obj = _CardText(text, list(take), session_id, turn_id)
     keys = []
-    for rid, r in take:
+    for rid in take:
         key = (session_id, rid)
         # ABANDON-SAFE rule 1: never replace a live claim (an abandoned worker
         # resuming late must not evict the fresh call's), and the dying text
         # drops only the claim it owns.
-        _PENDING.setdefault(key, {"dir": r, "turn_id": turn_id,
+        _PENDING.setdefault(key, {"turn_id": turn_id,
                                   "ref": weakref.ref(obj, lambda wr, k=key: _drop_own(k, wr))})
         keys.append(key)
     _PROPOSED[(session_id, turn_id)] = True
@@ -422,7 +377,7 @@ def _card_hook(response_text, session_id, turn_id="", model="", platform="", **_
     Fail-open law: any exception returns None — the user's reply is never eaten
     or blocked by this module. Nothing under .github is ever touched."""
     try:
-        if _CARD is None or _COMMON is None:
+        if _CARD is None or _LEDGER is None:
             return None                 # unbound module = door never registered: no-op
         if not isinstance(response_text, str) or not response_text:
             return None                 # no final text: nothing to attach to
@@ -438,20 +393,12 @@ def _card_hook(response_text, session_id, turn_id="", model="", platform="", **_
             for rid in ids:             # paste route delivered: retire THAT run
                 _RETIRED.add((session_id, rid))
                 _PENDING.pop((session_id, rid), None)
+                _LEDGER.drop(session_id, rid)
             return None                 # the model pasted (unfenced): hands off
         if _PROPOSED.get((session_id, turn_id)):
             return None                 # this turn already proposed; a duplicate
                                         # registration can never win selection
-        now = datetime.now(timezone.utc)
-        pending, seen_rid = [], set()
-        for rid, r in _outstanding(session_id, now):
-            if rid in seen_rid:
-                continue                # same run visible under two roots: ship once
-            seen_rid.add(rid)
-            pending.append((rid, r))
-        if not pending:
-            return None
-        take = pending[:MAX_CARDS_PER_TURN]
+        take = _owed(session_id)[:MAX_CARDS_PER_TURN]
         if not take:
             return None                 # no proposal may carry the empty string:
                                         # core keeps non-None results and an

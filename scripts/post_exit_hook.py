@@ -136,6 +136,7 @@ cleanup; the runner no longer dispatches (est-xwvu9) — tests exercise it direc
             [launchctl, "bootstrap", f"gui/{os.getuid()}", str(plist)],
             [launchctl, "load", "-w", str(plist)],
         ]
+        save("launching")  # est-fdulo (b): receipt exists before the first launch attempt
         for cmd in attempts:
             try:
                 proc = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
