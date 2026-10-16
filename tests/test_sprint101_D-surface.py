@@ -104,7 +104,8 @@ try:
     # gated by the config allow-list; the count comes FROM CONFIG, never a
     # hardcoded number. The card ledger's three hooks (post_tool_call records
     # launches, pre_llm_call reminds, transform_llm_output ships) are the literal
-    # sites; PR-3's flag-gated admission/witness pair is the one variable-named loop.
+    # sites; PR-3's flag-gated admission/witness pair and PR-4's default-on orphan-held
+    # observers (orphan_watch.HOOKS) ride the ONE variable-named loop over the surface.
     import re as _re
     _reg_src = src[src.index("def register(ctx):"):]
     _sites = _re.findall(r'ctx\.register_hook\(\s*["\']([A-Za-z0-9_]+)["\']', _reg_src)
@@ -119,10 +120,16 @@ try:
           and all(_re.search(rf'if "{n}" in _hooks:\s*\n\s*ctx\.register_hook\("{n}"', _reg_src)
                   for n in _sites))
     _loops = _re.findall(r'if _hook in _hooks:\s*\n\s*try:\s*\n\s*ctx\.register_hook\(_hook, _fn\)', _reg_src)
-    check("the PR-3 variable-named loop site is membership-gated too, and no other site exists",
+    check("the PR-3 + PR-4 variable-named loop site is membership-gated too, and no other site exists",
           len(_loops) == 1
           and _reg_src.count("ctx.register_hook(") == len(_sites) + _reg_src.count("ctx.register_hook(_hook, _fn)"),
           f"literal={_sites} loop={len(_loops)}")
+    _orphan_names = list(door._orphan_watch.HOOKS)
+    check("PR-4 orphan observers are on the surface (default-on, byte-identical when the allow-list is unset) and reach register() only via the gated loop",
+          len(_orphan_names) >= 1 and all(n in _surface for n in _orphan_names)
+          and all(_surface[n] is door._orphan_watch.HOOKS[n] for n in _orphan_names)
+          and "_orphan_watch.HOOKS" not in _reg_src and "ctx.register_hook(_hn" not in _reg_src,
+          str(_orphan_names))
 
     class _StubCtx:
         def __init__(self):
@@ -152,11 +159,11 @@ try:
         check("allow-list of a non-surface name registers zero hooks (intersect, no widening)",
               _c3.hooks == [] and door._hook_allowlist() == [])
         door._common.set_owner_setting_reader(
-            lambda k: ["post_tool_call", "pre_gateway_dispatch", "no_such_hook"]
+            lambda k: ["post_tool_call", "pre_gateway_dispatch", "on_session_end", "no_such_hook"]
             if k == "enabled_hooks" else _prev_reader(k))
         _c4 = _StubCtx(); door.register(_c4)
-        check("allow-list subset registers exactly the intersection (literal site + loop site)",
-              sorted(_c4.hooks) == ["post_tool_call", "pre_gateway_dispatch"])
+        check("allow-list subset registers exactly the intersection (literal site + loop sites, PR-3 and PR-4 names)",
+              sorted(_c4.hooks) == ["on_session_end", "post_tool_call", "pre_gateway_dispatch"])
         door._common.set_owner_setting_reader(
             lambda k: "not-a-list" if k == "enabled_hooks" else _prev_reader(k))
         check("malformed allow-list fails CLOSED (zero hooks)", door._hook_allowlist() == [])

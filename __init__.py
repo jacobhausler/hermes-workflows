@@ -39,6 +39,13 @@ _gi_spec = importlib.util.spec_from_file_location("_hermes_workflows_gate_index"
 assert _gi_spec is not None and _gi_spec.loader is not None
 _gate_index = importlib.util.module_from_spec(_gi_spec)
 _gi_spec.loader.exec_module(_gate_index)
+# PR-4: orphan-held awareness — advisory session-lifecycle observers (docs/orphan-held.md).
+_ow_spec = importlib.util.spec_from_file_location("_hermes_workflows_orphan_watch",
+                                                  Path(__file__).resolve().parent / "orphan_watch.py")
+assert _ow_spec is not None and _ow_spec.loader is not None
+_orphan_watch = importlib.util.module_from_spec(_ow_spec)
+_ow_spec.loader.exec_module(_orphan_watch)
+_orphan_watch.bind(_common)
 
 
 def _coerce_graph(graph):
@@ -3527,6 +3534,19 @@ def act_status(args):
         out["next"] = rows or [{"action": "amend", "node": None, "error_class": "unknown"}]
     elif s in ("done", "stopped"):
         out["next"] = []
+    # PR-4: orphan-held flag — advisory, fail-open. The owner session died while the
+    # run waits at a gate; stop is listed FIRST, release/wait rows stay (a human or a
+    # new session can still answer). A different live session's status re-attaches.
+    try:
+        _oh = _orphan_watch.status_info(r, st, _session_env("HERMES_SESSION_ID") or None) \
+            if _orphan_watch.enabled() else None
+        if _oh:
+            out["orphan_held"] = True
+            out["waiting_on"] = _oh
+            out["next"] = [{"action": "stop", "note": "owner session died; stop or re-attach"},
+                           *(out.get("next") or [])]
+    except Exception:
+        pass
     return out
 
 def _wait_foreign(args, r, st, resolved_via):
@@ -3731,6 +3751,10 @@ def _release_core(r, gate_id, answer, ui=False):
     tmp = p.with_name(f"{gate_id}.json.{os.getpid()}.tmp"); tmp.write_text(json.dumps(rec, ensure_ascii=False))
     os.replace(tmp, p)
     _gi_note_close(r, gate_id)   # PR-3: flag-gated, best-effort, never raises
+    try:   # PR-4: an answered gate is no longer orphan-held (advisory, fail-open)
+        _orphan_watch.revoke_run(r.name, "release", by=_session_env("HERMES_SESSION_ID") or None)
+    except Exception:
+        pass
     return {"ok": True}
 
 def act_release(args):
@@ -4120,6 +4144,10 @@ def act_stop(args):
         return {"ok": True, "already": st["status"]}
     (r / "stop.request").write_text(datetime.now(timezone.utc).isoformat(timespec="seconds"))
     _gi_note_close(r, None)   # PR-3: every open gate of a stopped run closes
+    try:   # PR-4: a stopped run is no longer orphan-held (advisory, fail-open)
+        _orphan_watch.revoke_run(r.name, "stop", by=_session_env("HERMES_SESSION_ID") or None)
+    except Exception:
+        pass
     mode = _resume_after_action(r, consumed=lambda: not (r / "stop.request").exists())
     if mode == "respawned":
         return {"ok": True, "note": "runner spawned to consume the stop marker"}
@@ -4405,6 +4433,8 @@ def _wf_command(raw_args):
         return "\n".join(lines)
     if arg in ("gates", "gate"):
         return _wf_gates()
+    if arg == "orphans":   # PR-4: runs whose owner session died while held at a gate
+        return _orphan_watch.render_orphans()
     out = act_library({})
     lib = out["library"]
     quarantined = out.get("quarantined") or []
@@ -4454,7 +4484,7 @@ def _hook_surface():
             ("pre_llm_call", _card_enforcement._pre_llm_call),
             ("transform_llm_output", _card_enforcement._card_hook),
             ("post_gateway_admission", _admission_handler),
-            ("pre_gateway_dispatch", _dispatch_witness))
+            ("pre_gateway_dispatch", _dispatch_witness)) + tuple(_orphan_watch.HOOKS.items())
 
 # The card ledger's three hooks: registered at literal, allow-list-gated sites in register().
 _CARD_HOOKS = ("post_tool_call", "pre_llm_call", "transform_llm_output")
@@ -4510,9 +4540,11 @@ def register(ctx):
         ctx.register_hook("pre_llm_call", _card_enforcement._pre_llm_call)
     if "transform_llm_output" in _hooks:
         ctx.register_hook("transform_llm_output", _card_enforcement._card_hook)
-    # PR-3: both default-off (flags read at call time); a core without the hook just
-    # ignores. Folded under the allow-list law at the P1 rebase: the loop stays
-    # variable-named ON PURPOSE — the pinned CI core (v2026.9.21) predates
+    # PR-3 admission/witness pair (default-off, flags read at call time) and PR-4
+    # orphan-held observers (default-on advisory, owner setting `orphan_watch: false`
+    # disables; all I/O at hook time, fail-open): a core without the hook just ignores.
+    # Folded under the allow-list law at the P1 rebase: ONE variable-named loop over
+    # the surface ON PURPOSE — the pinned CI core (v2026.9.21) predates
     # post_gateway_admission, so a quoted literal here would make the upstream drift
     # probe RED there; the loop's gate is pinned by tests/test_sprint101_D-surface.py.
     for _hook, _fn in _hook_surface():
