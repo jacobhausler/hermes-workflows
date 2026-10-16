@@ -26,12 +26,19 @@ amend_preview = _common.amend_preview
 quote_json_parse_error = _common.quote_json_parse_error
 kind = _common.kind   # the door consults the ONE node-kind table (wfcommon.NODE_TYPES) via this
 
-# #157: card enforcement — bind our OWN wfcommon (never a sys.path sibling).
+# #157: card enforcement + ledger — bind our OWN modules (never a sys.path sibling).
 _ce_spec = importlib.util.spec_from_file_location("_hermes_workflows_card_enforcement",
                                                   Path(__file__).resolve().parent / "card_enforcement.py")
 assert _ce_spec is not None and _ce_spec.loader is not None
 _card_enforcement = importlib.util.module_from_spec(_ce_spec)
 _ce_spec.loader.exec_module(_card_enforcement)
+
+# PR-3: admission-gate index + dispatch witness — bound by path like its siblings.
+_gi_spec = importlib.util.spec_from_file_location("_hermes_workflows_gate_index",
+                                                  Path(__file__).resolve().parent / "gate_index.py")
+assert _gi_spec is not None and _gi_spec.loader is not None
+_gate_index = importlib.util.module_from_spec(_gi_spec)
+_gi_spec.loader.exec_module(_gate_index)
 
 
 def _coerce_graph(graph):
@@ -706,8 +713,8 @@ WORKFLOW_PARAMS = {
     "properties": {
         "action": {
             "type": "string",
-            "enum": ["run", "status", "wait", "release", "steer", "inbox", "amend", "diff", "stop", "list", "save", "submit", "library", "doctor_version", "validate"],
-            "description": "run=launch a graph; wait=read state, RESPAWNING an idle runner if work is pending (blocks to the next boundary when one is live); status=read-model of a run; release=answer a held human gate; steer=queue steering text for a node; inbox=(child-side, cooperative) pull late steering lines baked for THIS spawn — call once at a natural seam; amend=replace the graph (invalidates changed nodes + all downstream by fingerprint), or pass patch to edit a few node fields without resubmitting the whole graph; diff=confirm surface: runs the amend door with dry_run FORCED (accepts patch or graph), returns the preview + graph_diff and touches nothing; stop=request stop; list=all runs; save=shelve a graph in the library under a name (from run_id or inline graph); library=list shelved graphs richly (name, description, tags, provenance, path-relative id). validate=dry-run the door's validation pipeline (defaults fill + defect collection + model/route policy) with no ping and no writes; returns {ok, errors:[{node,field,msg}], resolved_routes}. run from=<name> replays a shelved graph. submit=quarantine a hand-rolled graph for study (requires why_not_library >=80 chars; never joins the library — the quartermaster's human-gated loop decides); inbox kind=submissions lists them newest-first. doctor_version=read-only version truth for THIS install: {live_version, newest_packaged, source_commit, drift} comparing plugin.yaml against the install.json provenance that pack.py stamps at build time \u2014 one read, no network.",
+            "enum": ["run", "status", "wait", "release", "release_lock", "steer", "inbox", "amend", "diff", "stop", "list", "save", "submit", "library", "doctor_version", "validate"],
+            "description": "run=launch a graph; wait=read state, RESPAWNING an idle runner if work is pending (blocks to the next boundary when one is live; when the lock is PROVEN wedged — Errno 11 with the kernel ledger showing zero holders and the admission lease dead — wait heals it first, the #44 escape hatch); status=read-model of a run; release=answer a held human gate; release_lock=operator hatch for a wedged runner.lock (#44): renames the stranded inode aside under the admission heal-barrier and hands the lane a fresh lock path — REFUSES unless zero live holders are proven (never heals on EACCES or a live holder); steer=queue steering text for a node; inbox=(child-side, cooperative) pull late steering lines baked for THIS spawn — call once at a natural seam; amend=replace the graph (invalidates changed nodes + all downstream by fingerprint), or pass patch to edit a few node fields without resubmitting the whole graph; diff=confirm surface: runs the amend door with dry_run FORCED (accepts patch or graph), returns the preview + graph_diff and touches nothing; stop=request stop; list=all runs; save=shelve a graph in the library under a name (from run_id or inline graph); library=list shelved graphs richly (name, description, tags, provenance, path-relative id). validate=dry-run the door's validation pipeline (defaults fill + defect collection + model/route policy) with no ping and no writes; returns {ok, errors:[{node,field,msg}], resolved_routes}. run from=<name> replays a shelved graph. submit=quarantine a hand-rolled graph for study (requires why_not_library >=80 chars; never joins the library — the quartermaster's human-gated loop decides); inbox kind=submissions lists them newest-first. doctor_version=read-only version truth for THIS install: {live_version, newest_packaged, source_commit, drift} comparing plugin.yaml against the install.json provenance that pack.py stamps at build time \u2014 one read, no network.",
         },
         "run_id": {"type": "string", "description": "Run id (required for every action except run/list)."},
         "name": {"type": "string", "description": "run: overrides graph.name (default workflow); save: library name overrides graph.name (lowercase, [-_.]); library: return one entry with refs-derived required params and an instantiate command. amend: set graph.name in the replacement graph; omitting it retains the run name."},
@@ -1782,14 +1789,27 @@ def _lane_shelf_guard(p):
                      "(est-2ek.1.599; shelf waves 26-31; r4 realpath-only containment)",
             "error_class": "lane_shelf_write"}
 
+def _packaged_general_root():
+    """#51: the PACKAGED curated starter set shipped WITH the plugin — the repo's
+    library/general/ directory, which sits next to __init__.py in any install.
+    Read-only at runtime (act_save always lands on library_root()); it is the
+    FALLBACK the door resolves `general/<name>` to when every private root misses.
+    Resolution order: runs_root library > legacy launch-root library > packaged."""
+    return Path(__file__).resolve().parent / "library" / _GENERAL_PREFIX
+
 def _lib_read(name):
     """READ resolver mirroring find_run: resolved first, legacy only for an EXISTING
-    graph absent from the resolved root. Returns the path whether or not it exists
+    graph absent from the resolved root, and — for `general/<name>` (#51) — the
+    packaged starter set LAST. Returns the path whether or not it exists
     (callers keep their own None/not-exists handling on the primary shape)."""
     p = _lib_path(name)
     if not p.exists():
         n = str(name or "").strip().lower()
-        if LIB_OK.match(n):
+        if n.startswith(_GENERAL_PREFIX) and LIB_OK.match(n[len(_GENERAL_PREFIX):]):
+            packaged = _packaged_general_root() / f"{n[len(_GENERAL_PREFIX):]}.json"
+            if packaged != p and packaged.exists():
+                return packaged
+        elif LIB_OK.match(n):
             legacy = _common.launch_runs_root() / "library" / f"{n}.json"
             if legacy != p and legacy.exists():
                 return legacy
@@ -1797,10 +1817,11 @@ def _lib_read(name):
 
 def _lib_rel_name(p):
     """#50: the replayable name for a library path — `general/<stem>` inside the
-    curated public subdir, plain `<stem>` everywhere else (what `_lib_path` and
-    `library` both answer to)."""
-    return (str(p.relative_to(library_root()))[:-5] if p.parent == library_root() / _GENERAL_PREFIX
-            else p.stem)
+    curated public subdir (private shelf OR the #51 packaged set), plain `<stem>`
+    everywhere else (what `_lib_path` and `library` both answer to)."""
+    if p.parent == library_root() / _GENERAL_PREFIX or p.parent == _packaged_general_root():
+        return _GENERAL_PREFIX + p.stem
+    return p.stem
 def _library_reader():
     """The include resolver's library reader: a closure over _lib_read — the SAME
     resolver `from=<name>` uses (resolved root first, legacy launch root second).
@@ -2211,7 +2232,30 @@ def _library_rows():
                                     "reason": entry.get("invalid", "invalid: unreadable")})
                 continue
             graph = entry["graph"]
-            nodes = graph["nodes"]
+            # est-2ek.1.828 (owner ruling 16, proposal
+            # work/clinker/proposals/est-2ek.1.828-discovery-validation.md):
+            # continuous discovery-time admission — the SAME installed structural
+            # validator that guards save/run, applied AFTER envelope normalization
+            # and defaults fill. A shelf entry whose graph fails the door lands in
+            # the existing typed `skipped`/`quarantined` outputs (fail-closed on
+            # the entry, fail-open on the walk; the row never lists, never
+            # replays from discovery). No route/model liveness ping is ever a
+            # discovery side effect; passing entries — including bare legacy
+            # bytes — stay byte-identical rows.
+            try:
+                _g = _common.apply_graph_defaults(graph)
+            except ValueError as _e:
+                _g, _bad = None, f"invalid: defaults/shape: {_e}"
+            else:
+                _bad = _validation_error(_g)
+            if _g is None or _bad:
+                skipped.append(rel)
+                _r = _bad if isinstance(_bad, str) else json.dumps(
+                    (_bad or {}).get("errors", [_bad])[:3], default=str)
+                quarantined.append({"id": rel, "name": name,
+                                    "reason": f"invalid: structural: {_r}"[:300]})
+                continue
+            nodes = _g["nodes"]
             row = {"name": name,
                    "nodes": len(nodes),
                    "gates": sum(1 for n in nodes if n.get("type") == "gate"),
@@ -2368,6 +2412,21 @@ def act_validate(args):
                 "errors": [{"node": None, "field": "model", "msg": err}]}
     out = {"ok": True, "errors": [], "resolved_routes": routes,
            "hint": "validated only — nothing pinged or written; run it: workflow run graph=..."}
+    # est-vj8m (#256 ask 2), UNION with s12 (#421): shape-p95 budget advisory
+    # rides the SAME warnings channel, appended AFTER defaults fill so
+    # max_turns is the resolved cap. Dict-typed (node/field/msg) per the pin;
+    # s12 rows stay plain strings in the same list.
+    for node in graph["nodes"]:
+        if _common.kind(node).spawns is not True:
+            continue
+        shape = node.get("shape") or _common.DEFAULT_SHAPE
+        budget = _common.SHAPE_PRESETS[shape]["max_turns"]
+        cap = node["max_turns"]  # already resolved by apply_graph_defaults
+        if cap < budget:
+            warnings.append({"node": node["id"], "field": "max_turns",
+                             "msg": f"max_turns {cap} is below shape {shape!r} p95 "
+                                    f"budget {budget}; leave max_turns unset to use "
+                                    "the preset, or keep a measured explicit cap"})
     if warnings:
         out["warnings"] = warnings
     return out
@@ -2387,7 +2446,12 @@ def _card(rid):
 
 # #157: ONE card grammar — the enforcement module ships exactly what the tool
 # result carries, injected here rather than duplicated there.
-_card_enforcement.bind(_common, _card)
+_cl_spec = importlib.util.spec_from_file_location("_hermes_workflows_card_ledger",
+                                                  Path(__file__).resolve().parent / "card_ledger.py")
+_card_ledger = importlib.util.module_from_spec(_cl_spec)
+_cl_spec.loader.exec_module(_card_ledger)
+_card_ledger.bind(_common.runs_root)
+_card_enforcement.bind(_card_ledger, _card)
 
 
 def _lifecycle_notice(rid):
@@ -2821,6 +2885,19 @@ def _from_unknown_error(name):
            "hint": "workflow library lists recipes; run with graph or graph_path launches a one-off without saving"}
     return out
 
+def _node_id_warnings(graph):
+    """s12-adjacent readability advice only; never rename or refuse a node."""
+    warnings = []
+    for node in graph["nodes"]:
+        node_id = node["id"]
+        if len(node_id) == 1 or re.fullmatch(r"[aeiou]+", node_id, re.IGNORECASE):
+            warnings.append(
+                f"s12 node_id: {node_id!r} is single-character or vowel-only; "
+                "use a readable 1-3 word id such as 'scan_nodes' "
+                "(advisory; execution unchanged)")
+    return warnings
+
+
 def act_run(args):
     graph, bad = _input_graph(args, library=True)
     if bad:
@@ -2930,6 +3007,18 @@ def act_run(args):
     bad = _unbound_gate_argv_refs(graph)
     if bad:
         return bad
+    # est-2ek.1.856 (B3): the seat-cap knobs are validated where they can still
+    # refuse — an invalid WORKFLOW_MAX_SEATS / config workflows.max_seats refuses
+    # the launch BEFORE any run directory is written or child spawned. Without
+    # this the typo only surfaced at the first node's spawn (a failed node), and
+    # 8/8 lanes shipped with the cap never read at all (the w54 field report).
+    try:
+        _common.seat_max_seats()
+    except _common.SeatCapError as e:
+        return {"error": f"invalid seat cap: {e} "
+                        "(WORKFLOW_MAX_SEATS env or config workflows.max_seats; an integer "
+                        f"in [{_common.SEAT_CAP_FLOOR}, {_common.SEAT_CAP_CEILING}], or unset "
+                        "for the default; the per-run opt-out stays graph max_seats: 0)"}
     # 1.1 (RATIFY F2): profile validation runs on the RENDERED graph ({run.KEY} resolved).
     bad = _profile_error(graph)
     if bad:
@@ -2969,6 +3058,9 @@ def act_run(args):
                        + _liveness_hint_suffix(_liveness_notes)}
         if _include_notes:
             out["include_notes"] = _include_notes
+        warnings = _node_id_warnings(graph)
+        if warnings:
+            out["run_warnings"] = warnings
         return out
     key = args.get("lane_key")
     if key is not None:
@@ -3123,6 +3215,13 @@ def _create_run(args, graph, lib_name, models, routes, _liveness_notes, lane_pat
     _pv = _common.plugin_version()
     if _pv:
         meta["plugin_version"] = _pv
+    # est-2ek.1.856 deep review D2: the advertised per-run seat-cap opt-out is
+    # baked where the runner reads it — run.json meta max_seats (the structural
+    # pass has already validated the value: integer in [4,16] or the explicit 0
+    # off-sentinel; _max_seats honours meta over env/config). Absent = key never
+    # written: a plain run keeps the exact golden key set.
+    if "max_seats" in graph:
+        meta["max_seats"] = graph["max_seats"]
     # Composite runs record which shelf bytes they expanded from (author-form
     # provenance) and any non-fatal resolver notes (scratch collisions). Empty =
     # key omitted: a plain run keeps the exact pre-include run.json key set.
@@ -3178,6 +3277,9 @@ def _create_run(args, graph, lib_name, models, routes, _liveness_notes, lane_pat
             "card": _card(rid), "lifecycle_notice": _lifecycle_notice(rid)}
     if include_notes:
         out["include_notes"] = include_notes   # scratch-collision warnings ride the launch
+    warnings = _node_id_warnings(graph)
+    if warnings:
+        out["run_warnings"] = warnings
     return out
 
 def _steer_event(r, ev, **kw):
@@ -3256,6 +3358,12 @@ def act_status(args):
            "graph_revision": _graph_revision(r)}
     if "accounting" in st:
         out["accounting"] = st["accounting"]
+    if st.get("runner_lock") and st["runner_lock"] not in ("busy", "free"):
+        # #44: legibility of the recoverable wedge / EACCES-ambiguous lock —
+        # honest absence for the two ordinary states (golden key sets unchanged).
+        out["runner_lock"] = st["runner_lock"]
+        if st.get("runner_lock_detail"):
+            out["runner_lock_detail"] = st["runner_lock_detail"]
     if resolved_via:   # #58: the run lives outside the caller's resolved root — loud, not silent
         out["resolved_via"] = resolved_via
         out["resolved_via_note"] = ("run resolved under a sibling root (dispatch-time home "
@@ -3309,6 +3417,7 @@ def act_status(args):
                                   "respawn_eligible": True}
     if st["held_gate"]:
         out["gate"] = st["held_gate"]
+        _gi_note_open(r, st["held_gate"])   # PR-3: flag-gated, best-effort, never raises
     for nid, v in st["nodes"].items():
         rec = jload(r / "nodes" / f"{nid}.json")
         # est-2ek.1.95: the stop_reason's class rides ONLY off the via node's own
@@ -3502,6 +3611,21 @@ def act_wait(args):
     top_alive = None
     if st["status"] in ("running", "pending", "interrupted"):
         top_alive = bool(st.get("runner_live"))   # A2 one-read law: THE ONE read
+        if not top_alive and st.get("runner_lock") == "wedged":
+            # #44 escape hatch (automatic half): the lock says HELD while the
+            # kernel ledger proves ZERO holders and the admission lease is proven
+            # dead — nothing can ever progress on that shape, so wait heals it
+            # BEFORE the respawn below. The heal is the single safety authority
+            # (wfcommon.heal_wedged_runner_lock): it REFUSES on EACCES (B1), on
+            # any live holder, and on the lease-absent legacy shape (that one
+            # only the explicit operator verb carries authority over). A refused
+            # heal falls through to the honest status answer — never a false
+            # respawn over a live holder (the flock admission still makes even a
+            # raced spawn a harmless WORKFLOW_BUSY loser).
+            _wedge_heal = _common.heal_wedged_runner_lock(r)
+            if _wedge_heal.get("reason") == "healed":
+                st = run_state(r)
+                top_alive = bool(st.get("runner_live"))
         if not top_alive:
             _respawn_runner(r)  # only this explicit wait resumes unfinished work
     cap = min(float(args.get("timeout", 600)), 1800)
@@ -3653,6 +3777,7 @@ def _release_core(r, gate_id, answer, ui=False):
     p = r / "gates" / f"{gate_id}.json"
     tmp = p.with_name(f"{gate_id}.json.{os.getpid()}.tmp"); tmp.write_text(json.dumps(rec, ensure_ascii=False))
     os.replace(tmp, p)
+    _gi_note_close(r, gate_id)   # PR-3: flag-gated, best-effort, never raises
     return {"ok": True}
 
 def act_release(args):
@@ -3687,6 +3812,35 @@ def act_release(args):
     else:
         hint = "answer recorded; the live runner commits it at its boundary; push delivery is optional, use wait for blocking observation"
     return {**res, "hint": hint}
+
+def act_release_lock(args):
+    """#44 (issue ask 2): the operator escape hatch for a wedged runner.lock.
+    The field shape: Errno 11 forever with the kernel ledger proving zero
+    holders and the admission lease dead — wait-resume impossible without
+    copying directories. Delegates to the SINGLE safety authority
+    (wfcommon.heal_wedged_runner_lock): refuses unless the wedge is proven;
+    never heals on EACCES (B1) or against a live/advancing holder (B2 — the
+    final re-verification under the admission heal-barrier); renames the
+    stranded inode aside (evidence kept), never unlinks. Read-only verbs
+    (status/list) NEVER heal; only this verb and wait's wedged-gate do."""
+    r, st, resolved_via = _resolve_read_run(args.get("run_id"))
+    if not st:
+        return {"error": "unknown run_id"}
+    if resolved_via:   # #58 same law as wait: write verbs never cross roots
+        return {"ok": False, "error": "run lives under a sibling root — release_lock "
+                "must be issued from the owning home"}
+    res = _common.heal_wedged_runner_lock(r)
+    out = {**res, "run_id": st["run_id"]}
+    if res.get("ok"):
+        out["hint"] = ("lane re-locked fresh; `wait` resumes unfinished work"
+                       if res.get("reason") == "healed"
+                       else "no wedge present; nothing to do")
+    else:
+        out["hint"] = ("refused: the holder is not proven dead (live ledger row, "
+                       "EACCES-ambiguous, or legacy lease-absent shape). A LEGACY "
+                       "pre-lease dir needs the owner's explicit force — see "
+                       "references/operations.md; do NOT retry-loop this verb.")
+    return out
 
 def act_steer(args):
     r = run_dir(args.get("run_id"))
@@ -3971,8 +4125,23 @@ def act_amend(args):
             meta["include_notes"] = _include_notes
         else:
             meta.pop("include_notes", None)
-    if meta.get("name") != new["name"] or _includes or _include_notes:
+    _name_changed = meta.get("name") != new["name"]
+    if _name_changed or _includes or _include_notes:
         meta["name"] = new["name"]
+    # est-2ek.1.856 deep review D2: run.json's meta max_seats is the CURRENT
+    # graph's truth — SET-OR-REMOVE like the include notes: an amend that
+    # declares max_seats bakes it, an amend whose graph drops the key must drop
+    # it from run.json too (a stale opt-out surviving a graph swap would leave
+    # the runner honouring a cap its own graph no longer declares).
+    _MS_MISSING = object()                            # one sentinel, compared by identity
+    _ms_before = meta.get("max_seats", _MS_MISSING)   # pre-amend truth, before mutation
+    _ms_now = new.get("max_seats", _MS_MISSING)
+    if _ms_now is not _MS_MISSING:
+        meta["max_seats"] = new["max_seats"]
+    else:
+        meta.pop("max_seats", None)
+    if (_name_changed or _includes or _include_notes
+            or _ms_before != _ms_now):
         mtmp = r / f"run.json.{os.getpid()}.tmp"
         mtmp.write_text(json.dumps(meta, ensure_ascii=False))
         os.replace(mtmp, r / "run.json")
@@ -3997,6 +4166,7 @@ def act_stop(args):
     if st and st["status"] in ("done", "failed", "stopped"):
         return {"ok": True, "already": st["status"]}
     (r / "stop.request").write_text(datetime.now(timezone.utc).isoformat(timespec="seconds"))
+    _gi_note_close(r, None)   # PR-3: every open gate of a stopped run closes
     mode = _resume_after_action(r, consumed=lambda: not (r / "stop.request").exists())
     if mode == "respawned":
         return {"ok": True, "note": "runner spawned to consume the stop marker"}
@@ -4013,8 +4183,12 @@ def act_list(_args):
     # unique by RUN-DIR NAME across every scanned root (symlinked/profile
     # roots multiply hits), never raw per-root iterdir.
     scanned = _common.iter_run_dirs(roots, reverse=True)
+    # #44 (PR #47 C2 law, applied to the door census too): ONE batch probe child
+    # for the whole listing — run_state consumes the pre-observed lock state
+    # instead of spawning one probe child per row.
+    _lock_states = _common.runner_lock_states(scanned)
     for r in scanned:
-        st = run_state(r, telemetry=False)
+        st = run_state(r, telemetry=False, lock_state=_lock_states.get(r))
         if st and st["run_id"] not in seen:
             seen.add(st["run_id"])
             row = {"run_id": st["run_id"], "name": st["name"], "status": st["status"],
@@ -4075,6 +4249,7 @@ def act_doctor_version(args):
 
 
 ACTIONS = {"run": act_run, "status": act_status, "wait": act_wait, "release": act_release,
+           "release_lock": act_release_lock,
            "steer": act_steer, "inbox": act_inbox, "amend": act_amend, "diff": act_diff, "stop": act_stop, "list": act_list,
            "save": act_save, "submit": act_submit, "library": act_library,
            "doctor_version": act_doctor_version, "validate": act_validate}
@@ -4093,6 +4268,159 @@ def handle(args, **kwargs):
     except Exception as e:
         import traceback
         return json.dumps({"error": f"{type(e).__name__}: {e}", "trace": traceback.format_exc()[-800:]})
+
+# ---------- PR-3: zero-turn gate answers on the admission lane ----------
+# Scope law — HUMAN-TYPED ANSWERS ONLY. Spiked at hermes-agent origin/main 20c9da14eb:
+# `post_gateway_admission` fires from gateway/run_inbound_consumer.py::run_post_admission_hook,
+# called at gateway/run_inbound.py:1363 under `if not is_internal:`. Gateway wakes never reach
+# it (push platforms admit a synthetic MessageEvent(internal=True); api_server sessions get
+# gateway/wake.py self-POSTing /v1/chat/completions, which runs the turn directly). So this
+# handler can only ever see text a human typed, and CANNOT impersonate a wake: wake-delivered
+# text is out of scope by the core's contract. Hook contract (same file's docstring): kwargs are
+# session_key, platform, source (dict), message_id, text; a result `{"action": "handled",
+# "reply": <str, optional>}` skips the agent turn; ANYTHING else — None, another shape, a raise,
+# a timeout — is fail-open and the ordinary agent turn runs. Both hooks are flag-gated, default
+# off, read at CALL time (no restart): settings.admission_gates / settings.dispatch_witness.
+# pre_gateway_dispatch (gateway/run_inbound.py:73) passes event, gateway, session_store; the
+# witness returns None (= allow) and only records.
+
+_RELEASE_CMD = re.compile(r"^\s*wf\s+release\s+(\S+)\s+(\S+)\s+(.+?)\s*$", re.I | re.S)
+
+
+def _flag(key):
+    """Owner flag read at call time; only an explicit true enables (default off)."""
+    try:
+        v = _common.owner_setting(key)
+    except Exception:
+        return False
+    if isinstance(v, str):
+        return v.strip().lower() in ("1", "true", "yes", "on")
+    return v is True
+
+
+def _gi_note_open(r, held):
+    """status/wait surfaced a held gate to its OWNING session: index it (flag-gated)."""
+    try:
+        if not _flag("admission_gates") or not isinstance(held, dict) or not held.get("id"):
+            return
+        r = Path(r)
+        root = runs_root()
+        if r.resolve().parent != Path(root).resolve():
+            return                      # sibling/nested root: not this door's index
+        sid, skey = _session_env("HERMES_SESSION_ID"), _session_env("HERMES_SESSION_KEY")
+        if not (sid and skey):
+            return
+        owner = (jload(r / "run.json", {}) or {}).get("owner") or {}
+        if owner.get("session_id") != sid:
+            return
+        _gate_index.note_open(root, r.name, held["id"], skey, sid, held.get("options") or [])
+    except Exception:
+        pass
+
+
+def _gi_note_close(r, gate_id):
+    try:
+        if _flag("admission_gates"):
+            _gate_index.note_close(Path(r).parent, Path(r).name, gate_id)
+    except Exception:
+        pass
+
+
+def _gate_still_held(run_id, gate_id):
+    """The index is a hint; the run's own read model is the truth. UI/other-door answers never
+    close an index row, so every use re-verifies the hold."""
+    st = run_state(run_dir(run_id)) or {}
+    hg = st.get("held_gate") or {}
+    return st.get("status") == "held" and hg.get("id") == gate_id
+
+
+def _session_open_gates(root, session_key):
+    live = []
+    for row in _gate_index.open_rows(root, session_key):
+        try:
+            held = _gate_still_held(row["run_id"], row["gate_id"])
+        except Exception:
+            continue                    # unreadable: conservative, leave the row alone
+        if held:
+            live.append(row)
+        else:
+            _gate_index.note_close(root, row["run_id"], row["gate_id"])
+    return live
+
+
+def _admission_handler(event=None, gateway=None, session_store=None, **kw):
+    """post_gateway_admission: release a held gate from a human-typed answer, zero turns.
+    Returns core's `{"action": "handled", "reply": ...}` or None (ordinary turn) — None on
+    flag-off (before any index read), no/ambiguous match, and ANY failure."""
+    try:
+        if not _flag("admission_gates"):
+            return None
+        text = kw.get("text")
+        if text is None:
+            text = getattr(event, "text", None)
+        skey = kw.get("session_key") or getattr(event, "session_key", None)
+        if not isinstance(text, str) or not text.strip() or not isinstance(skey, str) or not skey:
+            return None
+        rows = _session_open_gates(runs_root(), skey)
+        if not rows:
+            return None
+        m = _RELEASE_CMD.match(text)
+        if m:
+            run, gate, answer = m.groups()
+            row = next((x for x in rows if x["run_id"] == run and x["gate_id"] == gate), None)
+            if row is None:
+                return None
+        elif len(rows) == 1:            # bare answers need exactly ONE open gate
+            row, answer, t = rows[0], None, text.strip()
+            opts = row.get("options") or []
+            if re.fullmatch(r"[0-9]+", t):
+                if 1 <= int(t) <= len(opts):
+                    answer = opts[int(t) - 1]
+            else:
+                answer = next((o for o in opts if o.strip().lower() == t.lower()), None)
+            if answer is None:
+                return None
+        else:
+            return None
+        res = act_release({"run_id": row["run_id"], "gate_id": row["gate_id"], "answer": answer})
+        if not (isinstance(res, dict) and res.get("ok")):
+            return None
+        return {"action": "handled",
+                "reply": f'Workflow "{row["run_id"]}": gate "{row["gate_id"]}" released '
+                         f'with "{answer}" (zero-turn admission path).'}
+    except Exception:
+        return None
+
+
+def _dispatch_witness(event=None, gateway=None, session_store=None, **kw):
+    """pre_gateway_dispatch observer: one correlation row per inbound. No control returned."""
+    try:
+        if _flag("dispatch_witness"):
+            _gate_index.witness_append(runs_root(), _gate_index.witness_row(event))
+    except Exception:
+        pass
+    return None
+
+
+def _wf_gates(_arg=""):
+    if not _flag("admission_gates"):
+        return ("Admission gates are off (set plugins.entries.hermes-workflows.settings."
+                "admission_gates: true). A gate is answered by an ordinary turn.")
+    skey = _session_env("HERMES_SESSION_KEY")
+    if not skey:
+        return "No session key in this context — cannot list this session's open gates."
+    rows = _session_open_gates(runs_root(), skey)
+    if not rows:
+        return "No open gates indexed for this session."
+    lines = [f"Open gates for this session ({len(rows)}):"]
+    for x in rows:
+        opts = x.get("options") or []
+        lines.append(f'- run "{x["run_id"]}" gate "{x["gate_id"]}"'
+                     + (": " + " ".join(f"{i}) {o}" for i, o in enumerate(opts, 1)) if opts else ": free text"))
+    lines.append("A bare option (or its number) answers the gate only when exactly one is open; "
+                 "`wf release <run> <gate> <answer>` always works.")
+    return "\n".join(lines)
+
 
 def _wf_command(raw_args):
     """`/wf` — the library front door. `/wf <name> [note]` supplies the note
@@ -4122,6 +4450,8 @@ def _wf_command(raw_args):
                          "(the door refuses an empty value by name):")
         lines.append(entry["command"])
         return "\n".join(lines)
+    if arg in ("gates", "gate"):
+        return _wf_gates()
     out = act_library({})
     lib = out["library"]
     quarantined = out.get("quarantined") or []
@@ -4168,7 +4498,7 @@ def register(ctx):
     # ctx._abandon_load() and every later register_* is silently ignored.
     # Keep this body cheap and non-blocking: measured ~0.1s import, register()
     # < 1ms — one cached config read (model_tiers) and in-memory registrations,
-    # no subprocess/network/run-dir scan (card_enforcement's module exec is
+    # no subprocess/network/run-dir scan (card_enforcement's/card_ledger's module exec is
     # defs only; its I/O runs at hook time). Never pass override=True to
     # register_tool: it is operator-gated (PluginToolOverrideError). Pinned by
     # tests/test_hook_abandon_safety.py.
@@ -4182,8 +4512,18 @@ def register(ctx):
             " — pick per node by how hard the step is. "
             "Unset = seat default. run echoes the resolved {node: model} table.")
     ctx.register_tool(name="workflow", toolset="workflows", schema=WORKFLOW_SCHEMA, handler=handle)
-    # #157: last-resort card shipper (core fires this once per turn before the
-    # assistant row persists; fail-open, marker-ledgered — see card_enforcement.py).
+    # Hook-led card ledger (card_ledger.py): post_tool_call records workflow
+    # launches, pre_llm_call reminds, transform_llm_output ships (#157) — all
+    # fail-open, no run-dir scan.
+    ctx.register_hook("post_tool_call", _card_enforcement._post_tool_call)
+    ctx.register_hook("pre_llm_call", _card_enforcement._pre_llm_call)
     ctx.register_hook("transform_llm_output", _card_enforcement._card_hook)
+    # PR-3: both default-off (flags read at call time); a core without the hook just ignores.
+    for _hook, _fn in (("post_gateway_admission", _admission_handler),
+                       ("pre_gateway_dispatch", _dispatch_witness)):
+        try:
+            ctx.register_hook(_hook, _fn)
+        except Exception:
+            pass
     ctx.register_command("wf", _wf_command, description="Workflow library: `/wf` lists, `/wf <name> [note]` replays a shelved graph",
                          args_hint="[name] [note]", argument_mode="text")

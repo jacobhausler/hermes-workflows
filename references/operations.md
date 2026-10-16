@@ -1,6 +1,6 @@
 # Run operations and read model
 
-Use `workflow{action:"run", graph:<object>}` (or `from:<saved-name>`, or `graph_path:<absolute-local-JSON-file>`), then `status` and `wait` with the returned `run_id`. For a reusable graph, `save` first and `run from:<name>` next; `library` lists it richly (name, description, tags, provenance, path-relative id). Optional study-only `submit` takes `why_not_library` (>=80 chars) and quarantines the submission under `runs_root()/inbox`, never the library; `inbox` lists submissions newest-first for a human-gated promotion review. Ordinary one-off `run` executes without lookup, tags, save or submission. `graph_path` is for an unsaved caller-authorized local file on run/save/amend, not a remote path. `/wf` is an optional library front end.
+Use `workflow{action:"run", graph:<object>}` (or `from:<saved-name>`, or `graph_path:<absolute-local-JSON-file>`), then `status` and `wait` with the returned `run_id`. For a reusable graph, `save` first and `run from:<name>` next; `library` lists it richly (name, description, tags, provenance, path-relative id). Discovery is a CONTINUOUS admission gate (est-2ek.1.828, owner ruling 16): every shelf graph is structural-validated at every listing (defaults fill + the door validator, after envelope normalization, no route/model ping) — an entry that fails is omitted as a typed `skipped`/`quarantined` row and never replays from discovery; passing entries and bare legacy bytes are byte-identical rows. Optional study-only `submit` takes `why_not_library` (>=80 chars) and quarantines the submission under `runs_root()/inbox`, never the library; `inbox` lists submissions newest-first for a human-gated promotion review. Ordinary one-off `run` executes without lookup, tags, save or submission. `graph_path` is for an unsaved caller-authorized local file on run/save/amend, not a remote path. `/wf` is an optional library front end.
 
 A run may be running, held, interrupted, done, failed or stopped. Running requires a live process with the exact runner command and run identity; a persisted PID or parked marker is not sufficient. Held gates and interrupted runs do not count as running. List responses include full-census `counts` and `total` even when the recent-runs page is truncated. `interrupted` means unfinished work with no live runner: inspect saved outputs and uncertain side effects before explicitly resuming with `wait`. A recorded fatal runner crash is `failed` and needs correction/amend rather than repeated wait/respawn. Every `status`/`wait` payload carries the derived `next` — do what it says and `wait` again until it is empty; alongside it rides the derived `failed_nodes` (`[{id, error, error_class}]`) — WHICH nodes died, derived from the same efp-valid committed states the status verdict used, never stored; a crash verdict with no failed node reads `[]` (honest absence: the runner died, not a node) (`wait` self-yields with a "call wait again" note before a terminal state to stay inside the host deadline). On a held gate `next` names the gate and its options: ask the owner, then `release` with the exact answer. A machine gate may park without a child; read its check attempt, last exit/tail and deadline.
 
@@ -21,6 +21,8 @@ Mixed-version door/runner skew (#152): the door that answers a gate respawns the
 Use a terminal, decision-only agent node with no automatically runnable work descendants. Its ordinary schema-defined final JSON can contain `needs_escalation: true` and a short reason (the node schema must actually permit these fields). The parent inspects that exact value and any external effects, selects an explicit model and amends the graph with original committed inputs plus a bounded factual handoff. Check `dry_run`'s `will_rerun` before applying. A timeout remains a failed node, not a safe auto-retry: the parent investigates and decides. Never use this on a work-product node with downstream execution; schema-valid JSON is committed as done even if its text requests escalation. This recipe adds no tool, status, automatic fallback or guarantee of side-effect rollback.
 
 Desktop cards use `::workflow{id="<run_id>"}` and are optional presentation. Plain CLI text and run IDs suffice. The existing desktop card hook may append cards; agents need not paste them. Backend and desktop installations are separate.
+
+**Card ledger.** Owed cards are tracked in `<runs_root>/card-ledger.json` (`{session_id: {run_id: {state: pending|held, ts, name}}}`, atomic writes, a corrupt file reads as empty), kept by hooks rather than a run-dir scan: `post_tool_call` adds a run on every `workflow` launch, marks `held` gate reports, and drops it on `done|failed|stopped`/`stop`; `pre_llm_call` reminds the model of owed cards only while the ledger holds some; `transform_llm_output` appends up to 3 cards (newest first) and drops each entry once the text is selected. The old age-window setting (`card_window_minutes`) is gone, replaced by the ledger; entries surviving a gateway restart ship late. Every hook is fail-open.
 
 `profile` routes an agent node to a named target profile, not a fan-out item: the child gets the TARGET's SOUL, memory, `.env` and tools. This is delegation, not isolation. Before launching, the target owner writes `<target_profile_home>/workflow_team.json` as `{"accept_from":["<launcher-profile-name>"]}`; the launcher name comes from the launching process's own HERMES_HOME (for the default profile, use `"default"`), never from a graph argument. The target must have `config.yaml`; `default` may launch but is never a target. Without target-owned consent validation fails before any run write/spawn; a target deleted before Popen fails with `error_class:"spawn"`, never silently falling back to the launcher.
 
@@ -116,6 +118,32 @@ A read-only pass over the tool's defaults — what a first-time agent would wish
 - **`submit` `why_not_library` — default: REQUIRED (>=80 chars), no default.** This applies only to an explicit study submission, not execution. Existing submission validation and persisted receipts are unchanged.
 - **`submit` dedupe — default: on, by graph digest + submitted_by, and it is a HINT (`{deduped, existing}`), not a bounce.** A first-time user wishes a resubmit silently overwrote the first copy. Current is right: the inbox is evidence for a human loop, so the tool never mutates or replaces stored receipts; a restatement reports the existing id and the human dedupes with the digest in hand.
 - **`library` unknown shapes — default: skipped + LISTED in `skipped`, never a crash.** A first-time user wishes a corrupt file were auto-repaired or hidden. Current is right: repairing another profile's file is not the library reader's authority (same-UID trust boundary), and hiding it would make a broken entry un-findable; the listed warning is the repairable truth.
+
+## Wedged runner.lock and the `release_lock` escape hatch (#44)
+
+The field shape (2026-09-29): the runner and its children are gone, yet a fresh
+`LOCK_EX|LOCK_NB` on `<run>/runner.lock` returns Errno 11 forever while a new file in
+the same dir locks fine — the holder is a kernel-side orphan / inherited-fd survivor
+beyond our `/proc` view. Left alone, `wait`-resume is permanently impossible.
+
+Three laws keep recovery safe (`wfcommon.py`, pinned by `tests/test_lock_wedge_44b.py`):
+- **Child-probe**: every read-path flock probe runs in a short-lived child whose death
+  IS the release; the door never opens `runner.lock`, so a SIGKILLed door cannot strand
+  an fd it never opened. The probe never creates the lock file.
+- **Tri-state read**: the lock truth of a run dir is `free | busy | eacces | wedged`,
+  never a bool. EACCES on an existing lock is its OWN fail-closed state (never free —
+  a permission failure proves nothing about holders); `busy` is resolved against the
+  kernel ledger (`/proc/locks`, seam `WF_PROC_LOCKS_PATH`) and the admission lease
+  (`runner.lease {pid,boottime,at}`, heartbeated by the live holder). `wedged` requires
+  probe EAGAIN AND zero ledger rows for the inode AND a proven-dead lease.
+- **Safe heal**: `release_lock` (door verb) / `wf.py release-lock <run_id>` renames the
+  stranded inode aside (never unlinks — evidence kept) and hands the lane a fresh lock
+  path, ONLY under the admission heal-barrier (`runner.lock.heal`), and re-verifies
+  probe + ledger + lease immediately before the rename: a holder that wakes between
+  check and commit shows its row and the heal refuses — the holder wins. Read verbs
+  (`status`/`list`) never heal; `wait` heals only the automatic `wedged` shape; a
+  legacy lease-absent dir refuses automatic healing and needs the explicit operator
+  verb. A heal never steals from a live holder and never heals on EACCES.
 
 ## Library provenance
 

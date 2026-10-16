@@ -1,0 +1,75 @@
+{
+  "meta": {
+    "description": "One red-green slice, three nodes: write a failing test for a named behavior, implement the minimum to pass, then an independent verifier re-runs the suite fresh. For small, provable feature steps.",
+    "tags": ["use_case:testing", "domain:repo", "starter", "seeded"],
+    "params": {
+      "repo_dir": {"desc": "absolute path of the git checkout to work in"},
+      "slice": {"desc": "ONE behavior, phrased so a test can pin it"},
+      "test_cmd": {"desc": "one command line, run from repo root, whose exit 0 means the suite is green"}
+    }
+  },
+  "graph": {
+    "grammar": "wf/1",
+    "name": "test-first-feature-slice",
+    "description": "Test-first delivery of ONE feature slice. SEED CONTRACT (run_context map, ALL THREE keys required, plain text, no braces): 'repo_dir' = absolute path of the checkout; 'slice' = exactly ONE behavior, phrased so a test can pin it (surfaces at most one slice per run - a list is a queue you dispatch twice); 'test_cmd' = the repo's own command line that runs the relevant tests from the repo root and exits nonzero on failure. LAUNCH: run from:'general/test-first-feature-slice' run_context:{'repo_dir':'/abs/path','slice':'<one behavior>','test_cmd':'<repo test command>'}. NODE MAP: red (write the failing test, prove it fails for the RIGHT reason) -> green (minimum implementation to pass, never weaken the test) -> verify (fresh independent re-run of {run.test_cmd} plus a hollowing spot-check: a verifier that only trusts the builder's word is a stamp, not a check). The red node commits the test file but nothing passes yet BY DESIGN - a run stopped between red and green leaves a committed failing test, so resume or stop deliberately, never by accident. Commits are the nodes' job inside {run.repo_dir} only; the verifier commits nothing. Tiers: worker for red and green, manager for verify.",
+    "provenance": {
+      "owner": "hermes-workflows",
+      "source": "hermes-workflows/library/general/test-first-feature-slice.json"
+    },
+    "defaults": {
+      "timeout": 1200,
+      "context": "You are one lane of a test-first slice. Ground rules: touch only {run.repo_dir}; the test is the contract - changing it to fit the code is forbidden; run the repo's real test command, never an invented substitute; report real observed output, not intent; keep the answer to the schema; one fenced json block as the final message; never print secrets."
+    },
+    "nodes": [
+      {
+        "id": "red",
+        "type": "agent",
+        "model": "worker",
+        "shape": "build",
+        "schema": {
+          "type": "object",
+          "required": ["red", "test_files", "evidence"],
+          "properties": {
+            "red": {"type": "boolean"},
+            "test_files": {"type": "array", "items": {"type": "string"}},
+            "evidence": {"type": "string"}
+          }
+        },
+        "goal": "In {run.repo_dir}, write the smallest test that pins this behavior (test-first: the behavior must FAIL it):\n{run.slice}\nFollow the repo's existing test layout and idioms. Run the repo's test command ({run.test_cmd}) and confirm the new test fails because the behavior is missing - an infrastructure error (missing dependency, unparseable file) is not red; fix the test placement first. Commit ONLY the new test file(s). Reply with ONLY fenced json {\"red\": <true only if the test ran and failed on the missing behavior>, \"test_files\": [\"<repo-relative paths committed>\"], \"evidence\": \"<one line of the real failure output>\"}"
+      },
+      {
+        "id": "green",
+        "type": "agent",
+        "model": "worker",
+        "shape": "build",
+        "after": ["red"],
+        "schema": {
+          "type": "object",
+          "required": ["green", "changed_files", "evidence"],
+          "properties": {
+            "green": {"type": "boolean"},
+            "changed_files": {"type": "array", "items": {"type": "string"}},
+            "evidence": {"type": "string"}
+          }
+        },
+        "goal": "In {run.repo_dir}, implement the MINIMUM needed to turn the red test(s) from your Inputs green. Do not modify or delete the test; do not add features beyond the slice; refactor only where the new code demands it. Run {run.test_cmd}; everything must be green, the new test included. Commit the implementation (separate commit from the test). Reply with ONLY fenced json {\"green\": <true only on a real full-suite exit 0>, \"changed_files\": [\"<repo-relative paths committed>\"], \"evidence\": \"<one line: the summary line of the real test run>\"}"
+      },
+      {
+        "id": "verify",
+        "type": "agent",
+        "model": "manager",
+        "shape": "review",
+        "after": ["green"],
+        "schema": {
+          "type": "object",
+          "required": ["verified", "note"],
+          "properties": {
+            "verified": {"type": "boolean"},
+            "note": {"type": "string"}
+          }
+        },
+        "goal": "Independent verification of the slice in {run.repo_dir}. Trust NOTHING in your Inputs' self-reports: 1) re-run {run.test_cmd} yourself and observe the real exit code; 2) spot-check the test is not hollow - temporarily break the new implementation line by line (or stub it) and confirm the test goes red again, then restore EXACTLY (git diff must show your scratch undone); 3) confirm the diff commits nothing beyond test + implementation for this slice. verified=true only when all three hold. Commit nothing. Reply with ONLY fenced json {\"verified\": <bool>, \"note\": \"<what you ran, what you broke and saw, final git status line>\"}"
+      }
+    ]
+  }
+}

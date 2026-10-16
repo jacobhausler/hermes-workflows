@@ -66,9 +66,9 @@ ending your turn right after `run` is how runs stall.
   spawns) when an ancestor's committed output lacks a listed path — the run FAILS,
   never skips quietly; skip-on-missing is a `when` gate with `on_skip:"prune"`.
 - After-edges block on a `partial` (harvest-on-death) ancestor
-  (`blocked_by_partial_ancestor`); consume the harvest with `after_partial:true`.
-- `save` always stamps provenance (owner, version, source, saved_at, source_digest); a
-  `run_context:{required?,defaults?}` contract refuses a launch missing a key, pre-write.
+  (`blocked_by_partial_ancestor`); consume the harvest with `after_partial:true`; a solo producer may instead set `harvest_policy: "validate"` so its own
+  schema-valid, self-declared-complete harvest commits `done` with the death kept on the
+  record. Details: [grammar](references/grammar.md).
 
 ## Run and handoff
 
@@ -84,10 +84,10 @@ ending your turn right after `run` is how runs stall.
   `stop` is terminal. Details: [operations](references/operations.md).
 - Lint before launching with `workflow{action:"validate", graph:…}` — the door's
   whole validation, zero writes, no liveness ping.
-- Optional recipes: `library` lists; `run` with `from:<name>` replays; `save`
-  explicitly shelves reusable graphs. One-off `run` needs no library lookup,
-  tags, save or `why_not_library`. Explicit study-only `submit` retains its
-  receipt requirement. [grammar](references/grammar.md).
+- Optional recipes: `library` lists; `run` with `from:<name>` replays; `save` explicitly shelves
+  reusable graphs and always stamps provenance; a `run_context:{required?,defaults?}` contract
+  refuses a launch missing a key, pre-write. One-off `run` needs no library lookup, tags, save or
+  `why_not_library`. Explicit study-only `submit` retains its receipt requirement. [grammar](references/grammar.md).
 - No double-dispatch for pollers: `run` with `lane_key:<key>` — while an UNFINISHED
   incumbent holds the key, a second `run` is deduped, never spawns. `needs_resume`
   means `wait` it — never replace it; `stop` is the explicit abandonment. Keys are
