@@ -151,7 +151,7 @@ with tempfile.TemporaryDirectory(prefix="prov126-") as td:
         (sandbox / "runs" / "library" / "legacy-entry.json").write_text(
             json.dumps(legacy_bare, indent=2))
         legacy_prov = json.loads(json.dumps(legacy_bare))
-        legacy_prov["provenance"] = {"owner": "gh-dispatch", "source": "repo:old",
+        legacy_prov["provenance"] = {"owner": "legacy-owner", "source": "repo:old",
                                      "saved_at": "2026-10-01T00:00:00+00:00",
                                      "source_digest": "0" * 64}
         (sandbox / "runs" / "library" / "legacy-prov-entry.json").write_text(
@@ -165,7 +165,7 @@ with tempfile.TemporaryDirectory(prefix="prov126-") as td:
               json.dumps(rb)[:220])
         rp = rows.get("legacy-prov-entry")
         check("T5b legacy four-key provenance entry lists without a fabricated version",
-              rp is not None and "version" not in rp and rp.get("owner") == "gh-dispatch",
+              rp is not None and "version" not in rp and rp.get("owner") == "legacy-owner",
               json.dumps(rp)[:220])
         check("T5c entry bytes untouched by the read",
               json.loads((sandbox / "runs" / "library" / "legacy-entry.json").read_text())

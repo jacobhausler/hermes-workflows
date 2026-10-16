@@ -67,11 +67,8 @@ ending your turn right after `run` is how runs stall.
   never skips quietly; skip-on-missing is a `when` gate with `on_skip:"prune"`.
 - After-edges block on a `partial` (harvest-on-death) ancestor
   (`blocked_by_partial_ancestor`); consume the harvest with `after_partial:true`.
-- Every library save stamps provenance `{owner, version, source, saved_at, 
-  source_digest}` (attribution only, never an access control); a graph may 
-  declare a `run_context` binding contract `{required?, defaults?}` — a missing 
-  required key refuses the launch before any write (typed 
-  `missing_run_context_keys`).
+- `save` always stamps provenance (owner, version, source, saved_at, source_digest); a
+  `run_context:{required?,defaults?}` contract refuses a launch missing a key, pre-write.
 
 ## Run and handoff
 

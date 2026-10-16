@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""1.1 door contracts: advisory keyed claims, no implicit resume, opt-in source."""
+"""1.1 door contracts: advisory keyed claims, no implicit resume, default-on provenance (#126)."""
 import hashlib
 import importlib.util
 import json
@@ -90,21 +90,37 @@ class DoorLane(unittest.TestCase):
         self.assertEqual(fresh[0]["run_id"], deduped[0]["run_id"])
         self.assertEqual(len(self.spawns), 1)
 
-    def test_provenance_opt_in_and_legacy_bytes(self):
+    def test_provenance_default_on_and_legacy_bytes(self):
+        # #126 (est-syim) retired the F5 opt-in law: EVERY save stamps provenance;
+        # `source` stays the optional note; pre-existing entries load verbatim.
         graph = dict(G)
         saved = door.act_save({"graph": graph, "name": "solo"})
         self.assertEqual(saved["saved"], "solo")
         path = door.library_root() / "solo.json"
-        self.assertEqual(path.read_text(), json.dumps(dict(graph, name="solo"), ensure_ascii=False, indent=2))
-        legacy = door.act_library({})["library"][0]
-        self.assertNotIn("owner", legacy)
+        entry = json.loads(path.read_text())
+        prov = entry.pop("provenance")
+        self.assertEqual(entry, dict(graph, name="solo"))
+        self.assertEqual(set(prov), {"owner", "version", "source", "saved_at", "source_digest"})
+        self.assertEqual((prov["owner"], prov["source"]), ("default", None))
+        self.assertEqual(prov["version"], door._common.plugin_version())
+        self.assertEqual(prov["source_digest"], door._common.source_digest(G))
+        bare = {"name": "legacy", "nodes": G["nodes"]}
+        bare_text = json.dumps(bare, ensure_ascii=False, indent=2)
+        (door.library_root() / "legacy.json").write_text(bare_text)
+        rows = {r["name"]: r for r in door.act_library({})["library"]}
+        self.assertNotIn("owner", rows["legacy"])
+        self.assertEqual(rows["solo"]["owner"], "default")
+        self.assertEqual(rows["solo"]["source_digest"], prov["source_digest"])
+        legacy_run = door.act_run({"from": "legacy"})
+        self.assertNotIn("graph_source", json.loads((self.root / legacy_run["run_id"] / "run.json").read_text()))
+        self.assertEqual((door.library_root() / "legacy.json").read_text(), bare_text)
         solo_run = door.act_run({"from": "solo"})
-        self.assertNotIn("graph_source", json.loads((self.root / solo_run["run_id"] / "run.json").read_text()))
+        solo_meta = json.loads((self.root / solo_run["run_id"] / "run.json").read_text())
+        self.assertEqual(solo_meta["graph_source"], {"name": "solo", "owner": "default", "source": None,
+                                                     "source_digest": prov["source_digest"]})
         door.act_save({"graph": G, "name": "solo", "source": "repo/graph.json"})
         prov = json.loads(path.read_text())["provenance"]
-        self.assertEqual(prov["source_digest"], door._common.source_digest(G))
-        self.assertEqual(prov["owner"], "default")
-        self.assertEqual(door.act_library({})["library"][0]["source_digest"], prov["source_digest"])
+        self.assertEqual((prov["owner"], prov["source"]), ("default", "repo/graph.json"))
         sourced = door.act_run({"from": "solo"})
         meta = json.loads((self.root / sourced["run_id"] / "run.json").read_text())
         self.assertEqual(meta["graph_source"], {"name": "solo", "owner": "default",
