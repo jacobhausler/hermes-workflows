@@ -1409,6 +1409,12 @@ def spawn_log_path(run, node, index, spawn_no):
     d.mkdir(parents=True, exist_ok=True)
     return d / _spawn_log_name(node, index, spawn_no)
 
+def _open_spawn_log(lp):
+    """est-hls8y: the ONE place a spawn log's open mode is decided — append, so a
+    re-driven attempt's log survives verbatim and the next spawn's capture is
+    appended after it, never truncating the attempt it resumes from."""
+    return open(lp, "a", encoding="utf-8", errors="replace")
+
 def spawn_prompt_path(run, node, index, spawn_no):
     """A1: the prompt AS SENT is a durable run-dir artifact, named by the same
     rule as its sibling log (`_spawn_stem`), never an ephemeral temp file."""
@@ -2502,8 +2508,11 @@ def _bank_the_corpse(run, node, index, spawn, out):
     newest), then log ONE node.banked line. Returns the corpus path for the
     death record's `banked` pointer. Honest-empty: ANY failure logs node.banked
     with error= and returns None — it never raises, so it can never move the
-    timeout verdict. Deterministic: the latest wall-kill's corpus replaces the
-    prior one (built in a tmp dir, swapped in by rename)."""
+    timeout verdict. Deterministic: the canonical pointer nodes/<_node_file>.corpus
+    always carries the LATEST wall-kill's corpus (built in a tmp dir, swapped in
+    by rename). est-hls8y: every wall-kill ALSO leaves its own verbatim attempt
+    slot nodes/<_node_file>.corpus.a<spawn>/ — a resumed run finds the bank of the
+    attempt it timed out on byte-intact beside the newer one, never zeroed."""
     corpus = run / "nodes" / f"{_node_file(node, index)}.corpus"
     tmp = corpus.with_name(f"{corpus.name}.{os.getpid()}.tmp")
     try:
@@ -2551,6 +2560,15 @@ def _bank_the_corpse(run, node, index, spawn, out):
             {"node": node["id"], "index": index, "spawn": spawn, "work_dir": str(wd),
              "last_written": rows[0]["path"] if rows else None, "files": rows,
              "bytes": nbytes, "budget": CORPUS_MAX_BYTES, "truncated": truncated}, indent=1))
+        # est-hls8y: bank the verbatim per-attempt slot FIRST (a same-spawn
+        # re-bank replaces only its OWN slot; other attempts' slots are never
+        # touched), then swap the canonical latest pointer as #131 always did.
+        slot = corpus.with_name(f"{corpus.name}.a{spawn if spawn is not None else 'na'}")
+        if slot.is_dir() and not slot.is_symlink():
+            shutil.rmtree(slot)
+        elif slot.exists() or slot.is_symlink():
+            slot.unlink()
+        shutil.copytree(tmp, slot)
         if corpus.is_dir() and not corpus.is_symlink():
             shutil.rmtree(corpus)
         os.rename(tmp, corpus)
@@ -5066,7 +5084,7 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
                 meta["_procs"].pop(reg_key, None)
 
     try:
-        logf = open(lp, "a", encoding="utf-8", errors="replace")   # est-hls8y: append, never truncate a prior attempt
+        logf = _open_spawn_log(lp)   # est-hls8y: append, never truncate a prior attempt
     except OSError:
         _seat_release(seat)
         raise
