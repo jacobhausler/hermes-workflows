@@ -152,9 +152,12 @@ check("T3 run.json bytes identical tokenless vs CAS",
       (rT / "run.json").read_bytes() == (rC / "run.json").read_bytes())
 rowT = json.loads((rT / "amends.jsonl").read_text())
 rowC = json.loads((rC / "amends.jsonl").read_text())
-check("T3 amends rows share the pre-#19 fields identically (at/old/new) — #19 adds only base_revision/cas",
-      {k: v for k, v in rowC.items() if k not in ("base_revision", "cas")}
-      == {k: v for k, v in rowT.items() if k not in ("base_revision", "cas")}, [sorted(rowT), sorted(rowC)])
+# `at` is a seconds-resolution wall-clock stamp: two sequential amends straddle a
+# second boundary under load, so it is presence-checked, never value-compared.
+check("T3 amends rows share the pre-#19 fields identically (old/new; `at` present) — #19 adds only base_revision/cas",
+      "at" in rowT and "at" in rowC
+      and {k: v for k, v in rowC.items() if k not in ("base_revision", "cas", "at")}
+      == {k: v for k, v in rowT.items() if k not in ("base_revision", "cas", "at")}, [sorted(rowT), sorted(rowC)])
 check("T3 the amends row records the pinned-ness: cas False tokenless, True CAS; base = the head written against",
       rowT["cas"] is False and rowC["cas"] is True
       and rowT["base_revision"] == rowC["base_revision"] == headT, [rowT.get("cas"), rowC.get("cas")])
