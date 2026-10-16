@@ -5416,6 +5416,14 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
     sr = os.environ.get("HERMES_WRITE_SAFE_ROOT")
     if sr:
         env["HERMES_WRITE_SAFE_ROOT"] = sr + os.pathsep + wd
+        # est-2mhl: core's served-profile resolver REPLACES HERMES_WRITE_SAFE_ROOT with
+        # the profile's own value, dropping the append above. The launcher's grant
+        # channel is the companion HERMES_WRITE_SAFE_ROOT_EXTRA: the child's OWN dir,
+        # replaced (never accumulated) per child. Inert until core unions it.
+        env["HERMES_WRITE_SAFE_ROOT_EXTRA"] = wd
+    else:
+        # No jail in force: never hand a child a grant inherited from the host.
+        env.pop("HERMES_WRITE_SAFE_ROOT_EXTRA", None)
     # est-2ek.1.772: Popen cwd=wd is not enough — the Hermes terminal tool takes its
     # default cwd from $TERMINAL_CWD, which dict(os.environ, ...) inherits from the
     # host. Pin it so a terminal call with no workdir lands in the node's workspace.
@@ -5426,7 +5434,7 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
         # secrets (provider keys and unrelated environment variables).
         keep = {"PATH", "HOME", "LANG", "TERM", "TZ", "TMPDIR",
                 "HERMES_QUIET_TURN_REPORT_FILE", "WF_RUNS_ROOT", "HERMES_WRITE_SAFE_ROOT",
-                "TERMINAL_CWD"}
+                "HERMES_WRITE_SAFE_ROOT_EXTRA", "TERMINAL_CWD"}
         env = {k: v for k, v in env.items()
                if k in keep or k.startswith("LC_") or k.startswith("HERMES_WF_")}
         env["HERMES_HOME"] = str(hermes_root())
