@@ -1,0 +1,272 @@
+{
+ "schema_version": 2,
+ "diagram_type": "workflow",
+ "meta": {
+  "title": "PR #432 — P1 outbound bridge: mirror typed transitions to an operator webhook (est-0wa48)",
+  "quality_profile": "showcase",
+  "output": "est-0wa48.html",
+  "subtitle": "New work, default OFF, wired into notify()'s own seam and wake identity. Top lane: the pack surface the review found broken; this PR fixes it and ships the module."
+ },
+ "lanes": [
+  {
+   "id": "pack",
+   "label": "Package surface: broken at 60df894 (found in review)",
+   "variant": "exception"
+  },
+  {
+   "id": "bridge",
+   "label": "New: hooks_outbound.py (default OFF, fail-open) + its pack entry"
+  },
+  {
+   "id": "runner",
+   "label": "Existing runner seam + run dir (reused, unchanged)"
+  },
+  {
+   "id": "operator",
+   "label": "Operator side"
+  }
+ ],
+ "mainPath": [
+  "notify",
+  "loader",
+  "mirror",
+  "post",
+  "webhook"
+ ],
+ "nodes": [
+  {
+   "id": "oldpack",
+   "lane": "pack",
+   "col": 0,
+   "type": "security",
+   "label": "pack.py INCLUDE_FILES",
+   "sublabel": "omits hooks_outbound.py",
+   "width": 150
+  },
+  {
+   "id": "oldzip",
+   "lane": "pack",
+   "col": 1,
+   "type": "database",
+   "label": "release ZIP",
+   "sublabel": "no bridge module",
+   "width": 130
+  },
+  {
+   "id": "oldinstall",
+   "lane": "pack",
+   "col": 2,
+   "type": "backend",
+   "label": "packaged install",
+   "sublabel": "bridge = None, silent",
+   "width": 140
+  },
+  {
+   "id": "oldtest",
+   "lane": "pack",
+   "col": 3,
+   "type": "frontend",
+   "label": "shipped bridge test",
+   "sublabel": "IndexError at unpacked root",
+   "width": 155
+  },
+  {
+   "id": "newpack",
+   "lane": "bridge",
+   "col": 0,
+   "type": "backend",
+   "label": "INCLUDE_FILES +=",
+   "sublabel": "hooks_outbound.py + ZIP pin",
+   "width": 150,
+   "tag": "FIX"
+  },
+  {
+   "id": "loader",
+   "lane": "bridge",
+   "col": 1,
+   "type": "backend",
+   "label": "_outbound_bridge()",
+   "sublabel": "lazy load; None if absent",
+   "width": 150
+  },
+  {
+   "id": "mirror",
+   "lane": "bridge",
+   "col": 2,
+   "type": "backend",
+   "label": "mirror()",
+   "sublabel": "reuses wake's tid; fail-open",
+   "width": 160,
+   "tag": "NEW"
+  },
+  {
+   "id": "post",
+   "lane": "bridge",
+   "col": 3,
+   "type": "security",
+   "label": "_post()",
+   "sublabel": "https only, no redirect",
+   "width": 140
+  },
+  {
+   "id": "notify",
+   "lane": "runner",
+   "col": 0,
+   "type": "external",
+   "label": "notify()",
+   "sublabel": "wf.py run-level transition",
+   "width": 140
+  },
+  {
+   "id": "waketid",
+   "lane": "runner",
+   "col": 1,
+   "type": "backend",
+   "label": "_wake_tid()",
+   "sublabel": "the one id; wake.jsonl row",
+   "width": 150
+  },
+  {
+   "id": "ledger",
+   "lane": "runner",
+   "col": 3,
+   "type": "database",
+   "label": "outbound.jsonl",
+   "sublabel": "delivered cache + failed",
+   "width": 150
+  },
+  {
+   "id": "setting",
+   "lane": "operator",
+   "col": 2,
+   "type": "external",
+   "label": "outbound_bridge",
+   "sublabel": "operator setting; unset = OFF",
+   "width": 155
+  },
+  {
+   "id": "webhook",
+   "lane": "operator",
+   "col": 4,
+   "type": "external",
+   "label": "operator webhook",
+   "sublabel": "Idempotency-Key = tid",
+   "width": 140
+  }
+ ],
+ "edges": [
+  {
+   "id": "old-pack-zip",
+   "from": "oldpack",
+   "to": "oldzip",
+   "label": "packs",
+   "variant": "default"
+  },
+  {
+   "id": "old-zip-install",
+   "from": "oldzip",
+   "to": "oldinstall",
+   "label": "installs",
+   "variant": "default"
+  },
+  {
+   "id": "old-install-test",
+   "from": "oldinstall",
+   "to": "oldtest",
+   "label": "runs",
+   "variant": "dashed"
+  },
+  {
+   "id": "fix-edge",
+   "from": "oldpack",
+   "to": "newpack",
+   "label": "root cause fixed",
+   "variant": "emphasis"
+  },
+  {
+   "id": "fix-ship",
+   "from": "newpack",
+   "to": "loader",
+   "label": "ships the file",
+   "variant": "emphasis"
+  },
+  {
+   "id": "notify-loader",
+   "from": "notify",
+   "to": "loader",
+   "label": "same seam",
+   "variant": "emphasis"
+  },
+  {
+   "id": "notify-tid",
+   "from": "notify",
+   "to": "waketid",
+   "label": "tid",
+   "variant": "default"
+  },
+  {
+   "id": "loader-mirror",
+   "from": "loader",
+   "to": "mirror",
+   "label": "mirror(run, event)",
+   "variant": "emphasis"
+  },
+  {
+   "id": "setting-mirror",
+   "from": "setting",
+   "to": "mirror",
+   "label": "gate",
+   "variant": "dashed"
+  },
+  {
+   "id": "mirror-post",
+   "from": "mirror",
+   "to": "post",
+   "label": "POST",
+   "variant": "emphasis"
+  },
+  {
+   "id": "mirror-ledger",
+   "from": "mirror",
+   "to": "ledger",
+   "label": "row + failed line",
+   "variant": "dashed"
+  },
+  {
+   "id": "post-webhook",
+   "from": "post",
+   "to": "webhook",
+   "label": "https",
+   "variant": "emphasis"
+  }
+ ],
+ "cards": [
+  {
+   "dot": "cyan",
+   "title": "What was reused (forced question)",
+   "items": [
+    "notify()'s own call site: the mirror fires where the wake fires",
+    "_wake_tid / _wake_identity: one transition identity, sent as Idempotency-Key",
+    "owner_setting + events.jsonl + the wake.jsonl dedupe law: no second store"
+   ]
+  },
+  {
+   "dot": "rose",
+   "title": "Default-off + fail-open",
+   "items": [
+    "Setting unset = byte-identical run loop; enabled:false is a carrier-proof floor",
+    "url and bearer are operator-only; https (loopback http) only; 3xx never followed",
+    "A dead endpoint never raises into the run loop: typed outbound.failed + ledger row"
+   ]
+  },
+  {
+   "dot": "amber",
+   "title": "Pack fix (the review blocker)",
+   "items": [
+    "wf.py loads hooks_outbound.py by file path, so only INCLUDE_FILES ships it",
+    "Control ZIP: module absent, shipped test rc=1; fixed ZIP: 25 PASS, rc=0",
+    "tests/test_packaging.py now pins the ZIP membership"
+   ]
+  }
+ ]
+}
