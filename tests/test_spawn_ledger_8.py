@@ -49,6 +49,7 @@ def load(name, path):
     return module
 
 os.environ["HERMES_HOME"] = str(HOME)
+os.environ["WF_RUNS_ROOT"] = str(Path(os.environ["HERMES_HOME"]) / "workflows")  # est-2ek.1.762 pin: HERMES_HOME alone is not a sandbox
 os.environ["WF_RUNS_ROOT"] = str(RUNS)   # #71 r5 env pin
 door = load("ledger8_door", ROOT / "__init__.py")
 import wf_test_isolation as _iso71_ledger8

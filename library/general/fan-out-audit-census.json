@@ -1,0 +1,91 @@
+{
+  "meta": {
+    "description": "File census with an audit fan-out: enumerate candidates as PATHS only, one lane per file, reconcile every answer or name it missing. The 8 KB per-parent input cap, taught by example.",
+    "tags": ["use_case:audit", "domain:repo", "starter", "seeded", "cap-example"],
+    "params": {
+      "scan_root": {"desc": "absolute path of the directory tree to census"},
+      "audit_rule": {"desc": "the standing rule each file is audited against, verbatim"}
+    }
+  },
+  "graph": {
+    "grammar": "wf/1",
+    "name": "fan-out-audit-census",
+    "description": "Fan-out audit/census over a file tree. THE 8 KB CAP EXEMPLAR: a parent node's committed output is auto-injected into each child's prompt CAPPED AT 8 KB PER PARENT - content that overruns arrives truncated, so a graph that rides payload through injection is quietly corrupting its own inputs. This graph encodes the fix by shape: the census node answers FILE PATHS only (its schema pins items[].path as required - no content fields exist to overflow), each fan-out lane receives exactly one path in its item goal, reads the file itself, and answers with the path pinned back in its own schema. The parent output stays bytes-small no matter how large the tree. SEED CONTRACT (run_context map, BOTH keys required, plain text, no braces): 'scan_root' = absolute path of the directory tree to census; 'audit_rule' = the standing rule every file is judged against, verbatim. LAUNCH: run from:'general/fan-out-audit-census' run_context:{'scan_root':'/abs/path','audit_rule':'<the rule>'}. NODE MAP: census (enumerate in-scope files as a path roster, capped at 40) -> lanes (one lane per file: read, judge against the rule, answer for that path only) -> reconcile (deterministic tally from the records: every path ANSWERED or NAMED MISSING - counts computed from roster vs answers, never from prose). Read-only toward scan_root.",
+    "provenance": {
+      "owner": "hermes-workflows",
+      "source": "hermes-workflows/library/general/fan-out-audit-census.json"
+    },
+    "defaults": {
+      "timeout": 900,
+      "context": "You are one lane of a file census. Ground rules: read-only toward the audited tree; judge only the file your lane owns; every claim comes from bytes you actually read; counts come from the record, never from vibes; keep the answer to the schema; one fenced json block as the final message; never print secrets."
+    },
+    "nodes": [
+      {
+        "id": "census",
+        "type": "agent",
+        "model": "worker",
+        "shape": "recon",
+        "schema": {
+          "type": "object",
+          "required": ["items", "count"],
+          "properties": {
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["path", "reason"],
+                "properties": {
+                  "path": {"type": "string"},
+                  "reason": {"type": "string"}
+                }
+              }
+            },
+            "count": {"type": "integer"},
+            "notes": {"type": "string"}
+          }
+        },
+        "goal": "Census the in-scope files under {run.scan_root} for this standing rule:\n{run.audit_rule}\nList UP TO 40 candidate files the rule clearly applies to (skip vendored/generated paths unless the rule names them). PATHS ONLY in your answer - never file contents, never diffs, never quotes beyond one short reason. Reply with ONLY fenced json {\"items\": [{\"path\": \"<absolute path>\", \"reason\": \"<why in scope, <= 80 chars>\"}], \"count\": <int, must equal items length>, \"notes\": \"<anything deliberately excluded and why>\"}"
+      },
+      {
+        "id": "lanes",
+        "type": "agent",
+        "model": "worker",
+        "shape": "review",
+        "after": ["census"],
+        "fanout": {
+          "items_from": "census.items",
+          "goal": "Audit EXACTLY ONE file against the standing rule:\n{run.audit_rule}\nYour file: {item.path} (census picked it because: {item.reason}). Read the whole file with your tools - do not judge from a path name, an injected excerpt, or a diff. Judge the rule as written; if the rule does not cover something you saw, that is a pass with an observation, not a fail. Reply with ONLY fenced json {\"path\": \"{item.path}\", \"finding\": \"<one line grounded in what you read, citing line numbers>\", \"pass\": <bool>}",
+          "schema": {
+            "type": "object",
+            "required": ["path", "finding", "pass"],
+            "properties": {
+              "path": {"type": "string"},
+              "finding": {"type": "string"},
+              "pass": {"type": "boolean"}
+            }
+          }
+        }
+      },
+      {
+        "id": "reconcile",
+        "type": "agent",
+        "model": "manager",
+        "shape": "review",
+        "after": ["lanes"],
+        "inputs": ["census"],
+        "schema": {
+          "type": "object",
+          "required": ["expected", "answered", "missing", "failed", "verdict"],
+          "properties": {
+            "expected": {"type": "integer"},
+            "answered": {"type": "integer"},
+            "missing": {"type": "array", "items": {"type": "string"}},
+            "failed": {"type": "array", "items": {"type": "string"}},
+            "verdict": {"type": "string", "enum": ["clean", "gaps"]}
+          }
+        },
+        "goal": "Reconcile the census. From census's committed roster (Inputs) take the expected count and path set; from your fan-out parents take the per-file answers. Every roster path must be ANSWERED or sit in missing, named by path - an honest dead lane is worth more than a shrug. Counts are COMPUTED from the two records (answered = paths answered minus dupes; missing = roster minus answered), never copied from prose. failed lists every path whose lane answered pass:false, with its finding folded into your report. verdict: clean only when missing and failed are both empty. Reply with ONLY fenced json {\"expected\": <int>, \"answered\": <int>, \"missing\": [\"<path>\"], \"failed\": [\"<path>: <finding>\"], \"verdict\": \"clean|gaps\"}"
+      }
+    ]
+  }
+}

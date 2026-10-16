@@ -44,6 +44,7 @@ HERE = Path(__file__).resolve().parent
 BUILD = Path(os.environ.get("WF_TEST_BUILD") or HERE.parent)
 sys.path.insert(0, str(BUILD))
 import wf  # noqa: E402
+from wf_test_markers import read_pid_marker   # est-jue3: one parseable-content wait family (the #267 shape, shared)
 
 ok = True
 def check(label, cond, detail=""):
@@ -76,6 +77,9 @@ def alive(pid):
 def remember(pids):
     ALL_GC.extend([p for p in pids if isinstance(p, int)])
 
+# est-gzmm (#267): the parseable-content gate now lives in wf_test_markers.py
+# (est-jue3) so sibling fixtures (#61 U2, wfpid_owner_8, failures_0923) reuse
+# THIS shape instead of hand-rolling existence-only waits. Import above.
 def cleanup():
     for p in ALL_GC:
         if alive(p):
@@ -223,14 +227,8 @@ try:
     kf = HOME / "b1a_kid.py"; kf.write_text(kid_src)
     kid_proc = subprocess.Popen([sys.executable, str(kf), str(gc_marker)],
                                 start_new_session=True)   # mirrors run_child's spawn contract
-    t = time.time() + 10
-    while not kid_marker.exists() and time.time() < t:
-        time.sleep(0.02)
-    kid = int(kid_marker.read_text())
-    t = time.time() + 10
-    while not gc_marker.exists() and time.time() < t:
-        time.sleep(0.02)
-    gc_a = int(gc_marker.read_text().splitlines()[0])
+    kid = read_pid_marker(kid_marker)[0]
+    gc_a = read_pid_marker(gc_marker)[0]
     remember([kid, gc_a])
     snap = wf._proc_snapshot()
     attached = gc_a in snap and kid in snap        # fixture sanity: BOTH generations observable
@@ -383,9 +381,9 @@ try:
                               stdout=f, stderr=f, start_new_session=True)
     ameta = {"_run": D, "_procs": {}, "_procs_lock": threading.Lock(),
              "_stop": threading.Event(), "proctree_hold_s": 0.0, "proctree_kill_proof_s": 2}
-    t = time.time() + 15
-    while not marker.exists() and time.time() < t:
-        time.sleep(0.02)
+    # est-gzmm: wait for the PARSEABLE pid, not mere file existence — existence
+    # fires at open() and the grandchild may not be resident yet when adoption walks.
+    gc_b4 = read_pid_marker(marker, timeout=15)[0]
     rec = wf._adopt_child(ameta, {"id": "fan"}, {"fan": {"id": "fan"}}, 0,
                           {"pid": ap.pid, "log_path": str(log), "skey": "wf:adopt-fixture",
                            "started": wf.now(), "attempt": 0}, None)
@@ -393,7 +391,6 @@ try:
         ap.wait(timeout=10)
     except subprocess.TimeoutExpired:
         pass
-    gc_b4 = int(marker.read_text()) if marker.exists() else None
     remember([ap.pid, gc_b4])
     # The survivor (120 s sleep) outlived the child (~1 s) across the verdict.
     # After the fix the adoption site may already have killed it — the honest

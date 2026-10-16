@@ -14,7 +14,7 @@ BUILD = Path(os.environ.get("WF_TEST_BUILD") or Path(__file__).parent)
 HOME = BUILD / "home_c1"
 RUNS = HOME / "workflows"
 if RUNS.exists(): shutil.rmtree(RUNS)   # hermetic: never trust leftovers
-env = dict(os.environ, HERMES_HOME=str(HOME), FAKE_LOG=str(BUILD / "fake_c1.log"))
+env = dict(os.environ, HERMES_HOME=str(HOME), WF_RUNS_ROOT=str(HOME / "workflows"), FAKE_LOG=str(BUILD / "fake_c1.log"))
 FAKE = str(BUILD / "fake")
 os.environ["HERMES_WF_HERMES_BIN"] = FAKE
 sys.path.insert(0, str(BUILD.parent))
@@ -50,6 +50,7 @@ def wf(run_id):
 # override outranks the env in lane processes; WF_RUNS_ROOT is checked first and
 # pins runs/library wherever the door resolves. Without it, saves pollute prod.
 os.environ["HERMES_HOME"] = str(HOME)
+os.environ["WF_RUNS_ROOT"] = str(Path(os.environ["HERMES_HOME"]) / "workflows")  # est-2ek.1.762 pin: HERMES_HOME alone is not a sandbox
 os.environ["WF_RUNS_ROOT"] = str(HOME / "workflows")
 _spec = importlib.util.spec_from_file_location("hw_c1", BUILD.parent / "__init__.py")
 hw = importlib.util.module_from_spec(_spec); _spec.loader.exec_module(hw)

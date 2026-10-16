@@ -36,6 +36,7 @@ HOME = HERE / "home541"
 RUNS = HOME / "workflows"
 FAKE = str(HERE / "fake")
 os.environ["HERMES_HOME"] = str(HOME)
+os.environ["WF_RUNS_ROOT"] = str(Path(os.environ["HERMES_HOME"]) / "workflows")  # est-2ek.1.762 pin: HERMES_HOME alone is not a sandbox
 # #71 lesson, subprocess form: a lane process carries WF_RUNS_ROOT — pin the
 # runner's runs root to the test home so no run can leak into the estate.
 os.environ["WF_RUNS_ROOT"] = str(RUNS)

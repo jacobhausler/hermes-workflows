@@ -102,20 +102,35 @@ def parse_args(argv):
 
 
 root, out, _baseline_path = parse_args(sys.argv)
+
+
+def invalidate_receipts():
+    """A refused invocation must never leave a PRIOR green receipt standing in a
+    reused out-dir (CI cache reuse, stale --baseline flows): a consumer reading
+    only admission.json would mistake yesterday's success for current proof.
+    Invalidate if the dir exists; never CREATE it."""
+    if out.exists():
+        (out / 'admission.json').unlink(missing_ok=True)
+        (out / 'exits.json').unlink(missing_ok=True)
+
+
 # #112: validate the invocation BEFORE any out-dir side effects — an invalid
 # root must never leave a green-looking ledger or admission behind.
 if not root.is_dir() or not (root / 'tests').is_dir():
     print(f'suite: invalid root: {root} (missing root or tests directory)', flush=True)
-    # review F4 (#112 §1 "none left green"): an invalid invocation must not leave a
-    # PRIOR green admission standing when the out-dir is reused (CI cache reuse,
-    # --baseline flows pointing at an old OUT would read a green admission for a
-    # run that never executed). Invalidate persisted artifacts if the dir already
-    # exists — but never CREATE out/ (fresh invalid invocations still create nothing).
-    if out.exists():
-        (out / 'admission.json').unlink(missing_ok=True)
-        (out / 'exits.json').unlink(missing_ok=True)
+    invalidate_receipts()
     raise SystemExit(2)
-base_reds = load_baseline(_baseline_path) if _baseline_path else None
+if _baseline_path:
+    try:
+        base_reds = load_baseline(_baseline_path)
+    except SystemExit:
+        # The refusal is right; the durable receipt must agree with it. A reused
+        # out-dir holding a prior green admission + ledger would otherwise still
+        # read as current proof after this exit-2 (#112 F4 law, baseline path).
+        invalidate_receipts()
+        raise
+else:
+    base_reds = None
 out.mkdir(parents=True, exist_ok=True)
 ledger = out / 'exits.json'
 # fb 3d2175e9cd75d2a1: a suite run reports the CURRENT pass only — reset the
@@ -131,12 +146,45 @@ os.replace(tmp, ledger)
 py = sorted((root / 'tests').glob('test_*.py'))
 js = sorted((root / 'tests').glob('test_*.mjs'))
 cases = [[sys.executable, str(p)] for p in py] + [['node', '--experimental-strip-types', str(p)] for p in js]
+# est-2ek.1.762: the serial run exports a TEMPORARY WF_RUNS_ROOT so a test that
+# forgets its own pin can never land fixture runs in the PRODUCTION runs root
+# (774/1227 zero-log fixture dirs were leaked exactly this way; census spool
+# key 9cfe87a0199e5e1b). An inherited hostile root is replaced; tests that
+# self-pin (the law) overwrite it in their own child envs and are unaffected.
+import atexit as _atexit
+import shutil as _shutil
+import tempfile as _tempfile
+_suite_runs_root = Path(_tempfile.mkdtemp(prefix='wf-suite-runs-'))
+# est-7ps8 (note 3): the temp root is the suite's own scratch — best-effort
+# removal at process end via atexit, which runs on normal exit, SystemExit,
+# and handled exceptions; it is NOT a guarantee under SIGKILL or a native
+# crash (no handler runs there). mkdir'd lazily by an unpinned test's child,
+# so cleanup is best-effort and never raises.
+_atexit.register(_shutil.rmtree, _suite_runs_root, ignore_errors=True)
+# Tests own private shelves, not the caller's lane identity. Keep the operator
+# launcher override; leave the live shelf guard unchanged (est-2ek.1.808).
+_KEEP_WF_ENV = {'HERMES_WF_HERMES_BIN'}
+# est-2ek.1.862: a test process must never wear the LAUNCHING agent's session
+# identity. An API seat exports HERMES_SESSION_PLATFORM=api_server (and friends);
+# the door stamps run.json.owner.{session_id,ui_session_id,platform} via
+# _session_env, so the frozen golden baseline (owner.platform null) was CI-green
+# / seat-red — six owner diffs under an inherited env. The suite owns the seat
+# the tests see: HERMES_SESSION_* / HERMES_UI_SESSION_* are lane-identity keys,
+# stripped exactly like HERMES_WF_* above. Tests that WANT a session identity
+# set it themselves in their own child env (wake matrices, card suites).
+_NO_SESSION_IDENTITY = {k for k in os.environ
+                        if k.startswith('HERMES_SESSION_')
+                        or k.startswith('HERMES_UI_SESSION_')}
+_base_env = {k: v for k, v in os.environ.items()
+             if (not k.startswith('HERMES_WF_') or k in _KEEP_WF_ENV)
+             and k not in _NO_SESSION_IDENTITY}
 for argv in cases:
     name = Path(argv[-1]).name
     log = out / (name + '.log')
     try:
         with log.open('w') as fh:
-            result = subprocess.run(argv, cwd=root, env={**os.environ, 'HERMES_HOME': str(root / 'tests' / '.suite-home')},
+            result = subprocess.run(argv, cwd=root, env={**_base_env, 'HERMES_HOME': str(root / 'tests' / '.suite-home'),
+                                                         'WF_RUNS_ROOT': str(_suite_runs_root)},
                                     stdout=fh, stderr=subprocess.STDOUT, timeout=90)
         rc = result.returncode
     except subprocess.TimeoutExpired:

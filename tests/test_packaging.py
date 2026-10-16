@@ -27,9 +27,10 @@ def check(label: str, condition: bool) -> None:
 
 def main() -> None:
     manifest = json.loads((ROOT / "dashboard/manifest.json").read_text(encoding="utf-8"))
-    check("dashboard backend manifest is API-only with a hidden tab",
+    check("dashboard backend keeps its API and hidden tab with a loadable web entry",
           manifest.get("api") == "plugin_api.py" and manifest.get("tab", {}).get("hidden") is True
-          and "entry" not in manifest)
+          and manifest.get("name") == "hermes-workflows" and manifest.get("version") == VERSION
+          and manifest.get("entry") == "index.js" and (ROOT / "dashboard/index.js").is_file())
 
     collision = types.ModuleType("wfcommon")
     sys.modules["wfcommon"] = collision
@@ -72,7 +73,7 @@ def main() -> None:
             check("archive includes runtime, docs, skill, examples, tests, and checksum manifest",
                   all(root + rel in members for rel in (
                       "plugin.yaml", "__init__.py", "wf.py", "wfcommon.py",
-                      "dashboard/manifest.json", "dashboard/plugin_api.py", "desktop/plugin.js",
+                      "dashboard/manifest.json", "dashboard/index.js", "dashboard/plugin_api.py", "desktop/plugin.js",
                       "README.md", "INSTALL.md", "SKILL.md", "examples/README.md", "examples/basics/smoke.json",
                       "examples/basics/approve-publish.json", "examples/review/blind-council.workflow.json",
                       "examples/basics/branch-on-verdict.json",
@@ -87,9 +88,64 @@ def main() -> None:
                       "examples/release/release-lifecycle.workflow.json", "examples/release/issue-to-pr.workflow.json", "examples/release/submit-pr.workflow.json", "references/portable.md",
                       "tests/test_packaging.py", "tests/test_fanout_ui.mjs", "tests/test_card_frontend_contract.mjs",
                       "tests/test_inline_header.mjs", "tests/fixtures/mac-source.txt",
-                      "references/grammar.md", "references/operations.md", "SHA256SUMS")))
+                      "references/grammar.md", "references/operations.md",
+                      # est-k75i: the upstream-shaped tool-result-card proposal doc is
+                      # part of the shipped surface — desktop contributors read it from
+                      # the package. Mandatory new-file pack-surface gate: an unshipped
+                      # doc is invisible to every install.
+                      "docs/card-toolresult-hook.md", "docs/orphan-held.md", "orphan_watch.py", "SHA256SUMS")))
             check("fake child retains executable mode in ZIP",
                   (archive.getinfo(root + "tests/fake").external_attr >> 16) & 0o111 == 0o111)
+            # est-4vnq finding 4 (pack-list omission, made explicit — pack_choice=INCLUDED):
+            # scripts/pr_tag_audit.py was outside INCLUDE_FILES/INCLUDE_PATTERNS while
+            # tests/test_pr_tag_audit.py (shipped via the tests/test_*.py glob) executes
+            # it, and test_packaging stayed green (observed red-proof on base f83e5d0:
+            # pack.collect_sources() scripts members == ['scripts/graph_check.py',
+            # 'scripts/pack.py', 'scripts/suite.py'] — helper absent, ALL PASS).
+            # The helper SHIPS because its shipped test subprocess-executes it from the
+            # package root; the four checks below are the mechanical contract.
+            packed_scripts = {m[len(root):] for m in members if m.startswith(root + "scripts/")}
+            check("audit helper ships: scripts/pr_tag_audit.py is in the ZIP (explicit include decision)",
+                  "scripts/pr_tag_audit.py" in packed_scripts)
+            check("pack-list contract: ZIP scripts/ set equals the exact declared packed set",
+                  packed_scripts == {"scripts/pack.py",
+                                      "scripts/pr_tag_audit.py", "scripts/suite.py",
+                                      # est-5p7x: the diagram-law generators — shipped
+                                      # because tests/test_diagram_law.py executes both
+                                      # from the package root (same rationale as the
+                                      # pr_tag_audit include above).
+                                      "scripts/diagram_readme.py",
+                                      "scripts/graph_diagram.py",
+                                      # est-2ek.1.866 (PR #323): tests/test_self_review_422_1866.py
+                                      # exec-modules this at import — packs per the
+                                      # est-4vnq finding-4 rationale in pack.py.
+                                      "scripts/pr_formal_review.py"})
+            # wf165d: the no-silent-middle half only has a premise in a REPO
+            # checkout — the source-only scripts (make_public.py,
+            # lane_recover.py) never travel inside the ZIP, so from the
+            # unpacked root the equality is unsatisfiable by construction
+            # (the committee's repro: exit 1 at the unpacked root while CI
+            # is green). Premise is .git, NOT the source-only files
+            # themselves: an adversary who deletes make_public.py +
+            # lane_recover.py and smuggles a silent-middle script must not
+            # flip the check into a silent skip — inside a git clone it still
+            # runs and REDs. The ZIP-side equality above stays unconditional
+            # and still bites a smuggled extra script INTO the package.
+            if (ROOT / ".git").exists():
+                check("pack-list contract: every repo scripts/*.py is packed or declared source-only (no silent middle)",
+                      {p.name for p in (ROOT / "scripts").glob("*.py")} ==
+                      {Path(s).name for s in packed_scripts}
+                      | {"make_public.py", "lane_recover.py",
+  # est-xwvu9 (upstream #133387 accepted ask): the post-exit
+  # hook is stripped from the shipped build; kept here for
+  # our own distribution path, executed by the source-only
+  # tests/test_post_exit_hook.py.
+  "post_exit_hook.py"})
+            else:
+                print("SKIP pack-list repo-side half: no .git — running from an "
+                      "unpacked ZIP/archive, where the premise does not exist")
+            check("the test that executes the audit helper ships beside it",
+                  root + "tests/test_pr_tag_audit.py" in members)
             unsafe = ("/.git/", "/home", "/workflows/", "/state.db", "/runner.log",
                       "/pre-lanes", "/home1/", "/.tmp-")
             check("archive excludes generated homes, owner-local examples, state, backups, logs, and Git metadata",

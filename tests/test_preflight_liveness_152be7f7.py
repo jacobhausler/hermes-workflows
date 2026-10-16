@@ -128,7 +128,7 @@ def graph_two_routes():
         {"id": "e", "type": "agent", "goal": "x", "model": "bare"},
     ]}
 
-PASTE = "PASTE this line alone in your reply, then call wait: "
+PASTE = "Run accepted. Use wait for blocking observation;"
 
 def submit_run(g=None):
     CALLS.clear()
@@ -152,7 +152,7 @@ check("pinned args: task/provider/model/max_tokens=1/timeout, single attempt",
           {("openai", "m-1"), ("openai-codex", "m-2")}, CALLS)
 check("unpinnable routes: liveness='unknown', ping skipped",
       r.get("d", {}).get("liveness") == "unknown" and r.get("e", {}).get("liveness") == "unknown", r)
-check("hint stays the copy-exact paste line (no dead copy)",
+check("hint offers blocking wait (no dead-route detail)",
       out.get("hint", "").startswith(PASTE) and "preflight liveness" not in out.get("hint", ""), out)
 check("annotation rides the EXISTING routes dict (requested/resolved kept)",
       set(("requested", "resolved", "liveness")) <= set(r["a"]) and
@@ -181,7 +181,7 @@ check("dead run LAUNCHES anyway (run_id + spawn + other route's verdict kept)",
       bool(out.get("run_id")) and len(_spawned) == 2
       and r.get("c", {}).get("liveness") == "alive", out)
 h = out.get("hint", "")
-check("hint: paste prefix copy-exact, dead copy rides behind it",
+check("hint retains blocking wait plus original dead-route detail",
       h.startswith(PASTE) and "preflight liveness:" in h
       and "route openai/m-1: dead (retry after 3600s)" in h
       and "repoint node(s) a, b" in h, h)

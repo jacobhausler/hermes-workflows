@@ -24,7 +24,7 @@ import wfcommon  # noqa: E402
 HOME = HERE / "home14"
 RUNS = HOME / "workflows"
 FAKE = HERE / "fake"
-ENV = {**os.environ, "HERMES_HOME": str(HOME), "WF_HERMES_BIN": str(FAKE),
+ENV = {**os.environ, "HERMES_HOME": str(HOME), "WF_RUNS_ROOT": str(RUNS), "WF_HERMES_BIN": str(FAKE),
        "PATH": f"{FAKE.parent}:{os.environ.get('PATH', '')}"}
 PY = sys.executable
 FAILS = []

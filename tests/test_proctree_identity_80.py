@@ -34,6 +34,7 @@ from unittest.mock import patch
 HERE = Path(__file__).resolve().parent
 BUILD = Path(os.environ.get("WF_TEST_BUILD") or HERE.parent)
 sys.path.insert(0, str(BUILD))
+from wf_test_markers import read_pid_marker
 import wf  # noqa: E402
 
 ok = True
@@ -184,8 +185,9 @@ try:
     kid = subprocess.Popen([sys.executable, str(HOME / "r1c_kid_main.py"),
                             str(BUILD), str(sidecar), token], start_new_session=True)
     ALL.append(kid.pid)
-    assert wait_file(HOME / "r1c_kid.txt"), "kid fixture never came up"
-    kid_pid = int((HOME / "r1c_kid.txt").read_text())
+    kid_pids = read_pid_marker(HOME / "r1c_kid.txt")
+    assert kid_pids and kid_pids[0] > 0, "kid fixture never came up"
+    kid_pid = kid_pids[0]
     ALL.append(kid_pid)
     t = time.time() + 10
     while (not sidecar.exists() or sidecar.read_text().strip() == "") and time.time() - t < 10:
@@ -217,8 +219,20 @@ try:
     # ============== R2: stuck boot proof BLOCKS admission before Popen ========
     real_popen = subprocess.Popen
     popens = []
+    import wfcommon as _wfc_r2
+    _OBSERVE_ONLY_SRC = {getattr(_wfc_r2, "LOCK_PROBE_CHILD", object()),
+                        getattr(_wfc_r2, "_LOCK_PROBE_BATCH_CHILD", object())}
     def spy_popen(*a, **k):
-        popens.append(a[0] if a else k.get("args"))
+        argv = a[0] if a else k.get("args")
+        # #44: the read-path lock probe (find_run -> run_state ->
+        # runner_lock_state -> _lock_probe_child) spawns ONE short-lived
+        # `sys.executable -c <probe src> <path>` child per observation. That
+        # is a read-only flock probe, not an admission spawn — the R2 law is
+        # about NODE/runner children. Count everything else.
+        if (isinstance(argv, (list, tuple)) and len(argv) >= 3
+                and argv[1:2] == ["-c"] and argv[2] in _OBSERVE_ONLY_SRC):
+            return real_popen(*a, **k)
+        popens.append(argv)
         return real_popen(*a, **k)
     src = (BUILD / "wf.py").read_text()
     mod = types.ModuleType("wf_r2_under_test")

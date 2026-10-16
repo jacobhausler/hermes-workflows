@@ -79,10 +79,32 @@ INCLUDE_FILES = (
     "README.md",
     "SKILL.md",
     "__init__.py",
+    "card_ledger.py",  # imported by __init__.py at bind time (hook-led card ledger)
+    "gate_index.py",  # PR-3: imported by __init__.py at bind time
+    "docs/admission-gates.md",
+    "orphan_watch.py",  # PR-4: imported by __init__.py at bind time — a packaged plugin without it dies at import
     "card_enforcement.py",  # #157: imported by __init__.py at bind time — a packaged plugin without it dies at import
     "dashboard/manifest.json",
+    "dashboard/index.js",  # hidden API plugin still needs the web host's script/registration contract
     "dashboard/plugin_api.py",
     "desktop/plugin.js",
+    # est-k75i: the tool-result-card proposal doc ships with the package (the
+    # mandatory new-file pack-surface gate). Pinned by tests/test_packaging.py's
+    # ZIP-membership assertion — an unshipped doc is invisible to every install.
+    "docs/card-toolresult-hook.md",
+    # #51 (est-6cym): the PACKAGED curated starter set ships with the plugin —
+    # the door's `_packaged_general_root()` resolves next to __init__.py, and
+    # tests/test_door_general_51.py (shipped via the tests glob) asserts the
+    # set loads from that address. Unshipped = every fresh install loses the
+    # cold-shelf `from: general/<name>` fallback AND the suite dies (the exact
+    # est-4vnq finding-4 shape). Explicit listing, per pack.py's no-wholesale law.
+    "library/general/README.md",
+    "library/general/pr-review-light.json",
+    "library/general/issue-triage.json",
+    "library/general/test-first-feature-slice.json",
+    "library/general/fan-out-audit-census.json",
+    "library/general/report-and-verify.json",
+    "docs/orphan-held.md",
     "examples/basics/approve-publish.json",
     "examples/review/blind-council.workflow.json",
     "examples/basics/branch-on-verdict.json",
@@ -103,19 +125,39 @@ INCLUDE_FILES = (
     "examples/basics/smoke.json",
     "plugin.yaml",
     "CHANGELOG.md",
-    "scripts/graph_check.py",
     "scripts/graph_diagram.py",
     "scripts/diagram_readme.py",
     "scripts/pack.py",
+    "scripts/pr_tag_audit.py",  # est-4vnq: tests/test_pr_tag_audit.py executes it; the shipped suite must not die on a missing helper
+    # est-5p7x (PR #165 CI blocker, run 37440782151): tests/test_diagram_law.py
+    # (shipped via the tests/test_*.py glob) subprocess-executes BOTH generators
+    # from the package root — the exact est-4vnq finding-4 shape. The merge ref
+    # gained these files from main (#232/#236 diagram law) while pack.py never
+    # declared them, so the no-silent-middle contract REDed there while the head
+    # tree (predating the files) stayed vacuously green. Stdlib-only, like the
+    # graph helpers above, so the ZIP side stays honest.
+    "scripts/diagram_readme.py",
+    "scripts/graph_diagram.py",
+    # est-2ek.1.866 (PR #323 CI red, run 37842073930 admission introduced=1):
+    # tests/test_self_review_422_1866.py exec-modules this at import
+    # (spec_from_file_location) — the exact est-4vnq finding-4 shape. Stdlib-only,
+    # so the ZIP side stays honest.
+    "scripts/pr_formal_review.py",
     "scripts/suite.py",
-    "graphify-out/GRAPH_REPORT.md",
-    "graphify-out/graph.json",
     ".graphifyignore",
     "tests/fake",
     "tests/fake_hermes.py",
     "tests/wf_test_isolation.py",
-    "tests/graph_gate_dep.py",  # shared fail-closed dep guard for the graph-gate tests (sys-hvd5gl)
+    "tests/wf_test_markers.py",  # est-jue3: shared parseable-content marker waits, imported by the shipped tests (est-4vnq finding-4 shape: an unshipped helper kills the suite)
     "tests/fixtures/mac-source.txt",
+    "tests/fixtures/seat_acquire_driver.py",   # est-g2xx: seat-semaphore driver
+    # est-2ek.1.762: the spawn-isolation law's shared helpers — SHIPPED because
+    # the shipped tests exec-load them by file path from the package root
+    # (test_suite_runs_root_762 imports runs_root_probe; the pinned spawned-
+    # runner tests load wf_spawn_isolation_762), the exact est-4vnq finding-4
+    # shape: a shipped test that executes an unpackaged helper dies there.
+    "tests/fixtures/runs_root_probe.py",
+    "tests/fixtures/wf_spawn_isolation_762.py",
     "tests/test_fanout_ui.mjs",
     "wf.py",
     "wf_dialect.py",
@@ -124,6 +166,28 @@ INCLUDE_FILES = (
 INCLUDE_PATTERNS = ("tests/test_*.py", "tests/test_*.mjs", "references/*.md",
                     "tests/fixtures/dialect/*")   # #33: the corpus test_dialect_js_33 asserts against
 EXECUTABLE_FILES = {"scripts/pack.py", "tests/fake"}
+# Checkout-only tests stay in repository CI, not the release's test glob.
+SOURCE_ONLY_TESTS = {
+    "tests/test_diagram_law.py": "needs diagrams/README.md and the source-only renderer",
+    "tests/test_example_census_fanout.py": "imports source-only scripts/make_public.py",
+    "tests/test_example_issue_to_pr.py": "imports source-only scripts/make_public.py",
+    "tests/test_example_release_lifecycle.py": "imports source-only scripts/make_public.py",
+    "tests/test_lane_recover_8edcc9bf.py": "executes source-only scripts/lane_recover.py",
+    "tests/test_example_exchange_run.py": "reads source-only scripts/scrub-list.txt",
+    "tests/test_lane_recover_legacy_amend_237r4.py": "loads source-only scripts/lane_recover.py",
+    "tests/test_respawn_hardening_723.py": "loads source-only scripts/lane_recover.py",
+    "tests/test_crash_no_exit_respawn_718.py": "loads source-only scripts/lane_recover.py",
+    "tests/test_lane_recover_cli_237r3.py": "executes source-only scripts/lane_recover.py",
+    "tests/test_plugin_resolution_live_not_old.py": "loads source-only scripts/lane_recover.py",
+    "tests/test_scrub_yml_166b.py": "executes source-only scripts/make_public.py",
+    "tests/test_stuck_node_finalize_733.py": "executes source-only scripts/lane_recover.py (main's #235)",
+    # #248 r3 (rebase onto main's #298): executes source-only make_public.py + reads scripts/scrub-list.txt
+    "tests/test_personal_path_scrub_867.py": "executes source-only scripts/make_public.py, reads scripts/scrub-list.txt",
+    # est-xwvu9 (upstream #133387 accepted ask): the post-exit hook is NOT shipped;
+    # this test executes the source-only scripts/post_exit_hook.py kept for our own
+    # distribution path only.
+    "tests/test_post_exit_hook.py": "executes source-only scripts/post_exit_hook.py (stripped from the shipped build, est-xwvu9)",
+}
 
 
 def collect_sources() -> list[tuple[str, bytes]]:
@@ -134,6 +198,7 @@ def collect_sources() -> list[tuple[str, bytes]]:
             raise RuntimeError(f"include pattern matched no files: {pattern}")
         paths.update(path.relative_to(ROOT) for path in matches)
 
+    paths.difference_update(Path(name) for name in SOURCE_ONLY_TESTS)
     sources: list[tuple[str, bytes]] = []
     for rel in sorted(paths, key=lambda p: p.as_posix()):
         path = ROOT / rel

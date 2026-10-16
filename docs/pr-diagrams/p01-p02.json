@@ -1,0 +1,40 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "P01 / P02 — facts without new authority",
+    "subtitle": "Before: workflow messages demand follow-up work; timing evidence is hard to separate. After: optional guidance and bounded read-only clocks, using the same runner records.",
+    "quality_profile": "showcase",
+    "output": "p01-p02.html"
+  },
+  "lanes": [
+    {"id": "before", "label": "BEFORE — mandates"},
+    {"id": "after", "label": "AFTER — facts + clocks"}
+  ],
+  "nodes": [
+    {"id": "caller", "lane": "before", "col": 0, "type": "external", "label": "Calling agent", "sublabel": "run / status / wait", "width": 150},
+    {"id": "old", "lane": "before", "col": 1, "type": "security", "label": "Old guidance", "sublabel": "paste / repair / dispatch", "width": 180},
+    {"id": "runner", "lane": "before", "col": 2, "type": "backend", "label": "Existing runner", "sublabel": "queue / spawn / hold", "width": 180},
+    {"id": "records", "lane": "before", "col": 3, "type": "database", "label": "Existing records", "sublabel": "ledger / events / nodes", "width": 190},
+    {"id": "facts", "lane": "after", "col": 0, "type": "messagebus", "label": "P01 factual guidance", "sublabel": "cards + curation optional", "width": 190},
+    {"id": "read", "lane": "after", "col": 1, "type": "backend", "label": "P02 run_state", "sublabel": "one now / 4 MiB prefix", "width": 180},
+    {"id": "clocks", "lane": "after", "col": 2, "type": "backend", "label": "Clock projection", "sublabel": "queue / work / hold", "width": 180},
+    {"id": "surfaces", "lane": "after", "col": 3, "type": "frontend", "label": "Status + dashboard", "sublabel": "unknown stays unknown", "width": 190}
+  ],
+  "edges": [
+    {"from": "caller", "to": "old", "label": "was"},
+    {"from": "old", "to": "runner", "label": "launch"},
+    {"from": "runner", "to": "records", "label": "writes"},
+    {"from": "caller", "to": "facts", "label": "now", "fromSide": "bottom", "toSide": "top"},
+    {"from": "facts", "to": "read", "label": "observe"},
+    {"from": "read", "to": "clocks", "label": "derive"},
+    {"from": "clocks", "to": "surfaces", "label": "expose"},
+    {"from": "records", "to": "read", "label": "read only", "fromSide": "bottom", "toSide": "top"}
+  ],
+  "mainPath": ["facts", "read", "clocks", "surfaces"],
+  "cards": [
+    {"dot": "rose", "title": "P01: remove mandates", "items": ["Wake facts grant no repair or dispatch authority", "Human gate answers still require the human", "wait may resume; push is best-effort"]},
+    {"dot": "emerald", "title": "P02: reuse evidence", "items": ["Verified spawns + literal item identity", "Observed child-seconds, not elapsed wall time", "Missing / dynamic evidence remains unknown"]},
+    {"dot": "cyan", "title": "Integration boundaries", "items": ["Keep upstream patch / diff and hook safety", "No new scheduler, budget ceiling or persisted shape", "Retired CI registries stay deleted; release held"]}
+  ]
+}

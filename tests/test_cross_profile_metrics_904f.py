@@ -62,8 +62,12 @@ def make_run(run_home: Path, node_records: dict):
         (run_home / "nodes" / f"{name}.json").write_text(json.dumps(rec))
 
 
+CHECKS = []
+
+
 def check(label, cond, detail=""):
-    print(("PASS " if cond else "FAIL ") + label + (("  -- " + str(detail)[:140]) if (detail and not cond) else ""))
+    print(("PASS " if cond else "FAIL ") + label + ((("  -- " + str(detail)[:140]) if detail else "") if not cond else ""))
+    CHECKS.append(label)
     if not cond:
         globals()["FAILS"].append(label)
 
@@ -123,5 +127,14 @@ text = src.read_text()
 check("S3 no bare child_metrics(st[\"run_id\"]) in the door",
       'child_metrics(st["run_id"])' not in text and "run_child_metrics" in text)
 
-print("TOTAL", 3 + 1, "FAIL", len(FAILS))
+# ---- S4 (est-la8m): the DASHBOARD's full view uses the same seam ----
+# The door fixed its fold in PR #79 (bc44977); dashboard/plugin_api.py _view(full)
+# kept the bare caller-home fold, so the WORKFLOWS full view false-zeroed every
+# profile-routed child (issue #81) even while the door's status read them fine.
+dash = Path(__file__).resolve().parent.parent / "dashboard" / "plugin_api.py"
+dtext = dash.read_text()
+check("S4 no bare child_metrics(st[\"run_id\"]) in the dashboard full view",
+      'child_metrics(st["run_id"])' not in dtext and "run_child_metrics(r)" in dtext)
+
+print("TOTAL", len(CHECKS), "FAIL", len(FAILS))
 sys.exit(1 if FAILS else 0)

@@ -80,7 +80,7 @@ def verbatim_graph(items):
     # items own the payload; the guard must never touch it.
     return fan_graph(items, tmpl="{item.goal}")
 
-env = dict(os.environ, HERMES_HOME=str(HOME), FAKE_LOG=str(BUILD / "fake-goal.log"),
+env = dict(os.environ, HERMES_HOME=str(HOME), WF_RUNS_ROOT=str(RUNS), FAKE_LOG=str(BUILD / "fake-goal.log"),
            PYTHONUNBUFFERED="1")
 
 def mk(run_id, graph):

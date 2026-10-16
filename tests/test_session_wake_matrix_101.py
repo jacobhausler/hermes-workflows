@@ -231,8 +231,13 @@ try:
               msg["content"].startswith("[runner-authored/v1]"), msg["content"])
         check("graph injection marker absent from every wire byte", INJ not in content,
               content[:400])
-        check("wake points at the gate view (runner protocol text)",
-              "needs your answer" in msg["content"], msg["content"])
+        check("wake factually points at the held human gate and status",
+              "HELD at a human gate" in msg["content"]
+              and "Status contains the question" in msg["content"], msg["content"])
+        check("wake requires a human decision and grants no answer/work authority",
+              "release requires the human's decision" in msg["content"]
+              and "does not authorize choosing an answer or additional work" in msg["content"],
+              msg["content"])
     r = RUNS / rid if rid else None
     if r:
         ev = events(r, "gate.held")

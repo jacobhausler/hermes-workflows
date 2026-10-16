@@ -36,3 +36,9 @@ p = hw.library_root() / "b2b.json"
 p.write_text("{not json!!")
 rb = call(action="save", graph=G, name="b2b")
 check("B2b-B re-shelve over corrupt entry fails closed", "error" in rb and "corrupt" in rb["error"], json.dumps(rb))
+check("B2b-B2 corrupt bytes preserved on disk (retain-on-overwrite)",
+      (hw.library_root() / "b2b.json").read_text() == "{not json!!")
+
+# fail-the-process contract (est-3pvk): FAIL lines must surface in the exit code
+print(f"\n{'ALL PASS' if ok else 'FAILED'} (b2b)")
+sys.exit(0 if ok else 1)

@@ -73,7 +73,7 @@ def mk_run(home, name, graph, fake_bin):
 
 
 def step(home, run_id, cwd):
-    env = dict(os.environ, HERMES_HOME=str(home))
+    env = dict(os.environ, HERMES_HOME=str(home), WF_RUNS_ROOT=str(home / "workflows"))
     env.pop("WF_RUNS_ROOT", None)
     p = subprocess.run([sys.executable, str(ROOT / "wf.py"), "run", run_id],
                        env=env, text=True, capture_output=True, timeout=120, cwd=str(cwd))

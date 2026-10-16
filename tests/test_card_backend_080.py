@@ -76,8 +76,8 @@ class CardBackend(unittest.TestCase):
             self.assertEqual(out["card"], f'::workflow{{id="{rid}"}}')
             self.assertEqual(CARD.fullmatch(out["card"]).group(1), rid)
             # Copy-exact inducement (papercut #70): the hint IS the paste line.
-            self.assertIn(out["card"], out["hint"])
-            self.assertIn("PASTE this line alone in your reply", out["hint"])
+            self.assertIn(out["card"], out["lifecycle_notice"])
+            self.assertIn("desktop cards are optional", out["hint"])
         finally:
             clear_session_vars(tokens)
 
@@ -93,7 +93,7 @@ class CardBackend(unittest.TestCase):
 
     def test_register_wires_tool_skill_command_and_card_hook(self):
         # #157: register() wires the tool, skill, command, and exactly the
-        # card-enforcement hook — nothing else (the O1 law pins the surface).
+        # three card-ledger hooks — nothing else (the O1 law pins the surface).
         class Context:
             hooks = {}
             def register_hook(self, name, fn): self.hooks[name] = fn
@@ -104,7 +104,10 @@ class CardBackend(unittest.TestCase):
             def get_config(self, _, default): return default
         ctx = Context()
         wf.register(ctx)
-        self.assertEqual(set(ctx.hooks), {"transform_llm_output"})
+        self.assertEqual(set(ctx.hooks), {"post_tool_call", "pre_llm_call",
+                                          "transform_llm_output", "post_gateway_admission",
+                                          "pre_gateway_dispatch", "on_session_end",
+                                          "on_session_finalize", "agent_loop_stopped"})   # card ledger 3 + PR-3 admission/witness + PR-4 orphan observers
         self.assertIs(ctx.hooks["transform_llm_output"],
                       wf._card_enforcement._card_hook)
 

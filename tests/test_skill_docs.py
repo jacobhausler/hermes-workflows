@@ -16,8 +16,8 @@ assert "cheapest tier" not in skill.lower()
 assert "haus " not in skill.lower()
 assert "/opt/hermes" not in skill
 assert "```json" not in skill  # main guide should not duplicate reference grammar
-assert "card" in skill and "alone" in skill, "SKILL.md must tell the agent to paste the card line alone"
-assert "composer" in skill, "SKILL.md must say the strip shows this chat's runs regardless"
+assert "Cards are optional" in skill, "SKILL.md must not require rendered cards for execution"
+assert "composer" in skill, "SKILL.md must describe the composer SDK gate handoff"
 assert "graph_path" in skill and "proposed" not in skill.lower()
 assert "interrupted" in skill
 assert "seat default" in skill.lower() and "not" in skill.lower()

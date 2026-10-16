@@ -2,6 +2,7 @@
 """Execute the shipped incident probe argv and the real parked-gate loop."""
 import copy
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -14,14 +15,14 @@ import wf  # noqa: E402
 GRAPH = json.loads((ROOT / "examples/ops/incident-response.json").read_text())
 GATE = next(n for n in GRAPH["nodes"] if n["id"] == "recovery-probe")
 CONVERGE = next(n for n in GRAPH["nodes"] if n["id"] == "converge")
-SCRATCH = "/tmp/incident-response-example"
+# 133387 ask #3: the shipped probe roots under $HERMES_HOME; the IR_STATE_ROOT
+# override (read first by the probe) steers tests at the shipped bytes.
 
 
 def probe_argv(scratch):
     argv = copy.deepcopy(GATE["wait"]["until_argv"])
-    # Only redirect the example's scratch root; run the shipped inline code.
-    assert SCRATCH in argv[2]
-    argv[2] = argv[2].replace(SCRATCH, str(scratch))
+    # Only steer the example's scratch root (env); run the shipped inline code.
+    assert "IR_STATE_ROOT" in argv[2] and "HERMES_HOME" in argv[2]
     return argv
 
 
@@ -39,7 +40,8 @@ def poll_sequence(root, name, sequence):
         else:
             cmd.write_text("exit " + str(rc))
         cp = subprocess.run(probe_argv(scratch), cwd=run, capture_output=True,
-                            text=True, timeout=10)
+                            text=True, timeout=10,
+                            env=dict(os.environ, IR_STATE_ROOT=str(scratch)))
         diag = run / "incident-diagnostic.json"
         rows.append({"exit": cp.returncode,
                      "counter": int((scratch / "clear_ticks").read_text()),
@@ -76,6 +78,8 @@ def engine_case(root, name, sequence, deadline):
     gate["wait"]["timeout_s"] = deadline
     (run / "graph.json").write_text(json.dumps(graph))
     (scratch / "verify_cmd.txt").write_text("exit " + str(sequence[0]))
+    # park_gate -> _aux_run inherits os.environ: steer the shipped probe bytes.
+    os.environ["IR_STATE_ROOT"] = str(scratch)
     observations = []
 
     def consume():

@@ -13,6 +13,7 @@ if home.exists():
     import shutil; shutil.rmtree(home)
 home.mkdir()
 os.environ["HERMES_HOME"] = str(home)
+os.environ["WF_RUNS_ROOT"] = str(Path(os.environ["HERMES_HOME"]) / "workflows")  # est-2ek.1.762 pin: HERMES_HOME alone is not a sandbox
 (home / "config.yaml").write_text("model:\n  default: qwen38-next\n  aliases:\n    sol: openai-codex/gpt-6-sol\n    fable: anthropic/claude-fable-5.1\n")
 sys.path.insert(0, str(BUILD))
 import wfcommon  # noqa: E402
@@ -34,10 +35,12 @@ nodes = [{"id": "a", "type": "agent", "goal": "x", "model": "openai-codex/gpt-6-
          {"id": "g", "type": "gate", "question": "q", "options": ["y"]}]
 err, table = door.resolve_models(nodes)
 check(err is None, "resolve_models accepts alias targets + unknown literal")
-check(nodes[0]["model"] == "openai-codex/gpt-6-sol", "literal alias-target stays literal")
+# est-2ek.1.46: a literal whose prefix is a provider the seat routes through bakes that provider
+# (a bare `-m openai-codex/...` died HTTP 400 on the seat default route); the table row keeps the full route.
+check((nodes[0].get("provider"), nodes[0]["model"]) == ("openai-codex", "gpt-6-sol"), "literal alias-target bakes its provider")
 check(table["a"] == "openai-codex/gpt-6-sol", "routing table preserves explicit literal")
 check(nodes[1]["model"] == "sol", "alias untouched")
-check(nodes[2]["model"] == "anthropic/claude-opus-5-5", "non-alias literal untouched")
+check((nodes[2].get("provider"), nodes[2]["model"]) == ("anthropic", "claude-opus-5-5"), "seat-routed vendor literal bakes its provider")
 
 # --- (2) keys on events + record, via the real runner and fake hermes ---
 fake = str(HERE / "fake")  # the executable shim (fake_hermes.py is not +x)
@@ -49,7 +52,7 @@ run = runs / "20990101-000000-keys"; (run / "nodes").mkdir(parents=True); (run /
 (run / "graph.json").write_text(json.dumps(graph))
 (run / "run.json").write_text(json.dumps({"name": "keys", "hermes_bin": fake, "concurrency": 4, "node_timeout": 30, "started": "2099-01-01T00:00:00+00:00"}))
 p = subprocess.run([sys.executable, str(BUILD / "wf.py"), "run", run.name], capture_output=True, text=True, timeout=120,
-                   env={**os.environ, "HERMES_HOME": str(home), "FAKE_LOG": str(home / "fake.log"), "FAKE_ARGV_LOG": str(home / "fake_hermes_argv.log")})
+                   env={**os.environ, "HERMES_HOME": str(home), "WF_RUNS_ROOT": str(runs), "FAKE_LOG": str(home / "fake.log"), "FAKE_ARGV_LOG": str(home / "fake_hermes_argv.log")})
 assert (run / "events.jsonl").exists(), p.stdout + p.stderr
 ev = [json.loads(l) for l in (run / "events.jsonl").read_text().splitlines()]
 byid = {n["id"]: n for n in graph["nodes"]}
@@ -97,6 +100,7 @@ check(abs(cm[exp_fan1]["cost"] - 0.0123) < 1e-9 and cm[exp_fan1]["model"] == "so
 sys.path.insert(0, str(BUILD / "dashboard"))
 import plugin_api  # noqa: E402
 os.environ["HERMES_HOME"] = str(home)
+os.environ["WF_RUNS_ROOT"] = str(Path(os.environ["HERMES_HOME"]) / "workflows")  # est-2ek.1.762 pin: HERMES_HOME alone is not a sandbox
 view = plugin_api._view(run, full=True)
 check(view["nodes"]["solo"]["metrics"]["tokens_in"] == 220, "read model: node metrics folded")
 check(view["nodes"]["fan"]["item_metrics"][1]["tool_calls"] == 5 and view["nodes"]["fan"]["item_metrics"][1]["live"] == 0, "read model: item spend folds respawns but an unended DB row is not a live process")

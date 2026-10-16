@@ -12,6 +12,18 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import wfcommon
 
+def _load_iso762():
+    # est-2ek.1.762: shared launch-env pin helper, exec-loaded by file path
+    # (repo convention — a top-level import of a tests/fixtures module would
+    # break the test_packaging import-closure from the unpacked package root).
+    spec = importlib.util.spec_from_file_location(
+        "wf_spawn_isolation_762", Path(__file__).parent / "fixtures" / "wf_spawn_isolation_762.py")
+    assert spec and spec.loader
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+pin_env = _load_iso762().pin_env
+
 def load(name, path):
     spec = importlib.util.spec_from_file_location(name, path)
     module = importlib.util.module_from_spec(spec)
@@ -20,6 +32,10 @@ def load(name, path):
 
 HOME = Path(tempfile.mkdtemp(prefix="home-node-facts-", dir=str(ROOT)))
 os.environ["HERMES_HOME"] = str(HOME)
+# est-2ek.1.762: the route/dashboard resolvers honor WF_RUNS_ROOT above
+# HERMES_HOME — a test that reads <home>/workflows must pin the ONE resolver
+# to that dir or a hostile/suite-exported root makes every run "unknown".
+os.environ.update(pin_env({}, HOME / "workflows", home=HOME))
 api = load("node_facts_dashboard", ROOT / "dashboard" / "plugin_api.py")
 door = load("node_facts_door", ROOT / "__init__.py")
 

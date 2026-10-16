@@ -19,6 +19,7 @@ if home.exists():
     shutil.rmtree(home)
 home.mkdir()
 os.environ["HERMES_HOME"] = str(home)
+os.environ["WF_RUNS_ROOT"] = str(Path(os.environ["HERMES_HOME"]) / "workflows")  # est-2ek.1.762 pin: HERMES_HOME alone is not a sandbox
 sys.path.insert(0, str(BUILD))
 import wfcommon  # noqa: E402
 
@@ -56,7 +57,7 @@ def run_graph(name, graph, gate_answers=None, seed=None):
         plog.unlink()
     p = subprocess.run([sys.executable, str(BUILD / "wf.py"), "run", name],
                        capture_output=True, text=True, timeout=120,
-                       env={**os.environ, "HERMES_HOME": str(home),
+                       env={**os.environ, "HERMES_HOME": str(home), "WF_RUNS_ROOT": str(runs),
                             "FAKE_LOG": str(home / f"{name}.fake.log"),
                             "FAKE_PROMPT_LOG": str(plog)})
     prompts = plog.read_text().split("\n=====PROMPT=====\n")[1:] if plog.exists() else []

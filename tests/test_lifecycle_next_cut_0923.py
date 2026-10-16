@@ -47,6 +47,7 @@ with tempfile.TemporaryDirectory(prefix="lifecycle-next-", dir=HERE) as td:
     runs = home / "workflows"
     runs.mkdir(parents=True)
     os.environ["HERMES_HOME"] = str(home)
+    os.environ["WF_RUNS_ROOT"] = str(Path(os.environ["HERMES_HOME"]) / "workflows")  # est-2ek.1.762 pin: HERMES_HOME alone is not a sandbox
     fake_log = Path(td) / "fake.log"
     os.environ["FAKE_LOG"] = str(fake_log)
 
@@ -62,7 +63,7 @@ with tempfile.TemporaryDirectory(prefix="lifecycle-next-", dir=HERE) as td:
         return r
 
     def run_engine(run_id, extra_env=None):
-        env = dict(os.environ, HERMES_HOME=str(home), FAKE_LOG=str(fake_log), **(extra_env or {}))
+        env = dict(os.environ, HERMES_HOME=str(home), WF_RUNS_ROOT=str(runs), FAKE_LOG=str(fake_log), **(extra_env or {}))
         return subprocess.run([sys.executable, str(ROOT / "wf.py"), "run", run_id],
                               env=env, capture_output=True, text=True, timeout=90)
 
@@ -128,7 +129,7 @@ with tempfile.TemporaryDirectory(prefix="lifecycle-next-", dir=HERE) as td:
     fake_log.write_text("")
     r = make_run("fanout-stop", [{"id": "f", "type": "agent", "fanout": {
         "items": ["one", "two", "three"], "goal": "SLEEP 30 item {item}"}}])
-    env = dict(os.environ, HERMES_HOME=str(home), FAKE_LOG=str(fake_log))
+    env = dict(os.environ, HERMES_HOME=str(home), WF_RUNS_ROOT=str(runs), FAKE_LOG=str(fake_log))
     proc = subprocess.Popen([sys.executable, str(ROOT / "wf.py"), "run", r.name], env=env,
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     deadline = time.time() + 30

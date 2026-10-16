@@ -33,6 +33,7 @@ HOME = HERE / "home102"
 RUNS = HOME / "workflows"
 FAKE = str(HERE / "fake")
 os.environ["HERMES_HOME"] = str(HOME)
+os.environ["WF_RUNS_ROOT"] = str(Path(os.environ["HERMES_HOME"]) / "workflows")  # est-2ek.1.762 pin: HERMES_HOME alone is not a sandbox
 os.environ["WF_RUNS_ROOT"] = str(RUNS)   # S3: writers pin the env door
 sys.path.insert(0, str(BUILD))
 

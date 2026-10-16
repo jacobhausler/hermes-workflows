@@ -39,6 +39,7 @@ atexit_registered = False
 import atexit; atexit.register(tmp_dir.cleanup)
 # #71: the shelf is live production — WF_RUNS_ROOT + isolation pin every door write.
 os.environ["HERMES_HOME"] = tmp_dir.name
+os.environ["WF_RUNS_ROOT"] = str(Path(os.environ["HERMES_HOME"]) / "workflows")  # est-2ek.1.762 pin: HERMES_HOME alone is not a sandbox
 os.environ["WF_RUNS_ROOT"] = str(Path(tmp_dir.name) / "workflows")
 os.environ["HERMES_WF_HERMES_BIN"] = "offline"
 os.environ.pop("WF_CONFIDENCE_SUBSTRATE", None)

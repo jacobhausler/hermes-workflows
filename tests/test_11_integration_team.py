@@ -109,7 +109,8 @@ class TeamIntegration(unittest.TestCase):
 
     def test_env_whitelist_plain_and_profiled(self):
         permitted = {'PATH', 'HOME', 'LANG', 'TERM', 'TZ', 'TMPDIR', 'HERMES_HOME',
-                     'WF_RUNS_ROOT', 'HERMES_WRITE_SAFE_ROOT', 'HERMES_QUIET_TURN_REPORT_FILE'}
+                     'WF_RUNS_ROOT', 'HERMES_WRITE_SAFE_ROOT', 'HERMES_QUIET_TURN_REPORT_FILE',
+                     'TERMINAL_CWD'}
         for profile in (None, 'e-fixture'):
             with self.subTest(profile=profile):
                 with patch.dict(os.environ, {**self.env, 'LANE_E_SECRET_TOKEN': 'never-inherit',
@@ -117,6 +118,7 @@ class TeamIntegration(unittest.TestCase):
                     rid = door.act_run({'graph': self.graph(profile=profile)})['run_id']
                 r = self.runs / rid
                 trace = self.first_trace(r)
+                self.assertEqual(trace['env']['TERMINAL_CWD'], str((r / 'work' / 'a').resolve()))
                 if profile:
                     # RATIFY F2: the env WHITELIST is mandated on routed spawns only.
                     self.assertNotIn('LANE_E_SECRET_TOKEN', trace['env'], 'profiled child inherited test secret')
@@ -160,6 +162,17 @@ class TeamIntegration(unittest.TestCase):
                         with patch.dict(os.environ, env, clear=True):
                             self.assertTrue(door.act_status({'run_id': r.name})['runner_live'])
                         if mode == 'pid-reused':
+                            # #271 review: the kernel is the lock truth — while a
+                            # LIVE holder holds the flock, held=>live is correct
+                            # (91b9a3de), so "reused pid must not read alive" can
+                            # only be asserted over a DEAD holder. The base code
+                            # passed this branch only because its µs in-process
+                            # probe beat the runner to admission; the #44 child
+                            # probe (spawn cost) exposes that race every run.
+                            # Kill + reap FIRST: the kernel released the flock
+                            # with the process, so the remaining claim under test
+                            # is purely pid-reuse identity.
+                            p.kill(); p.wait()
                             (r / 'wf.pid').write_text(str(os.getpid()))
                             self.assertFalse(common.runner_alive(r))
                             with patch.dict(os.environ, env, clear=True):

@@ -72,7 +72,7 @@ def mk_run(home, name, graph, fake_bin):
 
 
 def step(home, run_id, cwd, fake_log, expected="WORKFLOW_DONE"):
-    env = dict(os.environ, HERMES_HOME=str(home), FAKE_LOG=str(fake_log))
+    env = dict(os.environ, HERMES_HOME=str(home), WF_RUNS_ROOT=str(home / "workflows"), FAKE_LOG=str(fake_log))
     p = subprocess.run([sys.executable, str(ROOT / "wf.py"), "run", run_id],
                        env=env, text=True, capture_output=True, timeout=90, cwd=str(cwd))
     out = p.stdout + p.stderr
@@ -100,6 +100,14 @@ def main():
               "## Inputs" in text, text[:200])
         check("A1 the CONTRACT sentence names the child's durable work dir",
               "durable" in text and str((run / "work" / "child").resolve()) in text, text[-400:])
+        check("A1 prompt carries NO single-query repackaging instruction (catalog review 133387 ask 2)",
+              all(s not in text for s in ("Single-query approvals", "write a script file in your work", "run it instead")), text[:400])
+        check("A1 the absence holds for the first-wave child too",
+              "Single-query approvals" not in (run / "logs" / "parent.a0.prompt.md").read_text())
+        check("A1 approval advice removed from every child prompt, not just the fan-out",
+              text.count("Single-query approvals") == 0, text)
+        check("A1 advice is prompt-only, not graph data",
+              "Single-query approvals" not in (run / "graph.json").read_text())
         rec = json.loads((run / "nodes" / "child.json").read_text())
         check("A1 record prompt_path names the file",
               rec.get("prompt_path") == str(pf), json.dumps(rec)[:200])
@@ -152,7 +160,7 @@ def main():
         graph = {"name": "a4", "nodes": [{"id": "n1", "type": "agent", "goal": "PRINTCWD"}]}
         run = mk_run(home, "a4", graph, fake_bin)
         fake_log = tmp / "fake.log"
-        env = dict(os.environ, HERMES_HOME=str(home), FAKE_LOG=str(fake_log))
+        env = dict(os.environ, HERMES_HOME=str(home), WF_RUNS_ROOT=str(home / "workflows"), FAKE_LOG=str(fake_log))
         proc = subprocess.Popen([sys.executable, str(install / "wf.py"), "run", run.name],
                                 env=env, text=True, stdout=subprocess.PIPE,
                                 stderr=subprocess.STDOUT, cwd=str(install))

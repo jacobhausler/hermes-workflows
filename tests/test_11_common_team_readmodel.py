@@ -4,7 +4,7 @@ validation + precondition facts + profile-aware child_metrics home.
 RATIFY F2 (validation + facts) and F4 (validation + facts rendering). Everything
 here is read-model only: no runner, no door. Stdlib-only.
 """
-import json, os, shutil, sqlite3, sys, tempfile
+import json, os, shutil, sys, tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -177,34 +177,12 @@ check(routed_nf is not None and routed_nf["profile"] == "teammate" and
 # ---------- profile-aware child_metrics home ----------
 home_t = PROOT / "teammate"
 home_t.mkdir(parents=True, exist_ok=True)
-db = home_t / "state.db"
-c = sqlite3.connect(db)
-c.execute("create table sessions (title text, model text, billing_provider text,"
-          " input_tokens int, output_tokens int, cache_read_tokens int, reasoning_tokens int,"
-          " api_call_count int, tool_call_count int, estimated_cost_usd real,"
-          " last_activity_at int, last_activity_description text, ended_at int, started_at int)")
-c.execute("insert into sessions values (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-          (f"wf:c-run:rev:abcd.000001#a0", "m", "p", 10, 5, 0, 0, 3, 2, 0.1,
-           100, "thinking", None, 90))
-c.commit(); c.close()
 run = Path(tempfile.mkdtemp(prefix="c11-run2-", dir=str(ROOT / "tests"))) / "c-run"
 run.mkdir(parents=True)
 (run / "nodes").mkdir(parents=True)
-(run / "nodes" / "rev.json").write_text(json.dumps(
-    {"status": "done", "profile": "teammate", "profile_home": str(home_t)}))
-cm = wfcommon.node_child_metrics(run, "rev")
-key = "wf:c-run:rev:abcd.000001"
-check(key in cm and cm[key]["api_calls"] == 3 and cm[key]["tool_calls"] == 2,
-      "profile-routed node reads metrics from the TARGET profile's state.db")
 (run / "nodes" / "solo.json").write_text(json.dumps({"status": "done"}))
 check(wfcommon.node_child_home(run, "solo") is None,
       "no-profile record -> home None == today's hermes_home() default (no-team identical)")
-check(wfcommon.node_child_metrics(run, "solo") == wfcommon.child_metrics(run.name),
-      "node_child_metrics == child_metrics for a no-profile node")
-(run / "nodes" / "ghost.json").write_text(json.dumps(
-    {"status": "done", "profile_home": str(BASE / "gone-profile")}))
-check(wfcommon.node_child_metrics(run, "ghost") == {},
-      "unreadable target DB -> {} (the api_calls_known:false UNKNOWN path, never zero)")
 # profile-only record (no profile_home) derives <profiles_root>/<name>
 os.environ["HERMES_HOME"] = str(PROOT / "repo-bot")
 (run / "nodes" / "derived.json").write_text(json.dumps({"status": "done", "profile": "teammate"}))

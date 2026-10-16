@@ -103,14 +103,22 @@ def _node_log_tail(r, nid, index, attempt, kind, tail):
     return {"id": r.name, "node": name, "kind": kind, "size": size,
             "bytes": len(data), "content": data.decode("utf-8", errors="replace")}
 
-def _view(r, full=False):
-    st = _workflow_common().run_state(r)
+def _view(r, full=False, lock_state=None):
+    common = _workflow_common()
+    st = (common.run_state(r, lock_state=lock_state) if full
+          else common.run_state(r, telemetry=False, lock_state=lock_state))
     if not st:
         return None
     view = {"id": st["run_id"], "name": st["name"], "status": st["status"],
             "started": st.get("started"), "owner": st.get("owner"),
             "nodes_done": st["done"], "nodes_skipped": st["skipped"], "nodes_total": st["total"],
             "updated": (r / "events.jsonl").stat().st_mtime if (r / "events.jsonl").exists() else 0}
+    if st.get("runner_lock") and st["runner_lock"] not in ("busy", "free"):
+        # #44: a wedge (or an EACCES-ambiguous lock) is visible on the card —
+        # honest absence otherwise (golden key sets byte-unchanged for busy/free).
+        view["runner_lock"] = st["runner_lock"]
+        if st.get("runner_lock_detail"):
+            view["runner_lock_detail"] = st["runner_lock_detail"]
     # Agent-first pane (2026-10-03): stamp WHO launched this run. The read model
     # resolves owner.session_id -> profile name via the profiles' own session
     # tables (wfcommon.profiles_by_session, read-only). Absent stays absent —
@@ -128,7 +136,11 @@ def _view(r, full=False):
     if full:
         import time
         common = _workflow_common()
-        cm = common.child_metrics(st["run_id"])
+        # est-la8m: fold each node's children through its OWN child-DB home
+        # (wfcommon.run_child_metrics, the fb-904f seam the door uses) — a bare
+        # caller-home fold reads only the launcher's state.db and false-zeros
+        # every profile-routed child in the dashboard's full view (issue #81).
+        cm = common.run_child_metrics(r)
         nodes = {}
         for nid, v in st["nodes"].items():
             nodes[nid] = dict(v)
@@ -172,46 +184,59 @@ def _view(r, full=False):
         if rollup is not None:
             rollup.update(common.current_attempt(cm, active))
             rollup["scope"] = "cumulative"
-            if any(not m.get("api_calls_known", True) for m in cm.values()):
-                rollup.pop("api_calls", None)
+            # #114: no local unknown-rule here — fold_child_metrics already
+            # omitted api_calls for any unknown row (was: a per-copy pop, the
+            # half of the divergence this fix removes).
         view.update({"graph": st["graph"], "nodes": nodes, "events": _events(r),
                      "gate": dict(st["held_gate"] or {}), "metrics": rollup})
     return view
 
 def _fold_metrics(ms):
-    ms = list(ms)
-    if not ms:
-        return None
-    f = {"tokens_in": 0, "tokens_out": 0, "cache_read": 0, "reasoning": 0, "api_calls": 0,
-         "tool_calls": 0, "cost": 0.0, "attempts": 0, "children": len(ms), "live": 0,
-         "last_activity": None, "last_desc": None, "models": []}
-    for m in ms:
-        for k in ("tokens_in", "tokens_out", "cache_read", "reasoning", "api_calls", "tool_calls", "cost", "attempts"):
-            f[k] += m.get(k) or 0
-        if m.get("model") and m["model"] not in f["models"]:
-            f["models"].append(m["model"])
-    return f
+    # #114 (WF-04): thin adapter — the ONE fold + known/unknown policy is
+    # wfcommon.fold_child_metrics (AGENTS.md: the metrics join belongs to
+    # wfcommon). Every level (node line, fanout item, rollup) omits api_calls
+    # on ANY unknown child — the door and this surface cannot diverge.
+    return _workflow_common().fold_child_metrics(ms)
 
 def _list_runs():
     # F1 #14: merge the legacy launch root the way the door's act_list does — a
     # pre-fix run opens by URL via _safe_run's find_run fallback and must also
     # appear in the list. Resolved root wins on id collision.
+    # est-2ek.1.762 census hygiene: enumerate through wfcommon.iter_run_dirs
+    # (unique by REALPATH across every scanned root — a same-named torn stub
+    # in one root no longer hides the valid run in another; est-7ps8), and
+    # report how many rows EXECUTED (logs present).
+    # executed counts ONLY rows that land in `runs` (a valid, de-duplicated
+    # row) — dirs _view rejects never become rows, so they must not inflate
+    # the counter (zap non-blocking note 2). This listing ALWAYS measures:
+    # the actual count — including a measured zero — is supplied to
+    # run_summary, which renders an omitted count as the absent key
+    # (wfcommon.run_summary's supplied-versus-unmeasured contract).
     common = _workflow_common()
     roots = [_root()]
     legacy = common.launch_runs_root()
     if legacy != roots[0]:
         roots.append(legacy)
     runs, seen = [], set()
-    for root in roots:
-        if not root.exists():
-            continue
-        for r in sorted(root.iterdir(), reverse=True):
-            v = _view(r)
-            if v and v["id"] not in seen:
-                seen.add(v["id"])
-                runs.append(v)
+    executed = 0
+    # #44 (PR #47 round-3 sibling gap): 50 rows used to spawn 50 probe children.
+    # ONE batch probe child + ONE ledger read for the whole census now; _view
+    # consumes the pre-observed per-dir lock state (zero extra probes).
+    scanned = list(common.iter_run_dirs(roots, reverse=True))
+    _lock_states = common.runner_lock_states(scanned)
+    for r in scanned:
+        v = _view(r, lock_state=_lock_states.get(r))
+        if v and v["id"] not in seen:
+            seen.add(v["id"])
+            # est-7ps8 (note 2): count EXECUTED only for rows that land in
+            # `runs` — a torn dir that never reaches the list must not
+            # inflate the counter (executed > total was the probe).
+            if common.run_executed(r):
+                executed += 1
+            runs.append(v)
+    summary = common.run_summary(runs, executed=executed)
     return {**({"roots": [str(x) for x in roots]} if not runs else {}),
-            "runs": runs[:100], **_workflow_common().run_summary(runs)}
+            "runs": runs[:100], **summary}
 
 
 if router is not None:

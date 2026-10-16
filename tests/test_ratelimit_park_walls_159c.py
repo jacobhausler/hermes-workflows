@@ -32,14 +32,19 @@ The #54 park shipped with three boundary defects the committee reproduced on
 
 Run: env -u WF_RUNS_ROOT -u HERMES_HOME PYTHONPATH=/opt/hermes /opt/hermes/.venv/bin/python tests/test_ratelimit_park_walls_159c.py
 """
-import json, os, shutil, subprocess, sys, time
+import json, os, re, shutil, subprocess, sys, time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 BUILD = HERE.parent
-HOME = HERE / "home-159c"
+# est-qp8dj: fixture dir unique per pid — concurrent legs of one fan-out (or a
+# stray runner racing a re-run) previously shared home-159c and stomped each
+# other via the line-54 rmtree. atexit sweep keeps the repo tree clean.
+import atexit
+HOME = HERE / f"home-159c.{os.getpid()}"
 RUNS = HOME / "workflows"
 os.environ["HERMES_HOME"] = str(HOME)
+os.environ["WF_RUNS_ROOT"] = str(Path(os.environ["HERMES_HOME"]) / "workflows")  # est-2ek.1.762 pin: HERMES_HOME alone is not a sandbox
 os.environ.pop("WF_RUNS_ROOT", None)
 sys.path.insert(0, str(BUILD))
 import wf  # noqa: E402
@@ -52,6 +57,7 @@ def check(label, cond, detail=""):
 
 if HOME.exists(): shutil.rmtree(HOME)
 HOME.mkdir(parents=True); RUNS.mkdir()
+atexit.register(shutil.rmtree, HOME, ignore_errors=True)  # est-qp8dj sweep
 FAKE = str(HERE / "fake")
 
 def mk(run_id, nodes, **meta):
@@ -64,7 +70,7 @@ def mk(run_id, nodes, **meta):
     return r
 
 def runx(run_id, extra_env=None, timeout=120):
-    env = dict(os.environ, HERMES_HOME=str(HOME), FAKE_LOG=str(HOME / "fake.log"))
+    env = dict(os.environ, HERMES_HOME=str(HOME), WF_RUNS_ROOT=str(RUNS), FAKE_LOG=str(HOME / "fake.log"))
     env.update(extra_env or {})
     env.pop("WF_RUNS_ROOT", None)
     return subprocess.run([sys.executable, str(BUILD / "wf.py"), "run", run_id],
@@ -86,6 +92,14 @@ att = HOME / "att-w1"; shutil.rmtree(att, ignore_errors=True)
 r = mk("w1-fit", [{"id": "a", "type": "agent", "goal": "GO w1-fit", "timeout": 2}],
        ratelimit_interval=1.95, ratelimit_jitter=0.0, retry_budget=6, node_timeout=2)
 env = {"FAKE_MODE": "ratelimit", "FAKE_RL_FAILS": "1", "FAKE_ATTEMPT_DIR": str(att)}
+# est-qp8dj: measured spawn floor — the dt bound must scale with the box, not
+# assume an unloaded laptop. `_boot` = one bare interpreter round-trip under
+# the CURRENT load; bound = max(1.5, wall-budget + 2x boot). A straggler-
+# wait regression parks ~300s and is still caught by two orders of magnitude.
+_b0 = time.time()
+subprocess.run([sys.executable, "-c", "pass"], timeout=30)
+_boot = time.time() - _b0
+_W1_BOUND = max(1.5, 2.0 + 2.0 * _boot)
 t0 = time.time(); out = runx("w1-fit", env); dt = time.time() - t0
 rec = rec_of(r)
 rl_ev = [e for e in events(r) if e.get("event") == "item.retrying" or
@@ -98,7 +112,7 @@ check("W1: honest give-up with the verbatim banner + ratelimit_gave_up",
       and rec.get("error") == BANNER_GIVEUP and rec.get("ratelimit_gave_up") is True,
       json.dumps({k: rec.get(k) for k in ("status", "error_class", "error", "ratelimit_gave_up")}))
 check("W1: wall honored — run finished far below the 2s budget it refused to overshoot",
-      dt < 1.5, f"wall={dt:.2f}s")
+      dt < _W1_BOUND, f"wall={dt:.2f}s bound={_W1_BOUND:.2f}s boot={_boot:.2f}s")  # est-qp8dj: spawn-proportional bound
 check("W1: WORKFLOW_FAILED", "WORKFLOW_FAILED" in out, out[:60])
 
 # ---------- W-FIT (unit): the park's fit law is worst-case-jitter bounded and ----------
@@ -246,6 +260,98 @@ check("B3: the parked straggler is recorded cancelled, not as a ratelimit failur
       not any(e.get("error_class") == "ratelimit" and str(e.get("event", "")).endswith(".failed")
               for e in events(r)), json.dumps([e.get("event") for e in events(r)])[-200:])
 check("B3: WORKFLOW_DONE", "WORKFLOW_DONE" in out, out[:60])
+
+# ---------- M3 (est-xodi, from wf159e adversary finding): the parked respawn's ------
+# ---------- timeout is CONSUMED, not merely written in meta. Real children only: ------
+# ---------- first spawn dies on the banner; the parked respawn goes silent-slow and ------
+# ---------- answers VALIDLY way past the remaining wall. An un-consumed cap lets that ------
+# ---------- late answer commit done (adversary no-cap probes: 3 checks RED, 1856-1867ms ------
+# ---------- survivors). Head must kill it as timeout before commit. Both the plain-node ------
+# ---------- key and the fan-out index key ride the same cap table, so both shapes pin. --
+for mode, run_id, nodes in (
+        ("clamp", "m3-clamp", [{"id": "a", "type": "agent", "goal": "GO m3-clamp", "timeout": 2}]),
+        ("clamp-fanout", "m3-clamp-fo", [{"id": "f", "type": "agent", "timeout": 2,
+                                          "fanout": {"items": ["m3-item"], "goal": "GO m3-item"},
+                                          "schema": {"type": "object", "required": ["result"]}}])):
+    (HOME / "fake.log").write_text("")
+    att = HOME / f"att-{mode}"; shutil.rmtree(att, ignore_errors=True)
+    r = mk(run_id, nodes, ratelimit_interval=0.8, ratelimit_jitter=0.0,
+           retry_budget=1, node_timeout=2)
+    original = (r / "run.json").read_bytes()
+    # NO FAKE_API_CALLS here: the child must be TRULY silent (no spawn-written
+    # state.db session row) or the #11 extend-not-kill witness legitimately
+    # stacks on the clamp (adversary slow_child.py wrote no row either).
+    out = runx(run_id, {"FAKE_MODE": "ratelimit_then_slow", "FAKE_ATTEMPT_DIR": str(att),
+                       "FAKE_SLEEP": "1.65"})
+    rec = rec_of(r, "a" if mode == "clamp" else "f")
+    if mode != "clamp":
+        rec = (rec.get("output") or {}).get("all_results", [{}])[0]
+    rl_ev = [e for e in events(r) if str(e.get("event", "")).endswith(".retrying")
+             and e.get("error_class") == "ratelimit"]
+    ext = [e for e in events(r) if e.get("event") == "node.extended"]
+    claim = re.search(r"timeout after ([0-9.]+)s", str(rec.get("error", "")))
+    check(f"M3 [{mode}]: park armed and the actual second child spawned",
+          spawns("GO m3" if mode == "clamp" else "GO m3-item") == 1 + 1 and len(rl_ev) == 1,
+          f"spawns={spawns('GO m3' if mode == 'clamp' else 'GO m3-item')} parks={len(rl_ev)}")
+    check(f"M3 [{mode}]: silent slow child gets NO log-activity extension",
+          not ext, json.dumps([e.get("event") for e in ext]))
+    check(f"M3 [{mode}]: slow VALID answer killed by the consumed cap, never committed done",
+          rec.get("status") == "failed" and rec.get("error_class") == "timeout"
+          and "answered-way-late" not in json.dumps(rec.get("output") or {}),
+          json.dumps({k: rec.get(k) for k in ("status", "error_class", "error")}))
+    check(f"M3 [{mode}]: spawn report timeout is the REMAINING wall, not a fresh timeout",
+          claim is not None and 0 < float(claim.group(1)) <= 2 - 0.8 + 0.05,
+          f"claimed={claim and claim.group(1)}s wall=2s interval=0.8s")
+    check(f"M3 [{mode}]: run.json byte-identical — enforcement is the death, not meta",
+          original == (r / "run.json").read_bytes()
+          and json.loads(original)["node_timeout"] == 2,
+          json.dumps({"unchanged": original == (r / "run.json").read_bytes()}))
+
+# ---------- M2 (est-xodi): the post-wait deadline RECHECK is load-bearing. ----------
+# ---------- Fault-injection at the wait/clock seam only — the park's fit gate, ----------
+# ---------- event write, terminal result and respawn decision run unchanged. ----------
+# ---------- A scheduler overrun past the deadline must refuse the late respawn ----------
+# ---------- and return honest typed give-up (adversary no-recheck: respawn at ----------
+# ---------- 1002.5 past deadline 1002.0, false done — 2 checks RED). ----------
+import threading as _thr
+class _Clock:
+    current = 1000.0
+    def time(self): return self.current
+class _Draw:
+    def random(self): return 1.0
+_clock = _Clock()
+_saved_time, _saved_rand, _saved_pw = _wfmod.time, _wfmod.random, _wfmod._park_wait
+_wfmod.time, _wfmod.random = _clock, _Draw()
+_waits = []
+def _overrun(meta, seconds, cancel=None):
+    _waits.append(seconds)
+    _clock.current += seconds + 1.0        # scheduler/bookkeeping delay past admission
+    return False
+_wfmod._park_wait = _overrun
+try:
+    _m = {"_run": Path(tempfile.mkdtemp(prefix="rlm2-")), "_stop": _thr.Event(),
+          "_procs_lock": _thr.Lock(), "_retries_left": 1,
+          "ratelimit_interval": 1.0, "ratelimit_jitter": 0.5}
+    _r2 = {"status": "failed", "error_class": "ratelimit", "error": "credential window closed",
+          "raw": "hermes -z: agent failed: Anthropic credentials are rate-limited for "
+                 "claude-fable-5-1; other Claude models remain available (see `hermes auth list`).",
+          "pid": 4294967, "ms": 1}
+    _calls = []
+    def _respawn_late():
+        _calls.append(_clock.current)
+        return {"status": "done", "output": {"result": "late-child"}, "pid": 4294967, "ms": 1}
+    _res = _wfmod._ratelimit_park(_m, _r2, _respawn_late, "node", {"node": "overrun"},
+                                  node={"timeout": 2})
+finally:
+    _wfmod.time, _wfmod.random, _wfmod._park_wait = _saved_time, _saved_rand, _saved_pw
+check("M2: worst-case jitter park admitted before the overrun (fit gate honest)",
+      _waits == [1.5], json.dumps(_waits))
+check("M2: post-wait deadline recheck REFUSES the late respawn", not _calls,
+      f"respawn_calls={_calls} clock={_clock.current} deadline=1002.0")
+check("M2: overrun returns honest typed ratelimit give-up, never a false done",
+      _res.get("status") == "failed" and _res.get("error_class") == "ratelimit"
+      and _res.get("ratelimit_gave_up") is True,
+      json.dumps({k: _res.get(k) for k in ("status", "error_class", "ratelimit_gave_up")}))
 
 print(("" if ok else "FAILURES PRESENT"), "DONE test_ratelimit_park_walls_159c" if ok else "DONE with FAILURES")
 sys.exit(0 if ok else 1)

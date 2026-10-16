@@ -39,6 +39,22 @@ if "QFLUSH" in q:
 if "QSLEEP" in q:
     try: time.sleep(float(q.split("QSLEEP")[1].split()[0]))
     except Exception: pass
+# est-pygyy (#56): EFFECT-EMIT <rel/path> BYTES=<n> — the child publishes its
+# artifact at spawn time (cwd = the child work dir <run>/work/<node>[.<i>],
+# A4), so the runner's effect-receipt gate is proven to measure bytes AT the
+# commit edge, not at admission. Item rows carry their own EFFECT-EMIT token
+# (the fan-out shape: each item publishes its own artifact). Inert without
+# the marker: golden paths byte-identical.
+if "EFFECT-EMIT" in q:
+    _sp = q.split()
+    _i = _sp.index("EFFECT-EMIT")
+    _tok = _sp[_i + 1]
+    _n = int(_sp[_i + 2].split("BYTES=")[1]) if len(_sp) > _i + 2 and \
+        _sp[_i + 2].startswith("BYTES=") else 32
+    _p = os.path.join(os.getcwd(), _tok)
+    os.makedirs(os.path.dirname(_p) or ".", exist_ok=True)
+    with open(_p, "wb") as _f:
+        _f.write(b"e" * _n)
 # ---- #61 process-tree modes (no behavior change without the env) ----
 # FAKE_GC=1: background a same-session grandchild that outlives this child —
 # the detached-suite shape. Its pid is appended to $FAKE_GC_PIDS so the test
@@ -51,6 +67,15 @@ if os.environ.get("FAKE_GC"):
     if _gcp:
         with open(_gcp, "a") as _f:
             _f.write(str(_gc.pid) + "\n")
+# est-13z1: CLOSE-CLAIM {<json>} — the child returns EXACTLY that object as its
+# fenced answer (the false-close shape: output prose/note claims "est-x closed"
+# while the estate store says otherwise). The bead-close gate must anchor to the
+# store read-back, never to this reply. Inert without the marker.
+if "CLOSE-CLAIM" in q:
+    _line = next(l for l in q.splitlines() if "CLOSE-CLAIM" in l)
+    _body = _line.split("CLOSE-CLAIM", 1)[1].strip()
+    print("Done — posted the verdict.\n```json\n" + _body + "\n```")
+    sys.exit(0)
 if os.environ.get("FAKE_MODE") == "background" and "BGPROGRESS" in q:   # #61: the 06f57ea9 shape —
     # background the REAL work, print progress chatter, exit 0 with NO fenced
     # block (suite.a0.log verbatim style: "Suite is running ... Waiting").
@@ -160,6 +185,24 @@ if _FAKE_MODE == "provider400":    # 400 with inherited CLI advice lines that mu
     print("Try re-running with a different model via /new or /model")
     print("hermes -z: agent failed: Error code: 400 - {'error': 'bad request'}")
     sys.exit(2)
+if _FAKE_MODE == "fallback_ladder":      # est-2ek.1.164: transport death on any -m that is not $FAKE_OK_MODEL
+    _m = args[args.index("-m") + 1] if "-m" in args else None
+    if _m == os.environ.get("FAKE_OK_MODEL"):
+        print("```json\n" + json.dumps({"result": "answered on " + str(_m)}) + "\n```")
+        sys.exit(0)
+    print("hermes -z: agent failed: openai.APIConnectionError. Connection error.")
+    sys.exit(2)
+if _FAKE_MODE == "partial_remaining":    # est-2ek.1.165: harvest death WITH a declared Remaining block
+    print("did the head of the tail, then the cap took me")
+    print("## Remaining")
+    print("- roll seat plugin")
+    print("- CLI bake")
+    print("")
+    print("```json\n" + json.dumps({"result": "half done"}) + "\n```")
+    sys.exit(1)
+if _FAKE_MODE == "partial_noremaining":  # est-2ek.1.165: harvest death with NO declared block
+    print("```json\n" + json.dumps({"result": "half done"}) + "\n```")
+    sys.exit(1)
 if _FAKE_MODE == "unknown":        # dies with prose only — no machine-readable marker
     print("some daemon died unexpectedly, see your provider dashboard")
     sys.exit(7)
@@ -182,6 +225,16 @@ if _FAKE_MODE == "quota":          # #24: subscription-quota 429 with a reset ho
     print("Warning: install out of sync")
     print('Provider said: HTTP 429: {"error": {"message": "ChatGPT or Codex '
           'Subscription usage limit reached, resets in ~109 hours"}}')
+    sys.exit(1)
+if _FAKE_MODE == "rlhint130":   # #130: rate-limit park respawn — banks a work file, then the
+    # parked respawn answers ONLY when its prompt carried the artifact inventory.
+    if "RESUME-HINT-ARTIFACT-130" in q and "size=" in q and "mtime=" in q:
+        print("```json\n" + json.dumps({"result": "parked-hint-130"}) + "\n```")
+        sys.exit(0)
+    with open("hint130.md", "w") as f:
+        f.write("RESUME-HINT-ARTIFACT-130 banked before the rate-limit window\n")
+    print("hermes -z: agent failed: Anthropic credentials are rate-limited for "
+          "claude-fable-5-1; other Claude models remain available (see `hermes auth list`).")
     sys.exit(1)
 # ---- committee wf159c pins. Placed ABOVE the est-t0vz block on purpose: both
 # ---- mode names start with "ratelimit" and would otherwise be hijacked by its
@@ -214,6 +267,19 @@ if _FAKE_MODE == "ratelimit_straggler":
               "claude-fable-5-1; other Claude models remain available (see `hermes auth list`).")
         sys.exit(1)
     print("```json\n" + json.dumps({"result": "winner-answer"}) + "\n```")
+    sys.exit(0)
+# ---- est-xodi (M3 pin): first spawn dies on the banner, the PARKED respawn goes
+# ---- silent-slow (prints nothing for FAKE_SLEEP s) then answers with a VALID
+# ---- payload. Only the consumed remaining-wall cap can kill it before commit. ----
+if _FAKE_MODE == "ratelimit_then_slow":
+    _k159 = "".join(ch for ch in (q.splitlines()[0] if q.strip() else "x") if ch.isalnum())[:24] or "x"
+    if _rl159_count(_k159) == 0:                     # first spawn: banner death
+        print("Warning: Unknown toolsets: bogus")
+        print("hermes -z: agent failed: Anthropic credentials are rate-limited for "
+              "claude-fable-5-1; other Claude models remain available (see `hermes auth list`).")
+        sys.exit(1)
+    _t.sleep(float(os.environ.get("FAKE_SLEEP", "1.65")))
+    print("```json\n" + json.dumps({"result": "answered-way-late"}) + "\n```")
     sys.exit(0)
 # ---- est-t0vz (issue #54): credential-window 429 park modes ----
 # The banner below is the VERBATIM AuthError text the stock CLI raises at
@@ -347,6 +413,53 @@ if _FAKE_MODE == "toolcall_text_541" and "TOOLCALL541" in q:
         sys.exit(rc)
     print("```json\n" + json.dumps({"result": "redriven"}) + "\n```")
     sys.exit(0)
+if _FAKE_MODE == "cap_harvest_ggqs" and "CAPHARV" in q:
+    # est-ggqs (#256 claim 1): the turn-cap death that ALREADY printed a schema-valid
+    # fenced answer — typed max_iterations stamp in the -Q turn report, exit 2, so the
+    # runner commits partial + error_class=cap_exhausted via _harvest_death.
+    # Drive 1 registers a state.db row with tool_call_count > 0 (the bounded-retry
+    # progress evidence) unless FAKE_NO_PROGRESS=1. FAKE_ATTEMPT_DIR counts drives:
+    # drive 2+ answers clean (exit 0) — unless FAKE_REDRIVE_DIES=1 (drive 2+ dies with
+    # NO answer, transport marker). FAKE_REMAINING=1 declares a `## Remaining` tail;
+    # FAKE_DECLARED=<s> stamps a child-declared terminal status into the answer.
+    cnt = 0
+    if os.environ.get("FAKE_ATTEMPT_DIR"):
+        os.makedirs(os.environ["FAKE_ATTEMPT_DIR"], exist_ok=True)
+        p = os.path.join(os.environ["FAKE_ATTEMPT_DIR"], "attempts")
+        cnt = int(open(p).read()) if os.path.exists(p) else 0
+        open(p, "w").write(str(cnt + 1))
+    if cnt == 0:
+        if os.environ.get("FAKE_NO_PROGRESS") != "1" and "--continue" in args:
+            import sqlite3
+            title = args[args.index("--continue") + 1]
+            c = sqlite3.connect(os.path.join(_FAKE_HOME, "state.db"))
+            c.execute("create table if not exists sessions (id text primary key, title text, model text, billing_provider text, input_tokens int, output_tokens int, "
+                      "cache_read_tokens int, reasoning_tokens int, api_call_count int, tool_call_count int, estimated_cost_usd real, "
+                      "last_activity_at real, last_activity_description text, ended_at real, started_at real)")
+            t = time.time()
+            c.execute("insert or replace into sessions values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                      ("f-" + title, title, "fake", "fake", 0, 0, 0, 0, 35, 35, 0.0, t, "", t, t))
+            c.commit(); c.close()
+        _rp = os.environ.get("HERMES_QUIET_TURN_REPORT_FILE")
+        if _rp:
+            with open(_rp, "w") as f:
+                json.dump({"pid": os.getpid(), "exit_code": 2, "error": "budget",
+                           "reply": "census written; turn budget spent",
+                           "turn_exit_reason": "max_iterations_reached(35/35)"}, f)
+        if os.environ.get("FAKE_REMAINING") == "1":
+            print("## Remaining")
+            print("- reconcile the last two hosts")
+            print("")
+        _ans = {"result": "census-complete"}
+        if os.environ.get("FAKE_DECLARED"):
+            _ans["status"] = os.environ["FAKE_DECLARED"]
+        print("```json\n" + json.dumps(_ans) + "\n```")
+        sys.exit(2)
+    if os.environ.get("FAKE_REDRIVE_DIES") == "1":
+        print("hermes -z: agent failed: openai.APIConnectionError. Connection error.")
+        sys.exit(2)
+    print("```json\n" + json.dumps({"result": "redriven-clean"}) + "\n```")
+    sys.exit(0)
 if _FAKE_MODE == "die_after_json" and "DIETEST" in q:   # #4: dies AFTER a valid fenced answer
     print("```json\n" + json.dumps({"result": "harvested"}) + "\n```")
     sys.exit(1)
@@ -377,6 +490,43 @@ if _FAKE_MODE == "retry_progress" and "RESUME" in q:    # #5: transport death WI
         sys.exit(2)
     print("```json\n" + json.dumps({"result": "resumed"}) + "\n```")
     sys.exit(0)
+if _FAKE_MODE == "retry_hint":   # #130: transport death (0 api calls) that BANKED a work file;
+    # the transient respawn answers ONLY when its prompt carried the artifact inventory.
+    if "RESUME-HINT-ARTIFACT-130" in q and "size=" in q and "mtime=" in q:
+        print("```json\n" + json.dumps({"result": "resumed-hint-130"}) + "\n```")
+        sys.exit(0)
+    try:
+        with open("hint130.md", "w") as f:
+            f.write("RESUME-HINT-ARTIFACT-130 banked before the transport death\n")
+    except OSError:
+        pass
+    print("hermes -z: agent failed: openai.APIConnectionError. Connection error.")
+    sys.exit(2)
+if _FAKE_MODE == "lease_busy":
+    # lease-busy (2026-10-03 field shape): attempt 1 prints the CLI's dead-session
+    # banner + the CLI's fail-closed lease notice verbatim and exits 130 (the CLI's
+    # lease-wait timeout exit). NO state.db row is written — the tool-progress gate
+    # MUST be bypassed for this class. Attempt 2 answers only when its prompt carried
+    # the fresh-session harvest preamble (proves the re-drive is a FRESH session,
+    # not a resume of the busy one); without it, dies 130 again on the same notice.
+    cnt = 0
+    if os.environ.get("FAKE_ATTEMPT_DIR"):
+        os.makedirs(os.environ["FAKE_ATTEMPT_DIR"], exist_ok=True)
+        p = os.path.join(os.environ["FAKE_ATTEMPT_DIR"], "attempts")
+        cnt = int(open(p).read()) if os.path.exists(p) else 0
+        open(p, "w").write(str(cnt + 1))
+    if cnt == 0 or "Dead-session re-drive harvest" not in q:
+        print("Session 20261003_000000_fake00 found but has no messages. Starting fresh.", flush=True)
+        print("Stopped waiting for another Hermes process on this session. "
+              "Your message was not processed.", flush=True)
+        sys.exit(130)
+    print("```json\n" + json.dumps({"result": "lease-recovered"}) + "\n```")
+    sys.exit(0)
+if _FAKE_MODE == "rc130_quiet":
+    # control twin: exits 130 WITHOUT the lease notice — must keep the existing
+    # `unknown` classification and stay terminal (no lease re-drive).
+    print("some unrelated chatter, no lease marker")
+    sys.exit(130)
 if _FAKE_MODE == "dead_session_102" and "DEADSESS" in q:
     # #102: drive 1 dies on its wall leaving a session row with tool_call_count>0
     # (bounded-retry gate opens) and NO persisted messages when FAKE_MESSAGES=0;
@@ -448,8 +598,55 @@ if _FAKE_MODE == "poll_steer":     # B1: child pulls baked steering through the 
     print("REPULL:" + json.dumps(_res2.get("steering", [])))
     print("```json\n" + json.dumps({"pulled": _res.get("steering", []), "repull": _res2.get("steering", [])}) + "\n```")
     sys.exit(0)
+# ---- est-g2xx modes (appended; no behavior change without the env) ----
+if _FAKE_MODE == "buffered_child":
+    # The proven re-fire shape: the child WORKS but block-buffers stdout — its
+    # spawn log stays 0 bytes past the silence window while a live tool child
+    # runs in its subtree; only later does it answer.
+    import subprocess as _sp2
+    _tc = _sp2.Popen([sys.executable, "-c",
+                      "import time; time.sleep(float(__import__('os').environ.get('FAKE_BUFFERED_SLEEP','5')) * 0.6)"])
+    _t.sleep(float(os.environ.get("FAKE_BUFFERED_SLEEP", "5")))
+    _tc.wait(timeout=30)
+    print("```json\n" + json.dumps({"result": "ok", "buffered": True}) + "\n```", flush=True)
+    sys.exit(0)
+if _FAKE_MODE == "seat_timing":       # one span row per child: [start, end] of its run
+    _s0 = time.time()
+    _dur = float(os.environ.get("FAKE_SEAT_HOLD", "2"))
+    _t.sleep(_dur)
+    _sm = os.environ.get("SEAT_MARK")
+    if _sm:
+        with open(_sm, "a") as _f:
+            _f.write(json.dumps({"start": round(_s0, 6), "end": round(time.time(), 6)}) + "\n")
+    print("```json\n" + json.dumps({"result": "ok", "held": _dur}) + "\n```", flush=True)
+    sys.exit(0)
 if _FAKE_MODE == "hang":
     _t.sleep(float(os.environ.get("FAKE_HANG_SEC", "60")))
+    sys.exit(0)
+if _FAKE_MODE in ("session_pulse", "session_frozen"):   # est-2ek.1.595: the oneshot -Q shape —
+    # nothing ever reaches the spawn log while the child works, but its own sessions row
+    # (title = the --continue key) is in state.db. pulse: last_activity_at keeps moving;
+    # frozen: the row exists but never moves again. Either way the answer comes at the end.
+    import sqlite3 as _sq
+    _title = args[args.index("--continue") + 1]
+    _db = _sq.connect(os.path.join(_FAKE_HOME, "state.db"), timeout=5)
+    _db.execute("create table if not exists sessions (id text primary key, title text, model text, billing_provider text, "
+                "input_tokens int, output_tokens int, cache_read_tokens int, reasoning_tokens int, api_call_count int, "
+                "tool_call_count int, estimated_cost_usd real, last_activity_at real, last_activity_description text, "
+                "ended_at real, started_at real)")
+    _t0 = time.time()
+    _seen = _t0 - 3600 if _FAKE_MODE == "session_frozen" else _t0
+    _db.execute("insert into sessions values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (_title, _title, "fake", None, 0, 0, 0, 0, 0, 0, 0.0, _seen, "", None, _seen))
+    _db.commit()
+    _end = _t0 + float(os.environ.get("FAKE_SESSION_SEC", "3"))
+    while time.time() < _end:
+        if _FAKE_MODE == "session_pulse":
+            _db.execute("update sessions set last_activity_at=? where id=?", (time.time(), _title))
+            _db.commit()
+        _t.sleep(0.2)
+    _db.close()
+    print("```json\n" + json.dumps({"result": "ok", "session": _FAKE_MODE}) + "\n```", flush=True)
     sys.exit(0)
 if _FAKE_MODE == "early":          # writes stdout, then keeps cooking (mid-run log growth)
     print("partial progress line, flushed early", flush=True)
@@ -470,6 +667,17 @@ if _FAKE_MODE == "enum_always_bad":   # persistent out-of-set answer
     sys.exit(0)
 if _FAKE_MODE == "enum_always_good":  # in-set on the first attempt
     print("```json\n" + json.dumps({"verdict": "hold"}) + "\n```")
+    sys.exit(0)
+# ---- #96 minItems/minLength-enforcement modes (prompt-scoped like the enum
+# ones: the runner's attempt_note lands in the retry's prompt text) ----
+if _FAKE_MODE == "min_always_blank":   # persistent whitespace-only verify_list
+    print("```json\n" + json.dumps({"verify_list": ["   "]}) + "\n```")
+    sys.exit(0)
+if _FAKE_MODE == "min_blank_then_good":  # first answer blank, retry names a real probe
+    if "failed schema validation" in q:
+        print("```json\n" + json.dumps({"verify_list": ["pytest -q"]}) + "\n```")
+    else:
+        print("```json\n" + json.dumps({"verify_list": ["   "]}) + "\n```")
     sys.exit(0)
 # ---- #113 numeric-type-enforcement modes (prompt-scoped like the enum ones:
 # the runner's attempt_note lands in the retry's prompt text) ----

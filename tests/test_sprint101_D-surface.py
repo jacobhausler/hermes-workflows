@@ -75,9 +75,9 @@ try:
     src = (ROOT / "__init__.py").read_text(encoding="utf-8")
     check("no card_rule key remains in __init__.py", '"card_rule"' not in src)
     # O1 copy-exact hint (papercut #70): the hint names the paste line verbatim.
-    check("hint is the copy-exact paste line",
-          out.get("hint", "").startswith("PASTE this line alone in your reply")
-          and CARD(rid) in out.get("hint", ""), repr(out.get("hint"))[:200])
+    check("hint makes cards optional",
+          "desktop cards are optional" in out.get("hint", "")
+          and CARD(rid) in out.get("lifecycle_notice", ""), repr(out.get("hint"))[:200])
 
     # ---- 2: any reading session gets the card in the payload -----------------
     os.environ["HERMES_SESSION_ID"] = "watcher"
@@ -95,11 +95,17 @@ try:
                 "_visible_cards", "_LAUNCHED", "_HELD", "_HELD_TTL_SECONDS",
                 "_LAUNCH_LOCK", "_VISIBLE_CARD_RE", "_CARD_ATTR_RE"):
         check(f"symbol {sym} no longer exists on the door", not hasattr(door, sym))
-    # #157 re-armed exactly ONE hook (the card-enforcement last-resort shipper);
-    # the O1 law still holds for the deleted auto-card machine: no other hook.
-    check("exactly one register_hook call remains, the #157 card-enforcement hook",
-          src.count("register_hook") == 1
-          and 'register_hook("transform_llm_output"' in src)
+    # The card ledger owns exactly THREE hooks (post_tool_call records launches,
+    # pre_llm_call reminds, transform_llm_output ships); PR-3 adds exactly one call
+    # site: the flag-gated (default-off) admission/witness loop; PR-4 adds the advisory
+    # orphan-held observers as ONE registration loop (pinned by tests/test_orphan_watch.py).
+    # The O1 law still holds for the deleted auto-card machine: no other hook.
+    check("register_hook sites: three card-ledger hooks + PR-3 admission/witness loop + PR-4 orphan loop",
+          src.count("register_hook") == 5
+          and all(f'register_hook("{h}"' in src
+                  for h in ("post_tool_call", "pre_llm_call", "transform_llm_output"))
+          and 'for _hook, _fn in (("post_gateway_admission", _admission_handler),' in src
+          and "for _hn, _hf in _orphan_watch.HOOKS.items()" in src)
 finally:
     door._spawn_runner = _orig_spawn
     shutil.rmtree(HOME, ignore_errors=True)

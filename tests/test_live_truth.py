@@ -13,6 +13,18 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 
+def _load_iso762():
+    # est-2ek.1.762: shared launch-env pin helper, exec-loaded by file path
+    # (repo convention — a top-level import of a tests/fixtures module would
+    # break the test_packaging import-closure from the unpacked package root).
+    spec = importlib.util.spec_from_file_location(
+        "wf_spawn_isolation_762", Path(__file__).parent / "fixtures" / "wf_spawn_isolation_762.py")
+    assert spec and spec.loader
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+pin_env = _load_iso762().pin_env
+
 def load(name, path):
     spec = importlib.util.spec_from_file_location(name, path)
     mod = importlib.util.module_from_spec(spec)
@@ -27,7 +39,12 @@ class LiveTruth(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory(prefix='live-truth-', dir=ROOT)
         self.addCleanup(self.temp.cleanup)
         self.home = Path(self.temp.name)
-        self.env = patch.dict(os.environ, HERMES_HOME=str(self.home))
+        # est-2ek.1.762: HERMES_HOME alone is not a sandbox — the ONE resolver
+        # honors an inherited WF_RUNS_ROOT above it, and the launched children
+        # (identity-probe stand-ins) must never ride a lane-exported root either.
+        self.env = patch.dict(os.environ, pin_env(dict(os.environ),
+                                                   self.home / 'workflows',
+                                                   home=self.home), clear=True)
         self.env.start()
         self.addCleanup(self.env.stop)
         (self.home / 'workflows').mkdir()
@@ -141,7 +158,14 @@ class LiveTruth(unittest.TestCase):
         self.assertEqual(tool.get('total'), 106)
         self.assertEqual(len(tool['runs']), 50)
         view = api._list_runs()
-        self.assertEqual(view['counts'], tool['counts'])
+        # est-7ps8 repair (zap CHANGES 6033425646): the dashboard MEASURES
+        # executed and now always reports it, including a measured zero;
+        # act_list's census never measures it. Compare the COMMON status-count
+        # portion — whole-dict equality here once forced the dashboard to
+        # DROP a real measurement to satisfy the door's key set.
+        self.assertEqual({k: v for k, v in view['counts'].items() if k != 'executed'},
+                         {k: v for k, v in tool['counts'].items() if k != 'executed'})
+        self.assertEqual(view['counts'].get('executed'), 0)  # measured zero rides
         self.assertEqual(view['total'], tool['total'])
         self.assertEqual(len(view['runs']), 100)
 

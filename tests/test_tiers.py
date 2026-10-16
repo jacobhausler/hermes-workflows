@@ -41,11 +41,12 @@ check("tier name kept on node", nodes[0].get("tier") == "worker" and nodes[1].ge
 check("table shows literal + tier", table["a"] == "qwen38-next  (worker)" and table["c"] == "(seat default)", table)
 check("gate untouched", "g" not in table and "model" not in nodes[3])
 
-# 2. literal provider/model and seat alias pass through unchanged
+# 2. literal provider/model bakes the provider the seat routes through (est-2ek.1.46); seat alias and default pass through unchanged
 nodes = [{"id": "a", "type": "agent", "model": "anthropic/claude-z"}, {"id": "b", "type": "agent", "model": "fable"},
          {"id": "c", "type": "agent", "model": "seat-default"}]
 err, table = door.resolve_models(nodes)
-check("literal + alias + default pass through", err is None and [n["model"] for n in nodes] == ["anthropic/claude-z", "fable", "seat-default"], err)
+check("literal bakes provider; alias + default pass through", err is None and [(n.get("provider"), n["model"]) for n in nodes] == [("anthropic", "claude-z"), ("anthropic", "fable"), (None, "seat-default")], err)
+check("literal table row keeps the full route", table["a"] == "anthropic/claude-z", table)
 check("no tier stamped on literals", all("tier" not in n for n in nodes))
 
 # 3. unknown key fails closed, names the valid tiers

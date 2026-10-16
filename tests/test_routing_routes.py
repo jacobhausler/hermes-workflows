@@ -62,10 +62,13 @@ with tempfile.TemporaryDirectory(prefix=".routing-test-", dir=HERE) as tmp:
     errors = wfcommon.validate_graph_errors([bad_provider])
     assert any(e["field"] == "provider" and "model" in e["msg"] for e in errors), errors
 
-    # A literal equal to a configured alias target stays literal; aliases remain accepted as aliases.
+    # A literal equal to a configured alias target bakes its provider like an alias does
+    # (est-2ek.1.46: a bare `-m openai-codex/...` died HTTP 400 on the seat default route);
+    # aliases remain accepted as aliases.
     literal = [{"id": "literal", "type": "agent", "goal": "x", "model": "openai-codex/gpt-6-luna"}]
     alias = [{"id": "alias", "type": "agent", "goal": "x", "model": "luna"}]
-    assert door.resolve_models(literal)[0] is None and literal[0]["model"] == "openai-codex/gpt-6-luna"
+    assert door.resolve_models(literal)[0] is None
+    assert (literal[0]["provider"], literal[0]["model"]) == ("openai-codex", "gpt-6-luna")
     assert door.resolve_models(alias)[0] is None and alias[0]["model"] == "luna"
 
     # Exercise the actual child command builder without launching Hermes or contacting a provider.

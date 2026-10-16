@@ -26,7 +26,7 @@ if HOME.exists():
 RUNS = HOME / "workflows"
 RUNS.mkdir(parents=True)
 atexit.register(shutil.rmtree, HOME, ignore_errors=True)  # cleanup even on mid-test failure
-env = dict(os.environ, HERMES_HOME=str(HOME),
+env = dict(os.environ, HERMES_HOME=str(HOME), WF_RUNS_ROOT=str(RUNS),
            HERMES_WF_HERMES_BIN=str(BUILD / "tests" / "fake"))
 
 def mkrun(run_id, with_graph=True):

@@ -42,6 +42,12 @@ empty = Path(tempfile.mkdtemp(prefix="wf280-empty-"))
 os.environ["WF_RUNS_ROOT"] = str(empty)
 
 door = load("door280", ROOT / "__init__.py")
+# est-2ek.1.762: on a host whose config carries the owner settings.runs_root,
+# that value OUTRANKS WF_RUNS_ROOT (#42 precedence) and this scan would read
+# the production library — the same non-hermetic class #71 pins at the
+# resolver. Neutralise it so both pins answer the scratch root (C4 still
+# checks the resolved root is first; with the pin both resolvers agree).
+import wf_test_isolation as _iso71; _iso71.install(door)
 out = door.act_list({})
 check("C1 empty scan names its roots", out.get("runs") == [] and out.get("roots"),
       json.dumps({k: out.get(k) for k in ("runs", "roots")}))
@@ -54,6 +60,11 @@ check("C4 legacy launch root included when it differs from the resolved root",
 
 # C3 on the SAME empty scan: the dashboard API answers with the same roots.
 dash = load("dash280", ROOT / "dashboard" / "plugin_api.py")
+# The dashboard loads its OWN private wfcommon copy (per-plugin-root module key),
+# so the door's #71 pin above does not reach it: pin its owner-settings reader
+# at the same law — the env pin answers runs_root, everything else unset.
+dash._workflow_common().set_owner_setting_reader(
+    lambda key: (os.environ.get("WF_RUNS_ROOT") or None) if key == "runs_root" else None)
 lst = dash._list_runs()
 check("C3 dashboard empty scan names its roots",
       lst.get("runs") == [] and lst.get("roots") == out.get("roots") and lst.get("roots"),
