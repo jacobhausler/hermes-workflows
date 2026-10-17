@@ -222,6 +222,7 @@ with tempfile.TemporaryDirectory(prefix="params-bwv0h-") as td:
 
         # ---- T6 the triple + zero-change law ----
         r = json.loads(door.handle({"action": "save", "graph": KNOB_ONLY, "name": "knob-probe"}))
+        check("T6 knob row saves clean", "error" not in r, json.dumps(r)[:300])
         r = run_from("knob-probe", None)   # silent launch: tune default fills
         ridk = r.get("run_id")
         rj = json.loads((sandbox / "runs" / ridk / "run.json").read_text()) if ridk else {}
@@ -262,6 +263,66 @@ with tempfile.TemporaryDirectory(prefix="params-bwv0h-") as td:
               json.dumps({"u": unfilled, "l": launch})[:240])
         v = json.loads(door.handle({"action": "validate", "graph": LADDER}))
         check("T7 validate action passes a params graph", v.get("ok") is True, str(v)[:200])
+
+        # ---- T8 (est-7m6wv horde): the seam-hardening laws ----
+        PATCH_UNDECL = {
+            "params": {"verb": {"kind": "tune", "domain": ["triage", "fix"]}},
+            "nodes": [{"id": "a", "type": "agent", "goal": "plain {run.verb}",
+                       "by": {"verb": {"fix": {"goal": "FIX {run.sneaky}"}}}}],
+        }
+        r = json.loads(door.handle({"action": "run", "graph": PATCH_UNDECL,
+                                    "run_context": {"verb": "fix"}}))
+        check("T8a P-04 undeclared ref inside a by-patch refuses at the door",
+              "error" in r and "sneaky" in json.dumps(r) and "TOTAL" in json.dumps(r),
+              json.dumps(r)[:200])
+        ECHO_PIN = {
+            "params": {"note": {"kind": "pin"}},
+            "nodes": [{"id": "a", "type": "agent", "goal": "work"},
+                      {"id": "e", "type": "echo", "after": ["a"], "output": "verdict {run.note}"}],
+        }
+        r = json.loads(door.handle({"action": "run", "graph": ECHO_PIN,
+                                    "run_context": {"note": "hello"}}))
+        check("T8b P-07 pin referenced only in echo output is live: saves and launches",
+              "run_id" in r, json.dumps(r)[:200])
+        if r.get("run_id"):
+            door.handle({"action": "stop", "run_id": r["run_id"]})
+        BADPATCH = {
+            "params": {"v": {"kind": "tune", "domain": ["a", "b"]}},
+            "nodes": [{"id": "a", "type": "agent", "goal": "g {run.v}",
+                       "by": {"v": {"a": {"goal": None}}}},
+                      {"id": "b", "type": "agent", "goal": "h {run.v}",
+                       "by": {"v": {"a": {"type": "gate", "after": "not-a-list"}}}}],
+        }
+        r = json.loads(door.handle({"action": "run", "graph": BADPATCH,
+                                    "run_context": {"v": "a"}}))
+        check("T8c P-01 illegal patch VALUES refuse: the materialized graph is re-validated",
+              r.get("error_type") == "params_contract"
+              and "materialized graph invalid" in json.dumps(r), json.dumps(r)[:220])
+        PRUNE_RESULT = {
+            "params": {"depth": {"kind": "tune", "domain": ["light", "deep"]}},
+            "nodes": [{"id": "intake", "type": "agent", "goal": "i"},
+                      {"id": "deep", "type": "agent", "goal": "d {run.depth}",
+                       "where": {"param": "depth", "in": ["deep"]}}],
+            "result": "deep",
+        }
+        r = json.loads(door.handle({"action": "run", "graph": PRUNE_RESULT,
+                                    "run_context": {"depth": "light"}}))
+        check("T8d P-03 cascade-pruning the result target refuses (no dangling verdict)",
+              r.get("error_type") == "params_contract", json.dumps(r)[:220])
+        r = json.loads(door.handle({"action": "run", "graph": ECHO_PIN,
+                                    "run_context": {"note": "stamp-check"}}))
+        rid_a = r.get("run_id")
+        if rid_a:
+            gj_a = json.loads((sandbox / "runs" / rid_a / "graph.json").read_text())
+            check("T8e P-02 launched graph.json carries NO params block (fully concrete)",
+                  "params" not in gj_a and "where" not in gj_a["nodes"][0],
+                  json.dumps(sorted(gj_a))[:160])
+            am = json.loads(door.handle({"action": "amend", "run_id": rid_a,
+                                         "graph": {**ECHO_PIN, "name": "x"}}))
+            check("T8f P-02 amend REFUSES an author-form params graph",
+                  am.get("error_type") == "params_contract" and "CONCRETE" in am.get("error", ""),
+                  json.dumps(am)[:200])
+            door.handle({"action": "stop", "run_id": rid_a})
 
     finally:
         for k, v in saved_env.items():

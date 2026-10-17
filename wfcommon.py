@@ -2491,16 +2491,29 @@ _RUN_CONTRACT_KEY = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
 _RUN_CONTRACT_REF = re.compile(r"\{run\.([^{}]*)\}")
 
 def _run_contract_refer_keys(graph):
-    """The {run.KEY} names referenced by a graph's OPERATIVE text — the exact fields
-    _bind_run_context renders (goal/context/question/profile + fan-out goal/item goals)."""
+    """The {run.KEY} names referenced by a graph's OPERATIVE text — the exact
+    surface the launcher renders (est-7m6wv P-04/05/06/07): the shared
+    _include_text_fields walker (goal/context/question/profile + fan-out goal
+    and item goals + echo output + gate options[] + wait.until_argv[]) — PLUS
+    defaults.context (baked into every node context at launch), PLUS the string
+    leaves of every `by` patch value (a patch becomes operative text the moment
+    its enum arm is selected — "operative" means under ANY binding, or the
+    total-contract law is a hole an enum value can drive a truck through).
+    Shared on purpose: the s12 envelope check, the #126 unrefused-required
+    rule, the params dead/undeclared laws and the instantiate surface all read
+    THIS one enumeration — one renderer, one enumeration, one law."""
     out = set()
     nodes = graph.get("nodes")
     if not isinstance(nodes, list):
         return out
+    dfs = graph.get("defaults")
+    if isinstance(dfs, dict) and isinstance(dfs.get("context"), str):
+        for m in _RUN_CONTRACT_REF.finditer(dfs["context"]):
+            out.add(m.group(1))
     for n in nodes:
         if not isinstance(n, dict):
             continue
-        texts = [n.get(f) for f in ("goal", "context", "question", "profile")]
+        texts = _include_texts(n)
         fo = n.get("fanout")
         if isinstance(fo, dict):
             texts.append(fo.get("goal"))
@@ -2510,9 +2523,9 @@ def _run_contract_refer_keys(graph):
                 for m in _RUN_CONTRACT_REF.finditer(t):
                     out.add(m.group(1))
     # est-bwv0h: where/by slots are refs too — a tune knob that drives presence or
-    # patching is consumed AT THE DOOR, so a gate-driven key is never dead. Shared on
-    # purpose: the s12 envelope check, the #126 unrefused-required rule, and the
-    # params dead-slot law all read this one enumeration.
+    # patching is consumed AT THE DOOR, so a gate-driven key is never dead.
+    # est-7m6wv P-04: and every string leaf inside a by-patch is operative text
+    # under the arm that selects it — scanned here, refused at save if undeclared.
     for n in nodes:
         if not isinstance(n, dict):
             continue
@@ -2522,6 +2535,20 @@ def _run_contract_refer_keys(graph):
         b = n.get("by")
         if isinstance(b, dict):
             out.update(k for k in b if isinstance(k, str))
+            for slot_map in b.values():
+                if not isinstance(slot_map, dict):
+                    continue
+                for patch_ in slot_map.values():
+                    stack = [patch_]
+                    while stack:
+                        cur = stack.pop()
+                        if isinstance(cur, str):
+                            for m in _RUN_CONTRACT_REF.finditer(cur):
+                                out.add(m.group(1))
+                        elif isinstance(cur, dict):
+                            stack.extend(cur.values())
+                        elif isinstance(cur, list):
+                            stack.extend(cur)
     return out
 
 PARAM_KEYS = {"kind", "desc", "domain", "default"}

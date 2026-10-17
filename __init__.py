@@ -2809,7 +2809,14 @@ def _params_resolve(graph, binding):
             V(slot, "required pin is unbound — pin slots carry run content and are never defaulted")
     if violations:
         return None, None, violations
-    return dict(graph, nodes=kept), eff, []
+    concrete = dict(graph, nodes=kept)
+    # est-7m6wv P-02 (horde): the WHOLE contract is popped, not just the node
+    # seams — graph.json is the fully concrete graph. The launch contract lives
+    # in run.json meta.binding (the stamp is the law); a committed params block
+    # could only ever go stale beside that stamp, and a stale declaration is
+    # exactly the disease class of this estate.
+    concrete.pop("params", None)
+    return concrete, eff, []
 
 
 def _profile_error(graph):
@@ -3168,6 +3175,19 @@ def act_run(args):
                     "errors": _viol, "field": "params",
                     "error_type": "params_contract", "violations": _viol}
         graph = _mat
+        # est-7m6wv P-01/P-03 (horde): the seam may patch node VALUES the grammar
+        # never enumerated (patch keys are legal node keys; values were unchecked)
+        # and cascade-prune can orphan the `result` target — the committed
+        # artifact must satisfy every door law. Re-validate the CONCRETE graph
+        # before any write (_params_resolve already popped the whole contract —
+        # what we validate is exactly what ships). "What you read is what runs"
+        # is now ENFORCED, not merely promised.
+        _bad = _validation_error(graph)
+        if _bad:
+            return {"error": "params contract: materialized graph invalid — "
+                             + str(_bad.get("error")),
+                    "errors": _bad.get("errors") or [_bad.get("error")],
+                    "field": "params", "error_type": "params_contract"}
         args = dict(args, run_context=_params_eff)
         # The triple is meaningful only for the graph as SUBMITTED (pre-
         # materialization): row bytes + binding reproduce everything else.
@@ -3468,14 +3488,17 @@ def _create_run(args, graph, lib_name, models, routes, _liveness_notes, lane_pat
     # written: a plain run keeps the exact golden key set.
     if "max_seats" in graph:
         meta["max_seats"] = graph["max_seats"]
-    if graph.get("params") is not None:
+    if binding is not None:
         # est-bwv0h: THE RUN RECORD IS THE ARCHIVE. The triple (row/graph bytes,
         # effective binding — tune defaults included, engine version) is the whole
         # reproducibility contract: re-materialize the concrete graph on demand for
         # replay and diff; nothing else needs stamping, and a plain (paramless) run
         # never grows this key — the golden bytes of every legacy run stand.
-        if binding is not None:
-            meta["binding"] = binding
+        # est-7m6wv P-02 corollary: the OUTER probe used to re-read
+        # graph["params"] — harmless while materialization kept the block, a
+        # silent stamp-dropper once the committed graph went fully concrete.
+        # The built stamp is the only authority: if act_run made one, it stamps.
+        meta["binding"] = binding
     # Composite runs record which shelf bytes they expanded from (author-form
     # provenance) and any non-fatal resolver notes (scratch collisions). Empty =
     # key omitted: a plain run keeps the exact pre-include run.json key set.
@@ -4295,6 +4318,16 @@ def act_amend(args):
             return {"error": f"patch: {e}"}
     if new is None:
         return {"error": "amend needs full replacement graph, graph_path, or patch"}
+    if new.get("params") is not None:
+        # est-7m6wv P-02 (horde): params seams are LAUNCH-TIME — this run's binding
+        # stamp already fixed them, and re-shelving seams into a committed graph
+        # would leave graph.json's "concrete graph" claim and meta.binding lying
+        # to each other. Materialize (launch reproduces it deterministically from
+        # row bytes + binding) and amend the concrete graph.
+        return {"error": "amend takes the CONCRETE graph: a params seam is a launch-time "
+                         "contract and this run's binding stamp fixed it at launch — "
+                         "send the materialized graph (or launch a new run)",
+                "field": "params", "error_type": "params_contract"}
     # #19 (est-19k9w): opt-in compare-and-set on the graph revision, checked
     # EARLY so a stale caller is refused before the expensive gates and before
     # anything is written (a dry_run reports staleness too). Tokenless = today's
