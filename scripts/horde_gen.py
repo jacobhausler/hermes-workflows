@@ -59,7 +59,9 @@ RECEIPT_SCHEMA = {
     "type": "object",
     "properties": {
         "bead_id": {"type": "string"},
-        "verdict": {"type": "string", "enum": VERDICTS},
+        "verdict": {"type": "string", "enum": VERDICTS,
+                    "description": "DEFECT-3 closed enum — out-of-vocab is RED at the reducer: "
+                                   + "|".join(VERDICTS)},
         "evidence": {"type": "string"},
         "writes": {"type": "array", "items": {"type": "object", "properties": {
             "kind": {"type": "string", "enum": ["comment", "update", "close", "claim", "reclaim"]},
@@ -77,7 +79,8 @@ LAW = (
     "Closes: only on a premise probe THIS worker ran (gh pr view / df / file / service), and close_reason MUST quote the probe; live premise => handback-premise-live. "
     "DEFECT-4: BEFORE any comment append run `horde_gen.py guard --bead <ID> --line '<text>'` (exit 1 = exact-line dup already present => skip append, keep receipt write-free). "
     "DEFECT-2: receipt MUST list every write in writes[]; a missing/extra write is a false receipt. "
-    "DEFECT-3: verdict only from the closed enum. Net-zero-birth: spawn zero beads. Shield: est-2ek.* prefix and the orphans file are untouchable (refused-shield); owner-assigned => refused-owner-gate."
+    f"DEFECT-3: verdict only from the closed enum ({'|'.join(VERDICTS)}); out-of-vocab is RED at the reducer. "
+    "Net-zero-birth: spawn zero beads. Shield: est-2ek.* prefix and the orphans file are untouchable (refused-shield); owner-assigned => refused-owner-gate."
 )
 
 def bd(*args, timeout=60):
@@ -249,6 +252,13 @@ def reduce_run(args):
                     reds.append((dp, "DEFECT-3 vocab", v))
                 if not isinstance(w, list):
                     reds.append((dp, "DEFECT-2 writes[] missing", str(w)[:40])); continue
+                # Receipts are self-reported and lie (the W19 HA.55 lesson): a
+                # malformed writes entry is itself a false receipt — RED it,
+                # never crash the pass and never let junk count as declared=0.
+                malformed = [x for x in w if not (isinstance(x, dict) and isinstance(x.get("kind"), str))]
+                if malformed:
+                    reds.append((dp, f"DEFECT-2 malformed writes[] entry ({len(malformed)}; not {{kind,target,ts}}-shaped)",
+                                 json.dumps(malformed[0], default=str)[:80]))
                 bid = r.get("bead_id")
                 if bid:
                     cj = comments_json(bid)
@@ -259,7 +269,7 @@ def reduce_run(args):
                         fresh = sum(1 for t in texts
                                     for d in re.findall(r"20\d\d-\d\d-\d\d[T ]\d\d:\d\d", t)
                                     if datetime.datetime.fromisoformat(d.replace(" ", "T")[:16] + "+00:00") >= start)
-                        declared = sum(1 for x in w if x["kind"] == "comment")
+                        declared = sum(1 for x in w if isinstance(x, dict) and x.get("kind") == "comment")
                         # W22 fix: NO verdict-family exemption — any declared-vs-store
                         # divergence is the lie, in either direction. Verdict words are
                         # self-reported; the store delta is the ground truth.
