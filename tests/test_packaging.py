@@ -93,7 +93,7 @@ def main() -> None:
                       # part of the shipped surface — desktop contributors read it from
                       # the package. Mandatory new-file pack-surface gate: an unshipped
                       # doc is invisible to every install.
-                      "docs/card-toolresult-hook.md", "SHA256SUMS")))
+                      "docs/card-toolresult-hook.md", "docs/orphan-held.md", "orphan_watch.py", "SHA256SUMS")))
             check("fake child retains executable mode in ZIP",
                   (archive.getinfo(root + "tests/fake").external_attr >> 16) & 0o111 == 0o111)
             # est-4vnq finding 4 (pack-list omission, made explicit — pack_choice=INCLUDED):
@@ -110,6 +110,10 @@ def main() -> None:
             check("pack-list contract: ZIP scripts/ set equals the exact declared packed set",
                   packed_scripts == {"scripts/pack.py",
                                       "scripts/pr_tag_audit.py", "scripts/suite.py",
+                                      # est-zee7e: the pin-delta re-pin gate ships
+                                      # because its shipped test exec-loads it from
+                                      # the package root (est-4vnq finding-4 shape).
+                                      "scripts/pin_delta_check.py",
                                       # est-5p7x: the diagram-law generators — shipped
                                       # because tests/test_diagram_law.py executes both
                                       # from the package root (same rationale as the
@@ -165,6 +169,10 @@ def main() -> None:
                           "examples/release/release-lifecycle.workflow.json", "examples/release/issue-to-pr.workflow.json",
                           "examples/release/submit-pr.workflow.json",
                           "examples/basics/exchange-run.workflow.json"})
+            # P1 (PR #432): wf.py loads hooks_outbound.py by FILE PATH, so the import-closure
+            # probe below cannot see it — pin the ZIP membership directly.
+            check("hooks_outbound.py ships in the ZIP (wf.py spec-loads it; the shipped bridge test needs it)",
+                  root + "hooks_outbound.py" in members)
             checksum_text = archive.read(root + "SHA256SUMS").decode("utf-8")
             rows = [line.split("  ", 1) for line in checksum_text.splitlines()]
             check("SHA256SUMS verifies every pinned source entry",

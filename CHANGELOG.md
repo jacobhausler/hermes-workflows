@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **Wake-router class coverage + catch-all (est-jbcrw, dead-landing census
+  verdict 4):** `notify()` can no longer return silently for an event outside
+  `_WAKE_TEMPLATES`. A closed registry `_WAKE_EVENTS` names every event a call
+  site may pass; an unmapped class wakes on a fixed runner-authored catch-all
+  body (AUTHORITY LAW r5 unchanged — the text table is still the only author,
+  the key rides only as the Idempotency-Key), the probe row is typed
+  `catchall`, and the runner prints `WORKFLOW_WAKE_UNMAPPED_EVENT` on stdout so
+  a class gap is loud in the field. The old fail-silent rule let scripted wakes
+  for unmapped classes rot (5 dead rows attributed in the census). Pinned by
+  `tests/test_wake_catchall_jbcrw.py`.
+
 - **Operator scar-laws port (docs-only):** fifteen generalizable lessons from a
   retiring usage skill fold into the docs they belong to, one hardened line
   each — twelve authoring and recovery laws in `references/operator-playbook.md`
@@ -13,6 +24,40 @@
   `references/operations.md` (frozen launch meta, ephemeral run dirs), and the
   launch-agnostic reusable-graph law in `references/grammar.md`. No engine
   change.
+
+Desktop:
+- feat(desktop): est-z717 — the live-run TRAY is an opt-in surface: it
+  renders ONLY when `plugins.entries.hermes-workflows.settings.tray` is
+  literal `true` (GET /settings, `wfcommon.owner_setting` — fail-closed
+  default OFF while the native tray SDK area hermes-agent#133724 is
+  unlanded; when it lands, default-on rides that mount). The PillRail stays
+  the always-on surface, untouched by the gate. Door side: `_owner_stamp()`
+  honors the estate-shape law — an estate/dispatcher launcher sets
+  `WF_OWNER_SESSION=''` to stamp a NULL owner (pane-only, blank-owner honest
+  absent — a lane never impersonates the dispatcher's chat); a non-empty
+  override stamps that session with ui/platform null; unset keeps interactive
+  chats byte-identical. Zero-directive capture pinned end-to-end: a door
+  run-create under `HERMES_SESSION_ID` joins that chat's rail with NO
+  `::workflow` output. Tests: `tests/test_settings_route_z717.py`,
+  `tests/test_owner_session_override_z717.py`,
+  `tests/test_z717_zero_directive_capture.mjs`, gate pins in
+  `test_run_tray`/`test_session_tray`.
+
+- feat(desktop): session workflow tray above the composer (#230) — the
+  running-only accumulator stacks beside the pill rail on the
+  feature-detected composer mount (tray ?? underside ?? top). Collapsed
+  default is ONE slim row `[chevron] N running workflows` (pictured density,
+  inline styles over the CSS-var tone table, in-memory `$trayOpen` atom);
+  expand-in-place renders one THICK row per live run (name, status dot,
+  nodes done/total + mini progress bar, current node, gate-question snippet
+  while held, wall-clock elapsed); a row click accordion-opens the SHARED
+  MiniGraph for THAT run and `open ↗` escalates to the pane. Terminal runs
+  leave the tray at once — no ack ledger, no 60 s recap. The pill rail stays
+  mounted with `suppressGates` (exactly ONE GateActions per held run). When
+  neither focused-chat atom answers, the tray derives its sid from the first
+  live run's own owner stamp (honest absence preserved). Mirror
+  `desktop/src/components/runtray.mjs` grew real bodies; the parity test is
+  the leash. Spec: `tests/test_session_tray.mjs` (red-on-base, green-on-head).
 
 ## 1.3.8 — 2026-10-14
 

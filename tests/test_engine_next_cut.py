@@ -53,11 +53,18 @@ class EngineNextCut(unittest.TestCase):
     def states(self, run):
         return {k: v["status"] for k, v in wfcommon.run_state(run)["nodes"].items()}
 
-    def test_agent_when_is_rejected_not_silently_ignored(self):
+    def test_agent_when_is_validated_not_silently_ignored(self):
+        # est-l2ey (issue #132): agents take `when` — the gate-as-branch rejection is
+        # retired. The grammar still owns the key: a self-referencing head is refused.
         errors = wfcommon.validate_graph_errors([
             {"id": "a", "type": "agent", "goal": "JSON:{}", "when": "out.a.ok"}])
         self.assertEqual([e["field"] for e in errors], ["when"])
-        self.assertIn("only gate", errors[0]["msg"])
+        self.assertIn("ancestry", errors[0]["msg"])
+        # a VALID ancestor-head predicate now validates clean
+        self.assertEqual(wfcommon.validate_graph_errors([
+            {"id": "a", "type": "agent", "goal": "JSON:{}"},
+            {"id": "b", "type": "agent", "after": ["a"], "goal": "JSON:{}",
+             "when": "out.a.ok == True", "on_skip": "prune"}]), [])
 
     def test_submit_rejects_ignored_when_before_run_directory_creation(self):
         import importlib.util
@@ -71,8 +78,10 @@ class EngineNextCut(unittest.TestCase):
         os.environ["WF_RUNS_ROOT"] = str(Path(os.environ["HERMES_HOME"]) / "workflows")  # est-2ek.1.762 pin: HERMES_HOME alone is not a sandbox
         os.environ["WF_RUNS_ROOT"] = str(self.home / "workflows")  # #71 shelf pin
         try:
+            # est-l2ey (issue #132): the door law under the new grammar — a MALFORMED
+            # agent `when` is refused before write/spawn (a well-formed one is legal).
             res = door.act_run({"graph": {"name": "reject", "nodes": [
-                {"id": "a", "type": "agent", "goal": "JSON:{}", "when": "true"}]}})
+                {"id": "a", "type": "agent", "goal": "JSON:{}", "when": "garbage ="}]}})
         finally:
             if original is None:
                 os.environ.pop("HERMES_HOME", None)
@@ -83,7 +92,10 @@ class EngineNextCut(unittest.TestCase):
                 os.environ.pop("WF_RUNS_ROOT", None)
             else:
                 os.environ["WF_RUNS_ROOT"] = original_runs
-        self.assertIn("only gate nodes take when", res["error"])
+        # est-l2ey (issue #132): a well-formed agent `when` is LEGAL now — the door
+        # law this test pins is that a refusal at the door creates NO run dir; the
+        # malformed expr ("garbage =") keeps the test on the refusal path.
+        self.assertIn("when", res["error"])
         self.assertFalse((self.home / "workflows").exists())
 
     def test_lowercase_bool_literals_are_bounded_and_functional(self):

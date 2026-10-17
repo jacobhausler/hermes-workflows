@@ -144,7 +144,8 @@ check("a2d7f664 silent straggler reason names 'no output on disk at quorum momen
       "no output on disk at quorum moment" in (silent.get("error") or ""),
       json.dumps(silent)[:260])
 check("a2d7f664 silent straggler snapshot carries log_bytes=0/work_files=0",
-      silent.get("cancel_evidence") == {"log_bytes": 0, "work_files": 0},
+      silent.get("cancel_evidence") == {"log_bytes": 0, "work_files": 0,
+                                        "agent_visible_output": False},
       json.dumps(silent.get("cancel_evidence")))
 check("a2d7f664 flushed straggler reason names 'had output at quorum moment' with measurements",
       "had output at quorum moment" in (flushed.get("error") or "")

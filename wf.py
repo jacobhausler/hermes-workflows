@@ -332,7 +332,10 @@ def _stamp_served(meta, result, node=None):
         return result
     forbidden = set(policy.get("forbidden_models") or []) | set(seat_floor)
     served = result["served_model"]
-    if metric and served is not None and (served in forbidden or served.rsplit("/", 1)[-1] in forbidden):
+    # Policy follows the billed provider, never the node's requested pin.
+    provider = result["served_billing_provider"]
+    if metric and served is not None and (served in forbidden or served.rsplit("/", 1)[-1] in forbidden
+            or any(wfcommon.route_ids_equal(served, banned, provider) for banned in forbidden)):
         result.update(status="failed", error=f"forbidden served model: {served}",
                       error_class="forbidden_model")
         return result
@@ -472,12 +475,32 @@ _WAKE_TEMPLATES = {
                 "can end with its report; no dispatch, publication or curation is required.",
 }
 
+# CLOSED registry of lifecycle events a call site may pass to notify()
+# (est-jbcrw wake-router class-coverage law, from the dead-landing census
+# run 20261016-172339-iron-gravity). Drift — a call site waking an event not
+# listed here — is a CLASS GAP: it still wakes on the fixed catch-all body
+# below and prints WORKFLOW_WAKE_UNMAPPED_EVENT; it never goes silent again.
+_WAKE_EVENTS = frozenset({"gate.held", "run.failed", "run.done"})
+
+# Fixed catch-all body — runner-authored like every template: the text table is
+# the only author, so AUTHORITY LAW r5 holds unchanged. The old fail-silent
+# rule for unmapped events let a scripted wake for an unmapped class cost
+# nobody anything and the linked row rotted (wake-scripted-class-that-skipped,
+# 5 dead rows in the census); a fixed alarm beats ad-hoc silence.
+_WAKE_CATCHALL_BODY = (
+    "The workflow recorded a lifecycle event outside the runner's emitted-event "
+    "registry — a wake-router class gap. Status contains the run state; inspect it "
+    "once. This notification is a drift alarm and does not authorize repair, "
+    "dispatch or new work.")
+
 def _wake_owner_text(run_id, event):
-    """The runner-authored owner turn, or None when the event has no template (an
-    unmapped event gets NO wake — fail-silent beats an ad-hoc owner sentence)."""
+    """The runner-authored owner turn. Known events use their template; an
+    event with no template uses the fixed catch-all body (est-jbcrw: never
+    None — silence on an unmapped class was the gravity hole the dead-landing
+    census measured; caller/graph prose is still impossible by construction)."""
     body = _WAKE_TEMPLATES.get(event)
     if body is None:
-        return None
+        body = _WAKE_CATCHALL_BODY
     return (f"[runner-authored/v1] run_id={json.dumps(str(run_id))} "
             f"event={json.dumps(event)} \u2014 {body}")
 
@@ -855,16 +878,63 @@ def _wake_identity(run, event, key, graph=None):
         gfp = graph_fingerprint(jload(run / "graph.json", {}) or {})
     except Exception:
         pass
-    if gfp is None:
-        return None
+    if gfp is None and event in _WAKE_EVENTS:
+        return None                    # known-event facts unreadable: silent, never a duplicate
     if event == "run.done":
         return f"{event}|done:{gfp}|r{rev}"
     if event == "run.failed":
         failed = _wake_resolved_failed(run, graph)
-        if failed is None:
+        if failed is None or gfp is None:
             return None
         return f"{event}|failed:{','.join(failed)}@{gfp}|r{rev}"
-    return None
+    if event in _WAKE_EVENTS:
+        return None                    # keyed transitions returned above; unkeyed = silent law
+    # Unmapped class (est-jbcrw catch-all): deterministic off the durable rev
+    # alone — no graph facts needed and never None, so a class gap cannot go
+    # silent and retries of one decision still dedupe.
+    return f"{event}|unmapped:r{rev}"
+
+# ---------- P1: the outbound bridge (default OFF; hooks_outbound.py) ----------
+# ONE seam drives both halves of a lifecycle transition: notify() owns the
+# owner-session wake; the bridge mirrors the SAME instance to the operator's
+# configured endpoint when — and only when — the owner setting enables it.
+# Private spec-load under a prefixed module name (the wfcommon/card_enforcement
+# hygiene: no sys.path mutation, no generic name joining sys.modules). A missing
+# or broken hooks_outbound.py means NO bridge: the run loop is byte-identical.
+_OUTBOUND = None
+_OUTBOUND_TRIED = False
+
+def _outbound_bridge():
+    """Load + bind hooks_outbound once, lazily; None = no bridge (feature off by
+    absence or by a broken file — both the same byte-identical degradation)."""
+    global _OUTBOUND, _OUTBOUND_TRIED
+    if _OUTBOUND_TRIED:
+        return _OUTBOUND
+    _OUTBOUND_TRIED = True
+    try:
+        _p = Path(__file__).resolve().parent / "hooks_outbound.py"
+        if not _p.is_file():
+            return None
+        _spec = importlib.util.spec_from_file_location("_hermes_workflows_hooks_outbound", _p)
+        if _spec is None or _spec.loader is None:
+            return None
+        _mod = importlib.util.module_from_spec(_spec)
+        _spec.loader.exec_module(_mod)
+        _mod.bind(wfcommon, _wake_identity, log)   # ONE discriminant fn, the runner's own log voice
+        _OUTBOUND = _mod
+    except Exception:
+        _OUTBOUND = None
+    return _OUTBOUND
+
+def _wake_tid(run_name, event, disc):
+    """The wake/outbound instance id — ONE recipe (sha256(run|event|discriminant)
+    [:32], the B3 identity). With the bridge present the recipe lives in
+    hooks_outbound and is called there; without it the identical formula runs
+    inline, so wake identity never moves whether or not the feature is shipped."""
+    _ob = _outbound_bridge()
+    if _ob is not None:
+        return _ob.instance_id(run_name, event, disc)
+    return hashlib.sha256(f"{run_name}\0{event}\0{disc}".encode()).hexdigest()[:32]
 
 def notify(run, event, key=None, graph=None):
     """Push ONE lifecycle transition instance to the owner session stamp. Owner-null
@@ -881,8 +951,9 @@ def notify(run, event, key=None, graph=None):
     DELIVERED instance writes nothing. AUTHORITY LAW (r5): this function takes no
     text parameter at all. The owner-facing content is generated here from
     _WAKE_TEMPLATES via _wake_owner_text(run.name, event) — an event outside the
-    finite map gets NO wake (silent return), so no call site can route ad-hoc or
-    graph-authored prose into the owner's instruction channel. The wake.jsonl row
+    finite map wakes ONLY on the fixed catch-all body (est-jbcrw class-coverage
+    law: never silent), so no call site can route ad-hoc or graph-authored
+    prose into the owner's instruction channel. The wake.jsonl row
     and the wire body carry that same safe runner-authored string, bearer-redacted
     as a second net; the full failure detail stays in events.jsonl,
     runner_exit.json and the probe's typed error fields. Delivery failure is loud
@@ -894,6 +965,12 @@ def notify(run, event, key=None, graph=None):
     try:
         if not run.is_dir():
             return
+        # P1: the operator mirror fires at notify()'s OWN point and fail-opens inside
+        # mirror(). Owner-null runs still mirror — the endpoint is the operator's, not
+        # the session's, and events.jsonl carries the transition either way.
+        _ob = _outbound_bridge()
+        if _ob is not None:
+            _ob.mirror(run, event, key, graph)
         meta = jload(run / "run.json", {}) or {}
         owner = meta.get("owner")
         # Defensive on shape (R10): the wake needs the door's dict stamp
@@ -907,12 +984,18 @@ def notify(run, event, key=None, graph=None):
         disc = _wake_identity(run, event, key, graph)
         if disc is None:
             return                       # unresolvable identity: silent, never a duplicate
+        if event not in _WAKE_EVENTS:
+            # CLASS GAP (est-jbcrw): a call site woke an event outside the
+            # registry — wake on the fixed catch-all body anyway and shout on
+            # the field-loud stdout channel (same idiom as
+            # WORKFLOW_WAKE_RECORD_FAILED). Silence here was the gravity hole.
+            print(f"WORKFLOW_WAKE_UNMAPPED_EVENT {run.name} {_wake_safe(event)}")
         text = _wake_owner_text(run.name, event)   # AUTHORITY LAW: runner-generated only
-        if text is None:
-            return                       # event outside the finite map: NO wake, fail-silent
+        # never None since est-jbcrw: unmapped classes take the fixed catch-all
+        # body — the template table remains the ONLY author of owner text.
         text = _wake_safe(text)          # second net: the fixed templates carry no secret,
         # but the run name is caller-supplied and every persisted field runs the redactor.
-        tid = hashlib.sha256(f"{run.name}\0{event}\0{disc}".encode()).hexdigest()[:32]
+        tid = _wake_tid(run.name, event, disc)
         _rows, delivered = _wake_ledger_read(run)
         if tid in delivered:
             return                       # delivered instance: zero rows, zero POSTs
@@ -922,6 +1005,8 @@ def notify(run, event, key=None, graph=None):
             proto = "unstamped"          # run dir made outside the door (recorded as such)
         rec = {"ts": now(), "event": event, "run_id": run.name, "owner": owner,
                "id": tid, "wake_protocol": proto, "text": text}
+        if event not in _WAKE_TEMPLATES:
+            rec["catchall"] = True      # probe row is typed: template vs catch-all distinguishable
         ep = _wake_endpoint()
         if ep is None:
             rec["delivered"] = False
@@ -1603,6 +1688,12 @@ def spawn_log_path(run, node, index, spawn_no):
     d = run / "logs"
     d.mkdir(parents=True, exist_ok=True)
     return d / _spawn_log_name(node, index, spawn_no)
+
+def _open_spawn_log(lp):
+    """est-hls8y: the ONE place a spawn log's open mode is decided — append, so a
+    re-driven attempt's log survives verbatim and the next spawn's capture is
+    appended after it, never truncating the attempt it resumes from."""
+    return open(lp, "a", encoding="utf-8", errors="replace")
 
 def spawn_prompt_path(run, node, index, spawn_no):
     """A1: the prompt AS SENT is a durable run-dir artifact, named by the same
@@ -2367,7 +2458,14 @@ def _filter_child_toolsets(run, meta, node):
     est-2ek.1.166 toolsets slice (spool c258f0730346b426): a hostile shape
     (dict/int/nested element) is refused at the DOOR and at graph load, but
     this seam still fails CLOSED to None on any non-List[str]/comma-string —
-    a spawn-time AttributeError/TypeError is never the author's experience."""
+    a spawn-time AttributeError/TypeError is never the author's experience.
+    issue #427 amends the contract's tail: a DECLARED-EMPTY selection (`[]` /
+    empty comma-string) is REFUSED at graph load by validate_graph_errors —
+    -t cannot express zero toolsets and omission BROADENS, so silently
+    returning None there contradicted the opening sentence. None here still
+    means no selection to pass: undeclared, hostile shape, or an empty
+    selection persisted before the #427 gate (warned via node.clamped, never
+    silent)."""
     ts = node.get("toolsets")
     if ts is None:
         return None
@@ -2377,6 +2475,21 @@ def _filter_child_toolsets(run, meta, node):
         return None                                  # hostile shape: fail closed
     names = [s.strip() for s in (ts if isinstance(ts, list) else str(ts).split(",")) if str(s).strip()]
     if not names:
+        # issue #427: DECLARED-but-empty (`[]` / empty/whitespace/comma-only
+        # string) is a real minimisation that -t cannot express: an empty flag
+        # value collapses in the core to "use config defaults" and an OMITTED
+        # flag broadens — both spellings fail the author's ask OPEN. The door
+        # (wfcommon.validate_graph_errors) now refuses this shape at graph
+        # load, so it reaches here only via a graph persisted before the gate
+        # (old-run resume): record one node.clamped warning — the broadening
+        # becomes visible in the event log instead of silent — then fail
+        # closed to None like every other un-honorable shape.
+        if run and ts is not None:
+            _clamp_warn(run, meta, node, "toolsets", repr(ts),
+                        "(omitted — empty selection; refused at graph load "
+                        "since #427, this graph predates the gate; the child "
+                        "BROADENS to the seat's default toolsets)",
+                        _lane_label(node), [])
         return None
     if any(n.lower() in ("all", "*") for n in names):
         return names                                   # the child's own all-semantics
@@ -2600,18 +2713,15 @@ def _harvest_death(out, schema):
             "harvest": {"declared_status": declared if isinstance(declared, str) and declared else None}}
 
 def _cancel_evidence(run, nid, index, lp):
-    """a2d7f664: honest evidence for a quorum-straggler cancel. Snapshot of the
-    child's output state AT THE CANCEL INSTANT — spawn-log bytes (the same
-    _child_spoke primitive; bytes, not a bool, so the reason carries the
-    measurement) plus the file count in the child's durable work dir.
-    Returns (suffix, snapshot dict): suffix ' — no output on disk at quorum
-    moment' when the child had NOTHING (empty spawn log, empty work dir), else
-    ' — had output at quorum moment (log N bytes, workdir M files)'. A vanished
-    log/work dir reads as 0 bytes / 0 files (OSError is honest absence, never a
-    fabricated size)."""
+    """Snapshot after a quorum kill. Byte/file counts are raw disk evidence,
+    never proof of agent-visible output (startup banners/scaffolding count too).
+    A parsable fenced answer confirms output; a nonempty unstructured capture
+    is explicitly unknown, not absent and not confirmed agent output."""
     n_bytes = 0
+    capture = ""
     try:
         n_bytes = lp.stat().st_size
+        capture = lp.read_text(errors="replace")
     except (OSError, AttributeError):
         pass
     n_files = 0
@@ -2619,10 +2729,12 @@ def _cancel_evidence(run, nid, index, lp):
         n_files = sum(1 for f in child_work_dir(run, {"id": nid}, index).rglob("*") if f.is_file())
     except OSError:
         pass
+    visible = True if _harvest_death(capture, None) else (None if n_bytes else False)
+    snap = {"log_bytes": n_bytes, "work_files": n_files, "agent_visible_output": visible}
     if n_bytes == 0 and n_files == 0:
-        return " — no output on disk at quorum moment", {"log_bytes": 0, "work_files": 0}
-    return (f" — had output at quorum moment (log {n_bytes} bytes, workdir {n_files} files)"), \
-           {"log_bytes": n_bytes, "work_files": n_files}
+        return " — no output on disk at quorum moment", snap
+    state = "had output" if visible else "no confirmed agent-visible output"
+    return (f" — {state} at quorum moment (log {n_bytes} bytes, workdir {n_files} files)"), snap
 
 def _harvest_cancelled(out, schema, run, nid, index):
     """a2d7f664 harvest-at-cancel: the cancelled class was deliberately excluded
@@ -2736,8 +2848,11 @@ def _bank_the_corpse(run, node, index, spawn, out):
     newest), then log ONE node.banked line. Returns the corpus path for the
     death record's `banked` pointer. Honest-empty: ANY failure logs node.banked
     with error= and returns None — it never raises, so it can never move the
-    timeout verdict. Deterministic: the latest wall-kill's corpus replaces the
-    prior one (built in a tmp dir, swapped in by rename)."""
+    timeout verdict. Deterministic: the canonical pointer nodes/<_node_file>.corpus
+    always carries the LATEST wall-kill's corpus (built in a tmp dir, swapped in
+    by rename). est-hls8y: every wall-kill ALSO leaves its own verbatim attempt
+    slot nodes/<_node_file>.corpus.a<spawn>/ — a resumed run finds the bank of the
+    attempt it timed out on byte-intact beside the newer one, never zeroed."""
     corpus = run / "nodes" / f"{_node_file(node, index)}.corpus"
     tmp = corpus.with_name(f"{corpus.name}.{os.getpid()}.tmp")
     try:
@@ -2785,6 +2900,15 @@ def _bank_the_corpse(run, node, index, spawn, out):
             {"node": node["id"], "index": index, "spawn": spawn, "work_dir": str(wd),
              "last_written": rows[0]["path"] if rows else None, "files": rows,
              "bytes": nbytes, "budget": CORPUS_MAX_BYTES, "truncated": truncated}, indent=1))
+        # est-hls8y: bank the verbatim per-attempt slot FIRST (a same-spawn
+        # re-bank replaces only its OWN slot; other attempts' slots are never
+        # touched), then swap the canonical latest pointer as #131 always did.
+        slot = corpus.with_name(f"{corpus.name}.a{spawn if spawn is not None else 'na'}")
+        if slot.is_dir() and not slot.is_symlink():
+            shutil.rmtree(slot)
+        elif slot.exists() or slot.is_symlink():
+            slot.unlink()
+        shutil.copytree(tmp, slot)
         if corpus.is_dir() and not corpus.is_symlink():
             shutil.rmtree(corpus)
         os.rename(tmp, corpus)
@@ -3149,6 +3273,73 @@ def _max_seats(meta):
                           if isinstance(meta.get("max_seats"), int)
                           and not isinstance(meta.get("max_seats"), bool) else None,
                           dotenv_reader=_seat_cap_from_env_files)
+
+def _seat_pool_cap(seats, seed=None, ceiling=None):
+    """est-mg5o2: the POOL-RECORDED global seat cap — one truth per seats dir.
+
+    The per-process resolution (_max_seats: run.json / env / .env / config /
+    default; _seat_pool_seed: the same minus run.json) only SEEDS the pool: the first admission records its cap in <seats>/.cap
+    and every admission after it — including nested child runners whose
+    inherited env carries a stale, missing or default cap — arbitrates against
+    the RECORDED value, not the inheriting process's environment. Measured
+    defect (est-mg5o2, 2026-10-11): eight live runners under a fleet cap of 12
+    held the estate pool at 6/12 and the fleet near ONE concurrent request
+    because each spawn re-resolved the cap against its own inherited env.
+
+    seed=None => READ-ONLY: the recorded cap, or None when the pool has none
+    yet (never writes — the seat.wait event / seat_wait error use this).
+    A positive seed records once — first writer wins, cross-process: writers
+    are serialized by the <seats>/.lock flock _seat_acquire holds when it
+    calls this, and the file is replaced atomically. A corrupt/unparsable
+    file is re-seeded, never trusted, never fatal; an unwritable pool falls
+    back to arbitrating the caller's own seed (honest degradation).
+    ceiling (run.json meta max_seats — a per-RUN declaration, not env) acts as
+    a CEILING under the pool cap: the run may hold fewer seats than the pool
+    allows, never more. WORKFLOW_MAX_SEATS=0 disables the semaphore LOCALLY
+    and never touches pool state (_seat_acquire returns before this runs).
+    Operators change a live pool's cap by removing <seats>/.cap while idle."""
+    f = Path(seats) / ".cap"
+    cap_v = None
+    try:
+        v = int(f.read_text(encoding="utf-8").strip())
+        if v > 0:
+            cap_v = v
+    except (OSError, ValueError):
+        cap_v = None                       # absent/corrupt: re-seedable, not fatal
+    if cap_v is None and isinstance(seed, int) and 0 < seed:
+        try:
+            tmp = f.with_name(f".cap.{os.getpid()}.{uuid.uuid4().hex[:8]}.tmp")
+            tmp.write_text(str(seed), encoding="utf-8")
+            os.replace(str(tmp), str(f))   # atomic: readers never see a partial cap
+            cap_v = seed
+        except OSError:
+            cap_v = seed                   # unrecordable pool: arbitrate locally
+    if (cap_v is not None and isinstance(ceiling, int) and not isinstance(ceiling, bool)
+            and 0 < ceiling < cap_v):
+        return ceiling                     # per-run ceiling rides UNDER the pool truth
+    return cap_v
+
+def _seat_pool_seed():
+    """est-mg5o2 x est-2ek.1.856: the process-side SEED for the pool cap — the
+    operator-named knobs resolved by the ONE validator (wfcommon.seat_max_seats:
+    WORKFLOW_MAX_SEATS env > .env files read fresh (est-gxjh6) > config
+    workflows.max_seats > SEATS_DEFAULT) MINUS the per-run declaration: run.json
+    meta max_seats is deliberately NOT a seed — a run may hold fewer seats than
+    the pool allows, but a single run's declaration never sets the pool's global
+    truth (_seat_pool_ceiling carries it UNDER the pool cap). Only the FIRST
+    admission into an unrecorded pool records this seed; every admission after it
+    arbitrates against the recorded value. An invalid operator knob RAISES
+    SeatCapError here (floor/ceiling, never a silent SEATS_DEFAULT): a typo'd cap
+    is never recorded as the pool's global truth — the spawn path fails the node
+    closed as error_class=seat_cap before any ticket is written. 0 (the explicit
+    semaphore-off sentinel) stays a LOCAL disable and never records a pool cap."""
+    return seat_max_seats(None, dotenv_reader=_seat_cap_from_env_files)
+
+def _seat_pool_ceiling(meta):
+    """run.json meta max_seats as a pool CEILING: positive int or None."""
+    v = meta.get("max_seats")
+    return v if isinstance(v, int) and not isinstance(v, bool) and v > 0 else None
+
 def _seats_dir():
     d = os.environ.get("WF_SEATS_DIR", "")
     return Path(d) if d else runs_root() / ".seats"
@@ -3389,10 +3580,18 @@ def _seat_queue_prune(seats, cands):
             pass
 
 def _seat_acquire(seats, name, cap, bounded_s, on_wait=None, abort=None,
-                  admit_lock=None):
+                  admit_lock=None, pool_seed=None, pool_ceiling=None):
     """Wait until a seat is free (<= bounded_s), returning the ticket Path; None
     on bounded-wait expiry / abort(); _SEAT_UNSUPPORTED when full and our
     ancestry is unknowable. cap <= 0 disables the semaphore.
+    est-mg5o2: when pool_seed is supplied, admission arbitrates against the
+    POOL-RECORDED cap (<seats>/.cap, first writer wins) instead of the caller's
+    per-process cap — the caller's cap is only the fallback when the pool holds
+    no truth; pool_seed seeds an unrecorded pool; pool_ceiling (run.json
+    max_seats) caps THIS run under the pool truth. The arbitration runs under
+    the .lock flock, so first-writer-wins and count-then-admit are one
+    cross-process atomic step — a nested child runner whose inherited env
+    carries a stale/missing cap joins the pool's arithmetic, not its own.
     est-g255 P255-2: the wait is bounded and cancellable THROUGH lock
     contention — the registry lock is taken by a non-blocking poll that checks
     deadline/abort between tries, and both are rechecked after the lock is
@@ -3473,6 +3672,19 @@ def _seat_acquire(seats, name, cap, bounded_s, on_wait=None, abort=None,
                     try:
                         if _out():
                             return None
+                        # est-mg5o2 x est-2ek.1.856: the pool-recorded cap is grafted
+                        # INSIDE the FIFO admission path. We already hold admit_lock AND
+                        # the .lock flock, so first-writer-wins (<seats>/.cap) is a
+                        # cross-process fact and the cap read here is the same one the
+                        # queue-marker decision below uses: admission is `live < cap`
+                        # (pool truth, not this process's inherited env) AND no strictly-
+                        # older live marker (FIFO). Markers still gate fairness only,
+                        # never capacity; a corrupt .cap re-seeds, never fatal.
+                        if pool_seed is not None:
+                            _pc = _seat_pool_cap(seats, seed=pool_seed,
+                                                 ceiling=pool_ceiling)
+                            if _pc is not None:
+                                cap = _pc
                         live = _seat_live_tickets(seats, anc)
                         older, cands = _seat_queue_scan(seats, own, my_key, anc,
                                                         time.time())
@@ -3537,12 +3749,34 @@ def _seat_release(ticket):
     try: ticket.unlink()
     except OSError: pass
 
+def _spawn_floor_from_logs(run, node, index):
+    """est-hls8y: the highest a<N> whose logs/<node>[.<i>].a<N>.log already exists
+    in this run dir, or -1. A resumed runner is a new process, so the in-memory
+    counter starts empty; without this floor the resumed spawn reuses a0 and
+    truncates the attempt it resumes from."""
+    if run is None:
+        return -1
+    d = Path(run) / "logs"
+    if not d.is_dir():
+        return -1
+    pat = re.compile(re.escape(_spawn_stem(node, index, 0)[:-1]) + r"(\d+)\.log")
+    hi = -1
+    for p in d.iterdir():
+        m = pat.fullmatch(p.name)
+        if m:
+            hi = max(hi, int(m.group(1)))
+    return hi
+
 def _next_spawn_no(meta, node, index):
     """One counter per (node, item) — every Popen gets a fresh spawn number so
-    log names, session titles, and spawn-record `attempt` are unique per spawn."""
+    log names, session titles, and spawn-record `attempt` are unique per spawn.
+    est-hls8y: the first use of a key seeds from the logs already on disk, so a
+    resumed run never reuses a spawn number that owns a log."""
     key = f"{node['id']}:{index}"
     with meta["_procs_lock"]:
-        n = meta["_spawn_n"].get(key, -1) + 1
+        if key not in meta["_spawn_n"]:
+            meta["_spawn_n"][key] = _spawn_floor_from_logs(meta.get("_run"), node, index)
+        n = meta["_spawn_n"][key] + 1
         meta["_spawn_n"][key] = n
     return n
 
@@ -3702,6 +3936,29 @@ def child_parent_watch(interval=CHILD_BELT_POLL_S, grace_s=CHILD_BELT_GRACE_S):
             elif time.time() - gone_since >= grace_s:
                 os._exit(70)                  # EX_TEMPFAIL — never exit clean
         time.sleep(interval)
+
+def _lane_killed(run, nid):
+    """est-cl7t: a node-targeted lane kill (act_kill) marker exists for this node."""
+    return (run / "kill" / f"{nid}.json").exists()
+
+def _lane_kill_sweep(run, meta):
+    """est-cl7t: SIGKILL every in-flight child registered under a killed node.
+    Registry keys are "<node_id>:..."; sibling lanes are untouched and the run-level
+    stop Event / stop.request are never set, so the run keeps going."""
+    kd = run / "kill"
+    if not kd.is_dir():
+        return
+    for kf in kd.glob("*.json"):
+        pre = kf.stem + ":"
+        with meta["_procs_lock"]:
+            for key, p in list(meta["_procs"].items()):
+                if not str(key).startswith(pre):
+                    continue
+                try:
+                    os.killpg(os.getpgid(p.pid), signal.SIGKILL)
+                except Exception:
+                    try: p.kill()
+                    except Exception: pass
 
 def _kill_registered_children(meta, reason):
     """killpg EVERY registered child (each is its own group leader —
@@ -5027,7 +5284,7 @@ def _adopt_child(meta, node, byid, index, child, schema, fo_cancel=None):
         started=child.get("started"), attempt=child.get("attempt"))
     try:
         while True:
-            if meta["_stop"].is_set():
+            if meta["_stop"].is_set() or _lane_killed(run, nid):
                 _kill_adopted(pid)
                 cancelled = True
                 was_alive = True
@@ -5088,6 +5345,9 @@ def _adopt_child(meta, node, byid, index, child, schema, fo_cancel=None):
            "spawn": child.get("attempt"), "skey": skey_base, "adopted": True,
            "attempts": (child.get("attempt") or 0) + 1}
     if cancelled:
+        if _lane_killed(run, nid) and not meta["_stop"].is_set():
+            return {"status": "failed", "error": "killed by lane kill (action=kill)",
+                    "error_class": "killed", "raw": "", "ms": ms, **evd}
         return {"status": "failed", "error": "cancelled by stop", "error_class": "cancelled",
                 "raw": "", "ms": ms, **evd}
     try:
@@ -5159,9 +5419,9 @@ def _adopt_child(meta, node, byid, index, child, schema, fo_cancel=None):
     _note_turn_tier(run, nid, report_path)   # a death happened; success leaves no trace
     try: os.unlink(report_path)
     except OSError: pass
-    if fo_cancel is not None and fo_cancel.is_set() and was_alive:
-        # quorum straggler: WE observed the live orphan die to _cancel_stragglers'
-        # group kill (a child already dead at entry is classified from its capture).
+    if (fo_cancel is not None and fo_cancel.is_set() and was_alive
+            and getattr(handle, "_wf_quorum_cancel", False)):
+        # Quorum intent belongs to this adopted handle, not merely the event.
         # a2d7f664: same evidence + harvest-at-cancel as the run_child site — the
         # capture freezes at the kill, so the snapshot is honest to the quorum
         # moment; error_class/quorum math unchanged.
@@ -5416,17 +5676,46 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
     sr = os.environ.get("HERMES_WRITE_SAFE_ROOT")
     if sr:
         env["HERMES_WRITE_SAFE_ROOT"] = sr + os.pathsep + wd
+        # est-2mhl: core's served-profile resolver REPLACES HERMES_WRITE_SAFE_ROOT with
+        # the profile's own value, dropping the append above. The launcher's grant
+        # channel is the companion HERMES_WRITE_SAFE_ROOT_EXTRA: the child's OWN dir,
+        # replaced (never accumulated) per child. Inert until core unions it.
+        env["HERMES_WRITE_SAFE_ROOT_EXTRA"] = wd
+    else:
+        # No jail in force: never hand a child a grant inherited from the host.
+        env.pop("HERMES_WRITE_SAFE_ROOT_EXTRA", None)
     # est-2ek.1.772: Popen cwd=wd is not enough — the Hermes terminal tool takes its
     # default cwd from $TERMINAL_CWD, which dict(os.environ, ...) inherits from the
     # host. Pin it so a terminal call with no workdir lands in the node's workspace.
     env["TERMINAL_CWD"] = wd
+    # est-mg5o2 (spawn half of the launch-path fix): the seat cap is AUTHORITATIVE
+    # AT SPAWN. A long-lived runner inherits its launcher's WORKFLOW_MAX_SEATS —
+    # a gateway booted before the operator set the .env knob hands every nested
+    # child a stale cap, and seat_max_seats precedence (env > .env) then makes
+    # that child arbitrate against the STALE inheritance instead of the fresh
+    # env-file read est-gxjh6 added (measured: estate pool held 6/12 at an
+    # 8-squad launch under WORKFLOW_MAX_SEATS=12 in .env, "zero to ONE requests
+    # at once"). So a child's env never rides the parent's inherited key: an
+    # env-file value OVERWRITES it, and with no env-file value the key is
+    # STRIPPED so the child resolves fresh (config workflows.max_seats / default)
+    # — inheritance can never shadow the pool knob in a nested runner. The
+    # documented local-disable sentinel "0" deliberately keeps riding: it only
+    # disables the semaphore locally and never arbitrates (est-2ek.1.856 law);
+    # stripping it would silently flip nested runners from disabled to capped.
+    # The routed branch below already forwards neither (keep-set excludes the
+    # key), so delegated children always resolved from their own env files.
+    _cap_fresh = _seat_cap_from_env_files()
+    if _cap_fresh is not None:
+        env["WORKFLOW_MAX_SEATS"] = str(_cap_fresh)
+    elif env.get("WORKFLOW_MAX_SEATS") != "0":
+        env.pop("WORKFLOW_MAX_SEATS", None)
     if route:
         # Delegation is not isolation. The target's -p resolves against the common
         # root, never the launcher's named-profile home. Do not forward launcher
         # secrets (provider keys and unrelated environment variables).
         keep = {"PATH", "HOME", "LANG", "TERM", "TZ", "TMPDIR",
                 "HERMES_QUIET_TURN_REPORT_FILE", "WF_RUNS_ROOT", "HERMES_WRITE_SAFE_ROOT",
-                "TERMINAL_CWD"}
+                "HERMES_WRITE_SAFE_ROOT_EXTRA", "TERMINAL_CWD"}
         env = {k: v for k, v in env.items()
                if k in keep or k.startswith("LC_") or k.startswith("HERMES_WF_")}
         env["HERMES_HOME"] = str(hermes_root())
@@ -5435,12 +5724,17 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
     # by the node wall; expiry is a typed seat_wait failure, never a blind spawn.
     _seat_wall = node.get("timeout", meta.get("node_timeout", 900))
     _seat_w0 = time.time()
-    _cancelled = (lambda: meta["_stop"].is_set()
+    _cancelled = (lambda: meta["_stop"].is_set() or _lane_killed(run, node["id"])
                   or (seat_cancel is not None and seat_cancel.is_set()))
     while seat_hold:                       # a prior attempt's deferred seat
         _seat_release(seat_hold.pop())
     try:
         _seat_cap = _max_seats(meta)
+        # est-mg5o2 x est-2ek.1.856: the pool SEED rides the same validator. It is
+        # resolved HERE (before any ticket/marker) so an invalid operator knob can
+        # never be recorded as the pool's global cap; cap<=0 is the local disable
+        # and carries no seed (nothing is ever recorded for it).
+        _pool_seed = _seat_pool_seed() if _seat_cap > 0 else None
     except SeatCapError as e:
         # est-2ek.1.856 (B3) runner half: the door refuses this launch before any
         # write/spawn; a runner that launched while the knob was valid and finds
@@ -5458,8 +5752,13 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
         _seats_dir(), f"{run.name}.{node['id']}", _seat_cap,
         _seat_wall if isinstance(_seat_wall, (int, float)) else None,
         on_wait=lambda: log(run, "seat.wait", node=node["id"], index=index,
-                            spawn=spawn_no, cap=_seat_cap),
-        abort=_cancelled, admit_lock=seat_admit_lock)
+                            spawn=spawn_no,
+                            # est-mg5o2: the event carries the POOL truth (read-only);
+                            # _seat_cap is the already-validated fallback (no re-resolve
+                            # inside the callback: it must never raise SeatCapError).
+                            cap=_seat_pool_cap(_seats_dir()) or _seat_cap),
+        abort=_cancelled, admit_lock=seat_admit_lock,
+        pool_seed=_pool_seed, pool_ceiling=_seat_pool_ceiling(meta))
     if seat is _SEAT_UNSUPPORTED:
         return {"status": "failed",
                 "error": "seat_unsupported: the global agent-seat semaphore is full and this "
@@ -5490,9 +5789,11 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
                             "or unset; the per-run opt-out is run.json max_seats: 0)",
                     "error_class": "seat_cap", "ms": int((time.time() - _seat_w0) * 1000),
                     "spawn": spawn_no, "attempts": 1, **route}
+        _capv = _seat_pool_cap(_seats_dir())   # est-mg5o2: report the pool truth
         return {"status": "failed",
                 "error": f"seat_wait: no global agent seat freed within {_seat_wall}s "
-                         f"(cap={_seat_cap_now}; WORKFLOW_MAX_SEATS / run.json max_seats)",
+                         f"(cap={_capv if _capv is not None else _seat_cap_now}; "
+                         f"pool .cap / WORKFLOW_MAX_SEATS / run.json max_seats ceiling)",
                 "error_class": "seat_wait", "ms": int((time.time() - _seat_w0) * 1000),
                 "spawn": spawn_no, "attempts": 1, **route}
     t0 = time.time()
@@ -5524,7 +5825,7 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
                 meta["_procs"].pop(reg_key, None)
 
     try:
-        logf = open(lp, "w", encoding="utf-8", errors="replace")
+        logf = _open_spawn_log(lp)   # est-hls8y: append, never truncate a prior attempt
     except OSError:
         _seat_release(seat)
         raise
@@ -5539,6 +5840,10 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
                 # the watcher's scan WILL see it) — no window for a post-stop launch.
                 # est-g255 P255-1: the fan-out quorum cancel is honoured HERE too —
                 # _cancel_stragglers takes this lock BEFORE its scan (r2 R1).
+                if _lane_killed(run, node["id"]):
+                    logf.close()
+                    return {"status": "failed", "error": "killed by lane kill before spawn",
+                            "error_class": "killed", "ms": 0, **route}
                 if _cancelled():
                     logf.close()
                     return {"status": "failed", "error": "cancelled before spawn"
@@ -5870,6 +6175,11 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
     _tree_live = sorted(p for p in (tree_seen - {proc.pid}) if _proc_alive(p))
     if _tree_live:
         evd["tree_pids"] = _tree_live
+    if (rc or 0) != 0 and _lane_killed(run, node["id"]):
+        # est-cl7t: node-targeted lane kill — terminal and readable, never retried
+        return {"status": "failed", "error": "killed by lane kill (action=kill)",
+                "error_class": "killed", "raw": (out or "")[-2000:], "ms": ms,
+                "final": final_reply, **sk, **evd}
     if early_death:
         return {"status": "failed",
                 "error": f"early_death: child produced no output within {first_msg_s}s of spawn "
@@ -5892,14 +6202,11 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
         if (rc or 0) < 0 and meta["_stop"].is_set():
             return {"status": "failed", "error": "cancelled by stop", "error_class": "cancelled",
                     "raw": (out or "")[-2000:], "ms": ms, "final": final_reply, **sk, **evd}
-        if (rc or 0) < 0 and not timed_out and not early_death:
-            # signal-killed by the runner itself with no stop pending = a fan-out
-            # straggler killed at quorum (#12). Not a failure of the child's making.
-            # a2d7f664: never blind — the capture is frozen by the SIGKILL, so the
-            # snapshot is faithful to the quorum moment; and a straggler that had
-            # already flushed a valid fenced answer keeps its harvest (the cancelled
-            # class was excluded from _harvest_death — this is cancelled's own pass;
-            # classification and quorum math untouched, error_class stays cancelled).
+        if (rc == -signal.SIGKILL and seat_cancel is not None and seat_cancel.is_set()
+                and getattr(proc, "_wf_quorum_cancel", False)):
+            # The cancel setter recorded a successful kill request for THIS spawn.
+            # A negative rc (or a quorum event arriving after death) is not a cause.
+            # Snapshot/harvest are independent of the cancelled classification.
             suffix, snap = _cancel_evidence(run, node["id"], index, lp)
             hv = _harvest_cancelled(out, harvest_schema, run, node["id"], index)
             rec = {"status": "failed", "error": "cancelled: quorum already met" + suffix,
@@ -5909,6 +6216,19 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
             if hv:
                 rec.update(hv)
             return rec
+        if rc is not None and rc < 0:
+            signum = -rc
+            try:
+                sig_name = signal.Signals(signum).name
+            except ValueError:
+                sig_name = f"signal {signum}"
+            hv = _harvest_death(out, harvest_schema)
+            return {"status": "partial" if hv else "failed",
+                    "error": f"child terminated: {sig_name} (external: source unknown)",
+                    "error_class": "crashed", "death_class": "external_kill",
+                    "signal": sig_name, "signal_number": signum, "returncode": rc,
+                    "raw": (out or "")[-2000:], "ms": ms, "final": final_reply,
+                    **(hv or {}), **sk, **evd}
         if tclass == "cap_exhausted":
             hv = _harvest_death(out, harvest_schema)   # #4: every cap death that "said so precisely" keeps its answer
             if hv:
@@ -6283,12 +6603,21 @@ def _transient_retry(meta, r, respawn, ev, ev_kw, node=None, cancel=None):
     provider_400/cancelled/spawn. attempts_log records every failed attempt; a
     final retryable death after retries = error_class transport_exhausted.
     A `partial` harvest (#4) enters here as non-failed and is NEVER retried;
-    a still-retryable death hands off to _bounded_retry (#5) once Q4 is spent."""
+    a still-retryable death hands off to _bounded_retry (#5) once Q4 is spent.
+    est-ja41 (PR #159 finding, reverse of wf159c B2): a banner death the PARK
+    handled BEFORE this ladder arrives here as a transport death carrying the
+    park's attempts_log on the record (banner -> transport -> success shape).
+    The ladder SEEDS that history — never resets it — so the committed record
+    agrees with the event history (every parked death stays machine-visible).
+    The two-death cap and the transport_exhausted demotion count THIS ladder's
+    own attempts only; an inherited log alone never demotes a record the
+    ladder never touched."""
     run = meta["_run"]
     backoff = _retry_conf_params(meta)[0]
-    attempts_log = []
+    attempts_log = list(r.get("attempts_log") or [])   # est-ja41: inherited park history
+    ladder_attempts = 0
     while (r.get("status") == "failed" and r.get("error_class") in _RETRYABLE_CLASSES
-           and len(attempts_log) < 2):
+           and ladder_attempts < 2):
         if meta["_stop"].is_set():
             break
         calls = (_attempt_api_calls(run, r.get("skey"), r["profile_home"])
@@ -6305,18 +6634,22 @@ def _transient_retry(meta, r, respawn, ev, ev_kw, node=None, cancel=None):
             attempts_log.append({"attempt": len(attempts_log),
                                  "error_class": r["error_class"], "at": now(),
                                  **_attempt_counts(run, r)})
+            ladder_attempts += 1   # est-ja41: counts for the demote trigger, same as pre-fix
             log(run, ev + ".retry_skipped", reason="retry budget exhausted",
                 error_class=r.get("error_class"), **ev_kw)
             break
         attempts_log.append({"attempt": len(attempts_log),
 "error_class": r["error_class"], "at": now(),
                              **_attempt_counts(run, r)})
+        ladder_attempts += 1   # est-ja41: THIS ladder's own attempt counter
         # jam-h22/h30: rate-limited deaths draw full-jitter sleeps (see _retry_sleep);
         # a false-positive-free retry decision is unchanged — only the delay differs.
         rate_limited = _is_rate_limited(r.get("raw"))
         if rate_limited:
             r["subtype"] = "rate_limited"
-        delay = _retry_sleep(backoff, len(attempts_log) - 1, r.get("raw"))
+        # est-ja41: the sleep schedule indexes the LADDER's attempts, never the
+        # merged history — an inherited park log must not shift 5 s -> 20 s.
+        delay = _retry_sleep(backoff, ladder_attempts - 1, r.get("raw"))
         log(run, ev + ".retrying", error_class=r["error_class"], backoff_s=delay,
             rate_limited=rate_limited,
             attempts_log=list(attempts_log), **ev_kw)
@@ -6354,7 +6687,12 @@ def _transient_retry(meta, r, respawn, ev, ev_kw, node=None, cancel=None):
         r["attempts_log"] = attempts_log
         last_spawn = r.get("spawn")
         r["attempts"] = last_spawn + 1 if isinstance(last_spawn, int) else len(attempts_log) + r.get("attempts", 0)
-        if r.get("error_class") in _RETRYABLE_CLASSES:
+        # est-ja41: transport_exhausted is the LADDER's own verdict — "this
+        # ladder spent its respawns on the same dead model". An inherited park
+        # history proves nothing about this ladder; for no-inherit runs
+        # ladder_attempts>=1 reproduces the pre-fix trigger (own log non-empty)
+        # exactly, including the blocked-append path.
+        if ladder_attempts >= 1 and r.get("error_class") in _RETRYABLE_CLASSES:
             r["error_class"] = "transport_exhausted"
     return r
 
@@ -6845,11 +7183,24 @@ def run_agent_node(run, meta, byid, node, outputs, steering):
                     fo_cancel.set()
                     for k, p in list(meta["_procs"].items()):
                         if k.startswith(f"{nid}:"):
+                            # Only a live recipient of our successful kill request
+                            # gets quorum intent. Already-dead siblings keep their
+                            # actual exit cause, even if the event is now set.
+                            if isinstance(p, _AdoptedHandle):
+                                alive = _proc_alive(p.pid)
+                            else:
+                                alive = p.poll() is None
+                            if not alive:
+                                continue
                             try:
                                 os.killpg(os.getpgid(p.pid), signal.SIGKILL)
+                                setattr(p, "_wf_quorum_cancel", True)
                             except Exception:
-                                try: p.kill()
-                                except Exception: pass
+                                try:
+                                    p.kill()
+                                    setattr(p, "_wf_quorum_cancel", True)
+                                except Exception:
+                                    pass
             def one(i, item):
                 # an item's own `goal` wins over the fan-out template (papercut 2026-09-22:
                 # items[].goal was silently ignored, children got the placeholder template)
@@ -6911,9 +7262,10 @@ def run_agent_node(run, meta, byid, node, outputs, steering):
                     # sprint101 #12: per-item prompt = node goal + item goal, so the
                     # shared mission travels with every item (no 'unused' placeholder).
                     goal = node["goal"] + "\n\n" + goal
-                if meta["_stop"].is_set() or fo_cancel.is_set():
+                if meta["_stop"].is_set() or fo_cancel.is_set() or _lane_killed(run, nid):
                     r = {"status": "failed", "item": item, "error": "stopped before launch",
-                         "error_class": "cancelled", "attempts": 0, "attempts_log": [], "ms": 0}
+                         "error_class": "killed" if _lane_killed(run, nid) else "cancelled",
+                         "attempts": 0, "attempts_log": [], "ms": 0}
                     with lock:
                         results[i] = r
                     # est-2ek.1.765 single-writer ordering: the canonical record
@@ -6930,6 +7282,9 @@ def run_agent_node(run, meta, byid, node, outputs, steering):
                     return
                 held = []   # est-g255 P255-1: this item's deferred seat (run_child seat_hold)
                 def _spawn(resume_preamble="", model_override=None):
+                    if _lane_killed(run, nid):
+                        return {"status": "failed", "error": "killed by lane kill before launch",
+                                "error_class": "killed", "ms": 0}
                     if meta["_stop"].is_set() or fo_cancel.is_set():
                         return {"status": "failed", "error": "cancelled at quorum",
                                 "error_class": "cancelled", "ms": 0}
@@ -7888,6 +8243,8 @@ def main(run_id):
                 try: _sweep_orphans(meta, "stop")
                 except Exception: pass
                 return
+            try: _lane_kill_sweep(run, meta)   # est-cl7t: node-targeted kills only
+            except Exception: pass
             time.sleep(2)
 
     threading.Thread(target=_stop_watcher, daemon=True).start()
