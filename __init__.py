@@ -4514,7 +4514,7 @@ def act_kill(args):
     if nid not in {n.get("id") for n in graph.get("nodes") or []}:
         return {"error": f"unknown node {nid!r} in run {run_id}"}
     st = run_state(r)
-    if st and st["status"] in ("done", "failed", "stopped"):
+    if st and st["status"] in ("done", "partial", "failed", "stopped"):
         return {"ok": True, "already": st["status"]}
     kd = r / "kill"
     kd.mkdir(exist_ok=True)

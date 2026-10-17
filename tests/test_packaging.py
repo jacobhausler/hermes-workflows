@@ -185,6 +185,13 @@ def main() -> None:
             # FILE PATH when the token is allowed — same est-4vnq finding-4 shape.
             check("subagent_accounting.py ships in the ZIP (__init__.py spec-loads it)",
                   root + "subagent_accounting.py" in members)
+            # P5 (#431, est-431 lane): approval_bridge.py + its switch-board doc — the
+            # same finding-4 shape; an absent bridge armed per docs/native-hooks.md is a
+            # silent no-op on every ZIP install.
+            check("approval_bridge.py ships in the ZIP (__init__.py spec-loads it)",
+                  root + "approval_bridge.py" in members)
+            check("docs/native-hooks.md ships in the ZIP (the p3/p5 discoverability doc)",
+                  root + "docs/native-hooks.md" in members)
             checksum_text = archive.read(root + "SHA256SUMS").decode("utf-8")
             rows = [line.split("  ", 1) for line in checksum_text.splitlines()]
             check("SHA256SUMS verifies every pinned source entry",

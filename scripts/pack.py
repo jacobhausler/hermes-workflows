@@ -93,6 +93,11 @@ INCLUDE_FILES = (
     # `subagent_accounting` token is allowed — absent from the ZIP the module simply
     # fails to load and the lane dies silently (est-4vnq finding-4 pack law).
     "subagent_accounting.py",
+    # P5 (est-431 lane, #431): __init__.py spec-loads this by file path when the
+    # `approval` token is allowed — absent from the ZIP the armed P5 bridge is a
+    # permanent silent no-op (est-4vnq finding-4, the sibling shape verbatim).
+    "approval_bridge.py",
+    "docs/native-hooks.md",  # the p3/p5 switch board: an unshipped doc is invisible to ZIP installs
     "dashboard/manifest.json",
     "dashboard/index.js",  # hidden API plugin still needs the web host's script/registration contract
     "dashboard/plugin_api.py",

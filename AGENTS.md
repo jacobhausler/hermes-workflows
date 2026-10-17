@@ -253,7 +253,7 @@ publication guards, and crash recovery.
 - `node.failed` events carry `error_class` from the closed set defined in code
   (`wf.py ERROR_CLASSES`) — `bead_close | budget_exhausted | cancelled | cap_exhausted | config_input | crashed | early_death | effect_receipt |
   fanout_empty | fatal_quota | forbidden_model | incomplete_work |
-  inputs | item_record | lane_wreckage | lease_busy | left_live_descendants | malformed_turn | precondition | provider_400 | quorum |
+  inputs | item_record | killed | lane_wreckage | lease_busy | left_live_descendants | malformed_turn | precondition | provider_400 | quorum |
   ratelimit |
   route_substitution_denied | route_unavailable | schema | seat_cap | seat_unsupported | seat_wait | spawn | stale_graph | timeout | transport | transport_exhausted |
   unresolved_model`, plus `unknown` as the harvest-time default when nothing matches —
