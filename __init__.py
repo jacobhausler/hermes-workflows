@@ -746,7 +746,7 @@ WORKFLOW_PARAMS = {
         "team": {"type": "string", "description": "run (optional, <=64 chars): team label stamped into run.json and shown by list; no effect on scheduling."},
         "lane_key": {"type": "string", "description": "run (optional, <=128 chars): in-flight registry key — a second run with the same key while the incumbent is unfinished is deduped (no spawn; returns the incumbent's run_id); status lane_key=<key> reads the incumbent instead of run_id. Keys are global per runs root; prefix with <team>/ yourself."},
         "owner": {"type": "string", "description": "save (optional, <=64 chars): provenance owner override; defaults to the launcher profile. Every save now stamps provenance {owner, version, source, saved_at, source_digest} (#126 default-on)."}, 
-        "source": {"type": "string", "description": "save (optional, <=200 chars): where this graph came from (repo path, URL, skill) — every save stamps provenance {owner, version, source, saved_at, source_digest} (#126 default-on; attribution, never access control)."},
+        "source": {"type": "string", "description": "save (optional, <=512 chars): where this graph came from (repo path, URL, skill, attribution line) — every save stamps provenance {owner, version, source, saved_at, source_digest} (#126 default-on; attribution, never access control)."},
         "graph_path": {"type": "string", "description": "run/save/amend/validate: absolute path to a caller-supplied local regular UTF-8 JSON graph file (max 1 MiB, no final symlink). Choose exactly one of graph, graph_path, or run's from / save's run_id. Validated before any write or spawn."},
         "graph": {
             "type": "object",
@@ -2103,8 +2103,8 @@ def act_save(args):
     if blocked:
         return blocked
     source = args.get("source")
-    if source is not None and (not isinstance(source, str) or not source.strip() or len(source) > 200):
-        return {"error": "source must be a non-empty string of at most 200 characters"}
+    if source is not None and (not isinstance(source, str) or not source.strip() or len(source) > 512):
+        return {"error": "source must be a non-empty string of at most 512 characters"}
     # #126 (est-syim): provenance is DEFAULT-ON — `owner` is an optional override of the
     # launcher-profile default, never a way to skip the stamp.
     owner_arg = args.get("owner")

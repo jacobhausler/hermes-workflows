@@ -147,7 +147,7 @@ Three laws keep recovery safe (`wfcommon.py`, pinned by `tests/test_lock_wedge_4
 
 ## Library provenance
 
-`save` stamps provenance on EVERY entry: `{owner, version, source, saved_at, source_digest}` — `owner` defaults to the launcher profile (`save owner:<name>` ≤64 overrides), `version` is the plugin release that wrote the entry and is always present, `source` is the optional (≤200 chars) origin note. This DEFAULT-ON law (#126, owner ruling 2026-10-15) retires the 1.1 RATIFY F5 opt-in: pre-existing entries — bare or carrying the old four-key stamp — keep loading and listing verbatim (golden-solo bytes unchanged; no migration). `library` rows surface `owner`/`source`/`source_digest` when present; `run from:<name>` copies the stamp into run.json as `graph_source`. Provenance is attribution, never permission: no veto, no ACL.
+`save` stamps provenance on EVERY entry: `{owner, version, source, saved_at, source_digest}` — `owner` defaults to the launcher profile (`save owner:<name>` ≤64 overrides), `version` is the plugin release that wrote the entry and is always present, `source` is the optional (≤512 chars) origin note. This DEFAULT-ON law (#126, owner ruling 2026-10-15) retires the 1.1 RATIFY F5 opt-in: pre-existing entries — bare or carrying the old four-key stamp — keep loading and listing verbatim (golden-solo bytes unchanged; no migration). `library` rows surface `owner`/`source`/`source_digest` when present; `run from:<name>` copies the stamp into run.json as `graph_source`. Provenance is attribution, never permission: no veto, no ACL.
 
 ### The `run_context` binding contract
 
