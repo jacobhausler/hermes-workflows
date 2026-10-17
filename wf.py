@@ -62,6 +62,7 @@ node_rec = wfcommon.node_rec
 gate_answer_valid = wfcommon.gate_answer_valid
 when_true = wfcommon.when_true
 child_metrics = wfcommon.child_metrics
+budget_tokens = wfcommon.budget_tokens
 prune_states = wfcommon.prune_states
 dep_satisfied = wfcommon.dep_satisfied
 active_child = wfcommon.active_child
@@ -145,6 +146,96 @@ def _route_receipt_bake(meta, node):
         os.replace(tmp, p)
     except OSError:
         pass                                   # receipt best-effort WRITE; the HOLD is strict
+
+def _budget_refusal(meta, node, byid, index, spawn_no):
+    """est-3acn: BEFORE submit — the RunBudget pre-dispatch check at the same
+    seam as _route_substitution_refusal (est-2ek.1.641's shape: a refusal that
+    never touches the seat, never bills, logs its typed event, and reads as ONE
+    committed failure). Caps are tokens-only (USD is excluded per the repo
+    cost-trust law, issue #124 scope decision 2026-10-14 — there is no usd key
+    to check and validate_graph_errors refuses anyone who writes one).
+
+    Scopes, narrowest first (the event names the one that broke):
+      node — the node's own `budget:{tokens:N}` def;
+      run  — the door-baked run.json meta.budget.tokens (submit-time truth;
+             like concurrency it does not ride amends).
+    spent   = budget_tokens summed over every metered session row of this run
+              under the scope — node scope keys on the lane prefix
+              `wf:{run}:{node}` (covers fan-out items and #attempt suffixes);
+              run scope walks EVERY agent lane of the graph through its own
+              profile home (cross-profile runs bill their own state.db).
+    needed  = est_next: the measured per-attempt mean of this node's lanes;
+              node has no history => the run-wide mean; no history at all => 0
+              (a cap NEVER blocks the first attempt — refusal is always grounded
+              in measured spend, never a post-hoc tax on work already done).
+    The law is `spent + needed >= cap` refuses: the dispatch must be expected
+    to FIT under the cap, not merely start while the cap reads non-zero.
+    An absent/unreadable state.db reads spend 0 — honest absence can never
+    fire the gate. Returns None to proceed."""
+    caps = []
+    nb = (node or {}).get("budget")
+    if isinstance(nb, dict) and type(nb.get("tokens")) is int and nb["tokens"] > 0:
+        caps.append(("node", nb["tokens"]))
+    rb = meta.get("budget")
+    if isinstance(rb, dict) and type(rb.get("tokens")) is int and rb["tokens"] > 0:
+        caps.append(("run", rb["tokens"]))
+    if not caps:
+        return None                                   # no caps: byte-identical path
+    run = meta["_run"]
+    # ONE child_metrics read per distinct profile home PER CHECK — never cached
+    # across dispatches: the whole point of a pre-dispatch meter is that it
+    # sees spend grow between two spawns in the same wave (a cached snapshot
+    # would mint headroom out of staleness).
+    rows_by_home = {}
+    for n in byid.values():
+        if kind(n).spawns is not True:
+            continue
+        route = _profile_evidence(n)
+        home = str(route.get("profile_home") or hermes_home())
+        if home not in rows_by_home:
+            try:
+                rows_by_home[home] = child_metrics(run.name, home)
+            except Exception:
+                rows_by_home[home] = {}
+    # one pass: node lanes, and every lane of the run (deduped per home — a
+    # row in another profile home is a DIFFERENT billing session, never a
+    # shadow; within one home each skey counts exactly once).
+    pref = f"wf:{run.name}:{node['id']}"
+    node_spent = node_attempts = 0
+    run_spent = run_attempts = 0
+    seen = set()
+    for home, rows in rows_by_home.items():
+        for k, m in rows.items():
+            tok = budget_tokens(m)
+            att = int(m.get("attempts") or 0)
+            if k == pref or k.startswith(pref + ":"):
+                node_spent += tok
+                node_attempts += att
+            if k.startswith(f"wf:{run.name}:") and (home, k) not in seen:
+                seen.add((home, k))
+                run_spent += tok
+                run_attempts += att
+    est = (node_spent // node_attempts if node_attempts > 0
+           else run_spent // run_attempts if run_attempts > 0
+           else 0)                                    # floor 0: no history, no refusal
+    for scope, cap in caps:
+        spent = node_spent if scope == "node" else run_spent
+        if spent + est >= cap:
+            err = (f"budget_exhausted: {scope}-scope RunBudget cap {cap} tokens has no "
+                   f"headroom for node {node['id']!r} (scope spent {spent}, est_next {est}; "
+                   f"spent+est >= cap refuses BEFORE submit). RunBudget is tokens-only — "
+                   f"USD is excluded per the repo cost-trust law (issue #124); this spawn "
+                   f"never touched the seat (zero attempts). The run finalizes a graceful "
+                   f"partial; budget_ledger.json names what never launched.")
+            ev = {"node": node["id"], "scope": scope, "cap": cap, "spent": spent,
+                  "needed": est, "error_class": "budget_exhausted"}
+            if index is not None:
+                ev["index"] = index                   # {node,index?,scope,cap,spent,needed,...}
+            log(run, "dispatch.refused", **ev)
+            return {"status": "failed", "error": err, "error_class": "budget_exhausted",
+                    "raw": "", "ms": 0, "attempts": 1, "spawn": spawn_no}
+    return None
+
 
 def _route_substitution_refusal(meta, node, spawn_no):
     """est-2ek.1.641: BEFORE submit — if this lane has a proved-alive receipt
@@ -2059,6 +2150,13 @@ ERROR_CLASSES = frozenset(("provider_400", "unresolved_model", "cap_exhausted",
                            # because an amend/delete moved its effective fingerprint
                            # while it waited for a seat; the wave reloads and re-drives.
                            "stale_graph",
+                           # est-3acn: a spawn refused at the run_child seam BEFORE
+                           # submit because the run/node RunBudget (tokens-only cap;
+                           # USD excluded per the cost-trust law, issue #124) had no
+                           # headroom left. Terminal: outside every retry/fallback
+                           # whitelist; the runner finalizes a graceful `partial`
+                           # and budget_ledger.json names what never launched.
+                           "budget_exhausted",
                            # est-2ek.1.660: a (re-)drive refused at startup because a
                            # declared lane still carries the dead attempt's
                            # uncommitted TRACKED wreckage — bank it, then re-drive.
@@ -5553,6 +5651,13 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
         log(run, "node.route_substitution_denied", node=node["id"], index=index,
             spawn=spawn_no, error=_rsd["error"])
         return _rsd
+    # est-3acn: RunBudget BEFORE submit, the same seat-untouched shape as the
+    # route-substitution refusal beside it — spent is measured from the meters
+    # (state.db child_metrics join), NEVER estimated post-hoc; the refusal
+    # event (dispatch.refused) names scope, cap, spent and est_next.
+    _br = _budget_refusal(meta, node, byid, index, spawn_no)
+    if _br is not None:
+        return _br
     # #61c: the survivor-registry token for THIS spawn — unique per Popen (a
     # pid can be recycled, a token cannot). A detached descendant registers
     # itself against it (child-side helper reads these env pins, inherited
@@ -7422,6 +7527,37 @@ def run_agent_node(run, meta, byid, node, outputs, steering):
                                             "output": {"items": merged, "all_results": results}})
                 log(run, "node.failed", node=nid, error="forbidden served model in fan-out",
                     error_class="forbidden_model", failed_detail=fails, attempts=1)
+            elif any(r.get("error_class") == "budget_exhausted" for r in results):
+                # est-3acn: a RunBudget-capped fan-out is TYPED, never a quorum
+                # death: the items refused never billed (pre-dispatch refusals),
+                # so calling that `quorum` would misread a cap as broken work.
+                # Partial WITH harvest: every surviving item's output commits
+                # (partial IS committed output, #4 law); zero harvest commits
+                # failed with the same class. Downstream/verdict see `partial`,
+                # the runner's terminal hook closes the run gracefully.
+                dies = [i for i, r in enumerate(results)
+                        if r.get("error_class") == "budget_exhausted"]
+                if merged:
+                    save_node(run, node, byid, {"status": "partial",
+                                                "error_class": "budget_exhausted",
+                                                "error": f"budget_exhausted: {len(dies)}/{len(items)} items "
+                                                         f"refused at the RunBudget cap; harvested {len(merged)}",
+                                                "output": {"items": merged, "all_results": results}})
+                    log(run, "node.finished", node=nid, harvested=True,
+                        error_class="budget_exhausted")
+                else:
+                    fails = [{"index": i, "item": results[i].get("item"),
+                              "error": (results[i].get("error") or "")[:300],
+                              "error_class": "budget_exhausted"}
+                             for i in dies]
+                    save_node(run, node, byid, {"status": "failed",
+                                                "error_class": "budget_exhausted",
+                                                "error": f"budget_exhausted: all {len(dies)} items refused "
+                                                         f"pre-dispatch at the RunBudget cap (zero harvest)",
+                                                "failed_detail": fails,
+                                                "output": {"items": [], "all_results": results}})
+                    log(run, "node.failed", node=nid, error="budget_exhausted in fan-out",
+                        error_class="budget_exhausted", failed_detail=fails, attempts=1)
             elif len(merged) < quorum_req:
                 # partial credit: surviving children's outputs are committed; name each
                 # failure (index + reason) right here so the parent never digs through
@@ -8340,6 +8476,7 @@ def main(run_id):
             steering.setdefault(nid, []).extend(texts)
 
         states, outputs, prov = {}, {}, {}
+        _capped = []   # est-3acn: nodes whose COMMITTED record carries the RunBudget death
         for n in rs.nodes:
             st, rec = node_rec(run, n, rs.byid)
             states[n["id"]] = st
@@ -8347,6 +8484,35 @@ def main(run_id):
             # e68544a37be37657; est-ggqs: a validate-clamped harvest is the node's
             # own vouched `done` — its declared schema already held the answer.
             prov[n["id"]] = bool((rec or {}).get("harvest")) and not (rec or {}).get("clamped")
+            # A committed `partial` whose class is budget_exhausted (capped
+            # fan-out WITH harvest) is a RunBudget death too — the class, not
+            # the status, is the fact. A failed pre-dispatch refusal counts as
+            # well; harvest-reclassified `done` reads (node_rec law) carry no
+            # budget answer, so they can never masquerade here.
+            if st in ("failed", "partial") \
+                    and (rec or {}).get("error_class") == "budget_exhausted":
+                _capped.append(n["id"])
+        # est-3acn: RunBudget terminal hook — AFTER states build, BEFORE the
+        # prune cascade: a capped run closes GRACEFULLY as `partial`, never
+        # stumbles into `blocked by failed` prose. The durable ledger names the
+        # cap deaths and every node that NEVER LAUNCHED (pending at the instant
+        # of closing — derived, not guessed; a later resume sees the same file).
+        # finalize() commits the run.partial fact; the runner_exit verdict
+        # `budget_exhausted` rides main()'s write at exit — run_state reads
+        # both and reports status=partial + the derived budget view.
+        if _capped:
+            never = [n["id"] for n in rs.nodes if states[n["id"]] == "pending"]
+            led = {"cause": "budget_exhausted", "at": now(),
+                   "exhausted_nodes": _capped, "never_launched": never,
+                   "cap_tokens": (meta.get("budget") or {}).get("tokens")
+                   if isinstance(meta.get("budget"), dict) else None}
+            lp = run / "budget_ledger.json"
+            tmp = lp.with_name(f"budget_ledger.json.{os.getpid()}.tmp")
+            tmp.write_text(json.dumps(led, ensure_ascii=False))
+            os.replace(tmp, lp)                       # atomic: durable ledger
+            log(run, "run.budget_exhausted", nodes=_capped, never_launched=never)
+            finalize(run, rs.graph, "partial")
+            return "budget_exhausted"
         # prune propagation: derived skips become efp-stamped facts (replay-skip law)
         for nid in prune_states(rs.nodes, states):
             save_node(run, rs.byid[nid], rs.byid, {"status": "skipped", "output": {"skipped": "all deps pruned"}})

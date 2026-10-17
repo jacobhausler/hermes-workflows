@@ -78,6 +78,10 @@ GRAPH_KEYS = {"name", "nodes", "description", "defaults", "model_policy",
               "provenance",   # 1.1 (RATIFY F5): opt-in library provenance block, door-written
               "grammar",      # #32: dialect tag of a shared file ("wf/1"; absent = wf/1)
               "concurrency", "item_concurrency",  # #100: optional run-level limits
+              "budget",       # est-3acn: RunBudget — run-wide token cap ({"tokens": N});
+                              # tokens-only per the repo cost-trust law (USD excluded,
+                              # issue #124). Baked into run.json meta at submit, enforced
+                              # pre-dispatch by the runner; graceful budget_exhausted partial.
               "requires_plugin",  # est-2ek.1.166: version handshake (coarse >=; stale => arm-time refusal)
               "result",           # est-2ek.1.158: node id whose output is the run verdict
               "on_exit",          # #129: agent reserved for terminal postmortem
@@ -534,7 +538,10 @@ def _resume_after_action(r, grace_s=0.75, consumed=None):
         if consumed is not None and consumed():
             return "consumed"
         st = run_state(r) or {}
-        if st.get("status") in ("done", "stopped"):
+        if st.get("status") in ("done", "partial", "stopped"):
+            # est-3acn: a RunBudget `partial` is a COMMITTED terminal verdict —
+            # respawning would only re-derive it (and re-emit finalize); the
+            # resume machinery owes that run nothing.
             return "consumed"
         _respawn_runner(r)
         return "respawned"
@@ -2735,7 +2742,7 @@ def _lane_state(key, entry):
     if st is None and not r.is_dir():
         state = "orphaned"
     live = st.get("runner_live", False) if st else False   # A2 one-read law
-    unfinished = state not in ("done", "failed", "stopped")
+    unfinished = state not in ("done", "partial", "failed", "stopped")   # est-3acn: partial is terminal
     return {"lane_key": key, "run_id": rid, "state": state,
             "runner_live": live, "unfinished": unfinished,
             "needs_resume": unfinished and not live, "last_event_ts": _last_event_ts(r)}
@@ -3209,6 +3216,15 @@ def _create_run(args, graph, lib_name, models, routes, _liveness_notes, lane_pat
             "owner": _owner_stamp()}
     if concurrency_meta:
         meta.update(concurrency_meta)
+    # est-3acn: RunBudget bake beside concurrency — the graph-root cap becomes
+    # run.json meta.budget at submit (the submit-time truth; like concurrency it
+    # does NOT ride amends — a capped run's ceiling is what its owner admitted).
+    # Shape was validated by structural_graph_errors before this line, so the
+    # guard here is belt-only. No budget in the graph => no key => run.json is
+    # byte-identical to a pre-budget build (the no-cap stability law).
+    if isinstance(graph.get("budget"), dict) and type(graph["budget"].get("tokens")) is int \
+            and graph["budget"]["tokens"] > 0:
+        meta["budget"] = {"tokens": graph["budget"]["tokens"]}
     meta.update(_identity_stamps(args, graph, lib_name))   # 1.1: only derivable keys land
     # est-2ek.1.166 → ra-plan#125-1 (issue #125): EVERY run reports the arming
     # door's own truth (plugin.yaml via wfcommon.plugin_version), not only runs
@@ -3364,6 +3380,13 @@ def act_status(args):
            "graph_revision": _graph_revision(r)}
     if "accounting" in st:
         out["accounting"] = st["accounting"]
+    if "budget" in st:
+        # est-3acn: the RunBudget read view (spent-vs-cap derived from the SAME
+        # child_metrics join the runner enforces against, + the never_launched
+        # ledger when the run closed on the cap). Honest absence: no caps on
+        # this run => no key at all — the payload is byte-identical to a
+        # pre-budget build's.
+        out["budget"] = st["budget"]
     if st.get("runner_lock") and st["runner_lock"] not in ("busy", "free"):
         # #44: legibility of the recoverable wedge / EACCES-ambiguous lock —
         # honest absence for the two ordinary states (golden key sets unchanged).
@@ -3549,7 +3572,10 @@ def act_status(args):
     # output IS the run verdict; terminal status/wait report it (derive-only: the
     # node entry built above). Graphs without the key never gain the field.
     _rid = (jload(r / "graph.json", {}) or {}).get("result")
-    if isinstance(_rid, str) and _rid in out["nodes"] and st["status"] in ("done", "failed", "stopped"):
+    if isinstance(_rid, str) and _rid in out["nodes"] and st["status"] in ("done", "partial", "failed", "stopped"):
+        # est-3acn: `partial` (RunBudget terminal) reports the declared result
+        # too — the capped run's outputs are committed facts, and the owner
+        # reading `result` is exactly who wants the harvest named.
         out["result"] = {"node": _rid, "status": out["nodes"][_rid]["status"],
                          "output": out["nodes"][_rid].get("output")}
     # A3: derived "what next?" — computed ONLY from the run_state fields already in
@@ -3578,7 +3604,10 @@ def act_status(args):
                 for nid, v in st["nodes"].items() if v["status"] == "failed"]
         # failed with no failed node visible (e.g. a recorded crashed runner): amend the run.
         out["next"] = rows or [{"action": "amend", "node": None, "error_class": "unknown"}]
-    elif s in ("done", "stopped"):
+    elif s in ("done", "partial", "stopped"):
+        # est-3acn: a RunBudget `partial` is terminal — `next` is EMPTY, never
+        # absent (absent means the read could not ground a guess; empty means
+        # the run is closed). The cap's story lives in out["budget"].
         out["next"] = []
     # PR-4: orphan-held flag — advisory, fail-open. The owner session died while the
     # run waits at a gate; stop is listed FIRST, release/wait rows stay (a human or a
@@ -3888,7 +3917,10 @@ def act_steer(args):
     node_status = (st.get("nodes", {}).get(node["id"]) or {}).get("status")
     if kind(node).spawns is not True:
         return {"ok": False, "error": "gate nodes do not accept steering; use release for a held gate"}
-    if run_status in ("done", "failed", "stopped"):
+    if run_status in ("done", "partial", "failed", "stopped"):
+        # est-3acn: `partial` joins the terminal refusals — a capped run has no
+        # runner that will ever spawn that node either; the ledger + harvest are
+        # the report, and amend/re-run is the correct verb.
         # Feedback #68: a terminal run has NO runner that will ever spawn that node —
         # reporting ok here made steering text vanish silently. An interrupted run
         # is NOT refused: wait/release/amend resume its runner, which then consumes
@@ -4193,7 +4225,7 @@ def act_stop(args):
     if not (r / "graph.json").exists():
         return {"error": "unknown run_id"}
     st = run_state(r)
-    if st and st["status"] in ("done", "failed", "stopped"):
+    if st and st["status"] in ("done", "partial", "failed", "stopped"):
         return {"ok": True, "already": st["status"]}
     (r / "stop.request").write_text(datetime.now(timezone.utc).isoformat(timespec="seconds"))
     _gi_note_close(r, None)   # PR-3: every open gate of a stopped run closes

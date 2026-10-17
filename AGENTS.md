@@ -250,7 +250,7 @@ See [grammar](references/grammar.md#terminal-postmortem-optional) for validation
 publication guards, and crash recovery.
 
 - `node.failed` events carry `error_class` from the closed set defined in code
-  (`wf.py ERROR_CLASSES`) — `bead_close | cancelled | cap_exhausted | config_input | crashed | early_death | effect_receipt |
+  (`wf.py ERROR_CLASSES`) — `bead_close | budget_exhausted | cancelled | cap_exhausted | config_input | crashed | early_death | effect_receipt |
   fanout_empty | fatal_quota | forbidden_model | incomplete_work |
   inputs | item_record | lane_wreckage | lease_busy | left_live_descendants | malformed_turn | precondition | provider_400 | quorum |
   ratelimit |
@@ -258,6 +258,10 @@ publication guards, and crash recovery.
   unresolved_model`, plus `unknown` as the harvest-time default when nothing matches —
   plus `attempts`. Read the class, not the prose. `cancelled` (a `stop`, or a fan-out
   straggler at quorum) is never a failure: the run reads `stopped`, and a `wait` re-drives it.
+  `budget_exhausted` (est-3acn): a RunBudget cap (graph-root or node `budget:{tokens:N}`; tokens-only —
+  USD is excluded per the repo cost-trust law, issue #124) refused the spawn BEFORE submit, logged as
+  `dispatch.refused` and never billing (zero attempts); the runner closes the run gracefully as
+  `partial` and `budget_ledger.json` names the never-launched nodes. Terminal: outside every retry ladder.
   `seat_wait` (est-g2xx): no global agent seat (`WORKFLOW_MAX_SEATS`) freed within the node wall — the spawn never happened.
   `seat_unsupported` (est-g255): the semaphore was full and the host exposes no process-ancestry
   channel (neither `/proc` nor `ps`), so a nested runner cannot prove which held seat is its own

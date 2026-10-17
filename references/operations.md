@@ -165,3 +165,25 @@ pool state. Operators change a live pool's cap by removing `<seats>/.cap` while
 the pool is idle (the next first acquirer re-seeds it). A corrupt `.cap` is
 re-seeded, never trusted, never fatal; an unwritable pool degrades to each
 caller arbitrating its own seed.
+
+## RunBudget: tokens-only run caps (est-3acn)
+
+`budget: {"tokens": N}` caps provider-metered tokens — at the graph root (whole run;
+door-baked into run.json `meta.budget` at submit, does not ride amends) and/or per node.
+USD is deliberately NOT a key: an author who writes `budget.usd` is REFUSED at admission,
+never ignored (the repo cost-trust law, issue #124 — estimated dollars are not a cap
+surface). Enforcement is PRE-DISPATCH at the run_child seam beside the route-substitution
+hold: spend comes from the same `child_metrics` join the read model shows (in+out+
+cache_read+reasoning, summed per lane across attempts), NEVER estimated post-hoc. The law
+is `spent + est_next >= cap` refuses, where est_next is the measured per-attempt mean
+(node lanes first, run mean as fallback, floor 0 with no history — a cap never blocks the
+first attempt). A refusal emits `dispatch.refused {node, index?, scope, cap, spent,
+needed, error_class: budget_exhausted}` and bills ZERO attempts (the seat is never
+touched); the class is terminal — outside every retry/fallback whitelist. A capped fan-out
+commits `partial` WITH its surviving harvest (or `failed` on zero harvest, same class).
+At the wave boundary the runner writes `budget_ledger.json` (`exhausted_nodes`,
+`never_launched`), finalizes `run.partial`, and exits verdict `budget_exhausted`;
+`run_state`/`status` then read `status: partial` with the derived `budget` view
+(`cap_tokens`, `spent_tokens`, `per_node`, ledger fields) — terminal, `next: []`.
+Raising a cap is an amend: `budget` is policy, excluded from the node efp (same law as
+`run_budget`), so committed nodes stay frozen and replay-skip holds.

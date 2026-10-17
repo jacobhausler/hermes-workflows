@@ -15,7 +15,12 @@ def jload(p, default=None):
     except Exception:
         return default
 
-_BUDGET_KEYS = ("max_turns", "timeout", "run_budget", "shape")
+# est-3acn: `budget` (the RunBudget token cap) is budget policy, not committed
+# work — exactly like its wall-seconds sibling run_budget: raising a cap must
+# NEVER un-freeze committed nodes (that would re-drive finished work to buy
+# headroom the author already paid for). Nodes without the key hash
+# byte-identically (no legacy drift, same law as every budget key).
+_BUDGET_KEYS = ("max_turns", "timeout", "run_budget", "shape", "budget")
 # #100: scheduling limits are policy, not a change to committed node work.
 _CONCURRENCY_KEYS = ("concurrency", "item_concurrency")
 # #24/#25 (A3): route POLICY (require_route) and the door's proof ANNOTATION
@@ -739,6 +744,11 @@ ID_OK = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 # graph it baked itself. `reasoning` is validated per node (Q5).
 AGENT_KEYS = {"id", "type", "after", "goal", "context", "schema", "model", "provider", "toolsets",
               "max_turns", "timeout", "run_budget", "inputs", "fanout", "reasoning",
+              # est-3acn: per-node RunBudget — budget:{"tokens": N}, a token cap
+              # checked pre-dispatch at the child_metrics join seam. Distinct
+              # currency from run_budget (wall-seconds); USD excluded per the
+              # repo cost-trust law (issue #124 scope decision 2026-10-14).
+              "budget",
               "tier", "shape", "repo", "bead_close",
               # #24/#25: fail-closed pinned routes. Default TRUE for nodes
               # that pin an explicit model — a submit ping that AFFIRMATIVELY proves
@@ -1176,6 +1186,29 @@ def reasoning_levels():
               "fallback literal (keep it in sync with core).", file=sys.stderr)
     return allowed
 
+def budget_shape_errors(b, where):
+    """est-3acn RunBudget shape — `budget:{"tokens": N}` and nothing else, at the
+    graph root and on agent nodes alike. USD is deliberately NOT a key: the cap
+    is tokens-only per the repo cost-trust law (issue #124 scope decision
+    2026-10-14) — an author who writes budget.usd is REFUSED, never ignored
+    (a silently dropped cap key is a cap the author believes is on)."""
+    errs = []
+    if not isinstance(b, dict):
+        return [f"budget at {where} must be an object like {{\"tokens\": 200000}}"]
+    for k in sorted(set(b) - {"tokens"}):
+        errs.append(f"budget.{k} at {where} unknown; RunBudget is a tokens-only cap "
+                    f"(USD is excluded per the repo cost-trust law)")
+    if "tokens" not in b:
+        if not errs:
+            # an unknown key (the usd shape) already names the tokens-only law —
+            # stacking a second complaint over it is noise on the SAME defect.
+            errs.append(f"budget at {where} must carry a positive integer tokens cap")
+    elif type(b["tokens"]) is not int or b["tokens"] <= 0:
+        errs.append(f"budget.tokens at {where} must be a positive integer "
+                    f"(got {b['tokens']!r})")
+    return errs
+
+
 def validate_graph_errors(nodes, *, admission=False):
     """Return a LIST of {node, field, msg} — EVERY defect, not the first. Strict ids:
     node ids double as filenames.
@@ -1490,6 +1523,10 @@ def validate_graph_errors(nodes, *, admission=False):
                 # fb-validator-duo (2026-09-26): value AND cap in every numeric-bound
                 # rejection; the parenthetical is kept for substring-matchers.
                 E(nid, k, f"{k} {v!r} exceeds cap {hi} (must be a number in (0, {hi}])")
+        if n.get("budget") is not None:
+            # est-3acn: per-node RunBudget — tokens-only, positive integer.
+            for m_ in budget_shape_errors(n["budget"], f"node {nid}"):
+                E(nid, "budget", m_)
         if n.get("reasoning") is not None:
             lv = n["reasoning"]
             if lv not in reasoning_levels():
@@ -2001,6 +2038,12 @@ def admission_ledger_errors(graph, run_dir=None):
 STRUCTURAL_GRAPH_KEYS = {"name", "nodes", "description", "defaults", "model_policy",
                          "provenance", "grammar", "include",
                          "concurrency", "item_concurrency",  # #100: optional run-level limits
+                         # est-3acn: RunBudget — an optional run-wide token cap
+                         # ({"tokens": N}); enforced pre-dispatch, graceful
+                         # budget_exhausted partial. USD is deliberately NOT a
+                         # key: token-only per the repo cost-trust law
+                         # (issue #124 scope decision 2026-10-14).
+                         "budget",
                          # est-2ek.1.856 deep review D2: the advertised per-run
                          # seat-cap opt-out ("graph max_seats: 0") is a REAL key —
                          # accepted here, validated by value below, baked into
@@ -2190,6 +2233,11 @@ def structural_graph_errors(graph, extra_keys=()):
     for key in ("concurrency", "item_concurrency"):
         if key in graph and (type(graph[key]) is not int or graph[key] <= 0):
             E(key, f"{key} must be a positive integer")
+    # est-3acn: run-wide RunBudget — graph-root budget:{"tokens": N}, validated
+    # beside the #100 limits; the door bakes it into run.json meta at submit.
+    if graph.get("budget") is not None:
+        for m_ in budget_shape_errors(graph["budget"], "graph root"):
+            E("budget", m_)
     # est-2ek.1.856 deep review D2: the advertised per-run seat-cap opt-out is
     # measured by the SAME law as the operator knobs — one integer inside
     # [SEAT_CAP_FLOOR, SEAT_CAP_CEILING] or the explicit 0 off-sentinel; bool is
@@ -4492,11 +4540,24 @@ def execution_clocks(n, view, waits, now_s, ledger=(), ledger_available=True):
             "task_total_ceiling": "not_enforced"}
 
 
+BUDGET_TOKEN_COUNTERS = ("tokens_in", "tokens_out", "cache_read", "reasoning")
+
+def budget_tokens(m):
+    """est-3acn: the RunBudget counter — every provider-metered token column
+    state.db exposes (in/out/cache_read/reasoning), summed. One definition for
+    the pre-dispatch check and the read view; honest absence reads zero."""
+    try:
+        return sum(int(m.get(k) or 0) for k in BUDGET_TOKEN_COUNTERS)
+    except (TypeError, ValueError):
+        return 0
+
 def run_state(r, *, telemetry=True, lock_state=None):
     """Derived truth of a run dir: status, per-node status, held gate meta.
-    status: pending|running|interrupted|held|done|failed|stopped.
+    status: pending|running|interrupted|held|done|partial|failed|stopped.
     'interrupted' has unfinished work but NO verified runner; only wait/release/amend
-    explicitly resume it. A later amend demotes a stopped run to interrupted."""
+    explicitly resume it. A later amend demotes a stopped run to interrupted.
+    'partial' (est-3acn) is a RunBudget-capped run that finalized gracefully:
+    every committed output is preserved, the ledger names what never launched."""
     stored_graph = jload(r / "graph.json")
     if not stored_graph or not stored_graph.get("nodes"):
         return None
@@ -4575,6 +4636,10 @@ def run_state(r, *, telemetry=True, lock_state=None):
     held = None
     if (last or {}).get("event") == "run.stopped":
         status = "stopped"
+    elif (last or {}).get("event") == "run.partial":
+        # est-3acn: a RunBudget-capped run that finalized gracefully (the event
+        # is the fact; the runner_exit verdict below outranks it when present).
+        status = "partial"
     elif any(s == "failed" for s in states.values()):
         status = "failed"
     elif all(s in ("done", "partial", "skipped") for s in states.values()):   # #4: partial closes the run
@@ -4639,6 +4704,11 @@ def run_state(r, *, telemetry=True, lock_state=None):
         status = "done"
     elif verdict == "stopped":
         status = "stopped"
+    elif verdict == "budget_exhausted":
+        # est-3acn: the runner's own capped-out verdict — a graceful partial
+        # regardless of which node died the cap (failed and partial node records
+        # both stand as committed; the run is terminal, not blocked).
+        status = "partial"
     elif verdict.startswith("blocked by failed"):
         status = "failed"
     if verdict.startswith("crashed:") and (status == "interrupted" or stored_graph.get("on_exit")):
@@ -4711,28 +4781,74 @@ def run_state(r, *, telemetry=True, lock_state=None):
                       "basis": "observed child-seconds; sum across nodes, items and attempts, not elapsed wall time",
                       "observed_work_s": sum(v["clocks"]["work"]["observed_s"] for v in nodes.values()),
                       "unknown_intervals": sum(unknown_counts) if all(x is not None for x in unknown_counts) else None}
-    return {"run_id": r.name, "name": graph.get("name"), "status": status, "accounting": accounting,
-            "failed_nodes": failed_nodes,
-            "held_gate": held, "nodes": nodes, "graph": stored_graph,
-            # 91b9a3de companion: publish the ONE liveness read this state was
-            # derived from — a second runner_alive() call a few microseconds
-            # later can flip across a dying runner's kernel-released flock, and
-            # status vs a re-probed alive disagreeing sent act_wait spinning a
-            # respawn it then abandoned (the R6 regression shape). Consumers
-            # that need liveness use THIS field.
-            "runner_live": live,
-            # #44: the ONE lock observation this state was derived from, published
-            # so the door never re-probes (wedged = Errno 11 + kernel ledger proves
-            # zero holders + lease dead — the recoverable wedge; see runner_alive).
-            "runner_lock": _lock_state[0],
-            **({"runner_lock_detail": {k: v for k, v in _lock_state[1].items()
-                                       if k != "probe"}}
-               if _lock_state[0] in ("wedged", "eacces") else {}),
-            "runner_exit": exit_state,
-            "started": (jload(r / "run.json", {}) or {}).get("started"),
-            "owner": (jload(r / "run.json", {}) or {}).get("owner"),
-            "done": sum(1 for s in states.values() if s in ("done", "skipped", "partial")),   # #4: a harvest counts done
-            "skipped": sum(1 for s in states.values() if s == "skipped"), "total": len(graph["nodes"])}
+    out = {"run_id": r.name, "name": graph.get("name"), "status": status, "accounting": accounting,
+           "failed_nodes": failed_nodes,
+           "held_gate": held, "nodes": nodes, "graph": stored_graph,
+           # 91b9a3de companion: publish the ONE liveness read this state was
+           # derived from — a second runner_alive() call a few microseconds
+           # later can flip across a dying runner's kernel-released flock, and
+           # status vs a re-probed alive disagreeing sent act_wait spinning a
+           # respawn it then abandoned (the R6 regression shape). Consumers
+           # that need liveness use THIS field.
+           "runner_live": live,
+           # #44: the ONE lock observation this state was derived from, published
+           # so the door never re-probes (wedged = Errno 11 + kernel ledger proves
+           # zero holders + lease dead — the recoverable wedge; see runner_alive).
+           "runner_lock": _lock_state[0],
+           **({"runner_lock_detail": {k: v for k, v in _lock_state[1].items()
+                                      if k != "probe"}}
+              if _lock_state[0] in ("wedged", "eacces") else {}),
+           "runner_exit": exit_state,
+           "started": (jload(r / "run.json", {}) or {}).get("started"),
+           "owner": (jload(r / "run.json", {}) or {}).get("owner"),
+           "done": sum(1 for s in states.values() if s in ("done", "skipped", "partial")),   # #4: a harvest counts done
+           "skipped": sum(1 for s in states.values() if s == "skipped"), "total": len(graph["nodes"])}
+    # est-3acn: RunBudget read view — spent-vs-cap accounting derived here from
+    # the SAME child_metrics join the runner enforces against (derive-not-stored,
+    # same law as failed_nodes). Honest absence: no caps on this run => no keys
+    # at all, the payload is byte-identical to a pre-budget build's.
+    _run_meta = jload(r / "run.json", {}) or {}
+    _cap_run = (_run_meta.get("budget") or {}).get("tokens") \
+        if isinstance(_run_meta.get("budget"), dict) else None
+    _node_caps = {n["id"]: (n.get("budget") or {}).get("tokens")
+                  for n in stored_graph["nodes"]
+                  if isinstance(n.get("budget"), dict) and (n.get("budget") or {}).get("tokens")}
+    if _cap_run is not None or _node_caps:
+        rows_by_home = {}
+        for n in stored_graph["nodes"]:
+            _h = str((recs.get(n["id"]) or {}).get("profile_home") or hermes_home())
+            if _h not in rows_by_home:
+                try:
+                    rows_by_home[_h] = child_metrics(r.name, _h)
+                except Exception:
+                    rows_by_home[_h] = {}
+        per_node = {}
+        seen_skeys = set()
+        for n in stored_graph["nodes"]:
+            nid = n["id"]
+            _h = str((recs.get(nid) or {}).get("profile_home") or hermes_home())
+            pref = f"wf:{r.name}:{nid}"
+            spent = sum(budget_tokens(m) for k, m in rows_by_home.get(_h, {}).items()
+                        if (k == pref or k.startswith(pref + ":")) and k not in seen_skeys)
+            seen_skeys |= {k for k in rows_by_home.get(_h, {})
+                           if k == pref or k.startswith(pref + ":")}
+            row = {"spent_tokens": spent}
+            if _node_caps.get(nid):
+                row["cap_tokens"] = _node_caps[nid]
+            if spent or _node_caps.get(nid):
+                per_node[nid] = row
+        led = jload(r / "budget_ledger.json", {}) or {}
+        view = {"cap_tokens": _cap_run, "per_node": per_node,
+                "spent_tokens": sum(budget_tokens(m) for home_rows in rows_by_home.values()
+                                    for m in home_rows.values())}
+        if led.get("cause") == "budget_exhausted":
+            view["exhausted_nodes"] = led.get("exhausted_nodes")
+            view["never_launched"] = led.get("never_launched")
+            view["at"] = led.get("at")
+            if status == "partial":
+                out["error"] = "budget_exhausted"
+        out["budget"] = view
+    return out
 
 # ---------- O2: the ONE node-truth read (1.1) ----------
 # Closed key set read verbatim from nodes/<id>[.<i>].json. Two readers (dashboard
