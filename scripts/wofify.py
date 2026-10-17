@@ -102,7 +102,7 @@ def classify(repo: Path) -> list:
                       "path": str(skill_md.relative_to(repo)),
                       "summary": _summary(skill_md),
                       "phases": _phases(skill_md), "calls": _calls(skill_md)})
-    for sub in (repo / "skills").glob("*/playbooks/*.md") if (repo / "skills").is_dir() else []:
+    for sub in sorted((repo / "skills").glob("*/playbooks/*.md")) if (repo / "skills").is_dir() else []:
         units.append({"id": f"{sub.parent.parent.name}-{sub.stem}", "kind": "playbook",
                       "path": str(sub.relative_to(repo)), "summary": _summary(sub),
                       "phases": _phases(sub), "calls": _calls(sub)})
@@ -235,6 +235,9 @@ def shelf_lines(pack_dir: Path, skills_dir: str) -> list:
     problems = []
     for unit in units:
         uid = unit.get("id", "<missing-id>")
+        if not _ID_SAFE.match(str(uid)):
+            problems.append(f"{uid!r}: id fails the safe-id grammar (no shell interpolation of it)")
+            continue
         disp = unit.get("disposition", "skip")
         artifact = unit.get("artifact")
         if disp == "skip":
