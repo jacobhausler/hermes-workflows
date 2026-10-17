@@ -74,11 +74,20 @@ for shape in ([{"a": 1}], [123], {"web": "x"}, 5, [["terminal"]]):
     check(f"(2) door rejects toolsets={shape!r} naming node+key",
           "error" in blob and "toolsets" in blob and "a" in blob, err[:160])
 
-for good in (["terminal"], "terminal", ["web", "files"], []):
+for good in (["terminal"], "terminal", ["web", "files"]):
     err, blob = run_err({"nodes": [{"id": "a", "type": "agent", "goal": "g",
                                     "toolsets": good}]})
     check(f"(2) door ACCEPTS toolsets={good!r} (shape honored)", "error" not in blob,
           err[:160])
+
+# issue #427: `[]` was BLESSED as honored here pre-#427; an empty selection
+# cannot be carried at -t (empty collapses to config defaults, omission
+# broadens), so the door now REFUSES it at graph load. See test file
+# tests/test_toolsets_empty_427.py for the full contract.
+err, blob = run_err({"nodes": [{"id": "a", "type": "agent", "goal": "g",
+                                "toolsets": []}]})
+check("(2b) door REFUSES toolsets=[] (issue #427: empty selection broadens)",
+      "error" in blob and "EMPTY" in blob and '"a"' in blob, err[:200])
 
 # ---- (3) honored end-to-end: toolsets:["terminal"] spawns with -t terminal,
 # ---- NOT a crash, exactly as an author expects (the est-flah law intact) ----

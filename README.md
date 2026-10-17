@@ -55,11 +55,12 @@ One tool, action-routed — the complete surface, with the flags that matter:
 | `wait` | The resume-and-watch verb: the only read action that respawns an idle runner; blocks to the next boundary (default 600 s, ceiling 1800 s), self-yielding before the host's tool deadline with a "call wait again" note. |
 | `release` | Answer a held human gate (`gate_id`, `answer`); respawns the runner when idle. A human release pre-empts a machine `wait` park. |
 | `release_lock` | Operator escape hatch for a wedged `runner.lock`: renames the stranded inode aside under the admission heal-barrier and hands the lane a fresh lock path. REFUSES unless zero live holders are proven (kernel ledger + dead lease) — never heals on EACCES or a live holder. |
-| `steer` | Queue steering text for a running node (refused on gates and terminal nodes; delivery is cooperative via the child's `inbox` pull — never a mid-prompt injection). |
+| `steer` | Queue steering text for a running node (refused on gates and terminal nodes; delivery is cooperative via the child's `inbox` pull — never a mid-prompt injection). `cmd:"kill"` (with `node`) is the lane-kill form, identical to `kill`; it never queues text. |
 | `inbox` | Child-side pull of steering lines baked for this spawn — exactly-once per spawn. Parent-side `kind:"submissions"` lists `submit` items newest-first. |
 | `amend` | Replace the graph mid-run with the whole new graph (`dry_run:true` previews `will_rerun` without writing). Fingerprint-valid unchanged nodes replay-skip. |
 | `diff` | Confirm an amend before applying it: the amend door with `dry_run` FORCED — accepts `patch` or a full graph and returns the preview plus a unified `graph_diff`; touches nothing. |
 | `stop` | Request a stop at the next boundary; in-flight children are killed; stop ≠ failure — cancelled work re-drives on resume, and a `lane_key` is freed for the next dispatch. |
+| `kill` | Node-targeted lane kill (`run_id` + `node`): SIGKILLs that node's in-flight children and finishes the node `failed` with `error_class=killed`. Siblings and the run keep going (no `stop.request`). The kill marker stays for the run — a killed lane stays killed. |
 | `list` | All runs (capped page + full-census counts, per-run provenance rollup when present). |
 | `save` | Shelve a graph in the library under a name (overwrite = current best): `description`, `tags` (1–10, flat or `facet:value`; reuse `library`'s `tag_vocab` verbatim), optional `source` attribution writes provenance (owner, digest, timestamp) — attribution, never access control. |
 | `submit` | Quarantine a hand-rolled graph the library didn't cover for human-gated study — requires a `why_not_library` receipt (≥80 chars); never joins the library. |

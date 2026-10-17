@@ -174,7 +174,17 @@ class Experience(unittest.TestCase):
                 self.assertIn("does not authorize choosing an answer or additional work", text)
             for mandate in ("must land", "must be dispatched", "apply ONE", "wakes this session", "FAILED run", "PRs"):
                 self.assertNotIn(mandate, text)
-        self.assertIsNone(wf._wake_owner_text("research-only", "unknown"))
+        # est-jbcrw fix 3 inverted the unmapped-class contract: a class gap wakes
+        # on the catch-all body instead of skipping silent (silent skip was the
+        # dead-landing class). The P01 law still stands: the catch-all body must
+        # be fact-only — no authority, no mandate vocabulary.
+        catchall = wf._wake_owner_text("research-only", "unknown")
+        self.assertIsNotNone(catchall, "unmapped class must wake, never silent-skip")
+        self.assertIn('event=' + json.dumps("unknown"), catchall)
+        self.assertIn("wake-router class gap", catchall)
+        self.assertIn("does not authorize", catchall)
+        for mandate in ("must land", "must be dispatched", "apply ONE", "wakes this session", "FAILED run", "PRs"):
+            self.assertNotIn(mandate, catchall)
 
 
 if __name__ == "__main__":

@@ -82,7 +82,17 @@ INCLUDE_FILES = (
     "card_ledger.py",  # imported by __init__.py at bind time (hook-led card ledger)
     "gate_index.py",  # PR-3: imported by __init__.py at bind time
     "docs/admission-gates.md",
+    "orphan_watch.py",  # PR-4: imported by __init__.py at bind time — a packaged plugin without it dies at import
     "card_enforcement.py",  # #157: imported by __init__.py at bind time — a packaged plugin without it dies at import
+    # P1 (PR #432): wf.py spec-loads this by file path (_outbound_bridge) — absent from the ZIP, a
+    # packaged install silently loses the outbound bridge (bridge resolves None) and the shipped
+    # tests/test_hooks_outbound_bridge.py (tests glob) crashes at the unpacked root: the exact
+    # est-4vnq finding-4 shape. Stdlib-only, so the ZIP side stays honest.
+    "hooks_outbound.py",
+    # P3 (est-w86l0 lane, #430): __init__.py spec-loads this by file path when the
+    # `subagent_accounting` token is allowed — absent from the ZIP the module simply
+    # fails to load and the lane dies silently (est-4vnq finding-4 pack law).
+    "subagent_accounting.py",
     "dashboard/manifest.json",
     "dashboard/index.js",  # hidden API plugin still needs the web host's script/registration contract
     "dashboard/plugin_api.py",
@@ -103,6 +113,7 @@ INCLUDE_FILES = (
     "library/general/test-first-feature-slice.json",
     "library/general/fan-out-audit-census.json",
     "library/general/report-and-verify.json",
+    "docs/orphan-held.md",
     "examples/basics/approve-publish.json",
     "examples/review/blind-council.workflow.json",
     "examples/basics/branch-on-verdict.json",
@@ -127,6 +138,10 @@ INCLUDE_FILES = (
     "scripts/diagram_readme.py",
     "scripts/pack.py",
     "scripts/pr_tag_audit.py",  # est-4vnq: tests/test_pr_tag_audit.py executes it; the shipped suite must not die on a missing helper
+    # est-zee7e: tests/test_pin_delta_check_133387.py (shipped via the
+    # tests/test_*.py glob) exec-modules this at import from the package root —
+    # the est-4vnq finding-4 shape; the gate script ships beside its test.
+    "scripts/pin_delta_check.py",
     # est-5p7x (PR #165 CI blocker, run 37440782151): tests/test_diagram_law.py
     # (shipped via the tests/test_*.py glob) subprocess-executes BOTH generators
     # from the package root — the exact est-4vnq finding-4 shape. The merge ref
@@ -144,6 +159,8 @@ INCLUDE_FILES = (
     "scripts/suite.py",
     ".graphifyignore",
     "tests/fake",
+    # B1 and its gitpin snapshot this fixture before generating the child copy.
+    "tests/fake-b1",
     "tests/fake_hermes.py",
     "tests/wf_test_isolation.py",
     "tests/wf_test_markers.py",  # est-jue3: shared parseable-content marker waits, imported by the shipped tests (est-4vnq finding-4 shape: an unshipped helper kills the suite)
@@ -163,7 +180,7 @@ INCLUDE_FILES = (
 )
 INCLUDE_PATTERNS = ("tests/test_*.py", "tests/test_*.mjs", "references/*.md",
                     "tests/fixtures/dialect/*")   # #33: the corpus test_dialect_js_33 asserts against
-EXECUTABLE_FILES = {"scripts/pack.py", "tests/fake"}
+EXECUTABLE_FILES = {"scripts/pack.py", "tests/fake", "tests/fake-b1"}
 # Checkout-only tests stay in repository CI, not the release's test glob.
 SOURCE_ONLY_TESTS = {
     "tests/test_diagram_law.py": "needs diagrams/README.md and the source-only renderer",

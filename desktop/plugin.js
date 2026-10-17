@@ -669,6 +669,14 @@ const $railOpen = atom(null)
 // atom instrumentation); component bodies live beside the models below.
 // (test_register_surface locks the 'session-strip' registration.)
 export const $trayOpen = atom(null)
+// est-z717 SETTINGS GATE: the live-run tray is OPTIONAL until the native tray
+// SDK area lands (NousResearch/hermes-agent#133724). Tri-state atom:
+// null = not yet answered (renders HIDDEN — default OFF), true/false = the
+// answer of GET /settings (the door's owner_settings shape, plugins.entries.
+// hermes-workflows.settings.tray). In-memory plugin atom — never localStorage.
+// The PillRail is UNTOUCHED by this gate: it stays the always-on surface.
+// When #133724 lands, default-on rides that mount (one line in register()).
+export const $trayGate = atom(null)
 
 /** Pure pill-toggle (exported so node can test the transition table without a
  *  DOM): null → open {sid, runId}; clicking the OPEN pill (same sid AND same
@@ -696,6 +704,19 @@ export function ownedRuns(runs, sid, uiSid = '') {
   if (!sid && !uiSid) return []
   return (runs || []).filter(r =>
     (sid && r?.owner?.session_id === sid) || (uiSid && r?.owner?.ui_session_id === uiSid))
+}
+
+/** Feature-detected composer mount for the session strip (#230 item 0):
+ *  tray ?? underside ?? top. COMPOSER_AREAS is an SDK const map — a key EXISTS
+ *  ONLY on cores that mount that area, so a missing key reads undefined and ??
+ *  falls through: exactly one mount, never two. `composer.tray` is the tray
+ *  accumulation slot (subagents / background scripts / task lists — core's
+ *  ComposerStatusStack, internal as of hermes-agent@8b66a51036); the upstream
+ *  SDK-surface ask is filed (esc key wf230-composer-tray-area, issue #230), so
+ *  the day core exposes it the strip rides the real tray with no plugin change.
+ *  Today no shipped key is `tray` ⇒ underside (core >= v2026.7.30) ⇒ top. */
+export function sessionStripArea(composerAreas) {
+  return composerAreas?.tray ?? composerAreas?.underside ?? composerAreas?.top
 }
 
 /** Model split of one chat's runs: held first, then running by started desc,
@@ -915,10 +936,13 @@ function RailPanel({ runId }) {
 /** ---- Live-run tray (#22, design contract on issue #22) -----------------
  *  Collapsible situational tray stacked as a sibling of the native
  *  task-list/subagents/queued-messages family directly above the chat window.
- *  The pure models (trayScoping/trayModel/trayAggregateLabel/trayRecap/
- *  trayShouldShow/ackFinished/toggleTray) live HERE because test_11_ui_imports
- *  freezes plugin.js imports at exactly the three SDK sources — the scaffold
- *  mirror in desktop/src/components/runtray.mjs is design documentation only.
+ *  The pure models (trayScoping/trayRunModel/trayShouldShow/toggleTray) live
+ *  HERE because test_11_ui_imports freezes plugin.js imports at exactly the
+ *  three SDK sources — the scaffold mirror in
+ *  desktop/src/components/runtray.mjs is design documentation only.
+ *  #230 RUNNING-ONLY LAW: rows = runs whose status ∉ TERMINAL — terminal
+ *  runs LEAVE the tray (the #22 ack-away ledger and the 60 s recap were
+ *  deleted with their exports); zero rows hides the tray entirely.
  *  Mount law: SessionStrip stays the mount owner; the collapsed RunTrayRow
  *  stacks as a sibling tray row (same composer registration as PillRail).
  *  SCOPING: trayScoping keys on the owner.session_id VALUE — dispatch/cron-
@@ -942,95 +966,62 @@ export function trayScoping(runs, sid) {
   })
 }
 
-// Status → tray band (the ordering contract): held pinned top, then building,
-// then queued, then finished. 'interrupted' reads as building (the run is
-// mid-flight, waiting to be resumed); unknown statuses fall to queued.
-const TRAY_BANDS = {
-  held: 'held', running: 'building', interrupted: 'building',
-  pending: 'queued', blocked: 'queued'
-}
 const runStatusOf = r => (r && r.status) || 'pending'
-const trayBandOf = r => TRAY_BANDS[runStatusOf(r)] || (TERMINAL.has(runStatusOf(r)) ? 'finished' : 'queued')
-const TRAY_BAND_ORDER = { held: 0, building: 1, queued: 2, finished: 3 }
 
-/** The ledger the expanded tray renders: rows { id, band, status, run } —
- *  held → building → queued → finished, held pinned top. Inside a band the
- *  LIVE rows sort by started desc (newest action on top); the FINISHED band
- *  sorts by updated desc (newest activity first — the ledger reads
- *  newest-first and the ack walk enters at the newest entry). Finished rows
- *  already in the ack ledger drop out; live rows NEVER ack away (acking a
- *  live run is invisible). Pure, node-testable. */
-export function trayModel(runs, acked) {
-  const ackSet = new Set(acked || [])
-  const rows = (runs || [])
-    .filter(r => r && !(TERMINAL.has(runStatusOf(r)) && ackSet.has(r.id)))
-    .map(r => ({ id: r.id, band: trayBandOf(r), status: runStatusOf(r), run: r }))
-  rows.sort((a, b) =>
-    TRAY_BAND_ORDER[a.band] - TRAY_BAND_ORDER[b.band] ||
-    (a.band === 'finished'
-      ? parseTime(b.run.updated) - parseTime(a.run.updated)
-      : parseTime(b.run.started) - parseTime(a.run.started)))
-  return { rows }
+/** ---- #230 RUNNING-ONLY LEDGER -------------------------------------------------
+ *  The tray's ledger is the live set ONLY: rows = runs whose status ∉
+ *  TERMINAL={done,failed,stopped}. A terminal run LEAVES the tray outright —
+ *  no ack-away ledger, no 60 s recap (both superseded, deleted with their
+ *  exports). Ordering is THE SAME comparator as splitRuns: held first, then
+ *  the rest by started desc — asserted as trayRunModel order == splitRuns
+ *  active order on one shared ledger (splitRuns caps `active` at 3; the tray
+ *  lists every live run, uncapped, same comparator). Pure, node-testable. */
+export function trayRunModel(runs) {
+  const live = (runs || []).filter(r => r && !TERMINAL.has(runStatusOf(r)))
+  const held = live.filter(r => runStatusOf(r) === 'held')
+  const rest = live.filter(r => runStatusOf(r) !== 'held')
+    .sort((a, b) => parseTime(b.started) - parseTime(a.started))
+  return { rows: [...held, ...rest].map(r => ({ id: r.id, status: runStatusOf(r), run: r })) }
 }
 
-/** Collapsed-row aggregate: { total, building, held, failed, line, segments }.
- *  `line` is `N runs · X building · Y held` over the same rows trayModel
- *  renders (live + un-acked finished); segment colours read the ONE NODE_TONE
- *  table — held amber, failed red — never a forked palette. Empty ledger
- *  aggregates to 0 and never throws. */
-export function trayAggregateLabel(runs, acked) {
-  const { rows } = trayModel(runs, acked)
-  const count = band => rows.filter(r => r.band === band).length
-  const total = rows.length
-  const building = count('building')
-  const held = count('held')
-  const failed = rows.filter(r => r.status === 'failed').length
-  const segments = [
-    { key: 'runs', text: `${total} runs`, color: (NODE_TONE.pending || NODE_TONE.running).color },
-    { key: 'building', text: `${building} building`, color: NODE_TONE.running.color },
-    { key: 'held', text: `${held} held`, color: NODE_TONE.held.color }
-  ]
-  if (failed) segments.push({ key: 'failed', text: `${failed} failed`, color: NODE_TONE.failed.color })
-  return {
-    total, building, held, failed, segments,
-    line: `${total} runs · ${building} building · ${held} held`
-  }
+/** The live set as a PLAIN run array (#230 spec): the running-only ledger
+ *  (status ∉ TERMINAL) in THE SAME comparator as splitRuns — held first,
+ *  then the rest by started desc, uncapped. Terminal runs leave outright
+ *  (no ack-away ledger, no 60 s recap window — the tray never renders one). */
+export function trayLiveModel(runs) {
+  return trayRunModel(runs).rows.map(r => r.run)
 }
 
-/** The 60 s recap (queued-messages parity): once NOTHING is live, the tray
- *  row lingers `last run done · n/n nodes` for 60 s after the newest
- *  finished row, then retracts. `n/n` speaks the last run's REAL counts —
- *  absent counts read '?', never a fabricated 0/0. Returns null while any
- *  row is live (then the tray row itself shows) and for an empty ledger. */
-export function trayRecap(model, now) {
-  const rows = (model && model.rows) || []
-  if (!rows.length || rows.some(r => r.band !== 'finished')) return null
-  const last = rows[0] // already newest-updated first
-  const ended = parseTime(last.run.updated)
-  if (!ended || !(now < ended + 61_000)) return null
-  const r = last.run
-  const done = r.nodes_done != null && r.nodes_total != null ? `${r.nodes_done}/${r.nodes_total}` : '?'
-  return { line: `last run done · ${done} nodes`, runId: last.id, ended }
+export function trayRunningLabel(runs) {
+  const count = trayLiveModel(runs).length
+  return { count, line: `${count} running workflows` }
 }
 
-/** Pure visibility rule behind the 60 s retract: show while anything is
- *  live; after the last completion show while inside the recap window;
- *  otherwise hidden (zero rows = hidden). */
-export function trayShouldShow(model, now) {
-  const rows = (model && model.rows) || []
-  if (!rows.length) return false
-  if (rows.some(r => r.band !== 'finished')) return true
-  return trayRecap(model, now) != null
+/** Pure chevron transition (item 2): given the current glyph or the
+ *  expanded flag, answer the OTHER state's glyph. ▾ collapsed, ▴ expanded. */
+export function flipChevron(current) {
+  if (current === '▴') return '▾'
+  if (current === '▾') return '▴'
+  return current ? '▴' : '▾'
 }
 
-/** Ack-away ledger (finished rows only): append the id, keep the FIRST 10
- *  acks — the ledger is a cap-10 HISTORY, so once ten dismissals are on the
- *  books further acks change nothing (the tray keeps a ledger, not a
- *  firehose). Re-acking an already-acked id is a no-op. */
-export function ackFinished(acked, runId) {
-  const list = acked || []
-  if (list.includes(runId)) return list.slice(0, 10)
-  return [...list, runId].slice(0, 10)
+/** Pure visibility rule: zero rows (an empty ledger, a null ledger, a bare
+ *  {rows:[]} model, or a ledger of ONLY terminal runs — they all produce
+ *  zero rows) hides the tray entirely: the collapsed row renders nothing.
+ *  Accepts the trayRunModel model OR a plain live-set array (the
+ *  trayLiveModel shape) — both are zero when nothing lives.
+ *  est-z717 SETTINGS GATE (2nd arg): the tray renders ONLY under the owner's
+ *  explicit opt-in — `gate === true`, the answer of GET /settings (the door's
+ *  owner_setting('tray'), plugins.entries.hermes-workflows.settings.tray).
+ *  Anything else — absent, null (never fetched / backend down), false, a
+ *  truthy non-boolean — stays HIDDEN: default OFF while the native tray SDK
+ *  area (hermes-agent#133724) is unlanded; when it lands, default-on rides
+ *  that mount. (The retired #22 wall-clock parity arg is replaced here —
+ *  #230 already ignored it, there is no recap window.) */
+export function trayShouldShow(model, gate) {
+  if (gate !== true) return false
+  const rows = Array.isArray(model) ? model : ((model && model.rows) || [])
+  return !!rows.length
 }
 
 /** Pure tray/accordion transition table (exported so node can drive it
@@ -1044,83 +1035,74 @@ export function toggleTray(state, runId) {
   return { expanded: true, openRun: state.openRun === runId ? null : runId }
 }
 
-// Micro node-transition sparkline: bar heights are the run's done:total ratio
-// (the read model exposes no per-transition timeline), cadence rides the
-// number of building rows. Honest degradation, noted in the PR body.
-const traySpark = (total, building) => (total
-  ? `▁▃${'▅▇'.repeat(Math.min(2, Math.max(1, building)))}`.slice(0, 8)
-  : '▁▁▁▁▁▁▁▁')
-
-/** Collapsed affordance: ONE thicker tray row (native tray-row height) —
- *  ⌬ pulse glyph (cadence tied to node transitions: static when nothing
- *  runs, one pulse per building run), aggregate label with amber held /
- *  red failed segments from the ONE NODE_TONE table, micro sparkline, ▾/▴.
- *  Click anywhere expands (row click also clears the accordion row). */
-export function RunTrayRow({ agg, recap, pulseMs, expanded, onExpand }) {
-  const segs = recap
-    ? [{ key: 'recap', text: recap.line, color: NODE_TONE.done.color }]
-    : agg.segments
+/** Collapsed affordance (#230 items 1+2, design truth = the native collapsed
+ *  background-task tray): ONE slim single-line row `[chevron] N running
+ *  workflows` — numeral + label, muted secondary text via a CSS var, 1px
+ *  low-contrast border. The #22 shape (pulse glyph, `N runs · X building ·
+ *  Y held` segments, micro sparkline) is retired with its exports: a count of
+ *  RUNNING workflows is the whole glance, per-band colour belongs on the
+ *  expanded rows. Theme-safe: inline styles ride CSS vars only, never a
+ *  forked palette. Click / Enter / Space expands (the row click also clears
+ *  the accordion row via the owner's handler). `count` is ALWAYS the
+ *  running-only count — terminal runs are already out of the model. */
+export function RunTrayRow({ runs, count, expanded, onExpand }) {
+  // #230 spec shape: pass the scoped ledger via `runs` and the row computes
+  // its own count over the live set (never fabricates: empty reads 0). The
+  // legacy {count} call shape stays accepted (test_run_tray precedent).
+  const n = runs !== undefined ? trayRunningLabel(runs).count
+    : (Number.isFinite(count) && count > 0 ? Math.trunc(count) : 0)
+  // Chevron is the PURE transition fn's answer for the current state.
+  const chev = flipChevron(!!expanded)
   return jsxs('div', {
     role: 'button',
     tabIndex: 0,
-    title: recap ? 'Most recently finished run' : 'Toggle the live-run tray',
+    title: 'Toggle the running-workflow tray',
     onClick: e => { e?.stopPropagation?.(); onExpand?.() },
     onKeyDown: e => {
       if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); onExpand?.() }
     },
     style: {
       display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer',
-      fontSize: '0.6875rem', padding: '3px 8px', borderRadius: 8,
-      // State rule: gate-held reads amber, failed reads red, calm reads the
-      // running/pending stroke — all from the ONE NODE_TONE table.
-      border: `1px solid ${recap
-        ? NODE_TONE.done.borderColor
-        : agg.failed
-          ? NODE_TONE.failed.borderColor
-          : agg.held
-            ? NODE_TONE.held.borderColor
-            : NODE_TONE.running.borderColor}`,
+      fontSize: '0.6875rem', lineHeight: '1.2', padding: '3px 8px', borderRadius: 8,
+      // Slim + quiet: one low-contrast hairline, muted secondary text — the
+      // row is an affordance, not an alert (CSS vars only, theme-safe).
+      color: 'var(--ui-text-secondary)',
+      border: '1px solid var(--ui-stroke-secondary)',
       background: 'var(--ui-sidebar-surface-background, var(--card))'
     },
     children: [
       jsx('span', {
-        // Pulse glyph ⌬ — cadence tied to node transitions (pulseMs rides
-        // NODE_TONE.running's 900ms beat while runs move; static when calm).
-        style: {
-          color: (NODE_TONE.running || NODE_TONE.pending).color,
-          animation: pulseMs > 0 ? `wf-breathe ${pulseMs}ms ease-in-out infinite` : undefined
-        },
-        children: '⌬'
-      }, 'pulse'),
-      jsx('span', {
-        style: { display: 'inline-flex', alignItems: 'center', gap: 4 },
-        children: segs.flatMap((s, i) => (i
-          ? [jsx('span', { style: { opacity: 0.5 }, children: '·' }, `sep-${s.key}`),
-             jsx('span', { style: { color: s.color }, children: s.text }, s.key)]
-          : [jsx('span', { style: { color: s.color }, children: s.text }, s.key)]))
-      }, 'agg'),
-      jsx('span', {
         'aria-hidden': true,
-        style: { marginLeft: 'auto', color: 'var(--ui-text-tertiary)', letterSpacing: 1 },
-        children: traySpark(agg.total, agg.building)
-      }, 'spark'),
-      jsx('span', { style: { opacity: 0.7 }, children: expanded ? '▴' : '▾' }, 'chev')
+        style: { color: 'var(--ui-text-tertiary)' },
+        children: chev
+      }, 'chev'),
+      jsx('span', {
+        style: { fontVariantNumeric: 'tabular-nums' },
+        children: `${n} running workflows`
+      }, 'label')
     ]
   }, 'tray-row')
 }
 
 function trayElapsed(r) {
+  // Wall-clock elapsed since the run started (useTick re-renders the live
+  // tray every second, so the figure ages honestly; 'updated' is a node
+  // commit time, not "now" — a held run's elapsed must keep counting).
   const start = parseTime(r.started)
-  const end = parseTime(r.updated)
-  return start && end > start ? fmtDur(end - start) : ''
+  return start ? fmtDur(Math.max(0, Date.now() - start)) : ''
 }
+
+const trayBarPct = r => (r?.nodes_done != null && r?.nodes_total != null && r.nodes_total > 0)
+  ? `${Math.floor((r.nodes_done / r.nodes_total) * 100)}%` : '0%'
 
 /** Per-run chip (design row anatomy). lane_key and token totals have NO
  *  read-model surface today (the door's lane ledger and per-run token rollup
  *  are not exposed on /runs): the chips render ONLY when the run record
  *  carries the field — an absent fact is never fabricated (the rail's '?'
- *  law). The current-node label derives from the nodes map when present. */
-export function RunTrayRunRow({ run, band, open, onToggleRow, onOpenPane, onAck }) {
+ *  law). The current-node label derives from the nodes map when present.
+ *  #230: rows are RUNNING-ONLY — no finished band, no ack × (terminal runs
+ *  leave the tray; there is nothing to dismiss). */
+export function RunTrayRunRow({ run, open, onToggleRow, onOpenPane }) {
   const r = run || {}
   const tone = NODE_TONE[runStatusOf(r)] || NODE_TONE.pending
   const nodes = r.nodes || null
@@ -1130,13 +1112,16 @@ export function RunTrayRunRow({ run, band, open, onToggleRow, onOpenPane, onAck 
   const ti = r.tokens_in, to = r.tokens_out
   const gate = r.status === 'held' && r.held_gate ? r.held_gate : null
   // div (never <button>): GateActions carries SDK Buttons (F6 law).
+  // Key 'rr-<id>' rides the ROOT div (the RunTray call-site keys the
+  // component element 'rrc-<id>'): the acceptance spec locates the clickable
+  // thick row by key and calls its onClick directly.
   return jsxs('div', {
     style: {
       display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.6875rem',
       padding: '3px 8px', cursor: 'pointer', borderRadius: 6,
-      // Design state rule: a failed row reads RED until acked (the × below
-      // is the ack); every other band reads its NODE_TONE border.
-      border: `1px solid ${r.status === 'failed' ? NODE_TONE.failed.borderColor : tone.borderColor}`
+      // Every row reads its own NODE_TONE border — the colour lives HERE,
+      // not on the slim collapsed row.
+      border: `1px solid ${tone.borderColor}`
     },
     onClick: e => { e?.stopPropagation?.(); onToggleRow?.(r.id) },
     children: [
@@ -1145,7 +1130,12 @@ export function RunTrayRunRow({ run, band, open, onToggleRow, onOpenPane, onAck 
       r.lane_key ? jsx('span', { style: { opacity: 0.7 }, children: r.lane_key }, 'lane') : null,
       // Node dots are MiniGraph's visual language at row density; the x/y
       // count rides the read model's counts, '?' when absent — never 0/N.
+      // The mini bar (key 'bar') beside it SPEAKS the ratio as its width.
       jsx('span', { style: { fontVariantNumeric: 'tabular-nums', opacity: 0.8 }, children: pillProgress(r) }, 'xy'),
+      jsx('span', {
+        'aria-hidden': true,
+        style: { width: trayBarPct(r), minWidth: 24, height: 4, borderRadius: 2, background: tone.color, opacity: 0.6 }
+      }, 'bar'),
       current ? jsx('span', { style: { opacity: 0.7 }, children: `→ ${current}` }, 'current') : null,
       trayElapsed(r) ? jsx('span', { style: { opacity: 0.6 }, children: trayElapsed(r) }, 'elapsed') : null,
       (ti != null || to != null)
@@ -1162,17 +1152,9 @@ export function RunTrayRunRow({ run, band, open, onToggleRow, onOpenPane, onAck 
         style: { cursor: 'pointer', background: 'none', border: 'none', padding: '0 2px', fontSize: '0.6875rem' },
         onClick: e => { e?.stopPropagation?.(); onOpenPane?.(r.id) },
         children: 'open ↗'
-      }, 'open'),
-      band === 'finished'
-        ? jsx('button', {
-            type: 'button', title: 'Dismiss from the tray ledger',
-            style: { cursor: 'pointer', background: 'none', border: 'none', padding: '0 2px', fontSize: '0.6875rem' },
-            onClick: e => { e?.stopPropagation?.(); onAck?.(r.id) },
-            children: '×'
-          }, 'ack')
-        : null
+      }, 'open')
     ]
-  }, r.id)
+  }, `rr-${r.id}`)
 }
 
 /** Accordion body: the SHARED MiniGraph (#28 visual language, same
@@ -1193,23 +1175,27 @@ function TrayPanel({ runId }) {
 }
 
 /** The tray family root — collapsed RunTrayRow + drop-down RunTrayRunRow
- *  list (max ~40% viewport, internal scroll). Zero owned runs renders
- *  nothing; the last completion lingers 60 s as the recap row then retracts
- *  (trayShouldShow). Hooks run UNCONDITIONALLY (the parent SessionStrip
- *  owns the hook order; this component's hooks never sit behind a return).
- *  The collapse affordances ride SessionStrip's wiring (Esc onKeyDown,
- *  click-away via trayRef); row handlers stopPropagation so tray clicks
- *  never look like click-away. */
-export function RunTray({ runs, sid, trayOpen, acked, trayRef, onToggleHeader, onToggleRow, onOpenPane, onAck }) {
-  const scoped = trayScoping(runs, sid)
-  const model = trayModel(scoped, acked)
-  const now = Date.now()
-  const show = trayShouldShow(model, now)
-  useTick(show && model.rows.some(r => r.band !== 'finished'))
+ *  list (max ~40% viewport, internal scroll). #230 RUNNING-ONLY: the ledger
+ *  is trayRunModel (status ∉ TERMINAL), so zero live rows renders NOTHING
+ *  (terminal-only ledgers included — no recap linger, no ack ledger). Hooks
+ *  run UNCONDITIONALLY (the parent SessionStrip owns the hook order; this
+ *  component's hooks never sit behind a return). The collapse affordances
+ *  ride SessionStrip's wiring (Esc onKeyDown, click-away via trayRef); row
+ *  handlers stopPropagation so tray clicks never look like click-away. */
+export function RunTray({ runs, sid, trayOpen, trayRef, onToggleHeader, onToggleRow, onOpenPane, trayEnabled }) {
+  // sid blank = the mount owner pre-scoped under the focus-degraded law
+  // (SessionStrip): trust the given live set (running-only still applies).
+  const scoped = sid
+    ? trayScoping(runs, sid)
+    : (runs || []).filter(r => r && !TERMINAL.has(runStatusOf(r)))
+  const model = trayRunModel(scoped)
+  // est-z717: the settings gate rides as a PROP from the mount owner (the
+  // $trayGate atom value resolved by SessionStrip via useValue — F2 law,
+  // never an atom .get inside a component). Default OFF: only literal true
+  // shows the tray; the PillRail below is never gated.
+  const show = trayShouldShow(model, trayEnabled)
+  useTick(show)
   if (!show) return null
-  const recap = trayRecap(model, now)
-  const live = model.rows.filter(r => r.band !== 'finished').length
-  const pulseMs = live ? (NODE_TONE.running.pulseMs || 900) : 0
   // The accordion only ever renders while the TRAY itself is expanded — a
   // stale openRun from a collapsed tray never leaks a MiniGraph into the
   // collapsed state.
@@ -1219,7 +1205,7 @@ export function RunTray({ runs, sid, trayOpen, acked, trayRef, onToggleHeader, o
     style: { display: 'flex', flexDirection: 'column', gap: 2 },
     children: [
       jsx(RunTrayRow, {
-        agg: trayAggregateLabel(scoped, acked), recap, pulseMs,
+        runs: scoped,
         expanded: !!(trayOpen && trayOpen.expanded),
         onExpand: () => onToggleHeader?.()
       }, 'row'),
@@ -1230,9 +1216,9 @@ export function RunTray({ runs, sid, trayOpen, acked, trayRef, onToggleHeader, o
               style: { display: 'flex', flexDirection: 'column', gap: 2, maxHeight: '40vh', overflowY: 'auto' },
               children: model.rows.map(r => [
                 jsx(RunTrayRunRow, {
-                  run: r.run, band: r.band, open: openRun === r.id,
-                  onToggleRow, onOpenPane, onAck
-                }, `rr-${r.id}`),
+                  run: r.run, open: openRun === r.id,
+                  onToggleRow, onOpenPane
+                }, `rrc-${r.id}`),
                 openRun === r.id ? jsx(TrayPanel, { runId: r.id }, `tp-${r.id}`) : null
               ])
             })
@@ -1258,18 +1244,29 @@ export function SessionStrip() {
   const foldOpen = useValue($stripFold)
   const railOpen = useValue($railOpen)
   const trayState = useValue($trayOpen)
-  const owned = ownedRuns(data?.runs || [], runtimeSid || '', storedSid || '')
-  const pairKey = runtimeSid || storedSid || ''
-  // Ack-away ledger for finished tray rows: in-memory per focused session
-  // (never localStorage — a reload resurrects nothing), keyed by pairKey so
-  // switching chats never inherits another chat's dismissals. Hook runs
-  // unconditionally; the set() rides this render's trayAcked (F2 prop law).
-  const [trayAckState, setTrayAckState] = useState(null)
-  const trayAcked = trayAckState && trayAckState.sid === pairKey ? trayAckState.acked : []
+  const owned0 = ownedRuns(data?.runs || [], runtimeSid || '', storedSid || '')
+  // #230 focus-degradation law: the tray accumulates by the run's OWN
+  // ownership stamp. On packaged apps / SDK shapes where neither focused-chat
+  // atom answers (both read null/blank) an owned live run would render
+  // nothing forever — fall back to the first LIVE run's own
+  // owner.session_id so the pictured density still ships. Honest absence is
+  // preserved: a blank ledger, an all-terminal ledger, or blank-owner
+  // (cron) runs still derive nothing and the strip stays hidden.
+  const degradedSid = runtimeSid || storedSid ? ''
+    : ((data?.runs || []).find(r => r && !TERMINAL.has(runStatusOf(r)) && r?.owner?.session_id)
+        ?.owner?.session_id || '')
+  const owned = (owned0.length || !degradedSid)
+    ? owned0
+    : ownedRuns(data?.runs || [], degradedSid, '')
+  const pairKey = runtimeSid || storedSid || degradedSid
   const expanded = railOpen && railOpen.sid === pairKey ? railOpen.runId : null
   const trayExpanded = !!(trayState && trayState.expanded)
   const railRef = useRef(null)
   const trayRef = useRef(null)
+  // est-z717 settings gate (in-memory atom, hook order unconditional): null =
+  // unanswered => HIDDEN (default OFF); register()'s bootstrap fills it from
+  // GET /settings. PillRail stays mounted regardless (always-on surface).
+  const trayGate = useValue($trayGate)
   // Hooks run UNCONDITIONALLY (fixed order across renders); the bodies guard
   // themselves. Switching focused chat collapses the expanded panel.
   useEffect(() => { $railOpen.set(null) }, [pairKey])
@@ -1315,24 +1312,27 @@ export function SessionStrip() {
       // railModel filters TERMINAL and caps at 3 itself, so the +N overflow
       // stays visible (passing splitRuns' capped `active` pinned overflow to 0
       // and silently lost the affordance — review #28 F1).
-      // #22 live-run tray: the collapsed RunTrayRow stacks as the SIBLING
-      // tray row above the chat window (same composer registration, native
-      // tray family — task-list/subagents/queued-messages). The tray takes
-      // over the live-run glance + gate-release surface from PillRail, so
-      // the rail renders below it WITHOUT duplicating GateActions
-      // (suppressGates — one release surface per held run; test_run_tray
-      // locks exactly one GateActions in the strip). Handlers close over
-      // this render's trayState (F2 law: no atom .get in handlers, open
-      // state rides props).
+      // #230 running-only tray: the collapsed RunTrayRow is the slim
+      // '[chevron] N running workflows' row stacking as the SIBLING tray row
+      // above the chat window (same composer registration, native tray family
+      // — task-list/subagents/queued-messages). The tray takes over the
+      // live-run glance + gate-release surface from PillRail, so the rail
+      // renders below it WITHOUT duplicating GateActions (suppressGates — one
+      // release surface per held run; test_run_tray locks exactly one
+      // GateActions in the strip). Handlers close over this render's
+      // trayState (F2 law: no atom .get in handlers, open state rides props).
       jsx(RunTray, {
-        runs: owned, sid: pairKey, trayOpen: trayState, acked: trayAcked, trayRef,
+        runs: owned, sid: pairKey, trayOpen: trayState, trayRef, trayEnabled: trayGate,
         onToggleHeader: () => $trayOpen.set(trayState && trayState.expanded ? null : toggleTray(trayState, null)),
         onToggleRow: id => $trayOpen.set(toggleTray(trayState, id)),
-        onOpenPane: openRun,
-        onAck: id => setTrayAckState({ sid: pairKey, acked: ackFinished(trayAcked, id) })
+        onOpenPane: openRun
       }, 'run-tray'),
       jsx(PillRail, {
-        runs: owned, sid: pairKey, railOpen, suppressGates: true,
+        // The rail yields its gate controls ONLY while the tray actually
+        // renders them (enabled + expanded with live rows); disabled,
+        // unanswered settings, or a collapsed tray keep the rail release.
+        runs: owned, sid: pairKey, railOpen,
+        suppressGates: trayExpanded && trayShouldShow(trayRunModel(trayScoping(owned, pairKey)), trayGate),
         onPill: id => $railOpen.set(toggleRail(railOpen, pairKey, id)),
       }),
       terminalTotal
@@ -2522,6 +2522,13 @@ export default {
   register(ctx) {
     ctxRest = (path, opts) => ctx.rest(path, opts)   // keep the api() error wrapper — never reassign api
 
+    // est-z717 tray settings gate: ONE bootstrap read of the door's owner
+    // settings (GET /settings -> {tray}) resolved into $trayGate. FAIL-CLOSED
+    // by construction: until the answer arrives $trayGate stays null and the
+    // tray hides; a backend error leaves it null (hidden) forever — the
+    // default-OFF law (the native tray SDK area #133724 is unlanded).
+    api('/settings').then(s => { $trayGate.set(s?.tray === true) }).catch(() => {})
+
     ctx.register({
       id: 'directive',
       area: TRANSCRIPT_DIRECTIVE_AREA,
@@ -2551,13 +2558,20 @@ export default {
       render: () => jsx(WorkflowsPane, {})
     })
 
-    // Feature-detected composer slot (issue #22 item 3): `composer.underside` is
-    // the floating strip BELOW the composer dock on core >= v2026.7.30 —
-    // bottom-anchored, grows upward over the thread, and it is NOT inside the
-    // composer-fade div, so it does not dim when the thread scrolls up
-    // (composer/index.tsx:1558-1560). COMPOSER_AREAS is an SDK const map, so the
-    // key EXISTS ONLY on cores that mount the area — missing key ⇒ undefined ⇒
-    // ?? falls back to today's composer.top on older shells. One mount, never both.
-    ctx.register({ id: 'session-strip', area: COMPOSER_AREAS.underside ?? COMPOSER_AREAS.top, render: () => jsx(SessionStrip, {}) })
+    // Feature-detected composer slot (#22 item 3, chain head added by #230 item 0):
+    // sessionStripArea = COMPOSER_AREAS.tray ?? COMPOSER_AREAS.underside ??
+    // COMPOSER_AREAS.top. `composer.tray` is the tray accumulation slot (subagents
+    // / background scripts / task lists) — NOT SDK-exposed as of
+    // hermes-agent@8b66a51036 (the native bar is the internal ComposerStatusStack,
+    // composer/index.tsx:1344), so the ask is filed upstream and the head is
+    // inert until core adds the key; the day it lands the strip rides the real
+    // tray with zero plugin change. `composer.underside` is the floating strip
+    // BELOW the composer dock on core >= v2026.7.30 — bottom-anchored, grows
+    // upward over the thread, and it is NOT inside the composer-fade div, so it
+    // does not dim when the thread scrolls up (composer/index.tsx:1558-1560).
+    // COMPOSER_AREAS is an SDK const map, so a key EXISTS ONLY on cores that
+    // mount the area — missing key ⇒ undefined ⇒ ?? falls back to today's
+    // composer.top on older shells. One mount, never both.
+    ctx.register({ id: 'session-strip', area: sessionStripArea(COMPOSER_AREAS), render: () => jsx(SessionStrip, {}) })
   }
 }

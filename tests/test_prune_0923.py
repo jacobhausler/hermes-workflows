@@ -52,8 +52,10 @@ def agent(id, after=(), verdict=None, inputs=None):
 
 # ---- 1. validator grammar ----
 V = wfcommon.validate_graph
-check("on_skip on agent rejected (closed key set)",
-      "unknown key" in (V([dict(agent("a"), on_skip="prune")]) or ""))
+check("on_skip on agent accepted (est-l2ey: agents take when/on_skip)",
+      V([agent("a"), dict(agent("b", ["a"]), when="out.a.verdict", on_skip="prune")]) is None)
+check("on_skip on agent without when rejected",
+      "needs a `when`" in (V([dict(agent("a"), on_skip="prune")]) or ""))
 check("on_skip bad enum rejected",
       "allowed: ['pass', 'prune']" in (V([agent("a"), {"id": "g", "type": "gate", "after": ["a"], "when": "out.a.ok", "on_skip": "nope", "question": "?"}]) or ""))
 check("on_skip without when rejected",

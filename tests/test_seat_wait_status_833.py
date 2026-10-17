@@ -77,7 +77,16 @@ try:
     check(sw and isinstance(sw.get("age_s"), int) and sw["age_s"] > 0, "S1 seat_wait carries wait age_s", repr(sw))
     check("seat_wait" not in st["nodes"]["node_b"], "S1 a node that never waited gains no key")
     p = door.act_status({"run_id": "sw-incident"})
-    check(p["nodes"]["node_a"].get("seat_wait") == sw, "S1 act_status passes seat_wait through",
+    # est-b9dtf: age_s is wall-clock derived at EACH read; comparing whole dicts
+    # across two reads races the 1s tick (CI run 38832510065 @ 04a8865). Compare
+    # everything else verbatim; hold age_s to a <=2s band (two reads, one tick).
+    _pw = p["nodes"]["node_a"].get("seat_wait")
+    _pa, _sa = (dict(_pw), dict(sw))
+    _age_p = _pa.pop("age_s", None) if isinstance(_pw, dict) else None
+    _age_s = _sa.pop("age_s", None) if isinstance(sw, dict) else None
+    check(isinstance(_pw, dict) and _pa == _sa
+          and isinstance(_age_p, int) and _age_s is not None and abs(_age_p - _age_s) <= 2,
+          "S1 act_status passes seat_wait through",
           repr(p["nodes"]["node_a"]))
     nx = (p.get("next") or [{}])[0]
     check(nx.get("action") == "wait" and nx.get("reason") == "seat_wait",

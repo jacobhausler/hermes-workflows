@@ -39,6 +39,13 @@ _gi_spec = importlib.util.spec_from_file_location("_hermes_workflows_gate_index"
 assert _gi_spec is not None and _gi_spec.loader is not None
 _gate_index = importlib.util.module_from_spec(_gi_spec)
 _gi_spec.loader.exec_module(_gate_index)
+# PR-4: orphan-held awareness — advisory session-lifecycle observers (docs/orphan-held.md).
+_ow_spec = importlib.util.spec_from_file_location("_hermes_workflows_orphan_watch",
+                                                  Path(__file__).resolve().parent / "orphan_watch.py")
+assert _ow_spec is not None and _ow_spec.loader is not None
+_orphan_watch = importlib.util.module_from_spec(_ow_spec)
+_ow_spec.loader.exec_module(_orphan_watch)
+_orphan_watch.bind(_common)
 
 
 def _coerce_graph(graph):
@@ -104,7 +111,10 @@ def _model_policy_error(graph):
             candidates.add(f"{node['provider']}/{requested}")
         if "/" in effective:
             candidates.add(effective.rsplit("/", 1)[-1])
-        if candidates & forbidden:
+        provider = node.get("provider") or _p
+        if candidates & forbidden or any(
+                _common.route_ids_equal(candidate, banned, provider)
+                for candidate in candidates for banned in forbidden):
             errs.append({"node": nid, "field": "model",
                          "msg": f"model policy: node {nid} resolves to forbidden model {effective!r}"})
     if not errs:
@@ -711,7 +721,7 @@ WORKFLOW_PARAMS = {
     "properties": {
         "action": {
             "type": "string",
-            "enum": ["run", "status", "wait", "release", "release_lock", "steer", "inbox", "amend", "diff", "stop", "list", "save", "submit", "library", "doctor_version", "validate"],
+            "enum": ["run", "status", "wait", "release", "release_lock", "steer", "inbox", "amend", "diff", "stop", "kill", "list", "save", "submit", "library", "doctor_version", "validate"],
             "description": "run=launch a graph; wait=read state, RESPAWNING an idle runner if work is pending (blocks to the next boundary when one is live; when the lock is PROVEN wedged — Errno 11 with the kernel ledger showing zero holders and the admission lease dead — wait heals it first, the #44 escape hatch); status=read-model of a run; release=answer a held human gate; release_lock=operator hatch for a wedged runner.lock (#44): renames the stranded inode aside under the admission heal-barrier and hands the lane a fresh lock path — REFUSES unless zero live holders are proven (never heals on EACCES or a live holder); steer=queue steering text for a node; inbox=(child-side, cooperative) pull late steering lines baked for THIS spawn — call once at a natural seam; amend=replace the graph (invalidates changed nodes + all downstream by fingerprint), or pass patch to edit a few node fields without resubmitting the whole graph; diff=confirm surface: runs the amend door with dry_run FORCED (accepts patch or graph), returns the preview + graph_diff and touches nothing; stop=request stop; list=all runs; save=shelve a graph in the library under a name (from run_id or inline graph); library=list shelved graphs richly (name, description, tags, provenance, path-relative id). validate=dry-run the door's validation pipeline (defaults fill + defect collection + model/route policy) with no ping and no writes; returns {ok, errors:[{node,field,msg}], resolved_routes}. run from=<name> replays a shelved graph. submit=quarantine a hand-rolled graph for study (requires why_not_library >=80 chars; never joins the library — the quartermaster's human-gated loop decides); inbox kind=submissions lists them newest-first. doctor_version=read-only version truth for THIS install: {live_version, newest_packaged, source_commit, drift} comparing plugin.yaml against the install.json provenance that pack.py stamps at build time \u2014 one read, no network.",
         },
         "run_id": {"type": "string", "description": "Run id (required for every action except run/list)."},
@@ -746,11 +756,13 @@ WORKFLOW_PARAMS = {
             ", ledger (OPTIONAL item-indexed INPUT LEDGER: one row per item, "
             "positionally aligned; a row is a '<node_id>.<dotted.path>' input-ref string or {source:'<node_id>.<dotted.path>', artifact?:{file:rel/path under the run dir, sha256?:64-hex}} naming the on-disk artifact the item consumes. Admission refuses the graph fail-closed unless rows map 1:1 to items: a missing/extra row, two items sharing one source, a source head outside the node's after ancestry, "
             "or (when run-dir bytes are measurable \u2014 amend/validate) an absent artifact file or sha256 mismatch are each refused with an error naming the item and the missing/extra source \u2014 an item can never silently consume another item's artifacts (#85))}, "
-            "on_fail ('skip' | '<fallback-agent-node-id>' \u2014 on this node's failure commit it `skipped` (join-tolerant, run continues; a join with one live dep still runs), and with a fallback id ALSO let that agent node run; validated at run time: fallback must exist, be an agent, not be an ancestor; cancelled deaths are never caught"
-            ")} \u2014 agent node. A provider requires a non-empty model; "
+            "on_fail ('skip' | '<fallback-agent-node-id>' \u2014 on this node's failure commit it `skipped` (join-tolerant, run continues; a join with one live dep still runs), and with a fallback id ALSO let that agent node run; validated at run time: fallback must exist, be an agent, not be an ancestor; cancelled deaths are never caught), "
+            "when (the same bounded expr as a gate: out.<ancestor>.<dotted.path> with == != > >= < <=, and/or/not, parens; heads must name an ancestor in this node's after closure; malformed or non-ancestor-headed is rejected before any write/spawn), "
+            "on_skip:'pass'|'prune' (requires when; default prune: a false predicate commits skipped with zero spawns; pass: commits done with {agent:'skipped'} and descendants proceed; predicate errors spawn anyway and log agent.when_error)"
+            "} \u2014 agent node. A provider requires a non-empty model; "
             "model aliases are preserved; a literal 'provider/model' id keeps its route identity but is split into provider + model when the seat routes that provider (tiers resolve explicitly, and a matching provider/model prefix is removed for the CLI). Run/amend responses include requested/resolved provider/model routes. Gate node: {id, type:'gate', after, question, options, context, when (bounded expr: out.<node>.<dotted.path> with == != > >= < <=, and/or/not, parens; "
             "malformed when is rejected at run/amend validation and holds the gate at fire \u2014 never a silent skip), wait:{wait_s, until_argv:[fixed argv, no shell], every_s (default 60), timeout_s (default 3600)} (machine-answered gate: parks the run at zero tokens \u2014 wait_s alone = timer; until_argv re-runs until exit 0; timeout \u2192 gate fails; its last stdout/stderr tail is the gate's output, "
-            "usable via inputs). A human release pre-empts a park), on_skip:'pass'|'prune' (with when: prune commits the gate `skipped` and every node whose deps are ALL skipped is skipped too \u2014 terminal, not a failure; a join with one live dep runs; default pass = the arm still runs)}. Echo node: {id, type:'echo', after, "
+            "usable via inputs). A human release pre-empts a park), on_skip:'pass'|'prune' (with when: prune (the default, omitted = prune) commits the gate `skipped` and every node whose deps are ALL skipped is skipped too \u2014 terminal, not a failure; a join with one live dep runs; pass = the question is skipped but the arm still runs)}. Echo node: {id, type:'echo', after, "
             "output} — commits its `output` verbatim as the node result with zero tokens and no child spawn; downstream nodes consume it via after/inputs like any done node. Composite graphs: a top-level `include:[{as, use, seeds?, exports?}]` names library graphs "
             "to expand into this graph at materialize time (never a node type): `as` is the alias (alnum start, [A-Za-z0-9_], no hyphen or dot, <= 24 chars, unique), `use` the library name, `seeds` a closed map {KEY: non-empty string} that renders {run.KEY} inside the "
             "included subtree ONLY, `exports` an optional {inner_id: public_name} map. Included nodes land namespaced as `alias__<id>`; parent refs must name an exported public name or a literal alias__id (a bare inner id is refused); a present-but-malformed "
@@ -772,6 +784,7 @@ WORKFLOW_PARAMS = {
         "gate_id": {"type": "string", "description": "release: gate node id."},
         "node": {"type": "string", "description": "steer: target node id (pending node picks it up at spawn; a LIVE child pulls it at its next seam via its own inbox call — the prompt is never rewritten)."},
         "text": {"type": "string", "description": "steer: the steering message."},
+        "cmd": {"type": "string", "enum": ["kill"], "description": "steer: cmd=kill = node-targeted lane kill (node required): that lane's in-flight children are SIGKILLed and the node finishes failed with error_class=killed; sibling nodes and the run keep going. Never queues steering text."},
         "dry_run": {"type": "boolean", "description": "amend: true = validate + preview {added, removed, changed, will_rerun, unchanged, graph_diff} ONLY — nothing is written, the runner is not touched. Normal amends echo the same lists. run: true = the same pre-launch gates (validate, bind, profile, policy, model resolve, route ping, quota, route enforcement) return {ok, dry_run, models, routes} and NOTHING is written — no run dir, no lane entry, no spawned runner."},
         "patch": {"type": "object", "description": "amend/diff: per-node field patch instead of resubmitting the whole graph: {\"nodes\": {\"<existing id>\": {\"<field>\": value}}, \"name\": str?} — shallow merge per node, null deletes a field; unknown ids, id changes, new nodes, and other top-level keys are refused by name. Exclusive with graph/graph_path. The patched graph goes through the FULL amend door (validation, CAS, frozen replay, preview); amends.jsonl still records the resolved full graph."},
         "timeout": {"type": "number", "description": "wait: max seconds to block while a runner is live (default 600, capped 1800). Self-yields ~330s segments under the harness tool deadline with status+note — call wait again until terminal."},
@@ -1073,6 +1086,16 @@ def _resolve_models(nodes, committed=None, keep=()) -> tuple[str | None, dict | 
         # the route table — pinged AND reported — speaks the real model id, est-2ek.1.318),
         # else the baked literal. The node def keeps the alias verbatim.
         route_model = im if (tier or m in known) and im else m
+        # est-55z04: an explicit provider SKIPS the alias expansion above (`not provider`), so a
+        # seat alias pinned WITH provider fell back to the bare alias ('bigseat' -> HTTP 404 on the
+        # liveness ping). Expand the seat alias target for the route/ping when its provider
+        # matches the pinned one; a foreign-provider target is left alone (no guessing).
+        if provider and m and not tier and not frozen and m in _seat_aliases():
+            _tp, _, _tm = str(_seat_aliases()[m] or "").partition("/")
+            if _tm and _tp == provider:
+                route_model = _tm
+            elif not _tm and _tp:
+                route_model = _tp
         routes[n["id"]] = {
             # requested = what the AUTHOR wrote (an inherited provider is not a request);
             # resolved = the effective route (alias target, else node def after resolution).
@@ -2427,6 +2450,34 @@ def _session_env(name):
         return os.environ.get(name, "")
     return get_session_env(name, "")
 
+def _owner_stamp():
+    """est-z717 ESTATE-SHAPE LAW: who the run's owner is, honestly.
+
+    Interactive chats: unchanged — owner.session_id inherits HERMES_SESSION_ID
+    (gateway session context first, else process env), the chat's own rail
+    picks the run up at invocation with ZERO directive strings.
+
+    Estate/dispatcher-launched runs are the gap: the door process carries the
+    DISPATCHER's HERMES_SESSION_ID, so an inherited stamp would impersonate the
+    dispatcher's chat — the run would surface in a rail its launching chat never
+    owned. The honest rule (owner ruling 10-06): launchers that know they are
+    NOT the chat set WF_OWNER_SESSION explicitly. An EMPTY WF_OWNER_SESSION
+    means "no chat owns this run": owner keys land null -> the run is
+    pane-only (the blank-owner honest-absent law the rail already enforces).
+    A NON-EMPTY WF_OWNER_SESSION stamps that session id verbatim (a launcher
+    launching ON BEHALF of a known chat), and ui_session_id/platform go null
+    with it — the surrounding env ids belong to the launcher process, not to
+    the stamped owner, so they would be unverifiable impersonation residue.
+    UNSET (interactive chats) = today's behavior byte-identical.
+    """
+    override = os.environ.get("WF_OWNER_SESSION")
+    if override is not None:
+        sid = override.strip() or None
+        return {"session_id": sid, "ui_session_id": None, "platform": None}
+    return {"session_id": _session_env("HERMES_SESSION_ID") or None,
+            "ui_session_id": _session_env("HERMES_UI_SESSION_ID") or None,
+            "platform": _session_env("HERMES_SESSION_PLATFORM") or None}
+
 def _card(rid):
     return f'::workflow{{id="{rid}"}}'
 
@@ -3151,9 +3202,11 @@ def _create_run(args, graph, lib_name, models, routes, _liveness_notes, lane_pat
             # OWNER = the agent session that spawned the run. The desktop uses it to
             # send a visible SDK composer turn to THIS chat, never the active chat.
             # Absent (tests, CLI) => no owner => UI asks for manual resume.
-            "owner": {"session_id": _session_env("HERMES_SESSION_ID") or None,
-                      "ui_session_id": _session_env("HERMES_UI_SESSION_ID") or None,
-                      "platform": _session_env("HERMES_SESSION_PLATFORM") or None}}
+            # est-z717: the estate-shape law lives in _owner_stamp() —
+            # WF_OWNER_SESSION set by an estate launcher overrides (or nulls)
+            # the inherited dispatcher env; interactive chats ride today's
+            # HERMES_SESSION_ID inheritance untouched.
+            "owner": _owner_stamp()}
     if concurrency_meta:
         meta.update(concurrency_meta)
     meta.update(_identity_stamps(args, graph, lib_name))   # 1.1: only derivable keys land
@@ -3433,7 +3486,7 @@ def act_status(args):
             sb = _common.explain_stale(r, nid)
             if sb:
                 out["nodes"][nid]["stale_because"] = sb
-    # Cumulative spend is independent of heartbeat. Only a verified spawn's exact
+    # Cumulative spend is independent of heartbeat. Only a live spawn's (verified, or ledger-marked foreign-ns) exact
     # session title can supply current activity; historical unended rows are not live.
     try:
         cm = _common.run_child_metrics(r)
@@ -3527,6 +3580,19 @@ def act_status(args):
         out["next"] = rows or [{"action": "amend", "node": None, "error_class": "unknown"}]
     elif s in ("done", "stopped"):
         out["next"] = []
+    # PR-4: orphan-held flag — advisory, fail-open. The owner session died while the
+    # run waits at a gate; stop is listed FIRST, release/wait rows stay (a human or a
+    # new session can still answer). A different live session's status re-attaches.
+    try:
+        _oh = _orphan_watch.status_info(r, st, _session_env("HERMES_SESSION_ID") or None) \
+            if _orphan_watch.enabled() else None
+        if _oh:
+            out["orphan_held"] = True
+            out["waiting_on"] = _oh
+            out["next"] = [{"action": "stop", "note": "owner session died; stop or re-attach"},
+                           *(out.get("next") or [])]
+    except Exception:
+        pass
     return out
 
 def _wait_foreign(args, r, st, resolved_via):
@@ -3731,6 +3797,10 @@ def _release_core(r, gate_id, answer, ui=False):
     tmp = p.with_name(f"{gate_id}.json.{os.getpid()}.tmp"); tmp.write_text(json.dumps(rec, ensure_ascii=False))
     os.replace(tmp, p)
     _gi_note_close(r, gate_id)   # PR-3: flag-gated, best-effort, never raises
+    try:   # PR-4: an answered gate is no longer orphan-held (advisory, fail-open)
+        _orphan_watch.revoke_run(r.name, "release", by=_session_env("HERMES_SESSION_ID") or None)
+    except Exception:
+        pass
     return {"ok": True}
 
 def act_release(args):
@@ -3796,6 +3866,13 @@ def act_release_lock(args):
     return out
 
 def act_steer(args):
+    # est-cl7t: steering admission for a lane kill. cmd=kill is NOT steering text —
+    # it is the node-targeted kill (act_kill). Without this door an empty
+    # steering line was queued silently and the lane ran to done.
+    if args.get("cmd") not in (None, "", "kill"):
+        return {"ok": False, "error": f"unknown steer cmd {args.get('cmd')!r}; only cmd=kill (lane kill) is admitted"}
+    if args.get("cmd") == "kill":
+        return act_kill(args)
     r = run_dir(args.get("run_id"))
     graph = jload(r / "graph.json")
     if not graph:
@@ -4120,10 +4197,41 @@ def act_stop(args):
         return {"ok": True, "already": st["status"]}
     (r / "stop.request").write_text(datetime.now(timezone.utc).isoformat(timespec="seconds"))
     _gi_note_close(r, None)   # PR-3: every open gate of a stopped run closes
+    try:   # PR-4: a stopped run is no longer orphan-held (advisory, fail-open)
+        _orphan_watch.revoke_run(r.name, "stop", by=_session_env("HERMES_SESSION_ID") or None)
+    except Exception:
+        pass
     mode = _resume_after_action(r, consumed=lambda: not (r / "stop.request").exists())
     if mode == "respawned":
         return {"ok": True, "note": "runner spawned to consume the stop marker"}
     return {"ok": True, "note": "stop recorded; the live runner consumes it at its next boundary"}
+
+def act_kill(args):
+    """est-cl7t: node-targeted lane kill (action=kill). SIGKILLs the
+    in-flight children of ONE node and fails that node with error_class=killed.
+    Sibling nodes and the run keep going: no stop.request, no run-wide stop."""
+    run_id, nid = args.get("run_id"), args.get("node")
+    if not run_id:
+        return {"error": "run_id required"}
+    if not isinstance(nid, str) or not nid:
+        return {"error": "node required (the lane to kill)"}
+    r = run_dir(run_id)
+    if not (r / "graph.json").exists():
+        return {"error": "unknown run_id"}
+    graph = jload(r / "graph.json", {}) or {}
+    if nid not in {n.get("id") for n in graph.get("nodes") or []}:
+        return {"error": f"unknown node {nid!r} in run {run_id}"}
+    st = run_state(r)
+    if st and st["status"] in ("done", "failed", "stopped"):
+        return {"ok": True, "already": st["status"]}
+    kd = r / "kill"
+    kd.mkdir(exist_ok=True)
+    marker = kd / f"{nid}.json"
+    marker.write_text(json.dumps({"node": nid, "at": datetime.now(timezone.utc).isoformat(timespec="seconds")}))
+    return {"ok": True, "node": nid,
+            "note": "lane kill recorded; the live runner SIGKILLs this node's in-flight children "
+                    "within ~2s and the node finishes failed with error_class=killed; sibling nodes "
+                    "and the run continue. The kill marker stays for this run: a killed lane stays killed."}
 
 def act_list(_args):
     roots = [runs_root()]
@@ -4203,7 +4311,7 @@ def act_doctor_version(args):
 
 ACTIONS = {"run": act_run, "status": act_status, "wait": act_wait, "release": act_release,
            "release_lock": act_release_lock,
-           "steer": act_steer, "inbox": act_inbox, "amend": act_amend, "diff": act_diff, "stop": act_stop, "list": act_list,
+           "steer": act_steer, "inbox": act_inbox, "amend": act_amend, "diff": act_diff, "stop": act_stop, "kill": act_kill, "list": act_list,
            "save": act_save, "submit": act_submit, "library": act_library,
            "doctor_version": act_doctor_version, "validate": act_validate}
 
@@ -4405,6 +4513,8 @@ def _wf_command(raw_args):
         return "\n".join(lines)
     if arg in ("gates", "gate"):
         return _wf_gates()
+    if arg == "orphans":   # PR-4: runs whose owner session died while held at a gate
+        return _orphan_watch.render_orphans()
     out = act_library({})
     lib = out["library"]
     quarantined = out.get("quarantined") or []
@@ -4445,13 +4555,44 @@ def _wf_command(raw_args):
             + "}`"
             + "; then `wait` and answer human gates only with the human's decision. Cards are optional.")
 
+def _hook_surface():
+    """THE plugin's hook surface: (name, handler) pairs. One source for both the
+    register() gate below and the structural test's expected count
+    (tests/test_sprint101_D-surface.py) — the count law says count from config,
+    never a literal."""
+    return (("post_tool_call", _card_enforcement._post_tool_call),
+            ("pre_llm_call", _card_enforcement._pre_llm_call),
+            ("transform_llm_output", _card_enforcement._card_hook),
+            ("post_gateway_admission", _admission_handler),
+            ("pre_gateway_dispatch", _dispatch_witness)) + tuple(_orphan_watch.HOOKS.items())
+
+# The card ledger's three hooks: registered at literal, allow-list-gated sites in register().
+_CARD_HOOKS = ("post_tool_call", "pre_llm_call", "transform_llm_output")
+
+def _hook_allowlist():
+    """Hook NAMES this process may register: settings.enabled_hooks when the
+    operator set it. UNSET returns the shipped surface unchanged (byte-
+    identical); a LIST returns the surface INTERSECTED with it; anything
+    malformed returns NOTHING — fail-closed: a broken allow-list never silently
+    widens (or keeps) the hook surface."""
+    try:
+        raw = _common.owner_setting("enabled_hooks")
+    except Exception:
+        return []
+    if raw is None:
+        return [h for h, _f in _hook_surface()]
+    if not isinstance(raw, list) or not all(isinstance(x, str) and x for x in raw):
+        return []
+    return [h for h, _f in _hook_surface() if h in raw]
+
 def register(ctx):
     # Core v0.21.5 runs import + register() on a deadline worker
     # (plugins.load_timeout_seconds, default 10s); on overrun it calls
     # ctx._abandon_load() and every later register_* is silently ignored.
     # Keep this body cheap and non-blocking: measured ~0.1s import, register()
-    # < 1ms — one cached config read (model_tiers) and in-memory registrations,
-    # no subprocess/network/run-dir scan (card_enforcement's/card_ledger's module exec is
+    # < 1ms — two cached config reads (model_tiers, enabled_hooks) and in-memory
+    # registrations, no subprocess/network/run-dir scan (card_enforcement's/card_ledger's
+    # module exec is
     # defs only; its I/O runs at hook time). Never pass override=True to
     # register_tool: it is operator-gated (PluginToolOverrideError). Pinned by
     # tests/test_hook_abandon_safety.py.
@@ -4468,16 +4609,32 @@ def register(ctx):
     # Hook-led card ledger (card_ledger.py): post_tool_call records workflow
     # launches, pre_llm_call reminds, transform_llm_output ships (#157) — all
     # fail-open, no run-dir scan.
-    ctx.register_hook("post_tool_call", _card_enforcement._post_tool_call)
-    ctx.register_hook("pre_llm_call", _card_enforcement._pre_llm_call)
-    ctx.register_hook("transform_llm_output", _card_enforcement._card_hook)
-    # PR-3: both default-off (flags read at call time); a core without the hook just ignores.
-    for _hook, _fn in (("post_gateway_admission", _admission_handler),
-                       ("pre_gateway_dispatch", _dispatch_witness)):
-        try:
-            ctx.register_hook(_hook, _fn)
-        except Exception:
-            pass
+    # STRUCTURAL LAW (P1): every hook registration flows through register() gated
+    # by the owner's config allow-list — the live count comes FROM CONFIG, never
+    # from a literal here or in a test. The quoted name stays literal at each site
+    # so the upstream drift probe (tests/test_upstream_hook_contract.py) parses it.
+    _hooks = _hook_allowlist()
+    if "post_tool_call" in _hooks:
+        ctx.register_hook("post_tool_call", _card_enforcement._post_tool_call)
+    if "pre_llm_call" in _hooks:
+        ctx.register_hook("pre_llm_call", _card_enforcement._pre_llm_call)
+    if "transform_llm_output" in _hooks:
+        ctx.register_hook("transform_llm_output", _card_enforcement._card_hook)
+    # PR-3 admission/witness pair (default-off, flags read at call time) and PR-4
+    # orphan-held observers (default-on advisory, owner setting `orphan_watch: false`
+    # disables; all I/O at hook time, fail-open): a core without the hook just ignores.
+    # Folded under the allow-list law at the P1 rebase: ONE variable-named loop over
+    # the surface ON PURPOSE — the pinned CI core (v2026.9.21) predates
+    # post_gateway_admission, so a quoted literal here would make the upstream drift
+    # probe RED there; the loop's gate is pinned by tests/test_sprint101_D-surface.py.
+    for _hook, _fn in _hook_surface():
+        if _hook in _CARD_HOOKS:
+            continue                      # registered above, literal, for the drift probe
+        if _hook in _hooks:
+            try:
+                ctx.register_hook(_hook, _fn)
+            except Exception:
+                pass
     # P3: subagent accounting — DEFAULT OFF; registers only when settings.hooks_allow
     # lists 'subagent_accounting' (fail-closed gate). Harvest law, spool path (the
     # interface), and honest coverage live in subagent_accounting.py. Cost: one module

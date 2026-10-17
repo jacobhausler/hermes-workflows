@@ -53,20 +53,56 @@ def def_hash(node, rule=FP_RULE_VERSION):
 
 _EFP_SEP = "\u241f"
 
-def efp(byid, node, _seen=None, *, rule=FP_RULE_VERSION):
+def efp(byid, node, _seen=None, *, rule=FP_RULE_VERSION, memo=None):
     """Effective fingerprint: own def + every ancestor's effective fingerprint.
     An amended node (or any ancestor) changes the efp of everything downstream, so
-    downstream results are stale and nodes downstream re-run or re-hold — transitively."""
+    downstream results are stale and nodes downstream re-run or re-hold — transitively.
+
+    DAG-memoized: pass a shared `memo` dict (one per live `byid` table) and each
+    node's effective fingerprint computes once per (id, rule) instead of once per
+    path reaching it. Diamond-shaped graphs are exponential without it — an N-wide
+    join layer costs 2^N def_hash re-hashes of the SAME nodes — which is what made
+    a listing over real runs hash a quarter-million node definitions. `memo=None`
+    (the default) is the classic path, byte-identical to before; a fresh empty
+    dict is a live memo. Callers that mix several
+    graphs into one `byid` (or mutate node defs while the table lives) pass no memo.
+    Memo values are pure functions of the graph, so a table holding one graph may
+    share one memo across every read of it.
+    """
     _seen = _seen or set()
+    if memo is None:
+        return _efp(byid, node, _seen, rule, None)[0]
+    hit = memo.get((node["id"], rule))
+    if hit is not None:
+        return hit
+    val, tainted = _efp(byid, node, _seen, rule, memo)
+    if not tainted:
+        memo[(node["id"], rule)] = val
+    return val
+
+def _efp(byid, node, _seen, rule, memo):
+    """efp's walk: (value, tainted). `tainted` marks a value whose computation
+    depended on a cycle cut (a node already in `_seen` — the "?" law firing on a
+    malformed cyclic byid), so the result is walk-path-dependent and NEVER
+    enters the memo; an un-tainted value is a pure function of the node's
+    acyclic closure and a memo hit is therefore byte-identical to recomputing
+    it. Values, cycle law included, are identical to the un-memoized walk."""
     nid = node["id"]
     if nid in _seen:
-        return "?"  # unreachable for validated (acyclic) graphs
+        return "?", True  # unreachable for validated (acyclic) graphs
     _seen = _seen | {nid}
+    if memo is not None:
+        hit = memo.get((nid, rule))
+        if hit is not None:
+            return hit, False
     parts = [def_hash(node, rule)]
+    tainted = False
     for a in sorted(node.get("after", [])):
         if a in byid:
-            parts.append(efp(byid, byid[a], _seen, rule=rule))
-    return hashlib.sha256(_EFP_SEP.join(parts).encode()).hexdigest()[:16]
+            v, t = _efp(byid, byid[a], _seen, rule, memo)
+            parts.append(v)
+            tainted = tainted or t
+    return hashlib.sha256(_EFP_SEP.join(parts).encode()).hexdigest()[:16], tainted
 
 
 def graph_fingerprint(graph, *, rule=FP_RULE_VERSION):
@@ -76,7 +112,8 @@ def graph_fingerprint(graph, *, rule=FP_RULE_VERSION):
         return None
     try:
         byid = {n["id"]: n for n in nodes}
-        facts = {str(n["id"]): efp(byid, n, rule=rule) for n in nodes}
+        fp_memo = {}   # same single-graph read as run_state: one shared memo
+        facts = {str(n["id"]): efp(byid, n, rule=rule, memo=fp_memo) for n in nodes}
         raw = json.dumps(facts, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
         return hashlib.sha256(raw.encode()).hexdigest()[:16]
     except Exception:
@@ -740,6 +777,8 @@ AGENT_KEYS = {"id", "type", "after", "goal", "context", "schema", "model", "prov
               # producer: on commit done the runner mints the durable token
               # nodes/<id>.suite-proof.json (node id + committed efp).
               "publishes", "suite_proof",
+              # Agents reuse the gate predicate grammar and skip policy.
+              "when", "on_skip",
               # est-pygyy (issue #56): a publication node may DECLARE effect
               # receipts — postconditions the runner PROVES at the commit edge
               # before a done can stand. Absent = today's behavior byte-identical.
@@ -1253,9 +1292,6 @@ def validate_graph_errors(nodes, *, admission=False):
                     continue
                 if t == "gate" and k == "inputs":
                     continue
-                if t == "agent" and k == "when":
-                    E(nid, "when", "only gate nodes take when; use a gate with on_skip:prune to branch")
-                    continue
                 if k in ("after_partial", "order_only"):
                     continue  # the dedicated blocks below name the key (echo-meaningless / type)
                 E(nid, k, "unknown key; allowed: " + json.dumps(sorted(_type_keys)))
@@ -1284,7 +1320,12 @@ def validate_graph_errors(nodes, *, admission=False):
             # (the reported PathLike/TypeError death). Refuse every non-List[str]
             # / comma-string shape at the door, naming node+key+value; the
             # honored shapes stay exactly the runner's (list of strings,
-            # comma-string, and the empty list = the author's own ask).
+            # comma-string). #427 amends the tail: a declared-EMPTY selection
+            # is now REFUSED too — -t cannot express zero toolsets (the core
+            # collapses an empty flag value to "use config defaults") and an
+            # omitted -t BROADENS to the seat's defaults, so honoring [] failed
+            # the author's minimisation silently OPEN (boundary probe: 4
+            # declared tools -> 41 defaults).
             ts = n["toolsets"]
             shape_ok = (isinstance(ts, str)
                         or (isinstance(ts, list)
@@ -1293,6 +1334,18 @@ def validate_graph_errors(nodes, *, admission=False):
                 E(nid, "toolsets", f"toolsets {ts!r} invalid: must be a list of "
                                     "non-empty toolset-name strings (or a comma-"
                                     "separated string)")
+            elif (isinstance(ts, list) and not ts) or (
+                    isinstance(ts, str) and not any(
+                        s.strip() for s in ts.split(","))):
+                # issue #427: declared but EMPTY ([] / empty/whitespace/comma-
+                # only string) means "no tools" — inexpressible at -t, and the
+                # only available spelling (omission) silently broadens.
+                E(nid, "toolsets", f"toolsets {ts!r} declares an EMPTY selection "
+                                    "the runner cannot honor: an omitted -t "
+                                    "BROADENS to the seat's default toolsets. "
+                                    "Name at least one toolset, or use "
+                                    'toolsets "none" to opt out explicitly '
+                                    "(flag omitted, seat defaults apply).")
         if "after_partial" in n:
             # e68544a37be37657: agent/gate-only key; bool only — an unvalidated
             # truthy is never enough to open a harvest edge. Echo rejects it
@@ -1642,11 +1695,11 @@ def validate_graph_errors(nodes, *, admission=False):
                 E(nid, "output", f"echo output {o!r} must be a JSON-serialisable "
                                  f"value ({type(o).__name__} cannot be committed verbatim)")
         osk = n.get("on_skip")
-        if osk is not None and n.get("type") == "gate":   # non-gate: closed-key check already rejected it
+        if osk is not None and n.get("type") in ("gate", "agent"):   # est-l2ey: gate|agent (echo/join: closed-key check already rejected it)
             if osk not in ("pass", "prune"):
                 E(nid, "on_skip", f"on_skip {osk!r} invalid; allowed: ['pass', 'prune']")
             elif n.get("when") is None:
-                E(nid, "on_skip", "on_skip needs a `when` (nothing else can skip a gate)")
+                E(nid, "on_skip", "on_skip needs a `when` (nothing else can skip the node)")
         ofk = n.get("on_fail")   # jam-h23: agent-only (closed key set rejected others);
         if ofk is not None:      # non-'skip' value must name an existing, non-ancestor AGENT
             anc, stack = set(), list(n.get("after", []))
@@ -1675,7 +1728,7 @@ def validate_graph_errors(nodes, *, admission=False):
             else:
                 E(nid, "wait", "only gate nodes take wait")   # agent: dedicated error pinned by test_validate_0923
         anc = set()
-        if (n.get("when") is not None and t == "gate") or n.get("inputs") is not None:
+        if (n.get("when") is not None and t in ("gate", "agent")) or n.get("inputs") is not None:   # est-l2ey: agents take `when` too
             stack = list(n.get("after", []))
             while stack:
                 a = stack.pop()
@@ -1709,23 +1762,26 @@ def validate_graph_errors(nodes, *, admission=False):
                         E(nid, f"keys.{label}", f"join key ref {ref!r} head {head!r} is not an "
                                                 f"existing node in its `after` ancestry")
 
-        if n.get("when") is not None and t == "gate":
-            err = when_expr_ok(n["when"])
-            if err:
-                E(nid, "when", err)   # parse-only (syntax mode is total): NO head check on a broken expr
+        if n.get("when") is not None and t in ("gate", "agent"):   # est-l2ey: gate|agent
+            if not isinstance(n["when"], str):   # a non-str when would crash the tokenizer — name it instead
+                E(nid, "when", "when must be a string (bounded expression)")
             else:
-                # `when` reads out.<ancestor>.<path> (references/grammar.md). Parse-only
-                # when_expr_ok cannot see heads (sentinel operands), so a non-ancestor
-                # head — sibling, typo, ghost — would validate clean and resolve to
-                # None at fire time: False ⇒ silent skip (default on_skip:prune = dead
-                # branch), True ⇒ holds, depending on unrelated commit order. Validate
-                # the ref heads against the SAME ancestry closure `inputs` uses below.
-                for tok in _tok_when(n["when"]):
-                    if tok.startswith("out."):
-                        head = tok.split(".")[1]
-                        if head not in anc:
-                            E(nid, "when", f"when ref {tok!r} head {head!r} is not an existing "
-                                           f"node in its `after` ancestry (when must descend from it)")
+                err = when_expr_ok(n["when"])
+                if err:
+                    E(nid, "when", err)   # parse-only (syntax mode is total): NO head check on a broken expr
+                else:
+                    # `when` reads out.<ancestor>.<path> (references/grammar.md). Parse-only
+                    # when_expr_ok cannot see heads (sentinel operands), so a non-ancestor
+                    # head — sibling, typo, ghost — would validate clean and resolve to
+                    # None at fire time: False ⇒ silent skip (default on_skip:prune = dead
+                    # branch), True ⇒ holds, depending on unrelated commit order. Validate
+                    # the ref heads against the SAME ancestry closure `inputs` uses below.
+                    for tok in _tok_when(n["when"]):
+                        if tok.startswith("out."):
+                            head = tok.split(".")[1]
+                            if head not in anc:
+                                E(nid, "when", f"when ref {tok!r} head {head!r} is not an existing "
+                                               f"node in its `after` ancestry (when must descend from it)")
         ins = n.get("inputs")
         if ins is not None:
             if t == "gate":
@@ -3420,10 +3476,10 @@ def fingerprint_valid(stored, actual, rule):
     matches = [v for v in FP_RULES if stored is not None and stored == actual(v)]
     return len(matches) >= 1
 
-def record_efp_valid(rec, byid, node, field="efp"):
+def record_efp_valid(rec, byid, node, field="efp", memo=None):
     return isinstance(rec, dict) and ("fp_rule_version" not in rec or
                                       (type(rec["fp_rule_version"]) is int and rec["fp_rule_version"] in FP_RULES)) and fingerprint_valid(
-        rec.get(field), lambda rule: efp(byid, node, rule=rule), rec.get("fp_rule_version"))
+        rec.get(field), lambda rule: efp(byid, node, rule=rule, memo=memo), rec.get("fp_rule_version"))
 
 def runner_exit_read(r, pid_path=None):
     """Graph-bound runner verdict, or a crash when a previous pid lacks identity.
@@ -3458,18 +3514,27 @@ def is_external_kill(reason):
 
 # ---------- node state (the ONE validity rule: stored efp == current efp) ----------
 
-def _legacy_chain_unchanged(r, n, byid):
+def _legacy_chain_unchanged(r, n, byid, memo=None):
     """A pre-efp record is valid ONLY if the stored def_hash matches AND every
     ancestor was itself committed in the legacy era (its record also lacks efp)
     with a matching def_hash — chain-checked recursively. 'Done right now' is NOT
     proof of 'unchanged since this commit': an amended ancestor that re-ran must
     NOT resurrect stale downstream records or gate answers (MF2)."""
+    # The chain walk is itself exponential on diamonds; `memo` is a per-WALK
+    # visited map (False/True per ancestor), NOT the efp memo — pass no memo
+    # when `byid` may mix graphs.
+    if memo is not None and n["id"] in memo:
+        return memo[n["id"]]
     rec = jload(r / "nodes" / f"{n['id']}.json")
     if not rec or "efp" in rec or not fingerprint_valid(
             rec.get("def_hash"), lambda rule: def_hash(n, rule), rec.get("fp_rule_version")):
-        return False
-    return all(a not in byid or _legacy_chain_unchanged(r, byid[a], byid)
+        result = False
+    else:
+        result = all(a not in byid or _legacy_chain_unchanged(r, byid[a], byid, memo)
                for a in n.get("after", []))
+    if memo is not None:
+        memo[n["id"]] = result
+    return result
 
 def _answer_harvest_valid(n, rec):
     """Honest status (jam-aus): a committed record whose answer validates against the
@@ -3497,7 +3562,7 @@ def _answer_harvest_valid(n, rec):
     schema = n.get("schema") or (n.get("fanout") or {}).get("schema")
     return not validate(out, schema)
 
-def node_rec(r, n, byid):
+def node_rec(r, n, byid, memo=None, legacy_memo=None):
     """Return (status, rec): done|partial|failed|pending. Stale (efp mismatch after an
     amend) == pending — its stored result must never be presented as current.
     Legacy (pre-efp) records carried def_hash only; a bare stamp is a downgrade
@@ -3511,18 +3576,18 @@ def node_rec(r, n, byid):
     if st == "running":
         interruption = jload(r / "interruptions" / f"{n['id']}.json") or {}
         claim = {k: rec.get(k) for k in ("pid", "skey", "attempt", "efp", "fp_rule_version")}
-        if interruption.get("claim") == claim and record_efp_valid(rec, byid, n) \
+        if interruption.get("claim") == claim and record_efp_valid(rec, byid, n, memo=memo) \
                 and not _verify_spawn_rec(r, n, byid, rec):
             rec = {**rec, "status": "interrupted", "error_class": "crashed",
                    "interruption": {k: v for k, v in interruption.items() if k != "claim"}}
     if st == "failed" and (rec or {}).get("error_class") == "cancelled":
         return "pending", rec   # stop != failure (#7): a resume re-drives cancelled work
     if st in ("done", "partial", "failed", "skipped"):
-        if record_efp_valid(rec, byid, n):
+        if record_efp_valid(rec, byid, n, memo=memo):
             if st == "failed" and _answer_harvest_valid(n, rec):
                 return "done", rec
             return st, rec
-        if "efp" not in rec and _legacy_chain_unchanged(r, n, byid):
+        if "efp" not in rec and _legacy_chain_unchanged(r, n, byid, legacy_memo):
             return st, rec
         return "pending", rec
     return "pending", rec
@@ -3680,11 +3745,11 @@ def explain_stale(r, nid, index=None):
                 return f"stale because {x}: {', '.join(fields)} changed at {ts}"
     return "stale: definition drift (no amend on record)"
 
-def gate_answer_valid(r, gate, byid):
+def gate_answer_valid(r, gate, byid, memo=None, legacy_memo=None):
     ans = jload(r / "gates" / f"{gate['id']}.json")
     if ans is None:
         return None
-    if record_efp_valid(ans, byid, gate, "_def"):
+    if record_efp_valid(ans, byid, gate, "_def", memo=memo):
         return ans
     if "fp_rule_version" in ans:
         return None
@@ -3694,7 +3759,7 @@ def gate_answer_valid(r, gate, byid):
         # and a chain of equally verified pre-efp ancestor commits.
         if not fingerprint_valid(ans.get("_def"), lambda rule: def_hash(gate, rule), None):
             return None
-        return ans if all(a not in byid or _legacy_chain_unchanged(r, byid[a], byid)
+        return ans if all(a not in byid or _legacy_chain_unchanged(r, byid[a], byid, legacy_memo)
                           for a in gate.get("after", [])) else None
     return None
 
@@ -4006,15 +4071,69 @@ def _verify_spawn_rec(r, n, byid, rec):
     return {**{k: rec[k] for k in ("pid", "started", "attempt", "log_path") if k in rec},
             "skey": title}
 
+def _foreign_ns_spawn(r, n, byid, rec, ledger=None):
+    """est-2ek.1.818: a child the reader cannot see in its own /proc (the runner's
+    container has another pid namespace) is not thereby dead. DISPLAY path only —
+    adoption and the reaper keep the strict _verify_spawn_rec law. The runner lock
+    (flock, cross-namespace safe) is already proven held by the caller; the
+    evidence added here is the runner's own spawn-ledger: a `child` row for this
+    exact (pid, skey) written AFTER the last `runner` row (spawned by the runner
+    now holding the lock, not a crashed predecessor) with no `child_end` after it,
+    on a status=running record whose efp is current. A pid that IS visible but
+    fails identity (zombie, skey absent from argv: PID reuse) is never relaxed.
+    Returns the identity marked verified=False, or None."""
+    if not isinstance(rec, dict) or rec.get("status") != "running" \
+            or not record_efp_valid(rec, byid, n):
+        return None
+    pid, skey = rec.get("pid"), rec.get("skey")
+    if not isinstance(pid, int) or pid <= 0 or not isinstance(skey, str) or not skey:
+        return None
+    if Path(f"/proc/{pid}").exists():
+        return None   # visible here: _verify_spawn_rec already judged its identity
+    if not runner_lock_held(r):
+        return None   # no cross-namespace proof of a live runner: nothing to inherit from
+    try:
+        os.kill(pid, 0)
+        return None   # signalable but absent from /proc (hidepid etc.): unknown, not proof
+    except ProcessLookupError:
+        pass
+    except OSError:
+        return None
+    if ledger is None:
+        try:
+            ledger = [json.loads(x) for x in (Path(r) / "spawn-ledger.jsonl").read_text().splitlines() if x.strip()]
+        except (OSError, ValueError):
+            return None
+    spawned = False
+    for row in ledger:
+        if not isinstance(row, dict):
+            continue
+        if row.get("role") == "runner":
+            spawned = False   # a newer runner generation: earlier children are its predecessor's
+        elif row.get("pid") == pid and row.get("skey") == skey:
+            if row.get("role") == "child":
+                spawned = True
+            elif row.get("role") == "child_end":
+                spawned = False
+    if not spawned:
+        return None
+    title = skey if "#a" in skey or not isinstance(rec.get("attempt"), int) else f"{skey}#a{rec['attempt']}"
+    return {**{k: rec[k] for k in ("pid", "started", "attempt", "log_path") if k in rec},
+            "skey": title, "verified": False,
+            "unverified_because": "pid not visible in this pid namespace; runner lock held and "
+                                  "spawn-ledger shows this child spawned by the current runner, not ended"}
+
 def _active_spawns(r, n, byid):
-    """All verified uncommitted child identities, never historical DB liveness."""
+    """All verified uncommitted child identities, never historical DB liveness.
+    A live runner's own ledger-proven child in a foreign pid namespace is listed
+    too, marked verified=False (est-2ek.1.818)."""
     records = [r / "nodes" / f"{n['id']}.json"]
     if n.get("fanout"):
         records.extend(sorted((r / "nodes").glob(f"{n['id']}.[0-9]*.json")))
     active = []
     for path in records:
         rec = jload(path)
-        v = _verify_spawn_rec(r, n, byid, rec)
+        v = _verify_spawn_rec(r, n, byid, rec) or _foreign_ns_spawn(r, n, byid, rec)
         if v and isinstance(rec, dict):
             # Keep the verified attempt title for liveness/session joins, and
             # the exact stored key for the ledger's distinct representation.
@@ -4384,6 +4503,11 @@ def run_state(r, *, telemetry=True, lock_state=None):
     # Exit-agent records are diagnostics, never part of the run's verdict math.
     graph = {**stored_graph, "nodes": workflow_nodes(stored_graph)}
     byid = {n["id"]: n for n in stored_graph["nodes"]}
+    # One shared efp memo for this graph's read: every node hash below covers a
+    # single stored graph whose defs nothing here mutates, so ancestor hashes
+    # computed for one node's law-check are exactly the values every other
+    # node's check needs (diamond graphs make the un-memoized walk exponential).
+    fp_memo, legacy_memo = {}, {}
     # #44: ONE lock observation for the whole read — runner_alive consumes the
     # same (state, detail) the payload publishes as runner_lock (A2 one-read law:
     # a second probe microseconds later can flip across a dying runner's flock).
@@ -4398,7 +4522,7 @@ def run_state(r, *, telemetry=True, lock_state=None):
         events_text = ""
     outputs, states, nodes, recs = {}, {}, {}, {}
     for n in graph["nodes"]:
-        st, rec = node_rec(r, n, byid)
+        st, rec = node_rec(r, n, byid, fp_memo, legacy_memo)
         states[n["id"]] = st; recs[n["id"]] = rec
         if st in ("done", "partial"):   # #4: partial output IS output for when/refs
             outputs[n["id"]] = (rec or {}).get("output")
@@ -4458,16 +4582,16 @@ def run_state(r, *, telemetry=True, lock_state=None):
     else:
         gate = next((n for n in graph["nodes"] if kind(n).spawns is False
                      and states[n["id"]] == "pending" and deps_ok(n)), None)
-        if gate and gate.get("wait") and gate_answer_valid(r, gate, byid) is None:
+        if gate and gate.get("wait") and gate_answer_valid(r, gate, byid, fp_memo, legacy_memo) is None:
             # machine-answered gate: the runner is polling it — 'running', never 'held'.
             # Its blockage is self-explaining via nodes[id].parked (P4 + jury tweak).
             pk = jload(r / "gates" / f"{gate['id']}.parked.json", {}) or {}
-            if live and record_efp_valid(pk, byid, gate, "_def"):
+            if live and record_efp_valid(pk, byid, gate, "_def", memo=fp_memo):
                 nodes[gate["id"]]["parked"] = {k: v for k, v in pk.items() if k != "_def"}
             elif live:
                 nodes[gate["id"]]["parked"] = {"kind": "timer" if not gate["wait"].get("until_argv") else "check", "attempt": 0}
             gate = None
-        if gate and gate_answer_valid(r, gate, byid) is None:
+        if gate and gate_answer_valid(r, gate, byid, fp_memo, legacy_memo) is None:
             try:
                 cond = when_true(gate, outputs)
                 held = {"id": gate["id"], "question": gate.get("question"),
@@ -4707,15 +4831,65 @@ def run_child_metrics(r):
             out.setdefault(k, v)
     return out
 
+def _aggregate_item_fact(r, nid, index):
+    """Read-only projection of an item from a CURRENT done fan-out aggregate.
+    Never a recovery record: node_rec still reads only the aggregate on disk."""
+    graph = jload(Path(r) / "graph.json")
+    if not isinstance(graph, dict) or not isinstance(graph.get("nodes"), list):
+        return None
+    byid = {n["id"]: n for n in graph["nodes"] if isinstance(n, dict) and n.get("id")}
+    parent = str(nid)
+    # Accept either the explicit item index or its canonical record stem, but
+    # never split a real graph node whose own id happens to contain a dot.
+    if index is None and parent not in byid:
+        parent, _, index = parent.rpartition(".")
+    if isinstance(index, str) and index.isdecimal():
+        index = int(index)
+    n = byid.get(parent)
+    if type(index) is not int or index < 0 or not n or not n.get("fanout"):
+        return None
+    st, aggregate = node_rec(Path(r), n, byid)
+    if st != "done" or not isinstance(aggregate, dict):
+        return None  # stale, amended, partial and uncommitted aggregates cannot attest
+    output = aggregate.get("output")
+    rows = output.get("all_results") if isinstance(output, dict) else None
+    row = rows[index] if isinstance(rows, list) and index < len(rows) else None
+    if not isinstance(row, dict) or row.get("status") not in ("done", "partial", "failed", "skipped"):
+        row = {"status": "superseded"}  # aggregate closed it, exact item verdict unknown
+    return parent + ".json", row
+
+
 def node_facts(r, nid, index=None):
     """Record facts for one node (fan-out item via `index`), plus its steer truth.
+    A current done aggregate supersedes leftover running item spawn facts.
     None when the node has no record at all (never fabricate a record)."""
     name = str(nid) + (f".{index}" if index is not None else "")
     rec = jload(Path(r) / "nodes" / f"{name}.json")
     if not isinstance(rec, dict):
         return None
+    superseded = _aggregate_item_fact(r, nid, index) if rec.get("status") == "running" else None
+    if superseded:
+        source, row = superseded
+        # Keep spawn provenance, but outcome fields come ONLY from the committed
+        # aggregate row. No writes, item rescue, or fabricated success verdict.
+        rec = {k: v for k, v in rec.items() if k not in
+               ("status", "output", "error", "error_class", "harvest", "final", "ms")}
+        rec.update(row)
     facts = {k: (rec[k] if k in rec and rec[k] is not None else "unknown")
              for k in FACT_KEYS}
+    if superseded:
+        facts["superseded_by_aggregate"] = source
+        if rec["status"] == "superseded":
+            pid = rec.get("pid")
+            facts["pid_state"] = "unknown"
+            if type(pid) is int and pid > 0:
+                try:
+                    os.kill(pid, 0)
+                    facts["pid_state"] = "present"  # presence is not verified spawn identity
+                except ProcessLookupError:
+                    facts["pid_state"] = "absent"
+                except OSError:
+                    pass
     facts["steer"] = _steer_state(Path(r), str(nid))
     if rec.get("profile"):
         facts["profile"] = rec["profile"]
@@ -5411,7 +5585,7 @@ def run_explain(out):
     return f"{status}: " + ", ".join(parts)
 
 def current_attempt(cm, spawns):
-    """Activity only for verified spawn session titles; DB rows alone prove no liveness."""
+    """Activity only for live spawn session titles (verified, or ledger-marked foreign-ns); DB rows alone prove no liveness."""
     live = {}
     for spawn in spawns:
         title = (spawn or {}).get("skey")
