@@ -22,8 +22,8 @@ screenshots, `AGENTS.md` (agent front door: install / operate / contribute),
 | Rule | Evidence |
 |---|---|
 | 2 — exact pin | at release, `sha` will be the 40-char commit of tag `v1.3.9`; `image`/`screenshots` are raw URLs pinned to the same SHA |
-| 3 — no self-updater | No update checks and no remote fetches anywhere: zero `fetch(` in `desktop/plugin.js`, zero `urlopen` outside `tests/`; the plugin never loads code it did not ship |
-| 6 — capabilities match | `provides_tools: [workflow]`; no hooks; no middleware; `requires_env: []` — the runner's `HERMES_WF_STEER_*` vars are plugin-internal IPC set by the runner for its own children, never user-provided (`docs/manifest-decisions.md`) |
+| 3 — no self-updater | No update checks; the only outbound HTTP is the config-gated, default-OFF p1 webhook (`hooks_outbound.py`, ships OFF: no setting, no socket) and the core-client liveness ping; zero `fetch(` in `desktop/plugin.js`; the plugin never loads code it did not ship |
+| 6 — capabilities match | `provides_tools: [workflow]`; 8 hooks declared; every hook-backed feature (admission gates, dispatch witness, P1, P3, P5) is config-gated DEFAULT-OFF — OFF means zero registrations; no middleware; `requires_env: []` — the runner's `HERMES_WF_STEER_*` vars are plugin-internal IPC set by the runner for its own children, never user-provided (`docs/manifest-decisions.md`) |
 | 7 — install scanner | `hermes plugins validate .` → `Validation passed.`, security scan `safe`, zero `caution` findings |
 | 8 — desktop surface | `desktop/plugin.js` imports only `@hermes/plugin-sdk` / `react`; gate resumes use `host.composer.submit(ownerSessionId, text)` (visible) or SDK `insertText`; no app DOM reach or private composer events |
 | 9 — dependencies | None. Stdlib-only Python; no `python_dependencies`, no `pyproject.toml` |

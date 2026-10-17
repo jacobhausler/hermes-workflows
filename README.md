@@ -25,7 +25,7 @@ not re-paid.
 |---|---|
 | **Graph runs** | Agent nodes with `goal`, `after` edges, per-node `model`/`provider`/`reasoning`, and `max_turns`/`timeout`/`run_budget` caps; optional per-graph `concurrency`/`item_concurrency`, clamped to owner caps |
 | **Fan-out** | One node → N live children from `fanout.items` or `items_from:"<node>.items"`; per-item liveness; `quorum` cancels stragglers once N commit (they are `cancelled`, never a failure) |
-| **Human + machine gates** | A `gate` holds on a question until `release`; `gate.wait` holds on a timer or an argv probe at zero token cost; `when` predicates branch on upstream output; `on_skip:"prune"` retires the losing arm |
+| **Human + machine gates** | A `gate` holds on a question until `release`; `gate.wait` holds on a timer or an argv probe at zero token cost; `when` predicates branch on upstream output; `on_skip:"prune"` retires the losing arm; an optional default-off admission gate answers human releases at zero turns (`docs/admission-gates.md`) |
 | **Fingerprint resume** | Crash, restart, or `amend` the graph mid-flight — nodes whose effective fingerprint still matches replay-skip; only what actually changed re-runs. `run`/`amend` accept `dry_run:true` for a no-write preview |
 | **Cooperative steer** | `steer` queues text for a running node; the child pulls it at its next natural seam via the tool's `inbox` action — prompts are never rewritten mid-flight |
 | **Profile delegation** | A node can run *as* another local Hermes profile (its instructions, memory, tools) behind a per-profile consent file — multi-personality graphs on one machine, no isolation claimed |
@@ -86,18 +86,20 @@ One tool, action-routed — the complete surface, with the flags that matter:
 Plus a `/wf` slash command: bare `/wf` lists the library; `/wf <name> [note]`
 launches that graph with the note as its context seed. `/wf show <name>` (or
 `workflow {"action":"library","name":"<name>"}`) returns required inputs and
-an instantiate command. Library-sourced launches require nonempty string bindings
+an instantiate command; `/wf gates` boards held gates and `/wf orphans` lists
+orphan-held runs across the fleet. Library-sourced launches require nonempty string bindings
 for every `{run.KEY}` on the shared text surface, including echo output, gate
 options and machine argv; surviving refs refuse before any write. Inline graphs
 retain their existing behavior, including refusing unbound machine argv.
 
-Optional `save params:{KEY:{desc,default}}` stores descriptive `meta.params` in
-the envelope. Required keys derive from graph refs, not this declaration; defaults
-are suggestions in the instantiate command, never automatic launch bindings.
-Omission retains params on overwrite; `{}` clears them deliberately. Missing or
-dead declarations on an envelope save produce non-fatal `s12` save warnings
-naming the keys; a bare save's contract derives wholly from refs. Bare,
-ref-free library rows and clean save responses keep their previous key sets.
+A shelf row can declare its launch contract. The typed top-level `params` block
+(`pin`/`tune` kinds) plus the `where`/`by` door-time seams bind presence and
+patched goals at launch — every violation lands in ONE refusal, and the run
+records the reproducibility triple (`meta.binding`). The lighter
+`save params:{KEY:{desc,default}}` envelope stores display hints only: `/wf show`
+renders them, required keys always derive from graph refs, and defaults are
+suggestions — never automatic bindings. See
+[references/grammar.md](references/grammar.md).
 
 ## Graph grammar in 30 seconds
 
@@ -147,6 +149,7 @@ procedures:
 
 ```sh
 hermes plugins install hermes-workflows      # from the catalog (pinned SHA)
+hermes plugins install <git-url>@v1.3.9      # fallback until the catalog entry merges (see INSTALL.md for the zip)
 hermes plugins enable hermes-workflows
 ```
 
@@ -193,7 +196,7 @@ graphs ship *with the plugin* under `library/general/`, so a fresh install can
 run a real DAG out of the box:
 
 ```jsonc
-{ "task": {"from": "general/report-and-verify"} }
+{ "action": "run", "from": "general/report-and-verify" }
 ```
 
 | Address | Reach for it when |

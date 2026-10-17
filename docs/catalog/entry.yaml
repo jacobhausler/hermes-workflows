@@ -20,6 +20,6 @@ platforms: []
 capabilities:
   provides_tools:
     - workflow
-  provides_hooks: []
+  provides_hooks: [post_tool_call, pre_llm_call, transform_llm_output, post_gateway_admission, pre_gateway_dispatch, on_session_end, on_session_finalize, agent_loop_stopped]
   provides_middleware: []
   requires_env: []

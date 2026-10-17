@@ -1,14 +1,16 @@
 # Native hooks (default-off operator integrations)
 
-Two opt-in hook integrations ship since v1.3.9. Both are **DEFAULT OFF**: off
+Three default-off hook integrations live on main. All are **DEFAULT OFF**: off
 means zero registrations, zero threads, byte-identical payloads. Enabling one
-never changes graph behavior — it only adds an observer (P3) or an extra
-presentation surface for held human gates (P5). The authoritative spec for each
-is its module docstring ("the docstring is its man page"); this file is the
-pointer and the switch board.
+never changes graph behavior — it only adds an observer (P1, P3) or an extra
+presentation surface for held human gates (P5). Ship state: P1 (outbound bridge)
+shipped in the v1.3.9 cut; P3 and P5 landed on main after the tag and ship in
+the next release. The authoritative spec for each is its module docstring ("the
+docstring is its man page"); this file is the pointer and the switch board.
 
 | Feature | Settings key | Exact entry that arms it | Gate read |
 |---|---|---|---|
+| P1 outbound bridge | `plugins.entries.hermes-workflows.settings.outbound_bridge` | operator setting ON + per-run carrier opt-in (`outbound_bridge` in run meta/graph meta) | fail-open (webhook delivery is best-effort; the run never waits on the network) |
 | P3 subagent accounting | `plugins.entries.hermes-workflows.settings.hooks_allow` | `"subagent_accounting"` | fail-closed (a scalar, a mapping, or a read failure all read as OFF) |
 | P5 native approval bridge | `plugins.entries.hermes-workflows.settings.hooks_bridge_allow` | `"approval_bridge"` | allow-list; off = defs-only module exec, no thread |
 
