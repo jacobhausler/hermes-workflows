@@ -3,8 +3,8 @@
     {
       "dot": "cyan",
       "items": [
-        "A single classifier node, complementary when-gates: the branch is gate grammar, not agent discretion",
-        "Empty queue is a RESULT \u2014 a notice echo ends the run quietly instead of a failed fan-out waking anyone",
+        "A single classifier node, complementary `when` predicates on the arm heads: the branch is grammar, not agent discretion",
+        "Empty queue is a RESULT \u2014 the notice arm ends the run quietly instead of a failed fan-out waking anyone",
         "Routine work rides the batch fan-out; only urgent items spend a human escalation gate"
       ],
       "title": "Why it works"
@@ -12,7 +12,7 @@
     {
       "dot": "rose",
       "items": [
-        "6 agents, 4 gates, 1 echo, 1 fan-out: intake -> classify -> routes split to batch|urgent|empty",
+        "7 agents, 1 gates, 1 fan-out: intake -> classify -> when-guarded arms split to batch|urgent|empty",
         "escalate is a human gate mid-arm; report joins every arm, live or pruned, from ## Inputs payloads",
         "Derived from this example's bytes by scripts/graph_diagram.py"
       ],
@@ -29,27 +29,15 @@
     },
     {
       "from": "classify",
-      "id": "classify-route-urgent",
-      "to": "route-urgent",
+      "id": "classify-batch-prep",
+      "to": "batch-prep",
       "variant": "security"
     },
     {
       "from": "classify",
-      "id": "classify-route-batch",
-      "to": "route-batch",
-      "variant": "security"
-    },
-    {
-      "from": "route-batch",
-      "id": "route-batch-batch-prep",
-      "to": "batch-prep",
-      "variant": "default"
-    },
-    {
-      "from": "route-urgent",
-      "id": "route-urgent-escalate",
+      "id": "classify-escalate",
       "to": "escalate",
-      "variant": "default"
+      "variant": "security"
     },
     {
       "from": "escalate",
@@ -59,15 +47,9 @@
     },
     {
       "from": "classify",
-      "id": "classify-route-empty",
-      "to": "route-empty",
-      "variant": "security"
-    },
-    {
-      "from": "route-empty",
-      "id": "route-empty-empty-notice",
+      "id": "classify-empty-notice",
       "to": "empty-notice",
-      "variant": "default"
+      "variant": "security"
     },
     {
       "from": "batch-prep",
@@ -104,17 +86,12 @@
       "id": "gates",
       "label": "Gates",
       "variant": "normal"
-    },
-    {
-      "id": "room",
-      "label": "Deterministic",
-      "variant": "normal"
     }
   ],
   "meta": {
     "output": "examples/diagrams/triage-route.html",
     "quality_profile": "standard",
-    "subtitle": "Triage a work queue with one classifier node and the complementary two-gate branch pair: gates with negated `w",
+    "subtitle": "Triage a work queue with one classifier node and the complementary `when` pair carried by the arm heads themse",
     "title": "triage-route"
   },
   "nodes": [
@@ -138,38 +115,6 @@
     },
     {
       "col": 2,
-      "id": "route-batch",
-      "label": "Route Batch",
-      "lane": "gates",
-      "sublabel": "every s",
-      "tag": "branch",
-      "type": "security",
-      "width": 104
-    },
-    {
-      "col": 2,
-      "id": "route-empty",
-      "label": "Route Empty",
-      "lane": "gates",
-      "sublabel": "every s",
-      "tag": "branch",
-      "type": "security",
-      "width": 104,
-      "yOffset": 92
-    },
-    {
-      "col": 2,
-      "id": "route-urgent",
-      "label": "Route Urgent",
-      "lane": "gates",
-      "sublabel": "every s",
-      "tag": "branch",
-      "type": "security",
-      "width": 104,
-      "yOffset": 184
-    },
-    {
-      "col": 3,
       "id": "batch-prep",
       "label": "Batch Prep",
       "lane": "work",
@@ -178,25 +123,27 @@
       "width": 104
     },
     {
-      "col": 3,
+      "col": 2,
       "id": "empty-notice",
       "label": "Empty Notice",
-      "lane": "room",
-      "type": "messagebus",
-      "width": 104
+      "lane": "work",
+      "sublabel": "you are the empty",
+      "type": "backend",
+      "width": 104,
+      "yOffset": 92
     },
     {
-      "col": 3,
+      "col": 2,
       "id": "escalate",
       "label": "Escalate",
       "lane": "gates",
       "sublabel": "urgent items need a",
-      "tag": "human hold",
+      "tag": "branch",
       "type": "security",
       "width": 104
     },
     {
-      "col": 4,
+      "col": 3,
       "id": "batch-run",
       "label": "Batch Run",
       "lane": "work",
@@ -206,7 +153,7 @@
       "width": 104
     },
     {
-      "col": 4,
+      "col": 3,
       "id": "handle-urgent",
       "label": "Handle Urgent",
       "lane": "work",
@@ -216,7 +163,7 @@
       "yOffset": 92
     },
     {
-      "col": 5,
+      "col": 4,
       "id": "report",
       "label": "Report",
       "lane": "work",
@@ -236,13 +183,13 @@
       "fromCol": 1,
       "id": "mid",
       "label": "hand-offs",
-      "toCol": 4
+      "toCol": 3
     },
     {
-      "fromCol": 5,
+      "fromCol": 4,
       "id": "out",
       "label": "terminus",
-      "toCol": 5
+      "toCol": 4
     }
   ],
   "schema_version": 2

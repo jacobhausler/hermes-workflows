@@ -6,7 +6,7 @@
       "Both arms converge on a single closeout paragraph the owner skims first"
     ]},
     {"dot": "rose", "title": "Contract", "items": [
-      "{{nodes}} nodes: build -> independent verify -> {{branches}}-way route -> land_gate | escalate, joined at closeout",
+      "{{nodes}} nodes: build -> independent verify -> {{branches}}-way when-pair on the human arm gates: land_gate | escalate, joined at closeout",
       "No retry loop ships here: a failed attempt reaches the owner, not another silent build",
       "Derived from this example's bytes by scripts/graph_diagram.py"
     ]}

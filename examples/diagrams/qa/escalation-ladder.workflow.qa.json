@@ -1,11 +1,20 @@
 {
-  "browser": "local chromium (snap) headless --screenshot at 1512px width; archify viewer toolbars (.toolbar, .diagram-nav) hidden by injected style before capture, no PATH/MAP/LENS/zoom visible in any shot; vision-QA lap per png (clip, legibility, counts vs legend)",
+  "browser": "local chrome-headless-shell (Google Chrome for Testing 154.0.8037.92) via CDP Page.captureScreenshot (captureBeyondViewport); authoring box carries no full chromium — recorded honestly as headless-shell, not desktop chrome; archify viewer chrome (.toolbar, .diagram-nav, .no-print rail/node-outline) hidden by injected style before capture",
   "chrome_free": true,
   "clipped": false,
-  "expected_nodes": 8,
+  "expected_nodes": 6,
   "legible": true,
-  "note": "node-title ellipses and 'every s' sublabels are the generator fit law (phrase()/fit_label budgets), deterministic by design \u2014 not raster variance; window height chosen per diagram so the node-index panel lands with padding",
-  "png_sha256_16": "6b66951ce91ce7cb",
-  "renderer": "archify 3.0.1 (MIT) \u2014 vendored renderer, scripts/vendor/archify/, byte-identical to merged PR-3 vendor tree",
-  "shot_date": "2026-10-06"
+  "measured": {
+    "chrome_buttons_killed": 27,
+    "svg_geometry_onscreen": true,
+    "viewport": [
+      1512,
+      1602
+    ],
+    "visible_chrome_buttons_after_kill": 0
+  },
+  "note": "sublabel mid-word cuts are the generator's fit law (phrase()/fit_label budget at width 104) — deterministic by design, not raster variance; header subtitle ellipsis likewise; node-index rail excluded via injected .no-print style (viewer chrome is never on record)",
+  "png_sha256_16": "992467257812ca6c",
+  "renderer": "archify 3.0.1 (MIT) — vendored renderer for the diagram shoot loop; provenance: https://github.com/tt-a1i/archify skill-release.json @3.0.1; renderers/schemas/assets copied verbatim.",
+  "shot_date": "2026-10-17"
 }

@@ -3,7 +3,7 @@
     {
       "dot": "cyan",
       "items": [
-        "Armed branch on a schema'd verdict \u2014 the split is the gate grammar, not agent discretion",
+        "Armed branch on a schema'd verdict \u2014 the split is the `when` grammar on the arm heads, not agent discretion",
         "Complementary `when` predicates + on_skip:prune: arms are mutually exclusive by grammar",
         "The dead arm is pruned (skipped, never run) \u2014 join sees only the live arm"
       ],
@@ -12,7 +12,7 @@
     {
       "dot": "rose",
       "items": [
-        "6 nodes, 2 gates, 2 branches: judge -> ship/hold gate pair -> ship_it|escalate -> join",
+        "5 nodes, 1 gates, 2 branches: judge -> ship_it agent + hold gate, each armed with its own `when` -> join",
         "Replace judge/ship_it/escalate goals with real work; the shape is the lesson",
         "Derived from this example's bytes by scripts/graph_diagram.py \u2014 same input, same bytes"
       ],
@@ -23,21 +23,15 @@
   "edges": [
     {
       "from": "judge",
-      "id": "judge-go",
-      "to": "go",
-      "variant": "security"
-    },
-    {
-      "from": "judge",
       "id": "judge-hold",
       "to": "hold",
       "variant": "security"
     },
     {
-      "from": "go",
-      "id": "go-ship_it",
+      "from": "judge",
+      "id": "judge-ship_it",
       "to": "ship_it",
-      "variant": "default"
+      "variant": "security"
     },
     {
       "from": "hold",
@@ -73,7 +67,7 @@
   "meta": {
     "output": "examples/diagrams/branch-on-verdict.html",
     "quality_profile": "standard",
-    "subtitle": "Two-arm branch on a schema'd verdict: complementary `when` gates with on_skip:prune; the dead arm is pruned (s",
+    "subtitle": "Two-arm branch on a schema'd verdict in the when-on-agent form: complementary `when` + on_skip:prune carried b",
     "title": "branch-on-verdict"
   },
   "nodes": [
@@ -88,24 +82,22 @@
     },
     {
       "col": 1,
-      "id": "go",
-      "label": "Go",
-      "lane": "gates",
-      "sublabel": "every s",
-      "tag": "branch",
-      "type": "security",
-      "width": 104
-    },
-    {
-      "col": 1,
       "id": "hold",
       "label": "Hold",
       "lane": "gates",
       "sublabel": "judge said hold",
       "tag": "branch",
       "type": "security",
-      "width": 104,
-      "yOffset": 92
+      "width": 104
+    },
+    {
+      "col": 1,
+      "id": "ship_it",
+      "label": "Ship It",
+      "lane": "work",
+      "sublabel": "the ship arm ran",
+      "type": "backend",
+      "width": 104
     },
     {
       "col": 2,
@@ -115,16 +107,6 @@
       "sublabel": "the hold arm ran",
       "type": "backend",
       "width": 104
-    },
-    {
-      "col": 2,
-      "id": "ship_it",
-      "label": "Ship It",
-      "lane": "work",
-      "sublabel": "the go arm ran",
-      "type": "backend",
-      "width": 104,
-      "yOffset": 92
     },
     {
       "col": 3,

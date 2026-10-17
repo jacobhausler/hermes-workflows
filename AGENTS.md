@@ -193,12 +193,13 @@ through `settings.models` — no vendor model id appears in the file; an unbound
 class fails the launch closed. Author-run receipt:
 [receipts/blind-council/author-run.json](receipts/blind-council/author-run.json).
 [examples/build/triage-route.workflow.json](examples/build/triage-route.workflow.json) is a
-queue-triage TEMPLATE (intake -> classifier -> complementary `when` gate pair
-with `on_skip: prune`, routing exactly one arm: human escalation with the gate
-answer consumed as data, or a rule-driven batch fan-out). The classifier emits a
-`has_urgent` boolean because the gate grammar cannot see array length, and each arm
-hangs ONLY on its route gate (prune law: a node skips when ALL its `after` deps
-skip — a shared classifier dep resurrects the dead arm); the fan-out head is an
+queue-triage TEMPLATE (intake -> classifier -> complementary `when` +
+`on_skip: prune` carried by the arm heads themselves: human escalation gate with
+the answer consumed as data, or a rule-driven batch fan-out). The classifier emits
+a `has_urgent` boolean because the when grammar cannot see array length; each arm
+head hangs on the classifier and carries its own predicate (prune law: a cascade
+skip needs ALL `after` deps skipped, so only what hangs BEHIND a dead head
+cascade-prunes — the head's own `when` decides its fate); the fan-out head is an
 arm-scoped `batch-prep` forwarding the routine set, not the classifier itself.
 Author-run receipt:
 [receipts/triage-route/author-run.json](receipts/triage-route/author-run.json).
@@ -220,7 +221,7 @@ designed dead gauge so the tally's loud-row law is exercised on every run; the
 report node consumes the tally via `after_partial`. Two author laps — honest
 (dead gauge as a loud red row) and severed (a child cut from the record becomes
 a NAMED missing row): [receipts/census-fanout/author-run.json](receipts/census-fanout/author-run.json).
-[examples/review/escalation-ladder.workflow.json](examples/review/escalation-ladder.workflow.json) is a verify-then-branch TEMPLATE (builder -> fresh independent verifier -> when-pair: verified lands behind a human gate, failed escalates to a human hold with the whole packet; core has NO loop idiom - retry ownership is spelled out, not implied). Both arms smoke-run: [receipts/escalation-ladder/author-run.json](receipts/escalation-ladder/author-run.json).
+[examples/review/escalation-ladder.workflow.json](examples/review/escalation-ladder.workflow.json) is a verify-then-branch TEMPLATE (builder -> fresh independent verifier -> when-pair carried by the two human arm gates themselves: verified lands behind the land gate, failed escalates to a human hold with the whole packet; core has NO loop idiom - retry ownership is spelled out, not implied). Both arms smoke-run: [receipts/escalation-ladder/author-run.json](receipts/escalation-ladder/author-run.json).
 [examples/basics/exchange-run.workflow.json](examples/basics/exchange-run.workflow.json) is the
 byte-portability TEACHING PAIR — the file itself is the artifact that travels the
 save → library → re-run loop (the loop's verbs, told in the description; the proof

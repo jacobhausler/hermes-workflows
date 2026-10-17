@@ -27,18 +27,6 @@
       "after": [
         "judge"
       ],
-      "id": "go",
-      "on_skip": "prune",
-      "type": "gate",
-      "wait": {
-        "wait_s": 1
-      },
-      "when": "out.judge.verdict == 'ship'"
-    },
-    {
-      "after": [
-        "judge"
-      ],
       "id": "hold",
       "on_skip": "prune",
       "options": [
@@ -51,9 +39,9 @@
     },
     {
       "after": [
-        "go"
+        "judge"
       ],
-      "goal": "The go-arm ran because the judge said ship. Under '## Inputs' you have the judge's verdict. Reply with ONLY a fenced json block: {\"arm\": \"go\", \"echo\": \"<the judge's why>\"}.",
+      "goal": "The ship arm ran because the judge said ship — this agent carries the `when` directly, no routing gate in front of it. Under '## Inputs' you have the judge's verdict. Reply with ONLY a fenced json block: {\"arm\": \"ship\", \"echo\": \"<the judge's why>\"}.",
       "id": "ship_it",
       "inputs": [
         "judge"
@@ -75,7 +63,9 @@
       },
       "timeout": 120,
       "type": "agent",
-      "tier": "worker"
+      "tier": "worker",
+      "on_skip": "prune",
+      "when": "out.judge.verdict == 'ship'"
     },
     {
       "after": [
@@ -127,5 +117,5 @@
       "tier": "worker"
     }
   ],
-  "description": "Two-arm branch on a schema'd verdict: complementary `when` gates with on_skip:prune; the dead arm is pruned (skipped, not run); the join runs on the live arm only. Replace judge/ship_it/escalate goals with real work."
+  "description": "Two-arm branch on a schema'd verdict in the when-on-agent form: complementary `when` + on_skip:prune carried by the arm nodes themselves — the ship arm is an agent whose own `when` commits it terminal-skipped (zero spawns) when the verdict says hold; the hold arm is a human gate carrying the negated predicate, so the owner can still override. The dead arm is pruned (skipped, not run); the join runs on the live arm only. Replace judge/ship_it/escalate goals with real work."
 }

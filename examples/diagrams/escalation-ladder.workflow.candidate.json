@@ -12,7 +12,7 @@
     {
       "dot": "rose",
       "items": [
-        "8 nodes: build -> independent verify -> 2-way route -> land_gate | escalate, joined at closeout",
+        "6 nodes: build -> independent verify -> 2-way when-pair on the human arm gates: land_gate | escalate, joined at closeout",
         "No retry loop ships here: a failed attempt reaches the owner, not another silent build",
         "Derived from this example's bytes by scripts/graph_diagram.py"
       ],
@@ -29,21 +29,9 @@
     },
     {
       "from": "verify",
-      "id": "verify-route-verified",
-      "to": "route-verified",
-      "variant": "security"
-    },
-    {
-      "from": "verify",
-      "id": "verify-route-failed",
-      "to": "route-failed",
-      "variant": "security"
-    },
-    {
-      "from": "route-verified",
-      "id": "route-verified-land_gate",
+      "id": "verify-land_gate",
       "to": "land_gate",
-      "variant": "default"
+      "variant": "security"
     },
     {
       "from": "land_gate",
@@ -52,10 +40,10 @@
       "variant": "default"
     },
     {
-      "from": "route-failed",
-      "id": "route-failed-escalate",
+      "from": "verify",
+      "id": "verify-escalate",
       "to": "escalate",
-      "variant": "default"
+      "variant": "security"
     },
     {
       "from": "land",
@@ -109,20 +97,20 @@
     },
     {
       "col": 2,
-      "id": "route-failed",
-      "label": "Route Failed",
+      "id": "escalate",
+      "label": "Escalate",
       "lane": "gates",
-      "sublabel": "every s",
+      "sublabel": "verification failed",
       "tag": "branch",
       "type": "security",
       "width": 104
     },
     {
       "col": 2,
-      "id": "route-verified",
-      "label": "Route Verified",
+      "id": "land_gate",
+      "label": "Land Gate",
       "lane": "gates",
-      "sublabel": "every s",
+      "sublabel": "verification passed",
       "tag": "branch",
       "type": "security",
       "width": 104,
@@ -130,27 +118,6 @@
     },
     {
       "col": 3,
-      "id": "escalate",
-      "label": "Escalate",
-      "lane": "gates",
-      "sublabel": "verification failed",
-      "tag": "human hold",
-      "type": "security",
-      "width": 104
-    },
-    {
-      "col": 3,
-      "id": "land_gate",
-      "label": "Land Gate",
-      "lane": "gates",
-      "sublabel": "verification passed",
-      "tag": "human hold",
-      "type": "security",
-      "width": 104,
-      "yOffset": 92
-    },
-    {
-      "col": 4,
       "id": "land",
       "label": "Land",
       "lane": "work",
@@ -159,7 +126,7 @@
       "width": 104
     },
     {
-      "col": 5,
+      "col": 4,
       "id": "closeout",
       "label": "Closeout",
       "lane": "work",
@@ -179,13 +146,13 @@
       "fromCol": 1,
       "id": "mid",
       "label": "hand-offs",
-      "toCol": 4
+      "toCol": 3
     },
     {
-      "fromCol": 5,
+      "fromCol": 4,
       "id": "out",
       "label": "terminus",
-      "toCol": 5
+      "toCol": 4
     }
   ],
   "schema_version": 2
