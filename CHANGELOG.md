@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- `scripts/wofify.py`: the WOFification authoring-time seam — `inventory`
+  (path-shape census of a way-of-working repo), `scaffold` (never-clobber pack
+  skeleton), `validate` (pack graphs compiled and measured by the door's own
+  validator; card sidecars skipped; zero graphs is never green), `shelf`
+  (adoption script with sha256 drift refusal). Not a door action, like the
+  vaporized `wf_dialect.py` it mirrors; contract in `references/wofification.md`
+  (est-h0huv).
+
 ## 1.3.9 — 2026-10-17
 
 Patch release: 43 merged PRs since v1.3.8 — runner hardening (zombie-reap

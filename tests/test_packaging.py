@@ -123,7 +123,11 @@ def main() -> None:
                                       # est-2ek.1.866 (PR #323): tests/test_self_review_422_1866.py
                                       # exec-modules this at import — packs per the
                                       # est-4vnq finding-4 rationale in pack.py.
-                                      "scripts/pr_formal_review.py", "scripts/drift_check.py"})
+                                      "scripts/pr_formal_review.py", "scripts/drift_check.py",
+                                      # est-h0huv: tests/test_wofify.py subprocess-executes
+                                      # this CLI end to end — the est-4vnq finding-4
+                                      # rationale again; the tool ships beside its test.
+                                      "scripts/wofify.py"})
             # wf165d: the no-silent-middle half only has a premise in a REPO
             # checkout — the source-only scripts (make_public.py,
             # lane_recover.py) never travel inside the ZIP, so from the

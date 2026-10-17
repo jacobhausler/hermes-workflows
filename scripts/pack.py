@@ -142,6 +142,10 @@ INCLUDE_FILES = (
     # tests/test_*.py glob) exec-modules this at import from the package root —
     # the est-4vnq finding-4 shape; the gate script ships beside its test.
     "scripts/pin_delta_check.py",
+    # est-h0huv: tests/test_wofify.py (shipped via the tests/test_*.py glob)
+    # subprocess-executes this CLI end to end — the est-4vnq shape; the tool
+    # ships beside its test.
+    "scripts/wofify.py",
     # est-5p7x (PR #165 CI blocker, run 37440782151): tests/test_diagram_law.py
     # (shipped via the tests/test_*.py glob) subprocess-executes BOTH generators
     # from the package root — the exact est-4vnq finding-4 shape. The merge ref

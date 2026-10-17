@@ -104,6 +104,6 @@ ending your turn right after `run` is how runs stall.
   File-shareable graphs: [portable](references/portable.md).
 
 The graph vocabulary lives in [grammar](references/grammar.md); read-model/recovery in
-[operations](references/operations.md); build lanes and long-run babysitting in the
-[operator playbook](references/operator-playbook.md). [Development
-checks](references/development.md) are for contributors, not ordinary-user prerequisites.
+[operations](references/operations.md); build lanes and babysitting in the [operator
+playbook](references/operator-playbook.md); skills-repo→pack in [wofification](references/wofification.md).
+[Development checks](references/development.md) are for contributors, not user prerequisites.
