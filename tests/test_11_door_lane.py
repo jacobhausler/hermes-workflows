@@ -125,7 +125,12 @@ class DoorLane(unittest.TestCase):
         meta = json.loads((self.root / sourced["run_id"] / "run.json").read_text())
         self.assertEqual(meta["graph_source"], {"name": "solo", "owner": "default",
                                                 "source": "repo/graph.json", "source_digest": prov["source_digest"]})
-        self.assertIn("source", door.act_save({"graph": G, "source": "x" * 201})["error"])
+        self.assertIn("source", door.act_save({"graph": G, "source": "x" * 513})["error"])
+        # #459 G1: the cap moved 200 -> 512 so a full attribution line rides;
+        # the boundary assertion tracks the cap itself (see
+        # tests/test_save_sourcecap_459.py for the boundary trio).
+        self.assertNotIn("error", door.act_save({"graph": G, "name": "mid201",
+                                                 "source": "y" * 201}))
         with patch.dict(os.environ, {"HERMES_HOME": str(self.root / "profiles" / "reviewer")}):
             door.act_save({"graph": G, "name": "named"})
             self.assertEqual(json.loads((door.library_root() / "named.json").read_text())["provenance"]["owner"],
