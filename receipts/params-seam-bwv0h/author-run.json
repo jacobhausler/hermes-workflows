@@ -1,0 +1,46 @@
+{
+ "feature": "native params seam (pin/tune contract, where/by door-time primitives, reproducibility triple)",
+ "bead": "estate tracker est-bwv0h (private store; this receipt is public-safe)",
+ "owner_ruling": "build the full recommendation (private owner thread, 2026-10-17)",
+ "author": "owner estate seat (pseudonymized)",
+ "laps": [
+  {
+   "lap": "unit",
+   "command": "python3 tests/test_params_contract_bwv0h.py",
+   "verdict": "RESULT: PASS",
+   "legs_pointer": "T1(9) structural refusals, T2(3) accumulated refusal + zero-write, T3(1) seed refusal, T4(6) ladder presence incl cascade + popped seam + fb-572 supplied-unbound, T5(3) by verb-family byte-exact, T6(7) triple stamp incl from: row digest + inline null row + plain-run zero-change, T7(2) instantiate surface + validate action \u2014 count re-derivable from the file's check() calls (29)"
+  },
+  {
+   "lap": "golden zero-change",
+   "command": "python3 tests/11-golden-solo.py compare . tests/golden_solo/v1.0.15.json",
+   "verdict": "EMPTY diff 6 scenarios; solo run.json key sets match v1.0.15"
+  },
+  {
+   "lap": "adjacent regressions",
+   "command": "test_provenance_contract_126.py; test_11_door_lane.py; test_engine.py; test_door_general_51.py",
+   "verdict": "OK / OK / ALL PASS / OK"
+  },
+  {
+   "lap": "gates",
+   "command": "hermes plugins validate .; node --check desktop/plugin.js; scripts/make_public.py --repo . <fresh>",
+   "verdict": "Validation passed. / parse OK / 0 scrub hits (598 files published)"
+  },
+  {
+   "lap": "migration (estate-side, disclosed)",
+   "command": "estate ra-pr row re-authored as one params graph (depth ladder: tune depth[light,std,deep] default std; three deep-lane nodes where-gated; review goal by-patched per depth) \u2014 door validate + run dry_run at light/std/deep",
+   "verdict": "validate ok; dry_run ok at light and at std-silent (tune default bound); dry_run deep refused route_unavailable \u2014 the deep lane pins a codex model whose ping answered from the fallback ladder on this seat THIS HOUR (estate route state, not the seam: proof the seam works \u2014 the deep-only route check ran only when depth=deep, and light/std never saw the node). Accumulated-refusal probe (depth=huge + unknown key + missing pins in one call) returned error_type=params_contract with slots [ITEM, bogus, depth, repo] \u2014 one refusal, every violation.",
+   "receipt": "estate-local: work/est-bwv0h/{ra-pr-params.json,migration-receipt.json}"
+  },
+  {
+   "lap": "full suite",
+   "command": "python3 scripts/suite.py . ci-out-bwv0h (328 test files, serial)",
+   "verdict": "IN PROGRESS at PR-open time; ledger echo follows as a PR comment at close. Reds so far classified: 6 env-class (exit 1 on same-shell clean origin/main worktree: integration crash_resume/golden/lane_supervisor, enum_clamp_5med_flah, golden_seat_862, machine_watch_94) + 2 load-flake (test_door, integration_team \u2014 exit 0 re-run directly at head)."
+  },
+  {
+   "lap": "post-rebase parity + scrub",
+   "command": "test_personal_path_scrub_867.py; test_packaging.py; test_skill_docs.py",
+   "verdict": "scrub OK after receipt pseudonymization (private-handle literals removed); packaging+skill-docs restored by deferring the version bump to the release-cut lane (feature PRs carry no version literal on this repo \u2014 parity across nine faces is cut-time law)"
+  }
+ ],
+ "laws": "design-first-principles carrier is estate-local (cleanslate-binders.md); grammar lives in references/grammar.md; this file states per-lap facts and points totals at the enumerations"
+}

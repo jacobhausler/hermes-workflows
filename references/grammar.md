@@ -114,6 +114,60 @@ Keep a reusable graph launch-agnostic: per-launch ids, paths and dates bind as
 `{run.KEY}` refs through this contract and never ride baked into operative
 goal/context text — only provenance metadata may carry launch-specific values.
 
+## Params — the typed contract and the door-time seam (optional)
+
+A graph may declare its launch contract as a top-level `params` block:
+`{slot: {kind: "pin"|"tune", desc?, domain?, default?}}`. `pin` carries run
+content — required when referenced, never defaulted, never domain-gated.
+`tune` is a knob — a non-empty `domain` of distinct strings is required and an
+optional `default` (inside the domain) may ride; the default is safe precisely
+because the run record stamps the EFFECTIVE binding (an unstamped default is
+the fb-572 disease; a stamped one is ergonomics). `params` is the typed
+superset of the #126 `run_context` contract block: a graph carries ONE
+contract — co-declaration is refused. When `params` is present the contract is
+TOTAL both directions: every operative `{run.KEY}` ref must be declared, and
+every declared slot must be referenced (operative text or a `where`/`by` gate).
+
+Two structural primitives, evaluated at the DOOR, before any write:
+* `where: {"param": "<tune slot>", "in": [domain values]}` on any node —
+  presence. An effective value outside `in` removes the node, and removal
+  cascade-prunes its descendants (the `on_skip:"prune"` grammar, applied before
+  the graph exists rather than after it dies). This is the depth-ladder idiom.
+* `by: {<tune slot>: {<case>: <patch object>}}` on any node — value-conditional
+  patch, shallow-merged onto the node in deterministic order; patch keys must
+  be legal for the node's type. A case outside the domain is a typo, refused;
+  an unmatched case simply leaves the node as authored (totality lives in the
+  binding, not in patch coverage). This is the verb-family idiom.
+
+Node-count dynamism already exists natively (fan-out); do not re-add it through
+params. Dynamic node STRUCTURE by computation does not belong on the launch
+path at all — where generation is genuinely wanted, it is AUTHOR-time codegen
+that emits the row.
+
+Binding is a door event: the map arrives as `run_context` (unchanged grammar);
+before any spawn the door validates unknown keys, empty values, and domain
+membership, applies tune defaults, materializes `where`/`by`, and then checks
+totality against the FINAL graph: a referenced pin left unbound refuses, and a
+supplied value the final graph never binds refuses (a bound value silently
+unbuilt is the defect class this seam kills). A tune slot that drives
+`where`/`by` is consumed by the materialization itself — it is never "unused".
+Every violation lands in ONE refusal: `{error_type:"params_contract",
+violations:[{slot, msg}…]}`, zero state written. A params graph refuses a seed
+(string) binding, and a binding that prunes every node refuses.
+
+The seam is popped during materialization: `graph.json` carries the concrete
+graph with NO gates — what you read is what runs. Every params-carrying launch
+stamps `run.json` `meta.binding = {params, engine, row_sha256, graph_sha256}`:
+the reproducibility triple. Re-materialize on demand for replay and diff; no
+temp files guard rendered bytes. A paramless run grows no `binding` key — every
+legacy run's bytes stand (golden EMPTY). `save` derives the `meta.params`
+display envelope from the block when the author passes no `params` argument (a
+hand-passed envelope that disagrees warns s12), so `library name:` instantiate
+pre-fills tune defaults and lists pins unfilled. `where`/`by` without a `params`
+block is refused by name (a gate that can never fire is a typo).
+`wfcommon.params_errors` is the shared validator — run, validate, amend, save,
+and include doors measure the same law.
+
 ## Composite graphs (include)
 
 A graph may compose shelved library DAGs with a top-level `include` annotation:

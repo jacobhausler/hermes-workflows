@@ -2125,6 +2125,12 @@ def act_save(args):
             not isinstance(k, str) or not _RUN_KEY.fullmatch(k) or not isinstance(v, dict)
             for k, v in params.items())):
         return {"error": "params must map identifier keys to metadata objects"}
+    if (params is None and isinstance(graph.get("params"), dict) and graph["params"]
+            and all(isinstance(k, str) and _RUN_KEY.fullmatch(k) for k in graph["params"])):
+        # est-bwv0h: with a typed `params` block IN the graph, the block is the
+        # contract — save derives the meta.params display envelope from it when the
+        # author is silent (never a second manifest: the envelope follows the block).
+        params = json.loads(json.dumps(graph["params"]))
     if params is None:
         prev_path = _lib_read(p.stem) if p.parent == library_root() else p
         if prev_path.exists():
@@ -2249,6 +2255,13 @@ def act_save(args):
             _warn.append("s12 uncontracted run_context refs: " + ", ".join(contract["missing"]))
         if contract["dead"]:
             _warn.append("s12 dead declared params: " + ", ".join(contract["dead"]))
+        # est-bwv0h: a hand-passed envelope that disagrees with the graph's typed
+        # params block is a drift seed — warn (the block is the truth; the envelope
+        # is display).
+        _gp = graph.get("params")
+        if isinstance(_gp, dict) and _gp and isinstance(params, dict) and set(params) != set(_gp):
+            _warn.append("s12 meta.params envelope disagrees with the graph params block: "
+                         + ", ".join(sorted(set(params) ^ set(_gp))))
     if _warn:
         out["save_warnings"] = _warn
     return out
@@ -2696,6 +2709,100 @@ def _run_context_contract(graph, binding):
     return (eff or None), None
 
 
+def _params_resolve(graph, binding):
+    """est-bwv0h: resolve a graph's `params` contract into the EFFECTIVE binding and the
+    materialized (seam-free) graph — accumulating EVERY violation into one door refusal.
+    Returns (graph_or_None, effective_binding_or_None, violations=[{slot,msg}]).
+    Laws, in order: supplied keys must be declared (an undeclared key is a typo, not a
+    hint); values are non-empty strings; tune values live inside the domain; tune
+    defaults fill where the launch is silent (they ride the stamp — an unstamped default
+    is the fb-572 disease, a stamped one is just ergonomics). `where` then decides
+    presence at door time: effective value outside `in` removes the node, and removal
+    cascades to descendants (the on_skip:prune grammar, applied before the graph exists
+    rather than after it dies). `by` then patches surviving nodes per effective value
+    (deterministic sorted order; the seam is popped — the concrete graph that ships in
+    graph.json carries NO gates: what you read IS what runs). Finally totality on the
+    FINAL graph: a referenced pin that stayed unbound refuses, and a supplied value the
+    final graph never binds refuses (a bound value silently unbuilt is the exact defect
+    class this seam exists to kill). Structural well-formedness was validated upstream
+    (params_errors via structural_graph_errors) — this function may assume it."""
+    p = graph["params"]
+    violations = []
+    def V(slot, msg):
+        violations.append({"slot": slot, "msg": msg})
+    if isinstance(binding, str):
+        return None, None, [{"slot": "run_context",
+                             "msg": "a seed (string) binding cannot satisfy a params contract — pass a map"}]
+    binding = binding or {}
+    nodes0 = [n for n in graph["nodes"] if isinstance(n, dict)]
+    # A tune slot that drives where/by is consumed BY THE MATERIALIZATION ITSELF — the
+    # ladder's whole point is that depth=light uses depth by removing the deep lane.
+    # Only text refs can orphan a value; a gate slot is never "unused".
+    gate_slots = set()
+    for n in nodes0:
+        w = n.get("where")
+        if isinstance(w, dict) and isinstance(w.get("param"), str):
+            gate_slots.add(w["param"])
+        b = n.get("by")
+        if isinstance(b, dict):
+            gate_slots.update(k for k in b if isinstance(k, str))
+    eff = {slot: d["default"] for slot, d in p.items()
+           if isinstance(d, dict) and d.get("kind") == "tune" and "default" in d}
+    for key in sorted(set(binding) - set(p)):
+        V(str(key), "unknown binding key — with a params block the contract is TOTAL "
+                    "(typo, or an undeclared slot)")
+    for key in sorted(set(binding) & set(p)):
+        val = binding[key]
+        d = p[key] if isinstance(p[key], dict) else {}
+        if not isinstance(val, str) or not val.strip():
+            V(key, "bound value must be a non-empty string")
+            continue
+        if d.get("kind") == "tune" and val not in (d.get("domain") or []):
+            V(key, f"value {val!r} outside the domain {d.get('domain')}")
+            continue
+        eff[key] = val
+    # No early return: materialization on the VALID subset so the final totality pass
+    # can join its violations — one refusal must enumerate every defect, not just the
+    # first field the caller tripped on.
+    nodes = [dict(n) for n in nodes0]
+    removed = {n.get("id") for n in nodes
+               if isinstance(n.get("where"), dict)
+               and eff.get(n["where"].get("param")) not in n["where"].get("in", [])}
+    changed = True
+    while changed:                      # cascade-prune: a child of a removed parent dies too
+        changed = False
+        for n in nodes:
+            nid = n.get("id")
+            if nid not in removed and removed & set(n.get("after") or []):
+                removed.add(nid)
+                changed = True
+    kept = [n for n in nodes if n.get("id") not in removed]
+    if not kept:
+        V("*", "where gates removed every node — this binding launches an empty graph")
+        return None, None, violations
+    for n in kept:
+        b = n.get("by")
+        if isinstance(b, dict):
+            for slot in sorted(b):
+                patch_ = (b[slot] or {}).get(eff.get(slot))
+                if isinstance(patch_, dict):
+                    n.update({k: patch_[k] for k in sorted(patch_)})
+        n.pop("where", None)
+        n.pop("by", None)
+    final_refs = _common.run_context_contract({"nodes": kept})["refs"]
+    for slot in sorted(p):
+        d = p[slot] if isinstance(p[slot], dict) else {}
+        if slot in eff:
+            if slot not in final_refs and not (d.get("kind") == "tune" and slot in gate_slots):
+                V(slot, "value supplied but the launched graph never binds it (the where/by "
+                        "materialization removed its only reference) — a bound value must be built")
+        elif d.get("kind") == "pin" and slot in final_refs:
+            V(slot, "required pin is unbound — pin slots carry run content and are never defaulted")
+    if violations:
+        return None, None, violations
+    return dict(graph, nodes=kept), eff, []
+
+
 def _profile_error(graph):
     """1.1 (RATIFY F2): node `profile:` validation — AFTER `{run.KEY}` rendering, BEFORE any
     write/spawn. Launcher identity comes from the door's own HERMES_HOME, else the owner's
@@ -3039,6 +3146,39 @@ def act_run(args):
         graph = _common.apply_graph_defaults(graph)
     except ValueError as e:
         return {"error": f"graph invalid: defaults/shape: {e}"}
+    _binding = None
+    if graph.get("params") is not None:
+        # est-bwv0h: the typed contract. It REPLACES the #126 path for graphs that
+        # carry it (co-declaration is refused by the grammar — one contract per
+        # graph): materialize where/by at door time, resolve the effective binding
+        # with stamped tune defaults, and hand the existing binder a TOTAL map.
+        _mat, _params_eff, _viol = _params_resolve(graph, args.get("run_context"))
+        if _viol:
+            return {"error": "params contract: " + "; ".join(
+                        f"{x['slot']}: {x['msg']}" for x in _viol),
+                    "errors": _viol, "field": "params",
+                    "error_type": "params_contract", "violations": _viol}
+        graph = _mat
+        args = dict(args, run_context=_params_eff)
+        # The triple is meaningful only for the graph as SUBMITTED (pre-
+        # materialization): row bytes + binding reproduce everything else.
+        _submitted_sha = None
+        if isinstance(args.get("graph"), dict):
+            _submitted_sha = hashlib.sha256(json.dumps(
+                args["graph"], sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+        elif args.get("graph_path"):
+            try:
+                _submitted_sha = hashlib.sha256(Path(args["graph_path"]).read_bytes()).hexdigest()
+            except (OSError, ValueError):
+                _submitted_sha = None
+        _row_sha = None
+        if lib_name:
+            try:
+                _row_sha = hashlib.sha256(Path(_lib_read(args["from"])).read_bytes()).hexdigest()
+            except (OSError, ValueError):
+                _row_sha = None
+        _binding = {"params": _params_eff, "engine": _common.plugin_version(),
+                    "row_sha256": _row_sha, "graph_sha256": _submitted_sha}
     if graph.get("run_context") is not None:
         # #126 (est-syim): machine-readable binding contract — enforced CLOSED before any
         # run write; typed missing-key error enumerates the missing bindings.
@@ -3166,10 +3306,10 @@ def act_run(args):
                             "hint": f"wait run_id={incumbent['run_id']} resumes it"}
             return _create_run(args, graph, lib_name, models, routes, _liveness_notes, path,
                                includes=_includes, include_notes=_include_notes,
-                               concurrency_meta=concurrency_meta)
+                               concurrency_meta=concurrency_meta, binding=_binding)
     return _create_run(args, graph, lib_name, models, routes, _liveness_notes,
                        includes=_includes, include_notes=_include_notes,
-                       concurrency_meta=concurrency_meta)
+                       concurrency_meta=concurrency_meta, binding=_binding)
 
 def _new_ancestor_dirs(p):
     """est-2ek.1.199: the directory entries a `p.mkdir(parents=True)` would
@@ -3242,7 +3382,7 @@ def _prove_run_dir(r, extra_dirs=()):
 
 
 def _create_run(args, graph, lib_name, models, routes, _liveness_notes, lane_path=None,
-                *, concurrency_meta=None, includes=None, include_notes=None):
+                *, concurrency_meta=None, includes=None, include_notes=None, binding=None):
     """Under the lane flock: complete run dir, atomic registry entry, then spawn."""
     name = graph["name"]
     base = time.strftime("%Y%m%d-%H%M%S") + "-" + "".join(
@@ -3316,6 +3456,14 @@ def _create_run(args, graph, lib_name, models, routes, _liveness_notes, lane_pat
     # written: a plain run keeps the exact golden key set.
     if "max_seats" in graph:
         meta["max_seats"] = graph["max_seats"]
+    if graph.get("params") is not None:
+        # est-bwv0h: THE RUN RECORD IS THE ARCHIVE. The triple (row/graph bytes,
+        # effective binding — tune defaults included, engine version) is the whole
+        # reproducibility contract: re-materialize the concrete graph on demand for
+        # replay and diff; nothing else needs stamping, and a plain (paramless) run
+        # never grows this key — the golden bytes of every legacy run stand.
+        if binding is not None:
+            meta["binding"] = binding
     # Composite runs record which shelf bytes they expanded from (author-form
     # provenance) and any non-fatal resolver notes (scratch collisions). Empty =
     # key omitted: a plain run keeps the exact pre-include run.json key set.

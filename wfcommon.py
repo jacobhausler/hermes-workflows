@@ -755,6 +755,8 @@ AGENT_KEYS = {"id", "type", "after", "goal", "context", "schema", "model", "prov
               # the wave boundary instead of a spawn. See CONSOLIDATE_KEYS.
               "consolidate",
               "tier", "shape", "repo", "bead_close",
+              # est-bwv0h: door-time parameter seam — presence gate + conditional patch
+              "where", "by",
               # #24/#25: fail-closed pinned routes. Default TRUE for nodes
               # that pin an explicit model — a submit ping that AFFIRMATIVELY proves
               # the pinned route dead or answering from the fallback ladder refuses the
@@ -816,6 +818,8 @@ AGENT_KEYS = {"id", "type", "after", "goal", "context", "schema", "model", "prov
 HARVEST_POLICIES = ("strict", "validate")   # est-ggqs: agent `harvest_policy` values
 GATE_KEYS = {"id", "type", "after", "question", "options", "context", "when", "wait", "on_skip",
              "default_option", "hold_timeout",
+             # est-bwv0h: door-time parameter seam — presence gate + conditional patch
+             "where", "by",
              # 1.1 (RATIFY F4): gates take output preconditions too; gates obey the same
              # after_partial law as agents (e68544a37be37657).
              "requires", "after_partial", "order_only",
@@ -823,6 +827,8 @@ GATE_KEYS = {"id", "type", "after", "question", "options", "context", "when", "w
              # minted on its committed answer); it can never declare itself a publisher.
              "suite_proof"}
 ECHO_KEYS = {"id", "type", "after", "output",
+             # est-bwv0h: door-time parameter seam (see GATE_KEYS).
+             "where", "by",
              # est-2ek.1.603: an echo commits at the wave boundary WITHOUT a spawn, so
              # the publisher gate covers the echo commit path too.
              "publishes",
@@ -2197,6 +2203,11 @@ def admission_ledger_errors(graph, run_dir=None):
 
 STRUCTURAL_GRAPH_KEYS = {"name", "nodes", "description", "defaults", "model_policy",
                          "provenance", "grammar", "include",
+                         # est-bwv0h: `params` — the typed launch contract (declaration
+                         # in the row; the graph IS its manifest). Supersedes the #126
+                         # run_context contract for graphs that carry it; co-declaration
+                         # is refused (one contract per graph).
+                         "params",
                          "concurrency", "item_concurrency",  # #100: optional run-level limits
                          # est-3acn: RunBudget — an optional run-wide token cap
                          # ({"tokens": N}); enforced pre-dispatch, graceful
@@ -2448,7 +2459,155 @@ def _run_contract_refer_keys(graph):
             if isinstance(t, str):
                 for m in _RUN_CONTRACT_REF.finditer(t):
                     out.add(m.group(1))
+    # est-bwv0h: where/by slots are refs too — a tune knob that drives presence or
+    # patching is consumed AT THE DOOR, so a gate-driven key is never dead. Shared on
+    # purpose: the s12 envelope check, the #126 unrefused-required rule, and the
+    # params dead-slot law all read this one enumeration.
+    for n in nodes:
+        if not isinstance(n, dict):
+            continue
+        w = n.get("where")
+        if isinstance(w, dict) and isinstance(w.get("param"), str):
+            out.add(w["param"])
+        b = n.get("by")
+        if isinstance(b, dict):
+            out.update(k for k in b if isinstance(k, str))
     return out
+
+PARAM_KEYS = {"kind", "desc", "domain", "default"}
+_WHERE_KEYS = {"param", "in"}
+
+def params_errors(graph):
+    """est-bwv0h: defects for the optional top-level `params` CONTRACT block — the typed
+    launch contract that subsumes the #126 run_context contract. Shape:
+    {slot: {kind: "pin"|"tune", desc?, domain? (tune: distinct non-empty strings),
+    default? (tune only, in domain)}}. `pin` carries run content (never defaulted,
+    never domain-gated); `tune` is a knob (domain required; optional stamped default).
+    With a params block the contract is TOTAL both ways: every operative {run.KEY} ref
+    must be declared, and every declared slot must be referenced (operative text or a
+    where/by gate) — bind what you declare, declare what you bind. Node `where`
+    (presence gate on a tune slot, door-time) and node `by` (value-conditional patch,
+    door-time) are validated here too: their slots must be declared tune, values must
+    live inside the domain (a dead gate/patch is a typo, refused), and `by` patch keys
+    must be legal for the node's type. Absent key = no check: a plain graph stays
+    byte-identical."""
+    if not isinstance(graph, dict) or "params" not in graph:
+        return []
+    errs = []
+    def E(field, msg):
+        errs.append({"node": None, "field": field, "msg": msg})
+    p = graph["params"]
+    if "run_context" in graph:
+        E("params", "graph declares both `params` and a `run_context` contract block — one "
+                    "contract per graph: `params` is the typed superset of #126")
+    if not isinstance(p, dict) or not p:
+        E("params", "params must be a non-empty object of slot -> declaration")
+        return errs
+    nodes = [n for n in (graph.get("nodes") or []) if isinstance(n, dict)]
+    referenced = set(_run_contract_refer_keys(graph))
+    gate_slots = set()
+    for n in nodes:
+        w = n.get("where")
+        if isinstance(w, dict) and isinstance(w.get("param"), str):
+            gate_slots.add(w["param"])
+        b = n.get("by")
+        if isinstance(b, dict):
+            gate_slots.update(k for k in b if isinstance(k, str))
+    for slot in sorted(p, key=str):
+        d = p[slot]
+        f = f"params.{slot}"
+        if not isinstance(slot, str) or not _RUN_CONTRACT_KEY.match(slot):
+            E(f, f"invalid slot name {slot!r}: expected identifier")
+            continue
+        if not isinstance(d, dict):
+            E(f, "declaration must be an object (kind/desc/domain/default)")
+            continue
+        for k in sorted(set(d) - PARAM_KEYS):
+            E(f"{f}.{k}", f"unknown key; allowed: {sorted(PARAM_KEYS)}")
+        kind_ = d.get("kind")
+        if kind_ not in ("pin", "tune"):
+            E(f + ".kind", 'kind must be "pin" or "tune"')
+            continue
+        if "desc" in d and (not isinstance(d["desc"], str) or not d["desc"].strip()):
+            E(f + ".desc", "desc must be a non-empty string")
+        if kind_ == "pin" and ("default" in d or "domain" in d):
+            E(f, "pin slots carry run content: no default, no domain — a knob belongs in a tune slot")
+        elif kind_ == "tune":
+            dom = d.get("domain")
+            if (not isinstance(dom, list) or not dom
+                    or not all(isinstance(x, str) and x.strip() for x in dom)
+                    or len(set(dom)) != len(dom)):
+                E(f + ".domain", "tune needs a domain: non-empty list of distinct non-empty strings")
+                continue
+            if "default" in d and d["default"] not in dom:
+                E(f + ".default", f"default {d['default']!r} is outside the domain {dom}")
+    declared = {k for k in p if isinstance(k, str) and _RUN_CONTRACT_KEY.match(k)}
+    dead = sorted(declared - referenced - gate_slots)
+    if dead:
+        E("params", f"declared slot(s) {dead} never referenced as {{run.KEY}} in operative text "
+                    "nor used by a where/by gate — bind what you declare")
+    undeclared = sorted(referenced - declared)
+    if undeclared:
+        E("params", f"operative {{run.KEY}} ref(s) {undeclared} are not declared — with a params "
+                    "block the contract is TOTAL: declare every binding the nodes consume")
+    for n in nodes:
+        nid = n.get("id")
+        t = n.get("type", "agent")
+        tkeys = NODE_TYPES[t].keys if t in NODE_TYPES else frozenset()
+        w = n.get("where")
+        if w is not None:
+            if not isinstance(w, dict):
+                E(f"nodes.{nid}.where", "where must be an object {param, in}")
+                w = None
+            else:
+                for k in sorted(set(w) - _WHERE_KEYS):
+                    E(f"nodes.{nid}.where.{k}", f"unknown key; allowed: {sorted(_WHERE_KEYS)}")
+                ps = w.get("param")
+                dp = p.get(ps) if isinstance(ps, str) and ps in declared else None
+                if dp is None:
+                    E(f"nodes.{nid}.where.param", f"names an undeclared slot {ps!r} — params is the contract")
+                elif dp.get("kind") != "tune":
+                    E(f"nodes.{nid}.where.param", f"slot {ps!r} is a pin — where/by gate on tune slots only")
+                else:
+                    inv = w.get("in")
+                    if (not isinstance(inv, list) or not inv
+                            or not all(isinstance(x, str) and x.strip() for x in inv)
+                            or len(set(inv)) != len(inv)):
+                        E(f"nodes.{nid}.where.in", "in must be a non-empty list of distinct non-empty strings")
+                    else:
+                        out = [x for x in inv if x not in (dp.get("domain") or [])]
+                        if out:
+                            E(f"nodes.{nid}.where.in", f"value(s) {out} outside the domain — a presence "
+                                                       "gate can never fire nor pass as written")
+        b = n.get("by")
+        if b is not None:
+            if not isinstance(b, dict) or not b:
+                E(f"nodes.{nid}.by", "by must be a non-empty object slot -> case -> patch")
+                continue
+            for slot_key in sorted(b, key=str):
+                ff = f"nodes.{nid}.by.{slot_key}"
+                dp = p.get(slot_key) if isinstance(slot_key, str) and slot_key in declared else None
+                if dp is None:
+                    E(ff, f"names an undeclared slot {slot_key!r} — params is the contract")
+                    continue
+                if dp.get("kind") != "tune":
+                    E(ff, f"slot {slot_key!r} is a pin — where/by gate on tune slots only")
+                    continue
+                cases = b[slot_key]
+                if not isinstance(cases, dict) or not cases:
+                    E(ff, "cases must be a non-empty object case -> patch")
+                    continue
+                for case in sorted(cases, key=str):
+                    if case not in (dp.get("domain") or []):
+                        E(f"{ff}.{case}", "case outside the domain — a patch that can never apply is a typo")
+                        continue
+                    patch_ = cases[case]
+                    if not isinstance(patch_, dict) or not patch_:
+                        E(f"{ff}.{case}", "patch must be a non-empty object of node fields")
+                        continue
+                    for pk in sorted(set(patch_) - set(tkeys)):
+                        E(f"{ff}.{case}.{pk}", f"patch key not allowed on {t} nodes")
+    return errs
 
 def run_context_contract_errors(graph):
     """#126 (est-syim): defects for the optional top-level `run_context` CONTRACT block —
@@ -2542,6 +2701,17 @@ def structural_graph_errors(graph, extra_keys=()):
         E(e_["field"], e_["msg"])
     for e_ in run_context_contract_errors(graph):
         E(e_["field"], e_["msg"])
+    for e_ in params_errors(graph):
+        E(e_["field"], e_["msg"])
+    # est-bwv0h: the seam without a contract is a silent no-op — the door only
+    # materializes where/by for graphs that carry the typed block. Refuse the shape
+    # by name, never shelve a gate that can never fire.
+    if not (isinstance(graph.get("params"), dict) and graph["params"]):
+        for n in (graph.get("nodes") or []):
+            if isinstance(n, dict) and ("where" in n or "by" in n):
+                E(f"nodes.{n.get('id')}",
+                  "where/by require a top-level params contract block — the door "
+                  "materializes the seam only for graphs that declare it")
     if "defaults" in graph:
         errs.extend(_defaults_errors(graph["defaults"]))
     if "model_policy" in graph:
@@ -2708,6 +2878,17 @@ def run_context_contract(graph, params=None):
         if isinstance(node, dict):
             for text in _include_texts(node):
                 refs.update(_INCLUDE_RUN_REF.findall(text))
+    # est-bwv0h: where/by slots are refs too (consumed at the door) — the instantiate
+    # surface and the s12 law must see a gate-driven knob exactly like a text ref.
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        w = node.get("where")
+        if isinstance(w, dict) and isinstance(w.get("param"), str):
+            refs.add(w["param"])
+        b = node.get("by")
+        if isinstance(b, dict):
+            refs.update(k for k in b if isinstance(k, str))
     derived = {}
     for key in sorted(refs):
         spec = declared.get(key)
