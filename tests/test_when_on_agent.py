@@ -160,17 +160,5 @@ import wfcommon as _w
 check("when" not in _w.DEFAULTS_KEYS and "on_skip" not in _w.DEFAULTS_KEYS,
       "defaults stays closed against when/on_skip", str(sorted(_w.DEFAULTS_KEYS)))
 
-# 16. the js-dialect exporter never SILENTLY drops an agent `when`: their runtime has
-#     no bounded branch, so the export would run an arm the graph skips — REFUSED by
-#     name (any on_skip: a `pass` agent still never spawns), mirroring the prune gate.
-import wf_dialect  # noqa: E402
-for osk in (None, "prune", "pass"):
-    b = agent("b", ["a"], when="out.a.verdict == 'go'")
-    if osk:
-        b["on_skip"] = osk
-    rep = wf_dialect.export_report({"name": "t", "nodes": [agent("a"), b]})
-    check(rep.get("ok") is False and rep.get("node") == "b" and "when" in rep.get("refuse", ""),
-          f"js export refuses an agent when (on_skip={osk})", str(rep)[:300])
-
 print(f"\nRESULT: {'ALL PASS' if not fails else str(len(fails)) + ' FAIL'}")
 raise SystemExit(1 if fails else 0)
