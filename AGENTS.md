@@ -443,7 +443,7 @@ subscription routes.
 | `scripts/pack.py` | Release zip + `SHA256SUMS` + sidecar |
 | `scripts/wofify.py` | WOFification authoring seam (est-h0huv): `inventory`/`scaffold`/`validate`/`shelf` for way-of-working-repo→pack conversion; not a door action — the deterministic half of the shelf factory (`references/wofification.md`) |
 | `scripts/make_public.py` | Publish-tree exporter with a private-string audit gate (`scripts/.scrub-guards` allow-list) |
-| `docs/` | Patched-core guide, manifest decisions, catalog entry + PR body, scrub audit |
+| `docs/` | Patched-core guide, manifest decisions, catalog entry + PR body, scrub audit, [native-hooks.md](docs/native-hooks.md) (the default-off p3/p5 switch board) |
 
 ### 4b. Run the checks
 
