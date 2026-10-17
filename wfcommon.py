@@ -814,7 +814,16 @@ AGENT_KEYS = {"id", "type", "after", "goal", "context", "schema", "model", "prov
               # (HARVEST_POLICIES). 'strict' (= absent) keeps the after-edge block;
               # 'validate' commits a schema-valid, self-declared-complete harvest
               # `done` with the death kept visible (wf._harvest_clamp). Solo only.
-              "harvest_policy"}
+              "harvest_policy",
+              # #459 G3 (est-vp148): bounded rework cycle — GRAMMAR ACCEPTANCE ONLY.
+              # `rework:{to, max_iters}` names the node a verdict can send work back
+              # to, with a hard iteration bound. The engine has no loop-back edge yet
+              # (wf/1 is strictly acyclic), so the door REFUSES any launch whose graph
+              # carries this key (error_type engine_loop_not_wired, zero writes). The
+              # slice that wires the loop replaces the refusal with the real thing;
+              # until then a pack can express the shape and get a typed refusal, not a
+              # silent degradation to exit-and-relaunch.
+              "rework"}
 HARVEST_POLICIES = ("strict", "validate")   # est-ggqs: agent `harvest_policy` values
 GATE_KEYS = {"id", "type", "after", "question", "options", "context", "when", "wait", "on_skip",
              "default_option", "hold_timeout",
@@ -1512,6 +1521,32 @@ def validate_graph_errors(nodes, *, admission=False):
                 E(nid, "harvest_policy", "harvest_policy is meaningless on a fan-out node "
                                          "(the aggregate already merges harvested items as "
                                          "done credit); set it on solo agent nodes")
+        if "rework" in n:
+            # #459 G3 spike: shape-only acceptance; the door refuses the LAUNCH
+            # (act_run/act_amend) with error_type engine_loop_not_wired until the
+            # loop slice lands. A malformed value is refused here, by name —
+            # a graph cannot even reach the launch gate carrying junk.
+            rw = n["rework"]
+            if t != "agent":
+                E(nid, "rework", "rework is agent-only (gate/echo/join cannot loop work back)")
+            elif not isinstance(rw, dict) or set(rw) - {"to", "max_iters"} or "to" not in rw:
+                E(nid, "rework", "rework must be {to, max_iters?} — `to` names the node "
+                                 "the verdict sends work back to")
+            else:
+                tgt = rw.get("to")
+                if not isinstance(tgt, str) or tgt not in idset:
+                    E(nid, "rework.to", f"rework.to {tgt!r} must name an existing node id")
+                elif tgt == nid:
+                    E(nid, "rework.to", "rework.to must name a DIFFERENT node (self-loops "
+                                        "are the retry ladder's job, not a cycle's)")
+                if "max_iters" in rw:
+                    mi = rw["max_iters"]
+                    if not isinstance(mi, int) or isinstance(mi, bool) or not (1 <= mi <= 8):
+                        E(nid, "rework.max_iters", "rework.max_iters must be an integer in [1, 8] "
+                                                   "(a bounded loop, not a spin)")
+                if n.get("fanout"):
+                    E(nid, "rework", "rework is not defined on a fan-out node (the loop "
+                                     "targets the fan; set it on the solo agent)")
         if "order_only" in n:
             # est-ij0: ordering-only edges are a declared SUBSET of after — the cycle,
             # topo and downstream machinery keep reading `after` unchanged.

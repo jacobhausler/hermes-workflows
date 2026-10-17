@@ -1910,6 +1910,27 @@ def _unbound_include_refs(graph, provenance):
     return None
 
 
+def _rework_refusal(graph):
+    """#459 G3 (est-vp148): `rework` is GRAMMAR-ACCEPTED, LAUNCH-REFUSED.
+
+    wf/1 is strictly acyclic: there is no native loop-back edge, so a node
+    carrying rework:{to, max_iters} cannot run — and silently dropping the key
+    would degrade the author's bounded-rework intent to today's exit-and-
+    relaunch, which is exactly the loss this shape exists to prevent. The door
+    therefore refuses any launch (run or amend) whose graph carries the key,
+    with a typed error naming the carriers and zero writes, until the loop
+    slice replaces this refusal with the real scheduler hook."""
+    carriers = sorted(str(n.get("id")) for n in (graph or {}).get("nodes", [])
+                      if isinstance(n, dict) and "rework" in n)
+    if not carriers:
+        return None
+    return {"error": f"rework: engine loop not yet wired — wf/1 is acyclic; node(s) "
+                     f"{carriers} declare rework, which the grammar accepts and the "
+                     f"launch refuses (zero writes). Track: issue #459 G3. "
+                     f"Today's substitute: amend/relaunch under the same lane_key.",
+            "field": "rework", "nodes": carriers, "error_type": "engine_loop_not_wired"}
+
+
 def _unbound_gate_argv_refs(graph):
     """est-2ek.1.792: a gate's wait.until_argv is exec'd as FIXED argv. run_context
     renders {run.KEY} in goal/context/question/profile and fan-out goals only, so a
@@ -3230,6 +3251,9 @@ def act_run(args):
     bad = _unbound_gate_argv_refs(graph)
     if bad:
         return bad
+    bad = _rework_refusal(graph)          # #459 G3: grammar accepts, launch refuses
+    if bad:
+        return bad
     # est-2ek.1.856 (B3): the seat-cap knobs are validated where they can still
     # refuse — an invalid WORKFLOW_MAX_SEATS / config workflows.max_seats refuses
     # the launch BEFORE any run directory is written or child spawned. Without
@@ -4307,6 +4331,9 @@ def act_amend(args):
         if bad:
             return bad
     bad = _unbound_gate_argv_refs(new)    # est-2ek.1.792: same door law as run
+    if bad:
+        return bad
+    bad = _rework_refusal(new)            # #459 G3: same door law as run
     if bad:
         return bad
     bad = _validation_error(new, run_dir=r) or _profile_error(new)
