@@ -736,7 +736,7 @@ WORKFLOW_PARAMS = {
         "run_id": {"type": "string", "description": "Run id (required for every action except run/list)."},
         "name": {"type": "string", "description": "run: overrides graph.name (default workflow); save: library name overrides graph.name (lowercase, [-_.]); library: return one entry with refs-derived required params and an instantiate command. amend: set graph.name in the replacement graph; omitting it retains the run name."},
         "from": {"type": "string", "description": "run: library graph name to replay (instead of graph or graph_path)."},
-        "run_context": {"type": ["string", "object"], "description": "run only: non-empty string seed appended to every first-wave agent (including agents behind gate-only paths), OR non-empty map of identifier keys to non-empty strings replacing only explicit {run.KEY} in node goals/contexts, fan-out goals/item goals and gate questions. Library-sourced launches also render profile, echo string output, gate options and wait.until_argv; every surviving ref refuses before any write. Inline argv retains its existing unbound-placeholder refusal. Missing keys/malformed bindings reject before any run write — as does a seed against a graph with {run.KEY} refs, or a JSON-encoded map passed as a string. Values are persisted in prompts; do not supply secrets. A seed cannot replace baked literals. A graph may declare its binding contract as the graph-level run_context key {required:[KEY...], defaults:{KEY:val}} — a missing required key rejects before any run write with error_type missing_run_context_keys."},
+        "run_context": {"type": ["string", "object"], "description": "run only: non-empty string seed appended to every first-wave agent (including agents behind gate-only paths), OR non-empty map of identifier keys to non-empty strings replacing only explicit {run.KEY} in node goals/contexts, agent repo lanes, fan-out goals/item goals and gate questions. Library-sourced launches also render profile, echo string output, gate options and wait.until_argv; every surviving ref refuses before any write. Inline argv retains its existing unbound-placeholder refusal. Missing keys/malformed bindings reject before any run write — as does a seed against a graph with {run.KEY} refs, or a JSON-encoded map passed as a string. Values are persisted in prompts; do not supply secrets. A seed cannot replace baked literals. A graph may declare its binding contract as the graph-level run_context key {required:[KEY...], defaults:{KEY:val}} — a missing required key rejects before any run write with error_type missing_run_context_keys."},
         "description": {"type": "string", "description": "save: one-line purpose shown by library/list."},
         "params": {"type": "object", "additionalProperties": {"type": "object"}, "description": "save: optional meta.params descriptions/default suggestions for run_context keys. Required keys derive from graph refs, never this metadata. Omission retains prior params; {} deliberately clears them. Missing/dead declarations warn, never prevent saving."},
         "tags": {"type": "array", "items": {"type": "string"}, "description": "save (optional): 1-10 discovery tags — legacy flat tokens (lowercase alnum [-_.] <=32) or faceted `facet:value` (facets: use_case, repo, domain, risk, note; values [a-z0-9._-] <=48; e.g. use_case:code-review). For explicit curation, library exposes tag_vocab for optional reuse. Resaving without tags keeps the entry's existing tags; stored in the meta envelope. library (optional): filter to entries carrying ALL listed tags (same 1-10 law as save — an empty array errors on BOTH verbs; omit tags for no filter); an empty result's tag_match_counts says which term starved."},
@@ -1887,7 +1887,7 @@ def _unbound_include_refs(graph, provenance):
     leniency). Returns an error envelope naming alias, node, and key.
 
     PR#84 review F-3: the text surface is the SHARED _include_text_fields
-    traversal (goal/context/question/profile, fan-out goal + item goals, AND an
+    traversal (goal/context/question/profile/repo, fan-out goal + item goals, AND an
     echo node's string `output`), not a private field list here. The private
     list omitted echo output — the one surface the runner commits VERBATIM — so
     an included echo holding `verdict={run.MISSING}` survived a closed seeds
@@ -1912,7 +1912,7 @@ def _unbound_include_refs(graph, provenance):
 
 def _unbound_gate_argv_refs(graph):
     """est-2ek.1.792: a gate's wait.until_argv is exec'd as FIXED argv. run_context
-    renders {run.KEY} in goal/context/question/profile and fan-out goals only, so a
+    renders {run.KEY} in goal/context/question/profile/repo and fan-out goals only, so a
     {run.KEY} surviving in an argv element reaches the machine gate as a literal
     token (FileNotFoundError on '{run.python}', forever, no probe ever run). Refuse
     it before any write or spawn, naming node, argv index and key. Applies to
@@ -2579,16 +2579,17 @@ def _bind_run_context(graph, binding, *, library_sourced=False):
             raise ValueError("run_context is a JSON-encoded map passed as a string: pass the map itself "
                              "(a string is a seed and cannot replace {run.KEY} literals)")
         def _dangling(node):
-            texts = [node.get(f) for f in ("goal", "context", "question", "profile")]
+            texts = [(f, node.get(f)) for f in ("goal", "context", "question", "profile", "repo")]
             fo = node.get("fanout")
             if isinstance(fo, dict):
-                texts.append(fo.get("goal"))
-                texts += [i.get("goal") for i in fo.get("items", []) if isinstance(i, dict)]
-            for text in texts:
+                texts.append(("fanout.goal", fo.get("goal")))
+                texts += [("fanout.items[%d].goal" % i, it.get("goal"))
+                          for i, it in enumerate(fo.get("items", [])) if isinstance(it, dict)]
+            for label, text in texts:
                 if isinstance(text, str):
                     m = _RUN_REF.search(text)
                     if m:
-                        return f"node {node['id']!r} reference {{run.{m.group(1)}}}"
+                        return f"node {node['id']!r} field {label!r} reference {{run.{m.group(1)}}}"
             return None
         for node in graph["nodes"]:
             bad = _dangling(node)
@@ -2662,7 +2663,11 @@ def _bind_run_context(graph, binding, *, library_sourced=False):
         fan = n.get("fanout") if isinstance(n.get("fanout"), dict) else None
         # 1.1 (RATIFY F2): `profile` is rendered here, BEFORE profile validation, so a
         # graph can name its teammate per launch ({"profile": "{run.reviewer}"}).
-        for field in ("goal", "context", "question", "profile"):
+        # #459 G2 (est-rza3t): `repo` mirrors profile exactly — rendered before the
+        # runner's lane-boot gate reads it, so a traveling pack can name its git lane
+        # per launch and the mechanical lane guards (incomplete_work/lane_wreckage)
+        # reach portable graphs.
+        for field in ("goal", "context", "question", "profile", "repo"):
             if isinstance(n.get(field), str):
                 # issue #7: a fan-out node's OWN goal is the runner's fallback
                 # template (wf.py: fo.goal or node.goal -> fmt_goal) whenever

@@ -2823,7 +2823,7 @@ def _include_error(alias, msg):
 
 def _include_text_fields(node):
     """The string fields the {run.KEY} seed-render surface touches: the exact set
-    _bind_run_context (map mode) renders — goal/context/question/profile plus the
+    _bind_run_context (map mode) renders — goal/context/question/profile/repo plus the
     fan-out goal template and item goals — PLUS an echo node's string `output`
     PLUS a gate's `options[]` and `wait.until_argv[]`.
     The echo addition closes PR#84 review F-3: echo output is a text surface the
@@ -2837,7 +2837,7 @@ def _include_text_fields(node):
     scratch-path detection, and the door's survivor check — run/amend/binding/
     notes cannot drift apart again. Duplicated here (not imported from the door)
     so the resolver stays hermes-free."""
-    for f in ("goal", "context", "question", "profile"):
+    for f in ("goal", "context", "question", "profile", "repo"):
         if isinstance(node.get(f), str):
             yield f, (f,)
     if node.get("type") == "echo" and isinstance(node.get("output"), str):
