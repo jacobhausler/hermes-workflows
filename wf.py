@@ -64,7 +64,8 @@ when_true = wfcommon.when_true
 child_metrics = wfcommon.child_metrics
 budget_tokens = wfcommon.budget_tokens
 prune_states = wfcommon.prune_states
-dep_satisfied = wfcommon.dep_satisfied
+# (est-7m6wv horde) `dep_satisfied` re-bind deleted: the runner enforces the
+# after-edge law through release_law, never this direct handle (zero call sites).
 active_child = wfcommon.active_child
 admission_ledger_errors = wfcommon.admission_ledger_errors   # #85: artifact-admission guard at runner re-validation
 FP_RULE_VERSION = wfcommon.FP_RULE_VERSION
@@ -2361,14 +2362,9 @@ def _budget_cue_inject(run, node, index, skey, home, max_turns, margin, steer_fi
     return True
 
 def _quota_cache_path():
-    """#24 (b): seat-local memory of models known to be subscription-exhausted."""
-    import os
-    from pathlib import Path
-    override = os.environ.get("WF_QUOTA_CACHE")
-    if override:
-        return Path(override)
-    return (Path(os.environ.get("HERMES_HOME") or (Path.home() / ".hermes"))
-            / "cache" / "workflow-quota-cache.json")
+    """#24 (b): seat-local memory of models known to be subscription-exhausted.
+    ONE resolver lives in wfcommon (shared with the door's refusal gate)."""
+    return wfcommon.quota_cache_path()
 
 def _quota_note(model, marker):
     """#24 (b): record model -> reset horizon from a fatal_quota marker.
@@ -5419,7 +5415,6 @@ def _poll_registered_job(meta, node, byid):
 
 
 def _adopt_child(meta, node, byid, index, child, schema, fo_cancel=None):
-    harvest_schema = strip_engine_disclosure(schema, (node or {}).get("substrate_substituted"))  # #116
     """790c6ad: ADOPT a verified live orphan instead of re-spawning it (the
     respawned-runner token-loss bug: waveA3 re-ran 8 live children from zero
     because the fanout branch re-spawned unconditionally). Contract mirrors
@@ -5434,6 +5429,7 @@ def _adopt_child(meta, node, byid, index, child, schema, fo_cancel=None):
         (rc is unknowable — the child outlived its spawner — so death classes
         come from the capture and the core -Q turn report, never from a
         fabricated exit code)."""
+    harvest_schema = strip_engine_disclosure(schema, (node or {}).get("substrate_substituted"))  # #116
     run = meta["_run"]
     nid = node["id"]
     pid = child["pid"]
@@ -7084,8 +7080,8 @@ def _bounded_retry(meta, r, respawn, ev, ev_kw, node=None, index=None):
     if meta["_stop"].is_set() or not (progress or lease):
         return r          # no positive progress evidence: fail closed (lease: the death
                          # fact itself is the evidence — the message was never processed)
-    if meta["_stop"].is_set():
-        return r
+    # (est-7m6wv horde) a second standalone stop-guard here was dead — the
+    # compound above already returns on stop; deleted.
     # jam-h22/h30: a rate-limited death waits a FULL-JITTER draw (cap 5 s) before
     # the one resume re-drive; every other class keeps the fixed 5.0 s wait.
     rl = _is_rate_limited(r.get("raw"))

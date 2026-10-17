@@ -29,7 +29,7 @@ Three core hooks, all observers, registered by default:
 | `on_session_finalize` | `old_session_id` when present (rotation), else `session_id` |
 | `agent_loop_stopped` | the session whose id is the suffix of `session_key` (separator-delimited, id >= 8 chars) |
 
-Each fire scans `<runs_root>/*/run.json` (a few stat()s, 64-line events tail).
+Each fire scans `<runs_root>/*/run.json` (one read per run dir; the 64-line events tail fires only for matched holds).
 Idempotent per `(run_id, gate_id)`.
 
 ## Revocation
@@ -40,7 +40,7 @@ reports the flag only while the run is actually `held`.
 
 ## Why default-on
 
-The failure it prevents is silent, and the cost is a few stat()s at session end
+The failure it prevents is silent, and the cost is one run.json read per run dir at session end
 plus one small file. Disable with the owner setting `orphan_watch: false`
 (read at fire time, no restart).
 

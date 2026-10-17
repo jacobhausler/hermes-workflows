@@ -8,7 +8,8 @@ named state: an index row in `<runs_root>/orphan-held.jsonl`, an advisory
 
 Laws: advisory only (never kills, restarts, resumes or edits a graph); fail-open
 everywhere (every public function swallows its own exceptions); stdlib-only; the
-hook bodies do a few stat()s and a 64-line tail read, no subprocess/network.
+hook bodies do one run.json read per run dir and a 64-line events tail only
+for matched holds, no subprocess/network.
 Bound to the door's wfcommon via bind(), like card_enforcement.
 """
 import fcntl

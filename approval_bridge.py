@@ -42,6 +42,7 @@ holder of record for a hold stays the run dir; this surface is a copy.
 import hashlib
 import json
 import re
+import sys
 import threading
 
 FEATURE = "approval_bridge"
@@ -230,6 +231,11 @@ def _bridge(rid, run, ev, line_off):
                        if not i.get("resolved") and i.get("state") != "skipped")
         if inflight >= _MAX_INFLIGHT:
             _instances[token] = {"run_id": rid, "gate_id": gate_id, "state": "skipped", "resolved": False}
+            # est-7m6wv horde: skipped rows are TERMINAL bookkeeping — enter the
+            # FIFO so the bounded trim reaches them (before, they leaked forever).
+            _resolved_order.append(token)
+            while len(_resolved_order) > _KEEP_RESOLVED:
+                _instances.pop(_resolved_order.pop(0), None)
             return
         _instances[token] = {"run_id": rid, "gate_id": gate_id, "state": "pending", "resolved": False}
     t = threading.Thread(target=_emit, args=(rid, run, gate_id, token),
@@ -321,11 +327,16 @@ def _emit(rid, run, gate_id, token):
                                   "pattern_key": TOKEN_PREFIX + token,
                                   "pattern_keys": [TOKEN_PREFIX + token],
                                   "allow_permanent": False, "allow_session": False})
-        except Exception:
+        except Exception as e:                      # est-7m6wv: name the silent degradation once
+            sys.stderr.write("WORKFLOW_APPROVAL_BRIDGE_PRESENT_FAILED %s %s\n" % (token, type(e).__name__))
             with _lock:
                 inst = _instances.get(token)
                 if inst is not None and not inst.get("resolved"):
                     inst["state"] = "failed"
+                    # terminal row: enter the FIFO so the bounded trim reaches failures too
+                    _resolved_order.append(token)
+                    while len(_resolved_order) > _KEEP_RESOLVED:
+                        _instances.pop(_resolved_order.pop(0), None)
     except Exception:
         pass                                 # the hold stands; tool/desktop paths untouched
 

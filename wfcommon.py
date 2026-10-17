@@ -573,6 +573,21 @@ def iter_run_dirs(roots, reverse=False):
     return out
 
 
+def quota_cache_path(cache_path=None):
+    """ONE resolver for the #24(b) seat quota cache path: explicit argument >
+    `WF_QUOTA_CACHE` env > `<hermes_home>/cache/workflow-quota-cache.json`.
+    The door's refusal gate and the runner's stamp MUST agree on this path —
+    a silent drift turns the fail-closed quota gate into a no-op on an empty
+    cache (est-7m6wv horde finding: the law was hand-duplicated)."""
+    if cache_path:
+        return Path(cache_path)
+    override = os.environ.get("WF_QUOTA_CACHE")
+    if override:
+        return Path(override)
+    return (Path(os.environ.get("HERMES_HOME") or (Path.home() / ".hermes"))
+            / "cache" / "workflow-quota-cache.json")
+
+
 def runs_root():
     """ONE resolver. Precedence (#42): `settings.runs_root` (owner, validated,
     fail-closed) > `WF_RUNS_ROOT` env (non-empty) > `<hermes_home>/workflows`
@@ -2540,14 +2555,9 @@ def params_errors(graph):
         return errs
     nodes = [n for n in (graph.get("nodes") or []) if isinstance(n, dict)]
     referenced = set(_run_contract_refer_keys(graph))
-    gate_slots = set()
-    for n in nodes:
-        w = n.get("where")
-        if isinstance(w, dict) and isinstance(w.get("param"), str):
-            gate_slots.add(w["param"])
-        b = n.get("by")
-        if isinstance(b, dict):
-            gate_slots.update(k for k in b if isinstance(k, str))
+    # (est-7m6wv horde) gate-driven slots need no local re-collection:
+    # _run_contract_refer_keys folds every where-param and by-slot into
+    # `referenced` on purpose — the shared enumeration IS the law.
     for slot in sorted(p, key=str):
         d = p[slot]
         f = f"params.{slot}"
@@ -2577,7 +2587,7 @@ def params_errors(graph):
             if "default" in d and d["default"] not in dom:
                 E(f + ".default", f"default {d['default']!r} is outside the domain {dom}")
     declared = {k for k in p if isinstance(k, str) and _RUN_CONTRACT_KEY.match(k)}
-    dead = sorted(declared - referenced - gate_slots)
+    dead = sorted(declared - referenced)
     if dead:
         E("params", f"declared slot(s) {dead} never referenced as {{run.KEY}} in operative text "
                     "nor used by a where/by gate — bind what you declare")
@@ -2695,7 +2705,7 @@ def structural_graph_errors(graph, extra_keys=()):
     expanded shelf are measured by the SAME rules. `extra_keys` extends the
     closed top-level key set (the door passes its own additions); `include` is
     always allowed here — the author form carries it by design, and the fused
-    output is include-STRIPPED, so the door's GRAPH_KEYS law stays intact on
+    output is include-STRIPPED, so the STRUCTURAL_GRAPH_KEYS law holds on
     every submitted surface. Callers compose with validate_graph_errors (the
     node-level half)."""
     if not isinstance(graph, dict):
