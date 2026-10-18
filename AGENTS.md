@@ -516,6 +516,8 @@ draw the example workflow diagrams in `examples/README.md`, which DO ship.)
 
 ```sh
 # bump plugin.yaml / SKILL.md / references/grammar.md / CHANGELOG.md to the new version
+# re-pin every file:line cite in docs/catalog/disclosure-check.md (AGENTS 4d law:
+# the audit is exact-at-commit — a drifted cite sends readers to unrelated code)
 python3 scripts/suite.py . ci-out && hermes plugins validate . && python3 scripts/make_public.py /tmp/pub
 python3 scripts/pack.py                            # artifacts/hermes-workflows-<v>.zip + .sha256
 git tag v<version> && git push --tags

@@ -2,7 +2,9 @@
 
 Verification of the catalog submission disclosure for `hermes-workflows`
 (fix for NousResearch/hermes-agent#122099). Every clause below is checked
-against the source at this commit; `file:line` cites are exact at audit time.
+against the source at this commit; `file:line` cites are exact at audit time
+and RE-PINNED at every release cut (AGENTS.md 4d) — between cuts, trust the
+clause, not the line number.
 
 **Verdict: verified — with one correction.** An earlier draft disclosure said
 the plugin makes "no network calls of its own". Unqualified, that is

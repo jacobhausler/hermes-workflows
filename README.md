@@ -7,7 +7,7 @@ Your agent authors a JSON graph of agent nodes, fan-outs and gates; a background
 runner executes it outside the caller process tree and hands results back through
 the same `workflow` tool it launched from. Hermes Desktop draws the live DAG.
 
-![A nine-node review fleet: four parallel recon lanes, a synthesis node, two adversarial critics, a human gate, and a final sign-off — with the per-node timeline on the right](assets/dag-review.png)
+![A four-node review ladder — review, hydrate, adversary, reconcile — materialized from a params contract at the door; per-node durations on the timeline rail](assets/dag-review.png)
 
 ## Why this exists
 
@@ -40,8 +40,8 @@ not re-paid.
 | **Authoring skill** | Bundled `workflow` skill: grammar, operations, and **measured** per-shape budget presets (`recon`/`build`/`review`/`publish`) |
 
 <table><tr>
-<td width="50%"><img src="assets/fanout.png" alt="A fan-out node showing 2/2 items terminal, stacked behind the card, feeding a join node"><br><sub><b>Fan-out.</b> One node, two live children; items stack behind the card and the join reads both outputs.</sub></td>
-<td width="50%"><img src="assets/branch-gate.png" alt="A judge node feeding two complementary machine gates; each gate opens its own arm"><br><sub><b>Branch on verdict.</b> Two complementary <code>when</code> gates on one judge; each arm runs only when its gate opens.</sub></td>
+<td width="50%"><img src="assets/fanout.png" alt="A fan-out node at 3/3 terminal with its three item rows (host-a, host-b, host-c) expanded, feeding a join node"><br><sub><b>Fan-out.</b> One node, N live children; expanded items each carry their own status and duration, and the join only releases when the quorum is terminal.</sub></td>
+<td width="50%"><img src="assets/branch-gate.png" alt="A held human gate in the middle of the run graph: question 'Ship v1.4.0?' with its two answer options pending, the completed upstream node green, the downstream node pending"><br><sub><b>Human gates.</b> A held gate parks the run at zero token cost; the answer (tool, desktop card, or <code>/wf gates</code>) releases the waiting arm.</sub></td>
 </tr></table>
 
 ## Offline checkout drift probe
