@@ -26,6 +26,9 @@ import sys
 from pathlib import Path
 
 BUILD = Path(os.environ.get("WF_TEST_BUILD") or Path(__file__).parent)
+if os.environ.get("WF_TEST_BUILD") and not (BUILD / "fake").exists():
+    raise SystemExit("WF_TEST_BUILD names a tests/ dir (this test reads fixtures under it); got " + str(BUILD))
+
 ROOT = BUILD.parent
 sys.path.insert(0, str(ROOT))
 HOME = BUILD / "home_uvs"

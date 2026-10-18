@@ -20,6 +20,9 @@ import importlib.util, json, os, shutil, subprocess, sys, time
 from pathlib import Path
 
 BUILD = Path(os.environ.get("WF_TEST_BUILD") or Path(__file__).parent)
+if os.environ.get("WF_TEST_BUILD") and not (BUILD / "fake").exists():
+    raise SystemExit("WF_TEST_BUILD names a tests/ dir (this test reads fixtures under it); got " + str(BUILD))
+
 ROOT = BUILD.parent
 HOME = ROOT / "home-40"
 RUNS = HOME / "workflows"

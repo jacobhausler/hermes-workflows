@@ -32,6 +32,9 @@ from unittest.mock import patch
 
 HERE = Path(__file__).resolve().parent
 BUILD = Path(os.environ.get("WF_TEST_BUILD") or HERE.parent)
+if os.environ.get("WF_TEST_BUILD") and not (BUILD / "__init__.py").exists():
+    raise SystemExit("WF_TEST_BUILD names a plugin BUILD root (this test loads its __init__.py); got " + str(BUILD))
+
 sys.path.insert(0, str(BUILD))
 import wf  # noqa: E402
 

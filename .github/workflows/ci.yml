@@ -1,4 +1,4 @@
-# CI for hermes-workflows: the same five gates the release integrator runs by hand.
+# CI for hermes-workflows: the same gates the release integrator runs by hand.
 #   1. desktop half parses as ESM
 #   2. serial test suite (stdlib Python + Node .mjs) → ci-out/exits.json + per-test logs
 #   3. private-string scrub audit

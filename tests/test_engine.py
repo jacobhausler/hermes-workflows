@@ -4,6 +4,9 @@ import json, os, shutil, subprocess, sys, time
 from pathlib import Path
 
 BUILD = Path(os.environ.get("WF_TEST_BUILD") or Path(__file__).parent)
+if os.environ.get("WF_TEST_BUILD") and not (BUILD / "fake").exists():
+    raise SystemExit("WF_TEST_BUILD names a tests/ dir (this test reads fixtures under it); got " + str(BUILD))
+
 HOME = BUILD / "home"
 RUNS = HOME / "workflows"
 env = dict(os.environ, HERMES_HOME=str(HOME), WF_RUNS_ROOT=str(RUNS), FAKE_LOG=str(BUILD / "fake.log"))

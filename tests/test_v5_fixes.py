@@ -15,6 +15,9 @@ import json, os, shutil, subprocess, sys, time
 from pathlib import Path
 
 BUILD = Path(os.environ.get("WF_TEST_BUILD") or Path(__file__).parent)
+if os.environ.get("WF_TEST_BUILD") and not (BUILD / "fake").exists():
+    raise SystemExit("WF_TEST_BUILD names a tests/ dir (this test reads fixtures under it); got " + str(BUILD))
+
 HOME = BUILD / "home5"
 RUNS = HOME / "workflows"
 # #71: HERMES_HOME alone does NOT sandbox the shelf — the context-local home
@@ -78,7 +81,6 @@ check("S2a run_state totals: held + when_error surfaced",
       st and st["status"] == "held" and (st["held_gate"] or {}).get("when_error"),
       json.dumps({k: st.get(k) for k in ("status", "held_gate")})[:160] if st else "None")
 sys.path.insert(0, str(BUILD.parent / "dashboard"))
-os.environ.setdefault("HERMES_WORKFLOWS_DIR", str(RUNS))
 try:
     import importlib.util as ilu
     spec = ilu.spec_from_file_location("papi", str(BUILD.parent / "dashboard" / "plugin_api.py"))

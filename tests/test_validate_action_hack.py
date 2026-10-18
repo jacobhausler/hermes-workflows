@@ -8,6 +8,9 @@ import importlib.util, json, os, shutil, sys
 from pathlib import Path
 
 BUILD = Path(os.environ.get("WF_TEST_BUILD") or Path(__file__).parent)
+if os.environ.get("WF_TEST_BUILD") and not (BUILD / "fake").exists():
+    raise SystemExit("WF_TEST_BUILD names a tests/ dir (this test reads fixtures under it); got " + str(BUILD))
+
 HOME = BUILD / "home_validate"
 shutil.rmtree(HOME, ignore_errors=True)
 HOME.mkdir(parents=True)

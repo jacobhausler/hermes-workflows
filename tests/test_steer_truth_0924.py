@@ -14,6 +14,9 @@ from pathlib import Path
 from unittest.mock import patch
 
 BUILD = Path(os.environ.get("WF_TEST_BUILD") or Path(__file__).parent)
+if os.environ.get("WF_TEST_BUILD") and not (BUILD / "fake").exists():
+    raise SystemExit("WF_TEST_BUILD names a tests/ dir (this test reads fixtures under it); got " + str(BUILD))
+
 ROOT = BUILD.parent
 # #71: HERMES_HOME alone does NOT sandbox the shelf — the context-local home
 # override outranks the env in lane processes; WF_RUNS_ROOT is checked first and

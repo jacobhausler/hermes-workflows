@@ -55,4 +55,20 @@ check("open_items" not in sctx and "open_items" not in nodes["synthesis"].get("g
 check("verify_list" in json.load(open(ROOT / "examples" / "review" / "blind-council.workflow.json"))
       ["nodes"][3]["schema"]["required"], "verify_list remains a required synthesis field")
 
+# capability-class law, PINNED (est-7m6wv task-6): on a clean seat the council
+# slots are unbound capability classes, and the door must refuse them BY NAME
+# with the valid list — the documented "never a silent downgrade" contract is
+# only real if a test says so.
+import importlib.util as _ilu, os as _os, tempfile as _tf, io, contextlib
+_td = _tf.mkdtemp()
+_os.environ["WF_RUNS_ROOT"] = _td + "/runs"; _os.environ["HERMES_HOME"] = _td
+_spec = _ilu.spec_from_file_location("_bc_door", str(ROOT / "__init__.py"))
+_bc = _ilu.module_from_spec(_spec)
+with contextlib.redirect_stderr(io.StringIO()):   # reasoning-fallback notice is expected noise
+    _spec.loader.exec_module(_bc)
+with contextlib.redirect_stderr(io.StringIO()):
+    _v = json.loads(_bc.handle({"action": "validate", "graph": g}))
+check("clean seat: unbound capability class refuses BY NAME with the valid list",
+      _v.get("ok") is False and "council_a" in json.dumps(_v), json.dumps(_v)[:160])
+
 print(f"test_example_blind_council: {ok} checks PASS")
