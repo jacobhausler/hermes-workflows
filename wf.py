@@ -5693,6 +5693,48 @@ def _stale_spawn_refusal(run, node, byid):
             "ms": 0}
 
 
+# est-yq2xq frozen-route creation-override strip (marker-gated). The gateway's
+# frozen-route resume policy (hermes_cli/gateway_chat.py::check_resume_policy)
+# refuses creation overrides under `--continue <skey> --create-if-missing`: the
+# session is created WITHOUT the CLI creation flags, so every flag this spawn
+# then requests "differs from this session's launch" and the child dies rc=2
+# ("Resume retains gateway session policy; creation overrides are unsupported
+# on resume") — even on brand-new skeys; whole waves die (est-yq2xq class).
+# While this strip is ACTIVE the spawn omits every such flag pair and children
+# ride SEAT DEFAULTS: per-node model/provider pinning, reasoning effort,
+# toolsets, turn caps and run budgets are UNAVAILABLE while on (a pinned lane
+# silently runs the seat's default model). Enable with env WF_OMIT_POLICY_FLAGS=1
+# or the marker file <hermes_home>/workflows/omit-policy-flags.on. TURN OFF:
+# unset the env and delete the marker — argv returns byte-identical to stock.
+# The structural fix belongs in the gateway (session.create must freeze the
+# creation flags on the create-if-missing shape); until then this keeps waves
+# alive on affected seats instead of a per-install monkey-patch that every
+# plugin update wipes.
+_FROZEN_ROUTE_FLAGS = ("--max-turns", "--run-budget", "--reasoning",
+                       "-t", "-m", "--provider")
+
+
+def _omit_policy_flags_if_enabled(cmd, home=None, env=None):
+    """Strip frozen-route creation-override flag PAIRS from a child spawn argv
+    (est-yq2xq). Enabled when env WF_OMIT_POLICY_FLAGS=1 or the marker file
+    <hermes_home>/workflows/omit-policy-flags.on exists; otherwise returns the
+    argv byte-identical. Each flag consumes its own value token — exactly how
+    the argv builder materializes them above. `home`/`env` are test seams."""
+    env = os.environ if env is None else env
+    if env.get("WF_OMIT_POLICY_FLAGS") != "1":
+        root = Path(home) if home is not None else hermes_home()
+        if not (root / "workflows" / "omit-policy-flags.on").exists():
+            return list(cmd)
+    out, i = [], 0
+    while i < len(cmd):
+        if cmd[i] in _FROZEN_ROUTE_FLAGS:
+            i += 2
+            continue
+        out.append(cmd[i])
+        i += 1
+    return out
+
+
 def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering=None, attempt=0, skey=None,
               inputs="", index=None, resume_preamble="", reasoning_override=None,
               seat_cancel=None, seat_hold=None, seat_admit_lock=None, model_override=None):
@@ -5811,6 +5853,14 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
     if _ts is not None: cmd += ["-t", ",".join(_ts)]
     if node.get("max_turns"): cmd += ["--max-turns", str(node["max_turns"])]
     if node.get("run_budget"): cmd += ["--run-budget", str(node["run_budget"])]
+    # est-yq2xq: on seats whose gateway freezes the route at session create, the
+    # creation-override pairs above make every child die rc=2 (see
+    # _omit_policy_flags_if_enabled). While env WF_OMIT_POLICY_FLAGS=1 or
+    # <hermes_home>/workflows/omit-policy-flags.on is on, they are stripped and
+    # children ride seat defaults — per-node model pinning is UNAVAILABLE while
+    # on. Turn off: unset the env, delete the marker (byte-identical stock argv
+    # returns). Absent both, this line changes nothing.
+    cmd = _omit_policy_flags_if_enabled(cmd)
     lp = spawn_log_path(run, node, index, spawn_no)   # Q1: per-spawn stdout capture
     report_path = lp.with_name(lp.name.replace(".log", ".turn.json"))  # core -Q turn report
     # B1 cooperative steer (feedback #13/#40): bake this node's addressed inbox

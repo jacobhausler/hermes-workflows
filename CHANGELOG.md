@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- feat(spawn): marker-gated creation-override flag strip (est-yq2xq). On seats
+  whose gateway freezes the session route at create, `--continue <skey>
+  --create-if-missing` + any creation override is refused (child dies rc=2,
+  whole waves die). The runner now strips the frozen-route flag pairs
+  (`--max-turns`, `--run-budget`, `--reasoning`, `-t`, `-m`, `--provider`)
+  when `WF_OMIT_POLICY_FLAGS=1` or the marker
+  `<hermes_home>/workflows/omit-policy-flags.on` exists — children ride seat
+  defaults and per-node pinning is unavailable while on; delete the marker /
+  unset the env to return byte-identical stock argv. This replaces the
+  estate-side monkey-patch that every plugin update wiped. Contract in
+  `references/operations.md`.
 - `scripts/wofify.py`: the WOFification authoring-time seam — `inventory`
   (path-shape census of a way-of-working repo), `scaffold` (never-clobber pack
   skeleton), `validate` (pack graphs compiled and measured by the door's own
