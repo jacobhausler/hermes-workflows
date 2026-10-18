@@ -13,6 +13,17 @@
   unset the env to return byte-identical stock argv. This replaces the
   estate-side monkey-patch that every plugin update wiped. Contract in
   `references/operations.md`.
+- `tests/test_mechanic_admission_gate_104.py`: the issue-#104 admission gate as
+  an executable check — L1 drives a mechanic-shaped probe graph through the
+  real runner with the recording fake door and asserts deny-default
+  auto-release on `hold_timeout`, arm self-no-op, and audit-shape gate skips
+  with zero arm spawns; L2 pins the blind-holdout ledger (run.json.status
+  blinded, sealed-key digests, battery counts as measured ints); L3 becomes
+  binding on any vendoring PR via `WF_MECHANIC_CANDIDATE` (engine validation
+  in admission mode, deny-named defaults, single-gate arm dependencies).
+  Battle cards in `references/mechanic-battle-cards.md`; ledger in
+  `receipts/workflow-mechanic/admission-104.json` (est-t3m6).
+
 - `scripts/wofify.py`: the WOFification authoring-time seam — `inventory`
   (path-shape census of a way-of-working repo), `scaffold` (never-clobber pack
   skeleton), `validate` (pack graphs compiled and measured by the door's own
