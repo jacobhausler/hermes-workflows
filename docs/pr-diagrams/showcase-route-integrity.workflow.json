@@ -1,0 +1,250 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "Route integrity — a pinned model is served, substituted out loud, or refused",
+    "subtitle": "require_route defaults true on any node that pins a model; the door pings before launch and the runner re-checks at commit",
+    "locale": "en",
+    "visual_preset": "signal-flow",
+    "quality_profile": "standard",
+    "animation": "none",
+    "output": "showcase-route-integrity.html"
+  },
+  "lanes": [
+    {
+      "id": "author",
+      "label": "Graph author"
+    },
+    {
+      "id": "door",
+      "label": "Door (submit ping)"
+    },
+    {
+      "id": "ladder",
+      "label": "confidence_substrate ladder (owner config)",
+      "variant": "exception"
+    },
+    {
+      "id": "runner",
+      "label": "Runner commit"
+    }
+  ],
+  "phases": [
+    {
+      "id": "pin",
+      "label": "Pin",
+      "fromCol": 0,
+      "toCol": 0
+    },
+    {
+      "id": "prove",
+      "label": "Prove the route",
+      "fromCol": 1,
+      "toCol": 3,
+      "variant": "emphasis"
+    },
+    {
+      "id": "hold",
+      "label": "Hold it",
+      "fromCol": 4,
+      "toCol": 5
+    }
+  ],
+  "groups": [],
+  "mainPath": [
+    "pin",
+    "ping",
+    "verified",
+    "served",
+    "commit"
+  ],
+  "nodes": [
+    {
+      "id": "pin",
+      "lane": "author",
+      "col": 0,
+      "type": "external",
+      "label": "node pins model",
+      "sublabel": "require_route: true",
+      "width": 180
+    },
+    {
+      "id": "optout",
+      "lane": "author",
+      "col": 2,
+      "type": "backend",
+      "label": "require_route: false",
+      "sublabel": "fallback_models ladder",
+      "width": 196
+    },
+    {
+      "id": "ping",
+      "lane": "door",
+      "col": 1,
+      "type": "backend",
+      "label": "submit ping",
+      "sublabel": "validate → resolved_routes",
+      "tag": "unknown = warn only",
+      "width": 200
+    },
+    {
+      "id": "verified",
+      "lane": "door",
+      "col": 2,
+      "type": "backend",
+      "label": "route_verified",
+      "sublabel": "door-only annotation",
+      "width": 180
+    },
+    {
+      "id": "rung",
+      "lane": "ladder",
+      "col": 2,
+      "type": "security",
+      "label": "first alive rung",
+      "sublabel": "door pings each in order",
+      "width": 196
+    },
+    {
+      "id": "stamp",
+      "lane": "ladder",
+      "col": 3,
+      "type": "security",
+      "label": "substrate_substituted",
+      "sublabel": "{from, to, reason, source}",
+      "tag": "disclosure clause",
+      "width": 208
+    },
+    {
+      "id": "refuse",
+      "lane": "ladder",
+      "col": 4,
+      "type": "security",
+      "label": "route_unavailable",
+      "sublabel": "no ladder or all rungs dead",
+      "width": 208
+    },
+    {
+      "id": "served",
+      "lane": "runner",
+      "col": 3,
+      "type": "backend",
+      "label": "served_model check",
+      "sublabel": "must match route_verified",
+      "width": 196
+    },
+    {
+      "id": "commit",
+      "lane": "runner",
+      "col": 4,
+      "type": "database",
+      "label": "commit",
+      "sublabel": "honest model on the record",
+      "width": 196
+    },
+    {
+      "id": "quota",
+      "lane": "runner",
+      "col": 5,
+      "type": "database",
+      "label": "fatal_quota cache",
+      "sublabel": "refuse relaunch until reset",
+      "width": 200
+    }
+  ],
+  "edges": [
+    {
+      "id": "e-pin-ping",
+      "from": "pin",
+      "to": "ping",
+      "label": "launch",
+      "variant": "emphasis"
+    },
+    {
+      "id": "e-ping-verified",
+      "from": "ping",
+      "to": "verified",
+      "label": "proven alive",
+      "variant": "emphasis"
+    },
+    {
+      "id": "e-ping-rung",
+      "from": "ping",
+      "to": "rung",
+      "label": "proven dead",
+      "variant": "security",
+      "role": "error"
+    },
+    {
+      "id": "e-rung-stamp",
+      "from": "rung",
+      "to": "stamp",
+      "label": "re-route",
+      "variant": "security"
+    },
+    {
+      "id": "e-stamp-refuse",
+      "from": "stamp",
+      "to": "refuse",
+      "label": "every rung dead",
+      "variant": "security",
+      "role": "error"
+    },
+    {
+      "id": "e-verified-served",
+      "from": "verified",
+      "to": "served",
+      "label": "baked into graph.json",
+      "variant": "emphasis"
+    },
+    {
+      "id": "e-stamp-served",
+      "from": "stamp",
+      "to": "served",
+      "label": "re-verified",
+      "variant": "dashed",
+      "role": "branch"
+    },
+    {
+      "id": "e-served-commit",
+      "from": "served",
+      "to": "commit",
+      "label": "match",
+      "variant": "emphasis"
+    },
+    {
+      "id": "e-commit-quota",
+      "from": "commit",
+      "to": "quota",
+      "label": "429 with reset",
+      "variant": "dashed",
+      "role": "async"
+    },
+    {
+      "id": "e-optout-verified",
+      "from": "optout",
+      "to": "verified",
+      "label": "explicit opt-in",
+      "variant": "dashed",
+      "role": "branch"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Never silent",
+      "items": [
+        "dead pin + no owner ladder = refusal before any spawn, never another model's bill",
+        "a served_model that contradicts route_verified commits failed / route_unavailable"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Not work",
+      "items": [
+        "require_route, route_verified and the stamp never enter the fingerprint",
+        "a substitution changes the real model, so replay-skip sees it"
+      ]
+    }
+  ]
+}

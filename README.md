@@ -7,7 +7,10 @@ Your agent authors a JSON graph of agent nodes, fan-outs and gates; a background
 runner executes it outside the caller process tree and hands results back through
 the same `workflow` tool it launched from. Hermes Desktop draws the live DAG.
 
-![A four-node review ladder — review, hydrate, adversary, reconcile — materialized from a params contract at the door; per-node durations on the timeline rail](assets/dag-review.png)
+![Graph lifecycle: the door admits and validates the graph, the runner spawns one kernel-flock'd process, agent lanes fan out, a gate holds at zero tokens, amend swaps the rest — typed failures land in the ledger beside the report card](docs/pr-diagrams/showcase-dag-lifecycle.png)
+
+Four production diagrams, glossed two lines each:
+[docs/showcase.md](docs/showcase.md).
 
 ## Why this exists
 
@@ -36,7 +39,7 @@ not re-paid.
 | **Wedged-lock recovery** | The runner is admitted by a kernel flock on `runner.lock` held for the process's whole life — a dead holder's lock is released by the kernel itself, the next spawn contends cleanly, and there is no stale lock to clear by hand |
 | **Desktop DAG view** | Live graph, fan-out stacks, timeline, and a `::workflow{id="…"}` inline card in any reply; RUNNING / THE REST agent-first panes (every row carries its originating agent), and a session strip under the composer showing this chat's runs (core ≥ v2026.7.30; older shells get the fallback slot) |
 | **Library** | `save` a proven graph (description + tags — flat or `facet:value`, e.g. `use_case:code-review`), `library` lists it richly and filters by tags (with a `tag_vocab` echo so agents reuse the live taxonomy), `run from:"<name>"` replays it; optional study-only `submit` takes a `why_not_library` receipt and is quarantined for study, never auto-saved; `inbox kind:"submissions"` lists these submissions. Ordinary one-off `run` executes without lookup or curation |
-| **Composite graphs** | A graph-level `include` expands shelved library graphs into a run at launch — namespace-isolated ids, cycle/depth/size guards, model policy unions in and never relaxes (shipped in v1.3.0) |
+| **Composite graphs** | A graph-level `include` expands shelved library graphs into a run at launch — namespace-isolated ids, cycle/depth/size guards, model policy unions in and never relaxes |
 | **Authoring skill** | Bundled `workflow` skill: grammar, operations, and **measured** per-shape budget presets (`recon`/`build`/`review`/`publish`) |
 
 <table><tr>
@@ -46,18 +49,16 @@ not re-paid.
 
 ## Offline checkout drift probe
 
-Run `python3 scripts/drift_check.py --repo /path/to/checkout` on demand (the
-script's checkout is the default). No fetch, network refresh, daemon, or cron.
-`upstream_latest` means the nearest reachable local release tag selected by
-`git describe --tags`, not proof of the remote's newest release. The final stdout
-line reports `installed_version`, `upstream_latest`, `local_only_commits`,
-`trailers_missing`, and `verdict`; unknown error counts stay `unknown`.
-
-Exit 0 means `clean`; exit 1 means drift (`version_mismatch`, `trailers_missing`,
-then `local_only`, in that precedence). Commits after the tag need `(est-…)` or
-`#NN` tracker references in their messages. Exit 2 means `error`, including an
-absent installed-version changelog heading, missing tag, or unreadable git state.
-The probe only reads plugin.yaml, CHANGELOG.md, and git describe/rev-list/log.
+`python3 scripts/drift_check.py --repo <checkout>` (default: this checkout).
+On demand only — no fetch, daemon, or cron. Final stdout line:
+`installed_version`, `upstream_latest` (nearest local release tag by
+`git describe --tags`, not the remote's newest), `local_only_commits`,
+`trailers_missing`, `verdict`. Exit 0 = `clean`; exit 1 = drift
+(`version_mismatch`, `trailers_missing`, then `local_only`, in that precedence —
+commits after the tag need `(est-…)` or `#NN` references in their messages);
+exit 2 = `error` (absent installed-version changelog heading, missing tag,
+unreadable git state). Reads only plugin.yaml, CHANGELOG.md, and git
+describe/rev-list/log.
 
 ## The `workflow` tool
 
@@ -72,21 +73,25 @@ One tool, action-routed — the complete surface, with the flags that matter:
 | `release_lock` | Operator escape hatch for a wedged `runner.lock`: renames the stranded inode aside under the admission heal-barrier and hands the lane a fresh lock path. REFUSES unless zero live holders are proven (kernel ledger + dead lease) — never heals on EACCES or a live holder. |
 | `steer` | Queue steering text for a running node (refused on gates and terminal nodes; delivery is cooperative via the child's `inbox` pull — never a mid-prompt injection). `cmd:"kill"` (with `node`) is the lane-kill form, identical to `kill`; it never queues text. |
 | `inbox` | Child-side pull of steering lines baked for this spawn — exactly-once per spawn. Parent-side `kind:"submissions"` lists `submit` items newest-first. |
-| `amend` | Replace the graph mid-run with the whole new graph (`dry_run:true` previews `will_rerun` without writing). Fingerprint-valid unchanged nodes replay-skip. |
+| `amend` | Replace the graph mid-run with the whole new graph (`dry_run:true` previews `will_rerun` without writing). Fingerprint-valid unchanged nodes replay-skip. A `patch` edits a few node fields without resubmitting the whole graph. |
 | `diff` | Confirm an amend before applying it: the amend door with `dry_run` FORCED — accepts `patch` or a full graph and returns the preview plus a unified `graph_diff`; touches nothing. |
 | `stop` | Request a stop at the next boundary; in-flight children are killed; stop ≠ failure — cancelled work re-drives on resume, and a `lane_key` is freed for the next dispatch. |
 | `kill` | Node-targeted lane kill (`run_id` + `node`): SIGKILLs that node's in-flight children and finishes the node `failed` with `error_class=killed`. Siblings and the run keep going (no `stop.request`). The kill marker stays for the run — a killed lane stays killed. |
 | `list` | All runs (capped page + full-census counts, per-run provenance rollup when present). |
 | `save` | Shelve a graph in the library under a name (overwrite = current best): `description`, `tags` (1–10, flat or `facet:value`; reuse `library`'s `tag_vocab` verbatim), optional `source` attribution writes provenance (owner, digest, timestamp) — attribution, never access control. |
 | `submit` | Quarantine a hand-rolled graph the library didn't cover for human-gated study — requires a `why_not_library` receipt (≥80 chars); never joins the library. |
-| `library` | List shelved graphs richly (nodes, gates, fan-outs, description, tags, provenance), filterable by ALL-match tags; an empty filtered result says which tag starved. |
+| `library` | List shelved graphs richly (nodes, gates, fan-outs, description, tags, provenance), filterable by ALL-match tags; an empty filtered result says which tag starved. `name:"<name>"` returns required inputs and an instantiate command. |
 | `validate` | Dry-run the door's validation pipeline (defaults fill, defect collection, model/route policy) with no ping and no writes — `{ok, errors:[{node,field,msg}], resolved_routes}`. |
 | `doctor_version` | Read-only version truth for THIS install: `{live_version, newest_packaged, source_commit, drift}` — plugin.yaml vs the `install.json` provenance `pack.py` stamps at build time; one read, no network. |
 
 Plus a `/wf` slash command: bare `/wf` lists the library; `/wf <name> [note]`
-launches that graph with the note as its context seed. `/wf show <name>` (or
+returns the atomic run instruction for that graph, carrying the note as its
+`run_context` seed (the launch itself is the agent's `run` call — the command
+never spawns). `/wf show <name>` (or
 `workflow {"action":"library","name":"<name>"}`) returns required inputs and
-an instantiate command; `/wf gates` boards held gates and `/wf orphans` lists
+an instantiate command; `/wf gates` boards held gates (needs the
+`admission_gates` setting; see [docs/admission-gates.md](docs/admission-gates.md));
+`/wf orphans` lists
 orphan-held runs across the fleet. Library-sourced launches require nonempty string bindings
 for every `{run.KEY}` on the shared text surface, including echo output, gate
 options and machine argv; surviving refs refuse before any write. Inline graphs
@@ -131,6 +136,8 @@ Runnable templates in [examples/](examples/), grouped by role —
 (independent judgment), `release/` (issue→PR, release lifecycle, gates and
 watchers), `ops/` (incidents). [examples/README.md](examples/README.md) is the
 map: one line per template, what it teaches, and which arm its receipts proved.
+Every example ships with its rendered diagram under
+[examples/diagrams/](examples/diagrams/).
 
 ## What a run leaves behind
 
@@ -227,10 +234,8 @@ live in [`library/general/README.md`](library/general/README.md).
 procedures, and the rules that keep the tree publishable. Changes are gated by
 the serial suite (`python3 scripts/suite.py . ci-out`) and
 `hermes plugins validate .` — both run in [CI](.github/workflows/ci.yml).
-
-[`graphify`](https://github.com/Graphify-Labs/graphify) is an OPTIONAL local
-navigation aid — `graphify query "<question>"` beats a grep dump. Its output is
-never committed and CI never builds it; source and tests are the spec.
+`graphify` (a separate tool) can query the code graph locally; it is never
+required and never gates.
 
 ## License
 

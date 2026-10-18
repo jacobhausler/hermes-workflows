@@ -4,8 +4,8 @@ Three default-off hook integrations live on main. All are **DEFAULT OFF**: off
 means zero registrations, zero threads, byte-identical payloads. Enabling one
 never changes graph behavior — it only adds an observer (P1, P3) or an extra
 presentation surface for held human gates (P5). Ship state: P1 (outbound bridge)
-shipped in the v1.3.9 cut; P3 and P5 landed on main after the tag and ship in
-the next release. The authoritative spec for each is its module docstring ("the
+shipped in the v1.3.9 cut; P3 and P5 landed on main after that tag and ship in
+the v1.4.0 cut. The authoritative spec for each is its module docstring ("the
 docstring is its man page"); this file is the pointer and the switch board.
 
 | Feature | Settings key | Exact entry that arms it | Gate read |

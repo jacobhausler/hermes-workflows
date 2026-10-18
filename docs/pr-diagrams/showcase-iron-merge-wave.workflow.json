@@ -1,0 +1,278 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "iron-merge-1 — four merge lanes drain the PR queue (2026-10-17)",
+    "subtitle": "Run 20261017-032920-iron-merge-1: 40 PRs touched across 3 repos, 20 squash-merged, 13 carrier rows closed with the merge sha",
+    "locale": "en",
+    "visual_preset": "signal-flow",
+    "quality_profile": "standard",
+    "animation": "none",
+    "output": "showcase-iron-merge-wave.html"
+  },
+  "lanes": [
+    {
+      "id": "queue",
+      "label": "PR queue (gh)"
+    },
+    {
+      "id": "lanes",
+      "label": "Merge lanes (4 agents, claim comment arbitrates)"
+    },
+    {
+      "id": "law",
+      "label": "Merge-identity law (per PR, exact green head)",
+      "variant": "exception"
+    },
+    {
+      "id": "out",
+      "label": "Outcomes (rep join)"
+    }
+  ],
+  "phases": [
+    {
+      "id": "claim",
+      "label": "Claim",
+      "fromCol": 0,
+      "toCol": 1
+    },
+    {
+      "id": "gate",
+      "label": "Gate + merge",
+      "fromCol": 2,
+      "toCol": 3,
+      "variant": "emphasis"
+    },
+    {
+      "id": "ledger",
+      "label": "Ledger",
+      "fromCol": 4,
+      "toCol": 5
+    }
+  ],
+  "groups": [],
+  "mainPath": [
+    "queue",
+    "l1",
+    "marker",
+    "squash",
+    "rows",
+    "rep"
+  ],
+  "nodes": [
+    {
+      "id": "queue",
+      "lane": "queue",
+      "col": 0,
+      "type": "external",
+      "label": "open PRs",
+      "sublabel": "oldest-first: hw, rui, lcm",
+      "width": 196
+    },
+    {
+      "id": "l1",
+      "lane": "lanes",
+      "col": 1,
+      "type": "backend",
+      "label": "L1 · hw drain",
+      "sublabel": "known carriers first",
+      "width": 180
+    },
+    {
+      "id": "l2",
+      "lane": "lanes",
+      "col": 1,
+      "type": "backend",
+      "label": "L2 · conflicting",
+      "sublabel": "#329 #231 #297 rebase",
+      "width": 180,
+      "yOffset": 92
+    },
+    {
+      "id": "l3",
+      "lane": "lanes",
+      "col": 1,
+      "type": "backend",
+      "label": "L3 · hw continue",
+      "sublabel": "past L1/L2 claims",
+      "width": 180,
+      "yOffset": 184
+    },
+    {
+      "id": "l4",
+      "lane": "lanes",
+      "col": 1,
+      "type": "backend",
+      "label": "L4 · rui + lcm",
+      "sublabel": "then join hw drain",
+      "width": 180,
+      "yOffset": 276
+    },
+    {
+      "id": "marker",
+      "lane": "law",
+      "col": 2,
+      "type": "security",
+      "label": "reviewer marker",
+      "sublabel": "reviewed=<full-head-sha>",
+      "tag": "author ≠ reviewer",
+      "width": 206
+    },
+    {
+      "id": "squash",
+      "lane": "law",
+      "col": 3,
+      "type": "security",
+      "label": "gh pr merge --squash",
+      "sublabel": "read back MERGED + oid",
+      "tag": "pr-diagram gate",
+      "width": 206
+    },
+    {
+      "id": "merged",
+      "lane": "out",
+      "col": 3,
+      "type": "database",
+      "label": "20 squash-merged",
+      "sublabel": "16 hw · 4 rich-ui",
+      "width": 184
+    },
+    {
+      "id": "rows",
+      "lane": "out",
+      "col": 4,
+      "type": "database",
+      "label": "13 rows closed",
+      "sublabel": "reason: MERGED #n @ sha",
+      "tag": "never --force",
+      "width": 196
+    },
+    {
+      "id": "rep",
+      "lane": "out",
+      "col": 5,
+      "type": "frontend",
+      "label": "rep report",
+      "sublabel": "open after: hw 16, rui 5",
+      "width": 192
+    },
+    {
+      "id": "pending",
+      "lane": "out",
+      "col": 4,
+      "type": "backend",
+      "label": "6 author-fix",
+      "sublabel": "rebased, gates re-running",
+      "width": 196,
+      "yOffset": 92
+    },
+    {
+      "id": "blocked",
+      "lane": "out",
+      "col": 5,
+      "type": "security",
+      "label": "14 blocked",
+      "sublabel": "11 CONFLICTING, wall hit",
+      "width": 192,
+      "yOffset": 92
+    }
+  ],
+  "edges": [
+    {
+      "id": "e-q-l1",
+      "from": "queue",
+      "to": "l1",
+      "variant": "emphasis",
+      "label": "claim comment"
+    },
+    {
+      "id": "e-q-l2",
+      "from": "queue",
+      "to": "l2",
+      "variant": "default",
+      "role": "branch"
+    },
+    {
+      "id": "e-q-l3",
+      "from": "queue",
+      "to": "l3",
+      "variant": "default",
+      "role": "branch"
+    },
+    {
+      "id": "e-q-l4",
+      "from": "queue",
+      "to": "l4",
+      "variant": "default",
+      "role": "branch"
+    },
+    {
+      "id": "e-l1-marker",
+      "from": "l1",
+      "to": "marker",
+      "label": "green + clean",
+      "variant": "emphasis"
+    },
+    {
+      "id": "e-marker-squash",
+      "from": "marker",
+      "to": "squash",
+      "label": "verdict=merge",
+      "variant": "emphasis"
+    },
+    {
+      "id": "e-squash-merged",
+      "from": "squash",
+      "to": "merged",
+      "label": "merge sha",
+      "variant": "emphasis",
+      "role": "branch"
+    },
+    {
+      "id": "e-squash-rows",
+      "from": "squash",
+      "to": "rows",
+      "label": "bd close",
+      "variant": "emphasis"
+    },
+    {
+      "id": "e-rows-rep",
+      "from": "rows",
+      "to": "rep",
+      "label": "net-zero",
+      "variant": "emphasis"
+    },
+    {
+      "id": "e-rows-pending",
+      "from": "rows",
+      "to": "pending",
+      "variant": "dashed",
+      "role": "branch"
+    },
+    {
+      "id": "e-pending-blocked",
+      "from": "pending",
+      "to": "blocked",
+      "label": "next lap",
+      "variant": "dashed"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Merge-identity law",
+      "items": [
+        "marker: <!-- repo-admin reviewed=<head-sha> verdict=merge reviewer=clankville -->",
+        "PR author ≠ reviewer; the marker names the exact head the gates passed on"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Honest ledger",
+      "items": [
+        "rep caught one lane error: L2 labeled merge dd27b0d as #424 — live gh says #425",
+        "cross-actor guard refusal → merge sha commented on-row, never --force"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,73 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "Hermes Workflows — graph lifecycle",
+    "subtitle": "Author a JSON graph, the door admits it, lanes fan out, a gate holds at zero tokens, amend swaps the rest mid-run",
+    "locale": "en",
+    "visual_preset": "signal-flow",
+    "quality_profile": "standard",
+    "animation": "none",
+    "output": "showcase-dag-lifecycle.html"
+  },
+  "lanes": [
+    { "id": "owner", "label": "Owner surfaces" },
+    { "id": "door", "label": "Submission door" },
+    { "id": "run", "label": "Runner: fan-out lanes + gate" },
+    { "id": "ledger", "label": "Ledger + typed failures", "variant": "exception" }
+  ],
+  "phases": [
+    { "id": "submit", "label": "Submit", "fromCol": 0, "toCol": 1 },
+    { "id": "execute", "label": "Fan-out + hold", "fromCol": 2, "toCol": 4, "variant": "emphasis" },
+    { "id": "land", "label": "Report", "fromCol": 5, "toCol": 5 }
+  ],
+  "groups": [],
+  "mainPath": ["author", "door", "spawn", "lane_b", "gate", "report"],
+  "nodes": [
+    { "id": "author", "lane": "owner", "col": 0, "type": "external", "label": "Author graph", "sublabel": "agent-authored JSON", "width": 176 },
+    { "id": "amend", "lane": "owner", "col": 2, "type": "backend", "label": "amend · steer", "sublabel": "replace graph mid-run", "tag": "unchanged nodes replay", "width": 196 },
+    { "id": "report", "lane": "owner", "col": 5, "type": "frontend", "label": "Report card", "sublabel": "summary.md + ::workflow", "width": 196 },
+    { "id": "door", "lane": "door", "col": 1, "type": "security", "label": "run door", "sublabel": "validate · dry_run", "tag": "require_route ping", "width": 188 },
+    { "id": "spawn", "lane": "run", "col": 2, "type": "backend", "label": "runner spawn", "sublabel": "kernel flock · no daemon", "width": 196, "yOffset": 92 },
+    { "id": "lane_a", "lane": "run", "col": 3, "type": "backend", "label": "agent lane", "sublabel": "own model + budget", "tag": "timeout · max_turns cap", "width": 196 },
+    { "id": "lane_b", "lane": "run", "col": 3, "type": "backend", "label": "agent lane ×N", "sublabel": "per-item liveness", "width": 196, "yOffset": 92 },
+    { "id": "lane_c", "lane": "run", "col": 3, "type": "backend", "label": "agent lane", "sublabel": "quorum cancels stragglers", "width": 196, "yOffset": 184 },
+    { "id": "gate", "lane": "run", "col": 4, "type": "security", "label": "gate", "sublabel": "human release · machine wait", "tag": "0-token hold", "width": 210, "yOffset": 92 },
+    { "id": "failed", "lane": "ledger", "col": 4, "type": "security", "label": "node.failed", "sublabel": "error_class + node_facts", "width": 210 },
+    { "id": "events", "lane": "ledger", "col": 5, "type": "database", "label": "events.jsonl", "sublabel": "append-only typed log", "width": 196 }
+  ],
+  "edges": [
+    { "id": "e-author-door", "from": "author", "to": "door", "label": "graph JSON", "variant": "emphasis" },
+    { "id": "e-door-author", "from": "door", "to": "author", "label": "one refusal list", "variant": "dashed", "role": "return" },
+    { "id": "e-door-spawn", "from": "door", "to": "spawn", "label": "admit", "variant": "emphasis" },
+    { "id": "e-spawn-a", "from": "spawn", "to": "lane_a", "variant": "default", "role": "branch" },
+    { "id": "e-spawn-b", "from": "spawn", "to": "lane_b", "label": "fan-out", "variant": "emphasis" },
+    { "id": "e-spawn-c", "from": "spawn", "to": "lane_c", "variant": "default", "role": "branch" },
+    { "id": "e-a-gate", "from": "lane_a", "to": "gate", "variant": "default", "role": "branch" },
+    { "id": "e-b-gate", "from": "lane_b", "to": "gate", "label": "quorum", "variant": "emphasis" },
+    { "id": "e-c-gate", "from": "lane_c", "to": "gate", "variant": "default", "role": "branch" },
+    { "id": "e-gate-report", "from": "gate", "to": "report", "label": "release", "variant": "emphasis" },
+    { "id": "e-c-failed", "from": "lane_c", "to": "failed", "label": "typed, never prose", "variant": "security", "role": "error" },
+    { "id": "e-failed-events", "from": "failed", "to": "events", "label": "attempts + log", "variant": "dashed" },
+    { "id": "e-amend-spawn", "from": "amend", "to": "spawn", "label": "will_rerun", "variant": "dashed", "role": "branch" },
+    { "id": "e-events-report", "from": "events", "to": "report", "label": "status pointers", "variant": "dashed", "role": "async" }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Typed failure",
+      "items": [
+        "error_class from a closed set: timeout, cap_exhausted, schema, route_unavailable, …",
+        "failed nodes ship node_facts: attempts log, final words, log path"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Hot-swap + resume",
+      "items": [
+        "amend mid-run: fingerprint-matched nodes replay-skip, changed nodes re-run",
+        "crash or restart: wait respawns the runner; finished lanes replay from the ledger"
+      ]
+    }
+  ]
+}

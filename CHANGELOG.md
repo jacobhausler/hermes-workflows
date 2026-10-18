@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- docs(v1.4.0): revitalization pass — README drift fixes (`/wf <name>` returns
+  a run instruction, `/wf gates` behind `admission_gates`, `library name:` /
+  `amend patch` forms documented), four spec-backed showcase diagrams under
+  `docs/pr-diagrams/` with `docs/showcase.md` glosses; removed
+  `docs/event-driven-wake.md` (unreferenced pattern essay; history in git).
+  (est-7m6wv)
 - feat(spawn): marker-gated creation-override flag strip (est-yq2xq). On seats
   whose gateway freezes the session route at create, `--continue <skey>
   --create-if-missing` + any creation override is refused (child dies rc=2,

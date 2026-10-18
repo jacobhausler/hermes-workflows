@@ -1,0 +1,260 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "Estate back-pressure loop — beads ledger, claim, evidence, gravity re-check",
+    "subtitle": "Work lives in the bd store; a close is believed only on read-back; a 10-minute sweeper wakes rows nobody touched",
+    "locale": "en",
+    "visual_preset": "signal-flow",
+    "quality_profile": "standard",
+    "animation": "none",
+    "output": "showcase-backpressure-loop.html"
+  },
+  "lanes": [
+    {
+      "id": "ledger",
+      "label": "Beads store (dolt)"
+    },
+    {
+      "id": "agent",
+      "label": "Claiming agent"
+    },
+    {
+      "id": "runner",
+      "label": "Runner commit edge"
+    },
+    {
+      "id": "sweep",
+      "label": "GRAVITY-SWEEP-10M (no_agent, green = silent)",
+      "variant": "exception"
+    }
+  ],
+  "phases": [
+    {
+      "id": "pick",
+      "label": "Pick",
+      "fromCol": 0,
+      "toCol": 2
+    },
+    {
+      "id": "prove",
+      "label": "Work + prove",
+      "fromCol": 3,
+      "toCol": 5,
+      "variant": "emphasis"
+    }
+  ],
+  "groups": [],
+  "mainPath": [
+    "store",
+    "ready",
+    "claim",
+    "work",
+    "comment",
+    "close"
+  ],
+  "nodes": [
+    {
+      "id": "store",
+      "lane": "ledger",
+      "col": 0,
+      "type": "database",
+      "label": "beads store",
+      "sublabel": "bd -C ~/.hermes/beads",
+      "width": 180
+    },
+    {
+      "id": "ready",
+      "lane": "ledger",
+      "col": 1,
+      "type": "database",
+      "label": "ready frontier",
+      "sublabel": "bd ready --json",
+      "width": 170
+    },
+    {
+      "id": "close",
+      "lane": "ledger",
+      "col": 5,
+      "type": "database",
+      "label": "close",
+      "sublabel": "bd close ID --reason",
+      "width": 176
+    },
+    {
+      "id": "claim",
+      "lane": "agent",
+      "col": 2,
+      "type": "backend",
+      "label": "claim + read back",
+      "sublabel": "bd update ID --claim",
+      "tag": "lost claim = contention",
+      "width": 184
+    },
+    {
+      "id": "work",
+      "lane": "agent",
+      "col": 3,
+      "type": "backend",
+      "label": "do the work",
+      "sublabel": "workflow run or turn",
+      "width": 168
+    },
+    {
+      "id": "comment",
+      "lane": "agent",
+      "col": 4,
+      "type": "backend",
+      "label": "evidence comment",
+      "sublabel": "bd comment ID <locator>",
+      "width": 188
+    },
+    {
+      "id": "gate",
+      "lane": "runner",
+      "col": 5,
+      "type": "security",
+      "label": "bead_close gate",
+      "sublabel": "runner runs bd show itself",
+      "tag": "closed, or failed",
+      "width": 196
+    },
+    {
+      "id": "sweeper",
+      "lane": "sweep",
+      "col": 0,
+      "type": "messagebus",
+      "label": "sweeper tick",
+      "sublabel": "every 10 min, flock",
+      "width": 168
+    },
+    {
+      "id": "stale",
+      "lane": "sweep",
+      "col": 1,
+      "type": "security",
+      "label": "zero-progress row",
+      "sublabel": "unassigned, idle >10 min",
+      "width": 184
+    },
+    {
+      "id": "wake",
+      "lane": "sweep",
+      "col": 2,
+      "type": "messagebus",
+      "label": "wake child",
+      "sublabel": "≤3 children, 6 rows / tick",
+      "width": 190
+    },
+    {
+      "id": "verify",
+      "lane": "sweep",
+      "col": 3,
+      "type": "security",
+      "label": "60-min verify",
+      "sublabel": "closed · claimed · touched",
+      "tag": "else un-wake",
+      "width": 190
+    }
+  ],
+  "edges": [
+    {
+      "id": "e-store-ready",
+      "from": "store",
+      "to": "ready",
+      "label": "open, unblocked",
+      "variant": "emphasis"
+    },
+    {
+      "id": "e-ready-claim",
+      "from": "ready",
+      "to": "claim",
+      "label": "pick one",
+      "variant": "emphasis"
+    },
+    {
+      "id": "e-claim-work",
+      "from": "claim",
+      "to": "work",
+      "label": "assignee = me",
+      "variant": "emphasis"
+    },
+    {
+      "id": "e-work-comment",
+      "from": "work",
+      "to": "comment",
+      "label": "locator",
+      "variant": "emphasis"
+    },
+    {
+      "id": "e-comment-close",
+      "from": "comment",
+      "to": "close",
+      "label": "reason cites it",
+      "variant": "emphasis"
+    },
+    {
+      "id": "e-close-gate",
+      "from": "close",
+      "to": "gate",
+      "label": "read back",
+      "variant": "security",
+      "role": "branch"
+    },
+    {
+      "id": "e-sweeper-store",
+      "from": "sweeper",
+      "to": "store",
+      "label": "bd list open",
+      "variant": "dashed",
+      "role": "async"
+    },
+    {
+      "id": "e-sweeper-stale",
+      "from": "sweeper",
+      "to": "stale",
+      "label": "classify",
+      "variant": "default"
+    },
+    {
+      "id": "e-stale-wake",
+      "from": "stale",
+      "to": "wake",
+      "label": "12h no re-wake",
+      "variant": "default"
+    },
+    {
+      "id": "e-wake-claim",
+      "from": "wake",
+      "to": "claim",
+      "label": "hermes chat --oneshot",
+      "variant": "dashed",
+      "role": "branch"
+    },
+    {
+      "id": "e-wake-verify",
+      "from": "wake",
+      "to": "verify",
+      "label": "after 60 min",
+      "variant": "dashed"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Read-back, not prose",
+      "items": [
+        "claim → bd show: assignee/status re-read before work starts",
+        "bead_close nodes: runner reads observed_status; anything but closed fails the node"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Back-pressure",
+      "items": [
+        "RED line only on bd failure or zero open rows — never a vacuous green",
+        "a wake with no row evidence after 60 min is a dead wake and is un-woken"
+      ]
+    }
+  ]
+}

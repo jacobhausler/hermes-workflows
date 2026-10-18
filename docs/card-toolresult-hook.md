@@ -125,11 +125,13 @@ function _safeJson(s) { try { return JSON.parse(s) } catch { return null } }
 
 // The OWNERSHIP GUARD is ours to supply, NOT DirectiveCard's: DirectiveCard is
 // only an id-validity check plus DirectiveBody — it has no owner/session logic
-// (`DirectiveCard` at desktop/plugin.js ~415: `if (!ID_OK.test(id)) … else
+// (`DirectiveCard` in desktop/plugin.js — `grep -n "function DirectiveCard"
+// desktop/plugin.js`: `if (!ID_OK.test(id)) … else
 // DirectiveBody`). A bare DirectiveCard mounted from a tool-result slot would
 // render a FOREIGN-owner run's card in whatever chat happened to settle that
 // tool part. Gate on `run.json owner.session_id == viewing session` exactly as
-// the tray does: `ownedRuns` (desktop/plugin.js ~697) pairs
+// the tray does: `ownedRuns` (`grep -n "export function ownedRuns"
+// desktop/plugin.js`) pairs
 // `owner.session_id === sid` / `owner.ui_session_id === uiSid` against
 // `host.state.focusedSessionId` / `focusedStoredSessionId` via the
 // feature-detected `focusAtom`s — reuse that pairing here (fetch through the
