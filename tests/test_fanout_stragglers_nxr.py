@@ -173,9 +173,13 @@ if lb:
     check("B names the open pair and the cohort counts",
           e.get("open") == [4, 5] and e.get("done") == 4 and e.get("items") == 6,
           json.dumps({k: e.get(k) for k in ("open", "done", "items")}))
+    # The engine fires on the UNROUNDED age (> floor_s) and reports round(age, 1):
+    # a true 2.01-2.04 s fires correctly and reports exactly the floor, so the
+    # bound on the reported value is >= floor_s, never a strict > (CI flake).
     check("B fires EARLY (age past floor, before the sleepers land): "
-          "wake ts precedes run end by >2s of squirrel time",
-          e.get("oldest_open_age_s", 0) > 2, str(e.get("oldest_open_age_s")))
+          "reported age is at least the floor",
+          e.get("oldest_open_age_s", 0) >= e.get("floor_s", 2),
+          str(e.get("oldest_open_age_s")))
     check("B silent-classification field present (budget_cue-derived)",
           isinstance(e.get("silent"), list), str(e.get("silent")))
 wb = strag_wakes(rb)
