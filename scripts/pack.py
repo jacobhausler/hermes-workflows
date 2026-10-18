@@ -218,6 +218,9 @@ SOURCE_ONLY_SCRIPTS = {
     # est-a5obt (PR #414): estate wave-generator speaking bd-store vocabulary
     # and takeover law at an estate-private store — same class as make_public.py.
     "scripts/horde_gen.py": "estate horde generator (bd-store takeover tooling; not release surface)",
+    # est-d2eyc (PR #467, SH-07): estate shelf census over the shelf/ library,
+    # run-dir roots, and seat profiles — estate governance tooling, not release surface.
+    "scripts/shelf-census.py": "estate shelf census (launch attribution/deadweight/consumer scan; not release surface)",
 }
 
 

@@ -152,7 +152,11 @@ def main() -> None:
   # est-a5obt (PR #414): estate horde generator — speaks bd-store takeover law
   # at an estate-private store; source-only like make_public.py, declared in
   # pack.py SOURCE_ONLY_SCRIPTS.
-  "horde_gen.py"})
+  "horde_gen.py",
+  # est-d2eyc (PR #467, SH-07): estate shelf census — scans the shelf library,
+  # run-dir roots, and seat profiles; source-only, declared in pack.py
+  # SOURCE_ONLY_SCRIPTS.
+  "shelf-census.py"})
             else:
                 print("SKIP pack-list repo-side half: no .git — running from an "
                       "unpacked ZIP/archive, where the premise does not exist")
