@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """jam-h23 on_fail: per-agent failure catch -> join-tolerant `skipped` (or fallback run).
 
-Validator grammar (agent-only key, value checks) + THREE real-runner cases with
+Validator grammar (agent-only key, value checks) + real-runner cases with
 tests/fake:
   1. dead node FAILME on_fail:'skip' commits `skipped`; the downstream join with
      one live dep runs; the run closes `done` (WORKFLOW_DONE), death readable via
@@ -10,6 +10,10 @@ tests/fake:
   3. negative control: the same failing node WITHOUT on_fail blocks the run
      (WORKFLOW_FAILED, run.blocked) — the catch is opt-in, nothing changed for
      graphs that never name it.
+  4. #473: a downstream node that NAMES the skipped head in `inputs:` spawns with a
+     labelled skip-sentinel block (the death as data), never `error_class:inputs`.
+  5. control for #473: a `done` head missing the dotted path keeps the exact hard
+     failure — the sentinel never launders an authoring typo into a sanctioned skip.
 
 Run: cd tests && python3 test_on_fail_h23.py
 """
@@ -135,6 +139,46 @@ check("without on_fail the failure still blocks the run",
       out.startswith("WORKFLOW_FAILED of-none"), out[:90])
 check("negative control: node stays failed",
       json.loads((r / "nodes" / "dead.json").read_text())["status"] == "failed")
+
+# ---- 5. #473: an explicit inputs ref to the SKIPPED head is a sentinel, not a crash ----
+plog = HOME / "of-sentinel.prompts.log"
+if plog.exists():
+    plog.unlink()
+r = fresh("of-sentinel", [
+    agent("live", goal='JSON:{"ok": true}'),
+    agent("dead", goal="FAILME of-sentinel", on_fail="skip"),
+    agent("census", ["dead", "live"], goal='JSON:{"joined": true}', inputs=["dead"]),
+])
+cp = subprocess.run([PY, str(PLUGIN / "wf.py"), "run", r.name],
+                    env={**ENV, "FAKE_PROMPT_LOG": str(plog)},
+                    capture_output=True, text=True, timeout=120)
+out = cp.stdout.strip()
+prompts = plog.read_text().split("\n=====PROMPT=====\n")[1:] if plog.exists() else []
+sentinel = next((p for p in prompts if "(skipped: on_fail)" in p), None)
+check("#473: the consumer of a skipped head SPAWNS (no error_class=inputs death)",
+      json.loads((r / "nodes" / "census.json").read_text())["status"] == "done",
+      json.dumps(json.loads((r / "nodes" / "census.json").read_text()))[:200])
+check("#473: the dropout arm reaches `## Inputs` as a labelled skip-sentinel block",
+      sentinel is not None, str([p.splitlines()[0][:60] for p in prompts]))
+check("#473: the sentinel stays fail-closed — the death is readable in the payload",
+      sentinel is not None and "caught_error_class" in sentinel)
+check("#473: the run closes DONE with the census answered",
+      out.startswith("WORKFLOW_DONE of-sentinel"), out[:90])
+check("#473: the sentinel never pretends to be data (no fabricated roster key)",
+      sentinel is not None and '"all_results"' not in sentinel)
+
+# ---- 6. control: the sentinel is `skipped`-only; a missing path on a DONE head still fails ----
+r = fresh("of-hardfail", [
+    agent("live", goal='JSON:{"ok": true}'),
+    agent("census", ["live"], goal='JSON:{"joined": true}', inputs=["live.nope"]),
+])
+out = run_runner(r)
+check("#473 control: a `done` head without the path keeps the hard failure",
+      out.startswith("WORKFLOW_FAILED of-hardfail"), out[:90])
+check("#473 control: the exact error string is untouched",
+      json.loads((r / "nodes" / "census.json").read_text()).get("error")
+      == "inputs: live.nope not resolvable",
+      json.dumps(json.loads((r / "nodes" / "census.json").read_text()))[:200])
 
 print("FAILS:", FAILS if FAILS else "none")
 sys.exit(1 if FAILS else 0)

@@ -8204,12 +8204,34 @@ def _inputs_block(label, val, cap):
                f"nodes/{str(label).split('.')[0]}.json]")
     return f"{label}\n```json\n{s}\n```"
 
+def _skip_sentinel(run, ref, cap):
+    """#473: an explicit `inputs:` ref whose HEAD committed `skipped` resolves to ONE
+    labelled skipped-sentinel block instead of the `not resolvable` spawn crash. `skipped`
+    is a join-tolerant terminal state (the `on_fail:"skip"` catch, a false `when`, an
+    all-deps-pruned cascade) and the runner keeps it OUT of the outputs map — so a consumer
+    that NAMED the ref died `error_class:inputs` at spawn while a join carrying the very
+    same dead dep ran without complaint. The committed record already carries the readable
+    death; hand it over as data, fail-closed, labelled. A head that never committed, or
+    committed any other state (a `done` head that lacks the dotted path), is NOT a sentinel:
+    the hard failure stands, so an author typo can never read as a sanctioned skip."""
+    head = str(ref).split(".")[0]
+    rec = jload(run / "nodes" / f"{head}.json", {}) or {}
+    if rec.get("status") != "skipped":
+        return None
+    out = rec.get("output")
+    payload = out if isinstance(out, dict) and out else {"skipped": "skipped"}
+    return _inputs_block(f"{ref} (skipped: {payload.get('skipped', 'skipped')})", payload, cap)
+
 def build_inputs(run, node, outputs):
     """Node-level `inputs: [refs]` -> (prompt section, error). ONE fenced json block per
     ref, labelled by the ref string, resolved against committed outputs via resolve_ref.
     Each block is capped at INPUTS_CAP chars (overflow is truncated with a marker naming
     the full-record path). An unresolvable ref returns an error: the node FAILS at spawn,
-    never silently spawns with empty inputs. Fan-out: identical section for every item.
+    never silently spawns with empty inputs — the ONE exception (#473) is a ref whose HEAD
+    committed `skipped`: that resolves to a labelled skip-sentinel block (see _skip_sentinel)
+    because `skipped` is a join-tolerant terminal state and the dropout arm of
+    `on_fail:"skip"` must reach its consumer as readable data, not as a spawn-time crash.
+    Fan-out: identical section for every item.
     Sprint101 #10: every direct parent (`after:`) that is done gets its committed output
     injected automatically (capped AUTO_INPUTS_CAP chars, marker on overflow); a parent
     already covered by an `inputs:` ref (whole or dotted) is not repeated — `inputs:`
@@ -8263,6 +8285,10 @@ def build_inputs(run, node, outputs):
     for ref in refs:
         val = resolve_ref(outputs, ref, missing=_MISSING)
         if val is _MISSING:
+            sent = _skip_sentinel(run, ref, INPUTS_CAP)
+            if sent is not None:
+                blocks.append(sent)
+                continue
             return "", f"inputs: {ref} not resolvable"
         blocks.append(_inputs_block(ref, val, INPUTS_CAP))
     return "## Inputs\n\n" + "\n\n".join(blocks), None
