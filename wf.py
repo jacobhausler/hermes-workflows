@@ -8199,9 +8199,17 @@ AUTO_INPUTS_CAP = 8000   # #9/#10 lane: per-parent byte cap for auto-injected pa
 def _inputs_block(label, val, cap):
     s = json.dumps(val, ensure_ascii=False, indent=2, default=str)
     if len(s) > cap:
+        path = f"nodes/{str(label).split('.')[0]}.json"
         s = (s[:cap]
-             + f"\n…[truncated {len(s) - cap} chars; full record at "
-               f"nodes/{str(label).split('.')[0]}.json]")
+             + f"\n…[truncated {len(s) - cap} chars; full record at {path}]")
+        # #476: the marker NAMES the path but a goal that never re-reads it
+        # silently mis-tallies over the truncated tail. The advisement line
+        # under the fence turns that path into a standing instruction for the
+        # consumer — every injection path (explicit ref, auto-parent, ancestor
+        # gate answer, on_exit facts) inherits from this ONE site, and a
+        # non-truncated block stays byte-identical.
+        return (f"{label}\n```json\n{s}\n```\n"
+                f"[truncated: read {path} for the full record before deciding coverage]")
     return f"{label}\n```json\n{s}\n```"
 
 def build_inputs(run, node, outputs):
