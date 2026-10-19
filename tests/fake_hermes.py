@@ -695,6 +695,17 @@ if _FAKE_MODE == "min_blank_then_good":  # first answer blank, retry names a rea
     else:
         print("```json\n" + json.dumps({"verify_list": ["   "]}) + "\n```")
     sys.exit(0)
+# ---- #472 maxItems-cap modes (prompt-scoped like the enum/min ones: the
+# runner's attempt_note lands in the retry's prompt text) ----
+if _FAKE_MODE == "cap_always_bad":     # persistent roster over the declared cap
+    print("```json\n" + json.dumps({"candidates": ["a", "b", "c"]}) + "\n```")
+    sys.exit(0)
+if _FAKE_MODE == "cap_over_then_good":  # over-cap first, retry inside the cap
+    if "failed schema validation" in q:
+        print("```json\n" + json.dumps({"candidates": ["a", "b"]}) + "\n```")
+    else:
+        print("```json\n" + json.dumps({"candidates": ["a", "b", "c"]}) + "\n```")
+    sys.exit(0)
 # ---- #113 numeric-type-enforcement modes (prompt-scoped like the enum ones:
 # the runner's attempt_note lands in the retry's prompt text) ----
 if _FAKE_MODE == "num_out_then_in":    # first answer fractional as integer, retry integral

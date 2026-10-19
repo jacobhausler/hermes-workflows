@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- feat(door): `maxItems` joins the admitted schema subset as `minItems`' mirror
+  and `enum` widens onto `boolean`/`integer` (#472, est-v2fr6). Fan-out rosters
+  (arena candidates 2-6, swarm items 2-8) and bug-fix gate-keys
+  (`reproduced: enum[true,false]`) can now self-enforce instead of degrading to
+  prose. `wf.validate()` enforces the cap (`"{path}: expected at most N
+  item(s)"`) and typed membership — bool never satisfies an integer enum, an
+  integral float may hit its integer rung; an unsatisfiable `minItems >
+  maxItems` pair is refused at the door; the unsupported-keyword refusal names
+  the supported set AND the `description`-prose fallback for still-unenforceable
+  constraints (integer bounds, patterns). Tests:
+  `tests/test_schema_max_472.py` (+ re-pinned #96/#107 canaries).
+
 - docs(v1.4.0): revitalization pass — README drift fixes (`/wf <name>` returns
   a run instruction, `/wf gates` behind `admission_gates`, `library name:` /
   `amend patch` forms documented), four spec-backed showcase diagrams under

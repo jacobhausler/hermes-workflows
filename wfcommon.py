@@ -1365,39 +1365,64 @@ def validate_graph_errors(nodes, *, admission=False):
         # enforces both (array length; non-blank char count via v.strip(),
         # fail-closed: a whitespace-only probe is not a probe), so the door
         # admits exactly what the harvester can enforce, nothing more.
+        # #472: maxItems joins as minItems' mirror (wf.validate enforces the
+        # cap), and enum widens onto type:'boolean'/'integer' — membership in
+        # those closed domains is trivial at harvest. A refusal now also NAMES
+        # the fallback: an unenforceable cap belongs in the description prose,
+        # advisory by admission, never silently dropped.
         for k in sorted(set(schema) - {"type", "required", "properties", "items",
-                                       "description", "enum", "minItems", "minLength"}):
-            E(nid, f"{field}.{k}", "unsupported schema keyword; supported: type, required, properties, items, description, enum, minItems, minLength")
+                                       "description", "enum", "minItems", "minLength",
+                                       "maxItems"}):
+            E(nid, f"{field}.{k}", "unsupported schema keyword; supported: type, required, properties, items, description, enum, minItems, minLength, maxItems — a constraint the harvester cannot enforce here (integer bounds, patterns) belongs in the description prose: an advisory ceiling beats a silent pass")
         if "type" in schema and schema["type"] not in ("object", "array", "string", "number", "integer", "boolean"):
             E(nid, f"{field}.type", "unsupported schema type")
         if "required" in schema and (not isinstance(schema["required"], list)
                                       or not all(isinstance(x, str) for x in schema["required"])):
             E(nid, f"{field}.required", "required must be a list of strings")
         if "enum" in schema:
-            # #107: closed vocabulary. Stricter choice on placement — enum is
-            # REJECTED on a non-string (or type-less) schema, not merely
-            # documented: wf.validate() enforces membership only for str
-            # values against a string-membered enum, so anything else is a
-            # constraint the harvester cannot enforce — the closed-subset
-            # law refuses it at the door instead of shipping a dead keyword.
+            # #107: closed vocabulary. #472 widened placement from string-only
+            # to the three closed domains whose membership wf.validate()
+            # enforces trivially: type:'string' (non-empty string members),
+            # type:'boolean' (boolean members — the bug-fix playbook's
+            # `reproduced: enum[true,false]` gate-key is the repro), and
+            # type:'integer' (integer members; bool is never a member — the
+            # same bool law as #113). Still REJECTED on a type-less, number-,
+            # array- or object-typed schema: the closed-subset law refuses it
+            # at the door instead of shipping a dead keyword.
             en = schema["enum"]
+            _et = schema.get("type")
             if not isinstance(en, list) or not en:
                 E(nid, f"{field}.enum", "enum must be a non-empty list of non-empty strings")
-            elif not all(isinstance(x, str) and x for x in en):
+            elif _et == "string" and not all(isinstance(x, str) and x for x in en):
                 E(nid, f"{field}.enum", "enum members must be a list of non-empty strings")
-            elif schema.get("type") != "string":
-                E(nid, f"{field}.enum", "enum is only legal on type:'string' (the harvester enforces string membership only)")
+            elif _et == "boolean" and not all(isinstance(x, bool) for x in en):
+                E(nid, f"{field}.enum", "enum members must be a list of booleans")
+            elif _et == "integer" and not all(isinstance(x, int) and not isinstance(x, bool) for x in en):
+                E(nid, f"{field}.enum", "enum members must be a list of integers (bool is never a member)")
+            elif _et not in ("string", "boolean", "integer"):
+                E(nid, f"{field}.enum", "enum is only legal on type:'string', 'boolean' or 'integer' (the harvester enforces membership there only)")
         # #96: minItems/minLength — same enforceability law as enum. The door
         # admits a floor ONLY where wf.validate() can actually enforce it:
         # minItems on type:'array', minLength on type:'string', each a
         # non-negative int (bool is never a count — same bool law as #113).
-        for _kw, _t in (("minItems", "array"), ("minLength", "string")):
+        # #472: maxItems joins as minItems' mirror — type:'array', the same
+        # non-negative int shape, enforced as a cap at harvest.
+        for _kw, _t in (("minItems", "array"), ("minLength", "string"), ("maxItems", "array")):
             if _kw in schema:
                 mv = schema[_kw]
                 if isinstance(mv, bool) or not isinstance(mv, int) or mv < 0:
                     E(nid, f"{field}.{_kw}", f"{_kw} must be a non-negative integer")
                 elif schema.get("type") != _t:
                     E(nid, f"{field}.{_kw}", f"{_kw} is only legal on type:'{_t}' (the harvester enforces it only there)")
+        # #472: an unsatisfiable interval is a dead constraint — with both
+        # bounds otherwise well-formed, minItems > maxItems admits no value at
+        # all, so the door refuses the pair instead of shipping a schema that
+        # can only ever fail the harvest.
+        _mi, _ma = schema.get("minItems"), schema.get("maxItems")
+        if (isinstance(_mi, int) and not isinstance(_mi, bool) and _mi >= 0
+                and isinstance(_ma, int) and not isinstance(_ma, bool) and _ma >= 0
+                and _mi > _ma):
+            E(nid, f"{field}.maxItems", f"unsatisfiable range: minItems {_mi} > maxItems {_ma}")
         props = schema.get("properties")
         if props is not None:
             if not isinstance(props, dict):
@@ -6423,7 +6448,7 @@ def _rename_hint(r, v, s):
 
 def validate(out, schema):
     """Tiny forgiving validator: type / required / properties / items / enum
-    / minItems / minLength.
+    / minItems / minLength / maxItems.
     #107: `enum` membership is ENFORCED here — a str value against a
     string-membered enum (exactly what the door's schema_check admits: a
     non-empty list of non-empty strings on type:'string'), so a misspelled
@@ -6438,7 +6463,14 @@ def validate(out, schema):
     Schema, where minLength counts raw chars. Malformed floors (non-int) are
     ignored here, never crash: the door is the enforcement point; a
     hand-built schema must not take the runner down. An all-blank
-    verify_list-style array now fails closed like the rest of the law."""
+    verify_list-style array now fails closed like the rest of the law.
+    #472: `maxItems` is the cap mirror of minItems (same admitted placement,
+    error "{path}: expected at most N item(s)"), and enum membership widens
+    onto the boolean and integer closed domains the door now admits — with
+    #113's bool law preserved: a bool never satisfies an integer enum (True
+    must not hit the 1 rung), while an integral float may hit its integer
+    rung exactly as the type check allows it. A heterogeneous or malformed
+    enum is ignored here, never crash."""
     errs = []
     if not schema:
         return errs
@@ -6459,10 +6491,21 @@ def validate(out, schema):
             # modern JSON Schema contract) but rejects fractional ones.
             errs.append(f"{path}: expected number")
         en = s.get("enum")
-        if (isinstance(v, str) and isinstance(en, list) and en
-                and all(isinstance(x, str) for x in en) and v not in en):
-            errs.append(f"{path}: not an allowed value (allowed: "
-                        + ", ".join(repr(x) for x in en) + ")")
+        if isinstance(en, list) and en:
+            # #107 (string members) + #472 (boolean/integer members):
+            # membership enforced on exactly the closed domains the door
+            # admits. Bool is never an integer member (True must not hit the
+            # 1 rung); an integral float may hit its integer rung (#113's own
+            # contract); a heterogeneous or malformed enum is IGNORED — the
+            # forgiving-validator law, the door is the enforcement point.
+            _dom = ((isinstance(v, str) and all(isinstance(x, str) for x in en))
+                    or (isinstance(v, bool) and all(isinstance(x, bool) for x in en))
+                    or (((isinstance(v, int) and not isinstance(v, bool))
+                         or (isinstance(v, float) and v.is_integer()))
+                        and all(isinstance(x, int) and not isinstance(x, bool) for x in en)))
+            if _dom and v not in en:
+                errs.append(f"{path}: not an allowed value (allowed: "
+                            + ", ".join(repr(x) for x in en) + ")")
         # #96: floors, enforced only where the door admits them (right value
         # type, non-negative int floor). bool refused: True is not a count.
         mi = s.get("minItems")
@@ -6473,6 +6516,12 @@ def validate(out, schema):
         if (t == "string" and isinstance(v, str) and isinstance(ml, int)
                 and not isinstance(ml, bool) and ml >= 0 and len(v.strip()) < ml):
             errs.append(f"{path}: expected at least {ml} non-blank char(s)")
+        # #472: the cap mirror of minItems — same placement, same forgiving
+        # shape: enforced only on a real list under an admitted integer cap.
+        mx = s.get("maxItems")
+        if (t == "array" and isinstance(v, list) and isinstance(mx, int)
+                and not isinstance(mx, bool) and mx >= 0 and len(v) > mx):
+            errs.append(f"{path}: expected at most {mx} item(s)")
         if isinstance(v, dict):
             for r in s.get("required", []):
                 if r not in v:
