@@ -262,7 +262,7 @@
       "dot": "cyan",
       "title": "Merge-identity law",
       "items": [
-        "marker: <!-- repo-admin reviewed=<head-sha> verdict=merge reviewer=clankville -->",
+        "marker: <!-- repo-admin reviewed=<head-sha> verdict=merge reviewer=<verified-id> -->",
         "PR author ≠ reviewer; the marker names the exact head the gates passed on"
       ]
     },
