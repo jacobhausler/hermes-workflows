@@ -2833,6 +2833,52 @@ def validate_graph_full(graph):
                 item["after"] = []
             safe.append(item)
     errs.extend(validate_graph_errors(safe, admission=True))
+    errs.extend(_run_ref_scan(graph, safe))
+    return errs
+
+
+def _run_ref_scan(graph, safe_nodes):
+    """Malformed {run.X} references are validate-time defects, not launch surprises.
+
+    A captured key that is not a bare identifier ('{run.*}', '{run.a or b}')
+    can NEVER bind — _bind_run_context raises on it for EVERY run_context, so
+    the graph refuses to launch at any binding, after validate has said ok.
+    The include resolver already refuses this exact class inside composite
+    subtrees (_include_render, same identifier law); plain-graph authors
+    deserved the same static refusal. One defect per distinct (node, literal)
+    occurrence, worded so the fix is executable without reading the binder.
+    Surfaces scanned: exactly what the binder renders (goal/context/question/
+    profile/repo, fan-out goal + item goals, echo string output, gate options,
+    wait.until_argv — via the shared _include_texts traversal) PLUS
+    defaults.context, which the pre-run seed pass renders (wfcommon
+    _PRE_RUN_REF) after prepending. Non-run braces ({item.x}) are the
+    fan-out placeholder surface — untouched here by design."""
+    def scan(text, node_id, field):
+        out = []
+        seen = set()
+        for m in _INCLUDE_RUN_REF.finditer(text):
+            key = m.group(1)
+            if _INCLUDE_RUN_KEY.fullmatch(key) or m.group(0) in seen:
+                continue
+            seen.add(m.group(0))
+            out.append({"node": node_id, "field": "run_ref", "msg": (
+                f"malformed run_context reference {m.group(0)!r} in {field}: the key "
+                "must be a single identifier ([A-Za-z_][A-Za-z0-9_]*), so this literal "
+                "can never bind and the launch would refuse at every run_context — "
+                "reword the prose, write the value literally, or bind a real key")})
+        return out
+
+    errs = []
+    for node in safe_nodes:
+        if not isinstance(node, dict):
+            continue
+        nid = node.get("id") if isinstance(node.get("id"), str) else None
+        for text in _include_texts(node):
+            if isinstance(text, str):
+                errs.extend(scan(text, nid, "node render surface"))
+    defaults = graph.get("defaults") if isinstance(graph, dict) else None
+    if isinstance(defaults, dict) and isinstance(defaults.get("context"), str):
+        errs.extend(scan(defaults["context"], "defaults", "defaults.context"))
     return errs
 
 # ---------- include-by-expansion (design 2026-09-30) ----------
