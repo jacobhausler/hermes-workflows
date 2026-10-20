@@ -149,7 +149,7 @@ class BeadCloseFanout(unittest.TestCase):
     #         sibling's receipt still rides its row (measured facts, not erasure).
     def test_b_one_unproven_close_demotes_aggregate(self):
         self.set_store(**{"est-a1": {"status": "closed", "assignee": "hermes"},
-                          "est-a2": {"status": "in_progress", "assignee": "gh-dispatch"}})
+                          "est-a2": {"status": "in_progress", "assignee": "other-seat"}})
         r = self.mk("fo-b", [self.lanes([{"bead": "est-a1", "who": "hermes"},
                                          {"bead": "est-a2", "who": "hermes"}], self.decl())])
         out = self.wf("fo-b")
@@ -171,12 +171,12 @@ class BeadCloseFanout(unittest.TestCase):
     #         item 0 is still verified (one lane's honesty never excuses a skip).
     def test_c_pending_lane_never_probed(self):
         self.set_store(**{"est-a1": {"status": "closed", "assignee": "hermes"},
-                          "est-hold2": {"status": "in_progress", "assignee": "gh-dispatch"}})
+                          "est-hold2": {"status": "in_progress", "assignee": "other-seat"}})
         items = [{"bead": "est-a1", "who": "hermes",
                   "goal": 'CLOSE-CLAIM {"result":"done","note":"est-a1 closed"} post verdict'},
                  {"bead": "est-hold2", "who": "hermes",
                   "goal": 'CLOSE-CLAIM {"result":"in_progress","close-pending":'
-                          '"cannot close: assignee is gh-dispatch"} post verdict'}]
+                          '"cannot close: assignee is other-seat"} post verdict'}]
         r = self.mk("fo-c", [self.lanes(items, self.decl())])
         out = self.wf("fo-c")
         self.assertIn("WORKFLOW_DONE", out)
