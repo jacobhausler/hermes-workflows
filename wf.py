@@ -1553,8 +1553,13 @@ def _bead_close_gate_items(decl, rec):
     and EACH committing item is read back from the store at its own rendered
     id. The measured row rides the item's record inside all_results as
     `bead_close_receipt` (the same closed row shape the node-scoped path
-    writes), and the node record carries the full enumeration under the
-    PLURAL `bead_close_receipts`. Fail-closed law is item-for-item identical
+    writes), and the node record carries under the PLURAL
+    `bead_close_receipts` a SPARSE, SELF-INDEXED enumeration of the probed
+    rows: only done/partial non-pending items appear, honest-pending rows are
+    absent, and every row carries its own `index` (est-fxh6v). The key is
+    minted ONLY when at least one item was probed — an all-pending aggregate
+    commits key-free, the same pristine shape the token-free node-scoped
+    escape takes. Fail-closed law is item-for-item identical
     to the node-scoped gate: an item whose honest answer carried
     `close-pending` is a NON-claim (no probe, no row, record pristine); any
     other done/partial item that cannot be observed `closed` demotes the whole
@@ -1600,6 +1605,12 @@ def _bead_close_gate_items(decl, rec):
                 "error_class": "bead_close",
                 "bead_close_receipts": receipts,
                 "output": merged_out, "ms": rec.get("ms")}
+    if not receipts:
+        # est-fxh6v (a): nothing probed — no plural key, matching the
+        # token-free node-scoped escape (which mints no plural key either).
+        # An empty array would mint a "probed: none" claim the gate never
+        # made; the failure path above always carries >= 1 receipt.
+        return dict(rec, output=merged_out)
     return dict(rec, output=merged_out, bead_close_receipts=receipts)
 
 def _bead_close_gate(run, node, rec):
