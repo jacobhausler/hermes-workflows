@@ -18,6 +18,20 @@
   status-on-resume after a host restart). Follow-up issue: wake retry + silent
   `interrupted` class.
 
+- feat(bead_close): per-item `{FIELD}` interpolation on fan-out nodes (#485,
+  estate excavation E-9/E-11). A fan-out bead-worker lane — one item = one
+  estate bead — can now declare `bead_close.id` (and `.actor`) as ITEM
+  TEMPLATES: bare `{FIELD}` tokens (the exact law fan-out goals pay; `{item}`
+  and `{index}` resolve too) render per item at the commit edge and EVERY
+  committing item is read back from the store at its own rendered id. The
+  measured row rides each item's record inside `all_results` as
+  `bead_close_receipt`; the full indexed enumeration rides the node record
+  under the plural `bead_close_receipts`. The `close-pending` honest escape
+  is per item; unrenderable templates (empty / whitespace / surviving braces)
+  fail that item typed and are never probed. The door refuses the tokens on
+  any non-fan-out node, and a token-free declaration keeps the node-scoped
+  single-probe shape byte-identical. Tests: `tests/test_bead_close_fanout_485.py`.
+
 - feat(door): `maxItems` joins the admitted schema subset as `minItems`' mirror
   and `enum` widens onto `boolean`/`integer` (#472, est-v2fr6). Fan-out rosters
   (arena candidates 2-6, swarm items 2-8) and bug-fix gate-keys

@@ -906,6 +906,11 @@ def external_effect_receipts(node, rec):
                      "actual-readback": actual, "verdict": proven})
     return rows
 _HEX64_OK = re.compile(r"^[0-9a-f]{64}$")
+# #485: a bare item token ({FIELD}, {item}, {index}) inside a bead_close id/actor
+# template. Legal ONLY on a fan-out node, where the runner renders it per item
+# with fmt_goal; on a solo/echo commit nothing resolves it, so the door refuses
+# at admission instead of probing literal brace text at the commit edge.
+_RE_BC_ITEM_TOKEN = re.compile(r"\{[A-Za-z0-9_]+\}")
 JOIN_KEYS = {"id", "type", "after", "keys", "wait"}
 # ONE table for node kinds: closed key-set + the schedule hook. `spawns` is True
 # (agent: spawn a child when ready), False (gate: hold at the wave boundary), None
@@ -1699,6 +1704,13 @@ def validate_graph_errors(nodes, *, admission=False):
                                        or not bc["actor"].strip()):
                     E(nid, "bead_close", "bead_close.actor, when present, must be a "
                                          "non-empty string")
+                if not n.get("fanout") and any(
+                        _RE_BC_ITEM_TOKEN.search(str(bc.get(k) or ""))
+                        for k in ("id", "actor") if isinstance(bc.get(k), str)):
+                    E(nid, "bead_close", "bead_close id/actor item-token interpolation "
+                                         "({FIELD}) requires a fan-out node — nothing "
+                                         "resolves the token on a solo/echo commit "
+                                         "(drop the braces or fan the node out)")
         for k, hi in (("timeout", 86400), ("max_turns", 200), ("run_budget", 86400)):
             v = n.get(k)
             if v is not None and (not isinstance(v, (int, float)) or isinstance(v, bool) or v <= 0 or v > hi):

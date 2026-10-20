@@ -1485,20 +1485,33 @@ def _declares_close_pending(out):
         blob = str(out)
     return bool(_BEAD_PENDING_RE.search(blob))
 
-def _bead_close_gate(run, node, rec):
-    decl = node.get("bead_close")
-    if not isinstance(decl, dict) or rec.get("status") not in ("done", "partial"):
-        return rec                        # undeclared / non-committing: untouched
-    if _declares_close_pending(rec.get("output")):
-        return rec                        # honest non-claim: no read, record pristine
-    # Declared node committing without the honest escape: the runner verifies
-    # the store ITSELF — whether or not the output claims closure (test_d:
-    # closed-without-claim still PASSes from the read-back; the check anchors
-    # to the store, never to the prose).
-    bid = str(decl.get("id", "")).strip()
-    store = str(decl.get("store", "")).strip()
-    row = {"store": store, "id": bid, "actor": decl.get("actor"),
-           "observed_status": None, "assignee": None, "probe_rc": None, "ok": False}
+# #485: a bare item token ({FIELD}) in a bead_close id/actor template. Same
+# token class fmt_goal interpolates for fan-out goals; the door refuses these
+# on non-fan-out nodes (nothing to resolve them against), and the gate below
+# evaluates them PER ITEM on the fan-out aggregate.
+_RE_BC_ITEM_TOKEN = re.compile(r"\{[A-Za-z0-9_]+\}")
+
+def _bc_decl_interpolated(decl):
+    """True when a bead_close declaration's id OR actor carries a bare item
+    token — the per-fan-out-item shape of issue #485."""
+    for k in ("id", "actor"):
+        v = decl.get(k)
+        if isinstance(v, str) and _RE_BC_ITEM_TOKEN.search(v):
+            return True
+    return False
+
+def _bc_row(store, bid, actor):
+    """A pristine (never-probed) measured row — closed key set, insertion
+    order fixed; ok=True is written ONLY by a read-back that saw status closed."""
+    return {"store": store, "id": bid, "actor": actor,
+            "observed_status": None, "assignee": None, "probe_rc": None, "ok": False}
+
+def _bead_close_readback(store, bid, actor):
+    """Run the fixed store read-back for ONE bead id and return
+    (row, reason). The row is the measured fact, never a fabrication; reason
+    is the failure sentence ('' when ok). Shared verbatim-identical core for
+    the node-scoped and the per-item (#485) paths."""
+    row = _bc_row(store, bid, actor)
     try:
         # #80 R3 / #61c: the runner's OWN probe goes through _aux_run (registered
         # pid, bounded, own process group) with the fixed bd read-back argv.
@@ -1531,6 +1544,85 @@ def _bead_close_gate(run, node, rec):
             reason = f"store read-back unparseable (bd exit {row['probe_rc']})"
     except Exception as e:
         reason = f"store read-back could not run: {type(e).__name__}"
+    return row, reason
+
+def _bead_close_gate_items(decl, rec):
+    """#485: per-item close proof on a fan-out aggregate. The declaration's
+    id/actor are ITEM TEMPLATES — rendered per item with fmt_goal (the exact
+    bare-{FIELD} law fan-out goals pay, so {item} and {index} resolve too) —
+    and EACH committing item is read back from the store at its own rendered
+    id. The measured row rides the item's record inside all_results as
+    `bead_close_receipt` (the same closed row shape the node-scoped path
+    writes), and the node record carries the full enumeration under the
+    PLURAL `bead_close_receipts`. Fail-closed law is item-for-item identical
+    to the node-scoped gate: an item whose honest answer carried
+    `close-pending` is a NON-claim (no probe, no row, record pristine); any
+    other done/partial item that cannot be observed `closed` demotes the whole
+    aggregate to failed error_class "bead_close", naming each offender. A
+    template that renders empty, whitespace-laden, or with braces still
+    standing fails THAT item typed and is never probed — argv law is checked
+    after interpolation, never assumed."""
+    out = rec["output"]
+    store = str(decl.get("store", "")).strip()
+    tmpl_id = str(decl.get("id", "")).strip()
+    new_rows, receipts, failures = [], [], []
+    for i, r in enumerate(out["all_results"]):
+        if not isinstance(r, dict) or r.get("status") not in ("done", "partial") \
+                or _declares_close_pending(r.get("output")):
+            new_rows.append(r)            # non-committing / honest non-claim: untouched
+            continue
+        item = r.get("item")
+        bid = fmt_goal(tmpl_id, item, i).strip()
+        actor = (fmt_goal(str(decl["actor"]), item, i).strip()
+                 if isinstance(decl.get("actor"), str) else None)
+        if not bid:
+            row, reason = _bc_row(store, bid, actor), "rendered bead_close.id is empty"
+        elif _RE_PLACEHOLDER.search(bid):
+            row, reason = _bc_row(store, bid, actor), \
+                "unresolved item token in bead_close.id (the item carries no such field)"
+        elif any(c.isspace() for c in bid):
+            row, reason = _bc_row(store, bid, actor), \
+                "rendered bead_close.id carries whitespace (it rides the store read-back argv)"
+        else:
+            row, reason = _bead_close_readback(store, bid, actor)
+        new_rows.append(dict(r, bead_close_receipt=row))
+        receipts.append(dict(index=i, **row))
+        if not row["ok"]:
+            failures.append(f"[{i}] {bid}: {reason}")
+    merged_out = dict(out, all_results=new_rows)
+    if failures:
+        return {"status": "failed",
+                "error": "bead_close_unproven: " + "; ".join(failures)[:900]
+                         + " — the item's output claims the bead was closed; the runner "
+                           "read the estate store itself per item and it is not closed. "
+                           "Close with --actor matching the assignee, or return "
+                           "'close-pending: <reason>' and never claim closure.",
+                "error_class": "bead_close",
+                "bead_close_receipts": receipts,
+                "output": merged_out, "ms": rec.get("ms")}
+    return dict(rec, output=merged_out, bead_close_receipts=receipts)
+
+def _bead_close_gate(run, node, rec):
+    decl = node.get("bead_close")
+    if not isinstance(decl, dict) or rec.get("status") not in ("done", "partial"):
+        return rec                        # undeclared / non-committing: untouched
+    # Declared node committing without the honest escape: the runner verifies
+    # the store ITSELF — whether or not the output claims closure (test_d:
+    # closed-without-claim still PASSes from the read-back; the check anchors
+    # to the store, never to the prose).
+    out = rec.get("output")
+    if _bc_decl_interpolated(decl) and isinstance(out, dict) \
+            and isinstance(out.get("all_results"), list):
+        # #485 fan-out: the pending law is PER ITEM (one lane's honest
+        # close-pending never excuses the aggregate from reading back the
+        # beads the OTHER items claimed closed), so this branch runs ahead of
+        # the node-scoped non-claim check.
+        return _bead_close_gate_items(decl, rec)
+    if _declares_close_pending(rec.get("output")):
+        return rec                        # honest non-claim: no read, record pristine
+    bid = str(decl.get("id", "")).strip()
+    store = str(decl.get("store", "")).strip()
+    row, reason = _bead_close_readback(store, bid, decl.get("actor"))
     rec = dict(rec, bead_close_receipt=row)
     if not row["ok"]:
         rec = {"status": "failed",
