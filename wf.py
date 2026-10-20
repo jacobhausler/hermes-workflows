@@ -98,6 +98,12 @@ bake_route_receipts = wfcommon.bake_route_receipts
 _route_receipts_path = wfcommon._route_receipts_path
 _route_receipt_load = wfcommon._route_receipt_load
 validate = wfcommon.validate
+# est-libks: the #485 bare-item-token class is ONE compiled pattern, defined in
+# wfcommon (below), bound here off the private instance — the door's admission
+# refusal and the commit-edge gate's per-item check must read the identical
+# object; a second re.compile is the drift that kills a fan-out graph typed at
+# the commit edge. tests/test_single_source_bc_item_token_libks.py pins it.
+_RE_BC_ITEM_TOKEN = wfcommon._RE_BC_ITEM_TOKEN
 def _route_home(result):
     """The target owns the child's session DB; absent routing preserves legacy home."""
     return result.get("profile_home") or hermes_home()
@@ -1488,8 +1494,9 @@ def _declares_close_pending(out):
 # #485: a bare item token ({FIELD}) in a bead_close id/actor template. Same
 # token class fmt_goal interpolates for fan-out goals; the door refuses these
 # on non-fan-out nodes (nothing to resolve them against), and the gate below
-# evaluates them PER ITEM on the fan-out aggregate.
-_RE_BC_ITEM_TOKEN = re.compile(r"\{[A-Za-z0-9_]+\}")
+# evaluates them PER ITEM on the fan-out aggregate. The pattern itself is
+# bound off the private wfcommon instance at the module header (est-libks:
+# single source — the copies this line once carried are the drift hazard).
 
 def _bc_decl_interpolated(decl):
     """True when a bead_close declaration's id OR actor carries a bare item

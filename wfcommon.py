@@ -910,6 +910,10 @@ _HEX64_OK = re.compile(r"^[0-9a-f]{64}$")
 # template. Legal ONLY on a fan-out node, where the runner renders it per item
 # with fmt_goal; on a solo/echo commit nothing resolves it, so the door refuses
 # at admission instead of probing literal brace text at the commit edge.
+# THE one definition (est-libks): wf.py re-bound the same pattern beside its
+# commit-edge gate; the two literals drifting apart would let the door admit a
+# template the gate then reads differently. wf.py now binds THIS object off the
+# private instance, so door and commit edge agree by construction.
 _RE_BC_ITEM_TOKEN = re.compile(r"\{[A-Za-z0-9_]+\}")
 JOIN_KEYS = {"id", "type", "after", "keys", "wait"}
 # ONE table for node kinds: closed key-set + the schedule hook. `spawns` is True
