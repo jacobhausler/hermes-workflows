@@ -12,11 +12,15 @@ The contract implemented (issue #485):
     the exact token law fmt_goal pays for fan-out goals, so {item} and {index}
     resolve too) on a FAN-OUT node; the door REFUSES the tokens elsewhere;
   * every committing (done/partial) item is read back from the store at its
-    OWN rendered id; the measured row — the same closed
+    OWN rendered id — ONE bounded 10s read-back probe per committing item,
+    serial at the commit edge; the measured row — the same closed
     {store,id,actor,observed_status,assignee,probe_rc,ok} shape — rides that
     item's record inside all_results as `bead_close_receipt`, and the node
-    record carries the full enumeration (with item index) under the PLURAL
-    `bead_close_receipts`;
+    record carries under the PLURAL `bead_close_receipts` a sparse,
+    self-indexed enumeration of the PROBED rows only (honest-pending rows
+    absent, every row carries index); the key is minted only when at least
+    one item was probed — an all-pending aggregate commits key-free, matching
+    the token-free node-scoped escape (est-fxh6v shape call);
   * the honest escape is per ITEM: an item whose answer carries
     `close-pending` is a non-claim (no probe, pristine record) even while
     other items claim closures the gate must verify;
@@ -284,12 +288,45 @@ class BeadCloseFanout(unittest.TestCase):
         self.assertEqual(rec.get("status"), "done", f"string-item roster refused: {rec}")
         self.assertEqual([p["id"] for p in rec["bead_close_receipts"]], ["est-s1", "est-s2"])
 
+    # ---- (j) est-fxh6v (a): an ALL-PENDING fan-out probes nothing, so the
+    #         node record must stay key-free — the same pristine shape the
+    #         token-free node-scoped escape takes. Minting `[]` here would
+    #         fake a "probed, enumerated none" key; the chosen shape is to
+    #         skip the plural key when no item was probed.
+    def test_j_all_pending_mints_no_plural_key(self):
+        self.set_store(**{"est-hold1": {"status": "in_progress", "assignee": "other-seat"},
+                          "est-hold2": {"status": "in_progress", "assignee": "other-seat"}})
+        pend = ('CLOSE-CLAIM {"result":"in_progress","close-pending":'
+                '"cannot close: assignee is other-seat"} post verdict')
+        items = [{"bead": "est-hold1", "who": "hermes", "goal": pend},
+                 {"bead": "est-hold2", "who": "hermes", "goal": pend}]
+        r = self.mk("fo-j", [self.lanes(items, self.decl())])
+        out = self.wf("fo-j")
+        self.assertIn("WORKFLOW_DONE", out)
+        rec = self.rec(r, "lanes")
+        self.assertEqual(rec.get("status"), "done", f"all-pending aggregate died: {rec}")
+        self.assertNotIn("bead_close_receipts", rec,
+                         "no item probed => no plural key (pristine, like the node-scoped escape)")
+        for row in rec["output"]["all_results"]:
+            self.assertNotIn("bead_close_receipt", row, "pending row record not pristine")
+        self.assertFalse(any("est-hold" in a for a in self.argvs()),
+                         "runner probed the store for beads that were never claimed closed")
+
     # ---- (i) doc pins: the grammar line carries the per-item law and the
     #         gate source keys on the shared read-back core.
     def test_i_doc_pins(self):
         gram = (ROOT / "references" / "grammar.md").read_text(encoding="utf-8")
         self.assertIn("bead_close_receipts", gram,
                       "grammar.md must document the per-item plural enumeration")
+        # est-fxh6v (b): the plural key is the PROBED enumeration — sparse and
+        # self-indexed — never the "full enumeration" of every item.
+        self.assertIn("sparse, self-indexed", gram,
+                      "grammar.md must describe the plural key as the sparse probed enumeration")
+        # est-fxh6v (c): grammar must state the per-item cost against the real core.
+        self.assertIn("_bead_close_readback", gram,
+                      "grammar.md must name the shared read-back core it costs against")
+        self.assertIn("10s", gram,
+                      "grammar.md must state the bounded per-item probe cost")
         src = (ROOT / "wf.py").read_text(encoding="utf-8")
         self.assertIn("def _bead_close_readback", src)
         self.assertIn("def _bead_close_gate_items", src)
