@@ -128,7 +128,7 @@ def graph_two_routes():
         {"id": "e", "type": "agent", "goal": "x", "model": "bare"},
     ]}
 
-PASTE = "Run accepted. Use wait for blocking observation;"
+PASTE = "Run accepted — the runner is a separate process:"
 
 def submit_run(g=None):
     CALLS.clear()

@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- fix(contract): between-turns wake is the delivery DEFAULT; the wait loop was
+  demoted to what it always mechanically was — optional blocking observation and
+  the revive verb. Operator-facing truth audit (host ledger, ~40 runs): the
+  owner-session wake self-post lands (verified injected as a user turn in the
+  owner session dump), yet SKILL.md ordered agents to sit in the `wait` loop
+  ("ending your turn right after run is how runs stall") and every door hint
+  called wake "optional" — so agents blocked the originating session while
+  delegate_task's children re-entered. Changes: `run` hint states the wake
+  contract and says END YOUR TURN; `release`/`amend` hints stop pointing at
+  blocking first; the action schema marks `wait` OPTIONAL; derived `next` rows
+  for a live run carry a `wake` note when (and only when) run.json stamps an
+  owner.session_id; SKILL.md Smallest-working-graph, next-law and delivery
+  bullets rewritten async-first (fail-open honesty kept: `wake.jsonl` ledger,
+  status-on-resume after a host restart). Follow-up issue: wake retry + silent
+  `interrupted` class.
+
 - feat(door): `maxItems` joins the admitted schema subset as `minItems`' mirror
   and `enum` widens onto `boolean`/`integer` (#472, est-v2fr6). Fan-out rosters
   (arena candidates 2-6, swarm items 2-8) and bug-fix gate-keys

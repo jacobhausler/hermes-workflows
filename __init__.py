@@ -718,7 +718,7 @@ WORKFLOW_PARAMS = {
         "action": {
             "type": "string",
             "enum": ["run", "status", "wait", "release", "release_lock", "steer", "inbox", "amend", "diff", "stop", "kill", "list", "save", "submit", "library", "doctor_version", "validate"],
-            "description": "run=launch a graph; wait=read state, RESPAWNING an idle runner if work is pending (blocks to the next boundary when one is live; when the lock is PROVEN wedged — Errno 11 with the kernel ledger showing zero holders and the admission lease dead — wait heals it first, the #44 escape hatch); status=read-model of a run; release=answer a held human gate; release_lock=operator hatch for a wedged runner.lock (#44): renames the stranded inode aside under the admission heal-barrier and hands the lane a fresh lock path — REFUSES unless zero live holders are proven (never heals on EACCES or a live holder); steer=queue steering text for a node; inbox=(child-side, cooperative) pull late steering lines baked for THIS spawn — call once at a natural seam; amend=replace the graph (invalidates changed nodes + all downstream by fingerprint), or pass patch to edit a few node fields without resubmitting the whole graph; diff=confirm surface: runs the amend door with dry_run FORCED (accepts patch or graph), returns the preview + graph_diff and touches nothing; stop=request stop; kill=node-targeted lane kill (node required): that lane's in-flight children are SIGKILLed, the node finishes failed error_class=killed, siblings and the run keep going; list=all runs; save=shelve a graph in the library under a name (from run_id or inline graph); library=list shelved graphs richly (name, description, tags, provenance, path-relative id). validate=dry-run the door's validation pipeline (defaults fill + defect collection + model/route policy) with no ping and no writes; returns {ok, errors:[{node,field,msg}], resolved_routes}. run from=<name> replays a shelved graph. submit=quarantine a hand-rolled graph for study (requires why_not_library >=80 chars; never joins the library — the quartermaster's human-gated loop decides); inbox kind=submissions lists them newest-first. doctor_version=read-only version truth for THIS install: {live_version, newest_packaged, source_commit, drift} comparing plugin.yaml against the install.json provenance that pack.py stamps at build time \u2014 one read, no network.",
+            "description": "run=launch a graph; wait=OPTIONAL blocking observation (not the default loop: lifecycle transitions wake the owner session on their own — end your turn after run); read state, RESPAWNING an idle runner if work is pending (blocks to the next boundary when one is live; when the lock is PROVEN wedged — Errno 11 with the kernel ledger showing zero holders and the admission lease dead — wait heals it first, the #44 escape hatch); status=read-model of a run; release=answer a held human gate; release_lock=operator hatch for a wedged runner.lock (#44): renames the stranded inode aside under the admission heal-barrier and hands the lane a fresh lock path — REFUSES unless zero live holders are proven (never heals on EACCES or a live holder); steer=queue steering text for a node; inbox=(child-side, cooperative) pull late steering lines baked for THIS spawn — call once at a natural seam; amend=replace the graph (invalidates changed nodes + all downstream by fingerprint), or pass patch to edit a few node fields without resubmitting the whole graph; diff=confirm surface: runs the amend door with dry_run FORCED (accepts patch or graph), returns the preview + graph_diff and touches nothing; stop=request stop; kill=node-targeted lane kill (node required): that lane's in-flight children are SIGKILLed, the node finishes failed error_class=killed, siblings and the run keep going; list=all runs; save=shelve a graph in the library under a name (from run_id or inline graph); library=list shelved graphs richly (name, description, tags, provenance, path-relative id). validate=dry-run the door's validation pipeline (defaults fill + defect collection + model/route policy) with no ping and no writes; returns {ok, errors:[{node,field,msg}], resolved_routes}. run from=<name> replays a shelved graph. submit=quarantine a hand-rolled graph for study (requires why_not_library >=80 chars; never joins the library — the quartermaster's human-gated loop decides); inbox kind=submissions lists them newest-first. doctor_version=read-only version truth for THIS install: {live_version, newest_packaged, source_commit, drift} comparing plugin.yaml against the install.json provenance that pack.py stamps at build time \u2014 one read, no network.",
         },
         "run_id": {"type": "string", "description": "Run id (required for every action except run/list)."},
         "name": {"type": "string", "description": "run: overrides graph.name (default workflow); save: library name overrides graph.name (lowercase, [-_.]); library: return one entry with refs-derived required params and an instantiate command. amend: set graph.name in the replacement graph; omitting it retains the run name."},
@@ -3548,8 +3548,9 @@ def _create_run(args, graph, lib_name, models, routes, _liveness_notes, lane_pat
             "no run was durably created (check the launch path's root resolution, "
             "esp. a stub/non-registering door carrying settings.runs_root)")
     out = {"run_id": rid, "models": models, "routes": routes, "hint":
-            'Run accepted. Use wait for blocking observation; it may resume interrupted work. '
-            'Push delivery and desktop cards are optional.'
+            'Run accepted \u2014 the runner is a separate process: end your turn, the run still finishes. '
+            'This session gets a wake turn at gate.held / run.done / run.failed / run.partial (wake.jsonl is the ledger). '
+            'Use wait only to block to a boundary or revive an interrupted run. Desktop cards optional.'
             + _liveness_hint_suffix(_liveness_notes),
             "card": _card(rid), "lifecycle_notice": _lifecycle_notice(rid)}
     if include_notes:
@@ -3851,6 +3852,13 @@ def act_status(args):
             row.update({"reason": "seat_wait", "nodes": sorted(sw),
                         "cap": next((w.get("cap") for w in sw.values() if w.get("cap") is not None), None),
                         "age_s": max(ages) if ages else None})
+        # Wake-contract note (derive-only law honored): present ONLY when run.json
+        # carries the door's owner.session_id stamp — the exact precondition that
+        # makes between-turns re-entry real. Grounded, not a guess.
+        _own = (jload(r / "run.json", {}) or {}).get("owner")
+        if isinstance(_own, dict) and _own.get("session_id"):
+            row["wake"] = ("owner session is stamped: the next transition arrives as a "
+                           "wake turn — end your turn, do not poll")
         out["next"] = [row]
     elif s == "failed":
         rows = [{"action": "amend", "node": nid, "error_class":
@@ -4115,9 +4123,9 @@ def act_release(args):
                               .get("status") in ("done", "skipped")))
     if mode == "respawned":
         res["auto_resumed"] = True
-        hint = "runner respawned; push delivery is optional, use wait for blocking observation"
+        hint = "runner respawned; the owner session wakes at the next transition; wait only for blocking observation"
     else:
-        hint = "answer recorded; the live runner commits it at its boundary; push delivery is optional, use wait for blocking observation"
+        hint = "answer recorded; the live runner commits it at its boundary; the owner session wakes at the next transition"
     return {**res, "hint": hint}
 
 def act_release_lock(args):
@@ -4491,10 +4499,10 @@ def act_amend(args):
     if mode == "respawned":
         applies = "runner respawned; efp replay-skip re-runs changed nodes and everything downstream"
     else:
-        applies = "live runner hot-reloads at its next wave boundary; push delivery is optional"
+        applies = "live runner hot-reloads at its next wave boundary; the owner session wakes at the next transition"
     return {"ok": True, "models": _models, "routes": _routes, "applies": applies,
             "graph_revision": _new_rev,   # #19: the new head — the token a next CAS writes against
-            "hint": "continuation is automatic; wait blocks to a boundary and may resume an interrupted runner" + _rz_note + _liveness_hint_suffix(_liveness_notes), **preview}
+            "hint": "continuation is automatic and the owner session wakes at the next transition; wait only blocks to a boundary or revives an interrupted runner" + _rz_note + _liveness_hint_suffix(_liveness_notes), **preview}
 
 def act_stop(args):
     r = run_dir(args.get("run_id"))

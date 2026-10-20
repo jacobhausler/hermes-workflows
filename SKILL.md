@@ -27,9 +27,13 @@ launch a replacement or mutate configuration.
 
 Build `{ "name": "check", "nodes": [{"id":"inspect","type":"agent","goal":"Inspect the
 specified target. Return one fenced JSON object."}] }`. Submit with
-`workflow{action:"run", graph:<object>}`, then carry the returned `run_id` into
-`workflow{action:"wait", run_id:<id>}` and stay in that loop until a terminal state —
-ending your turn right after `run` is how runs stall.
+`workflow{action:"run", graph:<object>}` and END YOUR TURN. The runner is a separate
+process: lifecycle transitions (`gate.held`, `run.done`, `run.failed`, `run.partial`)
+wake the launching session as a fresh turn between turns — the same re-entry a
+delegated subagent gives you. `wait` is OPTIONAL blocking observation and the only
+verb that revives an `interrupted` run; reach for it when you must watch a boundary
+inline or a wake never landed (delivery is fail-open; the run dir's `wake.jsonl` is
+the ledger).
 
 ## Authoring rules
 
@@ -74,8 +78,9 @@ ending your turn right after `run` is how runs stall.
 - `running` needs a verified live runner; `interrupted` means unfinished work without
   one — inspect surviving outputs, then `wait` to resume. Fatal runner errors are
   `failed`, not respawn loops; held gates are not running. Every `status`/`wait`
-  payload carries `next` — do what `next` says, `wait` until it is empty; `next` is
-  derived, never a guess. Before `amend` or stop, read the failed node's `node_facts`
+  payload carries `next` — do what `next` says while you hold a run open; a live run
+  with a stamped owner needs no loop: the wake IS your next turn. `next` is derived,
+  never a guess. Before `amend` or stop, read the failed node's `node_facts`
   (error_class from the closed set; `cancelled` is never a failure) and committed
   outputs. `amend` accepts a WHOLE replacement graph or node-scoped `patch`;
   `diff` forces amend's dry-run preview. `run`/`amend` `dry_run:true` preview
@@ -98,7 +103,9 @@ ending your turn right after `run` is how runs stall.
   report `included`) and reads badly as spend.
 - Cards are optional desktop presentation; CLI text and returned run IDs suffice.
   Completion is execution state, not task verification or authority for more work.
-  Push notifications are best-effort; `wait` is the blocking/resuming path.
+  The owner wake is the delivery contract; delivery itself is fail-open (a missed
+  POST shows in `wake.jsonl` — after a host restart, `status` your open runs once).
+  `wait` stays the inline-blocking/revive tool, not the default loop.
 - `graph_path` replaces embedding on run/save/amend/validate: a caller-authorized
   absolute JSON file, exactly one graph source. [grammar](references/grammar.md).
   File-shareable graphs: [portable](references/portable.md).
