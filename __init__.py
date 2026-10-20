@@ -3550,7 +3550,7 @@ def _create_run(args, graph, lib_name, models, routes, _liveness_notes, lane_pat
     out = {"run_id": rid, "models": models, "routes": routes, "hint":
             'Run accepted \u2014 the runner is a separate process: end your turn, the run still finishes. '
             'This session gets a wake turn at gate.held / run.done / run.failed / run.partial (wake.jsonl is the ledger). '
-            'Use wait only to block to a boundary or revive an interrupted run. Desktop cards optional.'
+            'Use wait only to block to a boundary or revive an interrupted run; desktop cards are optional.'
             + _liveness_hint_suffix(_liveness_notes),
             "card": _card(rid), "lifecycle_notice": _lifecycle_notice(rid)}
     if include_notes:
@@ -4123,9 +4123,9 @@ def act_release(args):
                               .get("status") in ("done", "skipped")))
     if mode == "respawned":
         res["auto_resumed"] = True
-        hint = "runner respawned; the owner session wakes at the next transition; wait only for blocking observation"
+        hint = "runner respawned; wake delivery is optional (fail-open; ledger wake.jsonl) \u2014 wait only for inline observation"
     else:
-        hint = "answer recorded; the live runner commits it at its boundary; the owner session wakes at the next transition"
+        hint = "answer recorded; the live runner commits it at its boundary; wake delivery is optional (ledger wake.jsonl), wait for inline observation"
     return {**res, "hint": hint}
 
 def act_release_lock(args):
