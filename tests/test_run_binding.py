@@ -71,8 +71,11 @@ check("missing reference names key", "missing key 'branch'" in run(binding={"key
 bad_ref = {"name": "bad-ref", "nodes": [{"id": "a", "type": "agent", "goal": "bad {run.bad-key}"}]}
 before = (len(spawns), set((HOME / "workflows").iterdir()))
 r = run(graph=bad_ref, binding={"key": "a"})
-check("malformed placeholder rejects before spawn/write", "malformed reference" in r.get("error", "") and
+check("malformed placeholder rejects before spawn/write", r.get("error_class") == "graph_invalid" and
+      any(e.get("field") == "run_ref" for e in r.get("errors", [])) and
       (len(spawns), set((HOME / "workflows").iterdir())) == before, r)
+# #484: the refusal moved from bind time ("malformed reference") to the admission
+# door (graph_invalid + named run_ref defect) — strictly earlier, same atomicity.
 plain = {"name": "seed", "nodes": [{"id": "gate", "type": "gate", "question": "start?", "options": ["y"]},
         {"id": "a", "type": "agent", "after": ["gate"], "goal": "a"},
         {"id": "b", "type": "agent", "after": ["gate"], "goal": "b"}]}

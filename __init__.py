@@ -214,6 +214,12 @@ def _validation_error(graph, run_dir=None):
                 item["after"] = []
             safe.append(item)
     errs.extend(validate_graph_errors(safe, admission=True))  # R10: submit door only
+    # #484 (reconcile verdict @8cfcd7e): the malformed-{run.X} scan composes HERE
+    # too, mirroring validate_graph_full's composition (same call, same order).
+    # The PR#84 F-2 law above forbids the twins diverging in strictness, and a
+    # literal that can never bind under ANY run_context is statically decidable:
+    # refuse it at admission, not at _bind_run_context after validate said ok.
+    errs.extend(_common._run_ref_scan(graph, safe))
     # #85: the artifact-admission guard composes with the validator here, so EVERY
     # door admission path (run/amend/submit/save/validate) measures ledgers before
     # any write/spawn. Artifact BYTES are measured only when a run dir exists to
