@@ -856,7 +856,8 @@ def _retry_block_errors(v, field):
         errs.append({"node": None, "field": f, "msg": m})
     if not isinstance(v, dict) or not v or set(v) - set(RETRY_BOUNDS):
         E(field, f"retry {v!r} invalid: an object with optional integer keys "
-                 + json.dumps(sorted(RETRY_BOUNDS)) + f", each 0..{RETRY_BOUNDS['transient']} "
+                 + json.dumps(sorted(RETRY_BOUNDS)) + ", each within its own bound "
+                 + json.dumps(RETRY_BOUNDS) + " "
                  "(0 disables that ladder; transient = api_calls==0 re-spawns, "
                  "bounded = resume re-drive after a progressed death)")
         return errs

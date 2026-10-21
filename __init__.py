@@ -3213,6 +3213,14 @@ def act_run(args):
     concurrency_meta, bad = _concurrency_bake(graph)
     if bad:
         return bad
+    # hw-23c (est-mcwq6 parity): the retry knobs bake AT THE DOOR, beside
+    # concurrency — a malformed retry arg is refused here, before _create_run
+    # mkdirs anything (the first #497 shape baked inside _create_run, AFTER
+    # mkdir+graph.json, so a refusal orphaned a run dir). The returned dict is
+    # merged into meta at the same slot, keeping run.json byte-identical.
+    retry_meta, bad = _retry_bake(args)
+    if bad:
+        return bad
     name = args.get("name", graph.get("name", "workflow"))
     if not isinstance(name, str) or not name.strip():
         return {"error": "run name must be a non-empty string"}
@@ -3399,10 +3407,12 @@ def act_run(args):
                             "hint": f"wait run_id={incumbent['run_id']} resumes it"}
             return _create_run(args, graph, lib_name, models, routes, _liveness_notes, path,
                                includes=_includes, include_notes=_include_notes,
-                               concurrency_meta=concurrency_meta, binding=_binding)
+                               concurrency_meta=concurrency_meta, retry_meta=retry_meta,
+                               binding=_binding)
     return _create_run(args, graph, lib_name, models, routes, _liveness_notes,
                        includes=_includes, include_notes=_include_notes,
-                       concurrency_meta=concurrency_meta, binding=_binding)
+                       concurrency_meta=concurrency_meta, retry_meta=retry_meta,
+                       binding=_binding)
 
 def _new_ancestor_dirs(p):
     """est-2ek.1.199: the directory entries a `p.mkdir(parents=True)` would
@@ -3475,7 +3485,7 @@ def _prove_run_dir(r, extra_dirs=()):
 
 
 def _create_run(args, graph, lib_name, models, routes, _liveness_notes, lane_path=None,
-                *, concurrency_meta=None, includes=None, include_notes=None, binding=None):
+                *, concurrency_meta=None, retry_meta=None, includes=None, include_notes=None, binding=None):
     """Under the lane flock: complete run dir, atomic registry entry, then spawn."""
     name = graph["name"]
     base = time.strftime("%Y%m%d-%H%M%S") + "-" + "".join(
@@ -3521,12 +3531,14 @@ def _create_run(args, graph, lib_name, models, routes, _liveness_notes, lane_pat
             "owner": _owner_stamp()}
     if concurrency_meta:
         meta.update(concurrency_meta)
-    # hw-23c: author-reachable retry knobs (validated at the door before any
-    # write; absent args => no keys => run.json byte-identical to pre-fix).
-    _rb, _rb_err = _retry_bake(args)
-    if _rb_err:
-        return _rb_err
-    meta.update(_rb)
+    # hw-23c (est-mcwq6): author-reachable retry knobs, VALIDATED AT THE DOOR
+    # before any write — the bake runs in act_run beside _concurrency_bake and
+    # arrives as retry_meta (parity with the sibling; the first #497 shape
+    # baked here, after mkdir+graph.json, so a malformed arg orphaned a run
+    # dir while the comment claimed the door law). Absent args => no keys =>
+    # run.json byte-identical to pre-fix; the merge slot preserves key order.
+    if retry_meta:
+        meta.update(retry_meta)
     # est-3acn: RunBudget bake beside concurrency — the graph-root cap becomes
     # run.json meta.budget at submit (the submit-time truth; like concurrency it
     # does NOT ride amends — a capped run's ceiling is what its owner admitted).

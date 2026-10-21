@@ -2156,8 +2156,10 @@ _RETRYABLE_CLASSES = ("transport", "unknown")
 DEFAULT_RETRY_BACKOFF = (5.0, 20.0)
 DEFAULT_RETRY_BUDGET = 6
 
-# #5 bounded auto-retry (sprint101w2): ONE machine-resume re-drive — never a
-# loop — for classes where the dead attempt made TOOL PROGRESS (state.db join):
+# #5 bounded auto-retry (sprint101w2): machine-resume re-drive for classes
+# where the dead attempt made TOOL PROGRESS (state.db join), capped per node at
+# retry.bounded — default ONE (hw-23c raised this to an author tunable 0..8;
+# the default stays today's single-re-drive law):
 # transport / early_death / cap_exhausted / timeout (the latter two land with
 # B1's renames; plain strings, the integrator reconciles). The never-retry list
 # below is documentary law — membership in _BOUNDED_RETRY_CLASSES is the gate:
@@ -2182,13 +2184,15 @@ _BOUNDED_RETRY_CLASSES = ("transport", "early_death", "cap_exhausted", "timeout"
                           # tool-call markup, turn_exit_reason unknown) by definition made
                           # real tool calls — the bounded (tool-progress) ladder is the
                           # right re-drive channel; never Q4 (zero-calls evidence is the
-                          # wrong proof here) and never beyond the ONE bounded re-drive.
+                          # wrong proof here) and never beyond the node's bounded cap
+                          # (retry.bounded, default ONE — hw-23c tunable 0..8).
                           "malformed_turn",
                           # lease-busy (2026-10-03 field evidence): the child lost the
                           # session-lease race — the CLI waited it out, refused to process
                           # the message, and exited 130. A transient collision, not a
-                          # verdict on the work: exactly ONE bounded re-drive as a FRESH
-                          # session (see _is_lease_busy for the two-fact pin).
+                          # verdict on the work: a bounded re-drive as a FRESH session,
+                          # default exactly ONE (hw-23c: retry.bounded tunable 0..8;
+                          # see _is_lease_busy for the two-fact pin).
                           "lease_busy")
 _BOUNDED_RETRY_BACKOFF = 5.0
 RESUME_LINE = "Do not redo finished work; continue from the state above."
@@ -7026,10 +7030,12 @@ def _ratelimit_park(meta, r, respawn, ev, ev_kw, node=None, cancel=None,
     return r
 
 def _transient_retry(meta, r, respawn, ev, ev_kw, node=None, cancel=None):
-    """Q4 transient retry: re-spawn a failed child at most 2 more times (5 s, 20 s
-    backoff) ONLY when ALL hold — error_class ∈ {transport, unknown} AND the dead
-    attempt made api_calls == 0 AND stop is not set AND the per-run retry budget
-    (6) is not exhausted. Never retries schema/no_json/timeout/max_turns/
+    """Q4 transient retry: re-spawn a failed child up to the node's retry.transient
+    cap (default 2 — hw-23c tunable 0..8), backoff 5 s / 20 s (run-tunable via
+    retry_backoff) ONLY when ALL hold — error_class ∈ {transport, unknown} AND the
+    dead attempt made api_calls == 0 AND stop is not set AND the per-run retry
+    budget (default 6, run-tunable via retry_budget) is not exhausted. Never
+    retries schema/no_json/timeout/max_turns/
     provider_400/cancelled/spawn. attempts_log records every failed attempt; a
     final retryable death after retries = error_class transport_exhausted.
     A `partial` harvest (#4) enters here as non-failed and is NEVER retried;
@@ -7039,7 +7045,7 @@ def _transient_retry(meta, r, respawn, ev, ev_kw, node=None, cancel=None):
     park's attempts_log on the record (banner -> transport -> success shape).
     The ladder SEEDS that history — never resets it — so the committed record
     agrees with the event history (every parked death stays machine-visible).
-    The two-death cap and the transport_exhausted demotion count THIS ladder's
+    The per-node cap and the transport_exhausted demotion count THIS ladder's
     own attempts only; an inherited log alone never demotes a record the
     ladder never touched."""
     run = meta["_run"]
@@ -7282,12 +7288,14 @@ def _route_hold(meta, result, node=None, final_served=None):
     return result
 
 def _bounded_retry(meta, r, respawn, ev, ev_kw, node=None, index=None):
-    """#5 bounded auto-retry, run ONCE after _transient_retry: a death whose
+    """#5 bounded auto-retry, run after _transient_retry: a death whose
     error_class ∈ {transport, early_death, cap_exhausted, timeout} (B1's new
     names; `max_turns` included until the rename lands) AND whose dead attempt
-    made tool progress gets EXACTLY ONE resume re-drive with a machine-
-    generated preamble — never a loop, never a second bounded retry (a retry
-    of a retry would need the class tuple to widen, which it does not).
+    made tool progress gets a resume re-drive with a machine-generated
+    preamble, capped at the node's retry.bounded — default EXACTLY ONE
+    (hw-23c tunable 0..8; malformed_turn and lease_busy join the tuple below).
+    The cap, not the class tuple, is what bounds the ladder: a raised cap
+    re-drives the SAME classes, every pass re-entering every guard.
     Never retried: provider_400 / unresolved_model /
     schema(no_json) / cancelled / spawn — permfails redrive byte-identically —
     and never a `partial` harvest (#4: harvested, so not retried). The

@@ -218,6 +218,16 @@ if "run_id" in res:
     door.act_stop({"run_id": res["run_id"]})
 res = door.act_run({"graph": copy.deepcopy(G), "retry_budget": -1})
 check("door refuses a negative retry_budget", "error" in res, res)
+# est-mcwq6 (hw-23c fallout): the refusal runs AT THE DOOR beside
+# _concurrency_bake — BEFORE _create_run mkdirs anything (the first #497
+# shape baked inside _create_run, after mkdir+graph.json, so a malformed
+# arg orphaned a run dir). Pin: a refused submit adds NO directory.
+_before = sorted(p.name for p in (Path(td) / "runs").iterdir())
+res = door.act_run({"graph": copy.deepcopy(G), "retry_backoff": [3, "x"]})
+check("door refuses a malformed retry_backoff", "error" in res, res)
+_after = sorted(p.name for p in (Path(td) / "runs").iterdir())
+check("refused retry args create no run dir (door parity)", _after == _before,
+      (_before, _after))
 
 # ---------- 4. batch-site wiring (est-jzi8a finding 1, source-shape pin) ----------
 _wf_src = (ROOT / "wf.py").read_text()
