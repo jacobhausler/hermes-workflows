@@ -17,14 +17,39 @@ Contract asserted here:
      naming the node (or 'defaults') and the offending literal;
   2. well-formed {run.IDENT} refs stay legal (no error added);
   3. a brace that is not a run ref ({item.id} fan-out placeholder,
-     {notrun.x}) stays untouched by this check.
+     {notrun.x}) stays untouched by this check;
+  4. PARITY (reconcile verdict @8cfcd7e): the live admission door
+     (__init__._validation_error — the surface run/submit/save/amend actually
+     route through) refuses the SAME fixture with the SAME run_ref defects,
+     and act_run drops it before any spawn. The twins may never diverge in
+     strictness (PR#84 F-2 law); pinning only validate_graph_full over-
+     delivers while the door still admits the graph and it dies at bind time.
 """
+import copy
+import importlib.util
+import os
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 import wfcommon  # noqa: E402
+
+
+def _load_door():
+    """The live admission door, sandboxed like tests/test_run_binding.py:
+    HERMES_HOME + WF_RUNS_ROOT pinned to scratch BEFORE exec, owner settings
+    reader neutralised at the resolver by wf_test_isolation."""
+    scratch = Path(tempfile.mkdtemp(prefix="run_ref_door_"))
+    os.environ["HERMES_HOME"] = str(scratch / "home")
+    os.environ["WF_RUNS_ROOT"] = str(scratch / "workflows")
+    spec = importlib.util.spec_from_file_location("wf_door_run_ref", ROOT / "__init__.py")
+    door = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(door)
+    import wf_test_isolation as _iso
+    _iso.install(door)
+    return door
 
 
 def _node(nid, goal, **kw):
@@ -71,6 +96,28 @@ def main():
         hits = [m for (n, m) in named if n == node and lit in m]
         assert hits, f"defect for node {node!r} must name {lit!r}: {sorted(named)}"
         assert "identifier" in hits[0], f"msg must name the identifier law: {hits[0]}"
+
+    # 1b. PARITY: the live admission door refuses the SAME fixture with the
+    # SAME run_ref defects (reconcile@8cfcd7e: at head the door returned None
+    # for this exact graph and the launch died at bind time instead).
+    door = _load_door()
+    err = door._validation_error(copy.deepcopy(graph))
+    assert err is not None, "the admission door must refuse the malformed-ref fixture"
+    assert err.get("error_class") == "graph_invalid", err
+    door_ref = [e for e in err["errors"] if e.get("field") == "run_ref"]
+    assert {(e.get("node"), e["msg"]) for e in door_ref} == \
+           {(e.get("node"), e["msg"]) for e in ref_errs}, \
+        f"door and validate_graph_full diverge on run_ref defects: {door_ref}"
+
+    # 1c. act_run end-to-end: refused at the door BEFORE any spawn — the
+    # identical fixture must never reach _bind_run_context again.
+    spawns = []
+    door._spawn_runner = lambda r: spawns.append(r)
+    out = door.act_run({"graph": copy.deepcopy(graph), "run_context": {"X": "v"}})
+    assert out.get("error_class") == "graph_invalid", \
+        f"act_run must refuse at the admission door, got: {out}"
+    assert any(e.get("field") == "run_ref" for e in out.get("errors", [])), out
+    assert not spawns, f"door refusal must precede any spawn: {spawns}"
 
     # 2. well-formed refs stay legal
     good = {
