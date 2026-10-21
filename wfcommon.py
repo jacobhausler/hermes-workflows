@@ -2323,6 +2323,101 @@ STRUCTURAL_GRAPH_KEYS = {"name", "nodes", "description", "defaults", "model_poli
                          # launch BEFORE any run write (typed missing-key refusal).
                          "run_context"}
 
+# ---------- #509: door UX on unknown-key refusals (grammar-layer registry) ----------
+# A bare `unknown graph key; allowed: [...]` made a key that EXISTS in a known
+# grammar layer (a newer plugin, a different layer) read the same as pure junk:
+# the wave-9 shelf audit paid three round-trips diagnosing `params` on a 1.3.9
+# door whose files on disk were 1.4.0. Three asks, implemented together:
+#   (a) every graph_invalid refusal banner names the door's own version;
+#   (b) a refused key WITH A ROW HERE is named as a grammar-layer key with its
+#       floor, pointing at the requires_plugin handshake; when the plugin file
+#       on disk and the running process diverge (the reload boundary that born
+#       the audit), the note says so explicitly;
+#   (c) a near-miss key gets the difflib-mearest accepted suggestion.
+# RELEASE LAW (AGENTS 4d): a new top-level graph key adds a row HERE with the
+# release that first accepts it; the test gate refuses a STRUCTURAL_GRAPH_KEYS
+# member with no row. Values are the first TAG at which acceptance is PROVEN
+# (tag-probe of this set / its predecessors) — never earlier, so the floor a
+# stale door prints is upgrade-sufficient, not a promise the named release
+# might still refuse. Re-derive: probe STRUCTURAL_GRAPH_KEYS membership at
+# every `git tag` (tests/test_door_ux_509.py cites the recipe).
+GRAPH_KEY_MIN_VERSION = {
+    "name": "0.9.0", "nodes": "0.9.0", "description": "0.9.0",
+    "defaults": "1.0.1",
+    "grammar": "1.1.1",
+    "concurrency": "1.1.4", "item_concurrency": "1.1.4",
+    "include": "1.3.0", "model_policy": "1.3.0", "provenance": "1.3.0",
+    "requires_plugin": "1.3.1",
+    "result": "1.3.2",
+    "on_exit": "1.3.7",
+    "budget": "1.3.9", "max_seats": "1.3.9",
+    "params": "1.4.0", "run_context": "1.4.0",
+}
+
+# The truth of THIS module — what this process loaded. plugin_version() above
+# reads plugin.yaml FROM DISK: file truth. On the reload boundary the two split
+# (newer files, older process) and the door must not silently pass file-truth
+# off as its own. Re-pinned at release in the SAME commit as plugin.yaml
+# (AGENTS 4d; a test gate compares them at HEAD).
+CODE_VERSION = "1.3.9"
+
+def code_version():
+    return CODE_VERSION
+
+def _padded_eq_len(a, b):
+    if a is None or b is None:
+        return a, b
+    n = max(len(a), len(b))
+    return a + (0,) * (n - len(a)), b + (0,) * (n - len(b))
+
+def door_reload_note():
+    """#509(b): the reload-boundary signature. plugin.yaml (file truth) vs
+    CODE_VERSION (process truth) — equal or unreadable = no note. Divergent =
+    the exact shape that turns 'the docs promise this key' into a bare
+    allowed-list: name it so a cold reader reloads instead of archaeologizing."""
+    file_v = plugin_version()
+    if not file_v or not CODE_VERSION or file_v == CODE_VERSION:
+        return ""
+    fa, fb = _padded_eq_len(version_tuple(file_v), version_tuple(CODE_VERSION))
+    rel = ("newer" if (fa and fb and fa > fb) else
+           "older" if (fa and fb and fa < fb) else "divergent")
+    return (f"RELOAD BOUNDARY: the plugin file on disk is {file_v} but this "
+            f"process runs {CODE_VERSION} (file is {rel}) — restart/reload the "
+            "process that serves the plugin; keys from the file's version are "
+            "not live in this door")
+
+def unknown_graph_key_msg(key, allowed):
+    """The full refusal text for ONE unknown top-level graph key (#509). The
+    legacy prefix stays byte-identical (`unknown graph key; allowed: [...]`) —
+    pinned by existing tests; hints append after it, each honest about what a
+    door can know: rows in GRAPH_KEY_MIN_VERSION name the layer floor; a key
+    whose floor exceeds this process says REQUIRES >=X (this door: Y) + the
+    handshake pointer; the reload note fires when file/process split; a near
+    miss gets difflib's nearest accepted."""
+    msg = f"unknown graph key; allowed: {sorted(allowed)}"
+    minv = GRAPH_KEY_MIN_VERSION.get(key)
+    if minv:
+        have, need = _padded_eq_len(version_tuple(CODE_VERSION), version_tuple(minv))
+        if have is not None and need is not None and have < need:
+            msg += (f"; `{key}` is a grammar-layer key that requires plugin >={minv} "
+                    f"(this door: {CODE_VERSION}) — update the plugin or declare "
+                    f"requires_plugin {minv} to fail fast: see the requires_plugin "
+                    "handshake")
+        else:
+            msg += (f"; `{key}` is a known grammar-layer key (first accepted "
+                    f"{minv}) but this door ({CODE_VERSION}) does not take it "
+                    "at graph top level")
+        note = door_reload_note()
+        if note:
+            msg += f"; {note}"
+    try:
+        close = _difflib.get_close_matches(key, list(allowed), n=2, cutoff=0.6)
+    except Exception:
+        close = []
+    if close:
+        msg += f"; nearest accepted key(s): {close} — possible typo"
+    return msg
+
 def workflow_nodes(graph):
     """The ordinary DAG excludes the agent reserved for terminal cleanup (#129)."""
     return [n for n in graph.get("nodes", []) if n.get("id") != graph.get("on_exit")]
@@ -2782,7 +2877,9 @@ def structural_graph_errors(graph, extra_keys=()):
     def E(field, msg):
         errs.append({"node": None, "field": field, "msg": msg})
     for key in sorted(set(graph) - STRUCTURAL_GRAPH_KEYS - set(extra_keys)):
-        E(key, f"unknown graph key; allowed: {sorted(STRUCTURAL_GRAPH_KEYS | set(extra_keys))}")
+        # #509: layer hint + reload note + nearest-key on the refusal text;
+        # the legacy prefix before the first `;` stays byte-identical.
+        E(key, unknown_graph_key_msg(key, STRUCTURAL_GRAPH_KEYS | set(extra_keys)))
     # #32: a file may state its dialect; absent = wf/1, unknown = refused.
     errs.extend(grammar_errors(graph))
     # #100: run-level concurrency limits, positive integers only.

@@ -518,6 +518,9 @@ draw the example workflow diagrams in `examples/README.md`, which DO ship.)
 
 ```sh
 # bump plugin.yaml / SKILL.md / references/grammar.md / CHANGELOG.md to the new version
+# re-pin wfcommon.CODE_VERSION to the same string in the SAME commit (#509 door-UX
+# law — the reload-boundary note compares them; the test gate refuses drift), and
+# add every NEW top-level graph key's row to wfcommon.GRAPH_KEY_MIN_VERSION
 # re-pin every file:line cite in docs/catalog/disclosure-check.md (AGENTS 4d law:
 # the audit is exact-at-commit — a drifted cite sends readers to unrelated code)
 python3 scripts/suite.py . ci-out && hermes plugins validate . && python3 scripts/make_public.py /tmp/pub

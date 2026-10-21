@@ -230,7 +230,18 @@ def _validation_error(graph, run_dir=None):
         return None
     first = errs[0]
     head = first["msg"] if first["node"] is None else f"node {first['node']}: {first['msg']}"
-    return {"error": f"graph invalid: {head}", "error_class": "graph_invalid", "errors": errs}
+    # #509(a): every graph_invalid refusal banner names the door's own version;
+    # on the reload boundary (plugin file newer/older than this process) the
+    # banner says so — the audit's three round-trips were spent rediscovering
+    # exactly this split. Machine field `door_version` rides beside the text.
+    _banner_ver = f" [door {_common.code_version()}]"
+    _reload_note = _common.door_reload_note()
+    if _reload_note:
+        _banner_ver += f" ({_reload_note})"
+    return {"error": f"graph invalid: {head}{_banner_ver}",
+            "error_class": "graph_invalid",
+            "door_version": _common.code_version(),
+            "errors": errs}
 
 HERE = Path(__file__).resolve().parent
 

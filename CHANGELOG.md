@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- feat(door): #509 — door UX on unknown-key refusals. Every `graph_invalid`
+  refusal banner now names the door's own version (`[door X.Y.Z]`, plus the
+  machine field `door_version`), a refused top-level key that belongs to a
+  KNOWN GRAMMAR LAYER is named with its floor (e.g. `params` requires plugin
+  >=1.4.0, this door 1.3.9 → see the requires_plugin handshake), when the
+  plugin.yaml on disk and the loaded code diverge the banner carries an
+  explicit RELOAD BOUNDARY note (the wave-9 shelf audit's three round-trips
+  were spent rediscovering exactly that split), and a near-miss key gets
+  difflib's nearest accepted key(s) as a possible typo. The legacy refusal
+  prefix stays byte-identical; hints append. New release law (AGENTS 4d): a
+  new top-level graph key must add its row to `GRAPH_KEY_MIN_VERSION`, and a
+  release must re-pin `CODE_VERSION` beside plugin.yaml — both enforced by
+  tests/test_door_ux_509.py. No semantics change: refusals refuse exactly as
+  before, only the text and an extra field are richer.
+
+
 - feat(runner): run.failed/run.done wake payloads carry run-dir/log pointers
   (#501). The wake text for those two events additionally rides `run_dir="<path>"`
   and, on run.failed, `failed_node_logs=["<log_path>", ...]` — the efp-valid
