@@ -26,7 +26,7 @@ not re-paid.
 
 | Capability | In one line |
 |---|---|
-| **Graph runs** | Agent nodes with `goal`, `after` edges, per-node `model`/`provider`/`reasoning`, and `max_turns`/`timeout`/`run_budget` caps; optional per-graph `concurrency`/`item_concurrency`, clamped to owner caps |
+| **Graph runs** | Agent nodes with `goal`, `after` edges, per-node `model`/`provider`/`reasoning`, and `max_turns`/`timeout`/`run_budget` caps; optional `concurrency`/`item_concurrency` — per graph or as launch-time run args, clamped to owner caps |
 | **Fan-out** | One node → N live children from `fanout.items` or `items_from:"<node>.items"`; per-item liveness; `quorum` cancels stragglers once N commit (they are `cancelled`, never a failure) |
 | **Human + machine gates** | A `gate` holds on a question until `release`; `gate.wait` holds on a timer or an argv probe at zero token cost; `when` predicates branch on upstream output; `on_skip:"prune"` retires the losing arm; an optional default-off admission gate answers human releases at zero turns (`docs/admission-gates.md`) |
 | **Fingerprint resume** | Crash, restart, or `amend` the graph mid-flight — nodes whose effective fingerprint still matches replay-skip; only what actually changed re-runs. `run`/`amend` accept `dry_run:true` for a no-write preview |
