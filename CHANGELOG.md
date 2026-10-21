@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- chore(ci): the `gates` check is now a fan-in over 8 matrix lanes instead of
+  one 30-minute serial job. Measured wall census over the last full passes:
+  serial suite 28.7-32.0 min (97% of CI time; median case 1.1 s, top-25 cases
+  54% of the wall). `suite.py --shard I/8` slices the SAME sorted case list by
+  position — serial-within-lane is untouched — and `suite.py --merge` fuses the
+  lane ledgers back into the identical `exits.json`/`admission.json` contract,
+  refusing any lane that is missing, interrupted (new `done.json` completion
+  marker), empty, or overlapping: #112's zero-discovery law extended from the
+  suite to its lanes. `concurrency.cancel-in-progress` joins the workflow, so a
+  re-push replaces the stale pass instead of queueing a second one. Expected
+  PR wall: ~7-9 min from ~31 at unchanged coverage.
+
 - fix(engine): the status payload now carries the completeness truth as a
   derived field. `completed` (bool) rides every `status` read, derived in the
   same fold as `status` and `failed_nodes` — true only for a terminal
