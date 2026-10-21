@@ -199,7 +199,7 @@ lands, the branch collapses and that doc deletes itself.
 
 ## Starter set: run something today (`general/`)
 
-You don't have to author a graph first. Five scrubbed, estate-neutral starter
+You don't have to author a graph first. Six scrubbed, estate-neutral starter
 graphs ship *with the plugin* under `library/general/`, so a fresh install can
 run a real DAG out of the box:
 
@@ -214,6 +214,7 @@ run a real DAG out of the box:
 | `general/test-first-feature-slice` | one behavior is worth a red-green-proof slice |
 | `general/fan-out-audit-census` | a tree needs a per-file audit with an honest tally (the 8 KB per-parent input cap, taught by example) |
 | `general/report-and-verify` | a producer will drop a report later and you want zero tokens while waiting (machine `wait` gate exemplar) |
+| `general/queue-executor` | a tracker/file queue has open items to execute in parallel with receipts, not vibes (resume-from-disk + re-run verify exemplar) |
 
 Resolution order for `from: general/<name>`: your **runs-root library first**
 (`<runs_root>/library/general/<name>.json`), legacy launch root second, the
