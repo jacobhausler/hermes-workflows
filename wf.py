@@ -559,6 +559,11 @@ def _wake_safe(value):
 # JSON-encoded protocol fields (quoted via json.dumps, so a hostile run name can never
 # break out of the field or read as instruction prose) — exactly what makes a wake
 # actionable: inspect status/gates once, act, stop, never poll.
+# #501 (est-qcyfi): run.failed/run.done additionally carry runner-COMPUTED
+# pointer fields in that same inert JSON-quoted position — run_dir always,
+# failed_node_logs (the efp-valid committed records' log_path set) when
+# resolvable. The bodies above stay verbatim; the table stays the ONLY author
+# of owner prose. Absent pointer = unresolvable, never a fabricated value.
 _WAKE_TEMPLATES = {
     "gate.held": "The workflow is HELD at a human gate. Status contains the question "
                  "and options; release requires the human's decision. This notification "
@@ -611,16 +616,31 @@ _WAKE_CATCHALL_BODY = (
     "once. This notification is a drift alarm and does not authorize repair, "
     "dispatch or new work.")
 
-def _wake_owner_text(run_id, event):
+def _wake_owner_text(run_id, event, run_dir=None, failed_node_logs=None):
     """The runner-authored owner turn. Known events use their template; an
     event with no template uses the fixed catch-all body (est-jbcrw: never
     None — silence on an unmapped class was the gravity hole the dead-landing
-    census measured; caller/graph prose is still impossible by construction)."""
+    census measured; caller/graph prose is still impossible by construction).
+
+    #501 (est-qcyfi): the caller may additionally pass the run directory and,
+    for run.failed, the resolved failed-node log paths. They ride BEFORE the
+    separator as inert JSON-quoted protocol fields in the same position as
+    run_id/event — runner-computed at the notify point, redacted like every
+    persisted field, never caller-authored: the template body after the
+    separator stays verbatim, so AUTHORITY LAW r5 is untouched and the
+    template table remains the only author of owner prose. An empty or
+    unresolvable failed_node_logs emits nothing — absent is honest, the
+    renderer never fabricates a list (AGENTS rule 8)."""
     body = _WAKE_TEMPLATES.get(event)
     if body is None:
         body = _WAKE_CATCHALL_BODY
+    pointers = ""
+    if run_dir is not None:
+        pointers += f" run_dir={json.dumps(str(run_dir))}"
+    if failed_node_logs:
+        pointers += f" failed_node_logs={json.dumps(list(failed_node_logs))}"
     return (f"[runner-authored/v1] run_id={json.dumps(str(run_id))} "
-            f"event={json.dumps(event)} \u2014 {body}")
+            f"event={json.dumps(event)}{pointers} \u2014 {body}")
 
 _CRASH_GEN: list = [None, None]  # [run_path, generation] for this runner process
 
@@ -976,6 +996,39 @@ def _wake_resolved_failed(run, graph):
     except Exception:
         return None
 
+def _wake_failed_node_logs(run, graph):
+    """The recorded `log_path` fields of the run's efp-valid COMMITTED FAILED
+    nodes (#501): the pointers a woken session would otherwise dig for. Same
+    validity law the wake identity already uses (node_rec): a stale or absent
+    record is not a fact. A graph the caller did not pass falls back to the
+    run's own graph.json — the same on-disk fact the identity's fingerprint
+    read rides. Returns None when the node set cannot be resolved at all (no
+    graph anywhere, no nodes); otherwise the sorted, de-duplicated list of
+    recorded paths — a failed node whose committed record carries no log_path
+    (a pre-spawn refusal like inputs/budget/forbidden_model, or a fan-out
+    aggregate record) contributes nothing, and an empty resolution surfaces as
+    field ABSENCE at the renderer, never a fabricated list (AGENTS rule 8).
+    Never raises: an unreadable anything is unresolvable, not a crash."""
+    try:
+        nodes = (graph or {}).get("nodes")
+        if not isinstance(nodes, list):
+            nodes = (jload(run / "graph.json", {}) or {}).get("nodes")
+        if not isinstance(nodes, list):
+            return None
+        byid = {n["id"]: n for n in nodes if isinstance(n, dict) and n.get("id")}
+        if not byid:
+            return None
+        logs = []
+        for n in byid.values():
+            status, rec = node_rec(run, n, byid)
+            if status == "failed" and isinstance(rec, dict):
+                lp = rec.get("log_path")
+                if isinstance(lp, str) and lp.strip():
+                    logs.append(lp)
+        return sorted(set(logs))
+    except Exception:
+        return None
+
 def _wake_identity(run, event, key, graph=None):
     """THE transition-instance discriminant (B3 law): a string that is IDENTICAL
     across retries/respawns of one lifecycle decision and DIFFERENT for every
@@ -1108,7 +1161,19 @@ def notify(run, event, key=None, graph=None):
             # the field-loud stdout channel (same idiom as
             # WORKFLOW_WAKE_RECORD_FAILED). Silence here was the gravity hole.
             print(f"WORKFLOW_WAKE_UNMAPPED_EVENT {run.name} {_wake_safe(event)}")
-        text = _wake_owner_text(run.name, event)   # AUTHORITY LAW: runner-generated only
+        # AUTHORITY LAW unchanged + #501 (est-qcyfi): the text is runner-generated
+        # only. For run.failed/run.done the runner additionally computes INERT
+        # POINTER FIELDS at this point — the run dir (notify's own argument) and,
+        # for run.failed, the efp-valid committed failed-node log paths — which
+        # _wake_owner_text rides as JSON-quoted protocol fields BEFORE the
+        # separator; the template bodies stay verbatim and the redactor below
+        # runs over them like every persisted field. Delivery/identity/dedupe
+        # are untouched: the discriminant never reads these fields.
+        run_dir = str(run) if event in ("run.failed", "run.done") else None
+        failed_logs = (_wake_failed_node_logs(run, graph)
+                       if event == "run.failed" else None)
+        text = _wake_owner_text(run.name, event, run_dir=run_dir,
+                                failed_node_logs=failed_logs)
         # never None since est-jbcrw: unmapped classes take the fixed catch-all
         # body — the template table remains the ONLY author of owner text.
         text = _wake_safe(text)          # second net: the fixed templates carry no secret,

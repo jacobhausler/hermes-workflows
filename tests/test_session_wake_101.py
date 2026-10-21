@@ -135,6 +135,17 @@ def wakes(r):
         return []
 
 
+def ptr(text, name):
+    """One protocol-field value from the wake text (None if absent): the JSON
+    token following `name=` in the segment BEFORE the em-dash separator — the
+    #501 pointers are protocol fields, a body quote must never satisfy a pin."""
+    proto = text.split(" \u2014 ", 1)[0]
+    i = proto.find(f" {name}=")
+    if i < 0:
+        return None
+    return json.JSONDecoder().raw_decode(proto[i + len(name) + 2:])[0]
+
+
 def answer(r, gid, val):
     g = jg = json.loads((r / "graph.json").read_text())
     byid = {n["id"]: n for n in g["nodes"]}
@@ -165,6 +176,10 @@ try:
     check("wake carries run_id + owner stamp",
           bool(w) and w[0].get("run_id") == r.name and w[0].get("owner") == OWNER, w)
     check("wake text names the run (nudge shape)", bool(w) and r.name in w[0].get("text", ""), w)
+    check("gate.held carries no pointer fields (#501 lane: two events only)",
+          bool(w) and ptr(w[0]["text"], "run_dir") is None
+          and " failed_node_logs=" not in w[0]["text"],
+          str(w[0].get("text", "")[:160]) if w else str(w))
     check("sink saw the delivery", any(s["session_header"] == OWNER["session_id"] for s in sinks), str(sinks))
 
     # ---- 2. owner-null run fires ZERO wakes, stdout identical ----
@@ -189,6 +204,11 @@ try:
     w3 = wakes(r3)
     check("held+done = exactly 2 wakes (no held re-notify)",
           len(w3) == 2 and [e.get("event") for e in w3] == ["gate.held", "run.done"], w3)
+    p3 = ptr(w3[1]["text"], "run_dir") if len(w3) == 2 else None
+    check("run.done end-to-end carries run_dir pointing at the run (#501)",
+          p3 is not None and Path(p3).resolve() == r3.resolve()
+          and ptr(w3[1]["text"], "failed_node_logs") is None,
+          str(w3[1].get("text", "")[:160]) if len(w3) == 2 else str(w3))
 
     # ---- 4. run.failed fires one wake ----
     r4 = mk("w4", [{"id": "boom", "type": "agent", "goal": "FAILME"}], OWNER)
@@ -197,6 +217,13 @@ try:
     w4 = wakes(r4)
     check("run.failed fires exactly one wake",
           len(w4) == 1 and w4[0].get("event") == "run.failed", w4)
+    t4 = w4[0].get("text", "") if w4 else ""
+    p4, logs4 = ptr(t4, "run_dir"), ptr(t4, "failed_node_logs")
+    check("run.failed end-to-end carries run_dir + committed log pointers (#501)",
+          p4 is not None and Path(p4).resolve() == r4.resolve()
+          and isinstance(logs4, list) and len(logs4) >= 1
+          and all(Path(p).resolve().parent == (r4 / "logs").resolve() for p in logs4),
+          t4[:200])
 
     # ---- 5. park (hold_timeout) adds ZERO per-tick lines, then releases on the answer ----
     r5 = mk("w5", [{"id": "n1", "type": "agent", "goal": "LIST: go"},

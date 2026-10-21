@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- feat(runner): run.failed/run.done wake payloads carry run-dir/log pointers
+  (#501). The wake text for those two events additionally rides `run_dir="<path>"`
+  and, on run.failed, `failed_node_logs=["<log_path>", ...]` — the efp-valid
+  committed failed-node records' recorded `log_path` fields, resolved at the
+  notify point under the same validity law the wake identity already uses
+  (`node_rec`; graph falls back to the run's own `graph.json`). A pointer that
+  cannot be resolved is ABSENT, never fabricated: pre-spawn refusals carry no
+  log, a stale record is not a fact, and an unreadable graph omits the field
+  whole. The fixed template bodies stay verbatim — the pointers ride as inert,
+  runner-computed, JSON-quoted, redacted protocol fields beside `run_id`/`event`,
+  so authority law (no caller-authored owner text) is untouched and
+  delivery/identity/dedupe behavior is unchanged (the discriminant never reads
+  them). Other events' text is byte-identical.
+
 - chore(ci): the `gates` check is now a fan-in over 8 matrix lanes instead of
   one 30-minute serial job. Measured wall census over the last full passes:
   serial suite 28.7-32.0 min (97% of CI time; median case 1.1 s, top-25 cases
