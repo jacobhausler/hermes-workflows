@@ -9,6 +9,25 @@
   Tests: tests/test_graph_legacy_pin_hw_sl0.py.
 ## Unreleased
 
+- fix(watchdog): the fanout.stragglers disc formats a missing launch stamp as
+  the `'q'` literal, never through `:.3f` (est-waf8y, est-c0jo1 passport D1).
+  An open item queued behind a saturated fan-out cap has no launch stamp; the
+  disc line formatted the string default with a float spec — `ValueError`
+  inside the straggler watchdog on every poll after the verdict, so the wake
+  NEVER fired for a mixed cohort (>=1 launched straggler + >=1 queued-behind
+  open item) while the ledger filled with fake `item.commit.error` rows. Only
+  stamped items are formatted now (the same launched rule as
+  `straggler_verdict`: `get() is not None`); the latch law is untouched —
+  same cohort state -> same disc, a launch-stamp overwrite (retry, or a
+  queued item finally launching) flips it -> re-arm.
+  tests/test_fanout_stragglers_nxr.py gains case C (saturated lane cap via
+  `item_concurrency=2`; the first wake's payload must name the mixed cohort)
+  and pins its launch-all precondition against the GLOBAL seat semaphore via
+  the door's per-run `max_seats:0` opt-out — the passport's run1 EXACTLY-ONE
+  flake was seat contention splitting the wave and the latch re-arming
+  honestly on the second launch wave (est-waf8y D2); the run2 boundary flake
+  was already superseded by the >= floor_s assertion of #469.
+
 - test(fixtures): shared fake-runner helper (tests/fake_runner.py) for door-scan fixtures — the argv guard tail, absolute-path rule, and live seat child now live once; test_wfpid_owner_8/test_daemonize_8 refactored onto it; helper ships in the pack list.
 - docs(agents): AGENTS.md folded under core's 32,000-char subdirectory-hint cap — the §3c template catalog, the §3b 1.0.1 settings variant, and the §5 runtime map are relocated to references/example-tour.md (deduplicated, one copy per paragraph, per-fold headings); tests/test_docs_hint_cap_73c.py pins the cap, fold pointers, fence parity, and fold-not-clone (the over-cap file silently dropped §3e/§4 on every mid-run hint load).
 - feat(ci): P1 observe instruments for the estate-ci contract (NEXTGEN-CI

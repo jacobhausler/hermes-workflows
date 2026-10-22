@@ -7653,9 +7653,25 @@ def run_agent_node(run, meta, byid, node, outputs, steering):
                                                    grace_s=grace_s)
                     if v is None:
                         return
+                    # est-waf8y D1 (est-c0jo1 passport D1): an open item queued
+                    # behind the cap has NO launch stamp — the census itself
+                    # excuses it (scheduling, not squirreling: verdict needs
+                    # >=1 LAUNCHED), but the cohort is mixed whenever exactly
+                    # one branch launched, so the disc line used to format the
+                    # missing stamp's string default with :.3f and raise
+                    # ValueError INSIDE the watchdog: every poll logged a fake
+                    # item.commit.error and the wake never fired for that
+                    # cohort shape. Format only stamped items (same launched
+                    # rule as straggler_verdict: get() is not None); a queued
+                    # item enters the disc as the literal 'q'. Determinism is
+                    # the latch law, untouched: same cohort state -> same disc;
+                    # a retry overwriting its stamp (or a queued item finally
+                    # launching) flips it -> re-arm.
                     disc = (f"{nid}:{v['done']}:"
                             + hashlib.sha256(",".join(
-                                f"{j}:{launch_ts.get(j, 'q'):.3f}" for j in v["open"]
+                                (f"{j}:{launch_ts[j]:.3f}"
+                                 if launch_ts.get(j) is not None else f"{j}:q")
+                                for j in v["open"]
                             ).encode()).hexdigest()[:8])
                     if census["fired"] == disc:
                         return      # same cohort state: one wake per driven wave;

@@ -26,9 +26,19 @@ Test geometry (the RED-on-base pair both seats demanded — "didn't look" vs
                                              missing_endpoint degradation — the
                                              transition-instance identity, not
                                              delivery, is what's pinned).
+  C mixed cohort under a saturated cap  -> >=1 fanout.stragglers lines (the
+  (est-waf8y D1, est-c0jo1 passport)       queued-behind-cap shape must FIRE,
+                                           never be eaten by the disc), zero
+                                           straggler-watchdog errors, run done.
 RED at the pre-PR head: the event name does not exist, so case B fails on the
 zero-count line (the healthy case passes on base too — that asymmetry is the
 proof that case A's silence is earned, not vacuous).
+RED at the pre-D1-fix head (est-waf8y): case C fails its >=1 line check — the
+disc line formatted the missing launch stamp's 'q' string default with :.3f,
+raising ValueError inside the watchdog, which logged item.commit.error every
+poll and never let the wake fire for a cohort mixing launched and queued-open
+items. Every pre-C fixture launched all (item_concurrency = len(goals)), so
+the cap never saturated and the shape was fixture-invisible.
 
 Runner-authored wake law (PR#97 r5): the wake text is fixed template prose; the
 named facts (indices, counts, ages) ride events.jsonl only. This test asserts
@@ -97,7 +107,7 @@ check("door refuses fanout.straggler_grace_s as an unknown graph key "
       "(grace lives in run.json meta = launcher seam, never the graph)",
       any("straggler_grace_s" in e["field"] for e in _errs), str(_errs[:2]))
 
-def mk(run_id, goals, grace_s=2, poll_s=0.5):
+def mk(run_id, goals, grace_s=2, poll_s=0.5, item_concurrency=None):
     r = Path(BASE_ENV["WF_RUNS_ROOT"]) / run_id
     if r.exists():
         shutil.rmtree(r)
@@ -112,7 +122,15 @@ def mk(run_id, goals, grace_s=2, poll_s=0.5):
     # against it; with no reachable api_server the row records the typed
     # missing_endpoint degradation (the transition instance is what's pinned).
     (r / "run.json").write_text(json.dumps({
-        "hermes_bin": FAKE, "item_concurrency": len(goals),
+        "hermes_bin": FAKE, "item_concurrency": item_concurrency or len(goals),
+        # est-waf8y D2: pin the fixture's launch-all precondition against the
+        # GLOBAL seat semaphore too (default cap 4 < 6 items). Under machine
+        # load the semaphore splits the wave into launch waves; each queued->
+        # launched stamp flip re-arms the latch BY ENGINE LAW, minting a second
+        # honest wake and breaking the EXACTLY-ONE count (the passport's run1
+        # flake). The per-run meta opt-out is the door's sanctioned disable —
+        # these fixtures test the census, not seat admission.
+        "max_seats": 0,
         "owner": {"session_id": "nxr-test-session"},
         "straggler_grace_s": grace_s, "straggler_poll_s": poll_s}))
     return r
@@ -194,6 +212,54 @@ if wb:
           txt[:200])
     check("B run still completes after the smoke (observation, not interference)",
           json.loads((rb / "nodes" / "fan.json").read_text())["status"] == "done")
+
+# ---- C. est-waf8y D1 (est-c0jo1 passport leg 3): the MIXED cohort under a
+# SATURATED cap — the shape every prior fixture avoided (mk launched all:
+# item_concurrency was always len(goals), so no item ever queued behind the
+# cap). Geometry: cap 2; items 0-1 fast (they land FIRST and set the cohort
+# median), items 2-3 the QSLEEP 12 pair (they launch when the two lane slots
+# free, ~t1, and hold BOTH slots for 12s), items 4-5 fast (they queue behind
+# the pair with NO launch stamp for the pair's whole 12s). From ~t3 the cohort
+# is verdict-eligible AND mixed: open=[2,3,4,5], launched=[2,3] aged past
+# floor 2, queued=[4,5] — the oldest is aged from max(median finish, launch),
+# so the fast first-wave completions never re-base the sleepers' age (the
+# sleeper-first geometry does exactly that and goes silent). The disc line
+# formats item 4's missing stamp with :.3f -> ValueError -> wake NEVER fires
+# for this shape and every poll logs a straggler-watchdog item.commit.error.
+# Post-fix the wake fires. A later fire when the pair lands and 4/5's stamps
+# flip is HONEST engine law (stamp overwrite re-arms the latch), so the count
+# pins >=1; the regression pair is (>=1 event line, mixed first payload) +
+# (zero straggler-watchdog errors).
+rc_ = mk("nxr-mixedcap", ["reply ok"] * 2 + ["QSLEEP 12 reply ok"] * 2
+         + ["reply ok"] * 2, grace_s=2, poll_s=0.5, item_concurrency=2)
+run_wf(rc_, timeout=180)
+lc = strag_lines(rc_)
+check("C mixed cohort: >=1 fanout.stragglers line fires (pre-fix: the disc ValueError ate the wake)",
+      len(lc) >= 1, f"lines={json.dumps(lc)[:300]}")
+if lc:
+    e = lc[0]
+    # The FIRST fire is provably mixed: the sleeper pair (2,3) launched and aged,
+    # the tail (4,5) still queued — the tail cannot launch until a sleeper lands
+    # (~t13) and the first fire is due by ~t3+poll, so {2,4,5} is in open at the
+    # first line under any honest timing.
+    check("C first wake names the mixed cohort (launched sleeper 2 + queued tail 4,5 all open)",
+          {2, 4, 5} <= set(e.get("open", [])), json.dumps(e.get("open")))
+wakes_c = strag_wakes(rc_)
+check("C mixed cohort: >=1 straggler wake probe row reaches the ledger",
+      len(wakes_c) >= 1, f"rows={json.dumps(wakes_c)[:200]}")
+errs_c = []
+for _line in (rc_ / "events.jsonl").read_text().splitlines():
+    try:
+        _e = json.loads(_line)
+    except Exception:
+        continue
+    if _e.get("event") == "item.commit.error" and \
+            "straggler-watchdog" in str(_e.get("error", "")):
+        errs_c.append(_e)
+check("C zero straggler-watchdog errors (pre-fix: the verdict instant raised and the poll kept raising)",
+      len(errs_c) == 0, f"errors={json.dumps(errs_c)[:300]}")
+check("C run completes (the smoke observes, it does not interfere)",
+      json.loads((rc_ / "nodes" / "fan.json").read_text())["status"] == "done")
 
 print("DONE fanout_stragglers_nxr", "OK" if fails == 0 else "FAIL")
 sys.exit(0 if fails == 0 else 1)
