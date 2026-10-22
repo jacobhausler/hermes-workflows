@@ -1,15 +1,15 @@
 # Changelog
 
-- fix(door): a `from:<name>` string handed to the `graph` slot — the retired
-  library pin — is no longer fed to `json.loads` and refused as
-  "graph is not valid JSON: Expecting value...", which names the wrong
-  offender and no remedy. The refusal now names the pin as such and carries a
-  `hint` pointing at the live seam: `run` with `from="<name>"` (the name is
-  quoted back). Malformed-JSON refusals are unchanged.
-  Tests: tests/test_graph_legacy_pin_hw_sl0.py.
+- fix(engine): the terminal-record-or-completed law in the status read. A
+  recorded kill verdict (`terminated: SIGTERM ...`) outranks node-commit
+  done-ness: a run whose whole graph had committed when SIGTERM landed read
+  `done` and booked `completed:true` — the killed run counted as a success in
+  every finish-rate consumer downstream. It now reads `interrupted`
+  (resumable, respawn-eligible per the external-kill law), the kill reason
+  stays published in `runner_exit`, and the derived `completed` field reads
+  false. Runs without a kill record read byte-identically to before.
 ## Unreleased
 
-- docs(agents): AGENTS.md folded under core's 32,000-char subdirectory-hint cap — the §3c template catalog, the §3b 1.0.1 settings variant, and the §5 runtime map are relocated to references/example-tour.md (deduplicated, one copy per paragraph, per-fold headings); tests/test_docs_hint_cap_73c.py pins the cap, fold pointers, fence parity, and fold-not-clone (the over-cap file silently dropped §3e/§4 on every mid-run hint load).
 - feat(ci): P1 observe instruments for the estate-ci contract (NEXTGEN-CI
   (b)/(c)/(d)/(e) P1; spec ledger estate run 20261021-195954). OBSERVE mode
   only — zero behavior change on the merge path. Adds: `tests/budget.json`
