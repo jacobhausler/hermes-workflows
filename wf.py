@@ -9317,11 +9317,22 @@ def main(run_id):
             tally = wfcommon.consolidate_tally(
                 int(_led.get("dispatched") or 0), finals,
                 inflight=0, pending_batch=_led.get("pending") or [])
-            save_node(run, n, rs.byid, {"status": "done", "output": tally, "ms": 0})
-            log(run, "node.done", node=n["id"], consolidate=True,
-                dispatched=tally["dispatched"], consolidated=tally["consolidated"],
-                missing=tally["missing"], batches=len(tally["batches"]))
-            states[n["id"]] = "done"; outputs[n["id"]] = tally
+            # The partner's boundary done is a COMMIT EDGE like the agent
+            # solo/aggregate/echo paths — a declared `effects` row is proven from
+            # bytes here or the commit demotes (the #56 law; the tally is honest
+            # about the wave, it is not proof of a publication postcondition).
+            _crec = _effect_gate(run, n, {"status": "done", "output": tally, "ms": 0})
+            _crec = _bead_close_gate(run, n, _crec)   # est-13z1: the partner is a commit edge too — a consolidate node's close claim is read back from the store (the fourth-path gap)
+            save_node(run, n, rs.byid, _crec)
+            states[n["id"]] = _crec["status"]
+            if _crec["status"] == "done":
+                log(run, "node.done", node=n["id"], consolidate=True,
+                    dispatched=tally["dispatched"], consolidated=tally["consolidated"],
+                    missing=tally["missing"], batches=len(tally["batches"]))
+                outputs[n["id"]] = tally
+            else:
+                log(run, "node.failed", node=n["id"], error=_crec["error"],
+                    error_class=_crec.get("error_class", "effect_receipt"), attempts=1)
 
         ready = [n for n in rs.nodes if kind(n).spawns is True and states[n["id"]] == "pending"
                  and not n.get("consolidate")          # est-fanout-cell: boundary commit above
