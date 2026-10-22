@@ -226,6 +226,14 @@ SOURCE_ONLY_SCRIPTS = {
     # est-d2eyc (PR #467, SH-07): estate shelf census over the shelf/ library,
     # run-dir roots, and seat profiles — estate governance tooling, not release surface.
     "scripts/shelf-census.py": "estate shelf census (launch attribution/deadweight/consumer scan; not release surface)",
+    # ci-P1 (NEXTGEN-CI (e)): estate-ci observe instruments — the timing
+    # manifest / burn registry / md-input census and the preflight observer
+    # speak estate CI vocabulary (gh, the estate-ci contract repo); not
+    # release surface.
+    "scripts/timing_observe.py": "estate CI timing-manifest generator (gh log parsing; not release surface)",
+    "scripts/registry_observe.py": "estate CI burn-token registry census (not release surface)",
+    "scripts/md_inputs_observe.py": "estate CI admission md-input census (not release surface)",
+    "scripts/ci_preflight_observe.py": "estate-ci P1 observe preflight runner (fetches the contract at its pin; not release surface)",
 }
 
 

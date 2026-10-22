@@ -156,7 +156,12 @@ def main() -> None:
   # est-d2eyc (PR #467, SH-07): estate shelf census — scans the shelf library,
   # run-dir roots, and seat profiles; source-only, declared in pack.py
   # SOURCE_ONLY_SCRIPTS.
-  "shelf-census.py"})
+  "shelf-census.py",
+  # ci-P1 (NEXTGEN-CI (e)): estate-ci observe instruments (timing/registry/
+  # md-input census + preflight observer); source-only, declared in pack.py
+  # SOURCE_ONLY_SCRIPTS.
+  "timing_observe.py", "registry_observe.py", "md_inputs_observe.py",
+  "ci_preflight_observe.py"})
             else:
                 print("SKIP pack-list repo-side half: no .git — running from an "
                       "unpacked ZIP/archive, where the premise does not exist")

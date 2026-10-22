@@ -37,6 +37,18 @@ import subprocess
 import sys
 from pathlib import Path
 
+# ci-P1 (NEXTGEN-CI (d), S6 run-attempt law): the ledger grows run_attempt
+# ADDITIVELY — the done.json marker carries it when the runner exports
+# GITHUB_RUN_ATTEMPT (every Actions job does); a local pass keeps its exact
+# historical shape (no key), and no existing key changes meaning. Stale-ledger
+# detection (rollup demands attempt == current run_attempt) is the consumer's
+# job; the suite only stamps.
+_RUN_ATTEMPT = os.environ.get('GITHUB_RUN_ATTEMPT')
+
+
+def attempt_fields():
+    return {'run_attempt': int(_RUN_ATTEMPT)} if _RUN_ATTEMPT and _RUN_ATTEMPT.isdigit() else {}
+
 
 def load_baseline(path):
     """Read a prior ledger into {test: exit}. Contract is exact identities, so
@@ -223,7 +235,8 @@ if _merge_dirs:
     _tmp.write_text(json.dumps(adm, indent=2) + '\n')
     os.replace(_tmp, out / 'admission.json')
     _tmp = (out / 'done.json').with_suffix('.tmp')
-    _tmp.write_text(json.dumps({'complete': True, 'total': len(_rows)}) + '\n')
+    _tmp.write_text(json.dumps({'complete': True, 'total': len(_rows),
+                                **attempt_fields()}) + '\n')
     os.replace(_tmp, out / 'done.json')
     print(f'TOTAL {len(_rows)} FAIL {sum(1 for r in _rows if r["exit"] != 0)} (merged)', flush=True)
     if _baseline_path:
@@ -318,7 +331,8 @@ os.replace(tmp, out / 'admission.json')
 # never a green slice.
 tmp = (out / 'done.json').with_suffix('.tmp')
 tmp.write_text(json.dumps({'complete': True, 'total': len(rows),
-                           **({'shard': f'{_shard[0]}/{_shard[1]}'} if _shard else {})}) + '\n')
+                           **({'shard': f'{_shard[0]}/{_shard[1]}'} if _shard else {}),
+                           **attempt_fields()}) + '\n')
 os.replace(tmp, out / 'done.json')
 if adm['zero_discovery']:
     print(f'suite: zero cases discovered under {root / "tests"} — refusing green', flush=True)

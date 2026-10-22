@@ -2,6 +2,34 @@
 
 ## Unreleased
 
+- feat(ci): P1 observe instruments for the estate-ci contract (NEXTGEN-CI
+  (b)/(c)/(d)/(e) P1; spec ledger estate run 20261021-195954). OBSERVE mode
+  only — zero behavior change on the merge path. Adds: `tests/budget.json`
+  at the interim (b) hw numbers (330 / 44 / 3650, basis field says recut at
+  observe week); `scripts/timing_observe.py`, a manifest generator that
+  parses THIS workflow's own `gh run view --log` (per-case `NAME: rc`
+  completion deltas per lane) and writes `tests/timing.json` with EXACTLY
+  {case, wall_s, timeout_s} — the generator may only decrease weights, a
+  raise requires `--cite-run` (S3 addendum); first run at green main run
+  39696694242: 344/344 cases parsed (merged-TOTAL validated), sum wall
+  1876.7 s -> 13 lanes at lane_cap 150, committed. `scripts/registry_observe.py`
+  + `tests/registry.json`: burn-token-keyed census (path or header token,
+  grep law in the script), rows {case, tier:1, burn, order_group, after};
+  bootstrap guard-last `after:["ALL_OTHERS_IN_LANE"]` on
+  test_suite_runs_root_762 + test_fakeb1_gitpin_954r (S1).
+  `scripts/md_inputs_observe.py` + `tests/md_inputs.txt`: .md inputs
+  referenced by test sources (admission deny-consumer, S4b).
+  `.github/workflows/estate-ci-observe.yml` + `scripts/ci_preflight_observe.py`:
+  `# ci-contract: estate-ci@v1` pin line and an OBSERVE preflight job that
+  fetches the contract's own preflight script at the pinned tag and runs it
+  verbatim against this checkout — never required, never reds, writes no
+  status; the honest P1 observation is `PREFLIGHT FAIL
+  ci.yml:DUPLICATE-EMITTER` until the P2 cutover renames the legacy `gates`
+  job (one-emitter law). Ledger attempt fields: `scripts/suite.py` stamps
+  `run_attempt` additively into done.json when the runner exports
+  GITHUB_RUN_ATTEMPT (marker shape unchanged otherwise; --merge untouched —
+  test_shard_merge_speed's exact-key assert widened to the additive law;
+  pack.py SOURCE_ONLY_SCRIPTS declares the four new estate-CI scripts).
 - fix(runner): the `on_skip:"pass"` done-commit on agent nodes now rides the
   `_effect_gate` boundary (#56 law, est-0lxnh). The skip site committed
   `done` with `{agent:"skipped"}` UNGATED, so an agent declaring `effects`
