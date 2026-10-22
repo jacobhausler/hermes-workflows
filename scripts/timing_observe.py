@@ -24,7 +24,7 @@ manifest and reports. Validation teeth: the parsed row count must equal the
 
 Usage:
   python3 scripts/timing_observe.py [--run-id N] [--log FILE]
-      [--repo jacobhausler/hermes-workflows] [--workflow ci]
+      [--repo owner/repo] [--workflow ci]
       [--existing tests/timing.json] [--out tests/timing.json]
       [--cite-run ID]
 """
@@ -38,7 +38,23 @@ import subprocess
 import sys
 from pathlib import Path
 
-REPO_DEFAULT = 'jacobhausler/hermes-workflows'
+def _derive_repo():
+    """owner/repo of the `origin` remote — the generator must carry NO
+    hardcoded repo handle: the publish-scrub forbids shipping one, and a
+    derived default survives forks and renames (fail-closed if absent)."""
+    import subprocess
+    try:
+        url = subprocess.run(['git', 'remote', 'get-url', 'origin'],
+                             capture_output=True, text=True, check=True,
+                             cwd=Path(__file__).resolve().parent.parent
+                             ).stdout.strip()
+    except Exception:
+        return None
+    m = re.search(r'github\.com[:/](?P<r>[\w.-]+/[\w.-]+?)(?:\.git)?/?$', url)
+    return m.group('r') if m else None
+
+
+_REPO_DEFAULT = None
 # shard lane completion line inside the gh log prefix
 JOB_RE = re.compile(r'^gates-shard \((?P<i>\d+)/(?P<n>\d+)\)\t(?P<step>[^\t]*)\t'
                     r'(?P<ts>\d{4}-\d{2}-\d{2}T[\d:.]+Z)\s(?P<msg>.*)$')
@@ -132,7 +148,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--run-id', type=int)
     ap.add_argument('--log')
-    ap.add_argument('--repo', default=REPO_DEFAULT)
+    ap.add_argument('--repo', default=_derive_repo(),
+                    help='owner/repo (default: git origin remote)')
     ap.add_argument('--workflow', default='ci')
     ap.add_argument('--existing', default='tests/timing.json')
     ap.add_argument('--out', default='tests/timing.json')
