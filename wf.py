@@ -80,6 +80,7 @@ find_run = wfcommon.find_run
 blocked_legibility = wfcommon.blocked_legibility
 residue = wfcommon.residue
 release_law = wfcommon.release_law
+released_partials = wfcommon.released_partials
 publisher_gate_check = wfcommon.publisher_gate_check
 suite_proof_token_path = wfcommon.suite_proof_token_path
 confidence_substrate = wfcommon.confidence_substrate
@@ -8304,16 +8305,19 @@ def _unmet_requires(node, outputs, provenance=None):
     return missing
 
 
-def _unmet_partial(node, states):
+def _unmet_partial(node, states, released=()):
     """e68544a37be37657: plain after-edges block on a harvest-on-death partial.
     Returns the blocking ancestor ids ([]) — the opt-in (`after_partial: true`)
-    consumes the harvest instead. A TYPED verdict at the wave boundary: the
-    descendant never spawns and never hangs (fb-fix-2dd8de73: a dead impl's
-    `partial` released verify+suite onto an uncommitted candidate)."""
+    consumes the harvest instead, and so does a producer-declared release
+    (hw-sq1 ruling 2: `released` from wfcommon.released_partials). A TYPED
+    verdict at the wave boundary: the descendant never spawns and never hangs
+    (fb-fix-2dd8de73: a dead impl's `partial` released verify+suite onto an
+    uncommitted candidate)."""
     if node.get("after_partial"):
         return []
     oo = set(node.get("order_only") or ())   # est-ij0: an ordering edge consumes no harvest
-    return [a for a in node.get("after", []) if states.get(a) == "partial" and a not in oo]
+    return [a for a in node.get("after", [])
+            if states.get(a) == "partial" and a not in oo and a not in released]
 
 
 def _dead_letter(run, failed, byid):
@@ -8338,8 +8342,11 @@ def _dead_letter(run, failed, byid):
 
 
 def _fail_precondition(run, node, byid, missing, why="precondition unmet: "):
+    # hw-sq1 ruling 3: attempts=0 ON THE RECORD (not just the log event) —
+    # _dead_letter's rec.get("attempts") splits never-spawned victims (0) from
+    # real deaths (>0). status stays failed: a read-model fix, not a rename.
     save_node(run, node, byid, {"status": "failed", "error_class": "precondition",
-                                "error": why + missing[0],
+                                "error": why + missing[0], "attempts": 0,
                                 "output": {"missing": missing}})
     log(run, "node.failed", node=node["id"], reason="precondition",
         error_class="precondition", error=why + missing[0], attempts=0)
@@ -9172,7 +9179,7 @@ def main(run_id):
             save_node(run, rs.byid[nid], rs.byid, {"status": "skipped", "output": {"skipped": "all deps pruned"}})
             log(run, "node.skipped", node=nid, reason="all deps pruned")
         # e68544a37be37657 (partial blocks a plain edge) + #4 (partial resolves) +
-        # est-ij0 (a dead order_only predecessor is spliced out of the convoy) —
+        # est-ij0 (a dead order_only predecessor is spliced) —
         # wfcommon.release_law, shared with the read model.
         # e68544a37be37657: harvest-on-death partials block plain after-edges —
         # every wave-releasable node gets its typed verdict BEFORE anything
@@ -9180,20 +9187,27 @@ def main(run_id):
         # release of verify/suite onto an incomplete candidate). An explicit
         # pass, never folded into deps_ok: the gate pick and the terminal
         # `blocked` list both read deps_ok and must keep seeing the truth.
+        # hw-sq1 ruling 2: producer-declared partials (answer-only shape, empty
+        # remaining tail, no blocking declared status) release plain edges —
+        # one released set, consulted by BOTH the typed pass and release_law.
+        released = released_partials(
+            rs.nodes, states,
+            {n["id"]: (node_rec(run, n, rs.byid)[1] or {})
+             for n in rs.nodes if states[n["id"]] == "partial"})
         for n in rs.nodes:
             if states[n["id"]] != "pending":
                 continue
-            blocked_by = _unmet_partial(n, states)
+            blocked_by = _unmet_partial(n, states, released)
             if blocked_by:
                 _fail_precondition(run, n, rs.byid, blocked_by,
                                    why="blocked_by_partial_ancestor: ")
                 states[n["id"]] = "failed"   # the wave's own view sees the verdict now
 
         # e68544a37be37657 (partial blocks a plain edge) + #4 (partial resolves) +
-        # est-ij0 (a dead order_only predecessor is spliced out of the convoy) —
-        # wfcommon.release_law, shared with the read model. Built AFTER the typed
-        # partial pass so its dead set sees this wave's new failures.
-        deps_ok, deps_res, spliced = release_law(rs.nodes, states)
+        # est-ij0 (a dead order_only predecessor is spliced) — wfcommon.release_law,
+        # shared with the read model. Built AFTER the typed partial pass so its dead
+        # set sees this wave's new failures.
+        deps_ok, deps_res, spliced = release_law(rs.nodes, states, released)
         for n in rs.nodes:
             if states[n["id"]] == "pending" and n["id"] not in splice_logged and deps_ok(n):
                 past = spliced(n)

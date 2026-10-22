@@ -1,15 +1,28 @@
 # Changelog
 
-- fix(door): a `from:<name>` string handed to the `graph` slot — the retired
-  library pin — is no longer fed to `json.loads` and refused as
-  "graph is not valid JSON: Expecting value...", which names the wrong
-  offender and no remedy. The refusal now names the pin as such and carries a
-  `hint` pointing at the live seam: `run` with `from="<name>"` (the name is
-  quoted back). Malformed-JSON refusals are unchanged.
-  Tests: tests/test_graph_legacy_pin_hw_sl0.py.
+<<<<<<< HEAD
+=======
+- fix(engine): hw-sq1 — producer-declares partial release + `attempts: 0` on
+  precondition records (joint peer-estate ruling 2).
+  (1) A harvest-on-death `partial` now releases plain after-edges ONLY when the
+  PRODUCER declared answer-only work — node `shape: recon|review`, no `repo:`,
+  no `publishes:` — AND its harvest committed an empty `## Remaining` tail with
+  no blocking declared terminal `status` (same read law as the
+  `harvest_policy: validate` clamp). The record keeps reading `partial`; only
+  the release law consults the declaration (`wfcommon.released_partials`,
+  threaded through `release_law`, the runner's typed partial pass and the
+  status read model — runner and read model stay one law). Undeclared shape, a
+  non-empty tail, a blocking declared status or a missing record keep the plain
+  edge BLOCKED: fb-fix-2dd8de73 stands verbatim (test_partial_block_87 green).
+  (2) `_fail_precondition` stamps `"attempts": 0` ON THE RECORD (status stays
+  `failed` — a read-model fix, not a rename), so `_dead_letter`'s
+  `rec.get("attempts")` splits never-spawned precondition victims (0) from real
+  deaths (>0). No new graph keys; `dep_satisfied` semantics unchanged.
+  Tests: tests/test_partial_release_hw-sq1.py (RED at base: R1/R2/R5; block
+  pins R3/R4 green before and after).
+>>>>>>> b5770b9 (fix(engine): producer-declared partial releases plain after-edges; attempts:0 on precondition records (hw-sq1))
 ## Unreleased
 
-- docs(agents): AGENTS.md folded under core's 32,000-char subdirectory-hint cap — the §3c template catalog, the §3b 1.0.1 settings variant, and the §5 runtime map are relocated to references/example-tour.md (deduplicated, one copy per paragraph, per-fold headings); tests/test_docs_hint_cap_73c.py pins the cap, fold pointers, fence parity, and fold-not-clone (the over-cap file silently dropped §3e/§4 on every mid-run hint load).
 - feat(ci): P1 observe instruments for the estate-ci contract (NEXTGEN-CI
   (b)/(c)/(d)/(e) P1; spec ledger estate run 20261021-195954). OBSERVE mode
   only — zero behavior change on the merge path. Adds: `tests/budget.json`

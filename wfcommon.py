@@ -4802,6 +4802,37 @@ def dep_satisfied(states, a, allow_partial=False):
         return bool(allow_partial)
     return st in ("done", "skipped")
 
+def released_partials(nodes, states, recs):
+    """hw-sq1 (joint peer-estate ruling 2): the PRODUCER
+    declares what its answer is; release follows the declaration. A partial
+    releases plain after-edges ONLY when ALL hold: its node def declares
+    answer-only work (`shape: recon|review`, no `repo:`, no `publishes:`), its
+    committed record carries an EMPTY `remaining` tail (the structured harvest
+    data of est-2ek.1.165 — a record without the field reads blocking,
+    fail-closed), and its declared terminal status is absent or non-blocking
+    (same read law as the harvest_policy:validate clamp). fb-fix-2dd8de73
+    stands: undeclared shape, a non-empty tail, a blocking declared_status or a
+    missing record keep the plain edge BLOCKED. Returns the releasing ids."""
+    byid = {n["id"]: n for n in nodes}
+    out = set()
+    for nid, st in states.items():
+        rec = (recs or {}).get(nid)
+        n = byid.get(nid)
+        if st != "partial" or not isinstance(rec, dict) or n is None:
+            continue
+        if n.get("shape") not in ("recon", "review") or n.get("repo") or n.get("publishes"):
+            continue
+        if rec.get("remaining") != []:
+            continue
+        if rec.get("error_class") == "left_live_descendants":
+            continue  # #61: work provably outlived the answer — never release over a live tree (same read law as the validate clamp)
+        ds = (rec.get("harvest") or {}).get("declared_status")
+        if isinstance(ds, str) and ds.strip().lower() not in ("done", "ok", "success", "pass"):
+            continue
+        out.add(nid)
+    return out
+
+
 def dead_set(nodes, states):
     """est-ij0: ids that can never commit — `failed`, or `pending` behind a dead
     DATA edge (an after-edge not listed in the node's order_only). A dead ORDER
@@ -4821,10 +4852,13 @@ def dead_set(nodes, states):
         return memo[nid]
     return {n["id"] for n in nodes if dead(n["id"])}
 
-def release_law(nodes, states):
+def release_law(nodes, states, released=()):
     """ONE after-edge release law for runner and read model -> (deps_ok, deps_res,
-    spliced). Data edges keep dep_satisfied. An order_only edge to X is satisfied
-    when X is satisfied, OR X is dead and X's own order_only predecessors are
+    spliced). Data edges keep dep_satisfied. `released` (hw-sq1) is the set of
+    producer-declared partial ids from released_partials(): their plain edges
+    ride the same satisfaction the after_partial opt-in buys. An order_only edge
+    to X is satisfied when X is satisfied, OR X is dead and X's own order_only
+    predecessors are
     (recursively) satisfied — the convoy splice: no node inherits a dead member as
     its predecessor, and chain order among the living is preserved.
     spliced(n) -> the dead order predecessors this node is released past."""
@@ -4841,7 +4875,7 @@ def release_law(nodes, states):
     def edge_ok(n, a):
         if a in (n.get("order_only") or ()):
             return order_ok(a)
-        return dep_satisfied(states, a, allow_partial=bool(n.get("after_partial")))
+        return dep_satisfied(states, a, allow_partial=bool(n.get("after_partial")) or a in released)
     def deps_ok(n):
         return all(edge_ok(n, a) for a in n.get("after", []))
     def deps_res(n):
@@ -5389,7 +5423,10 @@ def run_state(r, *, telemetry=True, lock_state=None):
                 nodes[nid]["seat_wait"] = seat_wait_view(per)
     # e68544a37be37657 + est-ij0: the runner's own release law (partial blocks a
     # plain edge; a dead order_only predecessor is spliced) — one function, two callers.
-    deps_ok, _deps_res, _spliced = release_law(graph["nodes"], states)
+    # hw-sq1: producer-declared partials (empty tail, no blocking declared status)
+    # release their plain edges — the same set the runner's wave boundary consults.
+    deps_ok, _deps_res, _spliced = release_law(graph["nodes"], states,
+                                               released_partials(graph["nodes"], states, recs))
     last = None
     for line in events_text.splitlines()[-20:]:
         try:
