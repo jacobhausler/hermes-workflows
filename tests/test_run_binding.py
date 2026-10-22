@@ -175,8 +175,7 @@ def _run_dirs():
     root = HOME / "workflows"
     return {p.name for p in root.iterdir() if p.is_dir() and p.name != "library"} if root.is_dir() else set()
 def _gate(argv, name="argv792"):
-    return {"name": name, "nodes": [{"id": "census", "type": "gate", "question": "wait for the census",
-                                     "wait": {"until_argv": argv}}]}
+    return {"name": name, "nodes": [{"id": "census", "type": "gate", "wait": {"until_argv": argv}}]}
 before = _run_dirs()
 r = run(graph=_gate(["{run.python}", "-c", "pass"]), binding={"python": sys.executable})
 check("until_argv {run.KEY} refused: error names wait.until_argv[0] and run.python",

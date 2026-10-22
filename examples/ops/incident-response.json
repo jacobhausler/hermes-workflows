@@ -238,7 +238,6 @@
         "every_s": 300,
         "timeout_s": 86400
       },
-      "question": "Incident alerts STILL firing 24h after the mitigation pass (or the probe itself broke). Extend another 24h, or stop and escalate to a human?",
       "options": [
         "extend 1h",
         "escalate"

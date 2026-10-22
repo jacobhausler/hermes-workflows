@@ -550,7 +550,7 @@ finally:
 # `fanout`, so even a supplied seed left both literals committed untouched.
 (LIB / "gatelib.json").write_text(json.dumps({
     "name": "gatelib", "nodes": [
-        {"id": "g", "type": "gate", "question": "Question {run.Q}",
+        {"id": "g", "type": "gate",
          "options": ["yes {run.OPTION}", "no"],
          "wait": {"until_argv": ["true", "{run.OPTION}"]}}]}))
 _d19_comp = {"name": "d19", "include": [{"as": "gx", "use": "gatelib"}],

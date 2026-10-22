@@ -76,7 +76,7 @@ TEMPLATE = {"name": "tmpl", "nodes": [
      "context": "target {run.SUITE}", "shape": "recon"},
     {"id": "f", "type": "agent", "after": ["a"], "shape": "build",
      "fanout": {"items": ["i1"], "goal": "batch {run.JOB} {item}", "quorum": 1}},
-    {"id": "g", "type": "gate", "after": ["f"], "question": "ship {run.SUITE}?",
+    {"id": "g", "type": "gate", "after": ["f"],
      "options": ["{run.OPTION}", "no"], "wait": {"until_argv": ["echo", "{run.OPTION}"]}},
     {"id": "e", "type": "echo", "after": ["g"], "output": "verdict={run.VERDICT}"},
 ]}
@@ -127,7 +127,8 @@ if rid:
     byid = {n["id"]: n for n in snap["nodes"]}
     check("C5 goal+context rendered",
           byid["a"]["goal"] == "run pytest now" and byid["a"]["context"] == "target pytest")
-    check("C5 gate question rendered", byid["g"]["question"] == "ship pytest?")
+    check("C5 fan-out goal rendered",
+          byid["f"]["fanout"]["goal"] == "batch nightly {item}")
     check("C5 gate options rendered (was survivor)",
           byid["g"]["options"] == ["ship", "no"], json.dumps(byid["g"])[:200])
     check("C5 wait.until_argv rendered (was survivor)",

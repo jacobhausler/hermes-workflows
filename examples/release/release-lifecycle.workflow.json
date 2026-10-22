@@ -265,8 +265,7 @@
         ],
         "every_s": 20,
         "timeout_s": 1800
-      },
-      "question": "awaiting the external pipeline (machine gate)"
+      }
     },
     {
       "id": "channel-intake",
