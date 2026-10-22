@@ -30,6 +30,10 @@
   GITHUB_RUN_ATTEMPT (marker shape unchanged otherwise; --merge untouched —
   test_shard_merge_speed's exact-key assert widened to the additive law;
   pack.py SOURCE_ONLY_SCRIPTS declares the four new estate-CI scripts).
+  `contract-call` carries job-level `permissions` mirroring the contract's
+  declared block (contents read; actions/pull-requests/statuses write) —
+  GitHub startup-fails an under-permissioned reusable-call job, and
+  `if: false` guarantees the grant rides a job that never runs.
 - fix(runner): the `on_skip:"pass"` done-commit on agent nodes now rides the
   `_effect_gate` boundary (#56 law, est-0lxnh). The skip site committed
   `done` with `{agent:"skipped"}` UNGATED, so an agent declaring `effects`
