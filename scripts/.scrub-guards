@@ -169,3 +169,10 @@ regex:haus-docs rules/pr-diagram-standard
 # itself so a stray 'jacobhausler' anywhere else still fires. GUARD per
 # AGENTS.md rule 4 / docs/PUBLISH-SCRUB.md.
 regex:jacobhausler/estate-ci
+# ---- hw-83v (2026-10-21): amend-handoff truth test fixture ----
+# GUARD. tests/test_amend_handoff_truth_83v.py feeds a SYNTHETIC config (model
+# aliases + worker/manager/frontier mappings) purely to exercise the amend
+# response-vs-effect handoff; the model strings are inert fixture payload, the
+# behavior under test reads none of them. Same file-scope class as
+# tests/test_bead_close_claim_13z1.py (AGENTS.md rule 4).
+tests/test_amend_handoff_truth_83v.py

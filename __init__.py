@@ -50,12 +50,7 @@ _orphan_watch.bind(_common)
 def _coerce_graph(graph):
     """The door only ever sees `graph` as a parsed object from the tool schema, but a
     model CAN hand the string form; parse it and, on malformed JSON, quote ±40 chars
-    around the error offset. A `from:<name>` string is the retired library pin: it is
-    refused with a pointer to the live `from` argument, never parsed as JSON.
-    Returns (graph_or_None, error_response_or_None)."""
-    if isinstance(graph, str) and graph.startswith("from:"):
-        return None, {"error": f"graph {graph!r} is the retired library pin; replay a saved graph with the from argument",
-                      "hint": f'run with from="{graph[len("from:"):]}"'}
+    around the error offset. Returns (graph_or_None, error_response_or_None)."""
     if isinstance(graph, str):
         try:
             graph = json.loads(graph)
@@ -4580,13 +4575,25 @@ def act_amend(args):
                             "event": "graph.amended"}) + "\n")
     (r / "restart.request").write_text("1")
     mode = _resume_after_action(r, consumed=lambda: not (r / "restart.request").exists())
-    if mode == "respawned":
-        applies = "runner respawned; efp replay-skip re-runs changed nodes and everything downstream"
+    # Response truth equals applied effect: promise continuation only for what the
+    # handoff demonstrably did (respawn issued, or marker observed consumed); an
+    # unobserved handoff names its re-drive instead of promising automatic success.
+    _observed = mode == "respawned" or (mode == "consumed" and not (r / "restart.request").exists())
+    if _observed:
+        applies = ("runner respawned; efp replay-skip re-runs changed nodes and everything downstream"
+                   if mode == "respawned" else
+                   "runner consumed the amend at its boundary; efp replay-skip re-runs changed nodes and everything downstream")
+        hint = "continuation is automatic and the owner session wakes at the next transition; wait only blocks to a boundary or revives an interrupted runner"
+    elif preview.get("will_rerun"):
+        applies = ("live runner hot-reloads at its next boundary — expected, but NOT observed inside the "
+                   "handoff window; if the run stalls, re-drive by resubmitting this amend once the run reads interrupted")
+        hint = "continuation is not yet observed: verify at the next status read; re-drive by resubmitting this amend once the run reads interrupted"
     else:
-        applies = "live runner hot-reloads at its next wave boundary; the owner session wakes at the next transition"
+        applies = "amend durable; nothing scheduled to re-run, no re-drive needed"
+        hint = "nothing to follow: the replay-skip law re-runs no node for this graph and no runner is bound to it"
     return {"ok": True, "models": _models, "routes": _routes, "applies": applies,
             "graph_revision": _new_rev,   # #19: the new head — the token a next CAS writes against
-            "hint": "continuation is automatic and the owner session wakes at the next transition; wait only blocks to a boundary or revives an interrupted runner" + _rz_note + _liveness_hint_suffix(_liveness_notes), **preview}
+            "hint": hint + _rz_note + _liveness_hint_suffix(_liveness_notes), **preview}
 
 def act_stop(args):
     r = run_dir(args.get("run_id"))
