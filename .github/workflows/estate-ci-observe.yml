@@ -1,4 +1,4 @@
-# ci-contract: estate-ci@v1
+# ci-contract: jacobhausler/estate-ci@v1
 # P1 observe wiring for the estate-ci contract (NEXTGEN-CI.md (e) P1; (d) S7).
 # OBSERVE ONLY — nothing here changes a merge-blocking answer:
 #   * preflight-observe runs the CONTRACT's OWN preflight script, fetched at
@@ -17,6 +17,8 @@ name: estate-ci-observe
 
 on:
   pull_request:
+  push:
+    branches: ["main"]
 
 permissions:
   contents: read
