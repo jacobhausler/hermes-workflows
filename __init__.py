@@ -5143,6 +5143,28 @@ def register(ctx):
         pass  # fail-open: accounting absent, plugin intact
 
     # P5 native gate presentation (config-gated, DEFAULT OFF): when settings
+
+    # Child telemetry (est-wqml6): DEFAULT OFF BY ENVIRONMENT, not by config.
+    # The two stock hooks it consumes (post_api_request, post_tool_call) are
+    # registered ONLY where the runner's spawn pins HERMES_WF_TELEMETRY +
+    # HERMES_WF_RUN_DIR, i.e. inside workflow children. Gateway, door, and
+    # interactive processes carry neither pin and pay zero (the gate IS the
+    # env var, which doubles as the settle join key). Channel law, sidecar
+    # schema, and fail-open rule: node_telemetry.py (the docstring is its man
+    # page). Cost: one module exec (defs only) + two os.environ reads.
+    try:
+        _nt_spec = importlib.util.spec_from_file_location(
+            "_hermes_workflows_node_telemetry", HERE / "node_telemetry.py")
+        if _nt_spec is None or _nt_spec.loader is None:
+            raise RuntimeError("node_telemetry.py not loadable")
+        _node_telemetry = importlib.util.module_from_spec(_nt_spec)
+        _nt_spec.loader.exec_module(_node_telemetry)
+        _node_telemetry.register_observer_hooks(ctx)
+    except Exception:
+        pass  # fail-open: telemetry absent, plugin intact
+
+    # P5 native-approval bridge (config-gated, DEFAULT OFF): when settings
+
     # hooks_bridge_allow lists 'approval_bridge', held human gates are ALSO
     # presented into the run owner's OWN session through core's public
     # injection route (ctx.inject_message) and answered on this door's

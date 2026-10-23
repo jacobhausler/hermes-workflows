@@ -6045,7 +6045,9 @@ def run_state(r, *, telemetry=True, lock_state=None):
 FACT_KEYS = ("status", "error_class", "error", "attempts", "attempts_log", "final",
              "harvest", "output", "ms", "started", "log_path", "prompt_path", "efp", "skey")
 # No-team FACT_KEYS and node_facts shape stay byte-identical. Profile facts are
-# appended only when routed children actually carry them in a spawn/result record.
+# appended only when routed children actually carry them in a spawn/result record;
+# the est-wqml6 telemetry fact rides the same append-only law (absent record =
+# absent key, never "unknown").
 
 def precondition_facts(rec):
     """1.1 (RATIFY F4) fact rendering for a precondition failure: the string
@@ -6196,6 +6198,11 @@ def node_facts(r, nid, index=None):
     if rec.get("profile"):
         facts["profile"] = rec["profile"]
         facts["profile_home"] = rec.get("profile_home") or "unknown"
+    # est-wqml6: the settled child telemetry fact (folded from the sidecar at
+    # the commit edge), appended verbatim when present; absent records keep the
+    # byte-identical pre-telemetry shape (append-only, like the profile pair).
+    if isinstance(rec.get("telemetry"), dict) and rec["telemetry"]:
+        facts["telemetry"] = rec["telemetry"]
     pf = precondition_facts(rec)
     if pf:
         facts["fact"] = pf

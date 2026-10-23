@@ -44,7 +44,8 @@ SCENARIOS = {
 RUNNER_ENV_CORE = {'HERMES_HOME', 'HERMES_QUIET_TURN_REPORT_FILE', 'HERMES_WRITE_SAFE_ROOT',
                    'GOLDEN_FAKE', 'FAKE_MODE'}
 SANCTIONED_ENV_DELTA = {'HERMES_WF_RUN_DIR',                        # F1; excluded both sides, counted under F1(1)
-                        'HERMES_WF_PROCTREE_SIDECAR', 'HERMES_WF_PROCTREE_SPAWN'}  # #61c; excluded both sides
+                        'HERMES_WF_PROCTREE_SIDECAR', 'HERMES_WF_PROCTREE_SPAWN',  # #61c; excluded both sides
+                        'HERMES_WF_TELEMETRY'}                      # est-wqml6; excluded both sides
 
 def normalize_fanout_starts(rows):
     """Only commute empty first bakes with independent same-node item starts.

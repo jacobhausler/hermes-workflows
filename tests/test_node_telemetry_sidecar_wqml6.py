@@ -171,6 +171,7 @@ nt.sidecar_path(td, "good").write_text(json.dumps(AGG))
 check("valid aggregate loads verbatim", nt.load(td, "good") == AGG)
 
 # ---------- 4. fold consumes at settle; corrupt included ----------------------
+nt.sidecar_path(td, KEY).write_text(json.dumps(AGG))   # reset the fixture (the recorder used this key)
 got = nt.fold_at_settle(td, FULL_SKEY)   # derives the key prefix from the skey
 check("fold_at_settle joins by the env key derived from the skey and consumes the file",
       got == AGG and not nt.sidecar_path(td, KEY).exists(), str(got))
@@ -185,6 +186,7 @@ import wf  # noqa: E402  (import-time: spec-loads wfcommon only; no spawn)
 
 srun = td / "run-settle"
 (srun / "nodes").mkdir(parents=True)
+(srun / "telemetry").mkdir()
 (srun / "graph.json").write_text(json.dumps({"name": "settle", "nodes": []}))
 nt.sidecar_path(srun, KEY).write_text(json.dumps(AGG))
 res = wf._stamp_served({"_run": srun}, {"status": "done", "skey": FULL_SKEY})

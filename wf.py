@@ -420,6 +420,17 @@ def _lane_gate(run, node, r):
 
 def _stamp_served(meta, result, node=None):
     """Commit actual child seat truth, never the requested alias. No row means unknown."""
+    # est-wqml6: settle-time child telemetry join by the spawn env key,
+    # fail-open on every path (man page: node_telemetry.py). Folded FIRST so
+    # every settle outcome, including the early refusals below, consumes the
+    # sidecar; a telemetry bug never blocks a settle.
+    try:
+        _nt = _node_telemetry()
+        _td = _nt.fold_at_settle(meta["_run"], result.get("skey")) if _nt else None
+    except Exception:
+        _td = None
+    if _td:
+        result["telemetry"] = _td
     # #116: engine substitution stamp validation at the commit (verified against
     # the estate config at bake/commit time). A stamp whose `to` is NOT a declared
     # rung — a forged node_def edit through a hand-edited graph.json — fails closed
@@ -1241,6 +1252,32 @@ def _outbound_bridge():
     except Exception:
         _OUTBOUND = None
     return _OUTBOUND
+
+_NODE_TELEMETRY = None
+_NODE_TELEMETRY_TRIED = False
+
+def _node_telemetry():
+    """est-wqml6: spec-load node_telemetry.py once, lazily, for the runner-side
+    half of the child telemetry channel (the child-side half registers inside
+    the child's own plugin load). None = channel absent: the byte-identical
+    degradation, same law as _outbound_bridge."""
+    global _NODE_TELEMETRY, _NODE_TELEMETRY_TRIED
+    if _NODE_TELEMETRY_TRIED:
+        return _NODE_TELEMETRY
+    _NODE_TELEMETRY_TRIED = True
+    try:
+        _p = Path(__file__).resolve().parent / "node_telemetry.py"
+        if not _p.is_file():
+            return None
+        _spec = importlib.util.spec_from_file_location("_hermes_workflows_node_telemetry", _p)
+        if _spec is None or _spec.loader is None:
+            return None
+        _mod = importlib.util.module_from_spec(_spec)
+        _spec.loader.exec_module(_mod)
+        _NODE_TELEMETRY = _mod
+    except Exception:
+        _NODE_TELEMETRY = None
+    return _NODE_TELEMETRY
 
 def _wake_tid(run_name, event, disc):
     """The wake/outbound instance id — ONE recipe (sha256(run|event|discriminant)
@@ -2282,7 +2319,7 @@ def commit_item_record(run, node, byid, index, result):
     for k in ("output", "error", "error_class", "reason", "ms", "attempts", "attempts_log",
               "skey", "log_path", "prompt_path", "pid", "started", "spawn",
               "served_model", "served_billing_provider", "billed_models", "adopted", "harvested",
-              "tree_descendants", "final", "banked"):
+              "tree_descendants", "final", "banked", "telemetry"):   # est-wqml6: child telemetry rides the commit
         v = result.get(k)
         if v is not None:
             rec[k] = v
@@ -6401,6 +6438,14 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
     # default cwd from $TERMINAL_CWD, which dict(os.environ, ...) inherits from the
     # host. Pin it so a terminal call with no workdir lands in the node's workspace.
     env["TERMINAL_CWD"] = wd
+    # est-wqml6: the child-side telemetry pin. The value IS the join key: the
+    # session-key prefix (skey minus its per-spawn efp8.nonce tail, stable
+    # across retries so one sidecar per node reflects the latest attempt, the
+    # same law as output). The child's plugin load registers observer hooks
+    # only where this key and HERMES_WF_RUN_DIR both exist; the settle join
+    # (wf._stamp_served) and the sidecar law live in node_telemetry.py.
+    if skey:
+        env["HERMES_WF_TELEMETRY"] = str(skey).rsplit(":", 1)[0]
     # est-mg5o2 (spawn half of the launch-path fix): the seat cap is AUTHORITATIVE
     # AT SPAWN. A long-lived runner inherits its launcher's WORKFLOW_MAX_SEATS —
     # a gateway booted before the operator set the .env knob hands every nested

@@ -391,6 +391,20 @@ Patch release: 37 merged PRs since v1.4.0 — the door-UX version handshake (nam
   first at every quiescent boundary — before the on_fail-catch opportunity
   and before finalize-done — and a flagged run spawns nothing new (in-flight
   waves drain, never killed). Tests: tests/test_fail_closed_f1w4u.py.
+- feat(telemetry): CLI-spawned children now report their own per-node counters.
+  The runner pins `HERMES_WF_TELEMETRY` (the join key: the session-key prefix)
+  into every agent spawn; inside a child carrying that pin and `HERMES_WF_RUN_DIR`,
+  the plugin registers `post_api_request` + `post_tool_call` and rewrites one
+  small JSON sidecar atomically per event (`<run>/telemetry/<key>.json`:
+  api_calls, tool_calls, input/output/total tokens). The runner folds and
+  consumes the sidecar at the settle seam (`_stamp_served`), the fact rides the
+  committed node record (solo and per fan-out item) and surfaces through
+  `node_facts`; absent, corrupt, or un-writable telemetry never blocks a settle
+  and reads absent, never a zero. Processes without the pins (gateway, door,
+  interactive) register nothing and pay nothing. Closes the documented P3 blind
+  spot (CLI children never fire `subagent_stop`). Tests:
+  tests/test_node_telemetry_sidecar_wqml6.py (gate, atomic write, corrupt and
+  missing sidecars, settle join, read model, end-to-end via the fake child).
 
 - feat(runner,door): WF-GRAFT-1 — wake-noise control: honor the Hermes `[SILENT]`
   verdict, and a `wake_tier` ladder over every node (est-1f7cn, PR #533; adapted from

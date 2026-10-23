@@ -43,7 +43,7 @@ if "QSLEEP" in q:
 # telemetry sidecar FROM THE SPAWN ENV (HERMES_WF_TELEMETRY join key +
 # HERMES_WF_RUN_DIR), atomically, before answering. The sanitizer is duplicated
 # deliberately (3 replaces, no import channel here); parity is not trusted to
-# this copy — the integration check in tests/test_node_telemetry_sidecar_wqml6.py
+# this copy: the integration check in tests/test_node_telemetry_sidecar_wqml6.py
 # goes red if the runner can no longer join what this child wrote.
 if "TELEMETRY-EMIT" in q and os.environ.get("HERMES_WF_TELEMETRY") and os.environ.get("HERMES_WF_RUN_DIR"):
     _tk = os.environ["HERMES_WF_TELEMETRY"].replace("/", "_").replace("\\", "_").replace(":", "_")
