@@ -2212,8 +2212,10 @@ def _node_file(node, index):
 
 def write_spawn_record(run, node, byid, index, spawn_no, argv, lp, pid, skey, started=None,
                        prompt_path=None):
-    """Q1 spawn-time record: written right after Popen succeeds, BEFORE the child
-    is awaited, so a babysitter sees the live child (pid, log, argv) mid-run.
+    """Q1 spawn-time record, written at TWO instants of every spawn (est-w95h7):
+    BEFORE the exec with pid=None (the started marker: a crash anywhere after it
+    settles from this file's own name) and again after the exec with the proven
+    pid, so a babysitter sees the live child (pid, log, argv) mid-run.
     status="running" is SAFE BY CONSTRUCTION: node_rec() returns pending for any
     status outside done/failed, so this can never be mistaken for a commit and
     replay-skip law is untouched (the merged node record remains the commit)."""
@@ -6647,8 +6649,8 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
                 # target and its fields carry the spawn identity; the door
                 # reaper derives the interruption receipt from the record path.
                 # pid=None never passes _verify_spawn_rec, so an unproven spawn
-                # is never adopted; the finalize after the seat-bind stamps the
-                # proven pid.
+                # is never adopted; the existing Q1 record after the exec
+                # stamps the proven pid over the marker.
                 try:
                     write_spawn_record(run, node, byid, index, spawn_no, cmd, lp, None,
                                        skey, prompt_path=str(pp))
@@ -6745,9 +6747,10 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
         # est-2ek.1.641: this spawn billed under the door's alive-proof — record
         # the lane's proved-alive receipt (durable, replacement-runner-visible).
         _route_receipt_bake(meta, node)
-        # Q1 spawn-time record (after Popen succeeded, before awaiting): the live
-        # child is visible mid-run with pid / log / argv / prompt path (A1: the
-        # prompt as sent is durable in the run dir — no redaction, no unlink).
+        # est-w95h7: the FINALIZE of the started marker written before the exec.
+        # Same file, now carrying the proven pid, so the live child is visible
+        # mid-run with pid / log / argv / prompt path (A1: the prompt as sent is
+        # durable in the run dir, no redaction, no unlink).
         spawn_cmd = list(cmd)
         started_iso = now()
         try:
