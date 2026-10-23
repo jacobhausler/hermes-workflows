@@ -33,10 +33,33 @@ wake-time line numbers had drifted):
   S8 wfcommon.find_run      — run-by-name pick = roots [resolved, legacy], first
                               dir that yields a view; twin id across roots
                               resolves to the resolved side. Pinned.
+  S9 wfcommon.seat_wait_view— oldest-wait pick over one node's open waits: bare
+                              min(since) let same-stamp ties fall to dict-insertion
+                              (ledger-scan) order; the fix is since ASC, str(idx)
+                              ASC (index unique within the node, key cannot tie).
+  S10 wfcommon.current_attempt — max(recent) over (last_activity, title, desc):
+                              already total — the session title is dict-unique —
+                              pinned so a future key edit can't reintroduce a tie.
+  S11 door.act_library hint — "drop the rarest term (X)": bare min(counts) broke
+                              ties on the caller's query-term order (same corpus,
+                              different ask, different advice); count ASC, term ASC
+                              makes the advice query-order-invariant.
+  S12 door.act_status seat_wait row cap — first-non-None cap over a dict's values
+                              was insertion order; the fix scans sorted(sw) (node
+                              ids unique). The line is exercised verbatim by
+                              tests/test_seat_wait_status_833.py S1 (row.cap==4),
+                              which pins it in the suite; no duplicate fixture here.
 
-S1-S3 are RED at base (traversal-order tiebreak under adversarial fs order) and
-flip with the fix; S4-S8 pin contracts that are already total — the AGENTS.md
-rule line (4c rule 12) is what keeps them that way.
+Graph-declaration-order scheduler picks (wf.py gate next(), the dashboard's
+pending-gate next(), the consolidate-partner next()) are deterministic in the
+graph bytes — the DAG executes the graph's own enumeration — so they are NOT
+data-collapses under this law; each carries a because-comment naming the
+declaration-order contract instead of a synthetic fixture.
+
+S1-S3, S9 and S11 are RED at base (traversal/insertion/query-order tiebreak
+under adversarial order) and flip with the fix; S4-S8, S10 and S12 pin contracts
+that are already total — the AGENTS.md rule line (4c rule 12) is what keeps them
+that way.
 
 Standalone script (NOT pytest). Run: python3 tests/test_tiebreak_law_1n7gx.py
 """
@@ -272,7 +295,55 @@ def s8():
           C.find_run("rf-nope") == RES / "rf-nope", str(C.find_run("rf-nope")))
 
 
-for fn in (s1, s2, s3, s4, s5, s6, s7, s8):
+# ------------------------------------------------------------ S9 seat_wait_view
+def s9():
+    T = "2026-10-23T00:00:00+00:00"
+    # Two open waits with the SAME since stamp (same-second events are routine):
+    # the dict is written idx-2-first so insertion order and the law DISAGREE —
+    # insertion would show idx 2's cap/spawn, the total order shows idx 0's.
+    per = {2: {"since": T, "cap": 9, "spawn": 7},
+           0: {"since": T, "cap": 4, "spawn": 1},
+           1: {"since": "2026-10-23T00:00:05+00:00", "cap": 4, "spawn": 2}}
+    v = C.seat_wait_view(per, now_s=1761177660.0)
+    check("S9 seat_wait_view oldest pick: since ASC, str(idx) ASC (never dict-insertion)",
+          v["since"] == T and v["cap"] == 4 and v["spawn"] == 1 and v["waiting"] == [0, 1, 2],
+          str(v))
+
+
+# ------------------------------------------------------------ S10 current_attempt
+def s10():
+    # The max key (last_activity, title, desc): title is the live-dict key, so
+    # it is unique and the key cannot tie. Same-activity twins resolve to the
+    # lexically-greater title deterministically — pinned so a future key edit
+    # (e.g. dropping title from the tuple) trips a test, not a flapping card.
+    cm = {"s": {"sessions": {"s#a1": {"last_activity": 100, "last_desc": "d-s"},
+                             "t#a1": {"last_activity": 100, "last_desc": "d-t"}}}}
+    out = C.current_attempt(cm, [{"skey": "t#a1"}, {"skey": "s#a1"}])
+    check("S10 current_attempt max is total by construction (unique session title in key)",
+          out["live"] == 2 and out["last_activity"] == 100 and out["last_desc"] == "d-t",
+          str(out))
+
+
+# ------------------------------------------------------------- S11 act_library
+def s11():
+    # Same corpus as S6's root; two tagged entries, alpha and beta, count 1 each,
+    # never co-occurring. The rarest-term advice must NOT depend on the order the
+    # caller typed its tags: both queries answer with the SAME term, and the law
+    # says which (term ASC).
+    lib_r = RES / "library"
+    def tagged(name, tag):
+        (lib_r / f"{name}.json").write_text(json.dumps(
+            {"meta": {"tags": [tag]},
+             "graph": {"name": name, "nodes": [{"id": "n0", "type": "agent", "goal": "g"}]}}))
+    tagged("tie-alpha", "alpha")
+    tagged("tie-beta", "beta")
+    h1 = door.act_library({"tags": ["beta", "alpha"]}).get("hint", "")
+    h2 = door.act_library({"tags": ["alpha", "beta"]}).get("hint", "")
+    check("S11 library rarest-term advice: count ASC, term ASC — query-order invariant",
+          h1 == h2 and "rarest term (alpha)" in h1, f"h1={h1!r} h2={h2!r}")
+
+
+for fn in (s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11):
     fn()
 print("ALL PASS" if ok else "FAILURES PRESENT")
 sys.exit(0 if ok else 1)
