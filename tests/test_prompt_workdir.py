@@ -152,7 +152,11 @@ def main():
         home, _fake = home_and_fakes(tmp)
         install = tmp / "plugin-install"
         install.mkdir()
-        for f in ("wf.py", "wfcommon.py"):
+        # est-imp1z (WF-GRAFT-2): the runner spec-loads outcome.py as a REQUIRED
+        # sibling (same import-purity law as wfcommon.py), so a staged install dir
+        # must carry it — absent, the runner refuses to start rather than run
+        # without the exit-0-is-not-success classifier.
+        for f in ("wf.py", "wfcommon.py", "outcome.py"):
             (install / f).write_text((ROOT / f).read_text())
         fake_bin = install / "fake-hermes"          # child lives IN the install dir
         fake_bin.write_text(FAKE)

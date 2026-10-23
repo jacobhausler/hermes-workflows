@@ -176,8 +176,9 @@ publication guards, and crash recovery.
   inputs | item_record | killed | lane_wreckage | lease_busy | left_live_descendants | malformed_turn | precondition | provider_400 | quorum |
   ratelimit |
   route_substitution_denied | route_unavailable | schema | seat_cap | seat_unsupported | seat_wait | spawn | stale_graph | timeout | transport | transport_exhausted |
-  unresolved_model`, plus `unknown` as the harvest-time default when nothing matches —
-  plus `attempts`. Read the class, not the prose. `cancelled` (a `stop`, or a fan-out
+  unresolved_model`, plus `unknown` (the harvest-time default) — plus `attempts`. Read the
+  class, not the prose; the exit-0-is-not-success settle law (`declared_failure`, transient
+  sentinels) is in references/operations.md. `cancelled` (a `stop`, or a fan-out
   straggler at quorum) is never a failure: the run reads `stopped`, and a `wait` re-drives it.
   `budget_exhausted` (est-3acn): a RunBudget cap (graph-root or node `budget:{tokens:N}`; tokens-only —
   USD is excluded per the repo cost-trust law, issue #124) refused the spawn BEFORE submit, logged as
@@ -258,13 +259,6 @@ publication guards, and crash recovery.
   Each park emits `node.retrying error_class=ratelimit backoff_s=N`;
   give-up commits the verbatim banner as the error text (plus `ratelimit_banner`) so
   a dispatcher can switch model instead of requeue.
-  `declared_failure` (est-imp1z, WF-GRAFT-2): the child's self-reported `node_outcome`
-  token (the tail `{"node_outcome": "success"|"failure"}` contract prompted on build-shape
-  spawns) declares failure — the node's own verdict outranks a clean exit 0 and any
-  parseable fence. Deterministic by definition: outside BOTH retry ladders. At the same
-  settle gate a line-scoped transient sentinel on an otherwise-trusted exit types `transport`
-  (never `unknown`, never `done`) so ONLY the bounded transient ladder may re-drive it —
-  exit 0 is not success (the agent CLI exits clean on exhausted provider retries).
   `route_unavailable` (#25): a pinned route the door's ping affirmatively proved dead
   or answered-from-the-fallback-ladder (submit refusal), or a committed served_model
   that contradicts the door's alive-proof (commit hold) — never silent fallback billing.
