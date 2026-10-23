@@ -316,8 +316,8 @@ def s10():
     # it is unique and the key cannot tie. Same-activity twins resolve to the
     # lexically-greater title deterministically — pinned so a future key edit
     # (e.g. dropping title from the tuple) trips a test, not a flapping card.
-    cm = {"s": {"sessions": {"s#a1": {"last_activity": 100, "last_desc": "d-s"},
-                             "t#a1": {"last_activity": 100, "last_desc": "d-t"}}}}
+    cm = {"s": {"sessions": {"s#a1": {"last_activity": 100, "last_desc": "d-s"}}},
+          "t": {"sessions": {"t#a1": {"last_activity": 100, "last_desc": "d-t"}}}}
     out = C.current_attempt(cm, [{"skey": "t#a1"}, {"skey": "s#a1"}])
     check("S10 current_attempt max is total by construction (unique session title in key)",
           out["live"] == 2 and out["last_activity"] == 100 and out["last_desc"] == "d-t",
