@@ -46,9 +46,11 @@ wake-time line numbers had drifted):
                               makes the advice query-order-invariant.
   S12 door.act_status seat_wait row cap — first-non-None cap over a dict's values
                               was insertion order; the fix scans sorted(sw) (node
-                              ids unique). The line is exercised verbatim by
-                              tests/test_seat_wait_status_833.py S1 (row.cap==4),
-                              which pins it in the suite; no duplicate fixture here.
+                              ids unique). tests/test_seat_wait_status_833.py pins
+                              the single-wait row verbatim; the TWIN-cap case (two
+                              waiting nodes, different caps, same second) — the
+                              only shape that can re-expose the insertion-order
+                              tie — is pinned here.
 
 Graph-declaration-order scheduler picks (wf.py gate next(), the dashboard's
 pending-gate next(), the consolidate-partner next()) are deterministic in the
@@ -56,8 +58,8 @@ graph bytes — the DAG executes the graph's own enumeration — so they are NOT
 data-collapses under this law; each carries a because-comment naming the
 declaration-order contract instead of a synthetic fixture.
 
-S1-S3, S9 and S11 are RED at base (traversal/insertion/query-order tiebreak
-under adversarial order) and flip with the fix; S4-S8, S10 and S12 pin contracts
+S1-S3, S9, S11 and S12 are RED at base (traversal/insertion/query-order tiebreak
+under adversarial order) and flip with the fix; S4-S8 and S10 pin contracts
 that are already total — the AGENTS.md rule line (4c rule 12) is what keeps them
 that way.
 
@@ -316,6 +318,7 @@ def s10():
     # it is unique and the key cannot tie. Same-activity twins resolve to the
     # lexically-greater title deterministically — pinned so a future key edit
     # (e.g. dropping title from the tuple) trips a test, not a flapping card.
+    # The cm layout mirrors the documented lookup: cm[base]["sessions"][title].
     cm = {"s": {"sessions": {"s#a1": {"last_activity": 100, "last_desc": "d-s"}}},
           "t": {"sessions": {"t#a1": {"last_activity": 100, "last_desc": "d-t"}}}}
     out = C.current_attempt(cm, [{"skey": "t#a1"}, {"skey": "s#a1"}])
@@ -343,7 +346,38 @@ def s11():
           h1 == h2 and "rarest term (alpha)" in h1, f"h1={h1!r} h2={h2!r}")
 
 
-for fn in (s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11):
+# ---------------------------------------------------- S12 door.act_status seat_wait cap
+def s12():
+    # A live runner (flock held by THIS process) blocked on the seat cap with two
+    # waiting nodes, same since-second. Graph order puts zeta first: the pre-fix
+    # first-non-None cap scan over sw.values() answered zeta's cap (node-state
+    # assembly luck); the law says the scan is sorted node ids — node names are
+    # unique, so (name ASC) is total and every reader answers the same cap.
+    import fcntl
+    run = RES / "s12-run"
+    (run / "nodes").mkdir(parents=True)
+    (run / "graph.json").write_text(json.dumps({"name": "s12", "nodes": [
+        {"id": "zeta", "type": "agent", "goal": "g"},
+        {"id": "alpha", "type": "agent", "goal": "g"}]}))
+    T = "2026-10-23T00:00:00+00:00"
+    (run / "events.jsonl").write_text("\n".join([
+        json.dumps({"ts": T, "event": "seat.wait", "node": "zeta", "index": 0, "cap": 9, "spawn": 7}),
+        json.dumps({"ts": T, "event": "seat.wait", "node": "alpha", "index": 0, "cap": 4, "spawn": 1}),
+    ]) + "\n")
+    lock = open(run / "runner.lock", "w")
+    fcntl.flock(lock, fcntl.LOCK_EX)
+    try:
+        payload = door.act_status({"run_id": "s12-run"})
+    finally:
+        fcntl.flock(lock, fcntl.LOCK_UN)
+        lock.close()
+    nxt = (payload.get("next") or [{}])[0]
+    check("S12 act_status seat_wait next-row cap: first-non-None over sorted node ids (never assembly order)",
+          nxt.get("reason") == "seat_wait" and nxt.get("cap") == 4
+          and nxt.get("nodes") == ["alpha", "zeta"], str(payload)[:220])
+
+
+for fn in (s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11, s12):
     fn()
 print("ALL PASS" if ok else "FAILURES PRESENT")
 sys.exit(0 if ok else 1)
