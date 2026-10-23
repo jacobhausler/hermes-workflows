@@ -386,13 +386,11 @@ same gates ([.github/workflows/ci.yml](.github/workflows/ci.yml)).
 ### 4b′. Navigate with the knowledge graph (optional)
 
 [`graphify`](https://github.com/Graphify-Labs/graphify) builds a code-navigation
-graph locally (`uv tool install graphifyy` → `graphify update .` in a scratch
-checkout; `graphify query`/`path`/`affected`/`god-nodes`; `.graphifyignore`
-ships). It is an exploration aid, not a gate: the output is never committed, CI
-never builds it, and a `graphify-out/` in your PR diff is deleted by review.
-Source and tests are the spec. (`scripts/graph_diagram.py` + `diagram_readme.py`
-are unrelated — they draw the example workflow diagrams in `examples/README.md`,
-which DO ship.)
+graph locally (`uv tool install graphifyy` → `graphify update .`; query/path/
+affected/god-nodes; `.graphifyignore` ships). Exploration aid, not a gate: never
+committed, CI never builds it, a `graphify-out/` in your PR diff is deleted by
+review. Source and tests are the spec. (`scripts/graph_diagram.py` +
+`diagram_readme.py` are unrelated — they draw the `examples/README.md` diagrams.)
 
 ### 4c. Rules
 
@@ -432,10 +430,10 @@ which DO ship.)
     loop, and let CI's freshness gate refuse a stale commit. One rule, one
     file: [examples/diagrams/README.md](examples/diagrams/README.md) (DIAGRAM LAW v1).
     The examples/ map keeps a pointer here.
-12. **Collapse-to-one law (est-1n7gx).** Every sort that feeds a head/dedupe/max
-    names a TOTAL order in code with a because-clause; where insertion order is
-    the contract, say so and pin it with a test. Full law, why, and the site
-    census: [references/collapse-to-one-law.md](references/collapse-to-one-law.md).
+12. **Collapse-to-one law (est-1n7gx).** Every sort feeding one row names its
+    TOTAL order in code with a because-clause; if insertion order is the
+    contract, say so and pin it with a test. Law and site census:
+    [references/collapse-to-one-law.md](references/collapse-to-one-law.md).
 
 ### 4d. Release
 
