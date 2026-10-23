@@ -15,8 +15,8 @@ re-check free when the leading wake already delivered.
 Laws pinned here:
   * SCOPE: only the repeat-prone mid-flight class coalesces; every terminal or
     gate wake is unchanged (a non-coalesced notify writes no marker).
-  * COALESCE: a burst inside one window advances exactly twice — the leading
-    wake plus one trailing re-check — never once (the peer flaw), never N.
+  * COALESCE: a burst inside one window advances exactly twice: the leading
+    wake plus one trailing re-check, never once (the peer flaw), never N.
   * TRAILING: the re-check names the LAST suppressed key, so the final event
     of the burst is the one that lands.
   * QUIET PATH: an isolated wake fires and schedules zero re-checks.
@@ -135,7 +135,7 @@ else:
         check("quiet: drain past window yields none (zero re-check cost)",
               wf._wake_drain_rechecks(r, now=200.0) == [])
 
-        # 3. COALESCE: a five-wake burst advances exactly 2 — leading + trailing.
+        # 3. COALESCE: a five-wake burst advances exactly 2: leading + trailing.
         r = mk_run("burst-2")
         advances = 0
         if wf._wake_coalesce_check(r, CO, "w1", now=100.0):

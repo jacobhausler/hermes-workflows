@@ -417,6 +417,22 @@ Patch release: 37 merged PRs since v1.4.0 — the door-UX version handshake (nam
   mutation proof and an external probe severing the `notify()` seam: 8 FAILs / rc=1).
   A graph carrying neither key wakes byte-identically.
 
+- feat(wake): wake-burst coalescer with a trailing re-check on the
+  fanout.stragglers wake class (est-zmizd, ported shape atbrace:hjs-epl /
+  iw-recon hooks.py:50-179, SYNTHESIS.md #12). A burst inside one 2 s window
+  advances exactly twice: the leading wake plus one trailing re-check that
+  names the LAST suppressed key, never once (the audited peer flaw DROPS the
+  suppressed tail) and never N. A suppressed wake records a pending re-check
+  in `wake-debounce/<event>.json` under the run dir (cross-process, durable);
+  the runner drains due re-checks at the wave boundary and finalize() force-
+  flushes every pending tail before the terminal wake, so the final event of
+  any burst always lands. The re-check re-enters notify(): a delivered
+  instance costs zero POSTs via ledger dedupe. Fail-open law adopted: any
+  marker-store error fires the wake: a double wake is harmless, a lost
+  transition is not. Terminal and gate wakes are outside the coalescer.
+  Tests: tests/test_wake_debounce_trailing_zmizd.py (29 checks: burst
+  collapse, trailing-key, quiet path, fail-open, end-to-end POST count).
+
 - fix(watchdog): the fanout.stragglers disc formats a missing launch stamp as
   the `'q'` literal, never through `:.3f` (est-waf8y, est-c0jo1 passport D1).
   An open item queued behind a saturated fan-out cap has no launch stamp; the

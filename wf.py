@@ -1252,7 +1252,90 @@ def _wake_tid(run_name, event, disc):
         return _ob.instance_id(run_name, event, disc)
     return hashlib.sha256(f"{run_name}\0{event}\0{disc}".encode()).hexdigest()[:32]
 
-def notify(run, event, key=None, graph=None, node=None):
+# ---------- wake-burst coalescer with trailing re-check (est-zmizd) ----------
+# Ported shape: atbrace:hjs-epl / iw-recon hermes_workflows/hooks.py:50-179
+# (SYNTHESIS.md #12): a cross-process mtime-style debounce so a fan-out /
+# straggler wake burst costs the owner a bounded number of turns. The audited
+# shape DROPS every suppressed event; a dropped tail is a lost transition, so
+# this port never drops: a suppressed wake records a PENDING TRAILING RE-CHECK
+# due one window after the burst's leading wake, and the re-check re-enters
+# notify(); ledger dedupe then makes it cost zero POSTs when the leading wake
+# already delivered. Due re-checks drain at the wave boundary, and finalize()
+# flushes them before the terminal wake, so the final event of any burst
+# always lands. Fail-open law (theirs, adopted): any marker-store error fires
+# the wake: a double wake is harmless, a lost transition is not.
+WAKE_DEBOUNCE_WINDOW_S = 2.0
+# Only the repeat-prone mid-flight observation class coalesces; terminal and
+# gate wakes are single-instance-per-decision and unchanged.
+_WAKE_COALESCE = frozenset({"fanout.stragglers"})
+
+def _wake_debounce_dir(run):
+    return run / "wake-debounce"
+
+def _wake_marker_path(run, event):
+    return _wake_debounce_dir(run) / (re.sub(r"[^A-Za-z0-9_.-]", "_", str(event)) + ".json")
+
+def _wake_marker_write(p, st):
+    tmp = p.with_name(p.name + ".tmp")
+    tmp.write_text(json.dumps(st))
+    os.replace(tmp, p)
+
+def _wake_coalesce_check(run, event, key, now=None, window=None, refire=False):
+    """True = fire the wake now; False = suppressed inside the open window, a
+    trailing re-check of the LATEST (event, key) pair is scheduled. refire=True
+    is the re-check path: it always fires and re-arms the window fresh."""
+    try:
+        window = WAKE_DEBOUNCE_WINDOW_S if window is None else float(window)
+        now = time.time() if now is None else float(now)
+        d = _wake_debounce_dir(run)
+        d.mkdir(parents=True, exist_ok=True)
+        p = _wake_marker_path(run, event)
+        st = None if refire else jload(p, None)
+        if isinstance(st, dict) and (now - float(st.get("fire_ts", 0.0))) < window:
+            st.update({"event": event, "key": key, "pending": True,
+                       "due": float(st.get("fire_ts", now)) + window})
+            _wake_marker_write(p, st)
+            return False
+        _wake_marker_write(p, {"event": event, "key": key, "fire_ts": now,
+                               "due": now + window, "pending": False})
+        return True
+    except Exception:
+        return True   # fall-through law: the coalescer never eats a transition
+
+def _wake_drain_rechecks(run, now=None, force=False):
+    """Due pending trailing re-checks as (event, key) pairs. READ-ONLY: the
+    re-check stays armed until the refire's notify() re-arms the marker, so a
+    crash between drain and POST re-drains at the next boundary (at-least-once;
+    ledger dedupe bounds the duplicate cost at zero POSTs). force=True ignores
+    the due clock: the terminal flush uses it so no pending tail survives the
+    runner's last word."""
+    out = []
+    try:
+        d = _wake_debounce_dir(run)
+        if not d.is_dir():
+            return out
+        now = time.time() if now is None else float(now)
+        for p in sorted(d.glob("*.json")):
+            st = jload(p, None)
+            if (not isinstance(st, dict) or not st.get("pending")
+                    or (not force and now < float(st.get("due", 0.0)))):
+                continue
+            out.append((st.get("event"), st.get("key")))
+    except Exception:
+        return out   # fail-open; a missed drain re-lands on the next boundary
+    return out
+
+def _wake_refire_pending(run, graph=None, now=None, force=False):
+    """Drain due trailing re-checks and re-notify each (refire path)."""
+    for event, key in _wake_drain_rechecks(run, now=now, force=force):
+        if event is None:
+            continue
+        try:
+            notify(run, event, key=key, graph=graph, refire=True)
+        except Exception:
+            pass   # the marker stays pending: the next boundary tries again
+
+def notify(run, event, key=None, graph=None, node=None, refire=False):
     """Push ONE lifecycle transition instance to the owner session stamp. Owner-null
     (tests, CLI, tool hosts without a session env) writes NOTHING — the door's
     silent degradation, unchanged. The transition instance (B3 law) is a
@@ -1293,6 +1376,12 @@ def notify(run, event, key=None, graph=None, node=None):
     this law."""
     try:
         if not run.is_dir():
+            return
+        # est-zmizd: the coalescer gates the WHOLE transition (mirror, ledger,
+        # POST fire, fail, or none): a suppressed wake writes nothing anywhere
+        # and a trailing re-check re-drives it once the window closes.
+        if event in _WAKE_COALESCE and not _wake_coalesce_check(
+                run, event, key, refire=refire):
             return
         # P1: the operator mirror fires at notify()'s OWN point and fail-opens inside
         # mirror(). Owner-null runs still mirror — the endpoint is the operator's, not
@@ -9684,6 +9773,11 @@ def main(run_id):
         for nid, texts in drain_inbox(run, consumed).items():
             steering.setdefault(nid, []).extend(texts)
 
+        # est-zmizd: due trailing re-checks of a coalesced wake burst land at the
+        # wave boundary; finalize() flushes whatever is still pending before the
+        # terminal wake, so the final event of a burst always reaches the owner.
+        _wake_refire_pending(run, graph=rs.graph)
+
         states, outputs, prov = {}, {}, {}
         _capped = []   # est-3acn: nodes whose COMMITTED record carries the RunBudget death
         for n in rs.nodes:
@@ -10283,6 +10377,10 @@ def finalize(run, graph, status):
     (run / "summary.md").write_text("\n".join(lines) + "\n")
     log(run, f"run.{status}")
     emit(f"WORKFLOW_{status.upper()} {run.name}")
+    # est-zmizd: flush ALL pending trailing re-checks (force: inside a still-open
+    # window too) BEFORE the terminal wake: a coalesced straggler burst must not
+    # die un-woken behind run.done/failed; a delivered instance dedupes to zero POSTs.
+    _wake_refire_pending(run, graph=graph, force=True)
     notify(run, f"run.{status}", graph={"nodes": nodes})
 
 
