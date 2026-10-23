@@ -171,7 +171,7 @@ See [grammar](references/grammar.md#terminal-postmortem-optional) for validation
 publication guards, and crash recovery.
 
 - `node.failed` events carry `error_class` from the closed set defined in code
-  (`wf.py ERROR_CLASSES`) — `bead_close | budget_exhausted | cancelled | cap_exhausted | config_input | crashed | early_death | effect_receipt |
+  (`wf.py ERROR_CLASSES`) — `bead_close | budget_exhausted | cancelled | cap_exhausted | config_input | crashed | declared_failure | early_death | effect_receipt |
   fanout_empty | fatal_quota | forbidden_model | incomplete_work |
   inputs | item_record | killed | lane_wreckage | lease_busy | left_live_descendants | malformed_turn | precondition | provider_400 | quorum |
   ratelimit |
@@ -258,6 +258,13 @@ publication guards, and crash recovery.
   Each park emits `node.retrying error_class=ratelimit backoff_s=N`;
   give-up commits the verbatim banner as the error text (plus `ratelimit_banner`) so
   a dispatcher can switch model instead of requeue.
+  `declared_failure` (est-imp1z, WF-GRAFT-2): the child's self-reported `node_outcome`
+  token (the tail `{"node_outcome": "success"|"failure"}` contract prompted on build-shape
+  spawns) declares failure — the node's own verdict outranks a clean exit 0 and any
+  parseable fence. Deterministic by definition: outside BOTH retry ladders. At the same
+  settle gate a line-scoped transient sentinel on an otherwise-trusted exit types `transport`
+  (never `unknown`, never `done`) so ONLY the bounded transient ladder may re-drive it —
+  exit 0 is not success (the agent CLI exits clean on exhausted provider retries).
   `route_unavailable` (#25): a pinned route the door's ping affirmatively proved dead
   or answered-from-the-fallback-ladder (submit refusal), or a committed served_model
   that contradicts the door's alive-proof (commit hold) — never silent fallback billing.

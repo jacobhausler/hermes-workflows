@@ -187,6 +187,13 @@ INCLUDE_FILES = (
     "tests/test_fanout_ui.mjs",
     "wf.py",
     "wfcommon.py",
+    # est-imp1z (WF-GRAFT-2): the pure output classifier wf.py spec-loads by file
+    # path (exit-0-is-not-success settle gate + node_outcome token parse; the
+    # kind=transient hand-off feeds the sibling bead est-9ceqc at the same seam)
+    # — absent from the ZIP, the runner dies at import at the same seam as the
+    # wfcommon include. Mandatory new-file pack-surface decision, explicit per
+    # the no-wholesale law.
+    "outcome.py",
 )
 INCLUDE_PATTERNS = ("tests/test_*.py", "tests/test_*.mjs", "references/*.md")
 EXECUTABLE_FILES = {"scripts/pack.py", "tests/fake", "tests/fake-b1"}

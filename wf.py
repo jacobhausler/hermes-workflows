@@ -50,6 +50,30 @@ _common_spec = importlib.util.spec_from_file_location("_hermes_workflows_wfcommo
 assert _common_spec is not None and _common_spec.loader is not None
 wfcommon = importlib.util.module_from_spec(_common_spec)
 _common_spec.loader.exec_module(wfcommon)
+# est-imp1z (WF-GRAFT-2): the pure output classifier (exit-0-is-not-success) rides
+# the same purity law as wfcommon — spec-loaded PRIVATELY under a prefixed module
+# name, bound by path from __file__; no generic 'outcome' name ever joins a host
+# sys.modules (the import-purity probe pins it).
+_OUTCOME_PATH = Path(__file__).resolve().parent / "outcome.py"
+if not _OUTCOME_PATH.is_file():
+    # A copy of this runner executed beside no sibling (door copies, fake-home
+    # stagings): resolve a sys.path-provided outcome.py the same way the wfcommon
+    # fallback above does — but ONLY one shipped beside a wfcommon.py (a bare
+    # 'outcome' is a common host-module name; the co-located wfcommon.py is the
+    # plugin-dir proof the fallback demands).
+    for _ent in list(sys.path):
+        try:
+            _cand = Path(_ent) / "outcome.py"
+            if _cand.is_file() and (Path(_ent) / "wfcommon.py").is_file():
+                _OUTCOME_PATH = _cand
+                break
+        except Exception:
+            continue
+assert _OUTCOME_PATH.is_file(), f"missing plugin sibling outcome.py (looked at {_OUTCOME_PATH})"
+_outcome_spec = importlib.util.spec_from_file_location("_hermes_workflows_outcome_runner", _OUTCOME_PATH)
+assert _outcome_spec is not None and _outcome_spec.loader is not None
+_outcome = importlib.util.module_from_spec(_outcome_spec)
+_outcome_spec.loader.exec_module(_outcome)
 # Bind every name OFF the private instance above. A `from wfcommon import ...`
 # statement is an import of the GENERIC top-level name — it re-executes the
 # sibling into sys.modules as bare 'wfcommon' (the exact leak this module's
@@ -2266,6 +2290,34 @@ def _lane_hygiene_preamble(node):
     retry, bounded resume, fan-out item — carries it; def-hash-neutral by
     construction (nothing here is ever written to graph.json or a node record)."""
     return "\n".join(LANE_HYGIENE_LINES) if _is_build_lane(node) else ""
+
+# est-imp1z (WF-GRAFT-2): the NODE-OUTCOME TOKEN contract — prompt-side, grammar
+# mirrored from the peer reference (iw-recon executor/outcome.py) so both estates
+# speak one token: `{"node_outcome": "success"|"failure"}` as the tail of the final
+# reply. It rides the SAME build-shape gate as lane hygiene (golden-solo prompt
+# bytes stay frozen); the PARSE side is universal — a token from any child is
+# honored at every CLI-backed settle by wf._outcome.classify (token > transient
+# sentinels > exit code).
+OUTCOME_TOKEN_LINES = (
+    "## Node-outcome token (machine preamble)",
+    "- Your final reply MUST end with exactly one tail token on its own line, byte-exact: "
+    '`{"node_outcome": "success"}` or `{"node_outcome": "failure"}`.',
+    "- The token is your verdict on the NODE, not on your prose: declare failure whenever the "
+    "work did not land (tools died, the provider retried out, acceptance unmet) — the runner "
+    "does NOT trust a clean exit code alone, and a transient provider-error line anywhere in "
+    "your output otherwise re-drives this node.",
+    "- Declare success only when the work is genuinely banked: a declared success outranks "
+    "any transient sentinel, so the token is how finished work is protected from a spurious "
+    "retry. A missing or malformed token is ignored — the sentinels and the exit code decide.",
+)
+OUTCOME_TOKEN_PREAMBLE_TOKEN = OUTCOME_TOKEN_LINES[0]   # the gate token tests grep for
+
+def _outcome_token_preamble(node):
+    """The node-outcome token contract for build-shape nodes ("" otherwise).
+    Prompt-side only (same def-hash/record law as LANE_HYGIENE_LINES): composed in
+    run_child so every spawn of a build node carries it. The classifier that READS
+    the token is universal; the instruction rides the build shape."""
+    return "\n".join(OUTCOME_TOKEN_LINES) if _is_build_lane(node) else ""
 # jam-h22/h30 (hackathon): the rate-limit/429 SUBCLASS of transport gets
 # exponential-with-full-jitter sleeps instead of the fixed ladder — many
 # sibling children dying on the same 429 window must not retry in lockstep.
@@ -2375,6 +2427,11 @@ ERROR_CLASSES = frozenset(("provider_400", "unresolved_model", "cap_exhausted",
                            # declared lane still carries the dead attempt's
                            # uncommitted TRACKED wreckage — bank it, then re-drive.
                            "lane_wreckage",
+                           # est-imp1z (WF-GRAFT-2): the child's self-reported
+                           # node_outcome token declares failure — the node's own
+                           # verdict outranks the exit code. Deterministic by
+                           # definition: outside BOTH retry ladders.
+                           "declared_failure",
                            # est-2ek.1.856 (B3): the seat-cap knob (WORKFLOW_MAX_SEATS
                            # env / config workflows.max_seats) named a non-integer or
                            # a value outside [4, 16]. The door refuses the whole launch
@@ -5780,6 +5837,22 @@ def _adopt_child(meta, node, byid, index, child, schema, fo_cancel=None):
         # retained together with (or instead of) done, BEFORE the harvest-ONCE
         # memo freezes the verdict (a memoized done must already be honest).
         return _final_quiesce(meta, rec, "item", {"node": nid, "index": index})
+    # WF-GRAFT-2 (est-imp1z): the adopted path carries the SAME classifier law
+    # (path-invariance, est-2ek.1.541 R8): rc is unobservable for an orphan, so
+    # the capture is all we have — committing `done` on a capture whose sentinel
+    # or token contradicts it is the est-jam8 laundering shape, and the honesty
+    # must land BEFORE the harvest-ONCE memo freezes the verdict (#61b B4).
+    _ov = _outcome.classify(0, out, _outcome.parse_node_outcome(out))
+    if _ov["outcome"] == "failure":
+        return {"status": "failed",
+                "error": "adopted child's capture contradicts the done commit — "
+                         + (f"transient provider-error sentinel on its exit (never launder a "
+                            f"dead child into done). Marker: {_ov['detail']}"
+                            if _ov["kind"] == "transient" else
+                            "self-reported node_outcome token declares failure "
+                            "(deterministic: never re-driven)"),
+                "error_class": "transport" if _ov["kind"] == "transient" else "declared_failure",
+                "raw": (out or "")[-2000:], "ms": ms, "final": final_reply, **evd}
     if errs is not None and not errs:
         try: os.unlink(report_path)
         except OSError: pass
@@ -5988,6 +6061,7 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
     # then the resume preamble:
     # Both are prompt-side artifacts (logs/*.prompt.md) — never record bytes.
     preamble = "\n\n".join(p for p in (_lane_hygiene_preamble(node),
+                                        _outcome_token_preamble(node),
                                         _respawn_effects_preamble(run, meta, byid, node),
                                         resume_preamble) if p)
     # est-13z1: the BEAD LAW rides as a GOAL SUFFIX, never a prefix — the goal
@@ -6794,6 +6868,23 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
                                "gate400_clamp": target})
                     r2["attempts_log"] = al
                     return r2
+        # WF-GRAFT-2 (est-imp1z): the generic-death settle gate. Every typed
+        # deterministic class above (config_input, fatal_quota, lease_busy,
+        # malformed_turn, cap, signals, provider_400…) already returned with its
+        # own fact — this classifier reclassifies NOTHING of that. For a death
+        # that would otherwise land `unknown`, the classifier is the single gate:
+        # a line-scoped transient sentinel types it `transport` (the same
+        # retryable ladder it already fed as unknown, now with the verbatim
+        # marker), and a failure token types it `declared_failure` (terminal).
+        # A token declaring SUCCESS never launders a dead child here — rc!=0 is
+        # the runner's own fact and the harvest law above owns the answer.
+        if eclass == "unknown":
+            _ov = _outcome.classify(rc, out, _outcome.parse_node_outcome(out))
+            _otok = _outcome.parse_node_outcome(out)
+            if _ov["outcome"] == "failure" and _ov["kind"] == "transient":
+                eclass, marker = "transport", _ov["detail"]
+            elif _ov["outcome"] == "failure" and _otok == "failure":
+                eclass = "declared_failure"
         verdict = _verdict_lines(marker if marker else out)
         rec = {"status": "failed", "error": f"child exited rc={rc}: {verdict}",
                "error_class": eclass, "raw": (out or "")[-2000:], "ms": ms, "final": final_reply, **sk, **evd}
@@ -6843,6 +6934,37 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
                     "final": final_reply, **hv, **extra, **sk, **evd}
     if detached is not None:
         return {**detached, **sk, **evd}
+    # WF-GRAFT-2 (est-imp1z): exit 0 is not yet success — the pure classifier's
+    # authority order (node_outcome token > transient sentinels > exit code) is
+    # the SINGLE gate for a CLI-backed settle from here down. The lie this graft
+    # kills: the agent CLI exhausts provider retries, prints
+    # `API call failed after N retries: HTTP 429 …` as its final message, exits
+    # 0 — and extract_json's harvest-once coercion below launders that text
+    # into {result: <prose>} and the node commits `done` on garbage. kind=transient
+    # hands off to error_class `transport` — the Q4 transient ladder's gate class
+    # (its own api_calls/tool-progress guards still own the re-drive decision);
+    # a token-declared failure is `declared_failure`, outside BOTH ladders. A
+    # token declaring SUCCESS outranks the sentinels (the node knows its result)
+    # but manufactures nothing: the schema/answer law below stays in force.
+    # Typed deterministic deaths (config_input/fatal_quota/lease_busy/…) all
+    # live on the rc!=0 path and returned above this line — this classifier can
+    # never reclassify them transient.
+    ov = _outcome.classify(rc, out, _outcome.parse_node_outcome(out))
+    if ov["outcome"] == "failure":
+        if ov["kind"] == "transient":
+            return {"status": "failed",
+                    "error": f"child exited rc={rc} but its capture carries a transient "
+                             f"provider-error sentinel — exit 0 is not success (the CLI exits "
+                             f"clean on exhausted provider retries); the bounded transient "
+                             f"ladder owns the re-drive. Marker: {ov['detail']}",
+                    "error_class": "transport", "sentinel": ov["detail"],
+                    "raw": (out or "")[-2000:], "ms": ms, "final": final_reply, **sk, **evd}
+        return {"status": "failed",
+                "error": "child exited rc=0 but its self-reported node_outcome token declares "
+                         "failure — the node's own verdict outranks the exit code and any "
+                         "parseable fence; deterministic, outside both retry ladders",
+                "error_class": "declared_failure",
+                "raw": (out or "")[-2000:], "ms": ms, "final": final_reply, **sk, **evd}
     valid_answer = False
     errs = None
     if parsed is not None and perr is None:
