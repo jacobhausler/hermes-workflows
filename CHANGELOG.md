@@ -375,6 +375,19 @@ Patch release: 37 merged PRs since v1.4.0 — the door-UX version handshake (nam
   clock, exactly one `node.retry` bounded re-drive, and the below-cap `done`
   twin carrying no cap evidence anywhere).
 
+- feat(runner): capture-boundary output clip + oversized-input budget
+  (est-x92v7, peer row atbrace:hw-s53 #6). `save_node` is the persist choke:
+  every string a node record persists passes bearer redaction FIRST, then a
+  head/tail clip at `WORKFLOW_OUTPUT_CLIP` chars (default 100000); the
+  retention marker names the dropped count, the total, and the ceiling, and
+  re-persisting a clipped record is a no-op. `build_inputs` caps the assembled
+  `## Inputs` section at `WORKFLOW_INPUTS_BUDGET` chars (default 200000) and
+  refuses loudly through the typed `inputs` spawn failure past it - never a
+  silent truncate. An invalid knob value warns on stderr and the default
+  stands. Tests: tests/test_output_clip_x92v7.py (O1 oversized capture, O2
+  marker round-trip, O3 config override, I1 budget refusal, R1 redaction
+  upstream of the clip).
+
 - fix(wf): exhaustive fail-closed resolution (WF-GRAFT-4, est-f1w4u). A
   settled router no longer closes the run done: a fork (done/partial, >=2
   direct consumers) whose EVERY direct consumer sits terminal-skipped on an
