@@ -39,6 +39,21 @@ if "QFLUSH" in q:
 if "QSLEEP" in q:
     try: time.sleep(float(q.split("QSLEEP")[1].split()[0]))
     except Exception: pass
+# est-wqml6: TELEMETRY-EMIT -> mirror the real child-side recorder: write the
+# telemetry sidecar FROM THE SPAWN ENV (HERMES_WF_TELEMETRY join key +
+# HERMES_WF_RUN_DIR), atomically, before answering. The sanitizer is duplicated
+# deliberately (3 replaces, no import channel here); parity is not trusted to
+# this copy — the integration check in tests/test_node_telemetry_sidecar_wqml6.py
+# goes red if the runner can no longer join what this child wrote.
+if "TELEMETRY-EMIT" in q and os.environ.get("HERMES_WF_TELEMETRY") and os.environ.get("HERMES_WF_RUN_DIR"):
+    _tk = os.environ["HERMES_WF_TELEMETRY"].replace("/", "_").replace("\\", "_").replace(":", "_")
+    _td = os.path.join(os.environ["HERMES_WF_RUN_DIR"], "telemetry")
+    os.makedirs(_td, exist_ok=True)
+    _tp = os.path.join(_td, _tk + ".json")
+    with open(_tp + ".tmp", "w") as _tf:
+        json.dump({"api_calls": 3, "tool_calls": 2, "input_tokens": 100,
+                   "output_tokens": 40, "total_tokens": 140}, _tf)
+    os.replace(_tp + ".tmp", _tp)
 # est-pygyy (#56): EFFECT-EMIT <rel/path> BYTES=<n> — the child publishes its
 # artifact at spawn time (cwd = the child work dir <run>/work/<node>[.<i>],
 # A4), so the runner's effect-receipt gate is proven to measure bytes AT the
