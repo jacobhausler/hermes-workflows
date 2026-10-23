@@ -2343,6 +2343,12 @@ def _library_rows():
     for root in _library_roots():
         if not root.exists():
             continue
+        # est-1n7gx (collapse-to-one law): the by-name pick-one below is
+        # FIRST-SEEN and the walk order is TOTAL, not traversal luck: roots in
+        # _library_roots order (resolved before legacy, F1 #14), the general/
+        # group before the bare-root group within a root, name-ASC via sorted()
+        # inside each group — and within a group names are unique (one file per
+        # name on disk), so the key cannot tie.
         files = ([(_GENERAL_PREFIX + p.stem, p) for p in sorted((root / _GENERAL_PREFIX).glob("*.json"))]
                  if (root / _GENERAL_PREFIX).is_dir() else [])
         files += [(p.stem, p) for p in sorted(root.glob("*.json"))]
@@ -2485,7 +2491,12 @@ def act_library(args):
                 hinted += ("; empty result — killer term(s) at 0 library-wide: "
                            + ", ".join(misses) + " (spelling miss — re-check against tag_vocab)")
             else:
-                rarest = min(want, key=lambda t: counts[t])
+                # est-1n7gx (collapse-to-one law): count ASC, term ASC. The bare
+                # min(counts) broke ties on the caller's QUERY order — same corpus,
+                # different tag order, different advice. Terms are unique (norm_tags
+                # dedups), so the key cannot tie and the advice is query-order
+                # invariant; term ASC is named arbitrarily and total by law.
+                rarest = min(want, key=lambda t: (counts[t], t))
                 hinted += ("; empty result — every term exists but they never "
                            "co-occur; drop the rarest term (" + rarest
                            + ") or union with two calls")
@@ -2943,6 +2954,12 @@ def _lane_entry(key):
     # stays visible from the scoped door, so an in-flight incumbent is still deduped
     # (one-time upgrade hazard otherwise: same lane_key admits a second runner while
     # the old one lives). Writes always go to the resolved root via _lane_paths.
+    # est-1n7gx (collapse-to-one law): the incumbent pick is TOTAL — one file per
+    # key (sha256 stem) so no within-root tie exists, and between the two possible
+    # homes the resolved root always wins over the legacy twin (the probe order
+    # below: resolved first, legacy only on a resolved-side miss). A key-mismatched
+    # winning file refuses typed rather than falling through to the twin — the
+    # refusal is part of the order, not a hole in it.
     stem = hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
     entry = jload(_lane_paths(key)[0])
     if entry is None:
@@ -3933,8 +3950,13 @@ def act_status(args):
         sw = {nid: v["seat_wait"] for nid, v in st["nodes"].items() if v.get("seat_wait")}
         if sw and st.get("runner_live"):
             ages = [w["age_s"] for w in sw.values() if isinstance(w.get("age_s"), int)]
+            # est-1n7gx (collapse-to-one law): first-non-None cap scanned the dict's
+            # INSERTION order (node-state assembly luck); scan sorted(sw) — node ids
+            # are unique, so (node-name ASC) is a total scan order and every reader
+            # answers the same cap for the same run bytes.
             row.update({"reason": "seat_wait", "nodes": sorted(sw),
-                        "cap": next((w.get("cap") for w in sw.values() if w.get("cap") is not None), None),
+                        "cap": next((sw[n].get("cap") for n in sorted(sw)
+                                     if sw[n].get("cap") is not None), None),
                         "age_s": max(ages) if ages else None})
         # Wake-contract note (derive-only law honored): present ONLY when run.json
         # carries the door's owner.session_id stamp — the exact precondition that

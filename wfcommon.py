@@ -522,7 +522,11 @@ def find_run(rid):
     first that YIELDS A VIEW wins (resolved first, so an intact resolved dir is
     untouched — the legacy probe is that same rule in the legacy-only shape).
     A dir yields a view when run_state() reads a state from it. Unknown ids
-    still answer the resolved path (the create/resume shape callers rely on)."""
+    still answer the resolved path (the create/resume shape callers rely on).
+    est-1n7gx (collapse-to-one law): the total order is (roots-arg order
+    [resolved, legacy] -> iter_run_dirs' name-ASC -> first dir yielding a view);
+    two dirs with the same NAME cannot coexist within one root (directory-entry
+    uniqueness), so the pick key cannot tie and no traversal luck reaches it."""
     root = runs_root()
     legacy = launch_runs_root()
     for cand in iter_run_dirs([root, legacy] if legacy != root else [root]):
@@ -550,7 +554,14 @@ def iter_run_dirs(roots, reverse=False):
     collapse because they resolve to one path. The ONE enumeration every
     list/read-model/scan routes through, never raw `root.iterdir()`. Sorted by
     name (newest-first when reverse=True) within each root, roots taken in
-    order."""
+    order. est-1n7gx (collapse-to-one law): this enumeration's pick-one is
+    FIRST-SEEN, and the order that makes it deterministic is TOTAL — a directory
+    entry name is unique per root, so the name sort key has no ties (reverse just
+    flips the whole order, it never re-shuffles ties), and cross-root order is
+    the roots-arg order (callers pass the resolved root first). Insertion/
+    traversal order is NOT the contract anywhere below the sort: whatever the OS
+    readdir hands back, the output is fully determined by (roots-arg order, name,
+    reverse)."""
     if isinstance(roots, (str, Path)):
         roots = [roots]
     seen, out = set(), []
@@ -5109,7 +5120,15 @@ def seat_wait_view(per_index, now_s=None):
     """One node's open waits -> {since, age_s, cap, spawn[, waiting]} (oldest wait)."""
     import time as _time
     from datetime import datetime
-    oldest = min(per_index.items(), key=lambda kv: str(kv[1].get("since") or ""))[1]
+    # est-1n7gx (collapse-to-one law): TOTAL pick key — since ASC, str(idx) ASC.
+    # The bare min(since) let two waits stamped in the same second fall through to
+    # per_index dict-insertion (ledger-scan) order, so the displayed cap/spawn of
+    # the "oldest" wait were scan luck; str(idx) is unique within the node's view,
+    # so the key cannot tie (string compare, not numeric — totalness is the law,
+    # naturalness isn't). Peer law is the same shape: ORDER BY COALESCE(started_at,
+    # -1) DESC, id DESC (iw-recon runRepository.ts:143/:413).
+    oldest = min(per_index.items(),
+                 key=lambda kv: (str(kv[1].get("since") or ""), str(kv[0])))[1]
     try:
         age = int((now_s if now_s is not None else _time.time())
                   - datetime.fromisoformat(str(oldest.get("since"))).timestamp())
@@ -5411,6 +5430,9 @@ def run_state(r, *, telemetry=True, lock_state=None):
     elif all(s in ("done", "partial", "skipped") for s in states.values()):   # #4: partial closes the run
         status = "done"
     else:
+        # est-1n7gx (collapse-to-one law): declaration-order contract (see wf.py
+        # gate pick) — the read model shows the FIRST ready gate in graph.json node
+        # order, deterministic in the graph bytes for every reader.
         gate = next((n for n in graph["nodes"] if kind(n).spawns is False
                      and states[n["id"]] == "pending" and deps_ok(n)), None)
         if gate and gate.get("wait") and gate_answer_valid(r, gate, byid, fp_memo, legacy_memo) is None:
@@ -6501,6 +6523,10 @@ def current_attempt(cm, spawns):
             live[title] = cm.get(title.split("#a", 1)[0], {}).get("sessions", {}).get(title, {})
     recent = [(row["last_activity"], title, row.get("last_desc"))
               for title, row in live.items() if row.get("last_activity") is not None]
+    # est-1n7gx (collapse-to-one law): the max key is TOTAL by construction — the
+    # session TITLE (tuple position 1) is a live-dict key, hence unique, so the key
+    # cannot tie and same-second activity twins resolve to the lexically-greater
+    # title, never to live-dict insertion order. Pinned by tests/test_tiebreak_law_1n7gx.py S10.
     last, _, desc = max(recent) if recent else (None, None, None)
     return {"live": len(live), "last_activity": last, "last_desc": desc}
 

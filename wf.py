@@ -3148,10 +3148,22 @@ def _clean_capture(text):
 
 def _work_files(run, node, index):
     """(wd, files) of the child's durable work dir, newest-mtime first — the ONE
-    walk _banked_work and _bank_the_corpse share. Raises OSError."""
+    walk _banked_work and _bank_the_corpse share. Raises OSError.
+
+    est-1n7gx (WF-GRAFT-7): the key is a TOTAL order — mtime DESC, ties broken by
+    relative path ASC. The bare-mtime key left ties in rglob's filesystem-walk
+    order, and same-second mtime granularity is routine on coarsely-timestamped
+    filesystems: two artifacts sharing an mtime made the head of this list — the
+    banked manifest's `last_written`, the resume inventory's first artifact —
+    directory-traversal luck. The path tie-break is arbitrary BY CHOICE and total
+    BY LAW (relative paths are unique per walk, the key cannot tie): every
+    consumer of this order sees the same head on the same bytes. Mirrors the
+    peer's SQL law `ORDER BY COALESCE(started_at,-1) DESC, id DESC`
+    (iw-recon runRepository.ts:143/:413)."""
     wd = child_work_dir(run, node, index)
     return wd, sorted((f for f in wd.rglob("*") if f.is_file()),
-                      key=lambda f: f.stat().st_mtime, reverse=True)
+                      key=lambda f: (-f.stat().st_mtime,
+                                     f.relative_to(wd).as_posix()))
 
 CORPUS_MAX_BYTES = 16 << 20   # #131 snapshot budget; files past it are manifest-only
 
@@ -3159,8 +3171,10 @@ def _bank_the_corpse(run, node, index, spawn, out):
     """#131 bank-the-corpse: on a wall-kill (timed_out, BOTH wait paths) write
     nodes/<_node_file>.corpus/ = work/ (snapshot of the durable work dir, newest
     first under CORPUS_MAX_BYTES), stdout_tail.txt (out[-4000:]) and
-    manifest.json (every file + size + mtime, newest first; last_written = the
-    newest), then log ONE node.banked line. Returns the corpus path for the
+    manifest.json (every file + size + mtime, newest first; ties by relative path
+    ASC — the ONE total order of _work_files, est-1n7gx; last_written = rows[0],
+    i.e. the head of that total order, never traversal luck), then log ONE
+    node.banked line. Returns the corpus path for the
     death record's `banked` pointer. Honest-empty: ANY failure logs node.banked
     with error= and returns None — it never raises, so it can never move the
     timeout verdict. Deterministic: the canonical pointer nodes/<_node_file>.corpus
@@ -3282,14 +3296,22 @@ def _resume_hint_block(run, node, index, attempts_log=None):
     if not (node or {}).get("id") or flag is False:
         return ""
     try:
-        wd = child_work_dir(run, node, index)
-        work = sorted((f for f in wd.rglob("*") if f.is_file()),
-                      key=lambda f: f.stat().st_mtime, reverse=True)
+        # est-1n7gx: ride the ONE walk (total order mtime DESC, relpath ASC) —
+        # the resume inventory and the banked manifest can never disagree about
+        # the head of the same bytes.
+        wd, work = _work_files(run, node, index)
         stem = re.sub(r"[^A-Za-z0-9_.-]", "_", str(node["id"])) + \
             (f".{index}" if index is not None else "")
         own = re.compile(re.escape(stem) + r"\.a\d+\.log")   # node-exact: x never takes x.audit.a0.log
+        # est-1n7gx: TOTAL order — mtime DESC with the spawn/attempt index as the
+        # in-name discriminator (attempt DESC: the bigger spawn index is the later
+        # attempt, the same time signal mtime carries; own.fullmatch guarantees a
+        # parseable number, so the key cannot tie). Peer law is id DESC for
+        # exactly this shape (iw-recon runRepository.ts:143/:413).
         logs = sorted((f for f in (run / "logs").glob(stem + ".a*.log") if own.fullmatch(f.name)),
-                      key=lambda f: f.stat().st_mtime, reverse=True)
+                      key=lambda f: (f.stat().st_mtime,
+                                     int(re.search(r"\.a(\d+)\.log$", f.name).group(1))),
+                      reverse=True)
     except OSError:
         work, logs = [], []
     if flag is not True and not work:
@@ -7732,6 +7754,10 @@ def run_agent_node(run, meta, byid, node, outputs, steering):
             # every item answered or NAMED missing) at the wave boundary. batch=1 is
             # "as they finish"; batch=N batches; the open batch always flushes with
             # its tail NAMED at wave end / stop / quorum — never silently dropped.
+            # est-1n7gx (collapse-to-one law): byid.values() iteration = graph
+            # declaration order (byid is built in node-list order), so a fan with
+            # (validator-legal) multiple partners picks the first DECLARED one —
+            # deterministic in the graph bytes, the same contract as the gate pick.
             cons_partner = next((m for m in byid.values()
                                  if isinstance(m.get("consolidate"), dict)
                                  and m["consolidate"].get("from") == nid), None)
@@ -9424,6 +9450,10 @@ def main(run_id):
         if m == "stopped": return "stopped"
         if m == "reloaded": continue
 
+        # est-1n7gx (collapse-to-one law): declaration-order contract, named here —
+        # when several gates are simultaneously ready (branch twins), the pick is the
+        # GRAPH's own node enumeration (deterministic in graph.json bytes), never fs
+        # or dict luck. This is scheduling over the declared DAG, not a data collapse.
         gate = next((n for n in rs.nodes if kind(n).spawns is False and states[n["id"]] == "pending"
                      and deps_ok(n) and (not n.get("requires") or deps_res(n))), None)
         if gate:

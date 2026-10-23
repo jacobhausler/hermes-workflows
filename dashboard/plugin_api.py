@@ -223,6 +223,13 @@ def _list_runs():
     # ONE batch probe child + ONE ledger read for the whole census now; _view
     # consumes the pre-observed per-dir lock state (zero extra probes).
     scanned = list(common.iter_run_dirs(roots, reverse=True))
+    # est-1n7gx (collapse-to-one law): the row order and the by-id pick-one below
+    # are TOTAL, not traversal luck: iter_run_dirs name-DESCs within each root
+    # (names unique per root — the key cannot tie) and takes roots in argument
+    # order (resolved first, legacy second), so `seen` first-seen dedupe always
+    # keeps the resolved-root row when two physically-distinct dirs carry the
+    # same view id. A torn dir never reaches `seen` (no row, no counter), so a
+    # valid twin behind it still lands.
     _lock_states = common.runner_lock_states(scanned)
     for r in scanned:
         v = _view(r, lock_state=_lock_states.get(r))
