@@ -111,7 +111,7 @@ def s1():
     with patch.object(Path, "rglob", adv):
         wd2, files = wf._work_files(run, {"id": "solo"}, None)
     got = [f.relative_to(wd2).as_posix() for f in files]
-    want = ["new.txt", "a.txt", "sub/z.txt", "b.txt"]
+    want = ["new.txt", "a.txt", "b.txt", "sub/z.txt"]   # as_posix string ASC: b < sub
     check("S1 wf._work_files total order (mtime DESC, relpath ASC)",
           got == want, f"got {got} want {want}")
 
