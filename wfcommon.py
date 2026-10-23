@@ -2017,9 +2017,11 @@ def validate_graph_errors(nodes, *, admission=False):
                 if a in anc or a not in idset:
                     continue
                 anc.add(a); stack.extend(parents[a])
-            if ofk != "skip":
+            if ofk not in ("skip", "abort"):   # WF-GRAFT-4: 'abort' is the other closed keyword
                 tgt = byid_of.get(ofk) if isinstance(ofk, str) else None
                 if not isinstance(ofk, str) or tgt is None:
+                    # message test-locked by test_on_fail_h23; the keyword set is
+                    # documented honestly in references/grammar.md (on_fail).
                     E(nid, "on_fail", f"on_fail {ofk!r} must be 'skip' or an existing node id")
                 elif tgt.get("type") != "agent":
                     E(nid, "on_fail", f"on_fail target {ofk!r} must be an agent node")
@@ -4709,6 +4711,59 @@ def when_true(gate, outputs):
         raise ValueError("when: trailing tokens")
     return bool(val)
 
+# ---------- WF-GRAFT-4 (est-f1w4u): fail-closed run resolution ----------
+# Two laws the runner and the read model SHARE (the release_law precedent: one
+# function, two callers, no drift between what the runner enforces at the
+# boundary and what a cold reader sees over the same run dir).
+
+def run_abort_flag(r):
+    """The persisted run-dir abort flag, or None. `abort.json` {node, source,
+    reason, at} is written atomically by the runner on an on_fail:"abort" death
+    or a zero-item fan-out with no else-arm — a file, so it survives a runner
+    restart; the FIRST flag wins (the original abort is the cause). An
+    unreadable or garbage file is no flag: the verdict stands on parsed facts,
+    never on a stub."""
+    ab = jload(Path(r) / "abort.json", {}) or {}
+    return ab if isinstance(ab, dict) and ab.get("node") else None
+
+def dead_end_forks(nodes, states, rec_of=None):
+    """Fork ids whose every edge is UNTAKEN: a node settled done/partial with
+    >=2 direct consumers (after-edges) where EVERY consumer sits terminal-skipped
+    on an untaken edge — a false `when`, the all-deps-pruned cascade, a gate
+    skip. The skip-record discriminator: a consumer output {skipped:'on_fail'}
+    means the edge WAS TAKEN (the flow reached the arm, the death was caught,
+    the author tolerated it) and disqualifies the fork; an on_skip:'pass' arm
+    commits `done` and disqualifies it too. A single-consumer conditional tail
+    stays legitimate — never a fork. Returns [] when no router is fully dead."""
+    byid = {n["id"]: n for n in nodes if isinstance(n.get("id"), str)}
+    consumers = {nid: [] for nid in byid}
+    for n in nodes:
+        if n.get("id") not in byid:
+            continue
+        for a in n.get("after") or []:
+            if a in consumers:
+                consumers[a].append(n["id"])
+    forks = []
+    for n in nodes:
+        nid = n.get("id")
+        if not isinstance(nid, str) or states.get(nid) not in ("done", "partial"):
+            continue
+        cs = consumers.get(nid) or []
+        if len(cs) < 2:
+            continue
+        every_edge_dead = True
+        for c in cs:
+            if states.get(c) != "skipped":
+                every_edge_dead = False
+                break
+            out = ((rec_of(c) if rec_of else None) or {}).get("output")
+            if isinstance(out, dict) and out.get("skipped") == "on_fail":
+                every_edge_dead = False   # edge taken; the death was caught on purpose
+                break
+        if every_edge_dead:
+            forks.append(nid)
+    return forks
+
 # ---------- the ONE read model ----------
 
 WAIT_KEYS = {"wait_s", "until_argv", "every_s", "timeout_s"}
@@ -5406,10 +5461,17 @@ def run_state(r, *, telemetry=True, lock_state=None):
         # est-3acn: a RunBudget-capped run that finalized gracefully (the event
         # is the fact; the runner_exit verdict below outranks it when present).
         status = "partial"
+    elif run_abort_flag(r):
+        # WF-GRAFT-4 (est-f1w4u): a persisted abort flag outranks every branch
+        # verdict short of an explicit stop/partial close — aborted > (done).
+        status = "failed"
     elif any(s == "failed" for s in states.values()):
         status = "failed"
     elif all(s in ("done", "partial", "skipped") for s in states.values()):   # #4: partial closes the run
-        status = "done"
+        # WF-GRAFT-4: all-settled over a dead-end router is a FAILED close,
+        # never a silent idle — the same scan the runner applies pre-finalize.
+        status = "failed" if dead_end_forks(graph["nodes"], states,
+                                            lambda c: recs.get(c) or {}) else "done"
     else:
         gate = next((n for n in graph["nodes"] if kind(n).spawns is False
                      and states[n["id"]] == "pending" and deps_ok(n)), None)

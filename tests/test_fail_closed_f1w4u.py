@@ -79,7 +79,12 @@ def echo(id, output, after=()):
     return {"id": id, "type": "echo", "after": list(after), "output": output}
 
 def events(r):
-    return [json.loads(l) for l in (r / "events.jsonl").read_text().splitlines() if l.strip()]
+    # An admission death writes no events file; the verdict assertions must not
+    # crash before they can report the RED.
+    p = r / "events.jsonl"
+    if not p.exists():
+        return []
+    return [json.loads(l) for l in p.read_text().splitlines() if l.strip()]
 
 def rec(r, nid):
     p = r / "nodes" / f"{nid}.json"

@@ -9,6 +9,23 @@
   Tests: tests/test_graph_legacy_pin_hw_sl0.py.
 ## Unreleased
 
+- fix(wf): exhaustive fail-closed resolution (WF-GRAFT-4, est-f1w4u). A
+  settled router no longer closes the run done: a fork (done/partial, >=2
+  direct consumers) whose EVERY direct consumer sits terminal-skipped on an
+  UNTAKEN edge (when-false, prune cascade, gate skip) commits the run FAILED
+  naming the fork (`run.blocked error_class=dead_end` + WORKFLOW_FAILED),
+  never a silent idle; a consumer skipped via the on_fail catch is a TAKEN
+  edge (author-tolerated) and never counts. A persisted run-dir `abort.json`
+  {node, source, reason, at} (atomic, first flag wins, survives a runner
+  restart) forces the failed verdict and outranks every done branch: sources
+  are the new `on_fail:"abort"` keyword (handled before the fallback-agent
+  lookup; the failed status STANDS — never converted to skipped) and a
+  zero-item fan-out with no `on_fail:"<agent-id>"` else-arm (flag set
+  alongside `fanout_empty`, even under `on_fail:"skip"`). The flag is checked
+  first at every quiescent boundary — before the on_fail-catch opportunity
+  and before finalize-done — and a flagged run spawns nothing new (in-flight
+  waves drain, never killed). Tests: tests/test_fail_closed_f1w4u.py.
+
 - fix(watchdog): the fanout.stragglers disc formats a missing launch stamp as
   the `'q'` literal, never through `:.3f` (est-waf8y, est-c0jo1 passport D1).
   An open item queued behind a saturated fan-out cap has no launch stamp; the

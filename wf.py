@@ -7571,6 +7571,18 @@ def run_agent_node(run, meta, byid, node, outputs, steering):
                                             "error_class": "fanout_empty",
                                             "output": {"items": []}})
                 log(run, "node.failed", node=nid, error="fanout empty", error_class="fanout_empty", attempts=0)
+                _of = node.get("on_fail")
+                if not (isinstance(_of, str) and _of not in ("skip", "abort")):
+                    # WF-GRAFT-4: a zero-item fan-out with NO else-arm is a dead
+                    # branch, not a no-op — flag the run IN ADDITION to the node
+                    # death. The only else-arm shape this grammar has is an
+                    # on_fail:"<agent-id>" fallback: with one declared, the
+                    # existing catch path owns the death and NO flag is set.
+                    # 'skip' sets the flag too — a fan-out that yielded no work
+                    # is not a death an author tolerated, and the abort
+                    # outranks the catch at the boundary anyway.
+                    _set_abort_flag(run, nid, "fanout_empty",
+                                    "fanout resolved to no items and no else-arm fallback")
                 return
             cap = min(len(items), meta.get("item_concurrency", 8))
             results = [None] * len(items)
@@ -8393,6 +8405,23 @@ def _mint_suite_proof(run, node, rec, byid):
     tmp.write_text(json.dumps(tok))
     os.replace(tmp, p)   # atomic: a token is a committed fact like a node record
 
+def _set_abort_flag(run, node_id, source, reason=None):
+    """WF-GRAFT-4 (est-f1w4u): persist the run's abort flag — run-dir
+    abort.json {node, source, reason, at}, atomic tmp+os.replace (a flag is a
+    committed fact like a node record), so it survives a runner restart. The
+    FIRST flag wins: the original abort is the cause; a later source never
+    overwrites it."""
+    if wfcommon.run_abort_flag(run):
+        return
+    p = run / "abort.json"
+    rec = {"node": str(node_id), "source": str(source), "at": now(),
+           "reason": (str(reason)[:300] if reason else None)}
+    tmp = p.with_name(f"abort.json.{os.getpid()}.tmp")
+    tmp.write_text(json.dumps(rec, ensure_ascii=False))
+    os.replace(tmp, p)   # atomic: durable abort fact
+
+_abort_flag = wfcommon.run_abort_flag   # ONE read of the flag, shared with the read model
+
 def _on_fail_catch(run, rs, states):
     """jam-h23 on_fail: a caught agent death becomes the join-tolerant `skipped`
     terminal commit instead of blocking the run. ONE interception point at the
@@ -8411,6 +8440,19 @@ def _on_fail_catch(run, rs, states):
             continue
         of = n.get("on_fail")
         if of is None:
+            continue
+        if of == "abort":
+            # WF-GRAFT-4: the abort keyword is handled BEFORE the fallback-agent
+            # lookup — the same precedence shape as 'skip' vs an agent named
+            # 'skip'. The flag persists; the failed status STANDS, an abort is
+            # never laundered into a tolerated skip. caught=True only re-makes
+            # states: the boundary's abort check on the next pass commits the
+            # typed failed verdict before any catch could convert anything.
+            _, rec = node_rec(run, n, rs.byid)
+            _set_abort_flag(run, n["id"], "on_fail_abort", (rec or {}).get("error"))
+            log(run, "node.on_fail", node=n["id"], on_fail="abort",
+                caught_error_class=(rec or {}).get("error_class"))
+            caught = True
             continue
         if of != "skip":
             fb = rs.byid.get(of)
@@ -8725,7 +8767,10 @@ def _terminal_status(reason):
         return reason
     if str(reason).startswith("crashed:"):
         return "crashed"
-    if str(reason).startswith("blocked by failed ") or reason == "graph stuck":
+    if str(reason).startswith("blocked by failed ") or str(reason).startswith("aborted by ") \
+            or reason == "graph stuck":
+        # WF-GRAFT-4: an aborted run is terminal-failed — the on_exit postmortem
+        # sees status=failed, never a hole where the verdict reads as neither.
         return "failed"
     return None
 
@@ -9342,6 +9387,14 @@ def main(run_id):
         ready = [n for n in rs.nodes if kind(n).spawns is True and states[n["id"]] == "pending"
                  and not n.get("consolidate")          # est-fanout-cell: boundary commit above
                  and deps_ok(n) and deps_res(n)]
+        if ready and _abort_flag(run):
+            # WF-GRAFT-4 precedence: a flagged run spawns NOTHING NEW. This point
+            # is post-wave at every iteration, so in-flight work has drained (we
+            # never kill a live wave); the abort verdict below names the flagged
+            # node and closes the run typed.
+            log(run, "run.spawn_refused", nodes=[n["id"] for n in ready],
+                error_class="aborted", flag=_abort_flag(run))
+            ready = []
         if ready:
             spawnable = []
             for n in ready:
@@ -9528,6 +9581,20 @@ def main(run_id):
                         log(run, "gate.expired", node=gate["id"], held_s=held_s)
                 time.sleep(0.5)
             continue   # top of loop: the answer reads exactly like a human release
+        _ab = _abort_flag(run)
+        if _ab:
+            # WF-GRAFT-4: the persisted abort flag is checked FIRST at this
+            # quiescent boundary — before the on_fail-catch opportunity and
+            # before finalize-done. A flagged run commits failed (reason
+            # "aborted by <node>") regardless of any branch later going done.
+            log(run, "run.blocked", failed=[], blocked=[], aborted=_ab,
+                error_class="aborted")
+            emit(f"WORKFLOW_FAILED {run_id} (aborted by {_ab.get('node')})")
+            notify(run, "run.failed", key=f"aborted by {_ab.get('node')}", graph=rs.graph)
+            m = consume_markers()
+            if m == "stopped": return "stopped"
+            if m == "reloaded": continue
+            return f"aborted by {_ab.get('node')}"
         failed = [n for n in rs.nodes if states[n["id"]] == "failed"]
         if failed:
             # jam-h23: give every on_fail catch one chance at this quiescent
@@ -9550,6 +9617,20 @@ def main(run_id):
             if m == "reloaded": continue
             return "blocked by failed " + ",".join(n["id"] for n in failed)
         if all(states[n["id"]] in ("done", "partial", "skipped") for n in rs.nodes):   # #4: a harvested partial closes the run
+            _forks = wfcommon.dead_end_forks(
+                rs.nodes, states,
+                lambda c: jload(run / "nodes" / f"{c}.json", {}) or {})
+            if _forks:
+                # WF-GRAFT-4: a settled router with NO satisfiable edge is a
+                # failed close naming the fork(s) — never a finalize done.
+                log(run, "run.blocked", failed=_forks, blocked=[],
+                    error_class="dead_end", forks=_forks)
+                emit(f"WORKFLOW_FAILED {run_id} (dead end at fork {','.join(_forks)})")
+                notify(run, "run.failed", key="dead end", graph=rs.graph)
+                m = consume_markers()
+                if m == "stopped": return "stopped"
+                if m == "reloaded": continue
+                return "blocked by failed dead_end at " + ",".join(_forks)
             unreceipted = []
             for n in rs.nodes:
                 if states[n["id"]] == "skipped":
@@ -9605,6 +9686,7 @@ def main(run_id):
                     (reason.startswith("held at ") or
                      reason.startswith("blocked by failed ") or
                      reason.startswith("blocked by effect receipt ") or
+                     reason.startswith("aborted by ") or
                      reason == "graph stuck")):
                 break
             # Terminal handoff fence: make liveness false BEFORE the final action
