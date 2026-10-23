@@ -573,6 +573,62 @@ def _wake_safe(value):
         text = pat.sub("[redacted]", text)
     return text
 
+# WF-GRAFT-11 (est-x92v7, peer row atbrace:hw-s53 #6): the size clip at the persist
+# choke. Every string a node record persists goes through bearer redaction FIRST
+# (redaction stays UPSTREAM of the clip: a cut must never split a credential shape
+# and leave half of it readable), then a head/tail clip at the ceiling. Operator
+# knobs are read fresh at every use (same law as the seat cap): WORKFLOW_OUTPUT_CLIP
+# and WORKFLOW_INPUTS_BUDGET, both in chars. An invalid knob value warns on stderr
+# and the default stands: honest degradation, never a runner death over a malformed
+# ceiling, and never a silent adoption of the default either.
+OUTPUT_CLIP_DEFAULT = 100_000
+INPUTS_BUDGET_DEFAULT = 200_000
+
+def _int_knob(name, default):
+    raw = (os.environ.get(name) or "").strip()
+    if not raw:
+        return default
+    try:
+        v = int(raw)
+    except ValueError:
+        v = 0
+    if v < 1:
+        print(f"WORKFLOW_KNOB_WARN {name}={raw!r} is not a positive integer; using {default}",
+              file=sys.stderr, flush=True)
+        return default
+    return v
+
+def clip_head_tail(text, ceiling):
+    """text unchanged when within the ceiling; otherwise the first `head` chars, a
+    retention marker naming dropped/total/ceiling, and the last `tail` chars. The
+    result never exceeds the ceiling. Re-clipping a clipped value is a no-op (the
+    marker keeps the record under the ceiling), so the store is idempotent."""
+    if len(text) <= ceiling:
+        return text
+    def marker(dropped):
+        return (f"…[clipped {dropped} of {len(text)} chars; "
+                f"head+tail retained; ceiling {ceiling}]…")
+    budget = ceiling - len(marker(len(text)))   # widest marker: dropped < len(text)
+    if budget < 1:
+        return marker(len(text))[:ceiling]
+    head = (budget + 1) // 2
+    tail = budget - head
+    return text[:head] + marker(len(text) - (head + tail)) + (text[-tail:] if tail else "")
+
+def _clip_record(rec):
+    """save_node's redact-then-clip walk: every string leaf redacted, then clipped
+    to WORKFLOW_OUTPUT_CLIP. Non-string leaves pass through untouched."""
+    ceiling = _int_knob("WORKFLOW_OUTPUT_CLIP", OUTPUT_CLIP_DEFAULT)
+    def walk(v):
+        if isinstance(v, str):
+            return clip_head_tail(_wake_safe(v), ceiling)
+        if isinstance(v, dict):
+            return {k: walk(x) for k, x in v.items()}
+        if isinstance(v, list):
+            return [walk(x) for x in v]
+        return v
+    return {k: walk(v) for k, v in dict(rec).items()}
+
 # AUTHORITY LAW (owner ruling, PR#97 review, r5): notify() accepts NO caller-authored
 # owner text at all. The role:user content is built HERE from a finite map of events,
 # so no call site — present or future — can interpolate graph question/options/context,
@@ -1625,7 +1681,7 @@ def ready_stamp(run):
             pass
 
 def save_node(run, node, byid, rec):
-    rec = dict(rec)
+    rec = _clip_record(dict(rec))   # persist choke: redact-then-clip (est-x92v7)
     rec["efp"] = efp(byid, node)
     rec["fp_rule_version"] = FP_RULE_VERSION
     p = run / "nodes" / f"{node['id']}.json"
@@ -9011,7 +9067,19 @@ def build_inputs(run, node, outputs):
                 continue
             return "", f"inputs: {ref} not resolvable"
         blocks.append(_inputs_block(ref, val, INPUTS_CAP))
-    return "## Inputs\n\n" + "\n\n".join(blocks), None
+    # est-x92v7: a per-block cap keeps every block honest, but pathological fan-in
+    # (many parents) can still assemble a section no child prompt should carry. The
+    # total gets a budget too: past it the node REFUSES at spawn through the same
+    # typed `inputs` failure an unresolvable ref uses, never a silent truncate.
+    section = "## Inputs\n\n" + "\n\n".join(blocks)
+    budget = _int_knob("WORKFLOW_INPUTS_BUDGET", INPUTS_BUDGET_DEFAULT)
+    if len(section) > budget:
+        big_block = max(blocks, key=len) if blocks else ""
+        return "", (f"inputs: assembled {len(section)} chars exceeds the {budget}-char "
+                    f"input budget (largest block {big_block.splitlines()[0]!r} at "
+                    f"{len(big_block)} chars); narrow the node's inputs or raise "
+                    f"WORKFLOW_INPUTS_BUDGET: refused loudly, never silently truncated")
+    return section, None
 
 # ---------- machine-answered gates (P4, jury form) ----------
 

@@ -128,7 +128,7 @@ Rules that bite:
   once, logged — `provider_400` stands only when nothing clamps; then read the
   server's message and pick from that list.
 - **`after` orders AND injects.** Every direct parent's committed output lands under
-  `## Inputs` automatically (8 KB per parent). Use `inputs:["a.key"]` only to pick a
+  `## Inputs` automatically (8 KB per parent; whole assembled section refused at spawn past `WORKFLOW_INPUTS_BUDGET` chars — loud, never silently truncated; est-x92v7). Use `inputs:["a.key"]` only to pick a
   dotted path or a non-parent ancestor, or `fanout.items_from:"a.items"`. A missing
   path fails at spawn — the one exception (#473): an explicit `inputs:` ref whose
   head committed `skipped` resolves to a labelled skipped-sentinel block carrying the
@@ -136,6 +136,7 @@ Rules that bite:
   data instead of an `error_class:"inputs"` spawn crash; a head that never committed, or
   committed `done` without that path, still hard-fails (references/grammar.md,
   when/on_skip).
+
 - **Shared settings go in `defaults`, once.** `defaults:{schema, timeout, max_turns,
   reasoning, provider, model, context}` at graph level; `shape:recon|build|review|publish`
   sizes budgets from measured presets. A `schema` makes the runner write the reply
@@ -300,6 +301,10 @@ publication guards, and crash recovery.
   (its durable work dir), `stdout_tail.txt` and `manifest.json` (`last_written` first); one
   `node.banked` event, and the death record's `banked` points at it. A failed bank logs
   `node.banked` with `error` and never changes the timeout verdict.
+- Capture clip (est-x92v7): every string a node record persists passes bearer redaction at the
+  save choke FIRST, then a head/tail clip at `WORKFLOW_OUTPUT_CLIP` chars (default 100000); the
+  retention marker names the dropped count, the total, and the ceiling, and re-persisting a
+  clipped record is a no-op. An oversized captured output is never stored whole.
 - A run with unfinished work and no live runner is `interrupted`. Inspect committed
   outputs, then `wait` to resume — finished nodes replay-skip by fingerprint.
 - **Partial-rescue law (#134):** the sole recovery state of a run is the committed

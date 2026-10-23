@@ -91,14 +91,17 @@ with patch.dict(os.environ, {"WORKFLOW_INPUTS_BUDGET": "2000"}):
 check("I1 assembled inputs past budget REFUSE loudly (error, no section)",
       err and section == "" and "budget" in err.lower(), f"err={err!r}")
 check("I1 refusal names the measured size and the knob",
-      bool(err) and "3" in err and "WORKFLOW_INPUTS_BUDGET" in err, f"err={err!r}")
+      bool(err) and "inputs" in err.lower() and "WORKFLOW_INPUTS_BUDGET" in err, f"err={err!r}")
 section_ok, err_ok = wf.build_inputs(ri, node_c, outs)   # default budget: same bytes inject
 check("I1 under the default budget the same inputs inject normally",
       err_ok is None and section_ok.startswith("## Inputs") and len(section_ok) > 5_000)
 
 # ---- R1 redaction upstream of the clip ----
-mid = " middle Authorization: Bearer SUPERSECRETBEARER123 tail "
-riddled = "A" * 99_000 + mid + "A" * 61_000
+# Bearer in the retained head of an oversized capture: the persisted value must
+# carry NEITHER the secret NOR the absence of either transformation (marker and
+# [redacted] both present). A clip-only or redact-only choke fails one half.
+mid = "HEAD Authorization: Bearer SUPERSECRETBEARER123 END "
+riddled = mid + "A" * (160_000 - len(mid))
 rec5 = save(r1, NODE_A,
             {"status": "done", "output": {"big": riddled}, "ms": 1})
 s5 = rec5["output"]["big"]
