@@ -386,12 +386,7 @@ same gates ([.github/workflows/ci.yml](.github/workflows/ci.yml)).
 
 ### 4b′. Navigate with the knowledge graph (optional)
 
-[`graphify`](https://github.com/Graphify-Labs/graphify) builds a code-navigation
-graph locally (`uv tool install graphifyy` → `graphify update .`; query/path/
-affected/god-nodes; `.graphifyignore` ships). Exploration aid, not a gate: never
-committed, CI never builds it, a `graphify-out/` in your PR diff is deleted by
-review. Source and tests are the spec. (`scripts/graph_diagram.py` +
-`diagram_readme.py` are unrelated — they draw the `examples/README.md` diagrams.)
+Optional AST-only exploration aid, folded to [references/graphify-navigation.md](references/graphify-navigation.md) to keep this file inside the hint cap. Never a gate; never committed.
 
 ### 4c. Rules
 
@@ -450,11 +445,7 @@ python3 scripts/pack.py                            # artifacts/hermes-workflows-
 git tag v<version> && git push --tags
 ```
 
-The catalog entry pins a full 40-char commit SHA
-([docs/catalog/entry.yaml](docs/catalog/entry.yaml)); bump it in a PR to
-`NousResearch/hermes-agent` → `plugin-catalog/hermes-workflows.yaml`.
-
-Cross-estate joint eng protocol v1 is the SSOT mirrored publicly at [issue #174](https://github.com/jacobhausler/hermes-workflows/issues/174), sha256 `a7f424c5be3f5d6d1cbeb590f6cd02b6699a60090a3a45646853c67b2360345b` (of the issue body including its trailing newline); private working copy: `jacobhausler/joint-eng-protocol@0bf569a`, file `docs/specs/hermes-workflows-joint-eng-protocol-v1.md`.
+Catalog entry SHA + the cross-estate joint-eng protocol pointer: [references/release-and-catalog.md](references/release-and-catalog.md).
 
 ---
 
