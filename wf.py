@@ -3907,9 +3907,13 @@ def _schema_failed_answer(out, schema):
 # lane's answer COMPLETE on disk in its durable work dir, zero stdout fence,
 # the runner dead-lettering it at the wall. The writer half rides the prompt
 # (CONTRACT + WORK_DIR_NOTE tell the child to write answer.json as soon as the
-# answer is complete); the reader half is this helper, consulted at the exact
-# sites _harvest_death is consulted (wall / cap_exhausted / rc!=0, spawn AND
-# adopted paths; `cancelled` never reaches it and never adopts).
+# answer is complete); the reader half is this helper, consulted at every death
+# site where an answer-first file can be adopted — SEVEN of the NINE sites that
+# consult _harvest_death: wall, cap_exhausted, rc!=0 and external-kill on the
+# spawn path, both adopted paths, and the #61 exit-0-with-live-tree gate. The
+# two exclusions are deliberate and law-pinned: `_cancel_evidence` (~3126) and
+# `_harvest_cancelled` (~3143) ride the `cancelled` class, which never adopts by
+# I2 law. Every excluded/wired site is asserted in the focused test.
 WORKDIR_ANSWER_FILE = "answer.json"
 
 def _harvest_source(hv):
@@ -6684,8 +6688,15 @@ def _adopt_child(meta, node, byid, index, child, schema, fo_cancel=None):
     skey_base = str(child.get("skey") or "").split("#a", 1)[0] or None
     try:
         started_epoch = datetime.fromisoformat(str(child.get("started"))).timestamp()
+        harvest_anchor = started_epoch      # est-c4wx4: the mtime guard's anchor
     except (TypeError, ValueError):
+        # The deadline math below has always degraded to "now" on an unparseable
+        # start (a live child still gets a wall). The est-c4wx4 guard does NOT
+        # inherit that fallback: with no honest spawn instant there is no way to
+        # tell this attempt's answer.json from a previous attempt's, so adoption
+        # fails closed — the same law as `spawn_started is None`.
         started_epoch = time.time()
+        harvest_anchor = None
     wall = node.get("timeout", meta.get("node_timeout", 900))
     deadline = started_epoch + wall if wall is not None else float("inf")
     timed_out = cancelled = extended = False
@@ -6786,7 +6797,7 @@ def _adopt_child(meta, node, byid, index, child, schema, fo_cancel=None):
             evd["banked"] = bk
         hv = _harvest_death(out, harvest_schema)
         if hv is None:                            # est-c4wx4: answer-first workdir adopt
-            hv = _harvest_workdir(run, node, index, harvest_schema, started_epoch)
+            hv = _harvest_workdir(run, node, index, harvest_schema, harvest_anchor)
         if hv:
             return {"status": "partial", "error": f"adopted child exceeded its re-armed wall "
                     f"(answer harvested from {_harvest_source(hv)})", "error_class": "timeout",
@@ -6886,7 +6897,7 @@ def _adopt_child(meta, node, byid, index, child, schema, fo_cancel=None):
                 "ms": ms, "final": final_reply, **evd}
     hv = _harvest_death(out, harvest_schema)   # #4 law applies to adopted deaths too
     if hv is None:                             # est-c4wx4: answer-first workdir adopt
-        hv = _harvest_workdir(run, node, index, harvest_schema, started_epoch)
+        hv = _harvest_workdir(run, node, index, harvest_schema, harvest_anchor)
     if hv:
         return {"status": "partial", "error": "adopted child died before exit was observable "
                 f"(answer harvested from {_harvest_source(hv)})", "error_class": tclass or "unknown",
@@ -8031,9 +8042,17 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
     # prose coercion — coerced progress chatter is exactly the lie this gate
     # refuses. Dead-or-empty returns None and every verdict below is the
     # pre-#61 path, byte-identical.
+    _hv_schema = strip_engine_disclosure(schema, (node or {}).get("substrate_substituted"))
+    hv = _harvest_death(out, _hv_schema)
+    if hv is None:   # est-c4wx4: answer-first covers this gate too. An exit-0 spawn
+        # whose tree outlived the turn is the SAME disease as a wall death — the work
+        # is done, the answer is on disk, only the fence is missing. Without the
+        # fallback this site answers "progress, not a result" and fails the node
+        # (kind "failed") while a harvestable answer sat in the work dir; with it the
+        # gate routes to `partial` exactly as #61 intends.
+        hv = _harvest_workdir(run, node, index, _hv_schema, t0)
     tree_note = _account_tree(meta, node, index, spawn_no, proc.pid,
-                              tree_seen, bool(hv := _harvest_death(out, strip_engine_disclosure(
-                                  schema, (node or {}).get("substrate_substituted")))))
+                              tree_seen, bool(hv))
     if tree_note is not None:
         kind, extra = tree_note
         if kind == "fail":
@@ -8053,12 +8072,15 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
             # outlived the turn — commit it as partial, never a silent done.
             # (hv: the stripped-schema harvest computed at the gate above —
             # same view as every other harvest path, #116 disclosure out.)
+            # est-c4wx4: the label rides `_harvest_source(hv)` exactly as at the
+            # wall/cap/rc!=0 sites — a stdout harvest renders this string
+            # byte-identical, a workdir adoption renames only the provenance.
             return {"status": "partial",
-                    "error": "answer harvested from stdout while the spawn's process tree "
+                    "error": f"answer harvested from {_harvest_source(hv)} while the spawn's process tree "
                              "outlived the turn; tree killed and proven dead — never a "
                              "silent done (#61)",
                     "error_class": "left_live_descendants", "ms": ms,
-                    "final": final_reply, **hv, **extra, **sk, **evd}
+                    "final": final_reply, **(hv or {}), **extra, **sk, **evd}
     if detached is not None:
         return {**detached, **sk, **evd}
     # WF-GRAFT-2 (est-imp1z): exit 0 is not yet success — the pure classifier's
