@@ -22,6 +22,22 @@
   Tests: tests/test_graph_legacy_pin_hw_sl0.py.
 ## Unreleased
 
+- docs(runner): turn/accounting contract (issue #387,
+  option-(b) ruling 2026-10-11; est-lw1eh). `references/budgets.md` now says
+  plainly that `max_turns` is billed per API call — `api_calls == turns`, ONE
+  counter, no reserve-final-turns seam and no reset knob (the knob variants
+  were declined by the ruling, behavior unchanged) — that a cap death is typed
+  (`error_class: cap_exhausted`, run clock `exhaustion_reason: turn_cap`,
+  door `stop_reason.class`) and re-drivable on `retry.bounded`, and what an
+  author does instead of reserving: size caps with the answer calls counted in,
+  split the node, write-first. Pinned in `references/grammar.md` beside the
+  `retry` law with a pointer to budgets.md as the single source.
+  Tests: tests/test_turn_accounting_contract_lw1eh.py (engine-driven with the
+  fake budget_lane: argv `--max-turns <cap>` on every spawn, typed death with
+  the cap named, recorded `api_calls` reaching the cap, `turn_cap` on the run
+  clock, exactly one `node.retry` bounded re-drive, and the below-cap `done`
+  twin carrying no cap evidence anywhere).
+
 - fix(wf): exhaustive fail-closed resolution (WF-GRAFT-4, est-f1w4u). A
   settled router no longer closes the run done: a fork (done/partial, >=2
   direct consumers) whose EVERY direct consumer sits terminal-skipped on an

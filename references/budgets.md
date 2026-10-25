@@ -20,3 +20,43 @@ message and exit 0. State that exit hygiene in its goal: persist the work before
 turn cap, return the JSON required by its schema, and add no trailing commentary.
 A complete answer does not make a nonzero exit successful; a harvested partial can
 still block plain downstream edges.
+
+## Turn accounting — `api_calls` is the counter that kills
+
+`max_turns` is billed **per API call**. The child runs
+`hermes chat --max-turns N` and the core loop consumes one turn for every
+provider request it makes, whatever triggered that request — so today
+`api_calls == turns`: ONE counter, no distinction between productive turns and
+retry turns, and no reservation seam. You cannot ring-fence "the last two turns
+for the final answer", because the counter you would reserve against is the
+counter that kills the lane. Ruled on issue #387
+(2026-10-11, option (b)): contract documented, behavior unchanged — a separate
+tool-turn counter or a `reset_after_harvest` knob was declined, so no such key
+exists or may be assumed.
+
+Consequences at the cap, all machine-visible:
+
+- The death is TYPED, never prose: `error_class: cap_exhausted` on the node
+  record, the run clock reports `phase: expired` with
+  `exhaustion_reason: turn_cap`, and the door's `stop_reason.class` carries it
+  (`kind: budget` when the pre-cap budget cue had fired first).
+- The death is re-drivable, not final: `cap_exhausted` rides the bounded ladder
+  (`retry.bounded`, default ONE machine-resume re-drive; a second cap death
+  commits `failed`). A schema-valid fenced answer in the dead attempt is still
+  kept as `partial` under the harvest-on-death law.
+- The budget cue is notice, not turns: at `max_turns - 5` (run.json
+  `budget_cue_margin`) the runner steers the lane ONCE to persist work and
+  prepare its final fenced answer. It buys seconds to write, not extra turns.
+
+To land the final answer inside the cap, shrink the work per node instead of
+reserve turns inside one: raise the cap with the answer-writing calls counted
+in; split a big node into two nodes whose budgets each include their own
+commit turn; and write-first — persist artifacts to the work dir every few
+turns and emit the fenced JSON the moment the last required section lands, so a
+cap death costs only the answer, not the work.
+
+This contract is pinned by `tests/test_turn_accounting_contract_lw1eh.py`
+(spawn carries `--max-turns <cap>`; the capped lane's recorded `api_calls`
+reach the cap and the death is typed with the `turn_cap` clock reason and
+exactly one bounded re-drive; the twin lane that answers below the cap ends
+`done` with no cap evidence).
