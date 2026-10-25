@@ -166,6 +166,10 @@ INCLUDE_FILES = (
     # so the ZIP side stays honest.
     "scripts/drift_check.py",  # #125: on-demand offline CLI and its shipped acceptance test
     "scripts/pr_formal_review.py",
+    # est-clrlx (PR #547): shipped test tests/test_release_merge_gate_clrlx.py
+    # exec-modules the gate script — the est-4vnq finding-4 shape; the tool ships
+    # beside its test.
+    "scripts/release_merge_gate.py",
     "scripts/suite.py",
     ".graphifyignore",
     "tests/fake",

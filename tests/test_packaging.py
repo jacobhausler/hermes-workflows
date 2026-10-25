@@ -127,7 +127,10 @@ def main() -> None:
                                       # est-h0huv: tests/test_wofify.py subprocess-executes
                                       # this CLI end to end — the est-4vnq finding-4
                                       # rationale again; the tool ships beside its test.
-                                      "scripts/wofify.py"})
+                                      "scripts/wofify.py",
+                                      # est-clrlx (PR #547): the release merge gate ships
+                                      # beside its shipped test (est-4vnq finding-4 law).
+                                      "scripts/release_merge_gate.py"})
             # wf165d: the no-silent-middle half only has a premise in a REPO
             # checkout — the source-only scripts (make_public.py,
             # lane_recover.py) never travel inside the ZIP, so from the

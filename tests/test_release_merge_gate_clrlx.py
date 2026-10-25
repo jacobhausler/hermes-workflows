@@ -12,7 +12,7 @@ comments=[] reviews=[] (fresh GET). The zap verdict arrived 20:36:55Z — after
 the merge — explicitly retrospective.
 
 Pinned law (scripts/release_merge_gate.py), against a STATEFUL fake GitHub:
-  T1  POSITIVE: open PR at head H, author stamp bot-id=clankville, newest
+  T1  POSITIVE: open PR at head H, author stamp bot-id=peer-bot, newest
       marker `reviewed=H verdict=merge reviewer=zap` -> the squash PUT issues
       ONCE, read-back verifies, the verdict dict carries sha+marker provenance.
   T2  NEGATIVE (the #545 shape): NO marker anywhere -> refuse no-peer-marker,
@@ -62,12 +62,12 @@ except Exception as exc:
     print("DONE release_merge_gate_clrlx FAIL")
     sys.exit(1)
 
-REPO = "jacobhausler/hermes-workflows"
+REPO = "octocat/whatever"
 PR = 545
 HEAD = "b67fa56a42d081fd5522a0f07a8b8d009f2f3993"      # the reviewed head
 OLD = "6336b1a5a6bbb547281975e7bd148604b95fbe53"        # pre-push head
 MERGE_SHA = "bca545b6a5f288939456edbe3c2b6122f59b8930"
-AUTHOR_BODY = "release: v1.4.1\n\n<!-- repo-admin bot-id=clankville -->"
+AUTHOR_BODY = "release: v1.4.1\n\n<!-- repo-admin bot-id=peer-bot -->"
 
 
 def marker(sha, verdict, reviewer, ts, profile="bot"):
@@ -85,7 +85,7 @@ class FakeGitHub:
                  comments=(), reviews=(), merged=False, merge_lies=False):
         self.calls = []
         self.pr = {"state": state, "head": {"sha": head}, "body": body,
-                   "user": {"login": "jacobhausler"},
+                   "user": {"login": "octocat"},
                    "merged": merged, "merge_commit_sha": MERGE_SHA if merged else ""}
         self.comments = list(comments)    # [{body, updated_at|created_at}]
         self.reviews = list(reviews)      # [{body, submitted_at}]
@@ -124,7 +124,7 @@ out = mod.gate(REPO, PR, HEAD, token="t0ken", transport=g)
 check("T1 peer receipt at exact head: merged=True with verified sha+marker",
       out.get("merged") is True and out.get("sha") == MERGE_SHA
       and out.get("marker", {}).get("reviewer") == "zap"
-      and out.get("author_bot") == "clankville", out)
+      and out.get("author_bot") == "peer-bot", out)
 check("T1 the squash PUT issued exactly once, method=squash",
       len(g.merges()) == 1 and g.merges()[0][2] == {"merge_method": "squash"},
       g.merges())
@@ -149,7 +149,7 @@ check("T3 seal at a superseded head -> refuse marker-stale-head (never carries)"
       and g3.writes() == [], (out3, g3.writes()))
 
 # ---- T4 PEER LAW: reviewer == author stamp; and fail-closed when unknown
-g4 = FakeGitHub(comments=({"body": marker(HEAD, "merge", "clankville",
+g4 = FakeGitHub(comments=({"body": marker(HEAD, "merge", "peer-bot",
                                           "2026-10-25T19:59:00Z")},))
 out4 = mod.gate(REPO, PR, HEAD, token="t0ken", transport=g4)
 check("T4 reviewer == author bot-id -> refuse self-review",
@@ -158,13 +158,13 @@ check("T4 reviewer == author bot-id -> refuse self-review",
 g4b = FakeGitHub(body="release with no bot-id stamp",
                  comments=SEAL)
 out4b = mod.gate(REPO, PR, HEAD, token="t0ken", transport=g4b)
-out4c = mod.gate(REPO, PR, HEAD, owner_bot="clankville", token="t0ken",
+out4c = mod.gate(REPO, PR, HEAD, owner_bot="peer-bot", token="t0ken",
                  transport=FakeGitHub(body="release with no bot-id stamp",
                                       comments=SEAL))
 check("T4 no author stamp -> refuse author-unknown (fail-closed); "
       "--owner-bot fallback resolves the same verdict",
       out4b.get("reason") == "author-unknown"
-      and out4c.get("merged") is True and out4c.get("author_bot") == "clankville",
+      and out4c.get("merged") is True and out4c.get("author_bot") == "peer-bot",
       (out4b, out4c))
 
 # ---- T5 mid-flight verdict does not authorize: pending -> refuse
