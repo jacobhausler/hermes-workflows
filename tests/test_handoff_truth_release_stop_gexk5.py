@@ -46,15 +46,15 @@ HOME = Path(_tmp.name)
 os.environ["HERMES_HOME"] = str(HOME)
 os.environ["WF_RUNS_ROOT"] = str(HOME / "workflows")
 (HOME / "config.yaml").write_text(
-    "model:\n  default: qwen38-next\n  aliases:\n"
-    "    fable: anthropic/claude-fable-5.1\n    opus: anthropic/claude-opus-5-5\n")
+    "model:\n  default: seat-fast\n  aliases:\n"
+    "    mid: seat-mid\n    strong: seat-strong\n")
 
 door = importlib.import_module("__init__")
 import wf_test_isolation as _iso71; _iso71.install(door)  # #71 r5: pin settings.runs_root
 from wfcommon import efp
 
 door._CTX = type("Ctx", (), {"get_config": lambda self, k, d=None:
-    {"worker": "qwen38-next", "manager": "fable", "frontier": "opus"} if k == "models" else d})()
+    {"worker": "seat-fast", "manager": "seat-mid", "frontier": "seat-strong"} if k == "models" else d})()
 door._ping_route_once = lambda p, m: {"liveness": "unknown"}   # no network
 
 RUNS = Path(os.environ["WF_RUNS_ROOT"])
