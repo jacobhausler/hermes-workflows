@@ -1,5 +1,68 @@
 # Changelog
 
+## 1.4.1 — 2026-10-25
+
+Patch release: 54 merged PRs since v1.3.9 — the door-UX version handshake (name the door, grammar-layer and nearest-key refusal hints, native typed `params`), outcome truth beyond exit-0 (output classifier + `node_outcome` self-report), fail-closed resolution and the `on_skip:pass` effect gate, per-item `bead_close` receipts and `{run.X}` admission validation, the name-keyed cron tick lifecycle, 8-lane sharded `gates` CI fan-out, author-tunable retry caps, wake payload pointers, hooks p3/p5 (default-off), the queue-executor starter, and the eight-lane antislop remediation ahead of 1.4.
+
+### Merged PRs (all via the maintainer account)
+
+- docs(runner): state the turn/accounting contract; pin it with a test (#387 option (b)) (#543)
+- docs(agents): fold §4b′ and the §4d pointers out — back under the 32,000-char hint cap (unblocks CI) (#542)
+- fix(1n7gx): collapse-to-one law — name a total order at every pick-one-row site (#540)
+- feat(outcome): exit-0-is-not-success — pure output classifier + node_outcome self-report token (WF-GRAFT-2, est-imp1z) (#537)
+- fix(wf): exhaustive fail-closed resolution — dead-end fails run, abort outranks (est-f1w4u) (#536)
+- test(px11): anchor the RLIMIT_AS ceiling on the live set, not allocator residue (#535)
+- feat(cron): name-keyed singleton tick job lifecycle (est-ip975 PR-1 of 3) (#534)
+- fix(watchdog): straggler disc formats a missing launch stamp as 'q', never :.3f (est-waf8y D1) (#532)
+- test(fixtures): shared fake-runner helper for door-scan fixtures (#530)
+- docs(agents): fold AGENTS.md under the 32k hint cap via references/example-tour.md (#528)
+- ci-P1 observe instruments: budget, timing, registry, md_inputs, observe preflight, run_attempt ledger fields (#526)
+- chore(hygiene): gitignore agent scratch dirs (.routing-test/, .wf-rerun/) (#524)
+- fix(runner): gate the on_skip:pass done-commit through _effect_gate (#523)
+- fix(door): retired from:<name> pin in the graph slot names the from argument instead of a JSON parse error (#519)
+- docs(changelog): record the shelf-save doc law entry (#516)
+- test(door): move the quota-gate regression to its door-prefixed name (#515)
+- feat(library): general/queue-executor — sixth starter (execute-the-queue verb) (#514)
+- chore(ue): mill CI-parity assets (cluster gate script + in-lane template + design record) (#513)
+- chore(retry): hw-23c fallout — law comments say tunable; _retry_bake at door parity (est-mcwq6) (#512)
+- feat(door): name the door version + grammar-layer + nearest-key hints on graph refusals (#509) (#511)
+- docs(readme): concurrency blurb names the launch-time run-arg channel (est-1awgu) (#510)
+- feat(runner): run.failed/run.done wake payloads carry run_dir + failed_node_logs pointers (#507)
+- feat(door): launch-time concurrency override args on the run verb (#498) (#506)
+- fix(door,runner): quota cost gate and stamps obey the route-identity contract (#499) (#505)
+- ci: fan the serial suite out to 8 matrix lanes behind the same gates check (#502)
+- feat(retry): author-tunable per-node retry caps + door-wired run-level retry knobs (#497)
+- fix(engine): derive the completeness truth in the status read (#496)
+- chore(bead_close): single-source _RE_BC_ITEM_TOKEN in wfcommon; wf.py binds off the private instance (#493)
+- chore(bead_close): pin per-item receipts empty-array asymmetry + say per-item probe cost in grammar (est-fxh6v) (#492)
+- docs(grammar): scope bead_close unrenderable clause to .id (actor not enforced in code) (#489)
+- fix(contract): between-turns wake is the delivery default — stop teaching the wait loop (#487)
+- feat(bead_close): per-item {FIELD} interpolation on fan-out nodes with per-item close receipts (#486)
+- validate: refuse malformed {run.X} refs at admission (estate-2026-10-19 class) (#484)
+- fix(inputs): #476 truncated input blocks carry a standard read-the-full-record advisement (#482)
+- fix(inputs): #473 explicit ref to a skipped head resolves to a labelled skip-sentinel block (#480)
+- feat(door): maxItems joins the admitted schema subset; enum widens to boolean/integer (#472, est-v2fr6) (#478)
+- docs(v1.4.0): revitalization + showcase diagrams (est-7m6wv owner pictures mandate) (#470)
+- test(fanout): straggler age bound >= floor_s, not strict > 2 (rounding flake on required gates) (#469)
+- test(mechanic-gate): executable admission gate + battle cards + blind-lap ledger (refs #104) (#468)
+- feat(scripts): shelf-census.py — committed shelf census (SH-07 re-admission, est-d2eyc) (#467)
+- feat(spawn): marker-gated creation-override flag strip (frozen-route workaround, est-yq2xq) (#466)
+- review(1.3.x): the eight-lane antislop remediation, six batches (pre-1.4) (#465)
+- chore: scrub stray tests/probe_e427/events.jsonl (est-5xwvs) (#463)
+- feat(door): render {run.KEY} in agent repo: — portable lane binding (#459 G2, est-rza3t) (#462)
+- feat(grammar): rework key — grammar-accepted, launch-refused (#459 G3, est-vp148) (#461)
+- feat(door): raise save source cap 200 -> 512 (#459 G1, est-rza3t) (#460)
+- feat(scripts): wofify — WOFification authoring seam (est-h0huv) (#458)
+- feat(door): native params — typed pin/tune contract, where/by door-time seam, reproducibility triple (#457)
+- refactor(examples): re-author gate-as-branch examples to when-on-agent (#132 deferred leg) (#454)
+- feat(hooks): p5 / approval (config-gated, default-off) (#431)
+- feat(hooks): p3 / subagent (config-gated, default-off) (#430)
+- feat(door): default-on save provenance + run_context contract block (#126, est-syim) (#424)
+- feat(fanout): fanout.stragglers wake + the [fan+consolidate] cell (wave-consolidation) (#370)
+- chore(dialect): vaporize the wf_dialect js seam — zero callers in the product path (#231)
+
+### Notes
+
 - feat(cron): `cron_bridge.py` — the self-terminating watchdog tick's lifecycle
   (est-ip975, PR-1 of 3; dormant module, no caller yet). One core cron job
   keyed BY NAME (`hermes-workflows-tick`, `no_agent=True`, prompt None):
@@ -20,8 +83,6 @@
   `hint` pointing at the live seam: `run` with `from="<name>"` (the name is
   quoted back). Malformed-JSON refusals are unchanged.
   Tests: tests/test_graph_legacy_pin_hw_sl0.py.
-## Unreleased
-
 - docs(runner): turn/accounting contract (issue #387,
   option-(b) ruling 2026-10-11; est-lw1eh). `references/budgets.md` now says
   plainly that `max_turns` is billed per API call — `api_calls == turns`, ONE
