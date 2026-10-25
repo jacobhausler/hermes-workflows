@@ -2,7 +2,7 @@
 
 ## 1.4.1 — 2026-10-25
 
-Patch release: 36 merged PRs since v1.4.0 — the door-UX version handshake (name the door + grammar-layer/nearest-key refusal hints, #511), outcome truth beyond exit-0 (output classifier + `node_outcome` self-report, #537), exhaustive fail-closed resolution (#536) and the `on_skip:pass` effect gate (#523), per-item `bead_close` receipts (#486) and `{run.X}` admission validation (#484), the name-keyed cron tick lifecycle (#534), 8-lane sharded `gates` CI fan-out (#502), author-tunable retry caps (#497), `run.failed`/`run.done` wake payload pointers (#507), the queue-executor starter (#514), quota stamps by route identity (#505), the skip-sentinel and truncated-inputs fixes (#480 #482), `maxItems` joining the admitted schema subset (#478), and the observe instruments + hint-cap doc folds. (The `## 1.4.0` section below is restored verbatim from the tag: its bump commit landed off `main`, so this file never recorded it.)
+Patch release: 37 merged PRs since v1.4.0 — the door-UX version handshake (name the door + grammar-layer/nearest-key refusal hints, #511), outcome truth beyond exit-0 (output classifier + `node_outcome` self-report, #537), exhaustive fail-closed resolution (#536) and the `on_skip:pass` effect gate (#523), per-item `bead_close` receipts (#486) and `{run.X}` admission validation (#484), the name-keyed cron tick lifecycle (#534), 8-lane sharded `gates` CI fan-out (#502), author-tunable retry caps (#497), `run.failed`/`run.done` wake payload pointers (#507), the queue-executor starter (#514), quota stamps by route identity (#505), the skip-sentinel and truncated-inputs fixes (#480 #482), `maxItems` joining the admitted schema subset (#478), and the observe instruments + hint-cap doc folds. (The `## 1.4.0` section below is restored verbatim from the tag: its bump commit landed off `main`, so this file never recorded it.)
 
 ### Merged PRs
 
@@ -35,6 +35,7 @@ Patch release: 36 merged PRs since v1.4.0 — the door-UX version handshake (nam
 - fix(engine): derive the completeness truth in the status read (#496)
 - chore(bead_close): single-source _RE_BC_ITEM_TOKEN in wfcommon; wf.py binds off the private instance (#493)
 - chore(bead_close): pin per-item receipts empty-array asymmetry + say per-item probe cost in grammar (est-fxh6v) (#492)
+- chore(tests): behavior pins in test_i — drop SOURCE-text def-name greps (est-luk28) (#490)
 - docs(grammar): scope bead_close unrenderable clause to .id (actor not enforced in code) (#489)
 - fix(contract): between-turns wake is the delivery default — stop teaching the wait loop (#487)
 - feat(bead_close): per-item {FIELD} interpolation on fan-out nodes with per-item close receipts (#486)
@@ -74,6 +75,7 @@ Patch release: 36 merged PRs since v1.4.0 — the door-UX version handshake (nam
 - #496 — @atbrace.
 - #493 — @jacobhausler.
 - #492 — @jacobhausler.
+- #490 — @jacobhausler.
 - #489 — @jacobhausler.
 - #487 — @jacobhausler.
 - #486 — @jacobhausler.
