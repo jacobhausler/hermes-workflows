@@ -5074,14 +5074,17 @@ def register(ctx):
     except Exception:
         pass  # fail-open: accounting absent, plugin intact
 
-    # P5 native-approval bridge (config-gated, DEFAULT OFF): when settings
+    # P5 native gate presentation (config-gated, DEFAULT OFF): when settings
     # hooks_bridge_allow lists 'approval_bridge', held human gates are ALSO
-    # presented on the host's native approval channel and approve-shape answers
-    # map to a release through this door's own act_release path. The emitted
-    # text is the run's runner-authored wake row verbatim — the bridge authors
-    # no gate prose. Off = a defs-only module exec + one in-memory settings read
-    # and nothing else: no registration, no thread. Degrades silently; desktop/tool
-    # release untouched.
+    # presented into the run owner's OWN session through core's public
+    # injection route (ctx.inject_message) and answered on this door's
+    # post_gateway_admission wf-release lane (zero turns) — no core private
+    # internals, no fallback to another session (upstream review
+    # NousResearch/hermes-agent#141665 point 2). The injected text is the run's
+    # runner-authored wake row verbatim plus a constant protocol footer — the
+    # bridge authors no gate prose. Off = a defs-only module exec + one
+    # in-memory settings read and nothing else: no registration, no thread.
+    # Degrades silently; desktop/tool release untouched.
     if "_approval_bridge" not in globals():
         globals()["_approval_bridge"] = None
         try:
