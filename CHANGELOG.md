@@ -2,9 +2,9 @@
 
 ## 1.4.1 — 2026-10-25
 
-Patch release: 54 merged PRs since v1.3.9 — the door-UX version handshake (name the door, grammar-layer and nearest-key refusal hints, native typed `params`), outcome truth beyond exit-0 (output classifier + `node_outcome` self-report), fail-closed resolution and the `on_skip:pass` effect gate, per-item `bead_close` receipts and `{run.X}` admission validation, the name-keyed cron tick lifecycle, 8-lane sharded `gates` CI fan-out, author-tunable retry caps, wake payload pointers, hooks p3/p5 (default-off), the queue-executor starter, and the eight-lane antislop remediation ahead of 1.4.
+Patch release: 36 merged PRs since v1.4.0 — the door-UX version handshake (name the door + grammar-layer/nearest-key refusal hints, #511), outcome truth beyond exit-0 (output classifier + `node_outcome` self-report, #537), exhaustive fail-closed resolution (#536) and the `on_skip:pass` effect gate (#523), per-item `bead_close` receipts (#486) and `{run.X}` admission validation (#484), the name-keyed cron tick lifecycle (#534), 8-lane sharded `gates` CI fan-out (#502), author-tunable retry caps (#497), `run.failed`/`run.done` wake payload pointers (#507), the queue-executor starter (#514), quota stamps by route identity (#505), the skip-sentinel and truncated-inputs fixes (#480 #482), `maxItems` joining the admitted schema subset (#478), and the observe instruments + hint-cap doc folds. (The `## 1.4.0` section below is restored verbatim from the tag: its bump commit landed off `main`, so this file never recorded it.)
 
-### Merged PRs (all via the maintainer account)
+### Merged PRs
 
 - docs(runner): state the turn/accounting contract; pin it with a test (#387 option (b)) (#543)
 - docs(agents): fold §4b′ and the §4d pointers out — back under the 32,000-char hint cap (unblocks CI) (#542)
@@ -42,24 +42,45 @@ Patch release: 54 merged PRs since v1.3.9 — the door-UX version handshake (nam
 - fix(inputs): #476 truncated input blocks carry a standard read-the-full-record advisement (#482)
 - fix(inputs): #473 explicit ref to a skipped head resolves to a labelled skip-sentinel block (#480)
 - feat(door): maxItems joins the admitted schema subset; enum widens to boolean/integer (#472, est-v2fr6) (#478)
-- docs(v1.4.0): revitalization + showcase diagrams (est-7m6wv owner pictures mandate) (#470)
-- test(fanout): straggler age bound >= floor_s, not strict > 2 (rounding flake on required gates) (#469)
-- test(mechanic-gate): executable admission gate + battle cards + blind-lap ledger (refs #104) (#468)
-- feat(scripts): shelf-census.py — committed shelf census (SH-07 re-admission, est-d2eyc) (#467)
-- feat(spawn): marker-gated creation-override flag strip (frozen-route workaround, est-yq2xq) (#466)
-- review(1.3.x): the eight-lane antislop remediation, six batches (pre-1.4) (#465)
-- chore: scrub stray tests/probe_e427/events.jsonl (est-5xwvs) (#463)
-- feat(door): render {run.KEY} in agent repo: — portable lane binding (#459 G2, est-rza3t) (#462)
-- feat(grammar): rework key — grammar-accepted, launch-refused (#459 G3, est-vp148) (#461)
-- feat(door): raise save source cap 200 -> 512 (#459 G1, est-rza3t) (#460)
-- feat(scripts): wofify — WOFification authoring seam (est-h0huv) (#458)
-- feat(door): native params — typed pin/tune contract, where/by door-time seam, reproducibility triple (#457)
-- refactor(examples): re-author gate-as-branch examples to when-on-agent (#132 deferred leg) (#454)
-- feat(hooks): p5 / approval (config-gated, default-off) (#431)
-- feat(hooks): p3 / subagent (config-gated, default-off) (#430)
-- feat(door): default-on save provenance + run_context contract block (#126, est-syim) (#424)
-- feat(fanout): fanout.stragglers wake + the [fan+consolidate] cell (wave-consolidation) (#370)
-- chore(dialect): vaporize the wf_dialect js seam — zero callers in the product path (#231)
+
+### Contributors by PR
+
+- #543 — @jacobhausler.
+- #542 — @jacobhausler.
+- #540 — @jacobhausler.
+- #537 — @jacobhausler.
+- #536 — @jacobhausler.
+- #535 — @jacobhausler.
+- #534 — @jacobhausler.
+- #532 — @jacobhausler.
+- #530 — @atbrace.
+- #528 — @atbrace.
+- #526 — @jacobhausler.
+- #524 — @jacobhausler.
+- #523 — @jacobhausler.
+- #519 — @atbrace.
+- #516 — @atbrace.
+- #515 — @atbrace.
+- #514 — @jacobhausler.
+- #513 — @atbrace.
+- #512 — @jacobhausler.
+- #511 — @jacobhausler.
+- #510 — @jacobhausler.
+- #507 — @jacobhausler.
+- #506 — @atbrace.
+- #505 — @atbrace.
+- #502 — @jacobhausler.
+- #497 — @atbrace.
+- #496 — @atbrace.
+- #493 — @jacobhausler.
+- #492 — @jacobhausler.
+- #489 — @jacobhausler.
+- #487 — @jacobhausler.
+- #486 — @jacobhausler.
+- #484 — @jacobhausler.
+- #482 — @jacobhausler.
+- #480 — @jacobhausler.
+- #478 — @jacobhausler.
 
 ### Notes
 
@@ -339,6 +360,45 @@ Patch release: 54 merged PRs since v1.3.9 — the door-UX version handshake (nam
   (adoption script with sha256 drift refusal). Not a door action, like the
   vaporized `wf_dialect.py` it mirrors; contract in `references/wofification.md`
   (est-h0huv).
+
+## [1.4.0] - 2026-10-19
+
+- docs(v1.4.0): revitalization pass — README drift fixes (`/wf <name>` returns
+  a run instruction, `/wf gates` behind `admission_gates`, `library name:` /
+  `amend patch` forms documented), four spec-backed showcase diagrams under
+  `docs/pr-diagrams/` with `docs/showcase.md` glosses; removed
+  `docs/event-driven-wake.md` (unreferenced pattern essay; history in git).
+  (est-7m6wv)
+- feat(spawn): marker-gated creation-override flag strip (est-yq2xq). On seats
+  whose gateway freezes the session route at create, `--continue <skey>
+  --create-if-missing` + any creation override is refused (child dies rc=2,
+  whole waves die). The runner now strips the frozen-route flag pairs
+  (`--max-turns`, `--run-budget`, `--reasoning`, `-t`, `-m`, `--provider`)
+  when `WF_OMIT_POLICY_FLAGS=1` or the marker
+  `<hermes_home>/workflows/omit-policy-flags.on` exists — children ride seat
+  defaults and per-node pinning is unavailable while on; delete the marker /
+  unset the env to return byte-identical stock argv. This replaces the
+  estate-side monkey-patch that every plugin update wiped. Contract in
+  `references/operations.md`.
+- `tests/test_mechanic_admission_gate_104.py`: the issue-#104 admission gate as
+  an executable check — L1 drives a mechanic-shaped probe graph through the
+  real runner with the recording fake door and asserts deny-default
+  auto-release on `hold_timeout`, arm self-no-op, and audit-shape gate skips
+  with zero arm spawns; L2 pins the blind-holdout ledger (run.json.status
+  blinded, sealed-key digests, battery counts as measured ints); L3 becomes
+  binding on any vendoring PR via `WF_MECHANIC_CANDIDATE` (engine validation
+  in admission mode, deny-named defaults, single-gate arm dependencies).
+  Battle cards in `references/mechanic-battle-cards.md`; ledger in
+  `receipts/workflow-mechanic/admission-104.json` (est-t3m6).
+
+- `scripts/wofify.py`: the WOFification authoring-time seam — `inventory`
+  (path-shape census of a way-of-working repo), `scaffold` (never-clobber pack
+  skeleton), `validate` (pack graphs compiled and measured by the door's own
+  validator; card sidecars skipped; zero graphs is never green), `shelf`
+  (adoption script with sha256 drift refusal). Not a door action, like the
+  vaporized `wf_dialect.py` it mirrors; contract in `references/wofification.md`
+  (est-h0huv).
+
 
 ## 1.3.9 — 2026-10-17
 

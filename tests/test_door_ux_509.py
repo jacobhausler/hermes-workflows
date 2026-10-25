@@ -73,9 +73,9 @@ check("C3 junk key gets no suggestion (never a lie)",
       "nearest" not in msg2, msg2)
 
 # --- (b) grammar-layer hint --------------------------------------------------
-# 'params' row is 1.4.0: while this branch's CODE_VERSION is 1.3.9 the REQUIRES
-# branch fires; on a >=1.4.0 door it flips to the layer-known branch. Force the
-# stale-door shape deterministically:
+# The 'params' row starts at 1.4.0: an older door takes the REQUIRES branch,
+# while a door at or above that floor takes the layer-known branch. Force the
+# stale-door shape deterministically, independent of the release version:
 with patch.object(wfcommon, "CODE_VERSION", "1.3.9"):
     m = wfcommon.unknown_graph_key_msg("params", set())
 check("B1 floor>door names requires >=1.4.0 and both versions",
