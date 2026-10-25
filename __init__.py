@@ -4254,14 +4254,35 @@ def act_release(args):
         res = _release_core(r, gate_id, args.get("answer", ""))
     if not res.get("ok"):
         return res
-    mode = _resume_after_action(
-        r, consumed=lambda: (((run_state(r) or {}).get("nodes", {}).get(gate_id) or {})
-                              .get("status") in ("done", "skipped")))
+    def _gate_committed():
+        return (((run_state(r) or {}).get("nodes", {}).get(gate_id) or {})
+                .get("status") in ("done", "skipped"))
+    mode = _resume_after_action(r, consumed=_gate_committed)
+    # est-gexk5 (the sibling sweep of #518's amend fix; found on the #518 R8
+    # adversary review): response truth equals observed effect. The consumed
+    # predicate is RECHECKED here, independent of the mode string — the est-3acn
+    # branch of _resume_after_action answers "consumed" for a run that closed
+    # terminal without ever consuming anything, and a runner that read alive
+    # across the whole grace window may still be dying. Promise the boundary
+    # commit only for what this handoff demonstrably did.
     if mode == "respawned":
         res["auto_resumed"] = True
         hint = "runner respawned; wake delivery is optional (fail-open; ledger wake.jsonl) \u2014 wait only for inline observation"
+    elif mode == "consumed" and _gate_committed():
+        hint = "answer recorded; the runner committed it at its boundary; wake delivery is optional (ledger wake.jsonl), wait for inline observation"
+    elif mode == "live":
+        hint = ("answer durable; the live-runner commit is expected but NOT observed inside the "
+                "handoff window: verify at the next status read or with wait; if the run stalls, "
+                "re-drive by resubmitting this release once the run reads interrupted — "
+                "wake delivery stays optional (ledger wake.jsonl)")
     else:
-        hint = "answer recorded; the live runner commits it at its boundary; wake delivery is optional (ledger wake.jsonl), wait for inline observation"
+        # Terminal false-consume: the run reads done/partial/stopped, so the
+        # re-drive-on-interrupted advice is UNSATISFIABLE (a terminal run never
+        # reads interrupted; act_wait respawns only running/pending/interrupted) —
+        # name the inertness instead.
+        hint = ("answer recorded; the run is terminal — no runner will commit this answer "
+                "and nothing will: it is inert for this run, no re-drive exists "
+                "(re-run the graph to continue); no wake arrives")
     return {**res, "hint": hint}
 
 def act_release_lock(args):
@@ -4654,9 +4675,23 @@ def act_stop(args):
     except Exception:
         pass
     mode = _resume_after_action(r, consumed=lambda: not (r / "stop.request").exists())
+    # est-gexk5 (sibling sweep of #518; #518 R8 adversary review): promise only
+    # observed effect — recheck the marker itself rather than trust the mode
+    # string. The est-3acn branch answers "consumed" for a run that closed
+    # terminal (done/partial committed verdicts) without consuming the marker;
+    # that marker is then residue this verb's terminal guard reports past as
+    # `already` on any re-submit.
     if mode == "respawned":
         return {"ok": True, "note": "runner spawned to consume the stop marker"}
-    return {"ok": True, "note": "stop recorded; the live runner consumes it at its next boundary"}
+    if mode == "consumed" and not (r / "stop.request").exists():
+        return {"ok": True, "note": "stop committed: the runner consumed the marker at its boundary"}
+    if mode == "live":
+        return {"ok": True, "note": "stop durable; the live-runner consume is expected but NOT "
+                "observed inside the handoff window: verify at the next status read; if the run "
+                "stalls, re-drive by resubmitting the stop once the run reads interrupted"}
+    return {"ok": True, "note": "stop recorded; the run is terminal — no runner will consume the "
+            "marker and nothing will: the stop is inert for this run, no re-drive exists "
+            "(the marker stays as residue)"}
 
 def act_kill(args):
     """est-cl7t: node-targeted lane kill (action=kill). SIGKILLs the

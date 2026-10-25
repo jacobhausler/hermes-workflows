@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+- fix(door): release/stop handoff truth — the sibling sweep of the #518 amend fix
+  (est-gexk5, found on the #518 R8 adversary review). `_resume_after_action` answers
+  `"consumed"` for a terminal run though nothing was consumed (the est-3acn branch);
+  `act_release` and `act_stop` trusted the mode string and printed
+  "the live runner commits/consumes it at its boundary" over runs with no live
+  runner at all (the est-3acn partial keeps held gates uncommitted). Both verbs now
+  recheck their own consumed predicate after the call — response truth equals
+  observed effect, the exact law #518 applied at the amend site — and split the
+  copy four ways: respawned / committed (predicate observed true) / expected-but-
+  NOT-observed (`live`: the dying runner lands interrupted, so the
+  resubmit-on-interrupted re-drive is named — it is satisfiable there) / terminal
+  false-consume (durable but inert: NO live-runner promise and NO re-drive promise,
+  because a terminal run never reads interrupted and `wait` respawns only
+  running/pending/interrupted). The wake-delivery-optional law (test P01) is
+  carried on every copy that can wake; the terminal copy says outright that no wake
+  arrives. Tests: `tests/test_handoff_truth_release_stop_gexk5.py` — red-first at
+  base like #518's T2-T4 (R2/S2 lie legs + R4/S4 missing-hedge legs + R3/S3
+  wording legs RED at `b9fc0b2`; respawn/refusal/already pins GREEN at base),
+  30 checks ALL PASS at head; `test_agent_experience_p01` re-pinned through the
+  new live copy unchanged.
+
+
+
 - feat(cli): `wf.py validate [--json] <graph.json>` — the documented graph-lint
   entrypoint now exists on argv (issue #474: three fix crews reached for it and found
   no subcommand, falling back to importing `act_validate` or the tool). It is argv for
