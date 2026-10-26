@@ -166,7 +166,6 @@ succeed, the rest are cancelled; without it the fan-out waits for every item;
 [examples/basics/approve-publish.json](examples/basics/approve-publish.json),
 [examples/basics/branch-on-verdict.json](examples/basics/branch-on-verdict.json).
 
-
 ### 3d. Failures, resume, amend
 
 A graph may reserve one existing agent with `on_exit:"<node id>"` for a once-only
@@ -295,10 +294,6 @@ publication guards, and crash recovery.
   a SIGKILL-wave child that banked nothing), the re-drive spawns as a FRESH session seeded
   instead with a harvest preamble (banked work-dir files + cleaned log tail); the
   `node.retry` event and the `attempts_log` entry stamp `fresh_session: true`.
-  `lease_busy` gets the same ONE bounded re-drive but ALWAYS as a FRESH session under the
-  next attempt key (never `--continue` the busy session) and WITHOUT the tool-progress
-  precondition — the CLI's own lease notice proves the attempt never ran; its machine-wait
-  event is `node.retrying error_class=lease_busy`.
 - A child silent for 120 s after spawn is killed as `early_death`; a child still writing its
   log when the wall fires gets one 50 % extension (`node.extended`), then dies.
 - A wall-killed child's corpse is banked (#131): `nodes/<id>[.<i>].corpus/` holds `work/`
@@ -414,6 +409,7 @@ Optional AST-only exploration aid, folded to [references/graphify-navigation.md]
    subset; a human reviewer checks the rest.
 7. **Stdlib-only Python; host imports lazy and guarded.** A local-backend Mac runs
    the plugin under system Python with neither `hermes_cli` nor PyYAML on path.
+   Pin: every private core import is a reasoned allow-list row in [tests/test_private_core_imports.py](tests/test_private_core_imports.py).
 8. **Honest degradation over hidden failure.** If a field is absent (untyped turn
    report, missing metrics row), say `unknown`; never fabricate a value.
 9. **Receipts state per-lap facts as facts and totals as pointers into the
