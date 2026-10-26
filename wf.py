@@ -1622,7 +1622,13 @@ def _bead_close_gate(run, node, rec):
     # closed-without-claim still PASSes from the read-back; the check anchors
     # to the store, never to the prose).
     out = rec.get("output")
-    _aggregate = isinstance(out, dict) and isinstance(out.get("all_results"), list)
+    # #491 adversary guard: the aggregate shape is only meaningful on a
+    # FAN-OUT node. An agent/echo node whose committed dict happens to carry
+    # an all_results list must NOT reach the item-walk (an empty/list-of-
+    # non-dict rows list returned the record PRISTINE — the 13z1 false-green
+    # class on the two non-fan-out commit edges). Mirrors the grammar.md
+    # sentence, which scopes the per-item escape to a FAN-OUT declaration.
+    _aggregate = bool(node.get("fanout")) and isinstance(out, dict) and isinstance(out.get("all_results"), list)
     if _aggregate and _bc_decl_interpolated(decl):
         # #485 fan-out: the pending law is PER ITEM (one lane's honest
         # close-pending never excuses the aggregate from reading back the
