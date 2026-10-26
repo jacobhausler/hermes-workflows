@@ -12,7 +12,7 @@ docstring is its man page"); this file is the pointer and the switch board.
 |---|---|---|---|
 | P1 outbound bridge | `plugins.entries.hermes-workflows.settings.outbound_bridge` | operator setting ON + per-run carrier opt-in (`outbound_bridge` in run meta/graph meta) | fail-open (webhook delivery is best-effort; the run never waits on the network) |
 | P3 subagent accounting | `plugins.entries.hermes-workflows.settings.hooks_allow` | `"subagent_accounting"` | fail-closed (a scalar, a mapping, or a read failure all read as OFF) |
-| P5 native approval bridge | `plugins.entries.hermes-workflows.settings.hooks_bridge_allow` | `"approval_bridge"` | allow-list; off = defs-only module exec, no thread |
+| P5 native gate presentation | `plugins.entries.hermes-workflows.settings.hooks_bridge_allow` | `"approval_bridge"` | allow-list; off = defs-only module exec, no thread; core consent `settings.allow_gateway_injection: true` is required for the injection route to accept anything |
 
 - **P3** (`subagent_accounting.py`) harvests `delegate_task` leaf children onto
   an append-only spool at
@@ -22,15 +22,23 @@ docstring is its man page"); this file is the pointer and the switch board.
   module: CLI-spawned workflow children do NOT fire `subagent_stop` — only
   in-process delegate_task leaves do. The spool itself is the interface; there
   is deliberately no status/wait wiring.
-- **P5** (`approval_bridge.py`) presents a held human gate ALSO on the host's
-  native approval channel (the same card the dangerous-command gate rides), so
-  an operator already in the gateway surface sees the hold without polling.
-  Authority law: the card text is the runner's own `wake.jsonl` `gate.held`
-  sentence verbatim — graph-authored question/options never enter the approval
+- **P5** (`approval_bridge.py`) presents a held human gate ALSO into the run
+  owner's OWN gateway session as a plugin-injected message — core's public
+  route `ctx.inject_message` (`gateway/run_plugin_injection.py`) — so an
+  operator already in the gateway surface sees the hold without polling. The
+  answer comes back on the door's own `post_gateway_admission` `wf release`
+  lane (zero turns) or the tool/desktop paths; there is **no fallback to any
+  other session** and no read of core private approval internals (upstream
+  review NousResearch/hermes-agent#141665 point 2). Authority law: the injected
+  body is the runner's own `wake.jsonl` `gate.held` sentence verbatim plus one
+  constant protocol footer — graph-authored question/options never enter the
   surface, and the bridge authors no prose. One hold event mints one idempotency
-  token and resolves to at most ONE release through the plugin's own
-  `act_release` door (the same path the tool action rides: CAS, answer file,
-  respawn). Desktop and tool release are untouched either way.
+  token; the tailer reconciles each instance against the run dir (the holder of
+  record), so an answer on any release path is terminal bookkeeping — never a
+  re-present, never a second release. The `pre_approval_request` /
+  `post_approval_response` observer pair stays registered behind the same flag
+  as a guarded compatibility path (it acts only on tokens this process minted).
+  Desktop and tool release are untouched either way.
 
 Proof (run at repo root):
 

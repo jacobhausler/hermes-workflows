@@ -113,18 +113,6 @@ Push delivery is best-effort, not guaranteed. `wait` can resume an interrupted r
   ] }
 ```
 
-Or, the 1.0.1 way — settings once, nodes carry only their work:
-
-```json
-{ "name": "check",
-  "defaults": { "model": "<model-id>", "provider": "<provider-name>", "reasoning": "medium",
-                "schema": { "type": "object", "required": ["ok"] } },
-  "nodes": [
-    { "id": "inspect", "type": "agent", "shape": "recon", "goal": "Inspect <target>." },
-    { "id": "verdict", "type": "agent", "after": ["inspect"], "goal": "Judge the inspection." }
-  ] }
-```
-
 Rules that bite:
 
 - **Pin `model` + `provider` on every node** unless you have verified the seat
@@ -142,12 +130,18 @@ Rules that bite:
 - **`after` orders AND injects.** Every direct parent's committed output lands under
   `## Inputs` automatically (8 KB per parent). Use `inputs:["a.key"]` only to pick a
   dotted path or a non-parent ancestor, or `fanout.items_from:"a.items"`. A missing
-  path fails at spawn.
+  path fails at spawn — the one exception (#473): an explicit `inputs:` ref whose
+  head committed `skipped` resolves to a labelled skipped-sentinel block carrying the
+  committed skip record, so the pruned arm reaches its consumer as readable, fail-closed
+  data instead of an `error_class:"inputs"` spawn crash; a head that never committed, or
+  committed `done` without that path, still hard-fails (references/grammar.md,
+  when/on_skip).
 - **Shared settings go in `defaults`, once.** `defaults:{schema, timeout, max_turns,
   reasoning, provider, model, context}` at graph level; `shape:recon|build|review|publish`
   sizes budgets from measured presets. A `schema` makes the runner write the reply
   contract itself — no contract prose in goals.
 - **Leave budgets unset and name a `shape`; see [references/budgets.md](references/budgets.md).**
+- **Folded out for the hint cap:** the 1.0.1 `defaults` graph variant and the runtime layout table (§5) live in [references/example-tour.md](references/example-tour.md).
 
 ### 3c. Fan-out, gates, branches
 
@@ -156,7 +150,7 @@ Rules that bite:
   "fanout": { "items": ["alpha", "beta"], "goal": "Audit {item}. Write <path>/{item}.md first.", "quorum": 1 } }
 
 { "id": "approve", "type": "gate", "after": ["lanes"],
-  "question": "Ship the report?", "options": ["ship", "hold"] }
+  "question": "Ship the report? Answer 'ship' to publish, 'hold' to stop.", "options": ["ship", "hold"] }
 
 { "id": "go",   "type": "gate", "after": ["judge"], "when": "out.judge.verdict == 'ship'", "on_skip": "prune" }
 { "id": "hold", "type": "gate", "after": ["judge"], "when": "out.judge.verdict != 'ship'", "on_skip": "prune" }
@@ -168,79 +162,10 @@ decorative gate release itself (`gate.auto_released`); `hold_timeout` alone logs
 `gate.expired` once and keeps holding. Fan-out `quorum` (optional) races: once N
 succeed, the rest are cancelled; without it the fan-out waits for every item;
 `goal` is optional when items carry their own. Machine gates: `wait:{"wait_s":N}` or
-`wait:{"until_argv":[…],"every_s":60,"timeout_s":3600}`. Tested examples:
+`wait:{"until_argv":[…],"every_s":60,"timeout_s":3600}`. Template guarantees beside author-run receipts and the laws each exercises: [references/example-tour.md](references/example-tour.md). Tested examples:
 [examples/basics/approve-publish.json](examples/basics/approve-publish.json),
 [examples/basics/branch-on-verdict.json](examples/basics/branch-on-verdict.json).
-[examples/release/gated-publish.workflow.json](examples/release/gated-publish.workflow.json) is a
-human-gated publish TEMPLATE built from the approve-publish seed (draft -> owner
-gate -> complementary `when`+`on_skip:"prune"` pair on the answer -> exactly one
-arm; no node names a vendor model — role vocabulary lives in prose, routing is the
-seat default). Launch seeds `run_context:{"artifact":"<name>"}`. Validate + author
-run tested (receipts/gated-publish/).
-[examples/release/machine-watch.workflow.json](examples/release/machine-watch.workflow.json) is a
-scheduled-watcher TEMPLATE (zero-token machine-gate poll, releases on exit 0;
-launch with `lane_key` so cron double-fire dedupes; timeout fails loudly for
-the next deduped dispatch). Validate + smoke-run tested.
-[examples/ops/incident-response.json](examples/ops/incident-response.json) is a full
-lifecycle TEMPLATE (alert-triggered incident: verdict-branch gate pair, machine
-recovery probe with human escalation, merge-gated close) meant to be adapted —
-its `run_context` seeds and the sweep-adapter contract are the swap points; it
-validates but is not smoke-run (real lanes need your stack).
-[examples/review/blind-council.workflow.json](examples/review/blind-council.workflow.json) is
-a review-council TEMPLATE (blind independent seats -> synthesis with mandatory
-verify-list). Its seats pin CAPABILITY CLASSES (`council_a`, `council_b`) bound
-through `settings.models` — no vendor model id appears in the file; an unbound
-class fails the launch closed. Author-run receipt:
-[receipts/blind-council/author-run.json](receipts/blind-council/author-run.json).
-[examples/build/triage-route.workflow.json](examples/build/triage-route.workflow.json) is a
-queue-triage TEMPLATE (intake -> classifier -> complementary `when` +
-`on_skip: prune` carried by the arm heads themselves: human escalation gate with
-the answer consumed as data, or a rule-driven batch fan-out). The classifier emits
-a `has_urgent` boolean because the when grammar cannot see array length; each arm
-head hangs on the classifier and carries its own predicate (prune law: a cascade
-skip needs ALL `after` deps skipped, so only what hangs BEHIND a dead head
-cascade-prunes — the head's own `when` decides its fate); the fan-out head is an
-arm-scoped `batch-prep` forwarding the routine set, not the classifier itself.
-Author-run receipt:
-[receipts/triage-route/author-run.json](receipts/triage-route/author-run.json).
-[examples/build/quorum-probe.workflow.json](examples/build/quorum-probe.workflow.json) folds
-the speed/coverage contrast into one file: a `quorum`-raced probe fan-out whose
-report must state the cancelled straggler set honestly, beside a no-quorum barrier
-that reconciles survivors against an explicit master catalog so a dead lane prints
-as a loud coverage gap, never silent loss. The two fan-outs are sibling nodes with no
-branch gates, so every author/peer lap walks both folded modes in a single launch;
-laps exist per-engine-side, not per-mode.
-[examples/build/bulk-transform.workflow.json](examples/build/bulk-transform.workflow.json) is a barrier-fan-out TEMPLATE (declared manifest -> per-file transform lanes -> audit that reconciles all_results against the manifest via an ancestor `inputs:` ref and re-checks the filesystem itself; evidence-without-command is a failed lane). Smoke-run on the author's deployment: [receipts/bulk-transform/author-run.json](receipts/bulk-transform/author-run.json).
-[examples/build/census-fanout.workflow.json](examples/build/census-fanout.workflow.json) is a
-census TEMPLATE (fan-out auditing N generic machine items with a DETERMINISTIC
-TALLY): an echo roster node carries the master item list, a no-quorum barrier
-audits every item against `{item, observed, ok}`, and the tally synth READS
-`audit.all_results` against the roster — every item answered or NAMED missing,
-counts computed from the record, never prose. One item (battery-gauge) is a
-designed dead gauge so the tally's loud-row law is exercised on every run; the
-report node consumes the tally via `after_partial`. Two author laps — honest
-(dead gauge as a loud red row) and severed (a child cut from the record becomes
-a NAMED missing row): [receipts/census-fanout/author-run.json](receipts/census-fanout/author-run.json).
-[examples/review/escalation-ladder.workflow.json](examples/review/escalation-ladder.workflow.json) is a verify-then-branch TEMPLATE (builder -> fresh independent verifier -> when-pair carried by the two human arm gates themselves: verified lands behind the land gate, failed escalates to a human hold with the whole packet; core has NO loop idiom - retry ownership is spelled out, not implied). Both arms smoke-run: [receipts/escalation-ladder/author-run.json](receipts/escalation-ladder/author-run.json).
-[examples/basics/exchange-run.workflow.json](examples/basics/exchange-run.workflow.json) is the
-byte-portability TEACHING PAIR — the file itself is the artifact that travels the
-save → library → re-run loop (the loop's verbs, told in the description; the proof
-laps live in the author receipt, never in node prose). An echo commits the token at
-zero tokens, a courier copies it as pure data from its declared input, and the leaf
-proves the hand-off only by re-reading both committed records from its `## Inputs` —
-never from chat memory. No node names a model; children ride seat defaults.
-Author-run receipt: [receipts/exchange-run/author-run.json](receipts/exchange-run/author-run.json).
 
-Library templates: `workflow {"action":"library","name":"<name>"}` or
-`/wf show <name>` lists required `{run.KEY}` inputs and an instantiate command.
-Supply explicit nonempty string values with `run from:<name>`; the door binds
-all shared text fields and refuses any surviving ref before writing or spawning.
-Optional `save params:{KEY:{desc,default}}` describes those refs in `meta.params`;
-missing/dead declarations on an envelope save warn (non-fatal `s12`; bare saves
-derive the contract from refs and never warn s12), omission retains prior params,
-and `{}` clears them. Defaults are suggestions, never automatic launch inputs.
-Inline unbound machine argv remains refused; ordinary inline text keeps its
-existing verbatim leniency.
 
 ### 3d. Failures, resume, amend
 
@@ -251,18 +176,21 @@ See [grammar](references/grammar.md#terminal-postmortem-optional) for validation
 publication guards, and crash recovery.
 
 - `node.failed` events carry `error_class` from the closed set defined in code
-  (`wf.py ERROR_CLASSES`) — `bead_close | budget_exhausted | cancelled | cap_exhausted | config_input | crashed | early_death | effect_receipt |
+  (`wf.py ERROR_CLASSES`) — `bead_close | budget_exhausted | cancelled | cap_exhausted | config_input | crashed | declared_failure | early_death | effect_receipt |
   fanout_empty | fatal_quota | forbidden_model | incomplete_work |
   inputs | item_record | killed | lane_wreckage | lease_busy | left_live_descendants | malformed_turn | precondition | provider_400 | quorum |
   ratelimit |
   route_substitution_denied | route_unavailable | schema | seat_cap | seat_unsupported | seat_wait | spawn | stale_graph | timeout | transport | transport_exhausted |
-  unresolved_model`, plus `unknown` as the harvest-time default when nothing matches —
-  plus `attempts`. Read the class, not the prose. `cancelled` (a `stop`, or a fan-out
+  unresolved_model`, plus `unknown` (the harvest-time default) — plus `attempts`. Read the
+  class, not the prose; the exit-0-is-not-success settle law (`declared_failure`, transient
+  sentinels) is in references/operations.md. `cancelled` (a `stop`, or a fan-out
   straggler at quorum) is never a failure: the run reads `stopped`, and a `wait` re-drives it.
   `budget_exhausted` (est-3acn): a RunBudget cap (graph-root or node `budget:{tokens:N}`; tokens-only —
   USD is excluded per the repo cost-trust law, issue #124) refused the spawn BEFORE submit, logged as
   `dispatch.refused` and never billing (zero attempts); the runner closes the run gracefully as
   `partial` and `budget_ledger.json` names the never-launched nodes. Terminal: outside every retry ladder.
+  A capped fan-out that DID harvest is a committing record: it rides the boundary gates (est-ps8i9); a
+  gate-demote's `node.failed` names the cap (`budget_cause=budget_exhausted`, est-6ig3s).
   `seat_wait` (est-g2xx): no global agent seat (`WORKFLOW_MAX_SEATS`) freed within the node wall — the spawn never happened.
   `seat_unsupported` (est-g255): the semaphore was full and the host exposes no process-ancestry
   channel (neither `/proc` nor `ps`), so a nested runner cannot prove which held seat is its own
@@ -438,7 +366,7 @@ subscription routes.
 | `desktop/plugin.js` | Desktop half: runs list, DAG canvas, fan-out stacks, timeline, gate hand-off, `::workflow` card |
 | `SKILL.md`, `references/` | The authoring skill loaded into sessions. Portable: no host names, install paths, or provider lore |
 | `tests/` | Stdlib-only serial scripts; each prints `PASS`/`FAIL` lines, exit 0 = green. `.mjs` under Node. `tests/fake_hermes.py` is the child stand-in (`FAKE_MODE=…`) |
-| `scripts/suite.py` | Serial runner with per-test logs + `exits.json` ledger (the merge gate); `--baseline <ledger>` adds `admission.json` splitting reds into introduced vs pre-existing (exact name+exit identities; a base red is blocking, never waived — and a base red whose test was DELETED reports `missing`, which blocks too, so `rm` can't launder a red to green); zero discovery under `tests/` is a failed admission (`green:false` + `zero_discovery:true`, nonzero exit) and an invalid root exits 2 before any out-dir side effects (#112) |
+| `scripts/suite.py` | Serial runner with per-test logs + `exits.json` ledger (the merge gate); `--shard I/N` slices the sorted case list for CI matrix lanes (serial-within-lane, `done.json` completion marker); `--merge DIR…` fuses lane ledgers back to the same contract and refuses missing/interrupted/empty/overlapping lanes; `--baseline <ledger>` adds `admission.json` splitting reds into introduced vs pre-existing (exact name+exit identities; a base red is blocking, never waived — and a base red whose test was DELETED reports `missing`, which blocks too, so `rm` can't launder a red to green); zero discovery under `tests/` is a failed admission (`green:false` + `zero_discovery:true`, nonzero exit) and an invalid root exits 2 before any out-dir side effects (#112) |
 | `scripts/pr_formal_review.py` | Author-aware formal review (est-2ek.1.866): preflight compares `GET /user` vs the PR author BEFORE posting; a self-review (shared credential == author, the GitHub 422 "Can not request changes on your own pull request") NEVER attempts the doomed POST — it takes the verified fallback (findings into the ONE live marker comment — `--comment-id` PATCHes it, law 3 — with the fallback reason recorded before the trailing marker, plus the `changes-requested` label ADDED via `POST issues/{n}/labels`, never the replace-all `PATCH issues/{n}`; both read back); different identities post the real `REQUEST_CHANGES`; one credential, never forged; exit nonzero unless the write is read-back-verified |
 | `scripts/pack.py` | Release zip + `SHA256SUMS` + sidecar |
 | `scripts/wofify.py` | WOFification authoring seam (est-h0huv): `inventory`/`scaffold`/`validate`/`shelf` for way-of-working-repo→pack conversion; not a door action — the deterministic half of the shelf factory (`references/wofification.md`) |
@@ -453,6 +381,8 @@ python3 tests/test_skill_docs.py                  # the portable-skill contract
 node --check desktop/plugin.js                    # desktop half parses
 node --experimental-strip-types tests/test_edge_routing.mjs
 python3 scripts/suite.py . ci-out                 # full serial suite → ci-out/exits.json (merge gate)
+python3 scripts/suite.py . ci-out --shard 3/8     # one CI lane (sorted-list position slice)
+python3 scripts/suite.py . ci-out --merge ci-out-shard-0 … ci-out-shard-7   # fan-in: fuses lane ledgers, refuses missing/interrupted/empty lanes
 hermes plugins validate .                         # manifest + SDK-surface + security scan
 python3 wf.py validate [--json] <graph.json>      # lint a GRAPH FILE through the SAME door pipeline
 python3 scripts/make_public.py /tmp/public-tree   # private-string audit; must print "0 scrub hits"
@@ -469,15 +399,7 @@ same gates ([.github/workflows/ci.yml](.github/workflows/ci.yml)).
 
 ### 4b′. Navigate with the knowledge graph (optional)
 
-[`graphify`](https://github.com/Graphify-Labs/graphify) builds a code-navigation
-graph locally (`uv tool install graphifyy` → `graphify update .` in a scratch
-checkout): `graphify query "<question>"`, `graphify path "act_run" "run_child"
---undirected`, `graphify affected "<symbol>" --depth 2`, `graphify god-nodes`.
-It is an exploration aid, not a gate: the output is never committed, CI never
-builds it, and a `graphify-out/` in your PR diff is deleted by review. Source
-and tests are the spec. (`.graphifyignore` ships so local runs skip generated
-noise; `scripts/graph_diagram.py` + `diagram_readme.py` are unrelated — they
-draw the example workflow diagrams in `examples/README.md`, which DO ship.)
+Optional AST-only exploration aid, folded to [references/graphify-navigation.md](references/graphify-navigation.md) to keep this file inside the hint cap. Never a gate; never committed.
 
 ### 4c. Rules
 
@@ -517,11 +439,18 @@ draw the example workflow diagrams in `examples/README.md`, which DO ship.)
     loop, and let CI's freshness gate refuse a stale commit. One rule, one
     file: [examples/diagrams/README.md](examples/diagrams/README.md) (DIAGRAM LAW v1).
     The examples/ map keeps a pointer here.
+12. **Collapse-to-one law (est-1n7gx).** Every sort feeding one row names its
+    TOTAL order in code with a because-clause; if insertion order is the
+    contract, say so and pin it with a test. Law and site census:
+    [references/collapse-to-one-law.md](references/collapse-to-one-law.md).
 
 ### 4d. Release
 
 ```sh
 # bump plugin.yaml / SKILL.md / references/grammar.md / CHANGELOG.md to the new version
+# re-pin wfcommon.CODE_VERSION to the same string in the SAME commit (#509 door-UX
+# law — the reload-boundary note compares them; the test gate refuses drift), and
+# add every NEW top-level graph key's row to wfcommon.GRAPH_KEY_MIN_VERSION
 # re-pin every file:line cite in docs/catalog/disclosure-check.md (AGENTS 4d law:
 # the audit is exact-at-commit — a drifted cite sends readers to unrelated code)
 python3 scripts/suite.py . ci-out && hermes plugins validate . && python3 scripts/make_public.py /tmp/pub
@@ -529,21 +458,10 @@ python3 scripts/pack.py                            # artifacts/hermes-workflows-
 git tag v<version> && git push --tags
 ```
 
-The catalog entry pins a full 40-char commit SHA
-([docs/catalog/entry.yaml](docs/catalog/entry.yaml)); bump it in a PR to
-`NousResearch/hermes-agent` → `plugin-catalog/hermes-workflows.yaml`.
-
-Cross-estate joint eng protocol v1 is the SSOT mirrored publicly at [issue #174](https://github.com/jacobhausler/hermes-workflows/issues/174), sha256 `a7f424c5be3f5d6d1cbeb590f6cd02b6699a60090a3a45646853c67b2360345b` (of the issue body including its trailing newline); private working copy: `jacobhausler/joint-eng-protocol@0bf569a`, file `docs/specs/hermes-workflows-joint-eng-protocol-v1.md`.
+Catalog entry SHA + the cross-estate joint-eng protocol pointer: [references/release-and-catalog.md](references/release-and-catalog.md).
 
 ---
 
 ## 5. Where things live at runtime
 
-| What | Where |
-|---|---|
-| Run directories | `<runs_root>/<run_id>/` (`$WF_RUNS_ROOT`, else `<resolved home>/workflows` — core's `get_hermes_home()`, which on a profile-scoped host is the profile's home, not the launch-root `$HERMES_HOME`) — `graph.json`, `run.json`, `events.jsonl`, `nodes/<id>.json`, `logs/<id>.a<n>.log`, `steer/`, `gates/` |
-| Library | `<runs_root>/library/` |
-| Child turn report | `HERMES_QUIET_TURN_REPORT_FILE` (per spawn, read then unlinked) |
-| Tier stamp | `<run>/turn_report.tier` (`typed` / `untyped`, write-once) |
-| Dashboard API | `/api/plugins/hermes-workflows/runs`, `/runs/{id}`, `POST /runs/{id}/gate` |
-| Desktop plugin | `~/.hermes/desktop-plugins/hermes-workflows/plugin.js` on the **app** machine |
+Runtime layout, API mounts, and the desktop-half path: [references/example-tour.md](references/example-tour.md) §5.

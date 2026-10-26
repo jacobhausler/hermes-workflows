@@ -1,0 +1,2120 @@
+[
+  {
+    "case": "test_11_door_lane.py",
+    "tier": 1,
+    "burn": "#126",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_11_integration_claim.py",
+    "tier": 1,
+    "burn": "#71",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_11_integration_team.py",
+    "tier": 1,
+    "burn": "#71",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_11_runner_requires.py",
+    "tier": 1,
+    "burn": "est-2ek.1.762",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_admission_gates.py",
+    "tier": 1,
+    "burn": "20c9da14eb",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_admission_ledger_85.py",
+    "tier": 1,
+    "burn": "85",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_agent_experience_p01.py",
+    "tier": 1,
+    "burn": "p01",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_alias_explicit_provider_ping_55z04.py",
+    "tier": 1,
+    "burn": "est-55z04",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_alias_receipt_respawn_318.py",
+    "tier": 1,
+    "burn": "est-2ek.1.318",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_alias_route_ping_318.py",
+    "tier": 1,
+    "burn": "est-2ek.1.318",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_amend_bound_preamble_838.py",
+    "tier": 1,
+    "burn": "est-2ek.1.838",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_amend_preview_defdiff.py",
+    "tier": 1,
+    "burn": "est-c9is",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_amend_rebake_034849a2.py",
+    "tier": 1,
+    "burn": "034849a2",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_approval_bridge_p5.py",
+    "tier": 1,
+    "burn": "p5",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_authoring_next_cut.py",
+    "tier": 1,
+    "burn": "#71",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_bank_the_corpse_131.py",
+    "tier": 1,
+    "burn": "est-empty",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_bead_close_claim_13z1.py",
+    "tier": 1,
+    "burn": "est-13z1",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_bead_close_fanout_485.py",
+    "tier": 1,
+    "burn": "est-pending",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_blocked_legibility_100.py",
+    "tier": 1,
+    "burn": "100",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_boolean_schema_0924.py",
+    "tier": 1,
+    "burn": "0924",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_budget_cue_bbfy.py",
+    "tier": 1,
+    "burn": "est-bbfy",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_budget_shape_warning_vj8m.py",
+    "tier": 1,
+    "burn": "vj8m",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_canvas_wrap.mjs",
+    "tier": 1,
+    "burn": "#10",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_card_backend_080.py",
+    "tier": 1,
+    "burn": "080",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_card_notice_157.py",
+    "tier": 1,
+    "burn": "157",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_child_write_grant_2mhl.py",
+    "tier": 1,
+    "burn": "est-2mhl",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_clean_lane_1660.py",
+    "tier": 1,
+    "burn": "est-2ek.1.660",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_completed_truth_on5.py",
+    "tier": 1,
+    "burn": "on5",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_concurrency_bake_100.py",
+    "tier": 1,
+    "burn": "100",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_concurrency_run_args_498.py",
+    "tier": 1,
+    "burn": "498",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_confidence_substrate_116.py",
+    "tier": 1,
+    "burn": "116",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_config_input_paths_jam8.py",
+    "tier": 1,
+    "burn": "est-jam8",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_config_input_tmuu.py",
+    "tier": 1,
+    "burn": "est-tmuu",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_convoy_splice_ij0.py",
+    "tier": 1,
+    "burn": "est-ij0",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_crash_no_exit_respawn_718.py",
+    "tier": 1,
+    "burn": "est-2ek.1.718",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_crash_respawn_idempotence_8.py",
+    "tier": 1,
+    "burn": "8",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_cross_container_liveness_91b9a3de.py",
+    "tier": 1,
+    "burn": "est-2ek.1.762",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_cross_profile_metrics_904f.py",
+    "tier": 1,
+    "burn": "904f",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_current_attempt_metrics.py",
+    "tier": 1,
+    "burn": "est-2ek.1.762",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_daemonize_8.py",
+    "tier": 1,
+    "burn": "8",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_deleted_cwd_resume_5c37b19.py",
+    "tier": 1,
+    "burn": "est-2ek.1.762",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_detach_redrive_o79j.py",
+    "tier": 1,
+    "burn": "o79j",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_docs_surface_drift.py",
+    "tier": 1,
+    "burn": "est-4vnq",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_door.py",
+    "tier": 1,
+    "burn": "#71",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_door_general_51.py",
+    "tier": 1,
+    "burn": "est-first-feature-slice",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_door_lib_50.py",
+    "tier": 1,
+    "burn": "est-first",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_door_quorum_copy.py",
+    "tier": 1,
+    "burn": "est-2ek.1.80",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_door_quota_route_identity_rq169.py",
+    "tier": 1,
+    "burn": "est-699",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_door_sibling_root_58.py",
+    "tier": 1,
+    "burn": "58",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_door_ux_509.py",
+    "tier": 1,
+    "burn": "est-key",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_drift_check_125.py",
+    "tier": 1,
+    "burn": "125",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_effects_receipt_pygyy.py",
+    "tier": 1,
+    "burn": "est-pygyy",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_engine_next_cut.py",
+    "tier": 1,
+    "burn": "#71",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_enum_clamp_5med_flah.py",
+    "tier": 1,
+    "burn": "est-flah",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_error_class_doc_sync.py",
+    "tier": 1,
+    "burn": "est-vb65",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_error_classes_exhaustive_vb65.py",
+    "tier": 1,
+    "burn": "vb65",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_example_blind_council.py",
+    "tier": 1,
+    "burn": "#89",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_example_census_fanout.py",
+    "tier": 1,
+    "burn": "#108",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_example_portable_review.py",
+    "tier": 1,
+    "burn": "#172",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_execution_clocks_p02.py",
+    "tier": 1,
+    "burn": "p02",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_explain_stale_0929.py",
+    "tier": 1,
+    "burn": "0929",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_failed_events_77.py",
+    "tier": 1,
+    "burn": "est-2ek.1.762",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_failed_nodes_5lnm.py",
+    "tier": 1,
+    "burn": "est-empty",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_failures_0923.py",
+    "tier": 1,
+    "burn": "est-2ek.1.762",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_fakeb1_gitpin_954r.py",
+    "tier": 1,
+    "burn": "est-954r",
+    "order_group": null,
+    "after": [
+      "ALL_OTHERS_IN_LANE"
+    ]
+  },
+  {
+    "case": "test_fanout_cell_dcd.py",
+    "tier": 1,
+    "burn": "est-fanout-cell",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_fanout_empty_items_0p.py",
+    "tier": 1,
+    "burn": "est-wr0p",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_fanout_expand.mjs",
+    "tier": 1,
+    "burn": "#11",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_fanout_item_commit_765.py",
+    "tier": 1,
+    "burn": "est-2ek.1.765",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_fanout_item_goal.py",
+    "tier": 1,
+    "burn": "fb12da4",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_fanout_stragglers_nxr.py",
+    "tier": 1,
+    "burn": "est-fanout-stragglers",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_fanout_ui.mjs",
+    "tier": 1,
+    "burn": "est-suite",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_fatal_quota_24.py",
+    "tier": 1,
+    "burn": "24",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_findrun_twin_t1kk.py",
+    "tier": 1,
+    "burn": "est-t1kk",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_forbidden_route_identity_e0yqy.py",
+    "tier": 1,
+    "burn": "e0yqy",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_foreign_ns_child_818.py",
+    "tier": 1,
+    "burn": "est-2ek.1.818",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_fp_rule_95d70102.py",
+    "tier": 1,
+    "burn": "95d70102",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_fp_rule_f0f154d5.py",
+    "tier": 1,
+    "burn": "f0f154d5",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_gate_answer_flows_00e46adb.py",
+    "tier": 1,
+    "burn": "est-2ek.1.762",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_gateway_sigterm_detach_6226.py",
+    "tier": 1,
+    "burn": "est-6226",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_golden_seat_no_inherited_identity_862.py",
+    "tier": 1,
+    "burn": "est-2ek.1.862",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_graph_result_158.py",
+    "tier": 1,
+    "burn": "est-2ek.1.158",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_graph_revision_cas_19.py",
+    "tier": 1,
+    "burn": "est-19k9w",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_harvest_cap_retry_ggqs.py",
+    "tier": 1,
+    "burn": "est-ggqs",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_harvest_scan_guard.py",
+    "tier": 1,
+    "burn": "est-gg96",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_heartbeat_verdict_127.py",
+    "tier": 1,
+    "burn": "est-zsws",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_hermes_bin_reserved_0928.py",
+    "tier": 1,
+    "burn": "0928",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_honest_status_jam_a3.py",
+    "tier": 1,
+    "burn": "est-a3-",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_import_purity_133387.py",
+    "tier": 1,
+    "burn": "133387",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_incident_response_93.py",
+    "tier": 1,
+    "burn": "93",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_inputs_0923.py",
+    "tier": 1,
+    "burn": "est-2ek.1.762",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_integration_080.py",
+    "tier": 1,
+    "burn": "080",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_jec0_recursion_containment.py",
+    "tier": 1,
+    "burn": "est-jec0",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_join_kind_hack.py",
+    "tier": 1,
+    "burn": "sprint101w2_C1",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_lane_gate_64c6772b.py",
+    "tier": 1,
+    "burn": "est-2ek.1.762",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_lane_hygiene_preamble_8edcc9bf.py",
+    "tier": 1,
+    "burn": "8edcc9bf",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_lane_kill_cl7t.py",
+    "tier": 1,
+    "burn": "est-cl7t",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_lane_kill_steer_cl7t.py",
+    "tier": 1,
+    "burn": "est-cl7t",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_lane_recover_8edcc9bf.py",
+    "tier": 1,
+    "burn": "8edcc9bf",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_lane_recover_cli_237r3.py",
+    "tier": 1,
+    "burn": "237r3",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_lane_recover_legacy_amend_237r4.py",
+    "tier": 1,
+    "burn": "237r4",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_lane_shelf_guard_1599.py",
+    "tier": 1,
+    "burn": "est-2ek.1.599",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_launcher_config.py",
+    "tier": 1,
+    "burn": "#71",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_launcher_recovery_851.py",
+    "tier": 1,
+    "burn": "851",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_library.py",
+    "tier": 1,
+    "burn": "#71",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_library_b2b.py",
+    "tier": 1,
+    "burn": "b2b",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_library_cooc_146.py",
+    "tier": 1,
+    "burn": "146",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_library_cooc_cause_yzoy.py",
+    "tier": 1,
+    "burn": "est-yzoy",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_library_corrupt_prev_yzoy.py",
+    "tier": 1,
+    "burn": "est-yzoy",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_library_empty_shelf_bvg0.py",
+    "tier": 1,
+    "burn": "est-bvg0",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_library_empty_vocab_yzoy.py",
+    "tier": 1,
+    "burn": "est-yzoy",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_library_erase_path_yzoy.py",
+    "tier": 1,
+    "burn": "est-yzoy",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_library_tag_read_qeul.py",
+    "tier": 1,
+    "burn": "est-qeul",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_lifecycle_next_cut_0923.py",
+    "tier": 1,
+    "burn": "0923",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_list_root_280.py",
+    "tier": 1,
+    "burn": "est-2ek.1.280",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_literal_provider_prefix_46.py",
+    "tier": 1,
+    "burn": "est-2ek.1.46",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_live_truth.py",
+    "tier": 1,
+    "burn": "est-2ek.1.762",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_lock_wedge_44b.py",
+    "tier": 1,
+    "burn": "44b",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_lost_handoff_sync_wake_r18.py",
+    "tier": 1,
+    "burn": "r18",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_machine_watch_94.py",
+    "tier": 1,
+    "burn": "94",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_malformed_turn_541.py",
+    "tier": 1,
+    "burn": "est-2ek.1.541",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_malformed_turn_adopted_541.py",
+    "tier": 1,
+    "burn": "est-2ek.1.541",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_measured_zero_7ps8.py",
+    "tier": 1,
+    "burn": "est-7ps8",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_mechanic_admission_gate_104.py",
+    "tier": 1,
+    "burn": "est-t3m6",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_metrics_0923.py",
+    "tier": 1,
+    "burn": "est-2ek.1.762",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_metrics_fold_parity_114.py",
+    "tier": 1,
+    "burn": "est-only",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_metrics_missing_ui.mjs",
+    "tier": 1,
+    "burn": "#12",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_metrics_unknown_fold_114.py",
+    "tier": 1,
+    "burn": "114",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_model_law_dad50be0.py",
+    "tier": 1,
+    "burn": "dad50be0",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_model_preflight_0924.py",
+    "tier": 1,
+    "burn": "0924",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_nested_gate_run_dir_243.py",
+    "tier": 1,
+    "burn": "243",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_node_facts.py",
+    "tier": 1,
+    "burn": "est-2ek.1.762",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_null_quorum_death_label_4sx.py",
+    "tier": 1,
+    "burn": "est-4sx",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_numeric_type_validation_113.py",
+    "tier": 1,
+    "burn": "113",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_old_door_resume_152.py",
+    "tier": 1,
+    "burn": "est-locked",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_omit_policy_flags_yq2x.py",
+    "tier": 1,
+    "burn": "est-yq2xq",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_on_exit_129.py",
+    "tier": 1,
+    "burn": "129",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_on_fail_h23.py",
+    "tier": 1,
+    "burn": "h23",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_originator_lookup_wk7l.py",
+    "tier": 1,
+    "burn": "est-wk7l",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_orphan_adopt_790c6ad.py",
+    "tier": 1,
+    "burn": "790c6ad",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_owner_session_override_z717.py",
+    "tier": 1,
+    "burn": "est-z717",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_package_source_only_756.py",
+    "tier": 1,
+    "burn": "est-xwvu9",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_pane_origin_hardening.mjs",
+    "tier": 1,
+    "burn": "est-wk7l",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_pane_render_uncapped.mjs",
+    "tier": 1,
+    "burn": "#156",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_papercuts_0922.py",
+    "tier": 1,
+    "burn": "0922",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_papercuts_0922b.py",
+    "tier": 1,
+    "burn": "est-2ek.1.762",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_params_contract_bwv0h.py",
+    "tier": 1,
+    "burn": "est-bwv0h",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_partial_block_87.py",
+    "tier": 1,
+    "burn": "est-on-death",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_partial_rescue_law_134.py",
+    "tier": 1,
+    "burn": "134",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_patch_amend_diff_2del.py",
+    "tier": 1,
+    "burn": "est-2del",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_personal_path_scrub_867.py",
+    "tier": 1,
+    "burn": "est-2ek.1.867",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_pill_rail.mjs",
+    "tier": 1,
+    "burn": "#22",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_pill_rail_expand.mjs",
+    "tier": 1,
+    "burn": "#22",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_pin_delta_check_133387.py",
+    "tier": 1,
+    "burn": "est-gbim",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_plugin_asks_164_fallback.py",
+    "tier": 1,
+    "burn": "est-2ek.1.164",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_plugin_asks_165_remaining.py",
+    "tier": 1,
+    "burn": "est-2ek.1.165",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_plugin_asks_166_version_handshake.py",
+    "tier": 1,
+    "burn": "est-2ek.1.166",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_plugin_asks_toolsets_d.py",
+    "tier": 1,
+    "burn": "est-2ek.1.142",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_plugin_resolution_live_not_old.py",
+    "tier": 1,
+    "burn": "est-ujtf",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_pool_seat_cap_fifo_mg5o2.py",
+    "tier": 1,
+    "burn": "est-mg5o2",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_pool_seat_cap_mg5o2.py",
+    "tier": 1,
+    "burn": "est-mg5o2",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_portable_32.py",
+    "tier": 1,
+    "burn": "32",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_post_exit_hook.py",
+    "tier": 1,
+    "burn": "est-w4qa",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_post_exit_strip_xwvu9.py",
+    "tier": 1,
+    "burn": "est-xwvu9",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_pr_tag_audit.py",
+    "tier": 1,
+    "burn": "est-4vnq",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_preflight_liveness_152be7f7.py",
+    "tier": 1,
+    "burn": "152be7f7",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_proctree_61.py",
+    "tier": 1,
+    "burn": "est-jue3",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_proctree_61b.py",
+    "tier": 1,
+    "burn": "est-empty",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_proctree_identity_80.py",
+    "tier": 1,
+    "burn": "80",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_profile_home_0928.py",
+    "tier": 1,
+    "burn": "0928",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_progress_channel_128.py",
+    "tier": 1,
+    "burn": "128",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_prose_json_raw_decode.py",
+    "tier": 1,
+    "burn": "#111",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_provenance_contract_126.py",
+    "tier": 1,
+    "burn": "est-syim",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_provenance_counters_57.py",
+    "tier": 1,
+    "burn": "57",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_prune_0923.py",
+    "tier": 1,
+    "burn": "0923",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_publisher_cap_1603.py",
+    "tier": 1,
+    "burn": "est-2ek.1.603",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_px11_memoryerror_containment.py",
+    "tier": 1,
+    "burn": "est-px11",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_quorum_cause_guard_6226.py",
+    "tier": 1,
+    "burn": "6226",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_quorum_drain_deadline_06xk.py",
+    "tier": 1,
+    "burn": "est-06xk",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_ratelimit_54.py",
+    "tier": 1,
+    "burn": "est-t0vz",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_ratelimit_history_ja41.py",
+    "tier": 1,
+    "burn": "est-ja41",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_ratelimit_park_walls_159c.py",
+    "tier": 1,
+    "burn": "est-qp8dj",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_reap_receipt_o79j.py",
+    "tier": 1,
+    "burn": "o79j",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_reaper_reason_8.py",
+    "tier": 1,
+    "burn": "8",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_register_surface.mjs",
+    "tier": 1,
+    "burn": "#22",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_release_zip_1nkx.py",
+    "tier": 1,
+    "burn": "1nkx",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_repo_render_459.py",
+    "tier": 1,
+    "burn": "est-rza3t",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_require_route_25.py",
+    "tier": 1,
+    "burn": "est-2ek.1.762",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_respawn_hardening_723.py",
+    "tier": 1,
+    "burn": "723",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_resume_fresh_session_102.py",
+    "tier": 1,
+    "burn": "est-2ek.1.762",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_resume_hint_130.py",
+    "tier": 1,
+    "burn": "est-2ek.1.762",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_resume_spawn_log_hls8y.py",
+    "tier": 1,
+    "burn": "est-hls8y",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_retry_knobs_23c.py",
+    "tier": 1,
+    "burn": "23c",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_review_fixes.py",
+    "tier": 1,
+    "burn": "est-2ek.1.762",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_rework_accept_459.py",
+    "tier": 1,
+    "burn": "est-vp148",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_route_bake_cron_45b038.py",
+    "tier": 1,
+    "burn": "45b038",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_route_efforts_b3c98b2a.py",
+    "tier": 1,
+    "burn": "b3c98b2a",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_route_hold_optout_retry_w56.py",
+    "tier": 1,
+    "burn": "est-2ek.1.641",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_route_identity_699.py",
+    "tier": 1,
+    "burn": "est-2ek.1.699",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_route_substitution_641.py",
+    "tier": 1,
+    "burn": "est-2ek.1.641",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_run_binding.py",
+    "tier": 1,
+    "burn": "#71",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_run_budget_3acn.py",
+    "tier": 1,
+    "burn": "est-3acn",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_run_context_seed_guard.py",
+    "tier": 1,
+    "burn": "#7",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_run_dir_proof_199.py",
+    "tier": 1,
+    "burn": "est-2ek.1.199",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_run_dry_run.py",
+    "tier": 1,
+    "burn": "est-seated",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_run_tray.mjs",
+    "tier": 1,
+    "burn": "#230",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_runctx_contract_kg3y.py",
+    "tier": 1,
+    "burn": "est-kg3y",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_runner_orphan_666.py",
+    "tier": 1,
+    "burn": "est-2ek.1.666",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_runs_root_realpath_7ps8.py",
+    "tier": 1,
+    "burn": "est-7ps8",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_safe_root_workdir.py",
+    "tier": 1,
+    "burn": "est-2ek.1.772",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_save_sourcecap_459.py",
+    "tier": 1,
+    "burn": "est-rza3t",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_save_stale_literals_245.py",
+    "tier": 1,
+    "burn": "est-2ek.1.245",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_schema_enum_107.py",
+    "tier": 1,
+    "burn": "est-time",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_schema_key_suggest_62.py",
+    "tier": 1,
+    "burn": "est-2ek.1.62",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_schema_max_472.py",
+    "tier": 1,
+    "burn": "472",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_schema_min_96.py",
+    "tier": 1,
+    "burn": "96",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_scrub_yml_166b.py",
+    "tier": 1,
+    "burn": "166b",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_seat_admission_deadline_g255.py",
+    "tier": 1,
+    "burn": "est-g255",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_seat_admit_lock_r3.py",
+    "tier": 1,
+    "burn": "est-g255",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_seat_cancel_at_ticket_r2_g255.py",
+    "tier": 1,
+    "burn": "est-g255",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_seat_cap_dotenv_gxjh6.py",
+    "tier": 1,
+    "burn": "est-gxjh6",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_seat_cap_override_856.py",
+    "tier": 1,
+    "burn": "est-2ek.1.856",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_seat_fifo_856.py",
+    "tier": 1,
+    "burn": "est-2ek.1.856",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_seat_lending_identity_r2_g255.py",
+    "tier": 1,
+    "burn": "est-g255",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_seat_live_g2xx.py",
+    "tier": 1,
+    "burn": "est-g2xx",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_seat_nesting_noprocs_g255.py",
+    "tier": 1,
+    "burn": "est-g255",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_seat_overadmit_857.py",
+    "tier": 1,
+    "burn": "est-2ek.1.857",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_seat_popen_exception_g255.py",
+    "tier": 1,
+    "burn": "est-g255",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_seat_postpopen_cleanup_r2_g255.py",
+    "tier": 1,
+    "burn": "est-g255",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_seat_quorum_straggler_g255.py",
+    "tier": 1,
+    "burn": "est-g255",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_seat_ticket_identity_g255.py",
+    "tier": 1,
+    "burn": "est-g255",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_seat_wait_status_833.py",
+    "tier": 1,
+    "burn": "est-2ek.1.833",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_seats_not_a_run_g2xx.py",
+    "tier": 1,
+    "burn": "est-g2xx",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_self_review_422_1866.py",
+    "tier": 1,
+    "burn": "est-2ek.1.866",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_session_strip.mjs",
+    "tier": 1,
+    "burn": "#23",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_session_tray.mjs",
+    "tier": 1,
+    "burn": "#230",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_session_wake_101.py",
+    "tier": 1,
+    "burn": "101",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_session_wake_matrix_101.py",
+    "tier": 1,
+    "burn": "101",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_settings_route_z717.py",
+    "tier": 1,
+    "burn": "est-z717",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_shelf_discovery_validation_828.py",
+    "tier": 1,
+    "burn": "est-2ek.1.828",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_shelf_isolation_71.py",
+    "tier": 1,
+    "burn": "71",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_silent_death_reaper_8.py",
+    "tier": 1,
+    "burn": "8",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_single_source_bc_item_token_libks.py",
+    "tier": 1,
+    "burn": "est-libks",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_skip_pass_effects_0lxnh.py",
+    "tier": 1,
+    "burn": "est-0lxnh",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_spawn_enoent_retry_w33.py",
+    "tier": 1,
+    "burn": "est-ulwpg",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_spawn_ledger_8.py",
+    "tier": 1,
+    "burn": "est-effort",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_spawn_seat_cap_scrub_mg5o2.py",
+    "tier": 1,
+    "burn": "est-mg5o2",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_sprint101_A-door.py",
+    "tier": 1,
+    "burn": "#1",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_sprint101_D-surface.py",
+    "tier": 1,
+    "burn": "#15",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_sprint101w2_B1-classes.py",
+    "tier": 1,
+    "burn": "est-954r",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_sprint101w2_B2-retry.py",
+    "tier": 1,
+    "burn": "est-on-death",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_sprint101w2_C1-defaults.py",
+    "tier": 1,
+    "burn": "#8",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_sprint101w2_C2-prompt.py",
+    "tier": 1,
+    "burn": "est-2ek.1.762",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_sprint101w2_C3-fanout-gates.py",
+    "tier": 1,
+    "burn": "#12",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_sprint101w2_D2-steer-liveness.py",
+    "tier": 1,
+    "burn": "est-2ek.1.762",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_stale_queued_spawn_byft8.py",
+    "tier": 1,
+    "burn": "est-byft8",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_status_next.py",
+    "tier": 1,
+    "burn": "95d7010295d70102",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_steer_live_40.py",
+    "tier": 1,
+    "burn": "est-2ek.1.762",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_steer_truth_0924.py",
+    "tier": 1,
+    "burn": "0924",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_stock_dispatch_selection_304.py",
+    "tier": 1,
+    "burn": "304",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_stop_reason_status_95.py",
+    "tier": 1,
+    "burn": "est-2ek.1.95",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_string_type_validation_59.py",
+    "tier": 1,
+    "burn": "59",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_stuck_node_finalize_733.py",
+    "tier": 1,
+    "burn": "733",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_subagent_accounting_p3.py",
+    "tier": 1,
+    "burn": "p3",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_suite_admission_17.py",
+    "tier": 1,
+    "burn": "17",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_suite_runs_root_762.py",
+    "tier": 1,
+    "burn": "est-2ek.1.762",
+    "order_group": null,
+    "after": [
+      "ALL_OTHERS_IN_LANE"
+    ]
+  },
+  {
+    "case": "test_suite_stale_receipt_m11.py",
+    "tier": 1,
+    "burn": "m11",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_suite_tempdir_cleanup_7ps8.py",
+    "tier": 1,
+    "burn": "est-7ps8",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_suite_zero_discovery_112.py",
+    "tier": 1,
+    "burn": "112",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_summary_all_nodes_p318w.py",
+    "tier": 1,
+    "burn": "est-p318w",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_tab_polish_48.mjs",
+    "tier": 1,
+    "burn": "#48",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_terminal_handoff_boundary_r19.py",
+    "tier": 1,
+    "burn": "r19",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_tier_report_0924.py",
+    "tier": 1,
+    "burn": "est-2ek.1.762",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_tiers.py",
+    "tier": 1,
+    "burn": "#71",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_tool_bridge_settings_9c41e2b7.py",
+    "tier": 1,
+    "burn": "9c41e2b7",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_tool_call_text_6st.py",
+    "tier": 1,
+    "burn": "est-6st",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_toolsets_empty_427.py",
+    "tier": 1,
+    "burn": "427",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_tree_quiesce_reap.py",
+    "tier": 1,
+    "burn": "987654321",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_unconditional_version_stamp.py",
+    "tier": 1,
+    "burn": "est-0sj4",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_upstream_hook_contract.py",
+    "tier": 1,
+    "burn": "#112",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_v3_fixes.py",
+    "tier": 1,
+    "burn": "est-locked",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_v4_fixes.py",
+    "tier": 1,
+    "burn": "est-2ek.1.762",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_v5_fixes.py",
+    "tier": 1,
+    "burn": "est-2ek.1.762",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_validate_0923.py",
+    "tier": 1,
+    "burn": "0923",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_validate_run_ref.py",
+    "tier": 1,
+    "burn": "#84",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_validator_caps.py",
+    "tier": 1,
+    "burn": "est-clip",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_version_truth_159.py",
+    "tier": 1,
+    "burn": "est-2ek.1.159",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_wait_payload_76.py",
+    "tier": 1,
+    "burn": "76",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_waitgate_0923.py",
+    "tier": 1,
+    "burn": "est-2ek.1.762",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_wake_catchall_jbcrw.py",
+    "tier": 1,
+    "burn": "est-jbcrw",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_wake_hermetic_env.py",
+    "tier": 1,
+    "burn": "#42",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_wake_payload_pointers_501.py",
+    "tier": 1,
+    "burn": "est-qcyfi",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_wall_extend_session_595.py",
+    "tier": 1,
+    "burn": "est-2ek.1.595",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_wall_meter_133.py",
+    "tier": 1,
+    "burn": "133",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_wfpid_owner_8.py",
+    "tier": 1,
+    "burn": "8",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_when_ancestry_0930.py",
+    "tier": 1,
+    "burn": "0930",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_when_on_agent.py",
+    "tier": 1,
+    "burn": "#132",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_when_on_agent_engine.py",
+    "tier": 1,
+    "burn": "est-xd3b",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_wofify.py",
+    "tier": 1,
+    "burn": "est-h0huv",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_z717_zero_directive_capture.mjs",
+    "tier": 1,
+    "burn": "est-z717",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_zombie_reaper_continuous.py",
+    "tier": 1,
+    "burn": "#283",
+    "order_group": null,
+    "after": []
+  },
+  {
+    "case": "test_zombie_settle_448.py",
+    "tier": 1,
+    "burn": "448",
+    "order_group": null,
+    "after": []
+  }
+]

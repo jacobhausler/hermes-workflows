@@ -17,8 +17,9 @@ Law:
               probe (deliberate deviation from JSON Schema, stated here).
               Harvest error: "{path}: expected at least N non-blank char(s)".
   No field-name special-casing of verify_list anywhere in the engine.
-  The subset stays CLOSED: `maxItems` still gets the unsupported-keyword
-  refusal (the closed-subset law stays tested).
+  The subset stays CLOSED: since #472 admitted `maxItems` (enforced as the
+  cap mirror of minItems), `uniqueItems` carries the unsupported-keyword
+  refusal canary — the closed-subset law stays tested.
 
 Covers:
   1. door admits minItems/minLength on the right types (top level, nested,
@@ -113,13 +114,15 @@ for bad in (-1, 1.5, "1", True, False, None, [1]):
     check(f"minLength {bad!r} rejected as non-int/non-negative (bool refused)",
           errs and "non-negative integer" in errs[0]["msg"], json.dumps(errs))
 # the subset stays CLOSED: a sibling keyword is still refused, and the
-# supported list now names exactly the two new entries.
-errs = V(agent_node({"type": "array", "maxItems": 2}))
+# supported list names the admitted set. (#472 re-pin: maxItems joined the
+# admitted set as minItems' mirror; uniqueItems is the canary now, and the
+# refusal additionally names the description-prose fallback.)
+errs = V(agent_node({"type": "array", "uniqueItems": True,
+                    "items": {"type": "string"}}))
 kw_err = [e for e in errs if "unsupported schema keyword" in e["msg"]]
-check("door: maxItems still refused — the subset stays closed", bool(kw_err), json.dumps(errs))
-check("the supported list names minItems and minLength now",
-      kw_err and kw_err[0]["msg"].endswith(
-          "supported: type, required, properties, items, description, enum, minItems, minLength"),
+check("door: uniqueItems still refused — the subset stays closed", bool(kw_err), json.dumps(errs))
+check("the supported list names minItems, minLength and (since #472) maxItems",
+      kw_err and "supported: type, required, properties, items, description, enum, minItems, minLength, maxItems" in kw_err[0]["msg"],
       kw_err[0]["msg"] if kw_err else "no keyword error")
 
 # ============ 3. harvest-time enforcement (wf.validate direct) ============

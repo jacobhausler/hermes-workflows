@@ -20,7 +20,7 @@ Include, as best you can:
 ## Supported versions
 
 Security fixes are accepted against the **latest release only** — currently
-`v1.3.9` (see [`CHANGELOG.md`](CHANGELOG.md) and the tags). Fixes ship in the
+`v1.4.3` (see [`CHANGELOG.md`](CHANGELOG.md) and the tags). Fixes ship in the
 next release cut; older tags are not patched retroactively.
 
 ## Child approvals posture

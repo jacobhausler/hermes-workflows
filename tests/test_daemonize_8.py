@@ -61,6 +61,7 @@ sys.path.insert(0, str(BUILD))
 spec = importlib.util.spec_from_file_location("hw8", BUILD / "__init__.py")
 hw = importlib.util.module_from_spec(spec); spec.loader.exec_module(hw)
 import wf_test_isolation as _iso71; _iso71.install(hw)  # #71 r5: pin settings.runs_root alongside WF_RUNS_ROOT
+from fake_runner import alive, cmdline, runners_for  # shared door-scan probes (tests/fake_runner.py)
 
 # This process asks to be the test tree's subreaper so T1 can assert the ADOPTION
 # TARGET: the orphaned runner must be adopted HERE (a live parent standing for the
@@ -91,23 +92,6 @@ def call(**a):
 
 SLOW = {"name": "daemonize8-slow", "nodes": [
     {"id": "slow", "type": "agent", "goal": "SLEEP 4 cook the report"}]}
-
-def alive(pid):
-    try:
-        os.kill(pid, 0)
-    except (ProcessLookupError, PermissionError):
-        return False
-    try:
-        st = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[0]
-        return not st.startswith("Z")
-    except OSError:
-        return True
-
-def cmdline(pid):
-    try:
-        return " " + Path(f"/proc/{pid}/cmdline").read_bytes().decode(errors="replace").replace("\0", " ").strip() + " "
-    except OSError:
-        return ""
 
 def ppid_of(pid):
     try:
@@ -383,8 +367,7 @@ time.sleep(1.2)
 busy4 = sum(1 for line in (rdir4 / "runner.log").read_text(errors="replace").splitlines()
             if "WORKFLOW_BUSY" in line)
 check("T3b double-spawn on a fresh run -> exactly one WORKFLOW_BUSY loser", busy4 == 1, f"busy={busy4}")
-live = [pid for pid, _ in proc_map().items()
-        if f"{os.sep}wf.py run {base3}" in cmdline(pid)]
+live = runners_for(base3)
 check("T3b exactly one live runner for the raced run", len(live) == 1, f"live={live}")
 check("T3b wf.pid names that live runner (ready-pipe handshake, door never stamps the loser)",
       bool(live) and wfpid_of(base3) == live[0] and alive(live[0]), f"wf.pid={wfpid_of(base3)} live={live}")

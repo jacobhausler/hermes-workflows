@@ -1,6 +1,6 @@
 # `general/` — the packaged starter set
 
-Five scrubbed, estate-neutral graphs that ship with the plugin. The door
+Six scrubbed, estate-neutral graphs that ship with the plugin. The door
 resolves `from: general/<name>` against them whenever your private library
 (``<runs_root>/library/general/``) misses, so a fresh install can run a real
 DAG without authoring anything first. Precedence is
@@ -16,6 +16,7 @@ the door.
 | `general/test-first-feature-slice` | one behavior is worth a red-green-proof slice | build chain + independent verifier that re-runs, not re-reads |
 | `general/fan-out-audit-census` | a tree needs a per-file audit with an honest tally | the 8 KB per-parent input cap by example: paths in item goals, schemas pin the `path` key |
 | `general/report-and-verify` | a producer will drop a report later and you want zero tokens while waiting | machine `wait` gate: fixed `until_argv`, `every_s`/`timeout_s`, timeout = failure |
+| `general/queue-executor` | a tracker/file queue has open items you want executed in parallel with receipts, not vibes | resume-from-disk lanes, independent re-run verify, owner's done-contract closing |
 
 All five route every agent through model **tiers** — no graph names a
 vendor model. Configure at least `worker` and `manager` in the plugin

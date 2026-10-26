@@ -1,5 +1,5 @@
 name: hermes-workflows
-version: 1.3.9
+version: 1.4.3
 description: Agent-owned workflow graphs — nodes, fan-outs, gates, fingerprint-resume, desktop DAG view
 description_long: |
   Adds a `workflow` tool: the spawning agent owns a JSON graph of agent nodes and
@@ -13,6 +13,10 @@ requires_hermes: ">=0.21.4"  # v2026.9.21: measured stock -Q CLI and quiet turn-
 provides_tools:
   - workflow
 provides_hooks:
+  # Registered by register(); the three marked gated below land only behind owner
+  # config flags (subagent_accounting / hooks_bridge_allow) — declared per
+  # upstream review NousResearch/hermes-agent#141665 point 3: hooks registered
+  # behind a flag still have to be declared, the validator only sees them when on.
   - post_tool_call
   - pre_llm_call
   - transform_llm_output
@@ -21,3 +25,6 @@ provides_hooks:
   - on_session_end
   - on_session_finalize
   - agent_loop_stopped
+  - subagent_stop            # gated: settings.hooks_allow lists subagent_accounting
+  - pre_approval_request     # gated: settings.hooks_bridge_allow lists approval_bridge
+  - post_approval_response   # gated: settings.hooks_bridge_allow lists approval_bridge

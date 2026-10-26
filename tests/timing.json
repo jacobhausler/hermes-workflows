@@ -1,0 +1,1722 @@
+[
+  {
+    "case": "test_11_common_team_readmodel.py",
+    "wall_s": 0.2,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_11_door_lane.py",
+    "wall_s": 1.0,
+    "timeout_s": 3
+  },
+  {
+    "case": "test_11_integration_claim.py",
+    "wall_s": 3.3,
+    "timeout_s": 10
+  },
+  {
+    "case": "test_11_integration_crash_resume.py",
+    "wall_s": 63.9,
+    "timeout_s": 192
+  },
+  {
+    "case": "test_11_integration_golden.py",
+    "wall_s": 9.2,
+    "timeout_s": 28
+  },
+  {
+    "case": "test_11_integration_lane_supervisor.py",
+    "wall_s": 78.4,
+    "timeout_s": 236
+  },
+  {
+    "case": "test_11_integration_team.py",
+    "wall_s": 12.7,
+    "timeout_s": 39
+  },
+  {
+    "case": "test_11_runner_profile.py",
+    "wall_s": 0.9,
+    "timeout_s": 3
+  },
+  {
+    "case": "test_11_runner_requires.py",
+    "wall_s": 1.3,
+    "timeout_s": 4
+  },
+  {
+    "case": "test_11_ui_imports.mjs",
+    "wall_s": 0.1,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_admission_gates.py",
+    "wall_s": 2.2,
+    "timeout_s": 7
+  },
+  {
+    "case": "test_admission_ledger_85.py",
+    "wall_s": 4.1,
+    "timeout_s": 13
+  },
+  {
+    "case": "test_adopt_stop_race.py",
+    "wall_s": 0.2,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_agent_experience_p01.py",
+    "wall_s": 0.8,
+    "timeout_s": 3
+  },
+  {
+    "case": "test_alias_explicit_provider_ping_55z04.py",
+    "wall_s": 0.1,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_alias_receipt_respawn_318.py",
+    "wall_s": 0.7,
+    "timeout_s": 3
+  },
+  {
+    "case": "test_alias_route_ping_318.py",
+    "wall_s": 0.2,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_amend_bound_preamble_838.py",
+    "wall_s": 0.2,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_amend_preview_defdiff.py",
+    "wall_s": 0.1,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_amend_rebake_034849a2.py",
+    "wall_s": 0.5,
+    "timeout_s": 2
+  },
+  {
+    "case": "test_approval_bridge_p5.py",
+    "wall_s": 4.8,
+    "timeout_s": 15
+  },
+  {
+    "case": "test_authoring_next_cut.py",
+    "wall_s": 2.3,
+    "timeout_s": 7
+  },
+  {
+    "case": "test_bank_the_corpse_131.py",
+    "wall_s": 12.2,
+    "timeout_s": 37
+  },
+  {
+    "case": "test_bead_close_claim_13z1.py",
+    "wall_s": 4.6,
+    "timeout_s": 14
+  },
+  {
+    "case": "test_bead_close_fanout_485.py",
+    "wall_s": 6.9,
+    "timeout_s": 21
+  },
+  {
+    "case": "test_blocked_legibility_100.py",
+    "wall_s": 2.6,
+    "timeout_s": 8
+  },
+  {
+    "case": "test_boolean_schema_0924.py",
+    "wall_s": 0.1,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_budget_cue_bbfy.py",
+    "wall_s": 34.7,
+    "timeout_s": 105
+  },
+  {
+    "case": "test_budget_shape_warning_vj8m.py",
+    "wall_s": 0.4,
+    "timeout_s": 2
+  },
+  {
+    "case": "test_canvas_wrap.mjs",
+    "wall_s": 0.1,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_card_backend_080.py",
+    "wall_s": 0.3,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_card_frontend_contract.mjs",
+    "wall_s": 0.1,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_card_ledger.py",
+    "wall_s": 5.8,
+    "timeout_s": 18
+  },
+  {
+    "case": "test_card_notice_157.py",
+    "wall_s": 0.4,
+    "timeout_s": 2
+  },
+  {
+    "case": "test_child_write_grant_2mhl.py",
+    "wall_s": 3.7,
+    "timeout_s": 12
+  },
+  {
+    "case": "test_clean_lane_1660.py",
+    "wall_s": 1.7,
+    "timeout_s": 6
+  },
+  {
+    "case": "test_completed_truth_on5.py",
+    "wall_s": 0.2,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_composer_owner.mjs",
+    "wall_s": 0.1,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_concurrency_bake_100.py",
+    "wall_s": 0.4,
+    "timeout_s": 2
+  },
+  {
+    "case": "test_concurrency_run_args_498.py",
+    "wall_s": 0.4,
+    "timeout_s": 2
+  },
+  {
+    "case": "test_confidence_substrate_116.py",
+    "wall_s": 1.0,
+    "timeout_s": 3
+  },
+  {
+    "case": "test_config_input_paths_jam8.py",
+    "wall_s": 3.1,
+    "timeout_s": 10
+  },
+  {
+    "case": "test_config_input_tmuu.py",
+    "wall_s": 10.1,
+    "timeout_s": 31
+  },
+  {
+    "case": "test_convoy_splice_ij0.py",
+    "wall_s": 3.2,
+    "timeout_s": 10
+  },
+  {
+    "case": "test_crash_no_exit_respawn_718.py",
+    "wall_s": 0.1,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_crash_respawn_idempotence_8.py",
+    "wall_s": 3.7,
+    "timeout_s": 12
+  },
+  {
+    "case": "test_cross_container_liveness_91b9a3de.py",
+    "wall_s": 1.6,
+    "timeout_s": 5
+  },
+  {
+    "case": "test_cross_profile_metrics_904f.py",
+    "wall_s": 0.1,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_current_attempt_metrics.py",
+    "wall_s": 3.5,
+    "timeout_s": 11
+  },
+  {
+    "case": "test_daemonize_8.py",
+    "wall_s": 22.3,
+    "timeout_s": 67
+  },
+  {
+    "case": "test_dashboard_entry_77.mjs",
+    "wall_s": 0.0,
+    "timeout_s": 0
+  },
+  {
+    "case": "test_deleted_cwd_resume_5c37b19.py",
+    "wall_s": 8.9,
+    "timeout_s": 27
+  },
+  {
+    "case": "test_detach_redrive_o79j.py",
+    "wall_s": 6.0,
+    "timeout_s": 18
+  },
+  {
+    "case": "test_diagram_law.py",
+    "wall_s": 1.2,
+    "timeout_s": 4
+  },
+  {
+    "case": "test_directive_card_error.mjs",
+    "wall_s": 0.0,
+    "timeout_s": 0
+  },
+  {
+    "case": "test_docs_surface_drift.py",
+    "wall_s": 0.2,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_door.py",
+    "wall_s": 10.6,
+    "timeout_s": 32
+  },
+  {
+    "case": "test_door_general_51.py",
+    "wall_s": 0.5,
+    "timeout_s": 2
+  },
+  {
+    "case": "test_door_lib_50.py",
+    "wall_s": 0.8,
+    "timeout_s": 3
+  },
+  {
+    "case": "test_door_quorum_copy.py",
+    "wall_s": 0.1,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_door_quota_route_identity_rq169.py",
+    "wall_s": 0.2,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_door_sibling_root_58.py",
+    "wall_s": 9.9,
+    "timeout_s": 30
+  },
+  {
+    "case": "test_door_ux_509.py",
+    "wall_s": 0.2,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_drift_check_125.py",
+    "wall_s": 0.9,
+    "timeout_s": 3
+  },
+  {
+    "case": "test_edge_routing.mjs",
+    "wall_s": 0.1,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_effects_receipt_pygyy.py",
+    "wall_s": 14.3,
+    "timeout_s": 43
+  },
+  {
+    "case": "test_efp_memo_dag.py",
+    "wall_s": 0.1,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_engine.py",
+    "wall_s": 10.6,
+    "timeout_s": 32
+  },
+  {
+    "case": "test_engine_next_cut.py",
+    "wall_s": 11.2,
+    "timeout_s": 34
+  },
+  {
+    "case": "test_enum_clamp_5med_flah.py",
+    "wall_s": 44.2,
+    "timeout_s": 133
+  },
+  {
+    "case": "test_error_class_doc_sync.py",
+    "wall_s": 0.1,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_error_classes_exhaustive_vb65.py",
+    "wall_s": 0.2,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_example_blind_council.py",
+    "wall_s": 0.2,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_example_census_fanout.py",
+    "wall_s": 0.1,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_example_exchange_run.py",
+    "wall_s": 0.1,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_example_issue_to_pr.py",
+    "wall_s": 0.1,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_example_portable_review.py",
+    "wall_s": 0.1,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_example_release_lifecycle.py",
+    "wall_s": 0.1,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_example_submit_pr.py",
+    "wall_s": 0.0,
+    "timeout_s": 0
+  },
+  {
+    "case": "test_execution_clocks_p02.py",
+    "wall_s": 1.8,
+    "timeout_s": 6
+  },
+  {
+    "case": "test_explain_stale_0929.py",
+    "wall_s": 0.3,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_failed_events_77.py",
+    "wall_s": 2.4,
+    "timeout_s": 8
+  },
+  {
+    "case": "test_failed_nodes_5lnm.py",
+    "wall_s": 0.5,
+    "timeout_s": 2
+  },
+  {
+    "case": "test_failures_0923.py",
+    "wall_s": 30.8,
+    "timeout_s": 93
+  },
+  {
+    "case": "test_fakeb1_gitpin_954r.py",
+    "wall_s": 46.5,
+    "timeout_s": 140
+  },
+  {
+    "case": "test_fanout_aggregate_readmodel.py",
+    "wall_s": 0.5,
+    "timeout_s": 2
+  },
+  {
+    "case": "test_fanout_cell_dcd.py",
+    "wall_s": 3.4,
+    "timeout_s": 11
+  },
+  {
+    "case": "test_fanout_empty_items_0p.py",
+    "wall_s": 0.4,
+    "timeout_s": 2
+  },
+  {
+    "case": "test_fanout_expand.mjs",
+    "wall_s": 0.1,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_fanout_item_commit_765.py",
+    "wall_s": 2.6,
+    "timeout_s": 8
+  },
+  {
+    "case": "test_fanout_item_goal.py",
+    "wall_s": 6.8,
+    "timeout_s": 21
+  },
+  {
+    "case": "test_fanout_stragglers_nxr.py",
+    "wall_s": 25.6,
+    "timeout_s": 77
+  },
+  {
+    "case": "test_fanout_ui.mjs",
+    "wall_s": 8.0,
+    "timeout_s": 24
+  },
+  {
+    "case": "test_fatal_quota_24.py",
+    "wall_s": 1.1,
+    "timeout_s": 4
+  },
+  {
+    "case": "test_findrun_twin_t1kk.py",
+    "wall_s": 0.7,
+    "timeout_s": 3
+  },
+  {
+    "case": "test_forbidden_route_identity_e0yqy.py",
+    "wall_s": 0.4,
+    "timeout_s": 2
+  },
+  {
+    "case": "test_foreign_ns_child_818.py",
+    "wall_s": 3.9,
+    "timeout_s": 12
+  },
+  {
+    "case": "test_fp_rule_95d70102.py",
+    "wall_s": 0.2,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_fp_rule_f0f154d5.py",
+    "wall_s": 0.1,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_gate_answer_flows_00e46adb.py",
+    "wall_s": 2.5,
+    "timeout_s": 8
+  },
+  {
+    "case": "test_gateway_sigterm_detach_6226.py",
+    "wall_s": 7.7,
+    "timeout_s": 24
+  },
+  {
+    "case": "test_golden_seat_no_inherited_identity_862.py",
+    "wall_s": 17.1,
+    "timeout_s": 52
+  },
+  {
+    "case": "test_graph_result_158.py",
+    "wall_s": 1.3,
+    "timeout_s": 4
+  },
+  {
+    "case": "test_graph_revision_cas_19.py",
+    "wall_s": 1.2,
+    "timeout_s": 4
+  },
+  {
+    "case": "test_harvest_cap_retry_ggqs.py",
+    "wall_s": 15.0,
+    "timeout_s": 45
+  },
+  {
+    "case": "test_harvest_scan_guard.py",
+    "wall_s": 0.2,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_heartbeat_verdict_127.py",
+    "wall_s": 0.8,
+    "timeout_s": 3
+  },
+  {
+    "case": "test_hermes_bin_reserved_0928.py",
+    "wall_s": 0.1,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_honest_status_jam_a3.py",
+    "wall_s": 0.2,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_hook_abandon_safety.py",
+    "wall_s": 0.2,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_hooks_outbound_bridge.py",
+    "wall_s": 1.5,
+    "timeout_s": 5
+  },
+  {
+    "case": "test_import_purity_133387.py",
+    "wall_s": 0.3,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_incident_response_93.py",
+    "wall_s": 2.8,
+    "timeout_s": 9
+  },
+  {
+    "case": "test_include_door.py",
+    "wall_s": 10.7,
+    "timeout_s": 33
+  },
+  {
+    "case": "test_include_expansion_core.py",
+    "wall_s": 0.2,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_inline_header.mjs",
+    "wall_s": 0.1,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_inputs_0923.py",
+    "wall_s": 3.3,
+    "timeout_s": 10
+  },
+  {
+    "case": "test_integration_080.py",
+    "wall_s": 0.6,
+    "timeout_s": 2
+  },
+  {
+    "case": "test_jec0_recursion_containment.py",
+    "wall_s": 0.1,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_jitter_backoff_hackathon.py",
+    "wall_s": 10.6,
+    "timeout_s": 32
+  },
+  {
+    "case": "test_join_kind_hack.py",
+    "wall_s": 4.7,
+    "timeout_s": 15
+  },
+  {
+    "case": "test_lane_gate_64c6772b.py",
+    "wall_s": 2.2,
+    "timeout_s": 7
+  },
+  {
+    "case": "test_lane_hygiene_preamble_8edcc9bf.py",
+    "wall_s": 1.4,
+    "timeout_s": 5
+  },
+  {
+    "case": "test_lane_kill_cl7t.py",
+    "wall_s": 9.0,
+    "timeout_s": 27
+  },
+  {
+    "case": "test_lane_kill_steer_cl7t.py",
+    "wall_s": 9.2,
+    "timeout_s": 28
+  },
+  {
+    "case": "test_lane_recover_8edcc9bf.py",
+    "wall_s": 1.7,
+    "timeout_s": 6
+  },
+  {
+    "case": "test_lane_recover_cli_237r3.py",
+    "wall_s": 0.3,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_lane_recover_legacy_amend_237r4.py",
+    "wall_s": 0.1,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_lane_shelf_guard_1599.py",
+    "wall_s": 0.2,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_launcher_config.py",
+    "wall_s": 0.1,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_launcher_recovery_851.py",
+    "wall_s": 4.5,
+    "timeout_s": 14
+  },
+  {
+    "case": "test_lease_busy_retry.py",
+    "wall_s": 6.4,
+    "timeout_s": 20
+  },
+  {
+    "case": "test_library.py",
+    "wall_s": 4.1,
+    "timeout_s": 13
+  },
+  {
+    "case": "test_library_b2b.py",
+    "wall_s": 0.2,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_library_cooc_146.py",
+    "wall_s": 0.3,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_library_cooc_cause_yzoy.py",
+    "wall_s": 0.3,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_library_corrupt_prev_yzoy.py",
+    "wall_s": 0.2,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_library_empty_shelf_bvg0.py",
+    "wall_s": 0.3,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_library_empty_vocab_yzoy.py",
+    "wall_s": 0.3,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_library_erase_path_yzoy.py",
+    "wall_s": 0.2,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_library_tag_read_qeul.py",
+    "wall_s": 0.2,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_lifecycle_next_cut_0923.py",
+    "wall_s": 3.8,
+    "timeout_s": 12
+  },
+  {
+    "case": "test_list_root_280.py",
+    "wall_s": 0.5,
+    "timeout_s": 2
+  },
+  {
+    "case": "test_literal_provider_prefix_46.py",
+    "wall_s": 0.6,
+    "timeout_s": 2
+  },
+  {
+    "case": "test_live_truth.py",
+    "wall_s": 4.9,
+    "timeout_s": 15
+  },
+  {
+    "case": "test_live_truth_ui.mjs",
+    "wall_s": 0.0,
+    "timeout_s": 0
+  },
+  {
+    "case": "test_lock_wedge_44b.py",
+    "wall_s": 3.2,
+    "timeout_s": 10
+  },
+  {
+    "case": "test_lost_handoff_sync_wake_r18.py",
+    "wall_s": 26.2,
+    "timeout_s": 79
+  },
+  {
+    "case": "test_machine_watch_94.py",
+    "wall_s": 5.6,
+    "timeout_s": 17
+  },
+  {
+    "case": "test_malformed_turn_541.py",
+    "wall_s": 12.8,
+    "timeout_s": 39
+  },
+  {
+    "case": "test_malformed_turn_adopted_541.py",
+    "wall_s": 41.9,
+    "timeout_s": 126
+  },
+  {
+    "case": "test_measured_zero_7ps8.py",
+    "wall_s": 0.5,
+    "timeout_s": 2
+  },
+  {
+    "case": "test_mechanic_admission_gate_104.py",
+    "wall_s": 11.0,
+    "timeout_s": 33
+  },
+  {
+    "case": "test_metrics_0923.py",
+    "wall_s": 1.6,
+    "timeout_s": 5
+  },
+  {
+    "case": "test_metrics_fold_parity_114.py",
+    "wall_s": 2.1,
+    "timeout_s": 7
+  },
+  {
+    "case": "test_metrics_missing_ui.mjs",
+    "wall_s": 0.0,
+    "timeout_s": 0
+  },
+  {
+    "case": "test_metrics_unknown_fold_114.py",
+    "wall_s": 0.8,
+    "timeout_s": 3
+  },
+  {
+    "case": "test_model_law_dad50be0.py",
+    "wall_s": 7.2,
+    "timeout_s": 22
+  },
+  {
+    "case": "test_model_preflight_0924.py",
+    "wall_s": 0.2,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_nested_gate_run_dir_243.py",
+    "wall_s": 7.1,
+    "timeout_s": 22
+  },
+  {
+    "case": "test_node_click_expand.mjs",
+    "wall_s": 0.0,
+    "timeout_s": 0
+  },
+  {
+    "case": "test_node_facts.py",
+    "wall_s": 1.1,
+    "timeout_s": 4
+  },
+  {
+    "case": "test_node_id_advisory.py",
+    "wall_s": 0.8,
+    "timeout_s": 3
+  },
+  {
+    "case": "test_node_panel.mjs",
+    "wall_s": 0.1,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_node_types_registry.py",
+    "wall_s": 0.1,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_null_quorum_death_label_4sx.py",
+    "wall_s": 0.1,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_numeric_type_validation_113.py",
+    "wall_s": 3.9,
+    "timeout_s": 12
+  },
+  {
+    "case": "test_old_door_resume_152.py",
+    "wall_s": 15.3,
+    "timeout_s": 46
+  },
+  {
+    "case": "test_omit_policy_flags_yq2x.py",
+    "wall_s": 0.4,
+    "timeout_s": 2
+  },
+  {
+    "case": "test_on_exit_129.py",
+    "wall_s": 13.3,
+    "timeout_s": 40
+  },
+  {
+    "case": "test_on_fail_h23.py",
+    "wall_s": 5.8,
+    "timeout_s": 18
+  },
+  {
+    "case": "test_originator_lookup_wk7l.py",
+    "wall_s": 0.1,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_orphan_adopt_790c6ad.py",
+    "wall_s": 15.5,
+    "timeout_s": 47
+  },
+  {
+    "case": "test_orphan_watch.py",
+    "wall_s": 0.6,
+    "timeout_s": 2
+  },
+  {
+    "case": "test_owner_session_override_z717.py",
+    "wall_s": 0.6,
+    "timeout_s": 2
+  },
+  {
+    "case": "test_package_source_only_756.py",
+    "wall_s": 0.3,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_packaging.py",
+    "wall_s": 12.3,
+    "timeout_s": 37
+  },
+  {
+    "case": "test_pane_model_agentfirst.mjs",
+    "wall_s": 0.1,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_pane_origin_hardening.mjs",
+    "wall_s": 0.0,
+    "timeout_s": 0
+  },
+  {
+    "case": "test_pane_render_uncapped.mjs",
+    "wall_s": 0.1,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_papercuts_0922.py",
+    "wall_s": 0.1,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_papercuts_0922b.py",
+    "wall_s": 8.0,
+    "timeout_s": 24
+  },
+  {
+    "case": "test_params_contract_bwv0h.py",
+    "wall_s": 6.3,
+    "timeout_s": 19
+  },
+  {
+    "case": "test_partial_block_87.py",
+    "wall_s": 9.3,
+    "timeout_s": 28
+  },
+  {
+    "case": "test_partial_rescue_law_134.py",
+    "wall_s": 0.1,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_patch_amend_diff_2del.py",
+    "wall_s": 1.4,
+    "timeout_s": 5
+  },
+  {
+    "case": "test_personal_path_scrub_867.py",
+    "wall_s": 2.8,
+    "timeout_s": 9
+  },
+  {
+    "case": "test_pill_rail.mjs",
+    "wall_s": 0.1,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_pill_rail_expand.mjs",
+    "wall_s": 0.0,
+    "timeout_s": 0
+  },
+  {
+    "case": "test_pin_delta_check_133387.py",
+    "wall_s": 0.9,
+    "timeout_s": 3
+  },
+  {
+    "case": "test_plugin_asks_164_fallback.py",
+    "wall_s": 5.3,
+    "timeout_s": 16
+  },
+  {
+    "case": "test_plugin_asks_165_remaining.py",
+    "wall_s": 2.3,
+    "timeout_s": 7
+  },
+  {
+    "case": "test_plugin_asks_166_version_handshake.py",
+    "wall_s": 2.8,
+    "timeout_s": 9
+  },
+  {
+    "case": "test_plugin_asks_toolsets_d.py",
+    "wall_s": 1.2,
+    "timeout_s": 4
+  },
+  {
+    "case": "test_plugin_resolution_live_not_old.py",
+    "wall_s": 0.1,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_pool_seat_cap_fifo_mg5o2.py",
+    "wall_s": 5.9,
+    "timeout_s": 18
+  },
+  {
+    "case": "test_pool_seat_cap_mg5o2.py",
+    "wall_s": 10.4,
+    "timeout_s": 32
+  },
+  {
+    "case": "test_portable_32.py",
+    "wall_s": 5.2,
+    "timeout_s": 16
+  },
+  {
+    "case": "test_post_exit_hook.py",
+    "wall_s": 0.6,
+    "timeout_s": 2
+  },
+  {
+    "case": "test_post_exit_strip_xwvu9.py",
+    "wall_s": 0.5,
+    "timeout_s": 2
+  },
+  {
+    "case": "test_pr_tag_audit.py",
+    "wall_s": 1.7,
+    "timeout_s": 6
+  },
+  {
+    "case": "test_preflight_liveness_152be7f7.py",
+    "wall_s": 0.6,
+    "timeout_s": 2
+  },
+  {
+    "case": "test_proctree_61.py",
+    "wall_s": 12.2,
+    "timeout_s": 37
+  },
+  {
+    "case": "test_proctree_61b.py",
+    "wall_s": 25.2,
+    "timeout_s": 76
+  },
+  {
+    "case": "test_proctree_identity_80.py",
+    "wall_s": 1.8,
+    "timeout_s": 6
+  },
+  {
+    "case": "test_profile_home_0928.py",
+    "wall_s": 1.4,
+    "timeout_s": 5
+  },
+  {
+    "case": "test_progress_channel_128.py",
+    "wall_s": 1.7,
+    "timeout_s": 6
+  },
+  {
+    "case": "test_prompt_workdir.py",
+    "wall_s": 1.8,
+    "timeout_s": 6
+  },
+  {
+    "case": "test_prose_json_raw_decode.py",
+    "wall_s": 0.1,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_provenance_contract_126.py",
+    "wall_s": 1.9,
+    "timeout_s": 6
+  },
+  {
+    "case": "test_provenance_counters_57.py",
+    "wall_s": 0.3,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_prune_0923.py",
+    "wall_s": 7.5,
+    "timeout_s": 23
+  },
+  {
+    "case": "test_publisher_cap_1603.py",
+    "wall_s": 3.5,
+    "timeout_s": 11
+  },
+  {
+    "case": "test_px11_memoryerror_containment.py",
+    "wall_s": 0.4,
+    "timeout_s": 2
+  },
+  {
+    "case": "test_quorum_cause_guard_6226.py",
+    "wall_s": 1.7,
+    "timeout_s": 6
+  },
+  {
+    "case": "test_quorum_drain_deadline_06xk.py",
+    "wall_s": 15.7,
+    "timeout_s": 48
+  },
+  {
+    "case": "test_ratelimit_54.py",
+    "wall_s": 6.0,
+    "timeout_s": 18
+  },
+  {
+    "case": "test_ratelimit_history_ja41.py",
+    "wall_s": 87.0,
+    "timeout_s": 261
+  },
+  {
+    "case": "test_ratelimit_park_walls_159c.py",
+    "wall_s": 19.8,
+    "timeout_s": 60
+  },
+  {
+    "case": "test_reap_receipt_o79j.py",
+    "wall_s": 0.2,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_reaper_reason_8.py",
+    "wall_s": 0.3,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_register_surface.mjs",
+    "wall_s": 0.1,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_release_zip_1nkx.py",
+    "wall_s": 46.6,
+    "timeout_s": 140
+  },
+  {
+    "case": "test_repo_render_459.py",
+    "wall_s": 0.1,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_require_route_25.py",
+    "wall_s": 1.0,
+    "timeout_s": 3
+  },
+  {
+    "case": "test_respawn_hardening_723.py",
+    "wall_s": 0.5,
+    "timeout_s": 2
+  },
+  {
+    "case": "test_resume_fresh_session_102.py",
+    "wall_s": 29.5,
+    "timeout_s": 89
+  },
+  {
+    "case": "test_resume_hint_130.py",
+    "wall_s": 50.4,
+    "timeout_s": 152
+  },
+  {
+    "case": "test_resume_spawn_log_hls8y.py",
+    "wall_s": 0.1,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_retry_knobs_23c.py",
+    "wall_s": 35.6,
+    "timeout_s": 107
+  },
+  {
+    "case": "test_review_fixes.py",
+    "wall_s": 19.1,
+    "timeout_s": 58
+  },
+  {
+    "case": "test_rework_accept_459.py",
+    "wall_s": 0.1,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_route_bake_cron_45b038.py",
+    "wall_s": 0.5,
+    "timeout_s": 2
+  },
+  {
+    "case": "test_route_efforts_b3c98b2a.py",
+    "wall_s": 0.1,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_route_hold_optout_retry_w56.py",
+    "wall_s": 0.2,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_route_identity_699.py",
+    "wall_s": 0.4,
+    "timeout_s": 2
+  },
+  {
+    "case": "test_route_substitution_641.py",
+    "wall_s": 0.7,
+    "timeout_s": 3
+  },
+  {
+    "case": "test_routing_routes.py",
+    "wall_s": 0.2,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_run_binding.py",
+    "wall_s": 5.6,
+    "timeout_s": 17
+  },
+  {
+    "case": "test_run_budget_3acn.py",
+    "wall_s": 0.6,
+    "timeout_s": 2
+  },
+  {
+    "case": "test_run_context_seed_guard.py",
+    "wall_s": 0.9,
+    "timeout_s": 3
+  },
+  {
+    "case": "test_run_dir_proof_199.py",
+    "wall_s": 0.9,
+    "timeout_s": 3
+  },
+  {
+    "case": "test_run_dry_run.py",
+    "wall_s": 1.2,
+    "timeout_s": 4
+  },
+  {
+    "case": "test_run_tray.mjs",
+    "wall_s": 0.0,
+    "timeout_s": 0
+  },
+  {
+    "case": "test_runctx_contract_kg3y.py",
+    "wall_s": 1.0,
+    "timeout_s": 3
+  },
+  {
+    "case": "test_runner_orphan_666.py",
+    "wall_s": 10.3,
+    "timeout_s": 31
+  },
+  {
+    "case": "test_runs_root_realpath_7ps8.py",
+    "wall_s": 0.4,
+    "timeout_s": 2
+  },
+  {
+    "case": "test_safe_root_workdir.py",
+    "wall_s": 2.8,
+    "timeout_s": 9
+  },
+  {
+    "case": "test_save_sourcecap_459.py",
+    "wall_s": 0.2,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_save_stale_literals_245.py",
+    "wall_s": 0.2,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_schema_enum_107.py",
+    "wall_s": 2.7,
+    "timeout_s": 9
+  },
+  {
+    "case": "test_schema_key_suggest_62.py",
+    "wall_s": 0.1,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_schema_max_472.py",
+    "wall_s": 2.1,
+    "timeout_s": 7
+  },
+  {
+    "case": "test_schema_min_96.py",
+    "wall_s": 2.1,
+    "timeout_s": 7
+  },
+  {
+    "case": "test_scrub_yml_166b.py",
+    "wall_s": 0.5,
+    "timeout_s": 2
+  },
+  {
+    "case": "test_seat_admission_deadline_g255.py",
+    "wall_s": 7.6,
+    "timeout_s": 23
+  },
+  {
+    "case": "test_seat_admit_lock_r3.py",
+    "wall_s": 1.4,
+    "timeout_s": 5
+  },
+  {
+    "case": "test_seat_cancel_at_ticket_r2_g255.py",
+    "wall_s": 0.6,
+    "timeout_s": 2
+  },
+  {
+    "case": "test_seat_cap_dotenv_gxjh6.py",
+    "wall_s": 0.2,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_seat_cap_override_856.py",
+    "wall_s": 7.7,
+    "timeout_s": 24
+  },
+  {
+    "case": "test_seat_fifo_856.py",
+    "wall_s": 3.0,
+    "timeout_s": 9
+  },
+  {
+    "case": "test_seat_lending_identity_r2_g255.py",
+    "wall_s": 1.0,
+    "timeout_s": 3
+  },
+  {
+    "case": "test_seat_live_g2xx.py",
+    "wall_s": 21.9,
+    "timeout_s": 66
+  },
+  {
+    "case": "test_seat_nesting_noprocs_g255.py",
+    "wall_s": 0.8,
+    "timeout_s": 3
+  },
+  {
+    "case": "test_seat_overadmit_857.py",
+    "wall_s": 27.9,
+    "timeout_s": 84
+  },
+  {
+    "case": "test_seat_popen_exception_g255.py",
+    "wall_s": 0.5,
+    "timeout_s": 2
+  },
+  {
+    "case": "test_seat_postpopen_cleanup_r2_g255.py",
+    "wall_s": 1.4,
+    "timeout_s": 5
+  },
+  {
+    "case": "test_seat_quorum_straggler_g255.py",
+    "wall_s": 9.9,
+    "timeout_s": 30
+  },
+  {
+    "case": "test_seat_ticket_identity_g255.py",
+    "wall_s": 1.2,
+    "timeout_s": 4
+  },
+  {
+    "case": "test_seat_wait_status_833.py",
+    "wall_s": 0.8,
+    "timeout_s": 3
+  },
+  {
+    "case": "test_seats_not_a_run_g2xx.py",
+    "wall_s": 0.3,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_self_review_422_1866.py",
+    "wall_s": 0.1,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_session_strip.mjs",
+    "wall_s": 0.1,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_session_tray.mjs",
+    "wall_s": 0.1,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_session_wake_101.py",
+    "wall_s": 16.5,
+    "timeout_s": 50
+  },
+  {
+    "case": "test_session_wake_matrix_101.py",
+    "wall_s": 19.7,
+    "timeout_s": 60
+  },
+  {
+    "case": "test_settings_route_z717.py",
+    "wall_s": 0.5,
+    "timeout_s": 2
+  },
+  {
+    "case": "test_shard_merge_speed.py",
+    "wall_s": 1.4,
+    "timeout_s": 5
+  },
+  {
+    "case": "test_shelf_discovery_validation_828.py",
+    "wall_s": 0.2,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_shelf_isolation_71.py",
+    "wall_s": 0.7,
+    "timeout_s": 3
+  },
+  {
+    "case": "test_silent_death_reaper_8.py",
+    "wall_s": 32.8,
+    "timeout_s": 99
+  },
+  {
+    "case": "test_single_source_bc_item_token_libks.py",
+    "wall_s": 0.3,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_skill_docs.py",
+    "wall_s": 0.0,
+    "timeout_s": 0
+  },
+  {
+    "case": "test_skip_pass_effects_0lxnh.py",
+    "wall_s": 0.9,
+    "timeout_s": 3
+  },
+  {
+    "case": "test_spawn_enoent_retry_w33.py",
+    "wall_s": 0.4,
+    "timeout_s": 2
+  },
+  {
+    "case": "test_spawn_ledger_8.py",
+    "wall_s": 0.7,
+    "timeout_s": 3
+  },
+  {
+    "case": "test_spawn_seat_cap_scrub_mg5o2.py",
+    "wall_s": 3.6,
+    "timeout_s": 11
+  },
+  {
+    "case": "test_sprint101_A-door.py",
+    "wall_s": 0.3,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_sprint101_D-surface.py",
+    "wall_s": 0.4,
+    "timeout_s": 2
+  },
+  {
+    "case": "test_sprint101w2_B1-classes.py",
+    "wall_s": 45.9,
+    "timeout_s": 138
+  },
+  {
+    "case": "test_sprint101w2_B2-retry.py",
+    "wall_s": 7.5,
+    "timeout_s": 23
+  },
+  {
+    "case": "test_sprint101w2_C1-defaults.py",
+    "wall_s": 16.6,
+    "timeout_s": 50
+  },
+  {
+    "case": "test_sprint101w2_C2-prompt.py",
+    "wall_s": 6.8,
+    "timeout_s": 21
+  },
+  {
+    "case": "test_sprint101w2_C3-fanout-gates.py",
+    "wall_s": 62.6,
+    "timeout_s": 188
+  },
+  {
+    "case": "test_sprint101w2_D2-steer-liveness.py",
+    "wall_s": 18.4,
+    "timeout_s": 56
+  },
+  {
+    "case": "test_stale_queued_spawn_byft8.py",
+    "wall_s": 15.2,
+    "timeout_s": 46
+  },
+  {
+    "case": "test_status_next.py",
+    "wall_s": 1.0,
+    "timeout_s": 3
+  },
+  {
+    "case": "test_steer_live_40.py",
+    "wall_s": 4.5,
+    "timeout_s": 14
+  },
+  {
+    "case": "test_steer_truth_0924.py",
+    "wall_s": 0.9,
+    "timeout_s": 3
+  },
+  {
+    "case": "test_stock_dispatch_selection_304.py",
+    "wall_s": 0.2,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_stop_reason_status_95.py",
+    "wall_s": 4.1,
+    "timeout_s": 13
+  },
+  {
+    "case": "test_string_type_validation_59.py",
+    "wall_s": 0.4,
+    "timeout_s": 2
+  },
+  {
+    "case": "test_stuck_node_finalize_733.py",
+    "wall_s": 1.1,
+    "timeout_s": 4
+  },
+  {
+    "case": "test_subagent_accounting_p3.py",
+    "wall_s": 0.1,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_suite_admission_17.py",
+    "wall_s": 0.5,
+    "timeout_s": 2
+  },
+  {
+    "case": "test_suite_runs_root_762.py",
+    "wall_s": 46.6,
+    "timeout_s": 140
+  },
+  {
+    "case": "test_suite_stale_receipt_m11.py",
+    "wall_s": 0.5,
+    "timeout_s": 2
+  },
+  {
+    "case": "test_suite_tempdir_cleanup_7ps8.py",
+    "wall_s": 0.2,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_suite_zero_discovery_112.py",
+    "wall_s": 0.9,
+    "timeout_s": 3
+  },
+  {
+    "case": "test_summary_all_nodes_p318w.py",
+    "wall_s": 0.8,
+    "timeout_s": 3
+  },
+  {
+    "case": "test_systemexit_stamp.py",
+    "wall_s": 1.0,
+    "timeout_s": 3
+  },
+  {
+    "case": "test_tab_polish_48.mjs",
+    "wall_s": 0.1,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_terminal_handoff_boundary_r19.py",
+    "wall_s": 2.6,
+    "timeout_s": 8
+  },
+  {
+    "case": "test_tier_report_0924.py",
+    "wall_s": 2.3,
+    "timeout_s": 7
+  },
+  {
+    "case": "test_tiers.py",
+    "wall_s": 0.2,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_tool_bridge_settings_9c41e2b7.py",
+    "wall_s": 12.1,
+    "timeout_s": 37
+  },
+  {
+    "case": "test_tool_call_text_6st.py",
+    "wall_s": 0.1,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_toolsets_empty_427.py",
+    "wall_s": 0.9,
+    "timeout_s": 3
+  },
+  {
+    "case": "test_tree_quiesce_reap.py",
+    "wall_s": 1.4,
+    "timeout_s": 5
+  },
+  {
+    "case": "test_unconditional_version_stamp.py",
+    "wall_s": 2.1,
+    "timeout_s": 7
+  },
+  {
+    "case": "test_upstream_hook_contract.py",
+    "wall_s": 0.1,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_v3_fixes.py",
+    "wall_s": 8.6,
+    "timeout_s": 26
+  },
+  {
+    "case": "test_v4_fixes.py",
+    "wall_s": 8.0,
+    "timeout_s": 24
+  },
+  {
+    "case": "test_v5_fixes.py",
+    "wall_s": 11.4,
+    "timeout_s": 35
+  },
+  {
+    "case": "test_validate_0923.py",
+    "wall_s": 3.8,
+    "timeout_s": 12
+  },
+  {
+    "case": "test_validate_action_hack.py",
+    "wall_s": 0.3,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_validate_run_ref.py",
+    "wall_s": 0.2,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_validator_caps.py",
+    "wall_s": 0.6,
+    "timeout_s": 2
+  },
+  {
+    "case": "test_version_truth_159.py",
+    "wall_s": 2.3,
+    "timeout_s": 7
+  },
+  {
+    "case": "test_wait_payload_76.py",
+    "wall_s": 8.2,
+    "timeout_s": 25
+  },
+  {
+    "case": "test_waitgate_0923.py",
+    "wall_s": 12.7,
+    "timeout_s": 39
+  },
+  {
+    "case": "test_wake_catchall_jbcrw.py",
+    "wall_s": 0.7,
+    "timeout_s": 3
+  },
+  {
+    "case": "test_wake_hermetic_env.py",
+    "wall_s": 1.3,
+    "timeout_s": 4
+  },
+  {
+    "case": "test_wake_payload_pointers_501.py",
+    "wall_s": 0.3,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_wall_extend_session_595.py",
+    "wall_s": 7.3,
+    "timeout_s": 22
+  },
+  {
+    "case": "test_wall_meter_133.py",
+    "wall_s": 1.4,
+    "timeout_s": 5
+  },
+  {
+    "case": "test_wfpid_owner_8.py",
+    "wall_s": 4.3,
+    "timeout_s": 13
+  },
+  {
+    "case": "test_when_ancestry_0930.py",
+    "wall_s": 0.0,
+    "timeout_s": 0
+  },
+  {
+    "case": "test_when_on_agent.py",
+    "wall_s": 0.1,
+    "timeout_s": 1
+  },
+  {
+    "case": "test_when_on_agent_engine.py",
+    "wall_s": 3.5,
+    "timeout_s": 11
+  },
+  {
+    "case": "test_wofify.py",
+    "wall_s": 0.9,
+    "timeout_s": 3
+  },
+  {
+    "case": "test_z717_zero_directive_capture.mjs",
+    "wall_s": 0.8,
+    "timeout_s": 3
+  },
+  {
+    "case": "test_zombie_reaper_continuous.py",
+    "wall_s": 13.7,
+    "timeout_s": 42
+  },
+  {
+    "case": "test_zombie_settle_448.py",
+    "wall_s": 2.2,
+    "timeout_s": 7
+  }
+]

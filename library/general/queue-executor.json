@@ -1,0 +1,194 @@
+{
+ "meta": {
+  "description": "Queue executor crew: enumerate any tracker/file queue, one lane per item with resume-from-disk, independent re-run verify, honest tally, owner's done contract.",
+  "tags": [
+   "use_case:execution",
+   "domain:queue",
+   "starter",
+   "seeded"
+  ],
+  "params": {
+   "work_queue": {
+    "desc": "where open items live: a JSON file path ({items:[{id,title,work}]}), a read-only command, or a URL"
+   },
+   "executor_rule": {
+    "desc": "standing rules every lane follows, verbatim (safety rails, output conventions, what NOT to touch)"
+   },
+   "done_contract": {
+    "desc": "how a finished item is marked: a command template containing {id}, a tracker note convention, or 'none' (report only)"
+   }
+  }
+ },
+ "graph": {
+  "name": "queue-executor",
+  "description": "Fan-out execution over an enumerated queue with independent verification and an honest tally.",
+  "nodes": [
+   {
+    "id": "intake",
+    "type": "agent",
+    "model": "worker",
+    "goal": "Enumerate the OPEN items in the work queue: {run.work_queue}. If it names a file, read it; if a command, run it read-only; if a URL, fetch it. Reduce each open item to exactly {id, title, work}: id = the queue's own stable identifier, title = one line, work = the COMPLETE instructions for that item copied faithfully (do not summarize away constraints). Skip items already closed or in flight from a prior run (their done-contract marks them). Return every open item, not a sample.",
+    "schema": {
+     "type": "object",
+     "properties": {
+      "items": {
+       "type": "array",
+       "items": {
+        "type": "object",
+        "properties": {
+         "id": {
+          "type": "string"
+         },
+         "title": {
+          "type": "string"
+         },
+         "work": {
+          "type": "string"
+         }
+        },
+        "required": [
+         "id",
+         "title",
+         "work"
+        ]
+       }
+      },
+      "queue_total": {
+       "type": "integer"
+      }
+     },
+     "required": [
+      "items",
+      "queue_total"
+     ]
+    }
+   },
+   {
+    "id": "lanes",
+    "type": "agent",
+    "after": [
+     "intake"
+    ],
+    "model": "worker",
+    "fanout": {
+     "items_from": "intake.items",
+     "goal": "Execute exactly ONE work item. Rails (standing rules, verbatim): {run.executor_rule}. Item {item.id} -- {item.title}. Complete instructions: {item.work}. Return status done/partial/blocked, the actions you took (measured numbers only), and receipt lines suitable for a ledger. Your schema `id` must be the literal item id: {item.id}"
+    },
+    "schema": {
+     "type": "object",
+     "properties": {
+      "id": {
+       "type": "string"
+      },
+      "status": {
+       "type": "string",
+       "enum": [
+        "done",
+        "partial",
+        "blocked"
+       ]
+      },
+      "actions": {
+       "type": "array",
+       "items": {
+        "type": "string"
+       }
+      },
+      "receipt": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "id",
+      "status",
+      "actions",
+      "receipt"
+     ]
+    }
+   },
+   {
+    "id": "verify",
+    "type": "agent",
+    "after": [
+     "lanes"
+    ],
+    "model": "manager",
+    "goal": "Independent verification: for every lane result in Inputs claiming done, RE-RUN its own read-back (re-stat the file, re-count, re-grep, re-run the check command) \u2014 never accept a lane's self-report as proof. For partial/blocked, confirm the stated blocker is real and not a transient. List verified_ok (one line per proven item naming the proof you personally observed) and discrepancies (claim vs what you found).",
+    "schema": {
+     "type": "object",
+     "properties": {
+      "verified_ok": {
+       "type": "array",
+       "items": {
+        "type": "string"
+       }
+      },
+      "discrepancies": {
+       "type": "array",
+       "items": {
+        "type": "string"
+       }
+      }
+     },
+     "required": [
+      "verified_ok",
+      "discrepancies"
+     ]
+    }
+   },
+   {
+    "id": "tally",
+    "type": "agent",
+    "after": [
+     "verify"
+    ],
+    "model": "manager",
+    "inputs": [
+     "intake",
+     "lanes",
+     "verify"
+    ],
+    "goal": "Final tally and closing. An item counts DONE only if done AND present in verify.verified_ok. For each such item apply the owner's done contract: {run.done_contract} \u2014 substitute {id}; when the contract is 'none', just report. Discrepancies contradicting a lane claim must appear in the notes, never papered over. Output the honest totals against intake.queue_total: done / partial / blocked, and NAME anything missing or unverifiable.",
+    "schema": {
+     "type": "object",
+     "properties": {
+      "total": {
+       "type": "integer"
+      },
+      "done": {
+       "type": "integer"
+      },
+      "partial": {
+       "type": "integer"
+      },
+      "blocked": {
+       "type": "integer"
+      },
+      "missing": {
+       "type": "array",
+       "items": {
+        "type": "string"
+       }
+      },
+      "verdict": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "total",
+      "done",
+      "partial",
+      "blocked",
+      "missing",
+      "verdict"
+     ]
+    }
+   }
+  ],
+  "defaults": {
+   "timeout": 1200,
+   "context": "You are one lane of a queue executor. Ground rules: the item's own work text outranks your initiative; resume-from-disk \u2014 before acting, check the queue or ledger for prior-run state and continue from disk truth, never restart finished steps; anything you launch that could outlive your turn must be detached so a pipe death cannot kill it; every claim you return comes from bytes you actually read or commands you actually ran, with measured numbers; report partial/blocked honestly \u2014 a false done is the only real failure."
+  },
+  "concurrency": 4
+ }
+}
