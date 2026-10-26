@@ -43,6 +43,28 @@
   red at 103284a on A5/C6/G3 (the demote line carried no cause), green after,
   E4 green across the whole sitting — the honest event never grows a key.
 
+- fix(runner): `budget_ledger.json` is now MERGE-ON-WRITE (est-y938s, P3 from
+  the PR #529 review — the second row on that same review, est-6ig3s above).
+  The loop's terminal hook rewrote the ledger whole at every budget closure,
+  so the persisted cause was always the LAST occurrence: a run capped first at
+  a fan-out and re-expressed at a downstream node lost the first cause from
+  the ledger. The re-expression is reachable, not hypothetical — a capped
+  fan-out whose boundary-gate demote (est-ps8i9) forfeits the graceful closure
+  leaves a record classed by the GATE, so the hook's re-scan arrives with a
+  narrower set than an earlier closure wrote. The write moves out of the hook
+  into `wf.close_budget_ledger`, the ONE writer: top-level `cause`/`at` now
+  name the FIRST closure (the run's first budget death),
+  `exhausted_nodes`/`never_launched` are first-seen-order unions, and
+  `occurrences[]` is the cause chain in close order — one row per DISTINCT
+  closure, so a benign resume re-passing the hook (the est-3acn resume law: a
+  later pass sees the same file) mints no duplicate row. A pre-fix legacy
+  ledger (no occurrences[]) is absorbed as the chain's first occurrence; the
+  run_state read view is untouched (same top-level keys, now first-cause
+  semantics). Test: tests/test_run_budget_3acn.py grows leg E (two cap
+  occurrences with the real stub meter — a capped fan-out, then a downstream
+  run-scope refusal after a demote narrows the re-scan — asserting ledger
+  CONTENT, not existence; red at 80e4004 on E0, green after).
+
 - fix(runner): the `bead_close` gate now rides the two remaining done-commit
   edges — the `on_skip:"pass"` skip-pass commit and the `on_exit` terminal
   postmortem commit (est-13z1 law; est-ikeon, the R8 sibling sweep of PR #523).
@@ -65,35 +87,9 @@
   holds: no `bead_close` key = today's behavior byte-identical, not one probe
   argv spent. Join/consolidate/gate commit edges stay exempt — their closed key
   sets carry neither gate key, so the door refuses the declaration before a
-  runner must honour one. CORRECTION (est-ps8i9, the R8 sweep of THIS PR's own
-  head): the word "remaining" over-claimed — beyond these two done-commits, the
-  est-3acn budget-capped fan-out PARTIAL commit rode NEITHER gate (not merely
-  the effect gate) and the enumeration missed it; that edge is named, gated,
-  and pinned by the est-ps8i9 entry above. New test: tests/test_skip_pass_bead_close_ikeon.py
+  runner must honour one. New test: tests/test_skip_pass_bead_close_ikeon.py
   (red at 47879ee on the four close-claim cases a/b/d/e, green on the two
   honest-degradation controls c/f; 6/6 green after).
-
-- fix(runner): `budget_ledger.json` is now MERGE-ON-WRITE (est-y938s, P3 from
-  the PR #529 review — the second row on that same review, est-6ig3s above).
-  The loop's terminal hook rewrote the ledger whole at every budget closure,
-  so the persisted cause was always the LAST occurrence: a run capped first at
-  a fan-out and re-expressed at a downstream node lost the first cause from
-  the ledger. The re-expression is reachable, not hypothetical — a capped
-  fan-out whose boundary-gate demote (est-ps8i9) forfeits the graceful closure
-  leaves a record classed by the GATE, so the hook's re-scan arrives with a
-  narrower set than an earlier closure wrote. The write moves out of the hook
-  into `wf.close_budget_ledger`, the ONE writer: top-level `cause`/`at` now
-  name the FIRST closure (the run's first budget death),
-  `exhausted_nodes`/`never_launched` are first-seen-order unions, and
-  `occurrences[]` is the cause chain in close order — one row per DISTINCT
-  closure, so a benign resume re-passing the hook (the est-3acn resume law: a
-  later pass sees the same file) mints no duplicate row. A pre-fix legacy
-  ledger (no occurrences[]) is absorbed as the chain's first occurrence; the
-  run_state read view is untouched (same top-level keys, now first-cause
-  semantics). Test: tests/test_run_budget_3acn.py grows leg E (two cap
-  occurrences with the real stub meter — a capped fan-out, then a downstream
-  run-scope refusal after a demote narrows the re-scan — asserting ledger
-  CONTENT, not existence; red at 80e4004 on E0, green after).
 
 ## 1.4.3 — 2026-10-26
 
