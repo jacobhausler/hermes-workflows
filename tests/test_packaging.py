@@ -167,7 +167,8 @@ def main() -> None:
   "ci_preflight_observe.py",
   # #477 (est-xl5n5): the gate lint is the refuse seam of source-only
   # make_public.py; declared source-only in pack.py SOURCE_ONLY_SCRIPTS.
-  "gate_lint.py"})
+  # issue #104 item 2: estate blind-lap scorer; declared source-only in pack.py.
+  "gate_lint.py", "mechanic_lap_score.py"})
             else:
                 print("SKIP pack-list repo-side half: no .git — running from an "
                       "unpacked ZIP/archive, where the premise does not exist")
