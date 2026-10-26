@@ -771,7 +771,7 @@ WORKFLOW_PARAMS = {
         "from": {"type": "string", "description": "run: library graph name to replay (instead of graph or graph_path)."},
         "retry_backoff": {"type": "array", "items": {"type": "number"}, "description": "run only: two non-negative seconds [first, second] replacing the transient ladder's retry schedule (default [5, 20]). The runner reads them from run.json meta; the node-level `retry` key caps attempts."},
         "retry_budget": {"type": "integer", "description": "run only: non-negative cap on total retry draws across ALL ladders for the run (default 6). A storm beyond the budget fails typed retry_skipped, never silently retries on."},
-        "run_context": {"type": ["string", "object"], "description": "run only: non-empty string seed appended to every first-wave agent (including agents behind gate-only paths), OR non-empty map of identifier keys to non-empty strings replacing only explicit {run.KEY} in node goals/contexts, agent repo lanes, fan-out goals/item goals and gate questions. Library-sourced launches also render profile, echo string output, gate options and wait.until_argv; every surviving ref refuses before any write. Inline argv retains its existing unbound-placeholder refusal. Missing keys/malformed bindings reject before any run write — as does a seed against a graph with {run.KEY} refs, or a JSON-encoded map passed as a string. Values are persisted in prompts; do not supply secrets. A seed cannot replace baked literals. A graph may declare its binding contract as the graph-level run_context key {required:[KEY...], defaults:{KEY:val}} — a missing required key rejects before any run write with error_type missing_run_context_keys."},
+        "run_context": {"type": ["string", "object"], "description": "run only: non-empty string seed appended to every first-wave agent (including agents behind gate-only paths), OR non-empty map of identifier keys to non-empty strings replacing only explicit {run.KEY} in node goals/contexts, agent repo lanes, fan-out goals/item goals and gate questions. Library-sourced launches also render profile, echo string output, gate options, wait.until_argv and fan-out precheck_argv; every surviving ref refuses before any write. Inline argv retains its existing unbound-placeholder refusal. Missing keys/malformed bindings reject before any run write — as does a seed against a graph with {run.KEY} refs, or a JSON-encoded map passed as a string. Values are persisted in prompts; do not supply secrets. A seed cannot replace baked literals. A graph may declare its binding contract as the graph-level run_context key {required:[KEY...], defaults:{KEY:val}} — a missing required key rejects before any run write with error_type missing_run_context_keys."},
         "description": {"type": "string", "description": "save: one-line purpose shown by library/list."},
         "params": {"type": "object", "additionalProperties": {"type": "object"}, "description": "save: optional meta.params descriptions/default suggestions for run_context keys. Required keys derive from graph refs, never this metadata. Omission retains prior params; {} deliberately clears them. Missing/dead declarations warn, never prevent saving."},
         "tags": {"type": "array", "items": {"type": "string"}, "description": "save (optional): 1-10 discovery tags — legacy flat tokens (lowercase alnum [-_.] <=32) or faceted `facet:value` (facets: use_case, repo, domain, risk, note; values [a-z0-9._-] <=48; e.g. use_case:code-review). For explicit curation, library exposes tag_vocab for optional reuse. Resaving without tags keeps the entry's existing tags; stored in the meta envelope. library (optional): filter to entries carrying ALL listed tags (same 1-10 law as save — an empty array errors on BOTH verbs; omit tags for no filter); an empty result's tag_match_counts says which term starved."},
@@ -1979,21 +1979,38 @@ def _unbound_gate_argv_refs(graph):
     token (FileNotFoundError on '{run.python}', forever, no probe ever run). Refuse
     it before any write or spawn, naming node, argv index and key. Applies to
     parent-authored and included gates alike: an included gate's seeds were already
-    rendered by expansion, so anything left here is unbound."""
+    rendered by expansion, so anything left here is unbound.
+    est-37d74 (#453): the SAME law covers fanout.precheck_argv — it is exec'd as
+    fixed argv per item before the child spawn, so a surviving {run.KEY} is an
+    unbound argv element there too (second traversal; the until_argv message stays
+    byte-identical, tests pin it)."""
     for node in graph.get("nodes") or []:
-        wait = node.get("wait") if isinstance(node, dict) else None
-        argv = wait.get("until_argv") if isinstance(wait, dict) else None
-        if not isinstance(argv, list):
+        if not isinstance(node, dict):
             continue
-        for i, el in enumerate(argv):
-            m = _RUN_REF.search(el) if isinstance(el, str) else None
-            if m:
-                return {"error": (
-                    f"run placeholder unbound: node {node.get('id')!r} wait.until_argv[{i}] "
-                    f"still references {{run.{m.group(1)}}} — run_context renders goals, "
-                    "contexts, questions and profile only, never command argv; write the "
-                    "value into the argv element literally (or hand it to the probe through "
-                    "a file); refused before any write or spawn")}
+        wait = node.get("wait")
+        argv = wait.get("until_argv") if isinstance(wait, dict) else None
+        if isinstance(argv, list):
+            for i, el in enumerate(argv):
+                m = _RUN_REF.search(el) if isinstance(el, str) else None
+                if m:
+                    return {"error": (
+                        f"run placeholder unbound: node {node.get('id')!r} wait.until_argv[{i}] "
+                        f"still references {{run.{m.group(1)}}} — run_context renders goals, "
+                        "contexts, questions and profile only, never command argv; write the "
+                        "value into the argv element literally (or hand it to the probe through "
+                        "a file); refused before any write or spawn")}
+        fo = node.get("fanout")
+        argv = fo.get("precheck_argv") if isinstance(fo, dict) else None
+        if isinstance(argv, list):
+            for i, el in enumerate(argv):
+                m = _RUN_REF.search(el) if isinstance(el, str) else None
+                if m:
+                    return {"error": (
+                        f"run placeholder unbound: node {node.get('id')!r} fanout.precheck_argv[{i}] "
+                        f"still references {{run.{m.group(1)}}} — run_context renders goals, "
+                        "contexts, questions and profile only, never command argv; write the "
+                        "value into the argv element literally (or hand it to the probe through "
+                        "a file); refused before any write or spawn")}
     return None
 
 

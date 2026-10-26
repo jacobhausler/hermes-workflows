@@ -1111,7 +1111,11 @@ def grammar_errors(graph):
                         + json.dumps(list(GRAMMAR_SUPPORTED))
                         + f" (absent = {GRAMMAR_DEFAULT!r})"}]
     return []
-FANOUT_KEYS = {"items", "items_from", "goal", "schema", "quorum", "quorum_drain_s", "ledger"}
+# est-37d74 (#453): 'precheck_argv' joins the closed set — an optional fixed-argv
+# custody probe re-run per item BEFORE the child spawns; non-zero commits the item
+# `skipped` (never failed). Same no-shell law as gate wait.until_argv.
+FANOUT_KEYS = {"items", "items_from", "goal", "schema", "quorum", "quorum_drain_s", "ledger",
+               "precheck_argv"}
 # ---------- est-fanout-cell (sys-96dcod): the [fan + consolidate] cell ----------
 # Owner directive (2026-10-10): a standard unit pairing WITH the fan so operators
 # get wave-consolidation — finished members flow into consolidation while the
@@ -1879,6 +1883,16 @@ def validate_graph_errors(nodes, *, admission=False):
                                                     "'<node_id>.<dotted.path>' string")
                     if fo.get("items") is not None and not isinstance(fo["items"], list):
                         E(nid, "fanout.items", "fanout.items must be a list")
+                    # est-37d74 (#453): fanout.precheck_argv — the until_argv law
+                    # of gate.wait mirrored verbatim (wait_spec_ok): a fixed argv
+                    # list, never a shell string; non-empty list of non-empty
+                    # strings. The runner exec's it as-is per item before spawn.
+                    _pa = fo.get("precheck_argv")
+                    if _pa is not None and (not isinstance(_pa, list) or not _pa
+                                            or not all(isinstance(a, str) and a for a in _pa)):
+                        E(nid, "fanout.precheck_argv",
+                          "fanout.precheck_argv must be a non-empty list of strings "
+                          "(fixed argv, no shell)")
                     # est-wr0p (vacuous-replay class of est-077y): a baked literal
                     # items:[] passed the door and replayed with ZERO children —
                     # a vacuous pass, not a fan-out. The runtime fails it typed
@@ -2686,7 +2700,8 @@ def _run_contract_refer_keys(graph):
     """The {run.KEY} names referenced by a graph's OPERATIVE text — the exact
     surface the launcher renders (est-7m6wv P-04/05/06/07): the shared
     _include_text_fields walker (goal/context/question/profile + fan-out goal
-    and item goals + echo output + gate options[] + wait.until_argv[]) — PLUS
+    and item goals + echo output + gate options[] + wait.until_argv[] +
+    fanout.precheck_argv[]) — PLUS
     defaults.context (baked into every node context at launch), PLUS the string
     leaves of every `by` patch value (a patch becomes operative text the moment
     its enum arm is selected — "operative" means under ANY binding, or the
@@ -3043,7 +3058,7 @@ def _run_ref_scan(graph, safe_nodes):
     occurrence, worded so the fix is executable without reading the binder.
     Surfaces scanned: exactly what the binder renders (goal/context/question/
     profile/repo, fan-out goal + item goals, echo string output, gate options,
-    wait.until_argv — via the shared _include_texts traversal) PLUS
+    wait.until_argv and fanout.precheck_argv — via the shared _include_texts traversal) PLUS
     defaults.context, which the pre-run seed pass renders (wfcommon
     _PRE_RUN_REF) after prepending. Non-run braces ({item.x}) are the
     fan-out placeholder surface — untouched here by design."""
@@ -3137,7 +3152,8 @@ def _include_text_fields(node):
     """The string fields the {run.KEY} seed-render surface touches: the exact set
     _bind_run_context (map mode) renders — goal/context/question/profile/repo plus the
     fan-out goal template and item goals — PLUS an echo node's string `output`
-    PLUS a gate's `options[]` and `wait.until_argv[]`.
+    PLUS a gate's `options[]` and `wait.until_argv[]` PLUS a fan-out's `precheck_argv[]`
+    (est-37d74: exec'd as fixed argv per item — same unbound-refusal surface).
     The echo addition closes PR#84 review F-3: echo output is a text surface the
     runner commits VERBATIM (wf.py echo pass), so a seed placeholder surviving it
     became a literal `{run.MISSING}` verdict in a done run. The options/argv
@@ -3171,6 +3187,14 @@ def _include_text_fields(node):
         for i, it in enumerate(fo.get("items") or []):
             if isinstance(it, dict) and isinstance(it.get("goal"), str):
                 yield f"fanout.items[{i}].goal", ("fanout", "items", i, "goal")
+        # est-37d74 (#453): fanout.precheck_argv is exec'd as fixed argv per item
+        # (same surface law as wait.until_argv) — a surviving {run.OPTION} would be
+        # a literal unbound argv element, so it rides the same traversal.
+        pa = fo.get("precheck_argv")
+        if isinstance(pa, list):
+            for i, a in enumerate(pa):
+                if isinstance(a, str):
+                    yield f"fanout.precheck_argv[{i}]", ("fanout", "precheck_argv", i)
 
 
 def run_context_contract(graph, params=None):

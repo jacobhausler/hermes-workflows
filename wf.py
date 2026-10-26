@@ -2078,13 +2078,16 @@ def commit_item_record(run, node, byid, index, result):
     committed fact; efp-stamped like save_node so record_efp_valid certifies it.
     Status vocabulary is node_rec's committed set; a cancelled straggler stays
     failed+error_class=cancelled (node_rec reads that as pending — a resume
-    re-drives it, #7 law preserved). An ADOPTED item (result.adopted — the
-    live-orphan path) retires to status=adopted instead, carrying the harvested
-    output: no re-adoption window, and spawn-path items commit done exactly as
-    the 765 law pins."""
+    re-drives it, #7 law preserved). A precheck-skipped item (est-37d74 #453)
+    commits status=skipped and KEEPS its error/error_class/reason: the reason is
+    the committed fact of why the roster row never spawned. An ADOPTED item
+    (result.adopted — the live-orphan path) retires to status=adopted instead,
+    carrying the harvested output: no re-adoption window, and spawn-path items
+    commit done exactly as the 765 law pins."""
     st = result.get("status")
     adopted = bool(result.get("adopted"))
-    rec_status = _ITEM_ADOPTED_RETIRE if adopted else (st if st in ("done", "partial") else "failed")
+    rec_status = (_ITEM_ADOPTED_RETIRE if adopted
+                  else (st if st in ("done", "partial", "skipped") else "failed"))
     np = run / "nodes" / f"{_node_file(node, index)}.json"
     try:
         rec = jload(np) or {}
@@ -2095,14 +2098,14 @@ def commit_item_record(run, node, byid, index, result):
     rec = dict(rec)
     rec["status"] = rec_status
     rec["committed_at"] = now()
-    for k in ("output", "error", "error_class", "ms", "attempts", "attempts_log",
+    for k in ("output", "error", "error_class", "reason", "ms", "attempts", "attempts_log",
               "skey", "log_path", "prompt_path", "pid", "started", "spawn",
               "served_model", "served_billing_provider", "billed_models", "adopted", "harvested",
               "tree_descendants", "final", "banked"):
         v = result.get(k)
         if v is not None:
             rec[k] = v
-    if rec_status != "failed":
+    if rec_status not in ("failed", "skipped"):
         rec.pop("error", None)
         rec.pop("error_class", None)
     rec["efp"] = efp(byid, node)
@@ -4824,6 +4827,11 @@ def _aux_run(cmd, timeout=None, **kw):
         for h in (p.stdout, p.stderr):
             try: h.close()
             except Exception: pass
+
+# est-37d74 (#453): the fan-out precheck probe is bound by the same per-probe cap
+# the gate wait applies to its until_argv check (min(every, 300)): a custody
+# probe costs seconds, never a wave.
+_FANOUT_PRECHECK_TIMEOUT_S = 300
 
 def _kill_aux_tree(p):
     """SIGKILL the aux child AND its group (the child is its own group leader
@@ -8140,6 +8148,52 @@ def run_agent_node(run, meta, byid, node, outputs, steering):
                         log_path=str(run / "runner.log"), child_log_path=None, skey=None,
                         ms=0, attempts=0, attempts_log=[])
                     return
+                # est-37d74 (#453): optional per-fanout custody precheck, run
+                # BEFORE the child spawn, per item. Fixed argv, no shell — the
+                # gate wait.until_argv law mirrored exactly (door-validated
+                # non-empty list of non-empty strings); executed AS-IS (no item
+                # substitution) with cwd = the item's own A4 work dir, and the
+                # run-identity pins re-baked like the gate probe's (PR #243 law:
+                # re-pin, never inherit). exit 0 -> the item is live, spawn
+                # proceeds untouched; non-zero (or a probe that cannot run) ->
+                # the item commits `skipped` with the precheck output tail as
+                # its reason and NEVER `failed` — zero tokens spent, excluded
+                # from the failure math exactly like stop-cancelled rows.
+                _pa = fo.get("precheck_argv")
+                if _pa and isinstance(_pa, list) and all(isinstance(a, str) and a for a in _pa):
+                    t_pre = time.time()
+                    try:
+                        cp = _aux_run(list(_pa), timeout=_FANOUT_PRECHECK_TIMEOUT_S,
+                                      cwd=str(child_work_dir(run, node, i)),
+                                      env={**os.environ, "HERMES_WF_RUN_DIR": str(run),
+                                           "HERMES_WF_RUN_ID": run.name})
+                        _rc, _po, _pe = cp.returncode, cp.stdout or "", cp.stderr or ""
+                    except subprocess.TimeoutExpired:
+                        _rc, _po, _pe = (None, "", f"precheck timed out after "
+                                                   f"{_FANOUT_PRECHECK_TIMEOUT_S}s")
+                    except Exception as _e:
+                        _rc, _po, _pe = None, "", f"{type(_e).__name__}: {_e}"
+                    if _rc != 0:
+                        _bits = [t.strip() for t in (_pe, _po) if t and t.strip()]
+                        reason = (f"precheck rc={_rc}"
+                                  + ((" — " + " / ".join(_bits)) if _bits else ""))
+                        r = {"status": "skipped", "reason": reason, "error": reason,
+                             "error_class": "precheck_skipped", "attempts": 0,
+                             "attempts_log": [],
+                             "ms": int((time.time() - t_pre) * 1000)}
+                        with lock:
+                            results[i] = {**r, "item": item}
+                        try:
+                            commit_item_record(run, node, byid, i, r)
+                        except Exception as e:
+                            log(run, "item.commit.error", node=nid, index=i,
+                                error=f"{type(e).__name__}: {e}")
+                        log(run, "item.finished", node=nid, index=i, status="skipped",
+                            error=reason[:300], error_class="precheck_skipped",
+                            tail=reason[-300:] or None,
+                            log_path=str(run / "runner.log"), child_log_path=None, skey=None,
+                            ms=r["ms"], attempts=0, attempts_log=[])
+                        return
                 held = []   # est-g255 P255-1: this item's deferred seat (run_child seat_hold)
                 # est-fanout-straggler: the census books the ACTUAL spawn instant per
                 # item INSIDE _spawn — a retry/re-drive overwrites the stamp, and
@@ -8284,9 +8338,15 @@ def run_agent_node(run, meta, byid, node, outputs, steering):
             # count toward neither the failure list nor the quorum (hindsight-002946:
             # 5 stopped items surfaced as a false quorum failure).
             cancelled = [r for r in results if r.get("error_class") == "cancelled"]
-            failed = [r for r in results if r["status"] not in ("done", "partial") and r.get("error_class") != "cancelled"]
+            # est-37d74 (#453): precheck-skipped rows are EXCLUDED from failure
+            # math exactly like stop-cancelled rows — stale roster, not dead
+            # work; they shrink the quorum denominator too (a purged item cannot
+            # be counted against a quorum it was never live to serve).
+            skipped = [r for r in results if r["status"] == "skipped"]
+            failed = [r for r in results if r["status"] not in ("done", "partial", "skipped")
+                      and r.get("error_class") != "cancelled"]
             merged = [r.get("output") for r in results if r["status"] in ("done", "partial")]
-            quorum_req = min(quorum, len(items) - len(cancelled))
+            quorum_req = min(quorum, len(items) - len(cancelled) - len(skipped))
             if cancelled and len(cancelled) == len(results):
                 # every item died to `stop`: the node is NOT a failure — commit the
                 # evidence with the cancelled class; node_rec demotes it to pending
@@ -8304,7 +8364,7 @@ def run_agent_node(run, meta, byid, node, outputs, steering):
                           "served_model": r.get("served_model"),
                           "served_billing_provider": r.get("served_billing_provider")}
                          for i, r in enumerate(results)
-                         if r["status"] not in ("done", "partial")
+                         if r["status"] not in ("done", "partial", "skipped")
                          and r.get("error_class") != "cancelled"]
                 save_node(run, node, byid, {"status": "failed", "error_class": "forbidden_model",
                                             "error": "forbidden served model in fan-out",
@@ -8351,6 +8411,7 @@ def run_agent_node(run, meta, byid, node, outputs, steering):
                           "error": (results[i].get("error") or "")[:300]}
                          for i in range(len(items))
                          if results[i]["status"] != "done"
+                         and results[i]["status"] != "skipped"
                          and results[i].get("error_class") != "cancelled"]
                 save_node(run, node, byid, {"status": "failed",
                                             "error": f"{len(failed)}/{len(items)} items failed: "
@@ -8364,6 +8425,7 @@ def run_agent_node(run, meta, byid, node, outputs, steering):
                                                     "output": {"items": merged,
                                                                "failed_items": len(failed),
                                                                "cancelled_items": len(cancelled) or None,
+                                                               "skipped_items": len(skipped) or None,
                                                                "all_results": results}})
                 if merged_rec["status"] == "done":
                     # est-2ek.1.765: aggregate done is DERIVED from the committed
@@ -8390,7 +8452,7 @@ def run_agent_node(run, meta, byid, node, outputs, steering):
                 save_node(run, node, byid, merged_rec)
                 if merged_rec["status"] == "done":
                     log(run, "node.finished", node=nid, done=len(merged), failed=len(failed),
-                        cancelled=len(cancelled))
+                        cancelled=len(cancelled), skipped=len(skipped) or None)
                 else:
                     log(run, "node.failed", node=nid, error=merged_rec["error"],
                         error_class=merged_rec.get("error_class", "incomplete_work"), attempts=1)
