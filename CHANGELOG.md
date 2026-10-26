@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- test(contract): pin private core imports as a reasoned allow-list
+  (#456 item 1, est-i3d1b). New `tests/test_private_core_imports.py` runs
+  upstream's own `private_import_findings()` (hermes-agent >= v0.22.0
+  admission lint) against this repo and compares the result against a
+  13-row `(file, target)` allow-list — one row per surviving private
+  core import, each citing the soft guard + observed fallback at its
+  call site. New or vanished couplings go RED; empty/unparseable findings
+  are RED, never a silent pass; cores without the lint (today's CI pin)
+  SKIP with a reason and exit 0. Live drift finding: 13 sites at main,
+  not the issue table's 12 — `cron_bridge.py`'s `cron.jobs` landed via
+  #534 after the issue snapshot, exactly the silent growth this probe
+  exists to catch. #456's AGENTS.md 4c rule-7 pointer line is carried in
+  the test docstring instead: AGENTS.md has 44 chars of headroom under
+  its own 32,000-char hint-cap gate (`test_docs_hint_cap_73c`) and the
+  line broke it — collision stated in the PR body.
+
 - test(contract): #456 item2 (est-v367p) — `tests/test_private_core_imports_softguard.py`
   re-runs the issue's R2 probe on every suite pass. Each allow-listed private-core
   import site is exercised in a FRESH subprocess in both block shapes the probe used
