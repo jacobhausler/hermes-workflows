@@ -1,13 +1,13 @@
 ---
 name: workflow
 description: "Workflow fan-out audit and census: run agent graphs"
-version: 1.3.9
+version: 1.4.3
 metadata:
   hermes:
     tags: [workflows, fan-out, audit, census, orchestration]
 ---
 
-# Workflow authoring (1.3.9)
+# Workflow authoring (1.4.3)
 
 Requires Hermes Agent v2026.9.21 or newer (package >=0.21.4). A Desktop gate answer
 reaches the run owner's chat via the composer SDK; on older builds it may only insert
@@ -27,9 +27,9 @@ launch a replacement or mutate configuration.
 
 Build `{ "name": "check", "nodes": [{"id":"inspect","type":"agent","goal":"Inspect the
 specified target. Return one fenced JSON object."}] }`. Submit with
-`workflow{action:"run", graph:<object>}`, then carry the returned `run_id` into
-`workflow{action:"wait", run_id:<id>}` and stay in that loop until a terminal state —
-ending your turn right after `run` is how runs stall.
+`workflow{action:"run", graph:<object>}` and END YOUR TURN — the runner is separate and
+transitions (`gate.held`/`run.done`/`run.failed`/`run.partial`) wake this session like a
+delegated subagent; `wait` = OPTIONAL blocking observation, the only revive verb (`wake.jsonl`).
 
 ## Authoring rules
 
@@ -73,20 +73,20 @@ ending your turn right after `run` is how runs stall.
 
 - `running` needs a verified live runner; `interrupted` means unfinished work without
   one — inspect surviving outputs, then `wait` to resume. Fatal runner errors are
-  `failed`, not respawn loops; held gates are not running. Every `status`/`wait`
-  payload carries `next` — do what `next` says, `wait` until it is empty; `next` is
-  derived, never a guess. Before `amend` or stop, read the failed node's `node_facts`
+  `failed`, not respawn loops; held gates are not running; the completion truth is the derived `completed`, not `status`. Every `status`/`wait`
+  payload carries `next` — do what it says while you hold a run open; a live run with a
+  stamped owner needs no loop: the wake IS your next turn. Derived, never a guess. Before `amend` or stop, read the failed node's `node_facts`
   (error_class from the closed set; `cancelled` is never a failure) and committed
   outputs. `amend` accepts a WHOLE replacement graph or node-scoped `patch`;
   `diff` forces amend's dry-run preview. `run`/`amend` `dry_run:true` preview
   without launching/replacing graphs, but can ping routes and check quota.
-  `stop` is terminal. Details: [operations](references/operations.md).
+  `stop` is terminal; a runner verdict is graph-bound — its `graph_fingerprint` rides `runner_exit.json`, not `run.json`. Details: [operations](references/operations.md).
 - Lint before launching with `workflow{action:"validate", graph:…}` — the door's
   whole validation, zero writes, no liveness ping.
-- Optional recipes: `library` lists; `run` with `from:<name>` replays; `save` explicitly shelves
-  reusable graphs and always stamps provenance; a `run_context:{required?,defaults?}` contract
-  refuses a launch missing a key, pre-write. One-off `run` needs no library lookup, tags, save or
-  `why_not_library`. Explicit study-only `submit` retains its receipt requirement. [grammar](references/grammar.md).
+- Optional recipes: `library` lists; `run` with `from:<name>` replays; `save` explicitly shelves reusable graphs and always stamps provenance.
+  The save source shapes the row: `save(run_id)` shelves the run's baked `graph.json` — defaults/shape budgets concrete, `source: null` unless passed —
+  so its `source_digest` (sha256 over the canonical `nodes`, budgets included) never equals the author file's digest; a `graph`/`graph_path` save
+  shelves author bytes and the digests match. A `run_context:{required?,defaults?}` contract refuses a launch missing a key, pre-write. One-off `run` needs no library lookup, tags, save or `why_not_library`. Explicit study-only `submit` retains its receipt requirement. A composite run refuses `save(run_id)` — shelf the author form. [grammar](references/grammar.md).
 - Optional typed `params` contract (pin/tune) with node `where`/`by` door-time seams: the door materializes, refuses every violation in one answer, and stamps the reproducibility triple. [grammar](references/grammar.md#params--the-typed-contract-and-the-door-time-seam-optional).
 - No double-dispatch for pollers: `run` with `lane_key:<key>` — while an UNFINISHED
   incumbent holds the key, a second `run` is deduped, never spawns. `needs_resume`
@@ -98,7 +98,7 @@ ending your turn right after `run` is how runs stall.
   report `included`) and reads badly as spend.
 - Cards are optional desktop presentation; CLI text and returned run IDs suffice.
   Completion is execution state, not task verification or authority for more work.
-  Push notifications are best-effort; `wait` is the blocking/resuming path.
+  The owner wake is the delivery contract, fail-open (`wake.jsonl` is the ledger). `wait` = inline blocking/revive.
 - `graph_path` replaces embedding on run/save/amend/validate: a caller-authorized
   absolute JSON file, exactly one graph source. [grammar](references/grammar.md).
   File-shareable graphs: [portable](references/portable.md).

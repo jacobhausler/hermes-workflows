@@ -1,8 +1,18 @@
-# CI for hermes-workflows: the same gates the release integrator runs by hand.
-#   1. desktop half parses as ESM
-#   2. serial test suite (stdlib Python + Node .mjs) → ci-out/exits.json + per-test logs
-#   3. private-string scrub audit
-#   4. `hermes plugins validate .` against a PINNED upstream commit
+# CI for hermes-workflows: the same gates the release integrator runs by hand,
+# fanned out to bound PR wall clock (the serial pass measured 28.7-32.0 min;
+# census: median case 1.1 s, top-25 cases = 54% of the wall — one lane, one tail).
+#
+# Topology: fan-out/fan-in. `gates-shard` runs 8 matrix lanes, each executing
+# `suite.py --shard I/8` — serial-within-lane, the SAME sorted case list, split
+# disjoint by position. The `gates` join job fuses the shard ledgers with
+# `suite.py --merge`, which re-demands the full contract: every lane present,
+# marker-complete, non-empty, rows disjoint (a crashed or empty lane is RED,
+# never a green slice — #112 extended from the suite to its lanes). The check
+# named `gates` is what the merge lane reads; shard lanes are informational.
+#
+# The cheap gates are uniform per lane (they cost seconds): ESM parse, scrub
+# audit, `hermes plugins validate` against the pinned core. Concurrency cancels
+# superseded pushes instead of queueing a second full pass.
 #
 # HERMES_PIN = the measured requires_hermes floor, tag v2026.9.21 (first release
 # whose quiet turn report carries HERMES_QUIET_TURN_REPORT_FILE; evidence in
@@ -20,12 +30,26 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
 env:
   HERMES_PIN: d337b736aa1e8ebecfab043842d13e4a2d2f48a3   # v2026.9.21
+  SHARDS: 8
 
 jobs:
-  gates:
+  gates-shard:
+    name: gates-shard (${{ matrix.shard }}/8)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7]
     steps:
       - uses: actions/checkout@v4
 
@@ -50,19 +74,18 @@ jobs:
       - name: Desktop half parses (ESM)
         run: cp desktop/plugin.js /tmp/plugin.check.mjs && node --check /tmp/plugin.check.mjs
 
-      - name: Serial suite
-        # Full serial pass is the gate: every discovered test, every exit 0
-        # (zero discovery = failed, #112). Optional `--baseline <measured-ledger>`
-        # remains for local diagnosis of introduced-vs-pre-existing reds; it is
-        # diagnostic only — base reds never waive (suite.py), and a ledger
-        # measured on the PR's merge-base beats any committed inventory.
-        run: python3 scripts/suite.py . ci-out
+      - name: Suite shard
+        # Every case runs in exactly one lane; serial-within-lane is the gate's
+        # law (suite.py header documents why matrix lanes are the ONLY
+        # parallelism). Optional `--baseline <measured-ledger>` remains for
+        # local diagnosis only — base reds never waive (suite.py).
+        run: python3 scripts/suite.py . ci-out --shard ${{ matrix.shard }}/8
 
-      - name: Upload suite ledger + per-test logs
+      - name: Upload suite ledger + per-test logs (this lane)
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ci-out
+          name: ci-out-shard-${{ matrix.shard }}
           path: ci-out/
 
       - name: Scrub audit (private strings)
@@ -70,3 +93,40 @@ jobs:
 
       - name: Validate plugin against pinned hermes
         run: hermes plugins validate .
+
+  gates:
+    name: gates
+    needs: gates-shard
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Download shard ledgers
+        uses: actions/download-artifact@v4
+        with:
+          pattern: ci-out-shard-*
+          path: shards
+
+      - name: Merge shard ledgers (full-contract fan-in)
+        # Refuses: missing lane, incomplete done.json marker, empty ledger,
+        # duplicate rows. Prints the serial-pass vocabulary (TOTAL/FAIL +
+        # ADMISSION) and exits on the merged ledger's truth.
+        run: |
+          dirs=""
+          for i in $(seq 0 $((SHARDS - 1))); do
+            dirs="$dirs shards/ci-out-shard-$i"
+          done
+          python3 scripts/suite.py . ci-out --merge $dirs
+
+      - name: Upload merged suite ledger
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-out
+          path: ci-out/

@@ -19,7 +19,7 @@
       "after": [
         "draft"
       ],
-      "question": "Publish?",
+      "question": "Publish the artifact? Answer 'publish' to ship it or 'rewrite' to send it back for changes.",
       "options": [
         "publish",
         "rewrite"

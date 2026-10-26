@@ -50,7 +50,12 @@ _orphan_watch.bind(_common)
 def _coerce_graph(graph):
     """The door only ever sees `graph` as a parsed object from the tool schema, but a
     model CAN hand the string form; parse it and, on malformed JSON, quote ±40 chars
-    around the error offset. Returns (graph_or_None, error_response_or_None)."""
+    around the error offset. A `from:<name>` string is the retired library pin: it is
+    refused with a pointer to the live `from` argument, never parsed as JSON.
+    Returns (graph_or_None, error_response_or_None)."""
+    if isinstance(graph, str) and graph.startswith("from:"):
+        return None, {"error": f"graph {graph!r} is the retired library pin; replay a saved graph with the from argument",
+                      "hint": f'run with from="{graph[len("from:"):]}"'}
     if isinstance(graph, str):
         try:
             graph = json.loads(graph)
@@ -217,6 +222,12 @@ def _validation_error(graph, run_dir=None):
                                       # #475: the wall resolver may see the graph's own
                                       # defaults — the door holds the graph dict.
                                       defaults=graph.get("defaults") if isinstance(graph, dict) else None))
+    # #484 (reconcile verdict @8cfcd7e): the malformed-{run.X} scan composes HERE
+    # too, mirroring validate_graph_full's composition (same call, same order).
+    # The PR#84 F-2 law above forbids the twins diverging in strictness, and a
+    # literal that can never bind under ANY run_context is statically decidable:
+    # refuse it at admission, not at _bind_run_context after validate said ok.
+    errs.extend(_common._run_ref_scan(graph, safe))
     # #85: the artifact-admission guard composes with the validator here, so EVERY
     # door admission path (run/amend/submit/save/validate) measures ledgers before
     # any write/spawn. Artifact BYTES are measured only when a run dir exists to
@@ -227,7 +238,18 @@ def _validation_error(graph, run_dir=None):
         return None
     first = errs[0]
     head = first["msg"] if first["node"] is None else f"node {first['node']}: {first['msg']}"
-    return {"error": f"graph invalid: {head}", "error_class": "graph_invalid", "errors": errs}
+    # #509(a): every graph_invalid refusal banner names the door's own version;
+    # on the reload boundary (plugin file newer/older than this process) the
+    # banner says so — the audit's three round-trips were spent rediscovering
+    # exactly this split. Machine field `door_version` rides beside the text.
+    _banner_ver = f" [door {_common.code_version()}]"
+    _reload_note = _common.door_reload_note()
+    if _reload_note:
+        _banner_ver += f" ({_reload_note})"
+    return {"error": f"graph invalid: {head}{_banner_ver}",
+            "error_class": "graph_invalid",
+            "door_version": _common.code_version(),
+            "errors": errs}
 
 HERE = Path(__file__).resolve().parent
 
@@ -252,6 +274,30 @@ _common.set_owner_setting_reader(_owner_setting_read)
 # constrains runs whose graph omitted the key. No optional key is baked otherwise.
 _CONCURRENCY_CAPS = {"concurrency": ("max_concurrency", 4),
                      "item_concurrency": ("max_item_concurrency", 8)}
+
+def _retry_bake(args):
+    """hw-23c: the door owns run.json meta; the runner has read retry_backoff /
+    retry_budget from it since #5/Q4 but the door never wrote them — the knobs
+    were test-only in practice. Bake the run args (validated) so an author can
+    reach them: retry_backoff [a, b] seconds, retry_budget N per-run draws."""
+    baked = {}
+    if "retry_backoff" in args:
+        v = args["retry_backoff"]
+        if (isinstance(v, list) and len(v) == 2
+                and all(type(x) in (int, float) and not isinstance(x, bool) and x >= 0
+                        for x in v)):
+            baked["retry_backoff"] = [float(v[0]), float(v[1])]
+        else:
+            return None, {"error": "retry_backoff must be a 2-element list of "
+                                   "non-negative numbers [first, second]"}
+    if "retry_budget" in args:
+        v = args["retry_budget"]
+        if type(v) is int and v >= 0:
+            baked["retry_budget"] = v
+        else:
+            return None, {"error": "retry_budget must be a non-negative integer"}
+    return baked, None
+
 
 def _concurrency_bake(graph):
     baked = {}
@@ -721,12 +767,14 @@ WORKFLOW_PARAMS = {
         "action": {
             "type": "string",
             "enum": ["run", "status", "wait", "release", "release_lock", "steer", "inbox", "amend", "diff", "stop", "kill", "list", "save", "submit", "library", "doctor_version", "validate"],
-            "description": "run=launch a graph; wait=read state, RESPAWNING an idle runner if work is pending (blocks to the next boundary when one is live; when the lock is PROVEN wedged — Errno 11 with the kernel ledger showing zero holders and the admission lease dead — wait heals it first, the #44 escape hatch); status=read-model of a run; release=answer a held human gate; release_lock=operator hatch for a wedged runner.lock (#44): renames the stranded inode aside under the admission heal-barrier and hands the lane a fresh lock path — REFUSES unless zero live holders are proven (never heals on EACCES or a live holder); steer=queue steering text for a node; inbox=(child-side, cooperative) pull late steering lines baked for THIS spawn — call once at a natural seam; amend=replace the graph (invalidates changed nodes + all downstream by fingerprint), or pass patch to edit a few node fields without resubmitting the whole graph; diff=confirm surface: runs the amend door with dry_run FORCED (accepts patch or graph), returns the preview + graph_diff and touches nothing; stop=request stop; kill=node-targeted lane kill (node required): that lane's in-flight children are SIGKILLed, the node finishes failed error_class=killed, siblings and the run keep going; list=all runs; save=shelve a graph in the library under a name (from run_id or inline graph); library=list shelved graphs richly (name, description, tags, provenance, path-relative id). validate=dry-run the door's validation pipeline (defaults fill + defect collection + model/route policy) with no ping and no writes; returns {ok, errors:[{node,field,msg}], resolved_routes}. run from=<name> replays a shelved graph. submit=quarantine a hand-rolled graph for study (requires why_not_library >=80 chars; never joins the library — the quartermaster's human-gated loop decides); inbox kind=submissions lists them newest-first. doctor_version=read-only version truth for THIS install: {live_version, newest_packaged, source_commit, drift} comparing plugin.yaml against the install.json provenance that pack.py stamps at build time \u2014 one read, no network.",
+            "description": "run=launch a graph; wait=OPTIONAL blocking observation (not the default loop: lifecycle transitions wake the owner session on their own — end your turn after run); read state, RESPAWNING an idle runner if work is pending (blocks to the next boundary when one is live; when the lock is PROVEN wedged — Errno 11 with the kernel ledger showing zero holders and the admission lease dead — wait heals it first, the #44 escape hatch); status=read-model of a run; release=answer a held human gate; release_lock=operator hatch for a wedged runner.lock (#44): renames the stranded inode aside under the admission heal-barrier and hands the lane a fresh lock path — REFUSES unless zero live holders are proven (never heals on EACCES or a live holder); steer=queue steering text for a node; inbox=(child-side, cooperative) pull late steering lines baked for THIS spawn — call once at a natural seam; amend=replace the graph (invalidates changed nodes + all downstream by fingerprint), or pass patch to edit a few node fields without resubmitting the whole graph; diff=confirm surface: runs the amend door with dry_run FORCED (accepts patch or graph), returns the preview + graph_diff and touches nothing; stop=request stop; kill=node-targeted lane kill (node required): that lane's in-flight children are SIGKILLed, the node finishes failed error_class=killed, siblings and the run keep going; list=all runs; save=shelve a graph in the library under a name (from run_id or inline graph); library=list shelved graphs richly (name, description, tags, provenance, path-relative id). validate=dry-run the door's validation pipeline (defaults fill + defect collection + model/route policy) with no ping and no writes; returns {ok, errors:[{node,field,msg}], resolved_routes}. run from=<name> replays a shelved graph. submit=quarantine a hand-rolled graph for study (requires why_not_library >=80 chars; never joins the library — the quartermaster's human-gated loop decides); inbox kind=submissions lists them newest-first. doctor_version=read-only version truth for THIS install: {live_version, newest_packaged, source_commit, drift} comparing plugin.yaml against the install.json provenance that pack.py stamps at build time \u2014 one read, no network.",
         },
         "run_id": {"type": "string", "description": "Run id (required for every action except run/list)."},
         "name": {"type": "string", "description": "run: overrides graph.name (default workflow); save: library name overrides graph.name (lowercase, [-_.]); library: return one entry with refs-derived required params and an instantiate command. amend: set graph.name in the replacement graph; omitting it retains the run name."},
         "from": {"type": "string", "description": "run: library graph name to replay (instead of graph or graph_path)."},
-        "run_context": {"type": ["string", "object"], "description": "run only: non-empty string seed appended to every first-wave agent (including agents behind gate-only paths), OR non-empty map of identifier keys to non-empty strings replacing only explicit {run.KEY} in node goals/contexts, agent repo lanes, fan-out goals/item goals and gate questions. Library-sourced launches also render profile, echo string output, gate options and wait.until_argv; every surviving ref refuses before any write. Inline argv retains its existing unbound-placeholder refusal. Missing keys/malformed bindings reject before any run write — as does a seed against a graph with {run.KEY} refs, or a JSON-encoded map passed as a string. Values are persisted in prompts; do not supply secrets. A seed cannot replace baked literals. A graph may declare its binding contract as the graph-level run_context key {required:[KEY...], defaults:{KEY:val}} — a missing required key rejects before any run write with error_type missing_run_context_keys."},
+        "retry_backoff": {"type": "array", "items": {"type": "number"}, "description": "run only: two non-negative seconds [first, second] replacing the transient ladder's retry schedule (default [5, 20]). The runner reads them from run.json meta; the node-level `retry` key caps attempts."},
+        "retry_budget": {"type": "integer", "description": "run only: non-negative cap on total retry draws across ALL ladders for the run (default 6). A storm beyond the budget fails typed retry_skipped, never silently retries on."},
+        "run_context": {"type": ["string", "object"], "description": "run only: non-empty string seed appended to every first-wave agent (including agents behind gate-only paths), OR non-empty map of identifier keys to non-empty strings replacing only explicit {run.KEY} in node goals/contexts, agent repo lanes, fan-out goals/item goals and gate questions. Library-sourced launches also render profile, echo string output, gate options, wait.until_argv and fan-out precheck_argv; every surviving ref refuses before any write. Inline argv retains its existing unbound-placeholder refusal. Missing keys/malformed bindings reject before any run write — as does a seed against a graph with {run.KEY} refs, or a JSON-encoded map passed as a string. Values are persisted in prompts; do not supply secrets. A seed cannot replace baked literals. A graph may declare its binding contract as the graph-level run_context key {required:[KEY...], defaults:{KEY:val}} — a missing required key rejects before any run write with error_type missing_run_context_keys."},
         "description": {"type": "string", "description": "save: one-line purpose shown by library/list."},
         "params": {"type": "object", "additionalProperties": {"type": "object"}, "description": "save: optional meta.params descriptions/default suggestions for run_context keys. Required keys derive from graph refs, never this metadata. Omission retains prior params; {} deliberately clears them. Missing/dead declarations warn, never prevent saving."},
         "tags": {"type": "array", "items": {"type": "string"}, "description": "save (optional): 1-10 discovery tags — legacy flat tokens (lowercase alnum [-_.] <=32) or faceted `facet:value` (facets: use_case, repo, domain, risk, note; values [a-z0-9._-] <=48; e.g. use_case:code-review). For explicit curation, library exposes tag_vocab for optional reuse. Resaving without tags keeps the entry's existing tags; stored in the meta envelope. library (optional): filter to entries carrying ALL listed tags (same 1-10 law as save — an empty array errors on BOTH verbs; omit tags for no filter); an empty result's tag_match_counts says which term starved."},
@@ -1505,16 +1553,27 @@ def _quota_refusal(graph, routes=None, cache_path=None, skip=()):
         res = ent.get("resolved") or {}
         names = {str(n.get("model")),
                  *( [str(res.get("model"))] if res.get("model") else [] )}
-        # #291 F3: entries stamped under the full 'provider/model' id (the pre-bake
-        # literal) still bind the baked node {provider, model}.
         req = (ent.get("requested") or {}).get("model")
         if req:
             names.add(str(req))
-        if n.get("provider") and "/" not in str(n.get("model")):
-            names.add(f"{n['provider']}/{n['model']}")
-        for key in names:
-            hit = cache.get(key)
+        # The AUTHOR's provider pin, never the resolve-baked one: routes.requested
+        # carries the author's spelling (an inherited alias provider is not a
+        # request); with no routes the node's own spelling is all there is.
+        author_provider = ((ent.get("requested") or {}).get("provider")
+                           if routes else n.get("provider"))
+        prov = str(res.get("provider") or n.get("provider") or "")
+        for key, hit in list(cache.items()):   # the recovery pop must not resize mid-iteration
+            # The est-699 route-identity contract at the quota seam: a quota death
+            # marks ONE subscription, not a name. A provider-BLANK (bare) stamp
+            # cannot name an explicit-provider subscription and never refuses one;
+            # a qualified key binds the node's route by IDENTITY, never by raw
+            # spelling (spelling never evades). #291 F3's full-id stamps keep
+            # binding — the identity comparison absorbs them.
             if not isinstance(hit, dict) or hit.get("resets_epoch", 0) <= _t.time():
+                continue
+            if author_provider and "/" not in key:
+                continue
+            if not any(_common.route_ids_equal(key, c, prov) for c in names):
                 continue
             if not offline:
                 # A5 (deep review): the same-route law makes _ping_route_once('')
@@ -1526,7 +1585,6 @@ def _quota_refusal(graph, routes=None, cache_path=None, skip=()):
                 # RECORDED MODEL is the stamped one (_ping_reachable: reachability,
                 # not alive-attribution; an exception, an unimportable core, or a
                 # fallback-ladder answer never recovers).
-                prov = str(res.get("provider") or "")
                 recovered = (_ping_route_once(prov, key).get("liveness") == "alive"
                              if prov else _ping_reachable(key))
                 if recovered:
@@ -1924,21 +1982,38 @@ def _unbound_gate_argv_refs(graph):
     token (FileNotFoundError on '{run.python}', forever, no probe ever run). Refuse
     it before any write or spawn, naming node, argv index and key. Applies to
     parent-authored and included gates alike: an included gate's seeds were already
-    rendered by expansion, so anything left here is unbound."""
+    rendered by expansion, so anything left here is unbound.
+    est-37d74 (#453): the SAME law covers fanout.precheck_argv — it is exec'd as
+    fixed argv per item before the child spawn, so a surviving {run.KEY} is an
+    unbound argv element there too (second traversal; the until_argv message stays
+    byte-identical, tests pin it)."""
     for node in graph.get("nodes") or []:
-        wait = node.get("wait") if isinstance(node, dict) else None
-        argv = wait.get("until_argv") if isinstance(wait, dict) else None
-        if not isinstance(argv, list):
+        if not isinstance(node, dict):
             continue
-        for i, el in enumerate(argv):
-            m = _RUN_REF.search(el) if isinstance(el, str) else None
-            if m:
-                return {"error": (
-                    f"run placeholder unbound: node {node.get('id')!r} wait.until_argv[{i}] "
-                    f"still references {{run.{m.group(1)}}} — run_context renders goals, "
-                    "contexts, questions and profile only, never command argv; write the "
-                    "value into the argv element literally (or hand it to the probe through "
-                    "a file); refused before any write or spawn")}
+        wait = node.get("wait")
+        argv = wait.get("until_argv") if isinstance(wait, dict) else None
+        if isinstance(argv, list):
+            for i, el in enumerate(argv):
+                m = _RUN_REF.search(el) if isinstance(el, str) else None
+                if m:
+                    return {"error": (
+                        f"run placeholder unbound: node {node.get('id')!r} wait.until_argv[{i}] "
+                        f"still references {{run.{m.group(1)}}} — run_context renders goals, "
+                        "contexts, questions and profile only, never command argv; write the "
+                        "value into the argv element literally (or hand it to the probe through "
+                        "a file); refused before any write or spawn")}
+        fo = node.get("fanout")
+        argv = fo.get("precheck_argv") if isinstance(fo, dict) else None
+        if isinstance(argv, list):
+            for i, el in enumerate(argv):
+                m = _RUN_REF.search(el) if isinstance(el, str) else None
+                if m:
+                    return {"error": (
+                        f"run placeholder unbound: node {node.get('id')!r} fanout.precheck_argv[{i}] "
+                        f"still references {{run.{m.group(1)}}} — run_context renders goals, "
+                        "contexts, questions and profile only, never command argv; write the "
+                        "value into the argv element literally (or hand it to the probe through "
+                        "a file); refused before any write or spawn")}
     return None
 
 
@@ -2292,6 +2367,12 @@ def _library_rows():
     for root in _library_roots():
         if not root.exists():
             continue
+        # est-1n7gx (collapse-to-one law): the by-name pick-one below is
+        # FIRST-SEEN and the walk order is TOTAL, not traversal luck: roots in
+        # _library_roots order (resolved before legacy, F1 #14), the general/
+        # group before the bare-root group within a root, name-ASC via sorted()
+        # inside each group — and within a group names are unique (one file per
+        # name on disk), so the key cannot tie.
         files = ([(_GENERAL_PREFIX + p.stem, p) for p in sorted((root / _GENERAL_PREFIX).glob("*.json"))]
                  if (root / _GENERAL_PREFIX).is_dir() else [])
         files += [(p.stem, p) for p in sorted(root.glob("*.json"))]
@@ -2434,7 +2515,12 @@ def act_library(args):
                 hinted += ("; empty result — killer term(s) at 0 library-wide: "
                            + ", ".join(misses) + " (spelling miss — re-check against tag_vocab)")
             else:
-                rarest = min(want, key=lambda t: counts[t])
+                # est-1n7gx (collapse-to-one law): count ASC, term ASC. The bare
+                # min(counts) broke ties on the caller's QUERY order — same corpus,
+                # different tag order, different advice. Terms are unique (norm_tags
+                # dedups), so the key cannot tie and the advice is query-order
+                # invariant; term ASC is named arbitrarily and total by law.
+                rarest = min(want, key=lambda t: (counts[t], t))
                 hinted += ("; empty result — every term exists but they never "
                            "co-occur; drop the rarest term (" + rarest
                            + ") or union with two calls")
@@ -2898,6 +2984,12 @@ def _lane_entry(key):
     # stays visible from the scoped door, so an in-flight incumbent is still deduped
     # (one-time upgrade hazard otherwise: same lane_key admits a second runner while
     # the old one lives). Writes always go to the resolved root via _lane_paths.
+    # est-1n7gx (collapse-to-one law): the incumbent pick is TOTAL — one file per
+    # key (sha256 stem) so no within-root tie exists, and between the two possible
+    # homes the resolved root always wins over the legacy twin (the probe order
+    # below: resolved first, legacy only on a resolved-side miss). A key-mismatched
+    # winning file refuses typed rather than falling through to the twin — the
+    # refusal is part of the order, not a hole in it.
     stem = hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
     entry = jload(_lane_paths(key)[0])
     if entry is None:
@@ -3148,6 +3240,14 @@ def act_run(args):
     if bad:
         return bad
     assert graph is not None   # bad None <=> expansion succeeded (same law as `assert models`)
+    # #498: launch-time concurrency args join the graph channel BEFORE validation, so the
+    # existing law applies unchanged (shape, owner clamp, bake, fingerprint exemption);
+    # one channel per key — co-declaration is refused, silence is not an option.
+    for _ck in _CONCURRENCY_CAPS:
+        if _ck in args:
+            if _ck in graph:
+                return {"error": f"run: {_ck} declared both as a run arg and a graph key (one channel per key)"}
+            graph = {**graph, _ck: args[_ck]}
     bad = _validation_error(graph) or _team_args_error(args)
     if bad:
         return bad
@@ -3163,6 +3263,14 @@ def act_run(args):
         if _vh:
             return {"error": _vh}
     concurrency_meta, bad = _concurrency_bake(graph)
+    if bad:
+        return bad
+    # hw-23c (est-mcwq6 parity): the retry knobs bake AT THE DOOR, beside
+    # concurrency — a malformed retry arg is refused here, before _create_run
+    # mkdirs anything (the first #497 shape baked inside _create_run, AFTER
+    # mkdir+graph.json, so a refusal orphaned a run dir). The returned dict is
+    # merged into meta at the same slot, keeping run.json byte-identical.
+    retry_meta, bad = _retry_bake(args)
     if bad:
         return bad
     name = args.get("name", graph.get("name", "workflow"))
@@ -3351,10 +3459,12 @@ def act_run(args):
                             "hint": f"wait run_id={incumbent['run_id']} resumes it"}
             return _create_run(args, graph, lib_name, models, routes, _liveness_notes, path,
                                includes=_includes, include_notes=_include_notes,
-                               concurrency_meta=concurrency_meta, binding=_binding)
+                               concurrency_meta=concurrency_meta, retry_meta=retry_meta,
+                               binding=_binding)
     return _create_run(args, graph, lib_name, models, routes, _liveness_notes,
                        includes=_includes, include_notes=_include_notes,
-                       concurrency_meta=concurrency_meta, binding=_binding)
+                       concurrency_meta=concurrency_meta, retry_meta=retry_meta,
+                       binding=_binding)
 
 def _new_ancestor_dirs(p):
     """est-2ek.1.199: the directory entries a `p.mkdir(parents=True)` would
@@ -3427,7 +3537,7 @@ def _prove_run_dir(r, extra_dirs=()):
 
 
 def _create_run(args, graph, lib_name, models, routes, _liveness_notes, lane_path=None,
-                *, concurrency_meta=None, includes=None, include_notes=None, binding=None):
+                *, concurrency_meta=None, retry_meta=None, includes=None, include_notes=None, binding=None):
     """Under the lane flock: complete run dir, atomic registry entry, then spawn."""
     name = graph["name"]
     base = time.strftime("%Y%m%d-%H%M%S") + "-" + "".join(
@@ -3473,6 +3583,14 @@ def _create_run(args, graph, lib_name, models, routes, _liveness_notes, lane_pat
             "owner": _owner_stamp()}
     if concurrency_meta:
         meta.update(concurrency_meta)
+    # hw-23c (est-mcwq6): author-reachable retry knobs, VALIDATED AT THE DOOR
+    # before any write — the bake runs in act_run beside _concurrency_bake and
+    # arrives as retry_meta (parity with the sibling; the first #497 shape
+    # baked here, after mkdir+graph.json, so a malformed arg orphaned a run
+    # dir while the comment claimed the door law). Absent args => no keys =>
+    # run.json byte-identical to pre-fix; the merge slot preserves key order.
+    if retry_meta:
+        meta.update(retry_meta)
     # est-3acn: RunBudget bake beside concurrency — the graph-root cap becomes
     # run.json meta.budget at submit (the submit-time truth; like concurrency it
     # does NOT ride amends — a capped run's ceiling is what its owner admitted).
@@ -3561,8 +3679,9 @@ def _create_run(args, graph, lib_name, models, routes, _liveness_notes, lane_pat
             "no run was durably created (check the launch path's root resolution, "
             "esp. a stub/non-registering door carrying settings.runs_root)")
     out = {"run_id": rid, "models": models, "routes": routes, "hint":
-            'Run accepted. Use wait for blocking observation; it may resume interrupted work. '
-            'Push delivery and desktop cards are optional.'
+            'Run accepted \u2014 the runner is a separate process: end your turn, the run still finishes. '
+            'This session gets a wake turn at gate.held / run.done / run.failed / run.partial (wake.jsonl is the ledger). '
+            'Use wait only to block to a boundary or revive an interrupted run; desktop cards are optional.'
             + _liveness_hint_suffix(_liveness_notes),
             "card": _card(rid), "lifecycle_notice": _lifecycle_notice(rid)}
     if include_notes:
@@ -3861,9 +3980,21 @@ def act_status(args):
         sw = {nid: v["seat_wait"] for nid, v in st["nodes"].items() if v.get("seat_wait")}
         if sw and st.get("runner_live"):
             ages = [w["age_s"] for w in sw.values() if isinstance(w.get("age_s"), int)]
+            # est-1n7gx (collapse-to-one law): first-non-None cap scanned the dict's
+            # INSERTION order (node-state assembly luck); scan sorted(sw) — node ids
+            # are unique, so (node-name ASC) is a total scan order and every reader
+            # answers the same cap for the same run bytes.
             row.update({"reason": "seat_wait", "nodes": sorted(sw),
-                        "cap": next((w.get("cap") for w in sw.values() if w.get("cap") is not None), None),
+                        "cap": next((sw[n].get("cap") for n in sorted(sw)
+                                     if sw[n].get("cap") is not None), None),
                         "age_s": max(ages) if ages else None})
+        # Wake-contract note (derive-only law honored): present ONLY when run.json
+        # carries the door's owner.session_id stamp — the exact precondition that
+        # makes between-turns re-entry real. Grounded, not a guess.
+        _own = (jload(r / "run.json", {}) or {}).get("owner")
+        if isinstance(_own, dict) and _own.get("session_id"):
+            row["wake"] = ("owner session is stamped: the next transition arrives as a "
+                           "wake turn — end your turn, do not poll")
         out["next"] = [row]
     elif s == "failed":
         rows = [{"action": "amend", "node": nid, "error_class":
@@ -4128,9 +4259,9 @@ def act_release(args):
                               .get("status") in ("done", "skipped")))
     if mode == "respawned":
         res["auto_resumed"] = True
-        hint = "runner respawned; push delivery is optional, use wait for blocking observation"
+        hint = "runner respawned; wake delivery is optional (fail-open; ledger wake.jsonl) \u2014 wait only for inline observation"
     else:
-        hint = "answer recorded; the live runner commits it at its boundary; push delivery is optional, use wait for blocking observation"
+        hint = "answer recorded; the live runner commits it at its boundary; wake delivery is optional (ledger wake.jsonl), wait for inline observation"
     return {**res, "hint": hint}
 
 def act_release_lock(args):
@@ -4504,10 +4635,10 @@ def act_amend(args):
     if mode == "respawned":
         applies = "runner respawned; efp replay-skip re-runs changed nodes and everything downstream"
     else:
-        applies = "live runner hot-reloads at its next wave boundary; push delivery is optional"
+        applies = "live runner hot-reloads at its next wave boundary; the owner session wakes at the next transition"
     return {"ok": True, "models": _models, "routes": _routes, "applies": applies,
             "graph_revision": _new_rev,   # #19: the new head — the token a next CAS writes against
-            "hint": "continuation is automatic; wait blocks to a boundary and may resume an interrupted runner" + _rz_note + _liveness_hint_suffix(_liveness_notes), **preview}
+            "hint": "continuation is automatic and the owner session wakes at the next transition; wait only blocks to a boundary or revives an interrupted runner" + _rz_note + _liveness_hint_suffix(_liveness_notes), **preview}
 
 def act_stop(args):
     r = run_dir(args.get("run_id"))
@@ -4973,14 +5104,17 @@ def register(ctx):
     except Exception:
         pass  # fail-open: accounting absent, plugin intact
 
-    # P5 native-approval bridge (config-gated, DEFAULT OFF): when settings
+    # P5 native gate presentation (config-gated, DEFAULT OFF): when settings
     # hooks_bridge_allow lists 'approval_bridge', held human gates are ALSO
-    # presented on the host's native approval channel and approve-shape answers
-    # map to a release through this door's own act_release path. The emitted
-    # text is the run's runner-authored wake row verbatim — the bridge authors
-    # no gate prose. Off = a defs-only module exec + one in-memory settings read
-    # and nothing else: no registration, no thread. Degrades silently; desktop/tool
-    # release untouched.
+    # presented into the run owner's OWN session through core's public
+    # injection route (ctx.inject_message) and answered on this door's
+    # post_gateway_admission wf-release lane (zero turns) — no core private
+    # internals, no fallback to another session (upstream review
+    # NousResearch/hermes-agent#141665 point 2). The injected text is the run's
+    # runner-authored wake row verbatim plus a constant protocol footer — the
+    # bridge authors no gate prose. Off = a defs-only module exec + one
+    # in-memory settings read and nothing else: no registration, no thread.
+    # Degrades silently; desktop/tool release untouched.
     if "_approval_bridge" not in globals():
         globals()["_approval_bridge"] = None
         try:

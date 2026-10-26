@@ -1,6 +1,6 @@
 """v0.7.3 `inputs:` node field: runner injects a `## Inputs` section (one labelled fenced
 json block per ref, resolved via resolve_ref against committed outputs, capped 12000 chars
-with a truncation marker), an unresolvable ref FAILS the node at spawn with the exact error,
+with a truncation marker + a #476 read-the-full-record advisement), an unresolvable ref FAILS the node at spawn with the exact error,
 validate_graph rejects non-list / non-ancestor-head / gate-with-inputs, and inputs are part
 of the def so the efp moves when they change."""
 # Ledger 95d7010295d70102: stamped fixtures verify under their own rule; ambiguous unstamped records fail closed.
@@ -70,6 +70,8 @@ check(json.loads(pr.split("gen.result.1\n```json\n")[1].split("\n```")[0]) == "b
       "dotted path resolves to the exact committed value")
 check(json.loads((run / "nodes" / "use.json").read_text())["status"] == "done",
       "node with inputs commits done")
+check("truncated" not in pr.split("## Inputs")[1].split("Finish your answer")[0],
+      "#476: a non-truncated inputs section carries no marker and no advisement (byte-unchanged)")
 
 # --- (2) truncation marker at the 12000-char cap ---
 g2 = {"name": "trunc", "nodes": [
@@ -82,6 +84,24 @@ n = len(json.dumps({"blob": "y" * 20000}, ensure_ascii=False, indent=2, default=
 check(f"…[truncated {n - 12000} chars; full record at nodes/big.json]" in pr,
       "oversized input truncated with exact marker (chars + nodes/big.json path)")
 check(11000 < pr.count("y") < 20000, "block actually capped at 12000 chars")
+# #476: the named path must ride with a standing instruction, not just a marker
+check("[truncated: read nodes/big.json for the full record before deciding coverage]" in pr,
+      "#476: oversized explicit ref carries the read-the-full-record advisement naming nodes/big.json")
+check("```\n[truncated: read nodes/big.json for the full record before deciding coverage]" in pr,
+      "#476: the advisement rides directly under the truncated block's closing fence")
+
+# --- (2b) #476 on the AUTO-injected parent path (AUTO_INPUTS_CAP): same site, same shape ---
+g2b = {"name": "truncauto", "nodes": [
+    {"id": "pbig", "type": "agent", "goal": "unused (seeded)"},
+    {"id": "down", "type": "agent", "after": ["pbig"], "goal": "DOWN"}]}
+run, prompts, out = run_graph("20990101-000007-truncauto", g2b,
+                              seed={"pbig": {"status": "done", "output": {"blob": "y" * 20000}}})
+pr = prompts[0]
+n = len(json.dumps({"blob": "y" * 20000}, ensure_ascii=False, indent=2, default=str))
+check(f"…[truncated {n - 8000} chars; full record at nodes/pbig.json]" in pr,
+      "auto-injected parent truncated at the 8000 cap with the exact marker")
+check("[truncated: read nodes/pbig.json for the full record before deciding coverage]" in pr,
+      "#476: oversized auto-parent carries the same advisement naming nodes/pbig.json")
 
 # --- (3) unresolvable ref => node FAILS at spawn, never a silent empty spawn ---
 g3 = {"name": "unres", "nodes": [

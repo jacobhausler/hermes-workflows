@@ -85,7 +85,7 @@
       "id": "approve",
       "label": "Approve",
       "lane": "gates",
-      "sublabel": "publish",
+      "sublabel": "publish the artifact",
       "tag": "human hold",
       "type": "security",
       "width": 104

@@ -1,6 +1,6 @@
 # Hermes Workflows
 
-![Version](https://img.shields.io/badge/version-1.3.9-blue)
+![Version](https://img.shields.io/badge/version-1.4.3-blue)
 
 **Agent-owned workflow graphs for [Hermes Agent](https://github.com/NousResearch/hermes-agent).**
 Your agent authors a JSON graph of agent nodes, fan-outs and gates; a background
@@ -26,7 +26,7 @@ not re-paid.
 
 | Capability | In one line |
 |---|---|
-| **Graph runs** | Agent nodes with `goal`, `after` edges, per-node `model`/`provider`/`reasoning`, and `max_turns`/`timeout`/`run_budget` caps; optional per-graph `concurrency`/`item_concurrency`, clamped to owner caps |
+| **Graph runs** | Agent nodes with `goal`, `after` edges, per-node `model`/`provider`/`reasoning`, and `max_turns`/`timeout`/`run_budget` caps; optional `concurrency`/`item_concurrency` — per graph or as launch-time run args, clamped to owner caps |
 | **Fan-out** | One node → N live children from `fanout.items` or `items_from:"<node>.items"`; per-item liveness; `quorum` cancels stragglers once N commit (they are `cancelled`, never a failure) |
 | **Human + machine gates** | A `gate` holds on a question until `release`; `gate.wait` holds on a timer or an argv probe at zero token cost; `when` predicates branch on upstream output; `on_skip:"prune"` retires the losing arm; an optional default-off admission gate answers human releases at zero turns (`docs/admission-gates.md`) |
 | **Fingerprint resume** | Crash, restart, or `amend` the graph mid-flight — nodes whose effective fingerprint still matches replay-skip; only what actually changed re-runs. `run`/`amend` accept `dry_run:true` for a no-write preview |
@@ -125,7 +125,8 @@ workflow { "action": "wait", "run_id": "<run_id>" }          → repeat until te
 
 Fan-out with `quorum`, gates with `when`/`on_skip`/`wait`, `requires` output
 preconditions, `after_partial` harvest release, `inputs` selection from upstream
-output, string-field `enum`s, answer-schema floors `minItems` (on `type:"array"`)
+output, per-domain (`string`/`boolean`/`integer`) `enum`s, answer-schema bounds
+`minItems`/`maxItems` (on `type:"array"`)
 and `minLength` (on `type:"string"`, counted on stripped chars — a whitespace-only
 string is too short), graph-level `defaults` (precedence: explicit node
 key > `shape` preset > `defaults`) and `model_policy` — the authoritative
@@ -156,7 +157,7 @@ procedures:
 
 ```sh
 hermes plugins install hermes-workflows      # from the catalog (pinned SHA)
-hermes plugins install <git-url>@v1.3.9      # fallback until the catalog entry merges (see INSTALL.md for the zip)
+hermes plugins install <git-url>@v1.4.3      # fallback until the catalog entry merges (see INSTALL.md for the zip)
 hermes plugins enable hermes-workflows
 ```
 
@@ -198,7 +199,7 @@ lands, the branch collapses and that doc deletes itself.
 
 ## Starter set: run something today (`general/`)
 
-You don't have to author a graph first. Five scrubbed, estate-neutral starter
+You don't have to author a graph first. Six scrubbed, estate-neutral starter
 graphs ship *with the plugin* under `library/general/`, so a fresh install can
 run a real DAG out of the box:
 
@@ -213,6 +214,7 @@ run a real DAG out of the box:
 | `general/test-first-feature-slice` | one behavior is worth a red-green-proof slice |
 | `general/fan-out-audit-census` | a tree needs a per-file audit with an honest tally (the 8 KB per-parent input cap, taught by example) |
 | `general/report-and-verify` | a producer will drop a report later and you want zero tokens while waiting (machine `wait` gate exemplar) |
+| `general/queue-executor` | a tracker/file queue has open items to execute in parallel with receipts, not vibes (resume-from-disk + re-run verify exemplar) |
 
 Resolution order for `from: general/<name>`: your **runs-root library first**
 (`<runs_root>/library/general/<name>.json`), legacy launch root second, the

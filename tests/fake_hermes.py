@@ -226,6 +226,30 @@ if _FAKE_MODE == "quota":          # #24: subscription-quota 429 with a reset ho
     print('Provider said: HTTP 429: {"error": {"message": "ChatGPT or Codex '
           'Subscription usage limit reached, resets in ~109 hours"}}')
     sys.exit(1)
+# ---- est-imp1z (WF-GRAFT-2): the exit-0-lie family (exit-0-is-not-success) ----
+_IMP1Z_LIE = "API call failed after 3 retries: HTTP 429 Too Many Requests"
+if _FAKE_MODE == "exit0lie":       # est-imp1z: THE exit-0 lie — provider retries exhausted,
+    # failure line as the final message, clean exit 0, NO fenced answer (the shape the
+    # harvest-once coercion laundered into {result: prose} -> done on garbage).
+    print(_IMP1Z_LIE)
+    sys.exit(0)
+if _FAKE_MODE == "exit1lie":       # est-imp1z: the same sentinel on a dying exit —
+    # generic rc!=0 death whose only machine fact is the transient sentinel line.
+    print(_IMP1Z_LIE)
+    sys.exit(1)
+if _FAKE_MODE == "declared":       # est-imp1z: self-report says FAILURE on a clean exit 0
+    # with a schema-valid fence present — the token outranks both the exit code and the
+    # answer's parseability; deterministic, never re-driven.
+    print("Done — but the acceptance is unmet.\n```json\n"
+          + json.dumps({"result": "self-declared-failure"}) + "\n```")
+    print('{"node_outcome": "failure"}')
+    sys.exit(0)
+if _FAKE_MODE == "tokenok":        # est-imp1z: sentinel prose + valid fence + SUCCESS tail
+    # token — the token protects finished work from the transient sentinel (token > sentinel).
+    print(_IMP1Z_LIE + " (recovered on the final turn)")
+    print("```json\n" + json.dumps({"result": "recovered"}) + "\n```")
+    print('{"node_outcome": "success"}')
+    sys.exit(0)
 if _FAKE_MODE == "rlhint130":   # #130: rate-limit park respawn — banks a work file, then the
     # parked respawn answers ONLY when its prompt carried the artifact inventory.
     if "RESUME-HINT-ARTIFACT-130" in q and "size=" in q and "mtime=" in q:
@@ -694,6 +718,17 @@ if _FAKE_MODE == "min_blank_then_good":  # first answer blank, retry names a rea
         print("```json\n" + json.dumps({"verify_list": ["pytest -q"]}) + "\n```")
     else:
         print("```json\n" + json.dumps({"verify_list": ["   "]}) + "\n```")
+    sys.exit(0)
+# ---- #472 maxItems-cap modes (prompt-scoped like the enum/min ones: the
+# runner's attempt_note lands in the retry's prompt text) ----
+if _FAKE_MODE == "cap_always_bad":     # persistent roster over the declared cap
+    print("```json\n" + json.dumps({"candidates": ["a", "b", "c"]}) + "\n```")
+    sys.exit(0)
+if _FAKE_MODE == "cap_over_then_good":  # over-cap first, retry inside the cap
+    if "failed schema validation" in q:
+        print("```json\n" + json.dumps({"candidates": ["a", "b"]}) + "\n```")
+    else:
+        print("```json\n" + json.dumps({"candidates": ["a", "b", "c"]}) + "\n```")
     sys.exit(0)
 # ---- #113 numeric-type-enforcement modes (prompt-scoped like the enum ones:
 # the runner's attempt_note lands in the retry's prompt text) ----

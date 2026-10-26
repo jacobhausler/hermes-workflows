@@ -3,6 +3,18 @@
 
 The ledger resets per run: exits.json reports the CURRENT pass only.
 
+Sharding (CI wall clock, never serial semantics): `--shard I/N` runs exactly
+the cases at positions I::N of the SAME sorted discovery list the serial pass
+uses — serial-within-shard is untouched, and matrix jobs over shards are the
+only parallelism (in-process concurrency would share tests/.suite-home and is
+deliberately NOT offered). A COMPLETED shard pass also writes done.json
+({complete:true,total:N}); a ledger without its marker is an interrupted run.
+`--merge DIR [DIR...]` fuses shard out-dirs back into the SAME contract the
+serial pass emits: every named dir must carry a complete (marker-present),
+non-empty ledger — a missing/incomplete/empty shard turns the merge red, so a
+crashed lane can never masquerade as a green slice (#112 extended to lanes);
+rows fuse and the admission + exit law is identical to the serial pass.
+
 Pass-gate admission contract (#17): with --baseline <exits.json> (a prior run's
 ledger, e.g. the clean base SHA), the run additionally writes admission.json
 next to exits.json carrying the EXACT red identities (test name + exit code)
@@ -24,6 +36,18 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+
+# ci-P1 (NEXTGEN-CI (d), S6 run-attempt law): the ledger grows run_attempt
+# ADDITIVELY — the done.json marker carries it when the runner exports
+# GITHUB_RUN_ATTEMPT (every Actions job does); a local pass keeps its exact
+# historical shape (no key), and no existing key changes meaning. Stale-ledger
+# detection (rollup demands attempt == current run_attempt) is the consumer's
+# job; the suite only stamps.
+_RUN_ATTEMPT = os.environ.get('GITHUB_RUN_ATTEMPT')
+
+
+def attempt_fields():
+    return {'run_attempt': int(_RUN_ATTEMPT)} if _RUN_ATTEMPT and _RUN_ATTEMPT.isdigit() else {}
 
 
 def load_baseline(path):
@@ -86,6 +110,8 @@ def parse_args(argv):
     root = Path(argv[1]).resolve()
     out = Path(argv[2]).resolve()
     baseline = None
+    shard = None            # (i, n) for --shard i/n
+    merge_dirs = None       # list of shard out-dirs for --merge
     rest = argv[3:]
     i = 0
     while i < len(rest):
@@ -95,13 +121,36 @@ def parse_args(argv):
                 raise SystemExit(2)
             baseline = Path(rest[i + 1]).resolve()
             i += 2
+        elif rest[i] == '--shard':
+            if i + 1 >= len(rest) or '/' not in rest[i + 1]:
+                print('suite: --shard needs I/N (e.g. --shard 3/8)', flush=True)
+                raise SystemExit(2)
+            si, sn = rest[i + 1].split('/', 1)
+            try:
+                si, sn = int(si), int(sn)
+            except ValueError:
+                print(f'suite: --shard needs integer I/N, got {rest[i+1]!r}', flush=True)
+                raise SystemExit(2)
+            if not (sn >= 1 and 0 <= si < sn):
+                print(f'suite: --shard {rest[i+1]} out of range (need N>=1, 0<=I<N)', flush=True)
+                raise SystemExit(2)
+            shard, i = (si, sn), i + 2
+        elif rest[i] == '--merge':
+            merge_dirs = rest[i + 1:]
+            if not merge_dirs:
+                print('suite: --merge needs at least one shard out-dir', flush=True)
+                raise SystemExit(2)
+            i = len(rest)
         else:
             print(f'suite: unknown argument {rest[i]!r}', flush=True)
             raise SystemExit(2)
-    return root, out, baseline
+    if shard and merge_dirs:
+        print('suite: --shard and --merge are exclusive modes', flush=True)
+        raise SystemExit(2)
+    return root, out, baseline, shard, merge_dirs
 
 
-root, out, _baseline_path = parse_args(sys.argv)
+root, out, _baseline_path, _shard, _merge_dirs = parse_args(sys.argv)
 
 
 def invalidate_receipts():
@@ -131,6 +180,71 @@ if _baseline_path:
         raise
 else:
     base_reds = None
+
+# --merge fuses shard out-dirs instead of running anything: the ledger IS the
+# contract, and a fused pass must satisfy every serial law (complete, non-empty
+# shards only; disjoint rows; identical admission + exit code).
+if _merge_dirs:
+    _rows, _problems = [], []
+    for _d in _merge_dirs:
+        _led, _mark = Path(_d) / 'exits.json', Path(_d) / 'done.json'
+        try:
+            _srows = json.loads(_led.read_text())
+            if not isinstance(_srows, list) or any(
+                    not isinstance(_r, dict) or 'test' not in _r or 'exit' not in _r
+                    for _r in _srows):
+                raise ValueError('ledger rows malformed')
+        except Exception as _exc:
+            _problems.append(f'shard ledger unusable ({_led}): {type(_exc).__name__}: {_exc}')
+            continue
+        try:
+            _mk = json.loads(_mark.read_text())
+            if _mk.get('complete') is not True or int(_mk.get('total', -1)) != len(_srows):
+                _problems.append(f'shard marker mismatch ({_mark}): {_mk!r}')
+                continue
+        except Exception as _exc:
+            _problems.append(f'shard done.json marker missing/incomplete ({_mark}): '
+                             f'{type(_exc).__name__}: {_exc}')
+            continue
+        if not _srows:
+            _problems.append(f'zero-discovery shard ({_led}) — a lane that ran '
+                             'nothing is not a pass (#112)')
+            continue
+        _rows.extend(_srows)
+    if _problems:
+        print('suite: merge refused:', flush=True)
+        for _p in _problems:
+            print(f'  - {_p}', flush=True)
+        invalidate_receipts()
+        raise SystemExit(2)
+    if len({r['test'] for r in _rows}) != len(_rows):
+        print('suite: merge refused: duplicate test names across shards — the split '
+              'is not disjoint (did two lanes run the same shard index?)', flush=True)
+        invalidate_receipts()
+        raise SystemExit(2)
+    _rows.sort(key=lambda r: r['test'])
+    out.mkdir(parents=True, exist_ok=True)
+    _tmp = (out / 'exits.json').with_suffix('.tmp')
+    _tmp.write_text(json.dumps(_rows, indent=2) + '\n')
+    os.replace(_tmp, out / 'exits.json')
+    reds = {row['test']: row['exit'] for row in _rows if row['exit'] != 0}
+    present = {row['test'] for row in _rows}
+    adm = admission(None if base_reds is None else dict(base_reds), reds,
+                    baseline_path=_baseline_path, present=present)
+    _tmp = (out / 'admission.json').with_suffix('.tmp')
+    _tmp.write_text(json.dumps(adm, indent=2) + '\n')
+    os.replace(_tmp, out / 'admission.json')
+    _tmp = (out / 'done.json').with_suffix('.tmp')
+    _tmp.write_text(json.dumps({'complete': True, 'total': len(_rows),
+                                **attempt_fields()}) + '\n')
+    os.replace(_tmp, out / 'done.json')
+    print(f'TOTAL {len(_rows)} FAIL {sum(1 for r in _rows if r["exit"] != 0)} (merged)', flush=True)
+    if _baseline_path:
+        print(f"ADMISSION introduced={len(adm['introduced'])} pre_existing={len(adm['pre_existing'])} "
+              f"missing={len(adm['missing'])} fixed={len(adm['fixed'])} green={'true' if adm['green'] else 'false'}", flush=True)
+    raise SystemExit(1 if (any(r['exit'] != 0 for r in _rows) or adm['missing']
+                           or adm['zero_discovery']) else 0)
+
 out.mkdir(parents=True, exist_ok=True)
 ledger = out / 'exits.json'
 # fb 3d2175e9cd75d2a1: a suite run reports the CURRENT pass only — reset the
@@ -146,6 +260,13 @@ os.replace(tmp, ledger)
 py = sorted((root / 'tests').glob('test_*.py'))
 js = sorted((root / 'tests').glob('test_*.mjs'))
 cases = [[sys.executable, str(p)] for p in py] + [['node', '--experimental-strip-types', str(p)] for p in js]
+if _shard:
+    # ci-speed: same sorted discovery list, this lane takes positions I::N.
+    # Positions are taken BEFORE any other filter, so the union over all shards
+    # is exactly the serial pass's case set (disjoint by construction).
+    _n_all = len(cases)
+    cases = cases[_shard[0]::_shard[1]]
+    print(f'suite: shard {_shard[0]}/{_shard[1]} — {len(cases)} of {_n_all} cases', flush=True)
 # est-2ek.1.762: the serial run exports a TEMPORARY WF_RUNS_ROOT so a test that
 # forgets its own pin can never land fixture runs in the PRODUCTION runs root
 # (774/1227 zero-log fixture dirs were leaked exactly this way; census spool
@@ -204,6 +325,15 @@ adm = admission(None if base_reds is None else dict(base_reds), reds,
 tmp = (out / 'admission.json').with_suffix('.tmp')
 tmp.write_text(json.dumps(adm, indent=2) + '\n')
 os.replace(tmp, out / 'admission.json')
+# ci-speed: completion marker — the ledger alone cannot prove the pass RAN TO
+# THE END (a SIGKILL leaves a valid, all-green partial ledger). --merge demands
+# this marker with total == len(ledger rows); a shard that died mid-pass is RED,
+# never a green slice.
+tmp = (out / 'done.json').with_suffix('.tmp')
+tmp.write_text(json.dumps({'complete': True, 'total': len(rows),
+                           **({'shard': f'{_shard[0]}/{_shard[1]}'} if _shard else {}),
+                           **attempt_fields()}) + '\n')
+os.replace(tmp, out / 'done.json')
 if adm['zero_discovery']:
     print(f'suite: zero cases discovered under {root / "tests"} — refusing green', flush=True)
 print(f'TOTAL {len(rows)} FAIL {sum(row["exit"] != 0 for row in rows)}', flush=True)

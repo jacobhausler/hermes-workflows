@@ -46,6 +46,7 @@ spec = importlib.util.spec_from_file_location("hwpo", BUILD / "__init__.py")
 hw = importlib.util.module_from_spec(spec); spec.loader.exec_module(hw)
 import wf_test_isolation as _iso71; _iso71.install(hw)  # #71 r5: pin settings.runs_root alongside WF_RUNS_ROOT
 from wf_test_markers import read_pid_marker   # est-jue3: one parseable-content wait family (the #267 shape, shared)
+from fake_runner import alive, cmdline, runners_for  # shared door-scan probes (tests/fake_runner.py)
 runs = Path(os.environ["WF_RUNS_ROOT"])
 
 ok = True
@@ -56,31 +57,6 @@ def check(label, cond, detail=""):
 
 def call(**a):
     return json.loads(hw.handle(a))
-
-def alive(pid):
-    try:
-        os.kill(pid, 0)
-    except (ProcessLookupError, PermissionError):
-        return False
-    try:
-        st = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[0]
-        return not st.startswith("Z")
-    except OSError:
-        return True
-
-def cmdline(pid):
-    try:
-        return " " + Path(f"/proc/{pid}/cmdline").read_bytes().decode(errors="replace").replace("\0", " ").strip() + " "
-    except OSError:
-        return ""
-
-def runners_for(rid):
-    """Live runner pids for THIS run id: cmdline carries the exact run dir name."""
-    out = []
-    for pid in _proc_pids():
-        if f"{os.sep}wf.py run {rid}" in cmdline(pid):
-            out.append(pid)
-    return out
 
 def _proc_pids():
     try:
