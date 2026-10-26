@@ -5047,6 +5047,88 @@ def wait_spec_ok(w):
         E("until_argv", "until_argv must be a non-empty list of strings (fixed argv, no shell)")
     return out
 
+def validate_graph_warnings(nodes):
+    """hw-udg: SEMANTIC lints for the validate action's warnings
+    channel — advisory {node, field, msg} rows, NEVER fatal (host-dependent paths
+    must not block a portable graph). Three classes validate structurally green
+    and misbehave at runtime: (1) a `when` operand `out.<head>.<field>` whose head
+    declares an object schema that does not declare that field — the validator is
+    forgiving and the runner commits agent output raw, so the branch is dead
+    UNLESS the child emits the undeclared key against its own schema; (2) a gate
+    wait probe whose argv[0] cannot be exec'd on this host — the park re-runs it
+    every tick and FileNotFoundError-loops until timeout_s (masked-digit path
+    copies are a classic source); (3) fanout.quorum below the literal item count —
+    the stragglers cancel at the quorum moment, possibly mid-flight. Accepts a
+    node list or a graph object, like validate_graph_errors. Read-only, no spawn."""
+    if isinstance(nodes, dict):
+        nodes = nodes.get("nodes")
+    out = []
+    if not isinstance(nodes, list):
+        return out
+    by_id = {n.get("id"): n for n in nodes if isinstance(n, dict)}
+
+    def undeclared_seg(schema, segs):
+        # Return the first segment not declared in a declared `properties` level,
+        # else None. This proves UNDECLARED, not UNEMITTABLE: the grammar admits
+        # no closed schema (additionalProperties is not an admitted keyword, the
+        # forgiving validator lets extra keys through, the runner commits output
+        # raw), so a hit is grounds for the advisory row, not proof of a dead
+        # branch.
+        cur = schema
+        for seg in segs:
+            props = cur.get("properties") if isinstance(cur, dict) else None
+            if not isinstance(props, dict):
+                return None
+            if seg not in props:
+                return seg
+            cur = props[seg]
+        return None
+
+    for n in by_id.values():
+        nid = n.get("id")
+        if n.get("type") in ("gate", "agent") and isinstance(n.get("when"), str) \
+                and when_expr_ok(n["when"]) is None:
+            for tok in _tok_when(n["when"]):
+                parts = tok.split(".")
+                if len(parts) < 3 or not tok.startswith("out."):
+                    continue
+                head = by_id.get(parts[1])
+                # a fan-out's out is the results LIST — property-path lint n/a
+                if head is None or isinstance(head.get("fanout"), dict):
+                    continue
+                miss = undeclared_seg(head.get("schema"), parts[2:])
+                if miss is not None:
+                    out.append({"node": nid, "field": "when",
+                                "msg": f"when ref {tok!r}: {parts[1]!r}'s schema declares no "
+                                       f"property {miss!r} — this branch is dead unless the "
+                                       "child emits the undeclared key anyway (the runner "
+                                       "commits output raw, not pruned to schema)"})
+        wait = n.get("wait")
+        if n.get("type") == "gate" and isinstance(wait, dict):
+            argv = wait.get("until_argv")
+            if isinstance(argv, list) and argv and all(isinstance(a, str) and a for a in argv):
+                import shutil
+                a0 = argv[0]
+                # ponytail: only argv[0] is checked — a missing PATH argument would
+                # take the same FileNotFoundError loop; a "/"-path is checked for
+                # existence, not exec bit (false-negative only). Upgrade if it bites.
+                found = os.path.exists(a0) if "/" in a0 else shutil.which(a0) is not None
+                if not found:
+                    out.append({"node": nid, "field": "wait.until_argv",
+                                "msg": f"probe {a0!r} is not executable on the validating host — "
+                                       "the gate would park re-running it until timeout_s (host "
+                                       "check only: the launch host may differ)"})
+        fo = n.get("fanout")
+        if isinstance(fo, dict):
+            items, q = fo.get("items"), fo.get("quorum")
+            if isinstance(items, list) and isinstance(q, int) and not isinstance(q, bool) \
+                    and 0 < q < len(items):
+                out.append({"node": nid, "field": "fanout.quorum",
+                            "msg": f"fanout.quorum {q} is below the {len(items)} literal items: "
+                                   f"{len(items) - q} item(s) cancel at the quorum moment, possibly "
+                                   "mid-run (a race wants this, a coverage fan-out does not)"})
+    return out
+
 def blocked_by(n, states, nodes_meta=None):
     """P1 (jury form): the NEAREST unfinished ancestors of a pending node, each with its
     state, computed at query time and never persisted. nodes_meta may carry per-node

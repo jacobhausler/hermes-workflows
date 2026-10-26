@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+- feat(validate): three advisory semantic lints ride the `validate`
+  action's existing never-fatal `warnings` channel. (1) a `when` operand
+  `out.<head>.<field>` whose head declares an object schema that does not
+  declare that field — the validator is forgiving and the runner commits
+  agent output raw, so the branch is dead unless the child emits the
+  undeclared key against its own schema; the door flags the suspect read
+  while the graph is still text; (2) a machine-gate probe whose
+  `wait.until_argv[0]` is missing on the validating host (a path with `/`
+  is existence-checked, not exec-bit — false-negative only) — the park
+  would re-run it every tick and FileNotFoundError-loop until `timeout_s`,
+  and a host check is explicitly
+  host-dependent, hence advisory never fatal; (3) `fanout.quorum` below the
+  literal item count — the stragglers cancel at the quorum moment, possibly
+  mid-flight (a race wants this, a coverage fan-out does not). Rows share the
+  pinned `{node, field, msg}` shape beside the s12/max_turns advisories; `ok`
+  is untouched — every graph that validated green before still does.
+  New tests/test_validate_semantic_warnings_udg.py.
+
 - test(contract): pin private core imports as a reasoned allow-list
   (#456 item 1, est-i3d1b). New `tests/test_private_core_imports.py` runs
   upstream's own `private_import_findings()` (hermes-agent >= v0.22.0

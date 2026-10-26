@@ -2598,6 +2598,9 @@ def act_validate(args):
     # graph is defaults-filled at this line; the resolver reads an explicit
     # (baked) timeout first, so filled bytes resolve the SAME walls.
     warnings.extend(_common.wall_invariant_warnings(graph))
+    # hw-udg: the advisory semantic lints (ghost when-field, dead probe path,
+    # quorum-below-items) ride this same never-fatal channel, after defaults fill.
+    warnings.extend(_common.validate_graph_warnings(graph))
     if warnings:
         out["warnings"] = warnings
     return out
