@@ -50,6 +50,30 @@ _common_spec = importlib.util.spec_from_file_location("_hermes_workflows_wfcommo
 assert _common_spec is not None and _common_spec.loader is not None
 wfcommon = importlib.util.module_from_spec(_common_spec)
 _common_spec.loader.exec_module(wfcommon)
+# est-imp1z (WF-GRAFT-2): the pure output classifier (exit-0-is-not-success) rides
+# the same purity law as wfcommon — spec-loaded PRIVATELY under a prefixed module
+# name, bound by path from __file__; no generic 'outcome' name ever joins a host
+# sys.modules (the import-purity probe pins it).
+_OUTCOME_PATH = Path(__file__).resolve().parent / "outcome.py"
+if not _OUTCOME_PATH.is_file():
+    # A copy of this runner executed beside no sibling (door copies, fake-home
+    # stagings): resolve a sys.path-provided outcome.py the same way the wfcommon
+    # fallback above does — but ONLY one shipped beside a wfcommon.py (a bare
+    # 'outcome' is a common host-module name; the co-located wfcommon.py is the
+    # plugin-dir proof the fallback demands).
+    for _ent in list(sys.path):
+        try:
+            _cand = Path(_ent) / "outcome.py"
+            if _cand.is_file() and (Path(_ent) / "wfcommon.py").is_file():
+                _OUTCOME_PATH = _cand
+                break
+        except Exception:
+            continue
+assert _OUTCOME_PATH.is_file(), f"missing plugin sibling outcome.py (looked at {_OUTCOME_PATH})"
+_outcome_spec = importlib.util.spec_from_file_location("_hermes_workflows_outcome_runner", _OUTCOME_PATH)
+assert _outcome_spec is not None and _outcome_spec.loader is not None
+_outcome = importlib.util.module_from_spec(_outcome_spec)
+_outcome_spec.loader.exec_module(_outcome)
 # Bind every name OFF the private instance above. A `from wfcommon import ...`
 # statement is an import of the GENERIC top-level name — it re-executes the
 # sibling into sys.modules as bare 'wfcommon' (the exact leak this module's
@@ -642,6 +666,127 @@ def _wake_owner_text(run_id, event, run_dir=None, failed_node_logs=None):
     return (f"[runner-authored/v1] run_id={json.dumps(str(run_id))} "
             f"event={json.dumps(event)}{pointers} \u2014 {body}")
 
+# ---------- wake-noise control: [SILENT] verdict + per-node wake tiers (WF-GRAFT-1) ----------
+# Adapted from itechmeat/hermes-workflows (notifications.py:29-45, engine.py:934-936):
+# a settled result that says "nothing to report" costs the owner ZERO turns, and a
+# scheduled graph can say so per node without changing the graph-wide default.
+#
+# The Hermes `[SILENT]` convention is honored at exactly ONE seam — the run-result
+# wake — and only against the output the graph itself declares as its verdict
+# (top-level `result:`, est-2ek.1.158). Binding the marker to that one committed
+# record is what keeps it safe: any node's prose could otherwise swallow a
+# transition, whereas `result` names the single channel the AUTHOR designated as the
+# run's answer. Case-sensitive, matching the host convention.
+SILENT_MARKER = "[SILENT]"
+
+# The node-subject notices a wake tier may govern. Run-terminal wakes (run.done /
+# run.failed / run.partial) are deliberately NOT tier-governable: the run boundary is
+# the contract that makes `wait` unnecessary, and the only thing that may suppress a
+# run.done wake is the run's own declared verdict carrying SILENT_MARKER. A malformed
+# or optimistic tier can therefore never leave a run unreported at its boundary.
+_TIERED_WAKE_EVENTS = frozenset({"gate.held", "fanout.stragglers"})
+WAKE_TIER_DEFAULT = "full"
+
+
+def _wake_graph(run, graph):
+    """The graph facts the wake-noise read uses: the caller's when it carries nodes,
+    else the run's COMMITTED graph.json (the same on-disk fact the wake identity's
+    fingerprint read rides). Unreadable/garbage degrades to {} — the default
+    behavior, never a crash and never a suppression."""
+    if isinstance(graph, dict) and isinstance(graph.get("nodes"), list) and graph["nodes"]:
+        return graph
+    try:
+        g = jload(run / "graph.json", {}) or {}
+    except Exception:
+        return {}
+    return g if isinstance(g, dict) else {}
+
+
+def _run_result_output(run, graph=None):
+    """The run's COMMITTED verdict output as text — the output of the node the graph
+    names as top-level `result` — or None when there is nothing grounded to read.
+    The `result` id is read from the run's COMMITTED graph.json (the notify call site
+    for run.done passes a run_state-derived graph carrying only `nodes`, so a
+    suppression must never depend on what the caller happened to hand over); the node
+    set comes from the caller's graph when it carries one, else the same file.
+    None — i.e. WAKE NORMALLY — for: no `result` declaration, no committed record, a
+    record the efp law says is stale (node_rec returning `pending`: the same validity
+    law the wake identity and the #501 pointers use), or a commit whose status is not
+    a real commit. Fail-open by construction: a suppression never rests on an
+    unreadable or amended-away fact. A structured (schema-committed) verdict is read
+    whole via JSON so the marker counts anywhere in the author's own answer, not only
+    in a bare-string one."""
+    try:
+        committed = jload(run / "graph.json", {}) or {}
+        committed = committed if isinstance(committed, dict) else {}
+        rid = committed.get("result")
+        if not isinstance(rid, str) or not rid:
+            return None
+        g = _wake_graph(run, graph)
+        byid = {n["id"]: n for n in (g.get("nodes") or [])
+                if isinstance(n, dict) and n.get("id")}
+        if rid not in byid:                       # the caller handed a nodes-only
+            byid = {n["id"]: n for n in (committed.get("nodes") or [])   # projection
+                    if isinstance(n, dict) and n.get("id")}
+        node = byid.get(rid)
+        if not isinstance(node, dict):
+            return None
+        status, rec = node_rec(run, node, byid)
+        if status not in ("done", "partial"):
+            return None                      # stale/amended-away/absent: not a fact
+        if not isinstance(rec, dict) or rec.get("output") is None:
+            return None
+        out = rec["output"]
+        return out if isinstance(out, str) else json.dumps(out, ensure_ascii=False)
+    except Exception:
+        return None
+
+
+def _wake_tier(run, graph, node_id):
+    """The effective wake tier for one node: the NODE's `wake_tier` over the GRAPH's
+    top-level `wake_tier` default, else `full`. Anything the door would have refused
+    — a non-string, a value outside wfcommon.WAKE_TIERS, an unreadable graph, an
+    unknown node — reads as `full`: the fail-open direction for a wake is always the
+    loud one, so a malformed tier can over-wake and can never swallow a transition."""
+    try:
+        g = _wake_graph(run, graph)
+        tier = None
+        for n in g.get("nodes") or []:
+            if isinstance(n, dict) and n.get("id") == node_id and "wake_tier" in n:
+                tier = n["wake_tier"]
+                break
+        if tier is None:
+            tier = g.get("wake_tier")
+        return tier if tier in wfcommon.WAKE_TIERS else WAKE_TIER_DEFAULT
+    except Exception:
+        return WAKE_TIER_DEFAULT
+
+
+def _wake_suppression(run, event, node, graph):
+    """Why this wake instance must NOT reach the owner session, or None to deliver.
+    Checked BEFORE any POST and before the row would record a delivery attempt: a
+    suppression is a decision, not a transport failure, and it never re-arms.
+      * `silent_marker` — a `run.done` whose declared verdict output carries
+        [SILENT]: the worker said nothing to report. Lifecycle notices
+        (run.failed / run.partial / gate.held / fanout.stragglers) never consult it.
+      * `wake_tier:quiet` — a mid-flight `fanout.stragglers` observation for a node
+        at tier quiet or silent (an observation, not a state the owner must act on).
+      * `wake_tier:silent` — any node-subject notice, including this gate's own hold:
+        the author explicitly took over polling it (status still answers
+        `next: [release]`, and the desktop card still shows the question)."""
+    if event == "run.done":
+        verdict = _run_result_output(run, graph)
+        if verdict is not None and SILENT_MARKER in verdict:
+            return "silent_marker"
+    if node is not None and event in _TIERED_WAKE_EVENTS:
+        tier = _wake_tier(run, graph, node)
+        if tier == "silent":
+            return "wake_tier:silent"
+        if tier == "quiet" and event == "fanout.stragglers":
+            return "wake_tier:quiet"
+    return None
+
+
 _CRASH_GEN: list = [None, None]  # [run_path, generation] for this runner process
 
 # ---------- #8 item 3: crash-respawn idempotence (attempt-N preamble +
@@ -1107,7 +1252,7 @@ def _wake_tid(run_name, event, disc):
         return _ob.instance_id(run_name, event, disc)
     return hashlib.sha256(f"{run_name}\0{event}\0{disc}".encode()).hexdigest()[:32]
 
-def notify(run, event, key=None, graph=None):
+def notify(run, event, key=None, graph=None, node=None):
     """Push ONE lifecycle transition instance to the owner session stamp. Owner-null
     (tests, CLI, tool hosts without a session env) writes NOTHING — the door's
     silent degradation, unchanged. The transition instance (B3 law) is a
@@ -1132,7 +1277,20 @@ def notify(run, event, key=None, graph=None):
     already decided; a dead endpoint must not cost the run its exit. Nothing
     caller-computed is interpolated into the probe before the generic fail-open
     net; a crash in preparation records a typed line. Every persisted field is
-    bearer-redacted (F4) — a stdlib error can embed the raw header value."""
+    bearer-redacted (F4) — a stdlib error can embed the raw header value.
+
+    `node` names the node a NODE-SUBJECT notice is about (the fan-out carrying
+    stragglers, the gate that is holding) so the wake-noise law can read THAT
+    node's effective tier; it never carries text and is never interpolated into
+    owner prose. Suppression law (WF-GRAFT-1, after itechmeat's notifications
+    layer): when _wake_suppression finds a reason — a [SILENT] declared verdict
+    on run.done, or a node-subject notice under a tier that quiets it — NOTHING
+    is POSTed and exactly ONE typed row (`suppressed=<reason>`, delivered=False)
+    lands in the probe; a re-drive of the same instance sees that row and writes
+    nothing further, so a suppression is recorded once and never retried. The
+    operator mirror still fires (it is the operator's endpoint, not an owner
+    turn), and a notice with no suppression reason is byte-identical to before
+    this law."""
     try:
         if not run.is_dir():
             return
@@ -1182,6 +1340,22 @@ def notify(run, event, key=None, graph=None):
         _rows, delivered = _wake_ledger_read(run)
         if tid in delivered:
             return                       # delivered instance: zero rows, zero POSTs
+        reason = _wake_suppression(run, event, node, graph)
+        if reason is not None:
+            # RECORDED ONCE, NEVER RETRIED. The row is the receipt of a decision, not
+            # a failed delivery: `delivered: False` keeps it out of the delivered-set
+            # above (a delivery retry must never treat it as an undelivered attempt),
+            # and this scan makes every later re-drive of the SAME instance write
+            # nothing. A genuinely new instance (rev bump, new hold) mints a new tid
+            # and records its own one row — legible forever in the probe, which is
+            # the difference between a suppression and a hole.
+            if any(r.get("id") == tid and r.get("suppressed") for r in _rows):
+                return
+            _wake_append(run, {"ts": now(), "event": event, "run_id": run.name,
+                               "owner": owner, "id": tid, "suppressed": reason,
+                               "delivered": False, "text": text})
+            print(f"WORKFLOW_WAKE_SUPPRESSED {run.name} {event} {reason}")
+            return
         try:                             # the door's authority-law stamp, for the trail
             proto = (run / "wake_protocol").read_text().strip()
         except OSError:
@@ -2054,13 +2228,16 @@ def commit_item_record(run, node, byid, index, result):
     committed fact; efp-stamped like save_node so record_efp_valid certifies it.
     Status vocabulary is node_rec's committed set; a cancelled straggler stays
     failed+error_class=cancelled (node_rec reads that as pending — a resume
-    re-drives it, #7 law preserved). An ADOPTED item (result.adopted — the
-    live-orphan path) retires to status=adopted instead, carrying the harvested
-    output: no re-adoption window, and spawn-path items commit done exactly as
-    the 765 law pins."""
+    re-drives it, #7 law preserved). A precheck-skipped item (est-37d74 #453)
+    commits status=skipped and KEEPS its error/error_class/reason: the reason is
+    the committed fact of why the roster row never spawned. An ADOPTED item
+    (result.adopted — the live-orphan path) retires to status=adopted instead,
+    carrying the harvested output: no re-adoption window, and spawn-path items
+    commit done exactly as the 765 law pins."""
     st = result.get("status")
     adopted = bool(result.get("adopted"))
-    rec_status = _ITEM_ADOPTED_RETIRE if adopted else (st if st in ("done", "partial") else "failed")
+    rec_status = (_ITEM_ADOPTED_RETIRE if adopted
+                  else (st if st in ("done", "partial", "skipped") else "failed"))
     np = run / "nodes" / f"{_node_file(node, index)}.json"
     try:
         rec = jload(np) or {}
@@ -2071,14 +2248,14 @@ def commit_item_record(run, node, byid, index, result):
     rec = dict(rec)
     rec["status"] = rec_status
     rec["committed_at"] = now()
-    for k in ("output", "error", "error_class", "ms", "attempts", "attempts_log",
+    for k in ("output", "error", "error_class", "reason", "ms", "attempts", "attempts_log",
               "skey", "log_path", "prompt_path", "pid", "started", "spawn",
               "served_model", "served_billing_provider", "billed_models", "adopted", "harvested",
               "tree_descendants", "final", "banked"):
         v = result.get(k)
         if v is not None:
             rec[k] = v
-    if rec_status != "failed":
+    if rec_status not in ("failed", "skipped"):
         rec.pop("error", None)
         rec.pop("error_class", None)
     rec["efp"] = efp(byid, node)
@@ -2266,6 +2443,34 @@ def _lane_hygiene_preamble(node):
     retry, bounded resume, fan-out item — carries it; def-hash-neutral by
     construction (nothing here is ever written to graph.json or a node record)."""
     return "\n".join(LANE_HYGIENE_LINES) if _is_build_lane(node) else ""
+
+# est-imp1z (WF-GRAFT-2): the NODE-OUTCOME TOKEN contract — prompt-side, grammar
+# mirrored from the peer reference (iw-recon executor/outcome.py) so both estates
+# speak one token: `{"node_outcome": "success"|"failure"}` as the tail of the final
+# reply. It rides the SAME build-shape gate as lane hygiene (golden-solo prompt
+# bytes stay frozen); the PARSE side is universal — a token from any child is
+# honored at every CLI-backed settle by wf._outcome.classify (token > transient
+# sentinels > exit code).
+OUTCOME_TOKEN_LINES = (
+    "## Node-outcome token (machine preamble)",
+    "- Your final reply MUST end with exactly one tail token on its own line, byte-exact: "
+    '`{"node_outcome": "success"}` or `{"node_outcome": "failure"}`.',
+    "- The token is your verdict on the NODE, not on your prose: declare failure whenever the "
+    "work did not land (tools died, the provider retried out, acceptance unmet) — the runner "
+    "does NOT trust a clean exit code alone, and a transient provider-error line anywhere in "
+    "your output otherwise re-drives this node.",
+    "- Declare success only when the work is genuinely banked: a declared success outranks "
+    "any transient sentinel, so the token is how finished work is protected from a spurious "
+    "retry. A missing or malformed token is ignored — the sentinels and the exit code decide.",
+)
+OUTCOME_TOKEN_PREAMBLE_TOKEN = OUTCOME_TOKEN_LINES[0]   # the gate token tests grep for
+
+def _outcome_token_preamble(node):
+    """The node-outcome token contract for build-shape nodes ("" otherwise).
+    Prompt-side only (same def-hash/record law as LANE_HYGIENE_LINES): composed in
+    run_child so every spawn of a build node carries it. The classifier that READS
+    the token is universal; the instruction rides the build shape."""
+    return "\n".join(OUTCOME_TOKEN_LINES) if _is_build_lane(node) else ""
 # jam-h22/h30 (hackathon): the rate-limit/429 SUBCLASS of transport gets
 # exponential-with-full-jitter sleeps instead of the fixed ladder — many
 # sibling children dying on the same 429 window must not retry in lockstep.
@@ -2375,6 +2580,11 @@ ERROR_CLASSES = frozenset(("provider_400", "unresolved_model", "cap_exhausted",
                            # declared lane still carries the dead attempt's
                            # uncommitted TRACKED wreckage — bank it, then re-drive.
                            "lane_wreckage",
+                           # est-imp1z (WF-GRAFT-2): the child's self-reported
+                           # node_outcome token declares failure — the node's own
+                           # verdict outranks the exit code. Deterministic by
+                           # definition: outside BOTH retry ladders.
+                           "declared_failure",
                            # est-2ek.1.856 (B3): the seat-cap knob (WORKFLOW_MAX_SEATS
                            # env / config workflows.max_seats) named a non-integer or
                            # a value outside [4, 16]. The door refuses the whole launch
@@ -3148,10 +3358,22 @@ def _clean_capture(text):
 
 def _work_files(run, node, index):
     """(wd, files) of the child's durable work dir, newest-mtime first — the ONE
-    walk _banked_work and _bank_the_corpse share. Raises OSError."""
+    walk _banked_work and _bank_the_corpse share. Raises OSError.
+
+    est-1n7gx (WF-GRAFT-7): the key is a TOTAL order — mtime DESC, ties broken by
+    relative path ASC. The bare-mtime key left ties in rglob's filesystem-walk
+    order, and same-second mtime granularity is routine on coarsely-timestamped
+    filesystems: two artifacts sharing an mtime made the head of this list — the
+    banked manifest's `last_written`, the resume inventory's first artifact —
+    directory-traversal luck. The path tie-break is arbitrary BY CHOICE and total
+    BY LAW (relative paths are unique per walk, the key cannot tie): every
+    consumer of this order sees the same head on the same bytes. Mirrors the
+    peer's SQL law `ORDER BY COALESCE(started_at,-1) DESC, id DESC`
+    (iw-recon runRepository.ts:143/:413)."""
     wd = child_work_dir(run, node, index)
     return wd, sorted((f for f in wd.rglob("*") if f.is_file()),
-                      key=lambda f: f.stat().st_mtime, reverse=True)
+                      key=lambda f: (-f.stat().st_mtime,
+                                     f.relative_to(wd).as_posix()))
 
 CORPUS_MAX_BYTES = 16 << 20   # #131 snapshot budget; files past it are manifest-only
 
@@ -3159,8 +3381,10 @@ def _bank_the_corpse(run, node, index, spawn, out):
     """#131 bank-the-corpse: on a wall-kill (timed_out, BOTH wait paths) write
     nodes/<_node_file>.corpus/ = work/ (snapshot of the durable work dir, newest
     first under CORPUS_MAX_BYTES), stdout_tail.txt (out[-4000:]) and
-    manifest.json (every file + size + mtime, newest first; last_written = the
-    newest), then log ONE node.banked line. Returns the corpus path for the
+    manifest.json (every file + size + mtime, newest first; ties by relative path
+    ASC — the ONE total order of _work_files, est-1n7gx; last_written = rows[0],
+    i.e. the head of that total order, never traversal luck), then log ONE
+    node.banked line. Returns the corpus path for the
     death record's `banked` pointer. Honest-empty: ANY failure logs node.banked
     with error= and returns None — it never raises, so it can never move the
     timeout verdict. Deterministic: the canonical pointer nodes/<_node_file>.corpus
@@ -3282,14 +3506,22 @@ def _resume_hint_block(run, node, index, attempts_log=None):
     if not (node or {}).get("id") or flag is False:
         return ""
     try:
-        wd = child_work_dir(run, node, index)
-        work = sorted((f for f in wd.rglob("*") if f.is_file()),
-                      key=lambda f: f.stat().st_mtime, reverse=True)
+        # est-1n7gx: ride the ONE walk (total order mtime DESC, relpath ASC) —
+        # the resume inventory and the banked manifest can never disagree about
+        # the head of the same bytes.
+        wd, work = _work_files(run, node, index)
         stem = re.sub(r"[^A-Za-z0-9_.-]", "_", str(node["id"])) + \
             (f".{index}" if index is not None else "")
         own = re.compile(re.escape(stem) + r"\.a\d+\.log")   # node-exact: x never takes x.audit.a0.log
+        # est-1n7gx: TOTAL order — mtime DESC with the spawn/attempt index as the
+        # in-name discriminator (attempt DESC: the bigger spawn index is the later
+        # attempt, the same time signal mtime carries; own.fullmatch guarantees a
+        # parseable number, so the key cannot tie). Peer law is id DESC for
+        # exactly this shape (iw-recon runRepository.ts:143/:413).
         logs = sorted((f for f in (run / "logs").glob(stem + ".a*.log") if own.fullmatch(f.name)),
-                      key=lambda f: f.stat().st_mtime, reverse=True)
+                      key=lambda f: (f.stat().st_mtime,
+                                     int(re.search(r"\.a(\d+)\.log$", f.name).group(1))),
+                      reverse=True)
     except OSError:
         work, logs = [], []
     if flag is not True and not work:
@@ -4746,6 +4978,11 @@ def _aux_run(cmd, timeout=None, **kw):
             try: h.close()
             except Exception: pass
 
+# est-37d74 (#453): the fan-out precheck probe is bound by the same per-probe cap
+# the gate wait applies to its until_argv check (min(every, 300)): a custody
+# probe costs seconds, never a wave.
+_FANOUT_PRECHECK_TIMEOUT_S = 300
+
 def _kill_aux_tree(p):
     """SIGKILL the aux child AND its group (the child is its own group leader
     via start_new_session — #80 R3: killing only the parent left
@@ -5780,6 +6017,22 @@ def _adopt_child(meta, node, byid, index, child, schema, fo_cancel=None):
         # retained together with (or instead of) done, BEFORE the harvest-ONCE
         # memo freezes the verdict (a memoized done must already be honest).
         return _final_quiesce(meta, rec, "item", {"node": nid, "index": index})
+    # WF-GRAFT-2 (est-imp1z): the adopted path carries the SAME classifier law
+    # (path-invariance, est-2ek.1.541 R8): rc is unobservable for an orphan, so
+    # the capture is all we have — committing `done` on a capture whose sentinel
+    # or token contradicts it is the est-jam8 laundering shape, and the honesty
+    # must land BEFORE the harvest-ONCE memo freezes the verdict (#61b B4).
+    _ov = _outcome.classify(0, out, _outcome.parse_node_outcome(out))
+    if _ov["outcome"] == "failure":
+        return {"status": "failed",
+                "error": "adopted child's capture contradicts the done commit — "
+                         + (f"transient provider-error sentinel on its exit (never launder a "
+                            f"dead child into done). Marker: {_ov['detail']}"
+                            if _ov["kind"] == "transient" else
+                            "self-reported node_outcome token declares failure "
+                            "(deterministic: never re-driven)"),
+                "error_class": "transport" if _ov["kind"] == "transient" else "declared_failure",
+                "raw": (out or "")[-2000:], "ms": ms, "final": final_reply, **evd}
     if errs is not None and not errs:
         try: os.unlink(report_path)
         except OSError: pass
@@ -5988,6 +6241,7 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
     # then the resume preamble:
     # Both are prompt-side artifacts (logs/*.prompt.md) — never record bytes.
     preamble = "\n\n".join(p for p in (_lane_hygiene_preamble(node),
+                                        _outcome_token_preamble(node),
                                         _respawn_effects_preamble(run, meta, byid, node),
                                         resume_preamble) if p)
     # est-13z1: the BEAD LAW rides as a GOAL SUFFIX, never a prefix — the goal
@@ -6794,6 +7048,23 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
                                "gate400_clamp": target})
                     r2["attempts_log"] = al
                     return r2
+        # WF-GRAFT-2 (est-imp1z): the generic-death settle gate. Every typed
+        # deterministic class above (config_input, fatal_quota, lease_busy,
+        # malformed_turn, cap, signals, provider_400…) already returned with its
+        # own fact — this classifier reclassifies NOTHING of that. For a death
+        # that would otherwise land `unknown`, the classifier is the single gate:
+        # a line-scoped transient sentinel types it `transport` (the same
+        # retryable ladder it already fed as unknown, now with the verbatim
+        # marker), and a failure token types it `declared_failure` (terminal).
+        # A token declaring SUCCESS never launders a dead child here — rc!=0 is
+        # the runner's own fact and the harvest law above owns the answer.
+        if eclass == "unknown":
+            _ov = _outcome.classify(rc, out, _outcome.parse_node_outcome(out))
+            _otok = _outcome.parse_node_outcome(out)
+            if _ov["outcome"] == "failure" and _ov["kind"] == "transient":
+                eclass, marker = "transport", _ov["detail"]
+            elif _ov["outcome"] == "failure" and _otok == "failure":
+                eclass = "declared_failure"
         verdict = _verdict_lines(marker if marker else out)
         rec = {"status": "failed", "error": f"child exited rc={rc}: {verdict}",
                "error_class": eclass, "raw": (out or "")[-2000:], "ms": ms, "final": final_reply, **sk, **evd}
@@ -6843,6 +7114,37 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
                     "final": final_reply, **hv, **extra, **sk, **evd}
     if detached is not None:
         return {**detached, **sk, **evd}
+    # WF-GRAFT-2 (est-imp1z): exit 0 is not yet success — the pure classifier's
+    # authority order (node_outcome token > transient sentinels > exit code) is
+    # the SINGLE gate for a CLI-backed settle from here down. The lie this graft
+    # kills: the agent CLI exhausts provider retries, prints
+    # `API call failed after N retries: HTTP 429 …` as its final message, exits
+    # 0 — and extract_json's harvest-once coercion below launders that text
+    # into {result: <prose>} and the node commits `done` on garbage. kind=transient
+    # hands off to error_class `transport` — the Q4 transient ladder's gate class
+    # (its own api_calls/tool-progress guards still own the re-drive decision);
+    # a token-declared failure is `declared_failure`, outside BOTH ladders. A
+    # token declaring SUCCESS outranks the sentinels (the node knows its result)
+    # but manufactures nothing: the schema/answer law below stays in force.
+    # Typed deterministic deaths (config_input/fatal_quota/lease_busy/…) all
+    # live on the rc!=0 path and returned above this line — this classifier can
+    # never reclassify them transient.
+    ov = _outcome.classify(rc, out, _outcome.parse_node_outcome(out))
+    if ov["outcome"] == "failure":
+        if ov["kind"] == "transient":
+            return {"status": "failed",
+                    "error": f"child exited rc={rc} but its capture carries a transient "
+                             f"provider-error sentinel — exit 0 is not success (the CLI exits "
+                             f"clean on exhausted provider retries); the bounded transient "
+                             f"ladder owns the re-drive. Marker: {ov['detail']}",
+                    "error_class": "transport", "sentinel": ov["detail"],
+                    "raw": (out or "")[-2000:], "ms": ms, "final": final_reply, **sk, **evd}
+        return {"status": "failed",
+                "error": "child exited rc=0 but its self-reported node_outcome token declares "
+                         "failure — the node's own verdict outranks the exit code and any "
+                         "parseable fence; deterministic, outside both retry ladders",
+                "error_class": "declared_failure",
+                "raw": (out or "")[-2000:], "ms": ms, "final": final_reply, **sk, **evd}
     valid_answer = False
     errs = None
     if parsed is not None and perr is None:
@@ -7571,6 +7873,18 @@ def run_agent_node(run, meta, byid, node, outputs, steering):
                                             "error_class": "fanout_empty",
                                             "output": {"items": []}})
                 log(run, "node.failed", node=nid, error="fanout empty", error_class="fanout_empty", attempts=0)
+                _of = node.get("on_fail")
+                if not (isinstance(_of, str) and _of not in ("skip", "abort")):
+                    # WF-GRAFT-4: a zero-item fan-out with NO else-arm is a dead
+                    # branch, not a no-op — flag the run IN ADDITION to the node
+                    # death. The only else-arm shape this grammar has is an
+                    # on_fail:"<agent-id>" fallback: with one declared, the
+                    # existing catch path owns the death and NO flag is set.
+                    # 'skip' sets the flag too — a fan-out that yielded no work
+                    # is not a death an author tolerated, and the abort
+                    # outranks the catch at the boundary anyway.
+                    _set_abort_flag(run, nid, "fanout_empty",
+                                    "fanout resolved to no items and no else-arm fallback")
                 return
             cap = min(len(items), meta.get("item_concurrency", 8))
             results = [None] * len(items)
@@ -7653,9 +7967,25 @@ def run_agent_node(run, meta, byid, node, outputs, steering):
                                                    grace_s=grace_s)
                     if v is None:
                         return
+                    # est-waf8y D1 (est-c0jo1 passport D1): an open item queued
+                    # behind the cap has NO launch stamp — the census itself
+                    # excuses it (scheduling, not squirreling: verdict needs
+                    # >=1 LAUNCHED), but the cohort is mixed whenever exactly
+                    # one branch launched, so the disc line used to format the
+                    # missing stamp's string default with :.3f and raise
+                    # ValueError INSIDE the watchdog: every poll logged a fake
+                    # item.commit.error and the wake never fired for that
+                    # cohort shape. Format only stamped items (same launched
+                    # rule as straggler_verdict: get() is not None); a queued
+                    # item enters the disc as the literal 'q'. Determinism is
+                    # the latch law, untouched: same cohort state -> same disc;
+                    # a retry overwriting its stamp (or a queued item finally
+                    # launching) flips it -> re-arm.
                     disc = (f"{nid}:{v['done']}:"
                             + hashlib.sha256(",".join(
-                                f"{j}:{launch_ts.get(j, 'q'):.3f}" for j in v["open"]
+                                (f"{j}:{launch_ts[j]:.3f}"
+                                 if launch_ts.get(j) is not None else f"{j}:q")
+                                for j in v["open"]
                             ).encode()).hexdigest()[:8])
                     if census["fired"] == disc:
                         return      # same cohort state: one wake per driven wave;
@@ -7670,7 +8000,7 @@ def run_agent_node(run, meta, byid, node, outputs, steering):
                     log(run, "fanout.stragglers", node=nid, open=v["open"],
                         silent=silent, done=v["done"], items=v["items"],
                         oldest_open_age_s=v["oldest_open_age_s"], floor_s=v["floor_s"])
-                    notify(run, "fanout.stragglers", key=disc)
+                    notify(run, "fanout.stragglers", key=disc, node=nid)
             def _straggler_tick(r):
                 # A completing item records ITS completion, then re-evaluates the
                 # cohort — the event a wake names already carries this item (this
@@ -7716,6 +8046,10 @@ def run_agent_node(run, meta, byid, node, outputs, steering):
             # every item answered or NAMED missing) at the wave boundary. batch=1 is
             # "as they finish"; batch=N batches; the open batch always flushes with
             # its tail NAMED at wave end / stop / quorum — never silently dropped.
+            # est-1n7gx (collapse-to-one law): byid.values() iteration = graph
+            # declaration order (byid is built in node-list order), so a fan with
+            # (validator-legal) multiple partners picks the first DECLARED one —
+            # deterministic in the graph bytes, the same contract as the gate pick.
             cons_partner = next((m for m in byid.values()
                                  if isinstance(m.get("consolidate"), dict)
                                  and m["consolidate"].get("from") == nid), None)
@@ -7964,6 +8298,52 @@ def run_agent_node(run, meta, byid, node, outputs, steering):
                         log_path=str(run / "runner.log"), child_log_path=None, skey=None,
                         ms=0, attempts=0, attempts_log=[])
                     return
+                # est-37d74 (#453): optional per-fanout custody precheck, run
+                # BEFORE the child spawn, per item. Fixed argv, no shell — the
+                # gate wait.until_argv law mirrored exactly (door-validated
+                # non-empty list of non-empty strings); executed AS-IS (no item
+                # substitution) with cwd = the item's own A4 work dir, and the
+                # run-identity pins re-baked like the gate probe's (PR #243 law:
+                # re-pin, never inherit). exit 0 -> the item is live, spawn
+                # proceeds untouched; non-zero (or a probe that cannot run) ->
+                # the item commits `skipped` with the precheck output tail as
+                # its reason and NEVER `failed` — zero tokens spent, excluded
+                # from the failure math exactly like stop-cancelled rows.
+                _pa = fo.get("precheck_argv")
+                if _pa and isinstance(_pa, list) and all(isinstance(a, str) and a for a in _pa):
+                    t_pre = time.time()
+                    try:
+                        cp = _aux_run(list(_pa), timeout=_FANOUT_PRECHECK_TIMEOUT_S,
+                                      cwd=str(child_work_dir(run, node, i)),
+                                      env={**os.environ, "HERMES_WF_RUN_DIR": str(run),
+                                           "HERMES_WF_RUN_ID": run.name})
+                        _rc, _po, _pe = cp.returncode, cp.stdout or "", cp.stderr or ""
+                    except subprocess.TimeoutExpired:
+                        _rc, _po, _pe = (None, "", f"precheck timed out after "
+                                                   f"{_FANOUT_PRECHECK_TIMEOUT_S}s")
+                    except Exception as _e:
+                        _rc, _po, _pe = None, "", f"{type(_e).__name__}: {_e}"
+                    if _rc != 0:
+                        _bits = [t.strip() for t in (_pe, _po) if t and t.strip()]
+                        reason = (f"precheck rc={_rc}"
+                                  + ((" — " + " / ".join(_bits)) if _bits else ""))
+                        r = {"status": "skipped", "reason": reason, "error": reason,
+                             "error_class": "precheck_skipped", "attempts": 0,
+                             "attempts_log": [],
+                             "ms": int((time.time() - t_pre) * 1000)}
+                        with lock:
+                            results[i] = {**r, "item": item}
+                        try:
+                            commit_item_record(run, node, byid, i, r)
+                        except Exception as e:
+                            log(run, "item.commit.error", node=nid, index=i,
+                                error=f"{type(e).__name__}: {e}")
+                        log(run, "item.finished", node=nid, index=i, status="skipped",
+                            error=reason[:300], error_class="precheck_skipped",
+                            tail=reason[-300:] or None,
+                            log_path=str(run / "runner.log"), child_log_path=None, skey=None,
+                            ms=r["ms"], attempts=0, attempts_log=[])
+                        return
                 held = []   # est-g255 P255-1: this item's deferred seat (run_child seat_hold)
                 # est-fanout-straggler: the census books the ACTUAL spawn instant per
                 # item INSIDE _spawn — a retry/re-drive overwrites the stamp, and
@@ -8108,9 +8488,15 @@ def run_agent_node(run, meta, byid, node, outputs, steering):
             # count toward neither the failure list nor the quorum (hindsight-002946:
             # 5 stopped items surfaced as a false quorum failure).
             cancelled = [r for r in results if r.get("error_class") == "cancelled"]
-            failed = [r for r in results if r["status"] not in ("done", "partial") and r.get("error_class") != "cancelled"]
+            # est-37d74 (#453): precheck-skipped rows are EXCLUDED from failure
+            # math exactly like stop-cancelled rows — stale roster, not dead
+            # work; they shrink the quorum denominator too (a purged item cannot
+            # be counted against a quorum it was never live to serve).
+            skipped = [r for r in results if r["status"] == "skipped"]
+            failed = [r for r in results if r["status"] not in ("done", "partial", "skipped")
+                      and r.get("error_class") != "cancelled"]
             merged = [r.get("output") for r in results if r["status"] in ("done", "partial")]
-            quorum_req = min(quorum, len(items) - len(cancelled))
+            quorum_req = min(quorum, len(items) - len(cancelled) - len(skipped))
             if cancelled and len(cancelled) == len(results):
                 # every item died to `stop`: the node is NOT a failure — commit the
                 # evidence with the cancelled class; node_rec demotes it to pending
@@ -8128,7 +8514,7 @@ def run_agent_node(run, meta, byid, node, outputs, steering):
                           "served_model": r.get("served_model"),
                           "served_billing_provider": r.get("served_billing_provider")}
                          for i, r in enumerate(results)
-                         if r["status"] not in ("done", "partial")
+                         if r["status"] not in ("done", "partial", "skipped")
                          and r.get("error_class") != "cancelled"]
                 save_node(run, node, byid, {"status": "failed", "error_class": "forbidden_model",
                                             "error": "forbidden served model in fan-out",
@@ -8175,6 +8561,7 @@ def run_agent_node(run, meta, byid, node, outputs, steering):
                           "error": (results[i].get("error") or "")[:300]}
                          for i in range(len(items))
                          if results[i]["status"] != "done"
+                         and results[i]["status"] != "skipped"
                          and results[i].get("error_class") != "cancelled"]
                 save_node(run, node, byid, {"status": "failed",
                                             "error": f"{len(failed)}/{len(items)} items failed: "
@@ -8188,6 +8575,7 @@ def run_agent_node(run, meta, byid, node, outputs, steering):
                                                     "output": {"items": merged,
                                                                "failed_items": len(failed),
                                                                "cancelled_items": len(cancelled) or None,
+                                                               "skipped_items": len(skipped) or None,
                                                                "all_results": results}})
                 if merged_rec["status"] == "done":
                     # est-2ek.1.765: aggregate done is DERIVED from the committed
@@ -8214,7 +8602,7 @@ def run_agent_node(run, meta, byid, node, outputs, steering):
                 save_node(run, node, byid, merged_rec)
                 if merged_rec["status"] == "done":
                     log(run, "node.finished", node=nid, done=len(merged), failed=len(failed),
-                        cancelled=len(cancelled))
+                        cancelled=len(cancelled), skipped=len(skipped) or None)
                 else:
                     log(run, "node.failed", node=nid, error=merged_rec["error"],
                         error_class=merged_rec.get("error_class", "incomplete_work"), attempts=1)
@@ -8377,6 +8765,23 @@ def _mint_suite_proof(run, node, rec, byid):
     tmp.write_text(json.dumps(tok))
     os.replace(tmp, p)   # atomic: a token is a committed fact like a node record
 
+def _set_abort_flag(run, node_id, source, reason=None):
+    """WF-GRAFT-4 (est-f1w4u): persist the run's abort flag — run-dir
+    abort.json {node, source, reason, at}, atomic tmp+os.replace (a flag is a
+    committed fact like a node record), so it survives a runner restart. The
+    FIRST flag wins: the original abort is the cause; a later source never
+    overwrites it."""
+    if wfcommon.run_abort_flag(run):
+        return
+    p = run / "abort.json"
+    rec = {"node": str(node_id), "source": str(source), "at": now(),
+           "reason": (str(reason)[:300] if reason else None)}
+    tmp = p.with_name(f"abort.json.{os.getpid()}.tmp")
+    tmp.write_text(json.dumps(rec, ensure_ascii=False))
+    os.replace(tmp, p)   # atomic: durable abort fact
+
+_abort_flag = wfcommon.run_abort_flag   # ONE read of the flag, shared with the read model
+
 def _on_fail_catch(run, rs, states):
     """jam-h23 on_fail: a caught agent death becomes the join-tolerant `skipped`
     terminal commit instead of blocking the run. ONE interception point at the
@@ -8395,6 +8800,19 @@ def _on_fail_catch(run, rs, states):
             continue
         of = n.get("on_fail")
         if of is None:
+            continue
+        if of == "abort":
+            # WF-GRAFT-4: the abort keyword is handled BEFORE the fallback-agent
+            # lookup — the same precedence shape as 'skip' vs an agent named
+            # 'skip'. The flag persists; the failed status STANDS, an abort is
+            # never laundered into a tolerated skip. caught=True only re-makes
+            # states: the boundary's abort check on the next pass commits the
+            # typed failed verdict before any catch could convert anything.
+            _, rec = node_rec(run, n, rs.byid)
+            _set_abort_flag(run, n["id"], "on_fail_abort", (rec or {}).get("error"))
+            log(run, "node.on_fail", node=n["id"], on_fail="abort",
+                caught_error_class=(rec or {}).get("error_class"))
+            caught = True
             continue
         if of != "skip":
             fb = rs.byid.get(of)
@@ -8709,7 +9127,10 @@ def _terminal_status(reason):
         return reason
     if str(reason).startswith("crashed:"):
         return "crashed"
-    if str(reason).startswith("blocked by failed ") or reason == "graph stuck":
+    if str(reason).startswith("blocked by failed ") or str(reason).startswith("aborted by ") \
+            or reason == "graph stuck":
+        # WF-GRAFT-4: an aborted run is terminal-failed — the on_exit postmortem
+        # sees status=failed, never a hole where the verdict reads as neither.
         return "failed"
     return None
 
@@ -9333,6 +9754,14 @@ def main(run_id):
         ready = [n for n in rs.nodes if kind(n).spawns is True and states[n["id"]] == "pending"
                  and not n.get("consolidate")          # est-fanout-cell: boundary commit above
                  and deps_ok(n) and deps_res(n)]
+        if ready and _abort_flag(run):
+            # WF-GRAFT-4 precedence: a flagged run spawns NOTHING NEW. This point
+            # is post-wave at every iteration, so in-flight work has drained (we
+            # never kill a live wave); the abort verdict below names the flagged
+            # node and closes the run typed.
+            log(run, "run.spawn_refused", nodes=[n["id"] for n in ready],
+                error_class="aborted", flag=_abort_flag(run))
+            ready = []
         if ready:
             spawnable = []
             for n in ready:
@@ -9425,6 +9854,10 @@ def main(run_id):
         if m == "stopped": return "stopped"
         if m == "reloaded": continue
 
+        # est-1n7gx (collapse-to-one law): declaration-order contract, named here —
+        # when several gates are simultaneously ready (branch twins), the pick is the
+        # GRAPH's own node enumeration (deterministic in graph.json bytes), never fs
+        # or dict luck. This is scheduling over the declared DAG, not a data collapse.
         gate = next((n for n in rs.nodes if kind(n).spawns is False and states[n["id"]] == "pending"
                      and deps_ok(n) and (not n.get("requires") or deps_res(n))), None)
         if gate:
@@ -9488,7 +9921,7 @@ def main(run_id):
                                    or not isinstance(hm.get("since"), (int, float))):
                 hm = {"since": time.time(), "_def": hdef, "fp_rule_version": FP_RULE_VERSION}
                 hf.write_text(json.dumps(hm))
-            notify(run, "gate.held", key=f"{gate['id']}:{hdef}")
+            notify(run, "gate.held", key=f"{gate['id']}:{hdef}", node=gate["id"])
             if ht is None:
                 # PR#97 lost-handoff fix: the owner turn runs synchronously inside
                 # notify(). A release/stop/amend can therefore land while this runner
@@ -9529,6 +9962,20 @@ def main(run_id):
                         log(run, "gate.expired", node=gate["id"], held_s=held_s)
                 time.sleep(0.5)
             continue   # top of loop: the answer reads exactly like a human release
+        _ab = _abort_flag(run)
+        if _ab:
+            # WF-GRAFT-4: the persisted abort flag is checked FIRST at this
+            # quiescent boundary — before the on_fail-catch opportunity and
+            # before finalize-done. A flagged run commits failed (reason
+            # "aborted by <node>") regardless of any branch later going done.
+            log(run, "run.blocked", failed=[], blocked=[], aborted=_ab,
+                error_class="aborted")
+            emit(f"WORKFLOW_FAILED {run_id} (aborted by {_ab.get('node')})")
+            notify(run, "run.failed", key=f"aborted by {_ab.get('node')}", graph=rs.graph)
+            m = consume_markers()
+            if m == "stopped": return "stopped"
+            if m == "reloaded": continue
+            return f"aborted by {_ab.get('node')}"
         failed = [n for n in rs.nodes if states[n["id"]] == "failed"]
         if failed:
             # jam-h23: give every on_fail catch one chance at this quiescent
@@ -9551,6 +9998,20 @@ def main(run_id):
             if m == "reloaded": continue
             return "blocked by failed " + ",".join(n["id"] for n in failed)
         if all(states[n["id"]] in ("done", "partial", "skipped") for n in rs.nodes):   # #4: a harvested partial closes the run
+            _forks = wfcommon.dead_end_forks(
+                rs.nodes, states,
+                lambda c: jload(run / "nodes" / f"{c}.json", {}) or {})
+            if _forks:
+                # WF-GRAFT-4: a settled router with NO satisfiable edge is a
+                # failed close naming the fork(s) — never a finalize done.
+                log(run, "run.blocked", failed=_forks, blocked=[],
+                    error_class="dead_end", forks=_forks)
+                emit(f"WORKFLOW_FAILED {run_id} (dead end at fork {','.join(_forks)})")
+                notify(run, "run.failed", key="dead end", graph=rs.graph)
+                m = consume_markers()
+                if m == "stopped": return "stopped"
+                if m == "reloaded": continue
+                return "blocked by failed dead_end at " + ",".join(_forks)
             unreceipted = []
             for n in rs.nodes:
                 if states[n["id"]] == "skipped":
@@ -9606,6 +10067,7 @@ def main(run_id):
                     (reason.startswith("held at ") or
                      reason.startswith("blocked by failed ") or
                      reason.startswith("blocked by effect receipt ") or
+                     reason.startswith("aborted by ") or
                      reason == "graph stuck")):
                 break
             # Terminal handoff fence: make liveness false BEFORE the final action

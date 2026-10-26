@@ -10,7 +10,7 @@ core's 32,000-char subdirectory-hint cap so a mid-run load drops no middle.
   "fanout": { "items": ["alpha", "beta"], "goal": "Audit {item}. Write <path>/{item}.md first.", "quorum": 1 } }
 
 { "id": "approve", "type": "gate", "after": ["lanes"],
-  "question": "Ship the report?", "options": ["ship", "hold"] }
+  "question": "Ship the report? Answer 'ship' to publish, 'hold' to stop.", "options": ["ship", "hold"] }
 
 { "id": "go",   "type": "gate", "after": ["judge"], "when": "out.judge.verdict == 'ship'", "on_skip": "prune" }
 { "id": "hold", "type": "gate", "after": ["judge"], "when": "out.judge.verdict != 'ship'", "on_skip": "prune" }

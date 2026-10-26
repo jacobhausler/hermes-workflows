@@ -127,7 +127,10 @@ def main() -> None:
                                       # est-h0huv: tests/test_wofify.py subprocess-executes
                                       # this CLI end to end — the est-4vnq finding-4
                                       # rationale again; the tool ships beside its test.
-                                      "scripts/wofify.py"})
+                                      "scripts/wofify.py",
+                                      # est-clrlx (PR #547): the release merge gate ships
+                                      # beside its shipped test (est-4vnq finding-4 law).
+                                      "scripts/release_merge_gate.py"})
             # wf165d: the no-silent-middle half only has a premise in a REPO
             # checkout — the source-only scripts (make_public.py,
             # lane_recover.py) never travel inside the ZIP, so from the
@@ -161,7 +164,10 @@ def main() -> None:
   # md-input census + preflight observer); source-only, declared in pack.py
   # SOURCE_ONLY_SCRIPTS.
   "timing_observe.py", "registry_observe.py", "md_inputs_observe.py",
-  "ci_preflight_observe.py"})
+  "ci_preflight_observe.py",
+  # #477 (est-xl5n5): the gate lint is the refuse seam of source-only
+  # make_public.py; declared source-only in pack.py SOURCE_ONLY_SCRIPTS.
+  "gate_lint.py"})
             else:
                 print("SKIP pack-list repo-side half: no .git — running from an "
                       "unpacked ZIP/archive, where the premise does not exist")

@@ -166,6 +166,10 @@ INCLUDE_FILES = (
     # so the ZIP side stays honest.
     "scripts/drift_check.py",  # #125: on-demand offline CLI and its shipped acceptance test
     "scripts/pr_formal_review.py",
+    # est-clrlx (PR #547): shipped test tests/test_release_merge_gate_clrlx.py
+    # exec-modules the gate script — the est-4vnq finding-4 shape; the tool ships
+    # beside its test.
+    "scripts/release_merge_gate.py",
     "scripts/suite.py",
     ".graphifyignore",
     "tests/fake",
@@ -174,6 +178,7 @@ INCLUDE_FILES = (
     "tests/fake_hermes.py",
     "tests/wf_test_isolation.py",
     "tests/wf_test_markers.py",  # est-jue3: shared parseable-content marker waits, imported by the shipped tests (est-4vnq finding-4 shape: an unshipped helper kills the suite)
+    "tests/fake_runner.py",  # shared fake-runner helper for door-scan fixtures — same unshipped-helper shape as wf_test_markers above
     "tests/fixtures/mac-source.txt",
     "tests/fixtures/seat_acquire_driver.py",   # est-g2xx: seat-semaphore driver
     # est-2ek.1.762: the spawn-isolation law's shared helpers — SHIPPED because
@@ -186,6 +191,13 @@ INCLUDE_FILES = (
     "tests/test_fanout_ui.mjs",
     "wf.py",
     "wfcommon.py",
+    # est-imp1z (WF-GRAFT-2): the pure output classifier wf.py spec-loads by file
+    # path (exit-0-is-not-success settle gate + node_outcome token parse; the
+    # kind=transient hand-off feeds the sibling bead est-9ceqc at the same seam)
+    # — absent from the ZIP, the runner dies at import at the same seam as the
+    # wfcommon include. Mandatory new-file pack-surface decision, explicit per
+    # the no-wholesale law.
+    "outcome.py",
 )
 INCLUDE_PATTERNS = ("tests/test_*.py", "tests/test_*.mjs", "references/*.md")
 EXECUTABLE_FILES = {"scripts/pack.py", "tests/fake", "tests/fake-b1"}
@@ -210,6 +222,9 @@ SOURCE_ONLY_TESTS = {
     # this test executes the source-only scripts/post_exit_hook.py kept for our own
     # distribution path only.
     "tests/test_post_exit_hook.py": "executes source-only scripts/post_exit_hook.py (stripped from the shipped build, est-xwvu9)",
+    # #477 (est-xl5n5): the gate-lint refusal seam — the test executes source-only
+    # scripts/make_public.py (the #298 rule, same shape as test_scrub_yml_166b).
+    "tests/test_gate_lint_477.py": "executes source-only scripts/make_public.py + gate_lint.py (#477 refuse seam)",
 }
 
 # Source-only SCRIPTS: repository/estate CI tooling that never travels in the
@@ -234,6 +249,9 @@ SOURCE_ONLY_SCRIPTS = {
     "scripts/registry_observe.py": "estate CI burn-token registry census (not release surface)",
     "scripts/md_inputs_observe.py": "estate CI admission md-input census (not release surface)",
     "scripts/ci_preflight_observe.py": "estate-ci P1 observe preflight runner (fetches the contract at its pin; not release surface)",
+    # #477 (est-xl5n5): the gate-lint lives beside the publish auditor it guards;
+    # make_public.py imports it at the refuse seam, so it travels with make_public.
+    "scripts/gate_lint.py": "publish-door gate lint (#477); refuse seam of source-only make_public.py, not release surface",
 }
 
 

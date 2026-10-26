@@ -130,7 +130,12 @@ Rules that bite:
 - **`after` orders AND injects.** Every direct parent's committed output lands under
   `## Inputs` automatically (8 KB per parent). Use `inputs:["a.key"]` only to pick a
   dotted path or a non-parent ancestor, or `fanout.items_from:"a.items"`. A missing
-  path fails at spawn.
+  path fails at spawn — the one exception (#473): an explicit `inputs:` ref whose
+  head committed `skipped` resolves to a labelled skipped-sentinel block carrying the
+  committed skip record, so the pruned arm reaches its consumer as readable, fail-closed
+  data instead of an `error_class:"inputs"` spawn crash; a head that never committed, or
+  committed `done` without that path, still hard-fails (references/grammar.md,
+  when/on_skip).
 - **Shared settings go in `defaults`, once.** `defaults:{schema, timeout, max_turns,
   reasoning, provider, model, context}` at graph level; `shape:recon|build|review|publish`
   sizes budgets from measured presets. A `schema` makes the runner write the reply
@@ -145,7 +150,7 @@ Rules that bite:
   "fanout": { "items": ["alpha", "beta"], "goal": "Audit {item}. Write <path>/{item}.md first.", "quorum": 1 } }
 
 { "id": "approve", "type": "gate", "after": ["lanes"],
-  "question": "Ship the report?", "options": ["ship", "hold"] }
+  "question": "Ship the report? Answer 'ship' to publish, 'hold' to stop.", "options": ["ship", "hold"] }
 
 { "id": "go",   "type": "gate", "after": ["judge"], "when": "out.judge.verdict == 'ship'", "on_skip": "prune" }
 { "id": "hold", "type": "gate", "after": ["judge"], "when": "out.judge.verdict != 'ship'", "on_skip": "prune" }
@@ -171,13 +176,14 @@ See [grammar](references/grammar.md#terminal-postmortem-optional) for validation
 publication guards, and crash recovery.
 
 - `node.failed` events carry `error_class` from the closed set defined in code
-  (`wf.py ERROR_CLASSES`) — `bead_close | budget_exhausted | cancelled | cap_exhausted | config_input | crashed | early_death | effect_receipt |
+  (`wf.py ERROR_CLASSES`) — `bead_close | budget_exhausted | cancelled | cap_exhausted | config_input | crashed | declared_failure | early_death | effect_receipt |
   fanout_empty | fatal_quota | forbidden_model | incomplete_work |
   inputs | item_record | killed | lane_wreckage | lease_busy | left_live_descendants | malformed_turn | precondition | provider_400 | quorum |
   ratelimit |
   route_substitution_denied | route_unavailable | schema | seat_cap | seat_unsupported | seat_wait | spawn | stale_graph | timeout | transport | transport_exhausted |
-  unresolved_model`, plus `unknown` as the harvest-time default when nothing matches —
-  plus `attempts`. Read the class, not the prose. `cancelled` (a `stop`, or a fan-out
+  unresolved_model`, plus `unknown` (the harvest-time default) — plus `attempts`. Read the
+  class, not the prose; the exit-0-is-not-success settle law (`declared_failure`, transient
+  sentinels) is in references/operations.md. `cancelled` (a `stop`, or a fan-out
   straggler at quorum) is never a failure: the run reads `stopped`, and a `wait` re-drives it.
   `budget_exhausted` (est-3acn): a RunBudget cap (graph-root or node `budget:{tokens:N}`; tokens-only —
   USD is excluded per the repo cost-trust law, issue #124) refused the spawn BEFORE submit, logged as
@@ -385,15 +391,7 @@ same gates ([.github/workflows/ci.yml](.github/workflows/ci.yml)).
 
 ### 4b′. Navigate with the knowledge graph (optional)
 
-[`graphify`](https://github.com/Graphify-Labs/graphify) builds a code-navigation
-graph locally (`uv tool install graphifyy` → `graphify update .` in a scratch
-checkout): `graphify query "<question>"`, `graphify path "act_run" "run_child"
---undirected`, `graphify affected "<symbol>" --depth 2`, `graphify god-nodes`.
-It is an exploration aid, not a gate: the output is never committed, CI never
-builds it, and a `graphify-out/` in your PR diff is deleted by review. Source
-and tests are the spec. (`.graphifyignore` ships so local runs skip generated
-noise; `scripts/graph_diagram.py` + `diagram_readme.py` are unrelated — they
-draw the example workflow diagrams in `examples/README.md`, which DO ship.)
+Optional AST-only exploration aid, folded to [references/graphify-navigation.md](references/graphify-navigation.md) to keep this file inside the hint cap. Never a gate; never committed.
 
 ### 4c. Rules
 
@@ -433,6 +431,10 @@ draw the example workflow diagrams in `examples/README.md`, which DO ship.)
     loop, and let CI's freshness gate refuse a stale commit. One rule, one
     file: [examples/diagrams/README.md](examples/diagrams/README.md) (DIAGRAM LAW v1).
     The examples/ map keeps a pointer here.
+12. **Collapse-to-one law (est-1n7gx).** Every sort feeding one row names its
+    TOTAL order in code with a because-clause; if insertion order is the
+    contract, say so and pin it with a test. Law and site census:
+    [references/collapse-to-one-law.md](references/collapse-to-one-law.md).
 
 ### 4d. Release
 
@@ -448,11 +450,7 @@ python3 scripts/pack.py                            # artifacts/hermes-workflows-
 git tag v<version> && git push --tags
 ```
 
-The catalog entry pins a full 40-char commit SHA
-([docs/catalog/entry.yaml](docs/catalog/entry.yaml)); bump it in a PR to
-`NousResearch/hermes-agent` → `plugin-catalog/hermes-workflows.yaml`.
-
-Cross-estate joint eng protocol v1 is the SSOT mirrored publicly at [issue #174](https://github.com/jacobhausler/hermes-workflows/issues/174), sha256 `a7f424c5be3f5d6d1cbeb590f6cd02b6699a60090a3a45646853c67b2360345b` (of the issue body including its trailing newline); private working copy: `jacobhausler/joint-eng-protocol@0bf569a`, file `docs/specs/hermes-workflows-joint-eng-protocol-v1.md`.
+Catalog entry SHA + the cross-estate joint-eng protocol pointer: [references/release-and-catalog.md](references/release-and-catalog.md).
 
 ---
 

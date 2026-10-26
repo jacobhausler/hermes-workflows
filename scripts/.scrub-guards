@@ -178,3 +178,5 @@ regex:haus-docs rules/pr-diagram-standard
 # itself so a stray 'jacobhausler' anywhere else still fires. GUARD per
 # AGENTS.md rule 4 / docs/PUBLISH-SCRUB.md.
 regex:jacobhausler/estate-ci
+# est-clrlx merge-gate test: fixture usernames/handles are audit-guarded inputs, verbatim.
+tests/test_release_merge_gate_clrlx.py

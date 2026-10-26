@@ -522,7 +522,11 @@ def find_run(rid):
     first that YIELDS A VIEW wins (resolved first, so an intact resolved dir is
     untouched — the legacy probe is that same rule in the legacy-only shape).
     A dir yields a view when run_state() reads a state from it. Unknown ids
-    still answer the resolved path (the create/resume shape callers rely on)."""
+    still answer the resolved path (the create/resume shape callers rely on).
+    est-1n7gx (collapse-to-one law): the total order is (roots-arg order
+    [resolved, legacy] -> iter_run_dirs' name-ASC -> first dir yielding a view);
+    two dirs with the same NAME cannot coexist within one root (directory-entry
+    uniqueness), so the pick key cannot tie and no traversal luck reaches it."""
     root = runs_root()
     legacy = launch_runs_root()
     for cand in iter_run_dirs([root, legacy] if legacy != root else [root]):
@@ -550,7 +554,14 @@ def iter_run_dirs(roots, reverse=False):
     collapse because they resolve to one path. The ONE enumeration every
     list/read-model/scan routes through, never raw `root.iterdir()`. Sorted by
     name (newest-first when reverse=True) within each root, roots taken in
-    order."""
+    order. est-1n7gx (collapse-to-one law): this enumeration's pick-one is
+    FIRST-SEEN, and the order that makes it deterministic is TOTAL — a directory
+    entry name is unique per root, so the name sort key has no ties (reverse just
+    flips the whole order, it never re-shuffles ties), and cross-root order is
+    the roots-arg order (callers pass the resolved root first). Insertion/
+    traversal order is NOT the contract anywhere below the sort: whatever the OS
+    readdir hands back, the output is fully determined by (roots-arg order, name,
+    reverse)."""
     if isinstance(roots, (str, Path)):
         roots = [roots]
     seen, out = set(), []
@@ -842,7 +853,14 @@ AGENT_KEYS = {"id", "type", "after", "goal", "context", "schema", "model", "prov
               # slice that wires the loop replaces the refusal with the real thing;
               # until then a pack can express the shape and get a typed refusal, not a
               # silent degradation to exit-and-relaunch.
-              "rework"}
+              "rework",
+              # WF-GRAFT-1 (est-1f7cn): wake-noise tier for this node — `full` |
+              # `quiet` | `silent`, overriding the graph-level `wake_tier` default.
+              # It governs ONLY the notices whose subject is this node (its fan-out's
+              # stragglers observation, this gate's own hold); run-terminal wakes
+              # never consult it. Enforced in wf._wake_suppression; the law lives in
+              # references/grammar.md.
+              "wake_tier"}
 RETRY_BOUNDS = {"transient": 8, "bounded": 8}   # hw-23c: author ceiling per half
 RETRY_DEFAULTS = {"transient": 2, "bounded": 1}  # today's hardcoded law
 
@@ -869,6 +887,17 @@ def _retry_block_errors(v, field):
 
 
 HARVEST_POLICIES = ("strict", "validate")   # est-ggqs: agent `harvest_policy` values
+# WF-GRAFT-1 (est-1f7cn): the closed wake-noise tier ladder, legal at graph top level
+# (the default) and on agent/gate nodes (the override). The ladder is ordered by how
+# much the owner is NOT woken, and the floor is fixed by law, not by value:
+#   full   — every notice whose subject is the node wakes (today's behavior).
+#   quiet  — the node's mid-flight OBSERVATIONS (fanout.stragglers) are recorded in
+#            the probe instead of waking; a hold and every run-terminal notice still
+#            wake.
+#   silent — every node-SUBJECT notice (including this gate's own hold, which the
+#            author then owns polling) is recorded, not woken.
+# No tier governs run.done / run.failed / run.partial — see wf._TIERED_WAKE_EVENTS.
+WAKE_TIERS = ("full", "quiet", "silent")
 GATE_KEYS = {"id", "type", "after", "question", "options", "context", "when", "wait", "on_skip",
              "default_option", "hold_timeout",
              # est-bwv0h: door-time parameter seam — presence gate + conditional patch
@@ -878,7 +907,11 @@ GATE_KEYS = {"id", "type", "after", "question", "options", "context", "when", "w
              "requires", "after_partial", "order_only",
              # est-2ek.1.603: a gate may DECLARE a suite-proof producer (the token is
              # minted on its committed answer); it can never declare itself a publisher.
-             "suite_proof"}
+             "suite_proof",
+             # WF-GRAFT-1: a gate's own tier governs whether ITS hold wakes the owner
+             # (`silent` = the author owns polling it; `quiet` deliberately does NOT
+             # silence a hold — a held gate asks for an action, not an observation).
+             "wake_tier"}
 ECHO_KEYS = {"id", "type", "after", "output",
              # est-bwv0h: door-time parameter seam (see GATE_KEYS).
              "where", "by",
@@ -1100,7 +1133,11 @@ def grammar_errors(graph):
                         + json.dumps(list(GRAMMAR_SUPPORTED))
                         + f" (absent = {GRAMMAR_DEFAULT!r})"}]
     return []
-FANOUT_KEYS = {"items", "items_from", "goal", "schema", "quorum", "quorum_drain_s", "ledger"}
+# est-37d74 (#453): 'precheck_argv' joins the closed set — an optional fixed-argv
+# custody probe re-run per item BEFORE the child spawns; non-zero commits the item
+# `skipped` (never failed). Same no-shell law as gate wait.until_argv.
+FANOUT_KEYS = {"items", "items_from", "goal", "schema", "quorum", "quorum_drain_s", "ledger",
+               "precheck_argv"}
 # ---------- est-fanout-cell (sys-96dcod): the [fan + consolidate] cell ----------
 # Owner directive (2026-10-10): a standard unit pairing WITH the fan so operators
 # get wave-consolidation — finished members flow into consolidation while the
@@ -1592,6 +1629,20 @@ def validate_graph_errors(nodes, *, admission=False):
             elif not isinstance(n["after_partial"], bool):
                 E(nid, "after_partial", "after_partial must be a boolean "
                                         "(true = this node consumes a partial ancestor's harvest)")
+        if "wake_tier" in n:
+            # WF-GRAFT-1 (est-1f7cn): closed value set (agent/gate only — an echo
+            # carries no node-subject notice, so the closed key set already refuses it
+            # by name above). A tier is policy over WAKES only; it never touches
+            # scheduling, and it can never govern a run-terminal wake.
+            wt = n["wake_tier"]
+            if not isinstance(wt, str) or wt not in WAKE_TIERS:
+                E(nid, "wake_tier", f"wake_tier {wt!r} invalid: must be one of "
+                                    + json.dumps(list(WAKE_TIERS))
+                                    + " (full = every notice about this node wakes; "
+                                      "quiet = its fan-out straggler observation "
+                                      "records without waking; silent = its "
+                                      "node-subject notices record, including this "
+                                      "gate's own hold)")
         if "harvest_policy" in n:
             # est-ggqs: closed value set; a fan-out aggregate already merges harvest
             # credit (partial items count done), so the key means nothing there —
@@ -1868,6 +1919,16 @@ def validate_graph_errors(nodes, *, admission=False):
                                                     "'<node_id>.<dotted.path>' string")
                     if fo.get("items") is not None and not isinstance(fo["items"], list):
                         E(nid, "fanout.items", "fanout.items must be a list")
+                    # est-37d74 (#453): fanout.precheck_argv — the until_argv law
+                    # of gate.wait mirrored verbatim (wait_spec_ok): a fixed argv
+                    # list, never a shell string; non-empty list of non-empty
+                    # strings. The runner exec's it as-is per item before spawn.
+                    _pa = fo.get("precheck_argv")
+                    if _pa is not None and (not isinstance(_pa, list) or not _pa
+                                            or not all(isinstance(a, str) and a for a in _pa)):
+                        E(nid, "fanout.precheck_argv",
+                          "fanout.precheck_argv must be a non-empty list of strings "
+                          "(fixed argv, no shell)")
                     # est-wr0p (vacuous-replay class of est-077y): a baked literal
                     # items:[] passed the door and replayed with ZERO children —
                     # a vacuous pass, not a fan-out. The runtime fails it typed
@@ -2017,9 +2078,11 @@ def validate_graph_errors(nodes, *, admission=False):
                 if a in anc or a not in idset:
                     continue
                 anc.add(a); stack.extend(parents[a])
-            if ofk != "skip":
+            if ofk not in ("skip", "abort"):   # WF-GRAFT-4: 'abort' is the other closed keyword
                 tgt = byid_of.get(ofk) if isinstance(ofk, str) else None
                 if not isinstance(ofk, str) or tgt is None:
+                    # message test-locked by test_on_fail_h23; the keyword set is
+                    # documented honestly in references/grammar.md (on_fail).
                     E(nid, "on_fail", f"on_fail {ofk!r} must be 'skip' or an existing node id")
                 elif tgt.get("type") != "agent":
                     E(nid, "on_fail", f"on_fail target {ofk!r} must be an agent node")
@@ -2360,6 +2423,11 @@ STRUCTURAL_GRAPH_KEYS = {"name", "nodes", "description", "defaults", "model_poli
                          "requires_plugin",
                          # est-2ek.1.158: the node whose output IS the run verdict.
                          "result", "on_exit",
+                         # WF-GRAFT-1 (est-1f7cn): the graph-wide wake-noise DEFAULT
+                         # ("full" | "quiet" | "silent"); a node's own `wake_tier`
+                         # overrides it. Validated by value below; honored by
+                         # wf._wake_suppression at the notify seam.
+                         "wake_tier",
                          # #126 (est-syim): machine-readable {run.KEY} binding contract —
                          # {required?: [ids], defaults?: {id: non-empty str}}; shape
                          # validated here (run_context_contract_errors), enforced at run
@@ -2395,6 +2463,10 @@ GRAPH_KEY_MIN_VERSION = {
     "on_exit": "1.3.7",
     "budget": "1.3.9", "max_seats": "1.3.9",
     "params": "1.4.0", "run_context": "1.4.0",
+    # WF-GRAFT-1: wake-noise tiers. Floor is the next feature release (never earlier
+    # than proven — a 1.3.x door genuinely refuses this key, so the hint a stale door
+    # prints stays upgrade-sufficient).
+    "wake_tier": "1.4.0",
 }
 
 # The truth of THIS module — what this process loaded. plugin_version() above
@@ -2402,7 +2474,7 @@ GRAPH_KEY_MIN_VERSION = {
 # (newer files, older process) and the door must not silently pass file-truth
 # off as its own. Re-pinned at release in the SAME commit as plugin.yaml
 # (AGENTS 4d; a test gate compares them at HEAD).
-CODE_VERSION = "1.3.9"
+CODE_VERSION = "1.4.3"
 
 def code_version():
     return CODE_VERSION
@@ -2673,7 +2745,8 @@ def _run_contract_refer_keys(graph):
     """The {run.KEY} names referenced by a graph's OPERATIVE text — the exact
     surface the launcher renders (est-7m6wv P-04/05/06/07): the shared
     _include_text_fields walker (goal/context/question/profile + fan-out goal
-    and item goals + echo output + gate options[] + wait.until_argv[]) — PLUS
+    and item goals + echo output + gate options[] + wait.until_argv[] +
+    fanout.precheck_argv[]) — PLUS
     defaults.context (baked into every node context at launch), PLUS the string
     leaves of every `by` patch value (a patch becomes operative text the moment
     its enum arm is selected — "operative" means under ANY binding, or the
@@ -2952,6 +3025,19 @@ def structural_graph_errors(graph, extra_keys=()):
         E(e_["field"], e_["msg"])
     for e_ in result_errors(graph) + on_exit_errors(graph):
         E(e_["field"], e_["msg"])
+    # WF-GRAFT-1 (est-1f7cn): the graph-wide wake default is a closed value, refused
+    # by name at the door — never a silent degradation to a louder or quieter default
+    # (the runner's own read fails open to `full`, so an unvalidated value would wake
+    # differently than the author wrote).
+    if "wake_tier" in graph:
+        _wt = graph["wake_tier"]
+        if not isinstance(_wt, str) or _wt not in WAKE_TIERS:
+            E("wake_tier", f"wake_tier {_wt!r} invalid: must be one of "
+                           + json.dumps(list(WAKE_TIERS))
+                           + " (full = wake on every notice about a node; quiet = that "
+                             "node's straggler observation records without waking; "
+                             "silent = its node-subject notices record, including a "
+                             "gate's own hold). Run-terminal wakes are never tiered.")
     for e_ in run_context_contract_errors(graph):
         E(e_["field"], e_["msg"])
     for e_ in params_errors(graph):
@@ -3030,7 +3116,7 @@ def _run_ref_scan(graph, safe_nodes):
     occurrence, worded so the fix is executable without reading the binder.
     Surfaces scanned: exactly what the binder renders (goal/context/question/
     profile/repo, fan-out goal + item goals, echo string output, gate options,
-    wait.until_argv — via the shared _include_texts traversal) PLUS
+    wait.until_argv and fanout.precheck_argv — via the shared _include_texts traversal) PLUS
     defaults.context, which the pre-run seed pass renders (wfcommon
     _PRE_RUN_REF) after prepending. Non-run braces ({item.x}) are the
     fan-out placeholder surface — untouched here by design."""
@@ -3124,7 +3210,8 @@ def _include_text_fields(node):
     """The string fields the {run.KEY} seed-render surface touches: the exact set
     _bind_run_context (map mode) renders — goal/context/question/profile/repo plus the
     fan-out goal template and item goals — PLUS an echo node's string `output`
-    PLUS a gate's `options[]` and `wait.until_argv[]`.
+    PLUS a gate's `options[]` and `wait.until_argv[]` PLUS a fan-out's `precheck_argv[]`
+    (est-37d74: exec'd as fixed argv per item — same unbound-refusal surface).
     The echo addition closes PR#84 review F-3: echo output is a text surface the
     runner commits VERBATIM (wf.py echo pass), so a seed placeholder surviving it
     became a literal `{run.MISSING}` verdict in a done run. The options/argv
@@ -3158,6 +3245,14 @@ def _include_text_fields(node):
         for i, it in enumerate(fo.get("items") or []):
             if isinstance(it, dict) and isinstance(it.get("goal"), str):
                 yield f"fanout.items[{i}].goal", ("fanout", "items", i, "goal")
+        # est-37d74 (#453): fanout.precheck_argv is exec'd as fixed argv per item
+        # (same surface law as wait.until_argv) — a surviving {run.OPTION} would be
+        # a literal unbound argv element, so it rides the same traversal.
+        pa = fo.get("precheck_argv")
+        if isinstance(pa, list):
+            for i, a in enumerate(pa):
+                if isinstance(a, str):
+                    yield f"fanout.precheck_argv[{i}]", ("fanout", "precheck_argv", i)
 
 
 def run_context_contract(graph, params=None):
@@ -4709,6 +4804,59 @@ def when_true(gate, outputs):
         raise ValueError("when: trailing tokens")
     return bool(val)
 
+# ---------- WF-GRAFT-4 (est-f1w4u): fail-closed run resolution ----------
+# Two laws the runner and the read model SHARE (the release_law precedent: one
+# function, two callers, no drift between what the runner enforces at the
+# boundary and what a cold reader sees over the same run dir).
+
+def run_abort_flag(r):
+    """The persisted run-dir abort flag, or None. `abort.json` {node, source,
+    reason, at} is written atomically by the runner on an on_fail:"abort" death
+    or a zero-item fan-out with no else-arm — a file, so it survives a runner
+    restart; the FIRST flag wins (the original abort is the cause). An
+    unreadable or garbage file is no flag: the verdict stands on parsed facts,
+    never on a stub."""
+    ab = jload(Path(r) / "abort.json", {}) or {}
+    return ab if isinstance(ab, dict) and ab.get("node") else None
+
+def dead_end_forks(nodes, states, rec_of=None):
+    """Fork ids whose every edge is UNTAKEN: a node settled done/partial with
+    >=2 direct consumers (after-edges) where EVERY consumer sits terminal-skipped
+    on an untaken edge — a false `when`, the all-deps-pruned cascade, a gate
+    skip. The skip-record discriminator: a consumer output {skipped:'on_fail'}
+    means the edge WAS TAKEN (the flow reached the arm, the death was caught,
+    the author tolerated it) and disqualifies the fork; an on_skip:'pass' arm
+    commits `done` and disqualifies it too. A single-consumer conditional tail
+    stays legitimate — never a fork. Returns [] when no router is fully dead."""
+    byid = {n["id"]: n for n in nodes if isinstance(n.get("id"), str)}
+    consumers = {nid: [] for nid in byid}
+    for n in nodes:
+        if n.get("id") not in byid:
+            continue
+        for a in n.get("after") or []:
+            if a in consumers:
+                consumers[a].append(n["id"])
+    forks = []
+    for n in nodes:
+        nid = n.get("id")
+        if not isinstance(nid, str) or states.get(nid) not in ("done", "partial"):
+            continue
+        cs = consumers.get(nid) or []
+        if len(cs) < 2:
+            continue
+        every_edge_dead = True
+        for c in cs:
+            if states.get(c) != "skipped":
+                every_edge_dead = False
+                break
+            out = ((rec_of(c) if rec_of else None) or {}).get("output")
+            if isinstance(out, dict) and out.get("skipped") == "on_fail":
+                every_edge_dead = False   # edge taken; the death was caught on purpose
+                break
+        if every_edge_dead:
+            forks.append(nid)
+    return forks
+
 # ---------- the ONE read model ----------
 
 WAIT_KEYS = {"wait_s", "until_argv", "every_s", "timeout_s"}
@@ -5109,7 +5257,15 @@ def seat_wait_view(per_index, now_s=None):
     """One node's open waits -> {since, age_s, cap, spawn[, waiting]} (oldest wait)."""
     import time as _time
     from datetime import datetime
-    oldest = min(per_index.items(), key=lambda kv: str(kv[1].get("since") or ""))[1]
+    # est-1n7gx (collapse-to-one law): TOTAL pick key — since ASC, str(idx) ASC.
+    # The bare min(since) let two waits stamped in the same second fall through to
+    # per_index dict-insertion (ledger-scan) order, so the displayed cap/spawn of
+    # the "oldest" wait were scan luck; str(idx) is unique within the node's view,
+    # so the key cannot tie (string compare, not numeric — totalness is the law,
+    # naturalness isn't). Peer law is the same shape: ORDER BY COALESCE(started_at,
+    # -1) DESC, id DESC (iw-recon runRepository.ts:143/:413).
+    oldest = min(per_index.items(),
+                 key=lambda kv: (str(kv[1].get("since") or ""), str(kv[0])))[1]
     try:
         age = int((now_s if now_s is not None else _time.time())
                   - datetime.fromisoformat(str(oldest.get("since"))).timestamp())
@@ -5406,11 +5562,21 @@ def run_state(r, *, telemetry=True, lock_state=None):
         # est-3acn: a RunBudget-capped run that finalized gracefully (the event
         # is the fact; the runner_exit verdict below outranks it when present).
         status = "partial"
+    elif run_abort_flag(r):
+        # WF-GRAFT-4 (est-f1w4u): a persisted abort flag outranks every branch
+        # verdict short of an explicit stop/partial close — aborted > (done).
+        status = "failed"
     elif any(s == "failed" for s in states.values()):
         status = "failed"
     elif all(s in ("done", "partial", "skipped") for s in states.values()):   # #4: partial closes the run
-        status = "done"
+        # WF-GRAFT-4: all-settled over a dead-end router is a FAILED close,
+        # never a silent idle — the same scan the runner applies pre-finalize.
+        status = "failed" if dead_end_forks(graph["nodes"], states,
+                                            lambda c: recs.get(c) or {}) else "done"
     else:
+        # est-1n7gx (collapse-to-one law): declaration-order contract (see wf.py
+        # gate pick) — the read model shows the FIRST ready gate in graph.json node
+        # order, deterministic in the graph bytes for every reader.
         gate = next((n for n in graph["nodes"] if kind(n).spawns is False
                      and states[n["id"]] == "pending" and deps_ok(n)), None)
         if gate and gate.get("wait") and gate_answer_valid(r, gate, byid, fp_memo, legacy_memo) is None:
@@ -6501,6 +6667,10 @@ def current_attempt(cm, spawns):
             live[title] = cm.get(title.split("#a", 1)[0], {}).get("sessions", {}).get(title, {})
     recent = [(row["last_activity"], title, row.get("last_desc"))
               for title, row in live.items() if row.get("last_activity") is not None]
+    # est-1n7gx (collapse-to-one law): the max key is TOTAL by construction — the
+    # session TITLE (tuple position 1) is a live-dict key, hence unique, so the key
+    # cannot tie and same-second activity twins resolve to the lexically-greater
+    # title, never to live-dict insertion order. Pinned by tests/test_tiebreak_law_1n7gx.py S10.
     last, _, desc = max(recent) if recent else (None, None, None)
     return {"live": len(live), "last_activity": last, "last_desc": desc}
 
