@@ -23,6 +23,8 @@ SOURCE_ONLY_TESTS = {
     # est-xwvu9: the post-exit hook is stripped from the shipped build; this test
     # executes the source-only scripts/post_exit_hook.py (kept for our own dist path)
     "tests/test_post_exit_hook.py",
+    # issue #104 R10: consent/dissent ledger rows load the source-only admission_ledger.py
+    "tests/test_admission_ledger_rows_104.py",
     # #477 (est-xl5n5): same shape — executes source-only make_public.py + gate_lint.py
     "tests/test_gate_lint_477.py",
 }
