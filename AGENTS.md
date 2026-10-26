@@ -130,7 +130,12 @@ Rules that bite:
 - **`after` orders AND injects.** Every direct parent's committed output lands under
   `## Inputs` automatically (8 KB per parent). Use `inputs:["a.key"]` only to pick a
   dotted path or a non-parent ancestor, or `fanout.items_from:"a.items"`. A missing
-  path fails at spawn.
+  path fails at spawn — the one exception (#473): an explicit `inputs:` ref whose
+  head committed `skipped` resolves to a labelled skipped-sentinel block carrying the
+  committed skip record, so the pruned arm reaches its consumer as readable, fail-closed
+  data instead of an `error_class:"inputs"` spawn crash; a head that never committed, or
+  committed `done` without that path, still hard-fails (references/grammar.md,
+  when/on_skip).
 - **Shared settings go in `defaults`, once.** `defaults:{schema, timeout, max_turns,
   reasoning, provider, model, context}` at graph level; `shape:recon|build|review|publish`
   sizes budgets from measured presets. A `schema` makes the runner write the reply
