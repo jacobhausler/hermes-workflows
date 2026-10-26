@@ -94,12 +94,24 @@ r = mk("w1-fit", [{"id": "a", "type": "agent", "goal": "GO w1-fit", "timeout": 2
 env = {"FAKE_MODE": "ratelimit", "FAKE_RL_FAILS": "1", "FAKE_ATTEMPT_DIR": str(att)}
 # est-qp8dj: measured spawn floor — the dt bound must scale with the box, not
 # assume an unloaded laptop. `_boot` = one bare interpreter round-trip under
-# the CURRENT load; bound = max(1.5, wall-budget + 2x boot). A straggler-
-# wait regression parks ~300s and is still caught by two orders of magnitude.
+# the CURRENT load. A straggler-wait regression parks ~300s and is still
+# caught by two orders of magnitude.
+# ra-drift v0.22.5 re-measure: the runner process also cold-imports the core
+# config module (load_config_readonly on the run hot path), and upstream
+# v0.22.5 doubled that floor (bare ~0.05s -> import ~0.80s at bf0203a; the
+# v0.21.4 pin floor ~0.45s left the old bound 2.0+2x_boot enough headroom).
+# The bound now folds that measured floor in: it follows the core installed
+# on the lane instead of assuming the 2025-09 one, and collapses to the exact
+# est-qp8dj formula when the core import is absent (guarded) — then it measures
+# as a ModuleNotFoundError round-trip (~0 delta).
 _b0 = time.time()
 subprocess.run([sys.executable, "-c", "pass"], timeout=30)
 _boot = time.time() - _b0
-_W1_BOUND = max(1.5, 2.0 + 2.0 * _boot)
+_b0 = time.time()
+subprocess.run([sys.executable, "-c", "import hermes_cli.config"],
+               timeout=30, capture_output=True)
+_cfg = max(0.0, (time.time() - _b0) - _boot)
+_W1_BOUND = max(1.5, 2.0 + 2.0 * _boot + _cfg)
 t0 = time.time(); out = runx("w1-fit", env); dt = time.time() - t0
 rec = rec_of(r)
 rl_ev = [e for e in events(r) if e.get("event") == "item.retrying" or
@@ -253,9 +265,19 @@ r = mk("b3-quorum", [{"id": "f", "type": "agent",
 env = {"FAKE_MODE": "ratelimit_straggler"}
 t0 = time.time(); out = runx("b3-quorum", env, timeout=90); dt = time.time() - t0
 rec = rec_of(r, "f")
+# Bound re-measured against upstream v0.22.5 (ra-drift probe 2026-10-25): the
+# runner's cold import of hermes_cli.config (plugin hot path) doubled at that
+# tag (~0.45s -> ~0.80s floor; 1485-line churn in hermes_cli/config.py added
+# non-lazy module-level imports), so the 1.8s bound — sized at the v0.21.4 pin
+# with ~1.2s of headroom — no longer fits (paired A/B at the tag:
+# 2.71/2.29/2.28/1.87s, 4/4 red on the wall, semantics 4/4 green). Restated at
+# dt < 3.0 = the FULL park (ratelimit_interval=3.0, jitter=0.0): the assertion
+# keeps its exact meaning — a satisfied quorum must beat the straggler's park
+# by a strict inequality (pre-fix code: 3.38s). The pin stays a real pin.
 check("B3: satisfied quorum commits WITHOUT waiting out the parked straggler",
-      rec.get("status") in ("done", "partial") and dt < 1.8,
-      f"status={rec.get('status')} wall={dt:.2f}s (old: 3.38s — full 3s park)")
+      rec.get("status") in ("done", "partial") and dt < 3.0,
+      f"status={rec.get('status')} wall={dt:.2f}s (bound <3.0s full park; "
+      f"old: 3.38s — full 3s park)")
 check("B3: the parked straggler is recorded cancelled, not as a ratelimit failure",
       not any(e.get("error_class") == "ratelimit" and str(e.get("event", "")).endswith(".failed")
               for e in events(r)), json.dumps([e.get("event") for e in events(r)])[-200:])
