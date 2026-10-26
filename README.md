@@ -1,6 +1,6 @@
 # Hermes Workflows
 
-![Version](https://img.shields.io/badge/version-1.4.1-blue)
+![Version](https://img.shields.io/badge/version-1.4.2-blue)
 
 **Agent-owned workflow graphs for [Hermes Agent](https://github.com/NousResearch/hermes-agent).**
 Your agent authors a JSON graph of agent nodes, fan-outs and gates; a background
@@ -157,7 +157,7 @@ procedures:
 
 ```sh
 hermes plugins install hermes-workflows      # from the catalog (pinned SHA)
-hermes plugins install <git-url>@v1.4.1      # fallback until the catalog entry merges (see INSTALL.md for the zip)
+hermes plugins install <git-url>@v1.4.2      # fallback until the catalog entry merges (see INSTALL.md for the zip)
 hermes plugins enable hermes-workflows
 ```
 

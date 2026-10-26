@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.4.2 — 2026-10-26
+
+Patch release: 4 merged PRs since v1.4.1 — the ra-release merge step now ships a machine gate (est-clrlx, #547): the release lane issues its squash-merge only through `scripts/release_merge_gate.py`, which refuses (exit 1, zero writes) unless the newest review marker carries `verdict=merge` at the exact current head from a non-author peer; CI-green alone is no longer merge authority. Plus the lane-declaration invariant for ra-work worktree verbs (#549), the W1/B3 wall-pin retiming against the v0.22.5 cold config-import floor (#550), and the §3b front-door skipped-head sentinel exception docs (#551).
+
+### Merged PRs
+
+- docs(agents): name the #473 skipped-head sentinel exception in the §3b front-door law (est-1tlcg) (#551)
+- test(159c): retime W1/B3 wall pins against the v0.22.5 cold config-import floor (drift fix) (#550)
+- test(h951x): lane-declaration invariant for ra-work worktree verbs (#549)
+- feat(release): gate the ra-release merge step on an exact-head peer receipt (est-clrlx) (#547)
+
+### Contributors by PR
+
+- #551 — @jacobhausler.
+- #550 — @jacobhausler.
+- #549 — @jacobhausler.
+- #547 — @jacobhausler.
+
 ## 1.4.1 — 2026-10-25
 
 Patch release: 37 merged PRs since v1.4.0 — the door-UX version handshake (name the door + grammar-layer/nearest-key refusal hints, #511), outcome truth beyond exit-0 (output classifier + `node_outcome` self-report, #537), exhaustive fail-closed resolution (#536) and the `on_skip:pass` effect gate (#523), per-item `bead_close` receipts (#486) and `{run.X}` admission validation (#484), the name-keyed cron tick lifecycle (#534), 8-lane sharded `gates` CI fan-out (#502), author-tunable retry caps (#497), `run.failed`/`run.done` wake payload pointers (#507), the queue-executor starter (#514), quota stamps by route identity (#505), the skip-sentinel and truncated-inputs fixes (#480 #482), `maxItems` joining the admitted schema subset (#478), and the observe instruments + hint-cap doc folds. (The `## 1.4.0` section below is restored verbatim from the tag: its bump commit landed off `main`, so this file never recorded it.)

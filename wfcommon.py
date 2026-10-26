@@ -2415,7 +2415,7 @@ GRAPH_KEY_MIN_VERSION = {
 # (newer files, older process) and the door must not silently pass file-truth
 # off as its own. Re-pinned at release in the SAME commit as plugin.yaml
 # (AGENTS 4d; a test gate compares them at HEAD).
-CODE_VERSION = "1.4.1"
+CODE_VERSION = "1.4.2"
 
 def code_version():
     return CODE_VERSION
