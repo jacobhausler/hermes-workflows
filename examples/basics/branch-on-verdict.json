@@ -34,6 +34,7 @@
         "stop"
       ],
       "question": "Judge said hold — override?",
+      "context": "Answer 'stop' to leave the verdict standing, or 'override: ship anyway' to run the ship arm despite the judge.",
       "type": "gate",
       "when": "out.judge.verdict != 'ship'"
     },
