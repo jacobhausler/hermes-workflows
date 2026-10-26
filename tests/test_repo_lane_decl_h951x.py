@@ -24,7 +24,7 @@ from pathlib import Path
 
 SHELF = Path(os.path.expanduser("~/.hermes/workflows/library/binders/ra_work.py"))
 
-BASE = dict(verb="fix", repo="jacobhausler/x", bead="est-t", store="/s",
+BASE = dict(verb="fix", repo="octo/widgets", bead="est-t", store="/s",
             lane_root="/lr", test_cmd="t", acceptance="a")
 
 
@@ -33,7 +33,7 @@ def render(verb, **overrides):
                     "--acceptance"],
             "build-deep": ["--item", "--repo", "--base-branch", "--lane-root",
                            "--bead"]}[verb]
-    vals = {"fix": {"--repo": overrides.get("repo", "jacobhausler/x"),
+    vals = {"fix": {"--repo": overrides.get("repo", "octo/widgets"),
                     "--bead": overrides.get("bead", "est-t"),
                     "--store": "/s",
                     "--lane-root": overrides.get("lane_root", "/lr"),
