@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+- test(contract): #456 item2 (est-v367p) — `tests/test_private_core_imports_softguard.py`
+  re-runs the issue's R2 probe on every suite pass. Each allow-listed private-core
+  import site is exercised in a FRESH subprocess in both block shapes the probe used
+  (absent: `sys.modules[m] = None`; renamed: module present, symbol gone — dotted
+  fake parents installed in both modes so the block itself is what raises,
+  host-independent) and each asserts the table's exact fallback: `_route_efforts` and
+  `_resolve_child_reasoning` degrade onto the `wfcommon.reasoning_levels()` table,
+  `_nearest_effort` and `_ping_retry_after` to `None`, `_alias_provider_pair` to
+  `(None, None)`, `_session_env` to the `os.environ` value, `_filter_child_toolsets`
+  to verbatim name pass-through, `_yaml_load` to the ruamel/PyYAML chain (honest
+  raise where the host has neither — documented leg), and the `_import_call_llm`
+  callers to liveness `unknown` / `False` (`_ping_subprocess` is stubbed before the
+  call, so no leg can touch the network). The `_PING_SUBPROCESS` string-exec site —
+  invisible to the lint, inside the same coupling family — is pinned twice: source
+  (import present, inner guard intact) and runtime (prints
+  `{"unavailable": true}`, exit 0). Twelve source pins assert every table import
+  still sits inside its guarded function — function names are keys, line numbers
+  are not (the issue's cites already drifted once). Engine edits: none, per the
+  issue's plan; the test stands alone even before item1's lint-side allow-list
+  (`tests/test_private_core_imports.py`) lands. 40 checks ALL PASS.
+
 - fix(door): release/stop handoff truth — the sibling sweep of the #518 amend fix
   (est-gexk5, found on the #518 R8 adversary review). `_resume_after_action` answers
   `"consumed"` for a terminal run though nothing was consumed (the est-3acn branch);
