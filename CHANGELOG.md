@@ -1,14 +1,28 @@
 # Changelog
 
-## Unreleased
+## 1.4.3 — 2026-10-26
 
-- docs(grammar): document the fan-out seat-cap trap where authors read it. One
-  sentence in `references/grammar.md` states the per-run `max_seats` law as the
-  engine's ceiling law — it lowers within range from the host ceiling
-  (`WORKFLOW_MAX_SEATS` / `.env` / config), never raises it; ranges ride the
-  live `SEAT_CAP_FLOOR`/`SEAT_CAP_CEILING` from `wfcommon.py`. The test bites
-  on DIRECTION: a mutation probe carrying the backwards sentence (as shipped
-  at daa0aba) must be refused. Test: tests/test_grammar_hw-bgb.py (10 checks).
+Patch release: 6 merged PRs since v1.4.2 — the grammar-doc seat-cap trap named where authors read it, with the direction-biting mutation test (#527, @atbrace), the `[SILENT]` verdict honored plus per-node wake tiers (WF-GRAFT-1, #533), the autouse test-sandbox conftest with env floor, resolver wrap and merge-gate subprocess items (WF-GRAFT-6, #538), held gates presented via core's public injection route with flag-gated hooks declared upstream-compatible (#141665 points 2–3, #546), the lint gate requiring option strings to appear verbatim in doc text (#477, #552), and the per-item `precheck_argv` custody probe before fan-out spawn (#453, #554). The seat-cap sentence in `references/grammar.md` now states the engine's ceiling law — `max_seats` lowers within range from the host ceiling (`WORKFLOW_MAX_SEATS` / `.env` / config), never raises it — and `tests/test_grammar_hw-bgb.py` (10 checks) refuses a mutation probe carrying the backwards sentence.
+
+### Merged PRs
+
+- docs(grammar): name the fan-out seat-cap trap and the max_seats remedy (#527)
+- feat(wake): honor the [SILENT] verdict + per-node wake tiers (WF-GRAFT-1, est-1f7cn) (#533)
+- test(sandbox): autouse test-sandbox conftest — env floor, resolver wrap, merge-gate subprocess items (WF-GRAFT-6) (#538)
+- fix(p5): present held gates via core's public injection route; declare flag-gated hooks (#141665 points 2-3) (#546)
+- feat(lint): gate option strings must appear verbatim in doc text (#477) (#552)
+- feat(fanout): per-item precheck_argv custody probe before spawn (#453) (#554)
+
+### Contributors by PR
+
+- #554 — @jacobhausler.
+- #552 — @jacobhausler.
+- #546 — @jacobhausler.
+- #538 — @jacobhausler.
+- #533 — @jacobhausler.
+- #527 — @atbrace.
+
+## 1.4.2 — 2026-10-26
 
 ## 1.4.2 — 2026-10-26
 
