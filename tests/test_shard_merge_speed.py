@@ -46,7 +46,12 @@ def test_shard_merge_reproduces_serial_ledger():
         assert rc == 1, f'serial reference must exit 1, got {rc}'
         base = ledger_of(serial)
         assert len(base) == 5 and sum(v != 0 for v in base.values()) == 1
-        assert json.loads((serial / 'done.json').read_text()) == {'complete': True, 'total': 5}
+        # ci-P1: done.json may now ALSO carry run_attempt (stamped only when
+        # the runner env exports GITHUB_RUN_ATTEMPT, which a CI run of THIS
+        # test does). Additive law: existing keys exact, extras allowed.
+        _mk = json.loads((serial / 'done.json').read_text())
+        assert _mk['complete'] is True and _mk['total'] == 5, _mk
+        assert set(_mk) <= {'complete', 'total', 'shard', 'run_attempt'}, _mk
 
         # 3 lanes, disjoint by position; merge must fuse to the same truth.
         # A lane's rc is lane-local law: red iff THIS lane holds the red case.

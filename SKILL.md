@@ -1,13 +1,13 @@
 ---
 name: workflow
 description: "Workflow fan-out audit and census: run agent graphs"
-version: 1.3.9
+version: 1.4.3
 metadata:
   hermes:
     tags: [workflows, fan-out, audit, census, orchestration]
 ---
 
-# Workflow authoring (1.3.9)
+# Workflow authoring (1.4.3)
 
 Requires Hermes Agent v2026.9.21 or newer (package >=0.21.4). A Desktop gate answer
 reaches the run owner's chat via the composer SDK; on older builds it may only insert
@@ -80,13 +80,13 @@ delegated subagent; `wait` = OPTIONAL blocking observation, the only revive verb
   outputs. `amend` accepts a WHOLE replacement graph or node-scoped `patch`;
   `diff` forces amend's dry-run preview. `run`/`amend` `dry_run:true` preview
   without launching/replacing graphs, but can ping routes and check quota.
-  `stop` is terminal. Details: [operations](references/operations.md).
+  `stop` is terminal; a runner verdict is graph-bound — its `graph_fingerprint` rides `runner_exit.json`, not `run.json`. Details: [operations](references/operations.md).
 - Lint before launching with `workflow{action:"validate", graph:…}` — the door's
   whole validation, zero writes, no liveness ping.
-- Optional recipes: `library` lists; `run` with `from:<name>` replays; `save` explicitly shelves
-  reusable graphs and always stamps provenance; a `run_context:{required?,defaults?}` contract
-  refuses a launch missing a key, pre-write. One-off `run` needs no library lookup, tags, save or
-  `why_not_library`. Explicit study-only `submit` retains its receipt requirement. [grammar](references/grammar.md).
+- Optional recipes: `library` lists; `run` with `from:<name>` replays; `save` explicitly shelves reusable graphs and always stamps provenance.
+  The save source shapes the row: `save(run_id)` shelves the run's baked `graph.json` — defaults/shape budgets concrete, `source: null` unless passed —
+  so its `source_digest` (sha256 over the canonical `nodes`, budgets included) never equals the author file's digest; a `graph`/`graph_path` save
+  shelves author bytes and the digests match. A `run_context:{required?,defaults?}` contract refuses a launch missing a key, pre-write. One-off `run` needs no library lookup, tags, save or `why_not_library`. Explicit study-only `submit` retains its receipt requirement. A composite run refuses `save(run_id)` — shelf the author form. [grammar](references/grammar.md).
 - Optional typed `params` contract (pin/tune) with node `where`/`by` door-time seams: the door materializes, refuses every violation in one answer, and stamps the reproducibility triple. [grammar](references/grammar.md#params--the-typed-contract-and-the-door-time-seam-optional).
 - No double-dispatch for pollers: `run` with `lane_key:<key>` — while an UNFINISHED
   incumbent holds the key, a second `run` is deduped, never spawns. `needs_resume`
