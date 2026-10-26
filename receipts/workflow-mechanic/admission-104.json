@@ -11,6 +11,7 @@
     ],
     "reseal_reason": "v1 allowlist dropped the route_unavailable node record fail-closed; sealed label was unwinnable from the shipped packet (hm2-v2 re-seal trap). All predictions re-run post-seal.",
     "frozen_before_predictions": true,
+    "admission_laps": [],
     "prior_certified_pins": {
       "blind_json_sha256": "980681c52df4ce9d51abb4d8ce139cd18772229a04b0e9b728cbcbf49a4d7c30",
       "hm2": {"precision": 0.935, "recall": 1.0},
@@ -34,12 +35,13 @@
     "reruns_executed": 0,
     "rearmed_at": "2026-10-17T15:36Z (per-incident verbatim consent asks, deny-on-no-answer default)",
     "consent_form": "freeze-then-ask: candidate snapshot + prior-effect inventory + digests pinned at ask time; exact verbatim grant string per candidate; hold_timeout + deny default",
-    "law": "consent cannot be self-granted by an agent seat; audit-only replay cannot satisfy the rerun leg"
+    "law": "consent cannot be self-granted by an agent seat; audit-only replay cannot satisfy the rerun leg",
+    "rows": [{"candidate_alias": "C1", "candidate_run_id_sha256": "e773844b7a9627b31221c246d1e250e7fb40b98ccae565efd87d6deafe5cc435", "ask_at": "2026-10-17T15:35:05Z", "ask_body_sha256": "fd588e17a7243ef16a096f26b3892f5e2450e924ba71637f5341f88f5412943e", "effect_inventory_sha256": "a137fcadab08929dd75404db64e09437f3a3d670697b31aecc2fb6f261edbbc7", "expected_side_effect_class": "read_only", "response": "unanswered", "responded_at": null, "action_taken": "noop", "hold_timeout_seconds": null, "deny_default": true}, {"candidate_alias": "C2", "candidate_run_id_sha256": "83f030b6386b7b3ce3d031a4d2b5729ac0662f8d8ef5b5361b490141c4cff555", "ask_at": "2026-10-17T15:35:05Z", "ask_body_sha256": "fd588e17a7243ef16a096f26b3892f5e2450e924ba71637f5341f88f5412943e", "effect_inventory_sha256": "a7530873c6f94166530cf5fcf21a2f3bf25e27c9502de2e4ef0ec69be6e8fe89", "expected_side_effect_class": "outbound", "response": "unanswered", "responded_at": null, "action_taken": "noop", "hold_timeout_seconds": null, "deny_default": true}, {"candidate_alias": "C3", "candidate_run_id_sha256": "b8a254b718a32ff727d35b9c5a3a98dd0bd564f8b88776ff54a3d7e6762380dc", "ask_at": "2026-10-17T15:35:05Z", "ask_body_sha256": "fd588e17a7243ef16a096f26b3892f5e2450e924ba71637f5341f88f5412943e", "effect_inventory_sha256": "4febded47896a764e72ac5c720f204aecdc47155be161f05d4343d687cf3029f", "expected_side_effect_class": "append_only_comment", "response": "unanswered", "responded_at": null, "action_taken": "noop", "hold_timeout_seconds": null, "deny_default": true}]
   },
   "clauses": {
     "a_run_id_seeded_audit_never_run_json_status": "test L2 + blinded run.json in every fixture (status=null); predictions derived from events+runner_exit+node records only",
     "b_audit_only_strictly_readonly": "test L1 audit-shape lap: zero arm spawns, zero door traffic; engine probe with recording fake door + sentinel file",
     "c_own_gate_only_deny_default_hold_timeout": "test L1 timer deny-release x3 + L3 candidate laws (deny default, bounded hold_timeout, single-gate dependency)"
   },
-  "updated": "2026-10-18T19:40:00Z"
+  "updated": "2026-10-26T14:30:00Z (item-3: machine consent/dissent rows + admission_laps added additively)"
 }

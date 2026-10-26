@@ -225,6 +225,7 @@ SOURCE_ONLY_TESTS = {
     # #477 (est-xl5n5): the gate-lint refusal seam — the test executes source-only
     # scripts/make_public.py (the #298 rule, same shape as test_scrub_yml_166b).
     "tests/test_gate_lint_477.py": "executes source-only scripts/make_public.py + gate_lint.py (#477 refuse seam)",
+    "tests/test_admission_ledger_rows_104.py": "loads source-only scripts/admission_ledger.py, reads the estate receipts ledger (issue #104 item-3)",
 }
 
 # Source-only SCRIPTS: repository/estate CI tooling that never travels in the
@@ -252,6 +253,7 @@ SOURCE_ONLY_SCRIPTS = {
     # #477 (est-xl5n5): the gate-lint lives beside the publish auditor it guards;
     # make_public.py imports it at the refuse seam, so it travels with make_public.
     "scripts/gate_lint.py": "publish-door gate lint (#477); refuse seam of source-only make_public.py, not release surface",
+    "scripts/admission_ledger.py": "estate consent/dissent ledger normalizer for receipts/workflow-mechanic/ (issue #104 item-3; not release surface)",
 }
 
 
