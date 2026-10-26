@@ -9466,11 +9466,17 @@ def _cli_validate(argv):
                 print(f"  {where}: {e.get('field')}: {e.get('msg')}")
             else:
                 print(f"  graph: {e}")
-    for w in res.get("warnings") or []:   # mixed rows: s12 strings, p95 dicts (#256/#421)
-        if isinstance(w, dict):
-            print(f"  warn node {w.get('node')}: {w.get('field')}: {w.get('msg')}")
-        else:
-            print(f"  warn {w}")
+    # #479 adversary pin: the warning rows are a HUMAN-channel surface.
+    # Under --json they rode stdout AFTER the envelope and broke strict
+    # json.loads ('Extra data') for every machine reader the PR's own docs
+    # advertise. The envelope already carries them under 'warnings' — skip
+    # the echo loop entirely in JSON mode; human mode stays byte-identical.
+    if not as_json:
+        for w in res.get("warnings") or []:   # mixed rows: s12 strings, p95 dicts (#256/#421)
+            if isinstance(w, dict):
+                print(f"  warn node {w.get('node')}: {w.get('field')}: {w.get('msg')}")
+            else:
+                print(f"  warn {w}")
     return 0 if res.get("ok") else 1
 
 

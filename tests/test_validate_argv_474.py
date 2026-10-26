@@ -137,6 +137,29 @@ class ValidateArgv(unittest.TestCase):
         r = self._run("validate", str(env_path))
         self.assertEqual(r.returncode, 0, (r.stdout, r.stderr))
 
+    # ---- A4 (#479 adversary pin): a WARNING-BEARING graph must still print a
+    # strictly parseable envelope under --json. The p95 max_turns advisory is
+    # the cheapest deterministic warn producer; the envelope carries the row
+    # and NOTHING may ride stdout after the closing brace. Human mode keeps
+    # printing the warn row (byte-identical to pre-#479 behavior).
+    def test_json_mode_with_warnings_is_strictly_parseable(self):
+        warn_graph = self.tmp / "argv-474-warn.json"
+        g = {
+            "name": "argv-474-warn",
+            "nodes": [{"id": "solo", "type": "agent", "goal": "Say hi.",
+                       "shape": "recon", "max_turns": 3}],
+        }
+        warn_graph.write_text(json.dumps(g))
+        r = self._run("validate", "--json", str(warn_graph))
+        self.assertEqual(r.returncode, 0, (r.stdout, r.stderr))
+        env = json.loads(r.stdout)   # would raise 'Extra data' if warn rows leaked
+        self.assertTrue(env["ok"])
+        self.assertTrue(env.get("warnings"), "advisory must ride the envelope")
+        self.assertTrue(any("max_turns" in str(w) for w in env["warnings"]))
+        h = self._run("validate", str(warn_graph))   # human mode unchanged
+        self.assertEqual(h.returncode, 0)
+        self.assertIn("warn", h.stdout)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
