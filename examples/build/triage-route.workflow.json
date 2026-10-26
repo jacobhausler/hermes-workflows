@@ -147,7 +147,7 @@
         "hold",
         "dismiss"
       ],
-      "context": "Urgent set and evidence are in the classify output above (## Inputs). Owner-escalation channel: {run.owner_notify}. Escalation means surfacing the item to a human, not silently acting on it. Release law: 'act' must state WHAT is authorized (e.g. 'act: refund pw-101 up to $50') — a bare 'act' with no authorization is treated as not-approved by the executor.",
+      "context": "Urgent set and evidence are in the classify output above (## Inputs). Owner-escalation channel: {run.owner_notify}. Escalation means surfacing the item to a human, not silently acting on it. Release law: 'act' must state WHAT is authorized (e.g. 'act: refund pw-101 up to $50') — a bare 'act' with no authorization is treated as not-approved by the executor. 'hold' parks the urgent set for the owner unactioned; 'dismiss' closes the escalation — neither touches the items.",
       "when": "out.classify.has_urgent == True",
       "on_skip": "prune"
     },

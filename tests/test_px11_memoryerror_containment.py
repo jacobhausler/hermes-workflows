@@ -31,15 +31,35 @@ def ok(cond, name, extra=""):
 # Deterministic pressure probe: set the RLIMIT_AS ceiling at PARSE ENTRY
 # (VM_SIZE headroom, not RSS: RLIMIT_AS counts virtual size), unmocked
 # decoder, resident 1M-zero flat candidate + shallow trailing object.
+#
+# The ceiling is anchored on the LIVE SET, not on whatever the allocator happens
+# to be holding: gc.collect() + malloc_trim(0) run before the VmSize read, so a
+# change in the module's import footprint cannot move the pressure point.
+# Without the anchor the pin is layout-sensitive — 2026-10-23, wake-tier PR #533
+# (a notify-path change that never touches the decoder) flipped T2/T6 to
+# ESCAPED on 3.14.7 deterministically 3/3 while ddc30ec stayed green 3/3: the
+# module had simply gained ~170 kB of VmSize between import and the read, and an
+# 8 MB razor-thin fixture cannot absorb that. gc alone is not enough (the arenas
+# stay mapped); malloc_trim returns them. The probe degrades to gc-only where
+# libc's malloc_trim is unavailable, and the anchor only ever LOWERS the
+# baseline reading, so the pressure the pin applies never gets weaker.
 PROBE = textwrap.dedent("""
-    import json, resource, sys, os
+    import ctypes, gc, json, resource, sys, os
     sys.path.insert(0, {build!r})
     import wf
     def vsize_kb():
         for l in open(f"/proc/{{os.getpid()}}/status"):
             if l.startswith("VmSize"): return int(l.split()[1])
+    def _anchor():
+        gc.collect()
+        try:
+            ctypes.CDLL("libc.so.6").malloc_trim(0)
+        except (OSError, AttributeError):
+            pass
+        gc.collect()
     cand = '{{"x":[' + ",".join(["0"] * 1_000_000) + ']}} then {{"ok":true}}'
     headroom_mb = int(sys.argv[1])
+    _anchor()
     ceil = (vsize_kb() + headroom_mb * 1024) * 1024
     resource.setrlimit(resource.RLIMIT_AS, (ceil, resource.RLIM_INFINITY))
     try:

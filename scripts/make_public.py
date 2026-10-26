@@ -24,6 +24,9 @@ GIT = "/usr/bin/git"
 PATTERN = re.compile(r"192\.168|\bhaus\b|callindor|gaidin|rhuidean|jacob|\bnous\b", re.I)
 SCRUB_LIST_FILE = "scripts/scrub-list.txt"
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import gate_lint  # noqa: E402  (#477 — same directory, ships together)
+
 
 def load_scrub_list(repo: Path) -> re.Pattern:
     """Core-10 contract: the peer-agreed scrub-grep categories (hostnames, LAN IPs,
@@ -140,6 +143,17 @@ def main() -> int:
         print("SCRUB FAILED — non-guard private-string hits in copied files:", file=sys.stderr)
         for o in offences:
             print(o, file=sys.stderr)
+        return 1
+
+    # Gate-lint (#477): a gate whose doc text (question+context) fails to quote
+    # an option verbatim strands the next releaser — refuse the publish.
+    scan = gate_lint.collect(repo)
+    if scan.violations:
+        print("GATE LINT FAILED — option strings not verbatim in gate doc text "
+              "(see scripts/gate_lint.py; fix the doc text, never the lint):",
+              file=sys.stderr)
+        for v in sorted(scan.violations, key=lambda v: (v.rel, v.line, v.node)):
+            print(f"  {v}", file=sys.stderr)
         return 1
 
     target.mkdir(parents=True, exist_ok=True)

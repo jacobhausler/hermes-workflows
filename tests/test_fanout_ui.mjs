@@ -1,7 +1,15 @@
 // Node-side unit test for the desktop half's fan-out normaliser (fanItems).
 // Extracts the pure functions from plugin.js (no React/SDK needed) and feeds them
 // REAL run records produced by the engine test-suite (tests/home6/workflows/*).
-import { readFileSync } from 'node:fs'
+// The records are normally committed by tests/test_papercuts_0922b.py — but the
+// CI shard lanes slice the serial case list by POSITION (#502), so a consumer
+// may not assume its producer shares the lane. Missing fixture => run the
+// producer case here, once: same real engine, one fixture source, no snapshot
+// drift, and a standalone `node tests/test_fanout_ui.mjs` works from a clean
+// checkout. (Hidden cross-case coupling is the lane-shift trap any new test
+// file would re-trip; this closes it for the only affected consumer.)
+import { readFileSync, existsSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 
@@ -24,6 +32,16 @@ const { fanItems, fanCounts } = new Function(`${code}; return { fanItems, fanCou
 
 let fails = 0
 const check = (label, cond, detail = '') => { console.log((cond ? 'PASS ' : 'FAIL ') + label + (cond ? '' : `  [${detail}]`)); if (!cond) fails++ }
+
+const fixtureOk = run => existsSync(join(here, 'home6', 'workflows', run, 'nodes', 'f.json'))
+if (!fixtureOk('pc2-mixed') || !fixtureOk('pc2-quorum')) {
+  const prod = spawnSync('python3', [join(here, 'test_papercuts_0922b.py')],
+                         { cwd: join(here, '..'), stdio: 'inherit', timeout: 180_000 })
+  if (!fixtureOk('pc2-mixed') || !fixtureOk('pc2-quorum')) {
+    console.error(`fanout_ui: engine fixture unavailable and producer run failed (rc=${prod.status}) — refusing to fabricate records`)
+    process.exit(1)
+  }
+}
 
 const load = run => {
   const r = join(here, 'home6', 'workflows', run)

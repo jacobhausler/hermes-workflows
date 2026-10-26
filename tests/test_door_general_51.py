@@ -37,7 +37,7 @@ spec.loader.exec_module(door)
 import wf_test_isolation as _iso51; _iso51.install(door)
 
 PACKAGED = ["pr-review-light", "issue-triage", "test-first-feature-slice",
-            "fan-out-audit-census", "report-and-verify"]
+            "fan-out-audit-census", "report-and-verify", "queue-executor"]
 TIERS = {"worker": "test-fast-model", "manager": "test-strong-model"}
 
 SEED = {"work_queue": "a test queue", "decision_rule": "urgent when the pager rings",

@@ -1,0 +1,6 @@
+{
+  "pr_gate_wall_s": 330,
+  "runner_min_per_pr": 44,
+  "runner_min_wk": 3650,
+  "basis": "interim; recut at observe week"
+}

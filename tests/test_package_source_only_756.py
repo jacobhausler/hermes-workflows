@@ -23,6 +23,8 @@ SOURCE_ONLY_TESTS = {
     # est-xwvu9: the post-exit hook is stripped from the shipped build; this test
     # executes the source-only scripts/post_exit_hook.py (kept for our own dist path)
     "tests/test_post_exit_hook.py",
+    # #477 (est-xl5n5): same shape — executes source-only make_public.py + gate_lint.py
+    "tests/test_gate_lint_477.py",
 }
 # A shipped test that loads/executes `<root> / "scripts" / "<file>"` needs that file in the ZIP.
 SCRIPT_REF = re.compile(r'(?:ROOT|BUILD)\s*/\s*"scripts"\s*/\s*"([^"]+)"|ROOT\s*/\s*"scripts/([^"]+)"')
