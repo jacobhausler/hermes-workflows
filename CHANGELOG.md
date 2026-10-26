@@ -1,8 +1,7 @@
 # Changelog
 
-## 1.4.3 — 2026-10-26
+## Unreleased
 
-<<<<<<< HEAD
 - fix(runner): the RunBudget-capped fan-out `partial` (the est-3acn harvest
   path) is a commit edge — the lane, effect and bead-close gates now run over
   its record before save (est-13z1/#56 law; est-ps8i9, adversarial R8 sweep of
@@ -74,7 +73,30 @@
   (red at 47879ee on the four close-claim cases a/b/d/e, green on the two
   honest-degradation controls c/f; 6/6 green after).
 
-=======
+- fix(runner): `budget_ledger.json` is now MERGE-ON-WRITE (est-y938s, P3 from
+  the PR #529 review — the second row on that same review, est-6ig3s above).
+  The loop's terminal hook rewrote the ledger whole at every budget closure,
+  so the persisted cause was always the LAST occurrence: a run capped first at
+  a fan-out and re-expressed at a downstream node lost the first cause from
+  the ledger. The re-expression is reachable, not hypothetical — a capped
+  fan-out whose boundary-gate demote (est-ps8i9) forfeits the graceful closure
+  leaves a record classed by the GATE, so the hook's re-scan arrives with a
+  narrower set than an earlier closure wrote. The write moves out of the hook
+  into `wf.close_budget_ledger`, the ONE writer: top-level `cause`/`at` now
+  name the FIRST closure (the run's first budget death),
+  `exhausted_nodes`/`never_launched` are first-seen-order unions, and
+  `occurrences[]` is the cause chain in close order — one row per DISTINCT
+  closure, so a benign resume re-passing the hook (the est-3acn resume law: a
+  later pass sees the same file) mints no duplicate row. A pre-fix legacy
+  ledger (no occurrences[]) is absorbed as the chain's first occurrence; the
+  run_state read view is untouched (same top-level keys, now first-cause
+  semantics). Test: tests/test_run_budget_3acn.py grows leg E (two cap
+  occurrences with the real stub meter — a capped fan-out, then a downstream
+  run-scope refusal after a demote narrows the re-scan — asserting ledger
+  CONTENT, not existence; red at 80e4004 on E0, green after).
+
+## 1.4.3 — 2026-10-26
+
 Patch release: 6 merged PRs since v1.4.2 — the grammar-doc seat-cap trap named where authors read it, with the direction-biting mutation test (#527, @atbrace), the `[SILENT]` verdict honored plus per-node wake tiers (WF-GRAFT-1, #533), the autouse test-sandbox conftest with env floor, resolver wrap and merge-gate subprocess items (WF-GRAFT-6, #538), held gates presented via core's public injection route with flag-gated hooks declared upstream-compatible (#141665 points 2–3, #546), the lint gate requiring option strings to appear verbatim in doc text (#477, #552), and the per-item `precheck_argv` custody probe before fan-out spawn (#453, #554). The seat-cap sentence in `references/grammar.md` now states the engine's ceiling law — `max_seats` lowers within range from the host ceiling (`WORKFLOW_MAX_SEATS` / `.env` / config), never raises it — and `tests/test_grammar_hw-bgb.py` (10 checks) refuses a mutation probe carrying the backwards sentence.
 
 ### Merged PRs
@@ -330,7 +352,6 @@ Patch release: 37 merged PRs since v1.4.0 — the door-UX version handshake (nam
   declared block (contents read; actions/pull-requests/statuses write) —
   GitHub startup-fails an under-permissioned reusable-call job, and
   `if: false` guarantees the grant rides a job that never runs.
->>>>>>> origin/main
 - fix(runner): the `on_skip:"pass"` done-commit on agent nodes now rides the
   `_effect_gate` boundary (#56 law, est-0lxnh). The skip site committed
   `done` with `{agent:"skipped"}` UNGATED, so an agent declaring `effects`
@@ -540,28 +561,6 @@ Patch release: 37 merged PRs since v1.4.0 — the door-UX version handshake (nam
   vaporized `wf_dialect.py` it mirrors; contract in `references/wofification.md`
   (est-h0huv).
 
-
-- fix(runner): `budget_ledger.json` is now MERGE-ON-WRITE (est-y938s, P3 from
-  the PR #529 review — the second row on that same review, est-6ig3s above).
-  The loop's terminal hook rewrote the ledger whole at every budget closure,
-  so the persisted cause was always the LAST occurrence: a run capped first at
-  a fan-out and re-expressed at a downstream node lost the first cause from
-  the ledger. The re-expression is reachable, not hypothetical — a capped
-  fan-out whose boundary-gate demote (est-ps8i9) forfeits the graceful closure
-  leaves a record classed by the GATE, so the hook's re-scan arrives with a
-  narrower set than an earlier closure wrote. The write moves out of the hook
-  into `wf.close_budget_ledger`, the ONE writer: top-level `cause`/`at` now
-  name the FIRST closure (the run's first budget death),
-  `exhausted_nodes`/`never_launched` are first-seen-order unions, and
-  `occurrences[]` is the cause chain in close order — one row per DISTINCT
-  closure, so a benign resume re-passing the hook (the est-3acn resume law: a
-  later pass sees the same file) mints no duplicate row. A pre-fix legacy
-  ledger (no occurrences[]) is absorbed as the chain's first occurrence; the
-  run_state read view is untouched (same top-level keys, now first-cause
-  semantics). Test: tests/test_run_budget_3acn.py grows leg E (two cap
-  occurrences with the real stub meter — a capped fan-out, then a downstream
-  run-scope refusal after a demote narrows the re-scan — asserting ledger
-  CONTENT, not existence; red at 80e4004 on E0, green after).
 
 ## 1.3.9 — 2026-10-17
 
