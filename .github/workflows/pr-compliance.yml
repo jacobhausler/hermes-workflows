@@ -1,12 +1,16 @@
 name: pr-compliance
 # Enforcement gate (owner directive 2026-10-09: agents must NOT be able to
 # avoid compliance). Required status check on main: a PR merges only if the
-# branch carries an archify explainer PNG OR the body carries the C2
+# PR DIFF adds an archify explainer PNG OR the body carries the C2
 # two-claim exemption token. Fails closed: workflow error = red = blocked.
 # Machine-checks FORM only (PNG exists / token has two sentences); claim
 # truth stays with the reviewer — that half is unforgeable only by reading.
 # Mirror of the peer estate's gate (atbrace pr-compliance@main); one
 # sentence added to the error line pointing at the standard.
+# est-2d1c9 (2026-10-27, PR #481 adversary): C1 is scoped to the PR diff —
+# stale PNGs on main must not satisfy the gate by tree inheritance; the C2
+# token is honored mechanically first so an exempt PR is never routed
+# through C1/C8 because of inherited diagrams.
 on:
   pull_request:
     types: [opened, reopened, synchronize, edited, ready_for_review]
@@ -20,10 +24,31 @@ jobs:
       BODY: ${{ github.event.pull_request.body }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          # est-2d1c9: depth 2 keeps the PR merge-commit's parents present
+          # so the C1 diff scope below can resolve HEAD^1.
+          fetch-depth: 2
       - name: diagram or two-claim exemption (standard v0.2 C1/C2)
         run: |
           set -uo pipefail
-          if ls docs/pr-diagrams/*.png >/dev/null 2>&1; then
+          # C2 honored mechanically FIRST (est-2d1c9): the exemption must
+          # always pass, never be routed into the C1/C8 branch by diagrams
+          # inherited from main.
+          if printf '%s' "$BODY" | grep -qE '^pr-diagram:[[:space:]]*exempt.*\..*\.'; then
+            echo "compliant: two-claim exemption token (C2)"; exit 0
+          fi
+          # C1 scoped to the PR DIFF (est-2d1c9, PR #481 adversary): a PNG
+          # inherited from main is not this PR's diagram. On pull_request
+          # events the checkout is the merge commit, so diff HEAD^1..HEAD
+          # is exactly base...HEAD semantics. workflow_dispatch (no PR
+          # context) keeps the whole-tree check as a branch smoke test.
+          case "${GITHUB_REF:-}" in
+            refs/pull/*/merge)
+              pngs=$(git diff --name-only --diff-filter=AM 'HEAD^1' HEAD -- docs/pr-diagrams/ | grep '\.png$' || true) ;;
+            *)
+              pngs=$(git ls-files 'docs/pr-diagrams/*.png' || true) ;;
+          esac
+          if [ -n "$pngs" ]; then
             # C8 composition law (v0.3, owner directive 2026-10-11; joint eng
             # protocol pointer: repo issue #174): a diagram-carrying PR must lead its
             # body with a Problem / User-story prose section — the digest
@@ -32,13 +57,10 @@ jobs:
             # call (three Qs: what breaks today / what never again / what
             # touches what), same split as the C2 token's two claims.
             if printf '%s' "$BODY" | grep -qiE '^#{1,3}[[:space:]]*(Problem|User[ -]?Story|Story|Why|Context)([:.][[:space:]]|.*)?$|^[[:space:]]*\*\*[: ]?(Problem|User[ -]?Story|Story|Why|Context)'; then
-              echo "compliant: archify explainer on branch + prose header in body (C1/C8)"; exit 0
+              echo "compliant: archify explainer in PR diff + prose header in body (C1/C8)"; exit 0
             fi
             echo "::error::diagram present but body lacks a leading '## Problem' or '## User story' prose section (v0.3 C8: reviewers must get the what/why before the canvas — haus-docs rules/pr-diagram-standard.md)"
             exit 1
           fi
-          if printf '%s' "$BODY" | grep -qE '^pr-diagram:[[:space:]]*exempt.*\..*\.'; then
-            echo "compliant: two-claim exemption token (C2)"; exit 0
-          fi
-          echo "::error::needs docs/pr-diagrams/*.png on branch OR 'pr-diagram: exempt — <what>. <why>.' in the body (haus-docs rules/pr-diagram-standard.md v0.2 C1/C2)"
+          echo "::error::needs a docs/pr-diagrams/*.png ADDED IN THIS PR'S DIFF (tree-inherited PNGs do not count — est-2d1c9) OR 'pr-diagram: exempt — <what>. <why>.' in the body (haus-docs rules/pr-diagram-standard.md v0.2 C1/C2)"
           exit 1
