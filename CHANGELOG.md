@@ -2,7 +2,6 @@
 
 ## Unreleased
 
-<<<<<<< ours
 - feat(wake): the wake sender is TRI-STATE. `_wake_deliver()` returns
   True/False/None = delivered / try-later / nowhere-ever (no reachable API
   server configured, e.g. a headless host), the `wake.jsonl` row mirrors the
@@ -15,7 +14,7 @@
   tests/test_wake_tristate_7rudf.py (hermetic — tmp run dirs + empty HERMES_HOME,
   the live cron store and runs root are never touched; red at ddc30ec, green
   after; includes the restart-redrive not-double-noticing case).
-=======
+
 - feat(park-watch): parked work gets a persisted blocked-since clock and a
   system floor. Every human-gate hold (with or without `hold_timeout`) and
   every machine-probe park now ticks a watchdog whose state lives in the
@@ -29,7 +28,6 @@
   clock. Tunable via owner setting `park_watch` (`{timeout_s, strikes}`;
   `false` disables). Tests: tests/test_park_watchdog.py.
   (est-hf4wq, peer atbrace:hw-36y)
->>>>>>> theirs
 
 - feat(audit): persisted launch locations are checked at submit and before each
   machine-gate probe. PATH targets, interpreter script operands, and symlink

@@ -97,6 +97,11 @@ INCLUDE_FILES = (
     # `approval` token is allowed — absent from the ZIP the armed P5 bridge is a
     # permanent silent no-op (est-4vnq finding-4, the sibling shape verbatim).
     "approval_bridge.py",
+    # #566 debt (est-hf4wq): wf.py imports this at runtime (_park_watch_mod —
+    # guarded import, degrades to None by design when absent) — absent from the
+    # ZIP, the parked-hold watchdog #566 just shipped is a SILENT NO-OP on every
+    # packaged install (the est-4vnq finding-4 pack law). Stdlib-only.
+    "park_watch.py",
     "docs/native-hooks.md",  # the p3/p5 switch board: an unshipped doc is invisible to ZIP installs
     "dashboard/manifest.json",
     "dashboard/index.js",  # hidden API plugin still needs the web host's script/registration contract

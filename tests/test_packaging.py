@@ -209,6 +209,11 @@ def main() -> None:
             # silent no-op on every ZIP install.
             check("approval_bridge.py ships in the ZIP (__init__.py spec-loads it)",
                   root + "approval_bridge.py" in members)
+            # #566 debt (est-hf4wq): wf.py imports park_watch.py at runtime
+            # (_park_watch_mod) — absent from the ZIP the parked-hold watchdog is a
+            # silent no-op on every packaged install (est-4vnq finding-4 pack law).
+            check("park_watch.py ships in the ZIP (wf.py imports it at runtime)",
+                  root + "park_watch.py" in members)
             check("docs/native-hooks.md ships in the ZIP (the p3/p5 discoverability doc)",
                   root + "docs/native-hooks.md" in members)
             # est-fi21a (#538 peer miss): the glob never matched conftest.py, so the
