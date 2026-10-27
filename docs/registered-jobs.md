@@ -31,7 +31,13 @@ The runner still observes stop; this contract does not grant an unlimited or
 unmanaged job lifetime. Use an external job deadline when bounded work requires
 one. The durable receipt/log are retained for review.
 
-Silent runner deaths are reaped only on mutation/resume paths. The door writes
+Silent runner deaths are reaped on mutation/resume paths and, while any run is
+active, by the self-terminating watchdog cron tick (`cron_bridge.py` +
+`runner_watchdog.py`, est-ip975): runner boot arms one named `no_agent` job
+that revives dead-runner runs — cadence resolved by `cron_bridge.tick_schedule`
+(env `WF_TICK_SCHEDULE` > config `workflows.tick_schedule` > every 2m) — and
+the tick body removes the job itself at drain, so an
+interrupted run needs no manual sweep and the idle cost is zero wakes. The door writes
 a graph-bound typed exit receipt and claim-bound interruption receipts under
 `interruptions/`. The node read model exposes current interrupted truth while
 preserving original spawn bytes as cold incident evidence. Reads remain pure.

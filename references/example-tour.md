@@ -122,3 +122,19 @@ Or, the 1.0.1 way — settings once, nodes carry only their work:
 | Tier stamp | `<run>/turn_report.tier` (`typed` / `untyped`, write-once) |
 | Dashboard API | `/api/plugins/hermes-workflows/runs`, `/runs/{id}`, `POST /runs/{id}/gate` |
 | Desktop plugin | `~/.hermes/desktop-plugins/hermes-workflows/plugin.js` on the **app** machine |
+
+## Lane hygiene (folded from AGENTS.md §3d for the hint cap)
+
+Every build-shape spawn (`shape: "build"` or a declared `repo:` lane) is
+prefixed with a machine preamble — prompt-side only, like the resume preamble,
+so it never touches graph.json, node records or the def hash. It bans
+producing a RED run by checking a base ref out over a dirty tree (that
+overwrites uncommitted work in place), prescribes commit-tests-first + a
+throwaway detached worktree (or a named stash) for the RED state, and orders
+a WIP commit before the turn cap. A lane that still dies unbanked is not
+lost: its tool calls are journaled in the profile's state.db, and
+`python3 scripts/lane_recover.py --run <id> --node <node> [--out <dir>]`
+(or `--profile <name> --skey <key>`) replays the write_file/patch calls into
+a restore dir — triage list by default, files + an unmatched-patch report
+with `--out`; exit 2 no session, 3 nothing journaled. The db is opened
+read-only.

@@ -9629,6 +9629,40 @@ class Run:
         self.nodes = wfcommon.workflow_nodes(self.graph)
         self.byid = {n["id"]: n for n in self.graph["nodes"]}
 
+def arm_tick(async_boot=False):
+    """Runner-boot arm of the watchdog tick (est-ip975 PR-2). Loads the sibling
+    runner_watchdog by path (same bootstrap as the `tick` verb) and delegates;
+    every failure mode degrades to a no-op.
+
+    async_boot=True (the runner's boot seam) hands the arm to a detached
+    child (`wf.py arm`): a cold cron.jobs import costs ~5-6 s on hosts with
+    core on path and would steal GIL from a timing-budgeted boot (crash-resume
+    canary). The arm is a durability
+    best-effort — the tick self-re-arms while runs stay active — so it must
+    never cost the runner a beat. It is NOT at the door: the door holds the
+    lane flock and a 5 s arm would break claim dedupe outright."""
+    def _do():
+        try:
+            spec = importlib.util.spec_from_file_location(
+                "_hw_boot_watchdog", Path(__file__).resolve().parent / "runner_watchdog.py")
+            if spec is None or spec.loader is None:
+                return
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            mod.ensure_tick()
+        except Exception:
+            pass
+    if not async_boot:
+        return _do()
+    import subprocess
+    try:
+        subprocess.Popen([sys.executable, str(Path(__file__).resolve()), "arm"],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         start_new_session=True)
+    except OSError:
+        pass
+
+
 def main(run_id):
     run = find_run(run_id)   # resolved runs_root first; a pre-fix run stays resumable from the launch root
     # #152 T3 provenance read (first reader wins — the key NEVER rides into a
@@ -9698,6 +9732,9 @@ def main(run_id):
     (run / "nodes").mkdir(exist_ok=True)
     (run / "gates").mkdir(exist_ok=True)
     acquire_lock(run)
+    # est-ip975 PR-2: boot-arms the watchdog tick off-thread (see arm_tick:
+    # never the door, never the boot path's timing budget).
+    arm_tick(async_boot=True)
     # #152 T3 (stop/release TOCTOU class, admission cut): a stop landing while a
     # held runner sits in its terminal-handoff fence races the door's
     # spawn-to-consume. The fence sees the marker, re-acquires, and consumes it
@@ -10660,6 +10697,21 @@ if __name__ == "__main__":
         register_job(r, n, byid, int(sys.argv[4]), sys.argv[5], sys.argv[6])
         print("WORKFLOW_JOB_REGISTERED " + n["id"])
         sys.exit(0)
+    # est-ip975 PR-2: the watchdog cron entry. PR-1's generated shim execs this
+    # exact argument-free line (`wf.py tick`), so the body loads by path on
+    # bare stdlib python - no core, no plugin-loader - and prints its census.
+    if len(sys.argv) == 2 and sys.argv[1] == "arm":
+        arm_tick()
+        sys.exit(0)
+    if len(sys.argv) == 2 and sys.argv[1] == "tick":
+        _wd_spec = importlib.util.spec_from_file_location(
+            "_hw_tick_watchdog", Path(__file__).resolve().parent / "runner_watchdog.py")
+        if _wd_spec is None or _wd_spec.loader is None:
+            print("TICK REFUSED runner_watchdog.py not present")
+            sys.exit(1)
+        _wd_mod = importlib.util.module_from_spec(_wd_spec)
+        _wd_spec.loader.exec_module(_wd_mod)
+        sys.exit(_wd_mod.main())
     # #44 (issue ask 2): the owner escape hatch rides the SAME entry point —
     # `wf.py release-lock <run_id>` heals a PROVEN-wedged runner.lock (zero live
     # holders on the kernel ledger + dead lease) so wait-resume recovers without

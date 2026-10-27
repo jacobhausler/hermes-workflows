@@ -52,4 +52,7 @@ still alive is marked until it (or any other session) reads status — then it
 is revoked only if the reader is a *different* session; the owner answering
 via `release` revokes too. Every path is fail-open: unreadable `run.json`,
 truncated events, locked files or a read-only runs root produce no row and
-no exception.
+no exception. Dead-runner *revival* is a separate authority and does exist:
+the self-terminating watchdog tick (`runner_watchdog.py`, est-ip975) re-drives
+dead-runner runs on a named `no_agent` cron job while any run is active and
+deletes itself at drain. This advisory stays advisory either way.

@@ -328,17 +328,10 @@ publication guards, and crash recovery.
 - To resume a lane that died at its wall with work already banked: amend its `goal`
   to a *resume* prompt that names what is already committed and forbids redoing it.
   Cold re-runs of a timed-out research lane time out again.
-- Lane hygiene (#37, digest 20260929f): every build-shape spawn (`shape: "build"` or a
-  declared `repo:` lane) is prefixed with a machine preamble — prompt-side only, like the
-  resume preamble, so it never touches graph.json, node records or the def hash. It bans
-  producing a RED run by checking a base ref out over a dirty tree (that overwrites
-  uncommitted work in place), prescribes commit-tests-first + a throwaway detached
-  worktree (or a named stash) for the RED state, and orders a WIP commit before the turn
-  cap. A lane that still dies unbanked is not lost: its tool calls are journaled in the
-  profile's state.db, and `python3 scripts/lane_recover.py --run <id> --node <node>
-  [--out <dir>]` (or `--profile <name> --skey <key>`) replays the write_file/patch calls
-  into a restore dir — triage list by default, files + an unmatched-patch report with
-  `--out`; exit 2 no session, 3 nothing journaled. The db is opened read-only.
+- Lane hygiene (#37, digest 20260929f): build-shape spawns get a machine preamble
+  (dirty-tree RED ban, pre-cap WIP commit); `scripts/lane_recover.py` replays a
+  lost lane's journaled tool calls. Folded for the hint cap:
+  [references/example-tour.md](references/example-tour.md) §Lane hygiene.
 - Steering: `steer` queues text; a running child pulls it via `inbox` at its next
   seam. It does not interrupt a child mid-turn.
 
@@ -360,6 +353,7 @@ subscription routes.
 | `__init__.py` | The tool door: schema, action dispatch (all 17: `run/status/wait/release/release_lock/steer/inbox/amend/stop/kill/diff/list/save/library/submit/validate/doctor_version` — the tool schema is the closed list), model-tier resolution, preflight, compact/full payload shaping |
 | `wf.py` | The background runner: scheduling, child spawn (`-Q` contract), retry gate, typed error classification, steer baking, tier stamping |
 | `wfcommon.py` | The read model: run state, fingerprints (`efp`), node records, metrics join, liveness. Read-only over a run directory. Also the ONE grammar: `params`/`where`/`by` and the shared run-contract enumeration live here |
+| `cron_bridge.py`, `runner_watchdog.py` | Watchdog tick: lifecycle + tick body; revives dead runners, drains |
 | `dashboard/plugin_api.py` | Dashboard routes (API-only; the manifest hides the tab) |
 | `desktop/plugin.js` | Desktop half: runs list, DAG canvas, fan-out stacks, timeline, gate hand-off, `::workflow` card |
 | `SKILL.md`, `references/` | The authoring skill loaded into sessions. Portable: no host names, install paths, or provider lore |

@@ -54,6 +54,7 @@ def make_tree(tmp: Path, readme_mut=None) -> Path:
     (tree / "scripts").mkdir(parents=True)
     shutil.copy2(SCRIPT, tree / "scripts" / "pr_tag_audit.py")
     for f in ("__init__.py", "wfcommon.py", "card_enforcement.py", "card_ledger.py", "gate_index.py", "orphan_watch.py",
+              "cron_bridge.py", "runner_watchdog.py",
               "README.md", "SKILL.md", "AGENTS.md",
               "CONTRIBUTING.md", "INSTALL.md", "CHANGELOG.md"):
         src = ROOT / f

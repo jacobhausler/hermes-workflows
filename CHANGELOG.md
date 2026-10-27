@@ -2,18 +2,20 @@
 
 ## Unreleased
 
-- feat(wake): the wake sender is TRI-STATE. `_wake_deliver()` returns
-  True/False/None = delivered / try-later / nowhere-ever (no reachable API
-  server configured, e.g. a headless host), the `wake.jsonl` row mirrors the
-  outcome (`delivered: true/false/null`), and the at-most-once marker rule
-  settles a transition instance only on True-or-None. A nowhere-ever
-  transition stops re-driving one ledger row per respawn instead of re-POSTing
-  a delivery that can never land; a headless no-op never stamps delivered, so
-  a later redrive with an endpoint still fires. Ledger parse settles only on
-  an explicit `delivered` key — legacy rows without one stay open. New test:
-  tests/test_wake_tristate_7rudf.py (hermetic — tmp run dirs + empty HERMES_HOME,
-  the live cron store and runs root are never touched; red at ddc30ec, green
-  after; includes the restart-redrive not-double-noticing case).
+- feat(watchdog): the watchdog tick body lands on PR-1's lifecycle and the
+  door starts using it (est-ip975 PR-2, riding #534). Every runner boot arms
+  the singleton through `cron_bridge.ensure_tick` (find-by-name, create-once;
+  a core-less host or a partial-tree copy degrades to a fail-open
+  `armed: false` and never fails the launch); the tick (`wf.py tick`, reached
+  by PR-1's shim) re-drives every dead-runner run in the resolved root
+  through the door's ONE respawn bridge (`_respawn_runner`, flock admission
+  makes a raced spawn a harmless loser), stays armed while any run is active,
+  and the tick body ITSELF removes the job when the active set drains - idle
+  cost is exactly zero wakes. Revival scope mirrors `act_wait`
+  (pending/interrupted; verdicts are never revived).
+  Tests: tests/test_runner_watchdog_ip975.py (arm, revive-in-one-tick,
+  drain-self-delete, double-arm idempotence, core-less fail-open; fake
+  `cron.jobs` injected at cron_bridge's seam, the live store never touched).
 
 - fix(consolidate): the bead close-effect gate now rides the partner-consolidation
   edge in `wf.py` — an unreadable bead store refuses the consolidate-partner step

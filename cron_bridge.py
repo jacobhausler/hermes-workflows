@@ -6,7 +6,7 @@ closes that gap on the scheduler's own cadence: one core cron job,
 ``no_agent=True`` (its stdout IS the job; zero agent wakes), armed idempotently
 by launch and torn down BY THE TICK ITSELF once no active run remains. This
 module is the lifecycle half only: arm, find, teardown, and the shim the job
-runs. The tick body (revive + drain-self-delete) and the launch-time arm land
+runs. The tick body (revive + drain-self-delete) and the boot-time arm land
 in the follow-on PRs; nothing here calls this module yet.
 
 Singleton law (why no tick table, no per-run jobs, no counters): the job is
