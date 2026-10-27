@@ -47,6 +47,16 @@ Consequences at the cap, all machine-visible:
 - The budget cue is notice, not turns: at `max_turns - 5` (run.json
   `budget_cue_margin`) the runner steers the lane ONCE to persist work and
   prepare its final fenced answer. It buys seconds to write, not extra turns.
+- The cue rides the ONE steer channel, and the panel shows it. The injector
+  appends an `inbox.jsonl` line `{node, index, text, budget_cue: true}` (the
+  same schema `steer` writes) and appends `i=-1` to the live spawn's bake file,
+  so the lane pulls the cue at its next inbox seam even though its bake was
+  HWM-frozen at spawn. Consequence for readers of `_steer_state` / the
+  NodePanel steer counts: a capped lane that reached the cue shows
+  `queued 1 · baked 1` although the OWNER never steered — `queued >= 1` does
+  not imply owner steering. The tell is the `budget_cue: true` flag on the
+  inbox line itself (one per (node,index) generation, claim-file idempotent);
+  see QA WF-08, seed run 20261027-143703-wf-qa-quorum (race.0/1/2).
 
 To land the final answer inside the cap, shrink the work per node instead of
 reserve turns inside one: raise the cap with the answer-writing calls counted
