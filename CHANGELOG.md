@@ -29,6 +29,22 @@
   `false` disables). Tests: tests/test_park_watchdog.py.
   (est-hf4wq, peer atbrace:hw-36y)
 
+- feat(watchdog): the watchdog tick body lands on PR-1's lifecycle and the
+  door starts using it (est-ip975 PR-2, riding #534). Every accepted launch arms
+  the singleton at the door's post-flock tail via `cron_bridge.ensure_tick`
+  (find-by-name, create-once;
+  a core-less host or a partial-tree copy degrades to a fail-open
+  `armed: false` and never fails the launch); the tick (`wf.py tick`, reached
+  by PR-1's shim) re-drives every dead-runner run in the resolved root
+  through the door's ONE respawn bridge (`_respawn_runner`, flock admission
+  makes a raced spawn a harmless loser), stays armed while any run is active,
+  and the tick body ITSELF removes the job when the active set drains - idle
+  cost is exactly zero wakes. Revival scope mirrors `act_wait`
+  (pending/interrupted; verdicts are never revived).
+  Tests: tests/test_runner_watchdog_ip975.py (arm, revive-in-one-tick,
+  drain-self-delete, double-arm idempotence, core-less fail-open; fake
+  `cron.jobs` injected at cron_bridge's seam, the live store never touched).
+
 - feat(audit): persisted launch locations are checked at submit and before each
   machine-gate probe. PATH targets, interpreter script operands, and symlink
   targets must exist under stable install roots. Cron shim creation and the
