@@ -5114,7 +5114,8 @@ def register(ctx):
     # orphan-held observers (default-on advisory, owner setting `orphan_watch: false`
     # disables; all I/O at hook time, fail-open): a core without the hook just ignores.
     # Folded under the allow-list law at the P1 rebase: ONE variable-named loop over
-    # the surface ON PURPOSE — the pinned CI core (v2026.9.21) predates
+    # the surface ON PURPOSE — the plugin still runs on the requires_hermes
+    # floor core (v2026.9.21), which predates
     # post_gateway_admission, so a quoted literal here would make the upstream drift
     # probe RED there; the loop's gate is pinned by tests/test_sprint101_D-surface.py.
     for _hook, _fn in _hook_surface():

@@ -11,7 +11,8 @@ below:
 
   - a NEW private import not in the allow-list   -> FAIL, naming file:line target
   - an allow-listed row the lint no longer reports -> FAIL (delete the row)
-  - an installed core without the lint (< v0.22.0, i.e. today's CI pin) ->
+  - an installed core without the lint (< v0.22.0, e.g. the requires_hermes
+    floor) ->
     prints SKIP-reason + exit 0 (the suite must run on checkouts without it)
 
 Keys are ``(file, target)``, never line numbers: lines drift on every refactor
@@ -130,7 +131,7 @@ def load_lint():
                     "private_import_findings — upstream moved the lint; update this probe"
                 )
             return mod, None
-    return None, "installed core predates the private-import lint (< v0.22.0; CI pin d337b736 is such a core)"
+    return None, "installed core predates the private-import lint (< v0.22.0; the requires_hermes floor v2026.9.21 is such a core)"
 
 
 def main():

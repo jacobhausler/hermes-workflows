@@ -14,8 +14,12 @@
 # audit, `hermes plugins validate` against the pinned core. Concurrency cancels
 # superseded pushes instead of queueing a second full pass.
 #
-# HERMES_PIN = the measured requires_hermes floor, tag v2026.9.21 (first release
-# whose quiet turn report carries HERMES_QUIET_TURN_REPORT_FILE; evidence in
+# HERMES_PIN = the CI core pin, tag v0.22.0 (first release carrying the
+# private-import lint, so tests/test_private_core_imports.py RUNS — 13/13
+# allow-list rows exact — instead of skipping; law-7 re-derivation and full
+# contract-surface probe: workflows run 20261026-122817 / est-i3pro). The
+# measured requires_hermes runtime floor stays v2026.9.21 (first release whose
+# quiet turn report carries HERMES_QUIET_TURN_REPORT_FILE; evidence in
 # docs/catalog/pr-body.md). Bump deliberately; never track a branch.
 #
 # Order matters: the pinned core is installed BEFORE the suite because the suite
@@ -38,7 +42,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  HERMES_PIN: d337b736aa1e8ebecfab043842d13e4a2d2f48a3   # v2026.9.21
+  HERMES_PIN: e06df9c2eae6901f4c88f464e0ae6e753c0428b8   # v0.22.0
   SHARDS: 8
 
 jobs:
