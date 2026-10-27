@@ -59,7 +59,7 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.14"  # core >= v0.22.0 gates ALL deps at python>=3.14; 3.12 installs a bare core and the dashboard/config-dependent suite arms go red (est-i3pro CI evidence, run 40455391852)
 
       - uses: actions/setup-node@v4
         with:
@@ -109,7 +109,7 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.14"  # core >= v0.22.0 gates ALL deps at python>=3.14; 3.12 installs a bare core and the dashboard/config-dependent suite arms go red (est-i3pro CI evidence, run 40455391852)
 
       - name: Download shard ledgers
         uses: actions/download-artifact@v4
