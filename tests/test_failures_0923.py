@@ -9,7 +9,8 @@ Q1  spawn-time node record (status running, spawn_cmd with the prompt path
     error lines (inherited CLI advice stripped); <run>/runner_exit.json on every
     exit path — done / blocked / stopped / held / crashed (in-process crash +
     SIGKILL 'no exit record' case).
-Q4  transient retry: max 2 respawns (backoff 5s/20s default), ONLY error_class
+Q4  transient retry: max 2 respawns (default backoff exponential, base 2 s
+    ceiling 30 s — est-9ceqc), ONLY error_class
     ∈ {transport, unknown} AND api_calls == 0 for the dead attempt (via
     wfcommon.child_metrics) AND not stopped AND per-run budget (6);
     attempts_log on the record; final = transport_exhausted; schema/timeout/

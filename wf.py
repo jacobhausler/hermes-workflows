@@ -2584,7 +2584,11 @@ def item_records_certified(run, node, byid, results):
 # ---------- typed failure classification (facts the RUNNER knows only) ----------
 
 _RETRYABLE_CLASSES = ("transport", "unknown")
-DEFAULT_RETRY_BACKOFF = (5.0, 20.0)
+# est-9ceqc (graft of atbrace:hw-r0a): the default transient schedule is
+# exponential — first re-spawn waits `base` seconds, doubling, clamped at
+# `ceiling`. An explicit two-element run.json meta.retry_backoff keeps the
+# fixed-schedule semantics (hw-23c door knob, tests, legacy runs).
+DEFAULT_RETRY_BACKOFF = {"base": 2.0, "ceiling": 30.0}
 DEFAULT_RETRY_BUDGET = 6
 
 # #5 bounded auto-retry (sprint101w2): machine-resume re-drive for classes
@@ -2746,12 +2750,99 @@ def _is_rate_limited(raw):
 
 def _retry_sleep(backoff, i, raw):
     """jam-h22: the retry delay for attempt i (0-based). Rate-limited deaths draw
-    full jitter random.uniform(0, cap) over the cap ladder (capped 120 s); every
-    other transport death keeps today's fixed backoff ladder, byte-for-behaviour."""
+    full jitter random.uniform(0, cap) over the cap ladder (capped 120 s); the
+    default schedule is the exponential policy (est-9ceqc: base * 2**i clamped
+    at ceiling); an explicit fixed schedule keeps today's indexed ladder,
+    byte-for-behaviour."""
     if _is_rate_limited(raw):
         cap = min(_RL_JITTER_CAPS[min(i, len(_RL_JITTER_CAPS) - 1)], _RL_JITTER_CEIL)
         return random.uniform(0, cap)
+    if isinstance(backoff, dict):
+        return min(backoff["base"] * (2 ** i), backoff["ceiling"])
     return backoff[min(i, len(backoff) - 1)]
+
+# est-9ceqc (graft of atbrace:hw-r0a): the persisted per-node transient-retry
+# window. A backoff decision is written to run/retry-window.json BEFORE the
+# sleep and cleared once the node settles anything but the transient death, so
+# a runner killed mid-backoff resumes by (1) waiting the deadline out before
+# its first spawn for that node instead of re-driving into the provider blip
+# that motivated the backoff, and (2) seeding the ladder's attempt counter from
+# the persisted count so restarts cannot amplify attempts past the node's cap.
+# The wait is polled and stop-aware, lives in the owning node's own wave
+# thread, and never serializes a sibling — the deadline is checked, never
+# slept past a shutdown.
+RETRY_WINDOW_FILE = "retry-window.json"
+_WINDOW_LOCK = threading.Lock()      # the runner's own threads share one file
+
+def _retry_window_key(ev, ev_kw):
+    """Window key for a transient-ladder site: solo node -> <id>, fan-out item
+    -> <id>#<index>. The consolidate.batch site (partner-keyed, batch-varying)
+    has no key and keeps the pre-graft restart behavior."""
+    if "partner" in ev_kw:
+        return None
+    idx = ev_kw.get("index")
+    return str(ev_kw.get("node")) + (f"#{idx}" if idx is not None else "")
+
+def _retry_window_load(run):
+    if run is None:
+        return {}
+    v = jload(run / RETRY_WINDOW_FILE, {})
+    return v if isinstance(v, dict) else {}
+
+def _retry_window_save(run, key, deadline, attempts):
+    if key is None or run is None:
+        return
+    with _WINDOW_LOCK:
+        w = _retry_window_load(run)
+        w[key] = {"deadline": float(deadline), "attempts": int(attempts)}
+        tmp = run / (RETRY_WINDOW_FILE + ".tmp")
+        tmp.write_text(json.dumps(w))
+        os.replace(tmp, run / RETRY_WINDOW_FILE)
+
+def _retry_window_clear(run, key):
+    if key is None or run is None:
+        return
+    with _WINDOW_LOCK:
+        w = _retry_window_load(run)
+        if key not in w:
+            return
+        w.pop(key)
+        if w:
+            tmp = run / (RETRY_WINDOW_FILE + ".tmp")
+            tmp.write_text(json.dumps(w))
+            os.replace(tmp, run / RETRY_WINDOW_FILE)
+        else:
+            try:
+                (run / RETRY_WINDOW_FILE).unlink()
+            except OSError:
+                pass
+
+def _retry_window_keep(meta, wkey, r):
+    """est-9ceqc: the window survives iff the node settled on the same
+    transient death the ladder was retrying (or its exhausted verdict) — a
+    restart must not re-grant a spent cap. done / partial / cancelled / a
+    typed terminal clears it."""
+    keep = (r.get("status") == "failed" and not r.get("harvest")
+            and r.get("error_class") in _RETRYABLE_CLASSES + ("transport_exhausted",))
+    if not keep:
+        _retry_window_clear(meta["_run"], wkey)
+
+def _honor_retry_window(meta, node_id, index=None, cancel=None):
+    """Wait out the node's persisted backoff BEFORE this boot's first spawn for
+    it (est-9ceqc). Past deadline: no wait. Polled at 0.1 s and abandoned on
+    stop/cancel, so the wait is never a wall on the shutdown path."""
+    wkey = str(node_id) + (f"#{index}" if index is not None else "")
+    d = _retry_window_load(meta["_run"]).get(wkey)
+    if not isinstance(d, dict):
+        return
+    deadline = d.get("deadline")
+    if not isinstance(deadline, (int, float)) or isinstance(deadline, bool) \
+            or deadline <= time.time():
+        return
+    while time.time() < deadline:
+        if meta["_stop"].is_set() or (cancel is not None and cancel.is_set()):
+            return
+        time.sleep(min(0.1, max(0.0, deadline - time.time())))
 
 # The machine-readable lines the child CLI actually emits (verified against
 # /opt/hermes/hermes_cli/oneshot.py: an escaping provider error reaches the
@@ -3882,11 +3973,20 @@ def _verdict_lines(text, limit=200):
 
 def _retry_conf_params(meta):
     """Backoff schedule / per-run budget come ONLY from run.json meta (the door's
-    channel) — no env hooks in the runner, per brief law."""
+    channel) — no env hooks in the runner, per brief law. The schedule is the
+    exponential default policy, an explicit {"base": B, "ceiling": C} dict
+    (est-9ceqc exp form; a launcher/test seam — the door bakes only the tuple
+    below), or a two-element fixed schedule [a, b] (hw-23c); anything malformed
+    falls back to the default."""
     tb = meta.get("retry_backoff")
-    tb = tuple(float(x) for x in tb) if isinstance(tb, (list, tuple)) and len(tb) == 2 \
-        and all(isinstance(x, (int, float)) and not isinstance(x, bool) and x >= 0 for x in tb) \
-        else DEFAULT_RETRY_BACKOFF
+    if isinstance(tb, dict):
+        tb = tb if all(isinstance(tb.get(k), (int, float)) and not isinstance(tb.get(k), bool)
+                       and tb.get(k) >= 0 for k in ("base", "ceiling")) \
+            else DEFAULT_RETRY_BACKOFF
+    else:
+        tb = tuple(float(x) for x in tb) if isinstance(tb, (list, tuple)) and len(tb) == 2 \
+            and all(isinstance(x, (int, float)) and not isinstance(x, bool) and x >= 0 for x in tb) \
+            else DEFAULT_RETRY_BACKOFF
     budget = meta.get("retry_budget")
     budget = budget if isinstance(budget, int) and not isinstance(budget, bool) and budget >= 0 \
         else DEFAULT_RETRY_BUDGET
@@ -7648,6 +7748,14 @@ def _transient_retry(meta, r, respawn, ev, ev_kw, node=None, cancel=None):
     cap = _retry_caps(node)[0]   # hw-23c: author-tunable (default 2 = today's law)
     attempts_log = list(r.get("attempts_log") or [])   # est-ja41: inherited park history
     ladder_attempts = 0
+    # est-9ceqc: seed the ladder's own counter from the persisted per-node count —
+    # a boot that finds a spent cap re-spawns zero, so restarts cannot amplify
+    # attempts past the node's bound.
+    wkey = _retry_window_key(ev, ev_kw)
+    _seed = _retry_window_load(run).get(wkey) if wkey else None
+    if isinstance(_seed, dict) and type(_seed.get("attempts")) is int \
+            and _seed["attempts"] > 0:
+        ladder_attempts = _seed["attempts"]
     while (r.get("status") == "failed" and r.get("error_class") in _RETRYABLE_CLASSES
            and ladder_attempts < cap):
         if meta["_stop"].is_set():
@@ -7686,6 +7794,7 @@ def _transient_retry(meta, r, respawn, ev, ev_kw, node=None, cancel=None):
             rate_limited=rate_limited,
             attempts_log=list(attempts_log), **ev_kw)
         deadline = time.time() + delay
+        _retry_window_save(run, wkey, deadline, ladder_attempts)   # est-9ceqc
         while time.time() < deadline:
             if meta["_stop"].is_set():
                 break
@@ -7698,6 +7807,7 @@ def _transient_retry(meta, r, respawn, ev, ev_kw, node=None, cancel=None):
         iso = _isolate_prior(meta, r, ev, ev_kw)
         if iso is not None:
             iso["attempts_log"] = attempts_log
+            _retry_window_keep(meta, wkey, iso)   # est-9ceqc: typed terminal clears
             return iso
         hint = _resume_hint_block(run, node, ev_kw.get("index"), attempts_log)   # #130
         r = respawn(resume_preamble=hint) if hint else respawn()
@@ -7712,9 +7822,11 @@ def _transient_retry(meta, r, respawn, ev, ev_kw, node=None, cancel=None):
             # typed give-up, or a quorum-cancel from the wait — all propagate
             # unchanged (dropping a cancel here would launder it into the
             # ladder's transport bookkeeping).
-            return _ratelimit_park(meta, r, respawn, ev, ev_kw,
+            _ret = _ratelimit_park(meta, r, respawn, ev, ev_kw,
                                    node=node, cancel=cancel,
                                    prior_attempts_log=attempts_log)
+            _retry_window_keep(meta, wkey, _ret)   # est-9ceqc: the banner ledger takes over
+            return _ret
     if attempts_log:
         r["attempts_log"] = attempts_log
         last_spawn = r.get("spawn")
@@ -7726,6 +7838,7 @@ def _transient_retry(meta, r, respawn, ev, ev_kw, node=None, cancel=None):
         # exactly, including the blocked-append path.
         if ladder_attempts >= 1 and r.get("error_class") in _RETRYABLE_CLASSES:
             r["error_class"] = "transport_exhausted"
+    _retry_window_keep(meta, wkey, r)   # est-9ceqc: survive only the transient verdict
     return r
 
 def _fallback_ladder(meta, r, respawn_fallback, ev, ev_kw, node=None, cancel=None):
@@ -8645,6 +8758,7 @@ def run_agent_node(run, meta, byid, node, outputs, steering):
                 def _book_launch():
                     launch_ts[i] = time.time()
                 def _spawn(resume_preamble="", model_override=None):
+                    _honor_retry_window(meta, nid, i, cancel=fo_cancel)   # est-9ceqc: resume honors the persisted window
                     if _lane_killed(run, nid):
                         return {"status": "failed", "error": "killed by lane kill before launch",
                                 "error_class": "killed", "ms": 0}
@@ -8937,6 +9051,8 @@ def run_agent_node(run, meta, byid, node, outputs, steering):
         else:
             first = {"done": False}
             def spawn(resume_preamble="", model_override=None):
+                if not first["done"]:
+                    _honor_retry_window(meta, nid, None, cancel=meta["_stop"])   # est-9ceqc
                 sk = solo_key if not first["done"] else skey_for(run, byid, node)
                 first["done"] = True
                 detached = _poll_registered_job(meta, node, byid)

@@ -88,6 +88,7 @@ meta_base = {"_run": None, "_stop": threading.Event(), "_procs_lock": threading.
 
 def mk_meta(tmp, node):
     run = Path(tmp)
+    run.mkdir(parents=True, exist_ok=True)
     (run / "nodes").mkdir(exist_ok=True)
     m = dict(meta_base)
     m["_run"] = run
@@ -180,17 +181,19 @@ with tempfile.TemporaryDirectory() as td:
             wf._bounded_retry = orig_br
 
         # transient: author N=3 lets the api_calls==0 ladder re-spawn 3 times
+        # (est-9ceqc: the transient ladder persists retry-window.json per run
+        # dir, so each independent ladder pass gets a fresh dir)
         orig_calls = wf._attempt_api_calls
         wf._attempt_api_calls = lambda *a, **k: 0
         try:
             node = node_with()
-            meta = mk_meta(td, node)
+            meta = mk_meta(td + "/t-default", node)
             respawn, calls = fake_bounded("unknown")
             r = wf._transient_retry(meta, death("unknown"), respawn, "node",
                                     {"node": "a"}, node=node)
             check("transient default caps at 2 re-spawns", calls["n"] == 2, calls)
             node = node_with(transient=3)
-            meta = mk_meta(td, node)
+            meta = mk_meta(td + "/t-3", node)
             respawn, calls = fake_bounded("unknown")
             r = wf._transient_retry(meta, death("unknown"), respawn, "node",
                                     {"node": "a"}, node=node)
