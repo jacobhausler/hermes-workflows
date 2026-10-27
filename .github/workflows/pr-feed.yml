@@ -17,7 +17,7 @@ jobs:
     # post at ready_for_review. (The first lap's double-post was MY OWN dead
     # poller's 12:44 lap racing the Action — self-caused, not GitHub firing
     # both events on a non-draft open. Attribution corrected at receipt.)
-    if: github.event.action == 'ready_for_review' || (github.event.action == 'opened' && github.event.pull_request.draft == false)
+    if: ${{ secrets.DISCORD_FEED_TOKEN != '' && (github.event.action == 'ready_for_review' || (github.event.action == 'opened' && github.event.pull_request.draft == false)) }}
     steps:
       - uses: actions/checkout@v4
       - name: post feed to #dev-digest
