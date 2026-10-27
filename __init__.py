@@ -767,14 +767,14 @@ WORKFLOW_PARAMS = {
         "action": {
             "type": "string",
             "enum": ["run", "status", "wait", "release", "release_lock", "steer", "inbox", "amend", "diff", "stop", "kill", "list", "save", "submit", "library", "doctor_version", "validate"],
-            "description": "run=launch a graph; wait=OPTIONAL blocking observation (not the default loop: lifecycle transitions wake the owner session on their own — end your turn after run); read state, RESPAWNING an idle runner if work is pending (blocks to the next boundary when one is live; when the lock is PROVEN wedged — Errno 11 with the kernel ledger showing zero holders and the admission lease dead — wait heals it first, the #44 escape hatch); status=read-model of a run; release=answer a held human gate; release_lock=operator hatch for a wedged runner.lock (#44): renames the stranded inode aside under the admission heal-barrier and hands the lane a fresh lock path — REFUSES unless zero live holders are proven (never heals on EACCES or a live holder); steer=queue steering text for a node; inbox=(child-side, cooperative) pull late steering lines baked for THIS spawn — call once at a natural seam; amend=replace the graph (invalidates changed nodes + all downstream by fingerprint), or pass patch to edit a few node fields without resubmitting the whole graph; diff=confirm surface: runs the amend door with dry_run FORCED (accepts patch or graph), returns the preview + graph_diff and touches nothing; stop=request stop; kill=node-targeted lane kill (node required): that lane's in-flight children are SIGKILLed, the node finishes failed error_class=killed, siblings and the run keep going; list=all runs; save=shelve a graph in the library under a name (from run_id or inline graph); library=list shelved graphs richly (name, description, tags, provenance, path-relative id). validate=dry-run the door's validation pipeline (defaults fill + defect collection + model/route policy) with no ping and no writes; returns {ok, errors:[{node,field,msg}], resolved_routes}. run from=<name> replays a shelved graph. submit=quarantine a hand-rolled graph for study (requires why_not_library >=80 chars; never joins the library — the quartermaster's human-gated loop decides); inbox kind=submissions lists them newest-first. doctor_version=read-only version truth for THIS install: {live_version, newest_packaged, source_commit, drift} comparing plugin.yaml against the install.json provenance that pack.py stamps at build time \u2014 one read, no network.",
+            "description": "run=launch a graph; wait=OPTIONAL blocking observation (not the default loop: lifecycle transitions wake the owner session on their own — end your turn after run); read state, RESPAWNING an idle runner if work is pending (blocks to the next boundary when one is live; when the lock is PROVEN wedged — Errno 11 with the kernel ledger showing zero holders and the admission lease dead — wait heals it first, the #44 escape hatch); status=read-model of a run; release=answer a held human gate; release_lock=operator hatch for a wedged runner.lock (#44): renames the stranded inode aside under the admission heal-barrier and hands the lane a fresh lock path — REFUSES unless zero live holders are proven (never heals on EACCES or a live holder); steer=queue steering text for a node; inbox=(child-side, cooperative) pull late steering lines baked for THIS spawn — call once at a natural seam; amend=replace the graph (invalidates changed nodes + all downstream by fingerprint), or pass patch to edit a few node fields without resubmitting the whole graph; submitted node text carrying {run.KEY} re-binds from the run's persisted launch binding (run_context_binding) or the amend refuses before any write (est-qohvi); diff=confirm surface: runs the amend door with dry_run FORCED (accepts patch or graph), returns the preview + graph_diff and touches nothing; stop=request stop; kill=node-targeted lane kill (node required): that lane's in-flight children are SIGKILLed, the node finishes failed error_class=killed, siblings and the run keep going; list=all runs; save=shelve a graph in the library under a name (from run_id or inline graph); library=list shelved graphs richly (name, description, tags, provenance, path-relative id). validate=dry-run the door's validation pipeline (defaults fill + defect collection + model/route policy) with no ping and no writes; returns {ok, errors:[{node,field,msg}], resolved_routes}. run from=<name> replays a shelved graph. submit=quarantine a hand-rolled graph for study (requires why_not_library >=80 chars; never joins the library — the quartermaster's human-gated loop decides); inbox kind=submissions lists them newest-first. doctor_version=read-only version truth for THIS install: {live_version, newest_packaged, source_commit, drift} comparing plugin.yaml against the install.json provenance that pack.py stamps at build time \u2014 one read, no network.",
         },
         "run_id": {"type": "string", "description": "Run id (required for every action except run/list)."},
         "name": {"type": "string", "description": "run: overrides graph.name (default workflow); save: library name overrides graph.name (lowercase, [-_.]); library: return one entry with refs-derived required params and an instantiate command. amend: set graph.name in the replacement graph; omitting it retains the run name."},
         "from": {"type": "string", "description": "run: library graph name to replay (instead of graph or graph_path)."},
         "retry_backoff": {"type": "array", "items": {"type": "number"}, "description": "run only: two non-negative seconds [first, second] replacing the transient ladder's retry schedule (default [5, 20]). The runner reads them from run.json meta; the node-level `retry` key caps attempts."},
         "retry_budget": {"type": "integer", "description": "run only: non-negative cap on total retry draws across ALL ladders for the run (default 6). A storm beyond the budget fails typed retry_skipped, never silently retries on."},
-        "run_context": {"type": ["string", "object"], "description": "run only: non-empty string seed appended to every first-wave agent (including agents behind gate-only paths), OR non-empty map of identifier keys to non-empty strings replacing only explicit {run.KEY} in node goals/contexts, agent repo lanes, fan-out goals/item goals and gate questions. Library-sourced launches also render profile, echo string output, gate options, wait.until_argv and fan-out precheck_argv; every surviving ref refuses before any write. Inline argv retains its existing unbound-placeholder refusal. Missing keys/malformed bindings reject before any run write — as does a seed against a graph with {run.KEY} refs, or a JSON-encoded map passed as a string. Values are persisted in prompts; do not supply secrets. A seed cannot replace baked literals. A graph may declare its binding contract as the graph-level run_context key {required:[KEY...], defaults:{KEY:val}} — a missing required key rejects before any run write with error_type missing_run_context_keys."},
+        "run_context": {"type": ["string", "object"], "description": "run only: non-empty string seed appended to every first-wave agent (including agents behind gate-only paths), OR non-empty map of identifier keys to non-empty strings replacing only explicit {run.KEY} in node goals/contexts, agent repo lanes, fan-out goals/item goals and gate questions. Library-sourced launches also render profile, echo string output, gate options, wait.until_argv and fan-out precheck_argv; every surviving ref refuses before any write. Inline argv retains its existing unbound-placeholder refusal. Missing keys/malformed bindings reject before any run write — as does a seed against a graph with {run.KEY} refs, or a JSON-encoded map passed as a string. Values are persisted in prompts; do not supply secrets. A seed cannot replace baked literals. A graph may declare its binding contract as the graph-level run_context key {required:[KEY...], defaults:{KEY:val}} — a missing required key rejects before any run write with error_type missing_run_context_keys. The door persists an effective MAP to run.json run_context_binding; an amend whose submitted node text still carries {run.KEY} re-binds from it, and refuses fail-closed (error_type amend_run_context_unbound / amend_run_context_rebind) when the run has no persisted binding to re-bind from (est-qohvi)."},
         "description": {"type": "string", "description": "save: one-line purpose shown by library/list."},
         "params": {"type": "object", "additionalProperties": {"type": "object"}, "description": "save: optional meta.params descriptions/default suggestions for run_context keys. Required keys derive from graph refs, never this metadata. Omission retains prior params; {} deliberately clears them. Missing/dead declarations warn, never prevent saving."},
         "tags": {"type": "array", "items": {"type": "string"}, "description": "save (optional): 1-10 discovery tags — legacy flat tokens (lowercase alnum [-_.] <=32) or faceted `facet:value` (facets: use_case, repo, domain, risk, note; values [a-z0-9._-] <=48; e.g. use_case:code-review). For explicit curation, library exposes tag_vocab for optional reuse. Resaving without tags keeps the entry's existing tags; stored in the meta envelope. library (optional): filter to entries carrying ALL listed tags (same 1-10 law as save — an empty array errors on BOTH verbs; omit tags for no filter); an empty result's tag_match_counts says which term starved."},
@@ -3633,6 +3633,17 @@ def _create_run(args, graph, lib_name, models, routes, _liveness_notes, lane_pat
         # silent stamp-dropper once the committed graph went fully concrete.
         # The built stamp is the only authority: if act_run made one, it stamps.
         meta["binding"] = binding
+    # est-qohvi (wake-31 class): {run.KEY} refs bind at launch ONLY, so a wake
+    # recovery that re-submits RAW binder output committed literal tokens into a
+    # bound run's live graph. The door persists the EFFECTIVE run_context map —
+    # contract/tune defaults included, because act_run already folded them into
+    # args — so act_amend can re-bind from the run's own context. Only the map
+    # form persists: a seed decorates first-wave agents and can never re-bind a
+    # ref; and only when one was supplied, so a plain run's run.json keeps its
+    # golden bytes (the same law as meta.binding above).
+    _rc_eff = args.get("run_context")
+    if isinstance(_rc_eff, dict) and _rc_eff:
+        meta["run_context_binding"] = _rc_eff
     # Composite runs record which shelf bytes they expanded from (author-form
     # provenance) and any non-fatal resolver notes (scratch collisions). Empty =
     # key omitted: a plain run keeps the exact pre-include run.json key set.
@@ -4547,6 +4558,44 @@ def act_amend(args):
         new = _common.apply_graph_defaults(new)
     except ValueError as e:
         return {"error": f"graph invalid: defaults/shape: {e}"}
+    # est-qohvi: {run.KEY} refs were bound at LAUNCH and amend never re-bound them —
+    # wake-31 lived this: a banked-verdict re-drive of RAW binder output committed
+    # literal {run.ITEM} into a bound run's live graph at 07:41:10 (hydrate gate
+    # had honestly passed at launch; every prompt after rendered the token and BEAD
+    # LAW fell to its file-one-first fallback). Door law now: submitted node text
+    # carrying a {run.KEY} ref after defaults baking is RE-BOUND from the run's
+    # persisted launch binding — the launch order mirrored (bake, then bind), so an
+    # unchanged node re-binds to byte-identical text and replay-skip keeps its
+    # verdict. With no persisted binding to re-bind from (pre-fix launch, or a
+    # seed-form launch) the amend REFUSES fail-closed naming the surviving tokens:
+    # the token could only seat as a literal, and that is the defect, not a feature.
+    # The plain-lenient law stands untouched: a run whose COMMITTED graph already
+    # carries the tokens launched unbound — literals riding in are the author's
+    # graph, not a recovery un-binding a bound run.
+    _qohvi_refs = _common.run_context_contract({"nodes": new["nodes"]})["refs"]
+    if _qohvi_refs:
+        _rmeta = jload(r / "run.json", {}) or {}
+        _rc_map = _rmeta.get("run_context_binding")
+        if isinstance(_rc_map, dict) and _rc_map:
+            try:
+                new = _bind_run_context(
+                    new, _rc_map,
+                    library_sourced=isinstance(_rmeta.get("graph_source"), dict)
+                    or isinstance(_rmeta.get("binding"), dict))
+            except ValueError as e:
+                return {"error": f"amend: run_context re-bind refused — {e}",
+                        "field": "graph", "error_type": "amend_run_context_rebind",
+                        "hint": "edit the BOUND live graph.json (diff onto it) — never re-submit raw binder output"}
+        elif not _common.run_context_contract({"nodes": (old.get("nodes") or [])})["refs"]:
+            return {"error": "amend: submitted node text carries unbound "
+                             + ", ".join("{{run.{}}}".format(k) for k in sorted(_qohvi_refs))
+                             + " and this run has no persisted run_context binding to re-bind from — "
+                               "refused before any write",
+                    "field": "graph", "error_type": "amend_run_context_unbound",
+                    "surviving_run_refs": sorted(_qohvi_refs),
+                    "hint": "diff your changes onto the bound live graph.json (GET run_id and edit "
+                            "node fields) instead of re-submitting re-rendered binder output; "
+                            "runs launched before this fix carry no run_context_binding"}
     # fb 034849a23af94418: freeze (against the OLD graph, BEFORE resolution) only the
     # nodes that will replay-skip; everything else re-resolves on the current seat.
     _old_byid, _frozen = _frozen_committed(r, old, new["nodes"])

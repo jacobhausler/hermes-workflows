@@ -235,7 +235,17 @@ graph with NO gates — what you read is what runs. Every params-carrying launch
 stamps `run.json` `meta.binding = {params, engine, row_sha256, graph_sha256}`:
 the reproducibility triple. Re-materialize on demand for replay and diff; no
 temp files guard rendered bytes. A paramless run grows no `binding` key — every
-legacy run's bytes stand (golden EMPTY). `save` derives the `meta.params`
+legacy run's bytes stand (golden EMPTY). An effective `run_context` **map** launch
+persists its own key, `run.json` `run_context_binding` (contract/tune defaults
+included; a seed is not persisted — it can never re-bind a ref) — the re-bind
+source for the amend door (est-qohvi): submitted node text carrying `{run.KEY}` is
+re-bound from that map, mirroring the launch order (defaults baked, then bound), so
+an unchanged node re-binds byte-identical and replay-skip keeps its verdict; with
+no persisted binding to re-bind from the amend REFUSES before any write
+(`error_type: amend_run_context_unbound`, naming the surviving tokens; a ref the
+map lacks refuses as `amend_run_context_rebind`). The plain-lenient law is
+untouched: a run whose committed graph already carries the tokens launched unbound,
+and its amend rides literals exactly as its launch did. `save` derives the `meta.params`
 display envelope from the block when the author passes no `params` argument (a
 hand-passed envelope that disagrees warns s12), so `library name:` instantiate
 pre-fills tune defaults and lists pins unfilled. `where`/`by` without a `params`

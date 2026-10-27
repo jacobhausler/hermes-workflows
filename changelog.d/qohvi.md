@@ -1,0 +1,27 @@
+fix(engine): amend re-binds `{run.KEY}` residue from the persisted launch binding (est-qohvi)
+
+`_bind_run_context` was launch-only, so wake recovery that re-submitted RAW binder
+output committed literal `{run.ITEM}` tokens into a bound run's live graph — the
+ra-pr deep run 20261027-072003 (#566@7ef5bdb) paid it at 07:41:10Z: the hydrate gate
+had honestly passed at launch (the `amends.jsonl` old-side carries the bound goals
+with `bead=est-387dh` on all three deep nodes), the adversary died
+`route_unavailable`, and the banked-verdict re-drive amended the live graph from
+un-bound output — every prompt rendered after (review.a1, reconcile.a0) showed the
+literal token, the `bead=` suffix was gone, and BEAD LAW fell to its file-one-first
+fallback with nodes self-verifying via fresh GET: survived, but at re-pay cost. The
+door now persists the effective `run_context` map to `run.json`
+`run_context_binding` at act_run (map form only — a seed can never re-bind a ref;
+a no-map launch grows no key, legacy run.json bytes stand), and act_amend, right
+after defaults baking and before any fingerprint or write, re-binds submitted node
+text carrying `{run.KEY}` from that map, mirroring the launch order so an unchanged
+node re-binds byte-identical and replay-skip keeps its verdict. With no persisted
+binding to re-bind from (pre-fix launches, seed launches) the amend refuses
+fail-closed — `amend_run_context_unbound` names the surviving tokens; a ref the map
+lacks refuses as `amend_run_context_rebind`. The plain-lenient law is untouched: a
+run whose committed graph already carries the tokens launched unbound and amends
+exactly as before. Pinned by tests/test_amend_rebind_run_context_qohvi.py — the
+launch→raw-resubmit→bound shape, byte-identity replay-skip, both typed refusals
+with bytes-untouched proof, seed non-persistence, golden key absence (red on main
+at 11 checks, green at 20/20). Lineage: est-2ek.1.139 / est-2ek.1.838 patched
+sibling seams of the same launch-only-binding class; the recurrence family of
+est-u33xj/est-4z6a.
