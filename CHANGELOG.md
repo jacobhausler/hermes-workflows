@@ -470,6 +470,21 @@ Patch release: 37 merged PRs since v1.4.0 — the door-UX version handshake (nam
   Tests: tests/test_wake_debounce_trailing_zmizd.py (29 checks: burst
   collapse, trailing-key, quiet path, fail-open, end-to-end POST count).
 
+- feat(retry): the transient ladder's backoff window and attempt count persist
+  per node (est-9ceqc, grafted from the converged atbrace:hw-r0a mechanism).
+  The runner writes `{deadline, attempts}` to `retry-window.json` in the run
+  dir before each backoff sleep and clears the key once the node settles
+  anything but the transient death; a runner killed mid-backoff resumes by
+  waiting the deadline out (polled, stop-aware, per node — never serializing
+  a sibling) before its first spawn for that node, and the ladder seeds its
+  attempt counter from the persisted count, so restarts cannot amplify
+  attempts past the node's bound. The default transient schedule becomes
+  exponential (base 2 s, ceiling 30 s); an explicit two-element
+  `retry_backoff: [a, b]` keeps the fixed schedule.
+  Tests: tests/test_persisted_retry_window_9ceqc.py. Law: full text in
+  references/transient-retry-window.md (AGENTS.md carries the one-line
+  hint-surface form; the 32k hint cap forced the fold).
+
 - fix(watchdog): the fanout.stragglers disc formats a missing launch stamp as
   the `'q'` literal, never through `:.3f` (est-waf8y, est-c0jo1 passport D1).
   An open item queued behind a saturated fan-out cap has no launch stamp; the

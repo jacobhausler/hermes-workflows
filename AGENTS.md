@@ -296,6 +296,7 @@ publication guards, and crash recovery.
   a SIGKILL-wave child that banked nothing), the re-drive spawns as a FRESH session seeded
   instead with a harvest preamble (banked work-dir files + cleaned log tail); the
   `node.retry` event and the `attempts_log` entry stamp `fresh_session: true`.
+- est-9ceqc: transient retry window persists to `retry-window.json`; boot waits it out; default exp 2 s/30 s.
 - A child silent for 120 s after spawn is killed as `early_death`; a child still writing its
   log when the wall fires gets one 50 % extension (`node.extended`), then dies.
 - A wall-killed child's corpse is banked (#131): `nodes/<id>[.<i>].corpus/` holds `work/`
