@@ -19,9 +19,7 @@ atexit.register(tmp_dir.cleanup)
 home = Path(tmp_dir.name)
 os.environ["HERMES_HOME"] = str(home)
 os.environ["WF_RUNS_ROOT"] = str(home / "workflows")
-ALIASES = ("  aliases:\n    fable: anthropic/claude-fable-5.1\n    opus: anthropic/claude-opus-5-5\n"
-           "    sol: openai-codex/gpt-6-sol\n")
-(home / "config.yaml").write_text("model:\n  default: qwen38-next\n" + ALIASES)
+(home / "config.yaml").write_text("model:\n  default: t-default\n  aliases:\n    fast: tprovider/t-fast\n")
 door = importlib.import_module("__init__")
 import wf_test_isolation as _iso; _iso.install(door)
 door._ping_route_once = lambda p, m: {"liveness": "unknown"}   # no network
@@ -35,13 +33,12 @@ def check(label, cond, detail=""):
 
 class Ctx:
     def get_config(self, k, d=None):
-        return {"worker": "qwen38-next", "manager": "fable", "frontier": "sol"} if k == "models" else d
+        return {"worker": "t-fast", "manager": "t-fast", "frontier": "t-fast"} if k == "models" else d
 door._CTX = Ctx()
 
 # The wake-31 payload shape: an operative ITEM line carrying the concrete record.
-ITEM = ('PR hermes-workflows#566 by jacobhausler profile=human? blast=deep author=human '
-        'reviewer=- "feat(park-watch): persisted watchdog" head=7ef5bdb ci=fail:diagram-check '
-        'bead=est-qohvi')
+ITEM = ('PR example-repo#12 by contributor profile=human? blast=deep author=human '
+        'reviewer=- "feat(watchdog): persisted watchdog" bead=est-qohvi')
 BIND = {"ITEM": ITEM}
 
 def author():
