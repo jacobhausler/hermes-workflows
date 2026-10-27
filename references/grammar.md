@@ -243,9 +243,13 @@ re-bound from that map, mirroring the launch order (defaults baked, then bound),
 an unchanged node re-binds byte-identical and replay-skip keeps its verdict; with
 no persisted binding to re-bind from the amend REFUSES before any write
 (`error_type: amend_run_context_unbound`, naming the surviving tokens; a ref the
-map lacks refuses as `amend_run_context_rebind`). The plain-lenient law is
-untouched: a run whose committed graph already carries the tokens launched unbound,
-and its amend rides literals exactly as its launch did. `save` derives the `meta.params`
+map lacks refuses as `amend_run_context_rebind`). The plain-lenient law at
+amend is judged on the COMMITTED graph, not the launch (est-cxmca): an amend
+carrying `{run.KEY}` text against a run with no persisted binding PASSES and
+rides literals iff that committed graph already carries `{run.*}` refs; if the
+committed graph carries none — a token-free plain launch or a seed launch — the
+amend REFUSES `amend_run_context_unbound`. Unlike launch, the amend door never
+seats fresh literals into a never-bound run. `save` derives the `meta.params`
 display envelope from the block when the author passes no `params` argument (a
 hand-passed envelope that disagrees warns s12), so `library name:` instantiate
 pre-fills tune defaults and lists pins unfilled. `where`/`by` without a `params`

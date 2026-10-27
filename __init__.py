@@ -4602,9 +4602,12 @@ def act_amend(args):
     # verdict. With no persisted binding to re-bind from (pre-fix launch, or a
     # seed-form launch) the amend REFUSES fail-closed naming the surviving tokens:
     # the token could only seat as a literal, and that is the defect, not a feature.
-    # The plain-lenient law stands untouched: a run whose COMMITTED graph already
-    # carries the tokens launched unbound — literals riding in are the author's
-    # graph, not a recovery un-binding a bound run.
+    # The plain-lenient law at amend is judged on the COMMITTED graph, not the
+    # launch (est-cxmca): if that graph already carries {run.*} refs, submitted
+    # token text rides as literals — the author's own graph, not a recovery
+    # un-binding a bound run. If it carries none (token-free plain launch, seed
+    # launch), the refusal below stands: a never-bound run seats its literals at
+    # LAUNCH, never at amend.
     _qohvi_refs = _common.run_context_contract({"nodes": new["nodes"]})["refs"]
     if _qohvi_refs:
         _rmeta = jload(r / "run.json", {}) or {}
@@ -4626,9 +4629,10 @@ def act_amend(args):
                                "refused before any write",
                     "field": "graph", "error_type": "amend_run_context_unbound",
                     "surviving_run_refs": sorted(_qohvi_refs),
-                    "hint": "diff your changes onto the bound live graph.json (GET run_id and edit "
-                            "node fields) instead of re-submitting re-rendered binder output; "
-                            "runs launched before this fix carry no run_context_binding"}
+                    "hint": "diff your changes onto the committed graph.json (GET run_id and edit "
+                            "node fields) without adding {run.X} tokens; to seat fresh literals, "
+                            "plain-LAUNCH a run instead (launch is lenient; amend of a never-bound "
+                            "run is not). Runs launched before this fix carry no run_context_binding"}
     # fb 034849a23af94418: freeze (against the OLD graph, BEFORE resolution) only the
     # nodes that will replay-skip; everything else re-resolves on the current seat.
     _old_byid, _frozen = _frozen_committed(r, old, new["nodes"])

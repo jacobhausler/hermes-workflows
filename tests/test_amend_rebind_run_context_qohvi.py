@@ -8,6 +8,11 @@ This test pins the cure shape named in the row:
   launch(run_context bound) -> amend with raw {run.ITEM} text -> the committed
   graph goals are bound again; and where no persisted binding exists, the amend is
   REFUSED and the run is untouched. Stdlib only; _spawn_runner stubbed (no runner).
+
+est-cxmca (adversary R10/P1 on #573) adds the discriminator rows: plain-lenient
+at amend is judged on the COMMITTED graph — a never-bound run whose committed
+graph carries no refs REFUSES a fresh {run.X} seat, while one whose committed
+graph already carries refs rides a new token as a literal.
 """
 import atexit, copy, importlib, json, os, sys, tempfile
 from pathlib import Path
@@ -136,6 +141,29 @@ check("seed-launched run + ref-carrying amend REFUSES fail-closed",
       out8.get("error_type") == "amend_run_context_unbound",
       {k: out8.get(k) for k in ("error", "error_type")})
 
+# ------------------------------------------------- est-cxmca: plain-lenient lives in the COMMITTED graph
+# (adversary R10/P1: the asymmetry is law — a never-bound run seats literals at
+# LAUNCH, never at amend; a run whose committed graph already carries refs rides.)
+gbytes9 = (home / "workflows" / run2["run_id"] / "graph.json").read_text()
+out9 = door.act_amend({"run_id": run2["run_id"], "graph": author()})   # committed graph: no refs
+check("est-cxmca: never-bound plain run + FRESH {run.X} seat REFUSES (launch-amend asymmetry pinned)",
+      out9.get("error") is not None and out9.get("error_type") == "amend_run_context_unbound",
+      {k: out9.get(k) for k in ("error", "error_type")})
+check("est-cxmca: refusal hint sends never-bound runs to re-LAUNCH, not a re-submit",
+      "plain-LAUNCH" in (out9.get("hint") or "") and "committed graph.json" in (out9.get("hint") or ""),
+      out9.get("hint"))
+check("est-cxmca: refusal fail-closed on a plain run — graph.json bytes stand",
+      (home / "workflows" / run2["run_id"] / "graph.json").read_text() == gbytes9)
+g10 = author(); g10["nodes"].append({"id": "tail", "type": "agent", "model": "worker",
+                                     "after": ["reconcile"], "goal": "{run.OTHER} tail"})
+out10 = door.act_amend({"run_id": run6["run_id"], "graph": g10})
+check("est-cxmca: committed graph already carries refs — amend submits a NEW token, PASSES as literal",
+      out10.get("ok") is True and out10.get("error") is None,
+      {k: out10.get(k) for k in ("error", "error_type")})
+check("est-cxmca: the fresh token committed as a literal (no binding consulted)",
+      any(n["id"] == "tail" and "{run.OTHER}" in n["goal"] for n in graph_of(run6["run_id"])["nodes"]),
+      graph_of(run6["run_id"])["nodes"][-1])
+
 print(("ALL PASS: amend re-binds {run.KEY} from the persisted launch binding"
-       if fails == 0 else f"{fails} FAILURE(S)") + f" ({20 - fails}/{20} checks)")
+       if fails == 0 else f"{fails} FAILURE(S)") + f" ({25 - fails}/{25} checks)")
 sys.exit(1 if fails else 0)
