@@ -18,6 +18,32 @@
   drain-self-delete, double-arm idempotence, core-less fail-open; fake
   `cron.jobs` injected at cron_bridge's seam, the live store never touched).
 
+- feat(audit): persisted launch locations are checked at submit and before each
+  machine-gate probe. PATH targets, interpreter script operands, and symlink
+  targets must exist under stable install roots. Cron shim creation and the
+  source-only post-exit hook refuse nonresident scripts before writing launch
+  orders. `scripts/argv_residency.py` audits home scripts, cron stores, workflow
+  gates, and post-exit registrations without executing or changing them.
+  `--guard` uses the same exit code and stays silent when clean. Dynamic shell
+  paths report unresolved. `WF_ARGV_STABLE_ROOTS` declares custom install roots.
+  Provenance atbrace:hw-cxk. Regression tests use temporary fixtures only.
+- fix(runner): fan-out item records clipped at the capture boundary + certify
+  parity (est-rucmf, residual of wf#568). `commit_item_record` persisted the
+  canonical per-item record through a raw merge + tmp/replace, bypassing the
+  est-x92v7 persist choke — oversized fan-out item outputs reached disk
+  UNCLIPPED while the aggregate record was clipped. The commit now runs the
+  record through `_clip_record` (bearer redaction first, then head/tail clip
+  at `WORKFLOW_OUTPUT_CLIP`, same marker, knob read fresh: identical to the
+  `save_node` edge). Naive clip-parity would have broken the 765 certification
+  law (a raw >clip aggregate claim can never be byte-equal to a clipped
+  record), so `item_records_certified` normalizes the claim through the
+  identical transform before the byte-for-byte compare: idempotent on clipped
+  records, identity under the ceiling — under-clip equality stays byte-for-byte
+  and forged divergences are still refused. Tests:
+  tests/test_item_record_clip_rucmf.py (C1 oversized commit at the default and
+  an overridden ceiling, C2 certify round-trip over the clip boundary,
+  C2b forged >clip claim still refused, C3 redaction upstream of the clip).
+
 - fix(consolidate): the bead close-effect gate now rides the partner-consolidation
   edge in `wf.py` — an unreadable bead store refuses the consolidate-partner step
   (typed failed, ledger holds) instead of a silent pass, and the case is pinned by

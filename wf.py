@@ -2494,6 +2494,14 @@ def commit_item_record(run, node, byid, index, result):
     if rec_status not in ("failed", "skipped"):
         rec.pop("error", None)
         rec.pop("error_class", None)
+    # est-rucmf (residual wf#568): the SAME capture-boundary choke save_node
+    # applies at its persist edge — redact-then-clip every string leaf at
+    # WORKFLOW_OUTPUT_CLIP before the atomic swap, so a fan-out item's
+    # committed fact can never persist an uncut oversized output. Re-persist
+    # is idempotent; pairs with the certify-side normalization in
+    # item_records_certified (a >clip claim is compared on identically
+    # normalized bytes, never refused for the clip itself).
+    rec = _clip_record(rec)
     rec["efp"] = efp(byid, node)
     rec["fp_rule_version"] = FP_RULE_VERSION
     # Test-only deterministic crash hook (same discipline as WF_HARVEST_SCAN_MAX_BYTES):
@@ -2555,9 +2563,19 @@ def item_records_certified(run, node, byid, results):
                                             f"record is status={rec_st!r} (incompatible status)"})
                 continue
             want, have = r.get("output"), rec.get("output")
-            if want is None or have is None or \
-                    json.dumps(want, sort_keys=True, default=str) != \
-                    json.dumps(have, sort_keys=True, default=str):
+            # est-rucmf parity: the committed record is redact-then-clipped at
+            # the persist choke, so the raw in-memory claim is normalized with
+            # the IDENTICAL transform before the byte-for-byte compare.
+            # _clip_record is the identity on under-clip output and idempotent
+            # on already-clipped output, so this cannot launder a divergence:
+            # a genuine mismatch still differs after normalization, and a
+            # >clip claim matches its clipped record exactly because both
+            # sides went through the same redact-then-clip at the same ceiling.
+            n_want = _clip_record({"output": want})["output"] if want is not None else None
+            n_have = _clip_record({"output": have})["output"] if have is not None else None
+            if n_want is None or n_have is None or \
+                    json.dumps(n_want, sort_keys=True, default=str) != \
+                    json.dumps(n_have, sort_keys=True, default=str):
                 problems.append({"index": i,
                                  "problem": "aggregate claims a done item whose committed "
                                             "output is missing or diverges from the record"})
