@@ -33,7 +33,7 @@ one. The durable receipt/log are retained for review.
 
 Silent runner deaths are reaped on mutation/resume paths and, while any run is
 active, by the self-terminating watchdog cron tick (`cron_bridge.py` +
-`runner_watchdog.py`, est-ip975): runner boot arms one named `no_agent` job
+`runner_watchdog.py`, est-ip975): the door arms one named `no_agent` job at its post-flock launch tail
 that revives dead-runner runs — cadence resolved by `cron_bridge.tick_schedule`
 (env `WF_TICK_SCHEDULE` > config `workflows.tick_schedule` > every 2m) — and
 the tick body removes the job itself at drain, so an

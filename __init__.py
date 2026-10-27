@@ -3212,6 +3212,35 @@ def _node_id_warnings(graph):
     return warnings
 
 
+def _arm_from_launch(out):
+    """est-ip975 PR-2: arm the watchdog tick once a launch is ACCEPTED, at the
+    act_run tail — AFTER the lane flock has been released. The measured law for
+    this seam: inside the flock (the first hook shape) a cold cron.jobs import
+    (~5-6 s on core-installed hosts) serializes two-process claim contention
+    past the incumbent's life and breaks dedupe (test_11_integration_claim,
+    two run_ids); a runner-boot fork is re-adopted by the runner's own #61b
+    census and gets its SIGTERM death attributed to the claimed node
+    (gateway_sigterm_detach_6226 C, red 2/2 on CI). Post-flock the arm costs
+    the winner's response latency only — the loser dedupe path returns
+    untouched, the flock window stays tight, and no runner census can ever
+    see the arm. Fail-open: a core-less host or a copy without the watchdog
+    file never fails a launch; the tick re-arms itself while runs stay
+    active, so a miss self-heals."""
+    if not isinstance(out, dict) or not out.get("run_id"):
+        return
+    try:
+        spec = importlib.util.spec_from_file_location(
+            "_hermes_workflows_runner_watchdog",
+            Path(__file__).resolve().parent / "runner_watchdog.py")
+        if spec is None or spec.loader is None:
+            return
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        mod.ensure_tick()
+    except Exception:
+        pass
+
+
 def act_run(args):
     graph, bad = _input_graph(args, library=True)
     if bad:
@@ -3460,14 +3489,18 @@ def act_run(args):
                             # Keep the incumbent's optional card presentation.
                             "lifecycle_notice": _lifecycle_notice(incumbent["run_id"]),
                             "hint": f"wait run_id={incumbent['run_id']} resumes it"}
-            return _create_run(args, graph, lib_name, models, routes, _liveness_notes, path,
-                               includes=_includes, include_notes=_include_notes,
-                               concurrency_meta=concurrency_meta, retry_meta=retry_meta,
-                               binding=_binding)
-    return _create_run(args, graph, lib_name, models, routes, _liveness_notes,
-                       includes=_includes, include_notes=_include_notes,
-                       concurrency_meta=concurrency_meta, retry_meta=retry_meta,
-                       binding=_binding)
+            out = _create_run(args, graph, lib_name, models, routes, _liveness_notes, path,
+                              includes=_includes, include_notes=_include_notes,
+                              concurrency_meta=concurrency_meta, retry_meta=retry_meta,
+                              binding=_binding)
+        _arm_from_launch(out)   # OUTSIDE the flock — see _arm_from_launch's law
+        return out
+    out = _create_run(args, graph, lib_name, models, routes, _liveness_notes,
+                      includes=_includes, include_notes=_include_notes,
+                      concurrency_meta=concurrency_meta, retry_meta=retry_meta,
+                      binding=_binding)
+    _arm_from_launch(out)
+    return out
 
 def _new_ancestor_dirs(p):
     """est-2ek.1.199: the directory entries a `p.mkdir(parents=True)` would

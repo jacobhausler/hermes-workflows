@@ -9630,17 +9630,18 @@ class Run:
         self.byid = {n["id"]: n for n in self.graph["nodes"]}
 
 def arm_tick(async_boot=False):
-    """Runner-boot arm of the watchdog tick (est-ip975 PR-2). Loads the sibling
-    runner_watchdog by path (same bootstrap as the `tick` verb) and delegates;
-    every failure mode degrades to a no-op.
+    """est-ip975 PR-2: arm the watchdog tick (the door's post-flock launch tail
+    is the live seam - see _arm_from_launch in __init__.py). Kept as the sync
+    loader for the `arm` verb and tests: loads the sibling runner_watchdog by
+    path and delegates; every failure mode degrades to a no-op.
 
-    async_boot=True (the runner's boot seam) hands the arm to a detached
-    child (`wf.py arm`): a cold cron.jobs import costs ~5-6 s on hosts with
-    core on path and would steal GIL from a timing-budgeted boot (crash-resume
-    canary). The arm is a durability
-    best-effort — the tick self-re-arms while runs stay active — so it must
-    never cost the runner a beat. It is NOT at the door: the door holds the
-    lane flock and a 5 s arm would break claim dedupe outright."""
+    async_boot=True was the runner-boot fork shape - POISONED at both ends:
+    cold-cron latency inside the door's lane flock broke claim dedupe, and a
+    runner-spawned child (Popen or double-fork) is re-adopted by the runner's
+    own #61b census, so an external SIGTERM settles it and attributes the
+    death to the claimed node (gateway_sigterm_detach_6226 C, CI red on the
+    pinned core). The fork is refused: async_boot now arms inline, never
+    forks."""
     def _do():
         try:
             spec = importlib.util.spec_from_file_location(
@@ -9652,15 +9653,7 @@ def arm_tick(async_boot=False):
             mod.ensure_tick()
         except Exception:
             pass
-    if not async_boot:
-        return _do()
-    import subprocess
-    try:
-        subprocess.Popen([sys.executable, str(Path(__file__).resolve()), "arm"],
-                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                         start_new_session=True)
-    except OSError:
-        pass
+    return _do()
 
 
 def main(run_id):
@@ -9732,9 +9725,6 @@ def main(run_id):
     (run / "nodes").mkdir(exist_ok=True)
     (run / "gates").mkdir(exist_ok=True)
     acquire_lock(run)
-    # est-ip975 PR-2: boot-arms the watchdog tick off-thread (see arm_tick:
-    # never the door, never the boot path's timing budget).
-    arm_tick(async_boot=True)
     # #152 T3 (stop/release TOCTOU class, admission cut): a stop landing while a
     # held runner sits in its terminal-handoff fence races the door's
     # spawn-to-consume. The fence sees the marker, re-acquires, and consumes it

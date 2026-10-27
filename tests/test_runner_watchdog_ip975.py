@@ -14,7 +14,7 @@ sys.modules BEFORE any cron read (it satisfies cron_bridge's guarded `_jobs()`
 seam), and the door's _spawn_runner is a spy (the launch spawn and the revival
 spawn are the same door bridge, _respawn_runner -> _reap_silent_death ->
 _spawn_runner). PR-1's tests/test_tick_bridge.py covers the lifecycle seam on
-its own; this file proves the end-to-end wiring: boot arms, tick revives,
+its own; this file proves the end-to-end wiring: launch arms, tick revives,
 drain self-deletes.
 """
 import importlib.util
@@ -118,14 +118,14 @@ with tempfile.TemporaryDirectory(prefix="wf-watchdog-") as scratch:
     door._spawn_runner = lambda r: spawns.append(Path(r))
 
     try:
-        # --- arm: the first RUNNER BOOT arms exactly one named no_agent job.
-        # The arm moved off the door (measured ~5-6 s cold cron.jobs import inside
-        # the lane flock breaks claim dedupe); this fakes the spawn and calls the
-        # runner's own boot seam - the exact function wf.py main() runs. ---
+        # --- arm: the first ACCEPTED LAUNCH arms exactly one named no_agent
+        # job through the door's own post-flock tail (_arm_from_launch). In-flock
+        # arming broke claim dedupe (cold cron import widens the flock window);
+        # a runner-boot fork is census-poisoned (#61b re-adopts it, so an external
+        # SIGTERM settles it and attributes the death to the claimed node -
+        # gateway_sigterm_detach_6226 C). The door tail is the only clean seam. ---
         a = door.act_run({"graph": {**GRAPH, "name": "wd-arm-1"}})
         check("launch armed the watchdog tick", bool(a.get("run_id")), a)
-        _wf = load("_hw_watchdog_wf", STABLE / "wf.py")
-        _wf.arm_tick()
         jobs = [j for j in store["jobs"] if j["name"] == cb.TICK_NAME]
         check("exactly one named job after first launch", len(jobs) == 1, store["jobs"])
         job = jobs[0] if jobs else {}

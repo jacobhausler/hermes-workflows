@@ -3,8 +3,9 @@
 ## Unreleased
 
 - feat(watchdog): the watchdog tick body lands on PR-1's lifecycle and the
-  door starts using it (est-ip975 PR-2, riding #534). Every runner boot arms
-  the singleton through `cron_bridge.ensure_tick` (find-by-name, create-once;
+  door starts using it (est-ip975 PR-2, riding #534). Every accepted launch arms
+  the singleton at the door's post-flock tail via `cron_bridge.ensure_tick`
+  (find-by-name, create-once;
   a core-less host or a partial-tree copy degrades to a fail-open
   `armed: false` and never fails the launch); the tick (`wf.py tick`, reached
   by PR-1's shim) re-drives every dead-runner run in the resolved root
