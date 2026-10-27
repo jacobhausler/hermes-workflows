@@ -147,7 +147,14 @@ def trace(frame, event, arg):
         while f and f.f_code.co_name != "run_child": f = f.f_back
         if f:
             meta = f.f_locals["meta"]
-            assert meta["_procs_lock"].locked(), "spawn section must hold the lock at Popen"
+            # v5.2 (est-i3pro / #563 CI): Popen calls seen on this stack also
+            # include provider-plugin load and _aux_run probes, which run
+            # intentionally under _aux_lock WITHOUT _procs_lock. Those are not
+            # the spawn section — skip them and arm at the first IN-SECTION
+            # Popen (lock held). Guard unchanged: pre-v5.1 the watcher would
+            # set _stop during the armed 5s wait; that still fails here.
+            if not meta["_procs_lock"].locked():
+                return trace
             (r / "stop.request").write_text("1")
             # 5s > the watcher's 2s poll: pre-fix the watcher WOULD set stop here
             obs["set_during_section"] = meta["_stop"].wait(5.0)
