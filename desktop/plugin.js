@@ -98,7 +98,9 @@ function fmtOutput(o) {
 
 const isBusy = status => status === 'running'
 const runningCount = data => data?.counts?.running ?? (data?.runs || []).filter(r => isBusy(r.status)).length
-const statusLabel = s => s || 'unknown'
+// WF-03 (QA 2026-10-27): an absent status reads an em-dash, never the raw
+// sentinel word — 'unknown' on the screen reads like a broken sensor.
+const statusLabel = s => s || '—'
 const nodesCount = r => `${r.nodes_done ?? 0}/${r.nodes_total ?? '?'} terminal`
 
 // Fan-out expansion state: which fan-out node is fanned open, and which item is
@@ -143,12 +145,18 @@ function fanItems(def, st, events) {
     const ev = byIdx.get(i)
     const item = rec?.item ?? (defItems ? defItems[i] : undefined)
     const metrics = im?.[i] || null
-    const status = rec?.status || (verified
+    const ec0 = rec?.error_class || ev?.error_class || null
+    const rawStatus = rec?.status || (verified
       ? (nodeLive && metrics?.live > 0 ? 'running' : ev?.status || 'pending')
       : ev?.status || (legacyDone ? 'done' : nodeLive ? (hasStarts ? (startedIdx.has(i) ? 'running' : 'pending') : 'running') : 'pending'))
+    // WF-02 (QA 2026-10-27): cancelled is never a failure (the #7 law — a stop
+    // re-drives cancelled work). A quorum loser / stopped straggler is recorded
+    // failed+error_class=cancelled; the panel renders it as its own neutral
+    // terminal word, never as a red 'failed'.
+    const status = rawStatus === 'failed' && ec0 === 'cancelled' ? 'cancelled' : rawStatus
     const goal = item && typeof item === 'object' && typeof item.goal === 'string' ? item.goal : fo.goal ? renderGoal(fo.goal, item, i) : ''
     rows.push({
-      index: i, status, item, goal,
+      index: i, status, errorClass: ec0, item, goal,
       label: itemLabel(item, i),
       output: rec && rec.status === 'done' ? rec.output : (recs == null && out && Array.isArray(out.items) && st?.status === 'done' ? out.items[i] : undefined),
       error: rec?.error || ev?.error || null,
@@ -176,12 +184,16 @@ function renderGoal(tmpl, item, i) {
   })
 }
 
+// WF-02 (QA 2026-10-27): cancelled joins the terminal tally as its OWN neutral
+// bucket — never folded into failed. The key rides the counts ONLY when
+// non-zero (the ratified no-cancelled fanCounts shape stays byte-identical for
+// every contract pin that deep-equals it).
 const fanCounts = rows => {
   const counts = { total: rows.length, done: 0, failed: 0, running: 0, skipped: 0, stopped: 0, pending: 0, terminal: 0 }
   for (const row of rows) {
     const status = row.status
-    if (status === 'done' || status === 'failed' || status === 'skipped' || status === 'stopped') {
-      counts[status]++
+    if (status === 'done' || status === 'failed' || status === 'skipped' || status === 'stopped' || status === 'cancelled') {
+      counts[status] = (counts[status] || 0) + 1
       counts.terminal++
     } else if (status === 'running' || status === 'pending') {
       counts[status]++
@@ -190,14 +202,18 @@ const fanCounts = rows => {
   return counts
 }
 
-const fanSummary = c => `${c.terminal}/${c.total} terminal${c.skipped ? ` ·${c.skipped} skipped` : ''}${c.stopped ? ` ·${c.stopped} stopped` : ''}${c.running ? ` ·${c.running}▶` : ''}${c.failed ? `, ${c.failed} failed` : ''}`
+const fanSummary = c => `${c.terminal}/${c.total} terminal${c.skipped ? ` ·${c.skipped} skipped` : ''}${c.stopped ? ` ·${c.stopped} stopped` : ''}${c.cancelled ? ` ·${c.cancelled} cancelled` : ''}${c.running ? ` ·${c.running}▶` : ''}${c.failed ? `, ${c.failed} failed` : ''}`
 
 // ---- vitals: dense spend + liveness ----------------------------------------------
 // Backend joins each child's state.db sessions row (title = wf:<run>:<node>[:<i>]:<efp8>)
 // into node.metrics / node.item_metrics / run.metrics. Liveness is deterministic: while a
 // child cooks, api_calls/tool_calls rise and last_activity moves; flat + old = stalling.
 const kfmt = n => n == null ? '' : n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e4 ? `${Math.round(n / 1e3)}k` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}k` : String(n)
-const usd = v => v >= 1 ? `$${v.toFixed(2)}` : v >= 0.01 ? `$${v.toFixed(3)}` : `$${v.toFixed(4)}`
+// WF-09 (QA 2026-10-27): a positive estimate must never render as '$0.0000' —
+// a sub-cent number floors to '<$0.0001'; zero is only reached through the
+// callers' truthy guards (seat-billed routes report cost 0 → 'included', no
+// dollar figure at all).
+const usd = v => v >= 1 ? `$${v.toFixed(2)}` : v >= 0.01 ? `$${v.toFixed(3)}` : v > 0 ? (v < 0.00005 ? '<$0.0001' : `$${v.toFixed(4)}`) : '—'
 const idleS = m => m && m.last_activity ? Math.max(0, Math.round(Date.now() / 1000 - m.last_activity)) : null
 // 0–30 s = cooking (accent), 30–90 s = watch (warning), >90 s = stalled (danger)
 const idleTone = s => s == null ? EDGE_TONE.pending : s < 30 ? EDGE_TONE.running : s < 90 ? EDGE_TONE.held : EDGE_TONE.failed
@@ -283,7 +299,9 @@ function ItemDetail({ row, compact }) {
       m ? jsx(Vitals, { m, live: row.status === 'running', cost: true }) : null),
     lastDesc ? box('text-[0.6875rem] text-(--ui-text-tertiary)', `last: ${lastDesc}`) : null,
     pre('goal', row.goal),
-    pre('error', row.error, EDGE_TONE.failed),
+    // WF-02: a cancelled child is not a failure — its reason line rides the
+    // neutral secondary colour, never the failed red.
+    pre('error', row.error, row.status === 'cancelled' ? undefined : EDGE_TONE.failed),
     pre('output', fmtOutput(row.output)),
     row.status === 'running' ? box('text-xs text-(--ui-text-tertiary)', 'child running…') : null,
     row.status === 'pending' ? box('text-xs text-(--ui-text-tertiary)', 'not started.') : null
@@ -296,7 +314,8 @@ function ItemChips({ runId, nodeId, rows, picked, size }) {
     style: { display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'center' },
     children: rows.map(r => {
       const on = picked === r.index
-      const tone = r.status === 'done' ? EDGE_TONE.done : r.status === 'failed' ? EDGE_TONE.failed : r.status === 'running' ? EDGE_TONE.running : r.status === 'skipped' || r.status === 'stopped' ? EDGE_TONE.skipped : EDGE_TONE.pending
+      // WF-02 (QA 2026-10-27): cancelled joins the neutral skipped tone.
+      const tone = r.status === 'done' ? EDGE_TONE.done : r.status === 'failed' ? EDGE_TONE.failed : r.status === 'running' ? EDGE_TONE.running : r.status === 'skipped' || r.status === 'stopped' || r.status === 'cancelled' ? EDGE_TONE.skipped : EDGE_TONE.pending
       // read-once: one binding shared by the guards and the derefs below
       const m = r.metrics || null
       const idle = m ? idleS(m) : null
@@ -311,7 +330,7 @@ function ItemChips({ runId, nodeId, rows, picked, size }) {
           fontSize: size === 'sm' ? 10 : 11, lineHeight: 1, whiteSpace: 'nowrap', cursor: 'pointer',
           border: `1px solid ${on ? 'var(--ui-accent)' : tone}`, borderRadius: 999,
           background: on ? 'var(--ui-bg-secondary, transparent)' : 'transparent',
-          color: r.status === 'pending' || r.status === 'skipped' || r.status === 'stopped' ? 'var(--ui-text-tertiary)' : 'var(--ui-text-secondary)',
+          color: r.status === 'pending' || r.status === 'skipped' || r.status === 'stopped' || r.status === 'cancelled' ? 'var(--ui-text-tertiary)' : 'var(--ui-text-secondary)',
           textDecoration: r.status === 'skipped' ? 'line-through' : 'none'
         },
         children: [jsx(Dot, { status: r.status }), jsx('span', { children: r.label }),
@@ -420,16 +439,23 @@ function DirectiveCard({ id }) {
 }
 
 // Two compact rows; absent metrics stay absent, never displayed as zero.
+// WF-06 (QA 2026-10-27): the header elapsed is the RUN clock — the word rides
+// the value so the same run's node-card and timeline clocks (different
+// sources) can never be mistaken for it.
+// WF-09: a zero cost is the seat-billed truth, not a dollar figure — never
+// 'COST $0.0000'; activity at zero reads 'COST included' (SKILL.md: report
+// metrics, not dollars; subscription routes report 'included').
 const inlineHeader = (data, elapsed) => {
   const m = data.metrics
   const first = [data.name || data.id, data.status, nodesCount(data)]
-  if (elapsed != null) first.push(fmtDur(elapsed))
+  if (elapsed != null) first.push(`run ${fmtDur(elapsed)}`)
   const second = []
   if (m) {
     for (const [key, label] of [['tokens_in', 'IN'], ['tokens_out', 'OUT'], ['api_calls', 'API'], ['tool_calls', 'TOOL']]) {
       if (m[key] != null) second.push(`${label} ${kfmt(m[key])}`)
     }
-    if (m.cost != null) second.push(`COST ${usd(m.cost)}`)
+    if (m.cost > 0) second.push(`COST ${usd(m.cost)}`)
+    else if (m.cost === 0 && ((m.api_calls ?? 0) > 0 || (m.tokens_in ?? 0) > 0 || (m.tokens_out ?? 0) > 0)) second.push('COST included')
     if (m.live > 0 && data.status === 'running') {
       second.push(`LIVE ${m.live}`)
       const idle = idleS(m)
@@ -1340,7 +1366,10 @@ export function SessionStrip() {
             type: 'button', className: 'text-[0.6875rem] text-(--ui-text-tertiary)',
             style: { cursor: 'pointer', background: 'none', border: 'none', padding: 0, textAlign: 'left' },
             onClick: () => $stripFold.set(folded ? pairKey : null),
-            children: [`▸ ${terminalTotal} finished`]
+            // WF-05 (QA 2026-10-27): the chevron answers the CURRENT state —
+            // ▸ points right while collapsed, ▾ opens downward when expanded
+            // (the fold's own disclosure vocabulary, one glyph one truth).
+            children: [`${folded ? '▸' : '▾'} ${terminalTotal} finished`]
           })
         : null,
       !folded
@@ -1351,7 +1380,20 @@ export function SessionStrip() {
               style: { cursor: 'pointer', background: 'none', border: 'none', padding: 0 },
               onClick: () => openRun(r.id),
               children: `${r.name || r.id} · ${statusLabel(r.status)} · ${ago(r.updated) || 'unknown'}`
-            }, r.id))
+            }, r.id)),
+            // WF-04 (QA 2026-10-27): the fold lists at most 5 but the label
+            // counts ALL N — the hidden rows keep an explicit affordance to
+            // the pane that lists every one (label N, rendered K used to
+            // silently lose N−K finished runs).
+            terminalTotal > terminalFold.length
+              ? jsx('button', {
+                  type: 'button', className: 'text-left text-[0.6875rem] text-(--ui-text-tertiary)',
+                  title: 'Open the Workflows pane — every finished run is listed there',
+                  style: { cursor: 'pointer', background: 'none', border: 'none', padding: 0 },
+                  onClick: () => host.navigate('/workflows'),
+                  children: `+${terminalTotal - terminalFold.length} more`
+                }, 'fold-more')
+              : null
           )
         : null
     ]
@@ -1486,7 +1528,10 @@ export function NodeCard({ runId, def, st, gate, selected, owner, events, hovere
                 'mt-1 flex items-center gap-1.5 text-[0.6875rem] text-(--ui-text-tertiary)',
                 jsx('span', { children: statusLabel(status) }),
                 fc ? jsx('span', { children: fanSummary(fc) }) : null,
-                dur ? jsx('span', { children: dur }) : null,
+                // WF-06 (QA 2026-10-27): the card's elapsed is the NODE clock
+                // (record ms — the child wall this node billed), a different
+                // source than the header's run clock; the word labels it.
+                dur ? jsx('span', { children: `node ${dur}` }) : null,
                 def.optional ? jsx('span', { children: 'opt' }) : null,
                 // F2 desktop (RATIFY): the delegation badge — ONLY when the node
                 // def carries `profile` (read model passes def through verbatim;
@@ -1557,6 +1602,9 @@ export const NODE_TONE = {
 // The ask vocabulary says 'waiting', the read model says 'pending' — the SAME
 // entry, not a twin: one table, one voice.
 NODE_TONE.waiting = NODE_TONE.pending
+// WF-02 (QA 2026-10-27): cancelled is never a failure — the SAME neutral, calm
+// entry as skipped (stop != failure, the #7 law; a resume re-drives it).
+NODE_TONE.cancelled = NODE_TONE.skipped
 
 // Hoisted animation CSS (#48): ONE <style>, injected once by PolishStyles,
 // deduped by React 19 via the stable href — BUMP THE NUMBER per CSS edit.
@@ -1627,9 +1675,10 @@ function edgeTone(upState, downState) {
 }
 
 // #48: the timeline reads the ONE tone table's colour column too — the same
-// decision tree as before, no parallel palette.
+// decision tree as before, no parallel palette. WF-02 (QA 2026-10-27):
+// cancelled reads neutral like skipped/stopped, never the failed red.
 const timelineTone = sp => sp.status === 'pending' ? NODE_TONE.pending.color
-  : sp.status === 'skipped' || sp.status === 'stopped' ? NODE_TONE.skipped.color
+  : sp.status === 'skipped' || sp.status === 'stopped' || sp.status === 'cancelled' ? NODE_TONE.skipped.color
   : sp.kind === 'gate' && sp.status === 'held' ? NODE_TONE.held.color
     : sp.status === 'failed' ? NODE_TONE.failed.color
       : sp.status === 'done' ? NODE_TONE.done.color
@@ -2135,8 +2184,10 @@ function Timeline({ detail }) {
   // a row selects the node so the wide Report panel shows it.
   return box(
     'flex w-60 shrink-0 flex-col gap-1.5 overflow-y-auto border-l border-(--ui-stroke-secondary) px-3 py-2',
+    // WF-06 (QA 2026-10-27): the axis total is the RUN wall measured on the
+    // event spine — named so it can't be confused with the header's clock.
     box('mb-1 flex items-center justify-between text-[0.6875rem] text-(--ui-text-tertiary)',
-      jsx('span', { children: 'timeline' }), jsx('span', { children: fmtDur(total) })),
+      jsx('span', { children: 'timeline' }), jsx('span', { title: 'run wall span (first → last event)', children: fmtDur(total) })),
     ...rows.map(sp => {
       const end = sp.end || (live ? Date.now() : last)
       const tone = timelineTone(sp)
@@ -2152,7 +2203,9 @@ function Timeline({ detail }) {
         children: [
           box('flex items-center justify-between gap-2',
             box('min-w-0 flex-1 truncate text-(--ui-text-secondary)', sp.id),
-            box('shrink-0 text-(--ui-text-tertiary)', fmtDur(end - sp.start))),
+            // WF-06: each row duration is the CHILD wall for that node
+            // (node.started → node.finished on the event spine).
+            jsx('span', { className: 'shrink-0 text-(--ui-text-tertiary)', title: 'child wall (node.started → node.finished)', children: fmtDur(end - sp.start) })),
           jsx('div', {
             className: 'relative h-2 w-full rounded-sm bg-(--ui-stroke-secondary)/40',
             children: jsx('div', {
@@ -2180,12 +2233,21 @@ const UNKNOWN = 'unknown'
 const TAIL_BYTES = 16384          // the contract's chosen constant, mirrored
 const defaultTabFor = st =>
   st === 'running' || st === 'failed' || st === 'partial' ? 'Log' : st === 'done' ? 'Output' : 'Prompt'
+
+// WF-03 (QA 2026-10-27): the backend node_facts substitutes the literal string
+// 'unknown' for every absent fact. unk stays the sentinel producer (the O2
+// contract — absent reads `unknown`, never a fabricated 0); the NodePanel
+// section renderers below HIDE sentinel-valued sections instead of printing
+// the raw word (factKnown guards them). The tab bodies keep their ratified
+// honest sentences ('prompt: unknown (not persisted)' etc.).
 const unk = v => v == null || v === '' ? UNKNOWN : v
 const factText = v => typeof v === 'string' ? v : v == null ? UNKNOWN : (() => { try { return JSON.stringify(v, null, 2) } catch { return String(v) } })()
-const logBase = p => { const s = String(p ?? ''); const i = s.lastIndexOf('/'); return i < 0 ? (s || UNKNOWN) : s.slice(i + 1) }
+// WF-03 (QA 2026-10-27): logBase/attemptNo are DISPLAY helpers of the panel
+// log-head — an absent path/attempt reads an em-dash, never the raw word.
+const logBase = p => { const s = String(p ?? ''); const i = s.lastIndexOf('/'); return i < 0 ? (s || '—') : s.slice(i + 1) || '—' }
 const attemptNo = facts => {
   const m = /(\d+)\.log$/.exec(String(facts?.log_path ?? ''))
-  return m ? m[1] : UNKNOWN
+  return m ? m[1] : '—'
 }
 
 function useNodeLogTail(runId, nodeId, facts, tab, open, live) {
@@ -2203,6 +2265,13 @@ function useNodeLogTail(runId, nodeId, facts, tab, open, live) {
 }
 
 function NodePanel({ detail }) {
+  // WF-03 (QA 2026-10-27): the backend node_facts substitutes the literal
+  // string 'unknown' for absent facts. On screen that raw sentinel reads like
+  // a broken sensor, so every FACTS section HIDES itself when its fact is not
+  // known (unk stays the sentinel producer for the data layer; the tab bodies
+  // keep their ratified honest sentences). Declared inside the panel so the
+  // existing source-grab harnesses keep the whole truth local.
+  const factKnown = v => v != null && v !== '' && v !== UNKNOWN
   const sel = useValue($selNode)
   const fanItem = useValue($fanItem)
   const open = !!sel && sel.runId === detail.id && !!detail.graph
@@ -2224,6 +2293,7 @@ function NodePanel({ detail }) {
   const facts = picked
     ? (shown.item_records && shown.item_records[picked.index])
       || Object.fromEntries(ITEM_FACTS.map(k => k === 'status' ? [k, picked.status]
+        : k === 'error_class' ? [k, picked.errorClass ?? null]
         : k === 'error' ? [k, picked.error ?? null]
         : k === 'output' ? [k, picked.output ?? null]
         : k === 'ms' ? [k, picked.ms ?? null] : [k, null]))
@@ -2244,7 +2314,9 @@ function NodePanel({ detail }) {
         className: 'overflow-auto whitespace-pre-wrap break-words rounded border border-(--ui-stroke-secondary) p-2 text-[0.6875rem]',
         children: text }))
     : null
-  // FACTS (left column). Absent facts read `unknown`; structured facts print as JSON.
+  // FACTS (left column). WF-03 (QA 2026-10-27): a sentinel-valued or absent fact HIDES
+  // its section instead of printing the raw word 'unknown' — hidden is honest absence,
+  // never a fabricated value; structured facts print as JSON.
   const chip = (text, onClick, on) => jsx('button', {
     type: 'button', onClick,
     style: {
@@ -2257,33 +2329,43 @@ function NodePanel({ detail }) {
   const inputChips = box('flex flex-wrap gap-1',
     ...(def.after || []).map(a => chip(a, () => { $selNode.set({ runId: detail.id, nodeId: a }); $fanItem.set(null) }, false)),
     ...(Array.isArray(def.inputs) ? def.inputs : []).map(s => chip(String(s), undefined, false)))
+  const budgetBits = [['max_turns', def.max_turns], ['timeout', def.timeout], ['run_budget', def.run_budget], ['shape', def.shape]]
+    .filter(([, v]) => factKnown(v))
+  // WF-02: a cancelled class keeps the error text but loses the red tone.
+  const cancelledClass = (facts && facts.error_class) === 'cancelled'
+    || (picked && picked.errorClass) === 'cancelled'
+    || shown.error_class === 'cancelled'
+  const steerTrip = facts?.steer
+    ? `queued ${unk(facts.steer.queued)} · baked ${unk(facts.steer.baked)} · consumed ${unk(facts.steer.consumed)}`
+    : null
   const left = box(
     'flex min-w-0 flex-col gap-3',
-    def.type === 'gate'
-      ? sect('question', box('text-xs whitespace-pre-wrap text-(--ui-text-secondary)', unk(def.question)))
-      : sect('goal', box('text-xs whitespace-pre-wrap text-(--ui-text-secondary)', unk(def.goal))),
+    factKnown(def.question) || factKnown(def.goal)
+      ? sect(def.type === 'gate' ? 'question' : 'goal',
+          box('text-xs whitespace-pre-wrap text-(--ui-text-secondary)', unk(def.type === 'gate' ? def.question : def.goal)))
+      : null,
     def.context ? sect('context', box('text-xs whitespace-pre-wrap text-(--ui-text-secondary)', def.context)) : null,
     sect('inputs', inputChips),
-    sect('schema required', box('flex flex-wrap gap-1',
-      ...(def.schema?.required?.length ? def.schema.required.map(k => chip(String(k), undefined, false))
-        : [box('text-xs text-(--ui-text-tertiary)', UNKNOWN)]))),
-    sect('budgets', box('flex flex-wrap gap-x-3 gap-y-1 text-[0.6875rem] text-(--ui-text-tertiary)',
-      jsx('span', { children: `max_turns: ${unk(def.max_turns)}` }),
-      jsx('span', { children: `timeout: ${unk(def.timeout)}` }),
-      jsx('span', { children: `run_budget: ${unk(def.run_budget)}` }),
-      jsx('span', { children: `shape: ${unk(def.shape)}` }))),
-    sect('blocked_by', box('text-xs whitespace-pre-wrap text-(--ui-text-secondary)',
-      Array.isArray(shown.blocked_by) && shown.blocked_by.length ? shown.blocked_by.join(', ') : UNKNOWN)),
+    def.schema?.required?.length
+      ? sect('schema required', box('flex flex-wrap gap-1', ...def.schema.required.map(k => chip(String(k), undefined, false))))
+      : null,
+    budgetBits.length
+      ? sect('budgets', box('flex flex-wrap gap-x-3 gap-y-1 text-[0.6875rem] text-(--ui-text-tertiary)',
+          ...budgetBits.map(([k, v]) => jsx('span', { children: `${k}: ${unk(v)}` }))))
+      : null,
+    Array.isArray(shown.blocked_by) && shown.blocked_by.length
+      ? sect('blocked_by', box('text-xs whitespace-pre-wrap text-(--ui-text-secondary)', shown.blocked_by.join(', ')))
+      : null,
     shown.parked ? sect('parked', box('text-xs text-(--ui-text-secondary)', factText(shown.parked))) : null,
-    pre('error', facts && facts.error !== UNKNOWN ? facts.error : shown.error, EDGE_TONE.failed),
-    sect('attempts_log', box('text-xs whitespace-pre-wrap text-(--ui-text-secondary)',
-      Array.isArray(facts?.attempts_log) && facts.attempts_log.length
-        ? facts.attempts_log.map(a => `#${a.attempt} ${unk(a.error_class)}`).join(' · ') : UNKNOWN)),
-    sect('efp', box('text-xs text-(--ui-text-secondary)',
-      `${unk(facts?.efp)}${shown.stale_of_amend ? ' · stale of amend' : ''}`)),
-    sect('steer', box('text-xs text-(--ui-text-secondary)',
-      facts?.steer ? `queued ${facts.steer.queued ?? UNKNOWN} · baked ${facts.steer.baked ?? UNKNOWN} · consumed ${facts.steer.consumed ?? UNKNOWN}` : UNKNOWN)),
-    sect('skey', box('text-xs select-text text-(--ui-text-tertiary)', unk(facts?.skey))),
+    pre('error', facts && facts.error !== UNKNOWN ? facts.error : shown.error !== UNKNOWN ? shown.error : null, cancelledClass ? undefined : EDGE_TONE.failed),
+    Array.isArray(facts?.attempts_log) && facts.attempts_log.length
+      ? sect('attempts_log', box('text-xs whitespace-pre-wrap text-(--ui-text-secondary)',
+          facts.attempts_log.map(a => `#${a.attempt} ${unk(a.error_class)}`).join(' · ')))
+      : null,
+    factKnown(facts?.efp) ? sect('efp', box('text-xs text-(--ui-text-secondary)',
+      `${facts.efp}${shown.stale_of_amend ? ' · stale of amend' : ''}`)) : null,
+    steerTrip ? sect('steer', box('text-xs text-(--ui-text-secondary)', steerTrip)) : null,
+    factKnown(facts?.skey) ? sect('skey', box('text-xs select-text text-(--ui-text-tertiary)', facts.skey)) : null,
     fc
       ? box('flex flex-col gap-2',
           label(`items · ${fanSummary(fc)}`),
@@ -2344,10 +2426,17 @@ function NodePanel({ detail }) {
       // F2 desktop (RATIFY): delegation badge — ONLY when the def carries
       // `profile`; a no-team def yields null and the panel is byte-identical.
       def.profile ? jsx('span', { title: `as @${def.profile}`, className: 'text-[0.6875rem] text-(--ui-text-tertiary)', children: `as @${def.profile}` }) : null,
-      jsx('span', { className: 'text-[0.6875rem] text-(--ui-text-tertiary)', children: unk(facts?.error_class ?? shown.error_class) }),
+      // WF-03: the header never prints a raw sentinel — an unknown error_class
+      // hides its chip; the model·provider·reasoning line renders only the
+      // parts the record actually carries.
+      factKnown(facts?.error_class ?? shown.error_class)
+        ? jsx('span', { className: 'text-[0.6875rem] text-(--ui-text-tertiary)', children: unk(facts?.error_class ?? shown.error_class) })
+        : null,
       (facts?.attempts ?? shown.attempts) > 1 ? jsx('span', { className: 'text-[0.6875rem] text-(--ui-text-tertiary)', children: `↻${facts.attempts}` }) : null,
-      box('min-w-0 truncate text-[0.6875rem] text-(--ui-text-tertiary)',
-        `${unk(def.model)} · ${unk(def.provider)} · ${unk(def.reasoning)}`),
+      factKnown(def.model) || factKnown(def.provider) || factKnown(def.reasoning)
+        ? box('min-w-0 truncate text-[0.6875rem] text-(--ui-text-tertiary)',
+            [def.model, def.provider, def.reasoning].filter(factKnown).join(' · '))
+        : null,
       shown.metrics ? jsx(Vitals, { m: shown.metrics, live, cost: true, wall: live ? shown.wall : null }) : null,
       jsx(Button, { size: 'xs', variant: 'ghost', 'aria-label': 'Close', onClick: () => { $selNode.set(null); $fanItem.set(null) }, children: '×' })
     ),
@@ -2400,7 +2489,10 @@ export function WorkflowsPage() {
                   // honest 'unknown' included (deep review #156 A2 — one law,
                   // both surfaces; never a fabricated name).
                   jsx('span', { className: 'text-xs text-(--ui-text-tertiary)', title: 'launched by this agent', children: `@${originLabel(d.owner, d.owner_profile)}` }),
-                  hdr.elapsed ? jsx('span', { className: 'text-xs text-(--ui-text-tertiary)', children: hdr.elapsedLabel }) : null,
+                  // WF-06 (QA 2026-10-27): the record header shows the RUN
+                  // wall — the word keeps it distinct from the node cards'
+                  // node clocks and the timeline's child spans.
+                  hdr.elapsed ? jsx('span', { className: 'text-xs text-(--ui-text-tertiary)', children: `run ${hdr.elapsedLabel}` }) : null,
                   d.metrics ? jsx(Vitals, { m: d.metrics, live: false, size: 'xs', cost: true }) : null,
                   d.metrics?.live ? jsx('span', { className: 'text-(--ui-text-tertiary)', style: { fontSize: 10 }, children: `${d.metrics?.live} live` }) : null,
                   d.held_gate ? jsx(Badge, { variant: 'outline', children: 'gate held' }) : null
@@ -2482,10 +2574,14 @@ export function WorkflowsPane() {
   // it's a fact about the row, not an ownership gate.
   const { running, rest } = paneModel(runs, null)
   // The census counts are the backend's full-census numbers (wfcommon
-  // run_summary); absent means unknown, never a fabricated zero.
+  // run_summary); absent means unknown, never a fabricated zero. WF-07
+  // (QA 2026-10-27): run_summary answers the full-census count at the TOP
+  // LEVEL ({total, counts}) — counts carries no total key, so the census
+  // reads data.total first (counts.total stays the fallback for legacy
+  // payloads; 'runs ?' on a payload that answers a number was the bug).
   const counts = data?.counts
   const census = counts
-    ? `runs ${counts.total ?? '?'} · running ${counts.running ?? 0} · held ${counts.held ?? 0} · failed ${counts.failed ?? 0}`
+    ? `runs ${data?.total ?? counts.total ?? '?'} · running ${counts.running ?? 0} · held ${counts.held ?? 0} · failed ${counts.failed ?? 0}`
     : 'runs unknown'
   // Agent-first pane law (owner, est-wk7l round): THE REST renders EVERY row —
   // no pane-level cap, no fold. paneModel is uncapped and the consumer must
