@@ -65,6 +65,17 @@ def fresh_run(name):
     return r
 
 
+def try_call(label, f, default=None):
+    """A RED-at-base run must not die on the missing API before it reaches the
+    integration seam: a TypeError here is the red, recorded as such, and the
+    script continues so the kill-during-third-spawn case still speaks."""
+    try:
+        return f()
+    except (TypeError, AttributeError) as e:
+        check(label + " — API absent (refusal gate not implemented)", False, str(e))
+        return default
+
+
 def unit_meta(r, **over):
     m = {"_run": r, "_stop": threading.Event(), "_procs_lock": threading.Lock(),
          "_retries_left": 6, "_procs": {}, "_spawn_n": {}}
@@ -80,7 +91,7 @@ run1 = fresh_run("u1")
 (run1 / "retry-window.json").write_text(json.dumps(
     {"n": {"deadline": time.time() + 5.0, "attempts": 2, "log": []}}))
 t0 = time.time()
-spent = wf._honor_retry_window(unit_meta(run1), "n", node={"id": "n"})
+spent = try_call("U1", lambda: wf._honor_retry_window(unit_meta(run1), "n", node={"id": "n"}))
 el = time.time() - t0
 check("U1 spent cap returns a refusal at the gate (no wait, no spawn)",
       isinstance(spent, dict) and spent.get("attempts") == 2 and el < 0.3,
@@ -91,7 +102,8 @@ run2 = fresh_run("u2")
 (run2 / "retry-window.json").write_text(json.dumps(
     {"n": {"deadline": time.time() - 5.0, "attempts": 1, "log": []}}))
 check("U2 attempts=1 < cap=2 passes the gate",
-      wf._honor_retry_window(unit_meta(run2), "n", node={"id": "n"}) is None)
+      try_call("U2", lambda: wf._honor_retry_window(unit_meta(run2), "n",
+                                                    node={"id": "n"}), "X") is None)
 check("U2b a node-less caller (no cap to consult) still passes",
       wf._honor_retry_window(unit_meta(run2), "n") is None)
 
@@ -100,24 +112,27 @@ check("U2b a node-less caller (no cap to consult) still passes",
 #    must NOT refuse (run 1's own third spawn rides a persisted attempts==cap
 #    save written right before its sleep — refusing there would under-grant).
 m3 = unit_meta(run1)
-first = wf._honor_retry_window(m3, "n", node={"id": "n"})
-second = wf._honor_retry_window(m3, "n", node={"id": "n"})
+first = try_call("U3", lambda: wf._honor_retry_window(m3, "n", node={"id": "n"}), "X")
+second = wf._honor_retry_window(m3, "n", node={"id": "n"}) \
+    if first != "X" else "X"
 check("U3 refusal is once-per-boot-per-key (in-boot respawns unaffected)",
       isinstance(first, dict) and second is None, f"{first!r} / {second!r}")
 
 # U4 the exhausted verdict carries the seeded lifetime count and the persisted
 #    log; a legacy window (no log key) still carries the count and class
-rec4 = wf._window_spent_record(unit_meta(fresh_run("u4")), "n", None,
-                               {"attempts": 2, "log": [{"attempt": 0, "error_class": "transport"},
-                                                       {"attempt": 1, "error_class": "transport"}]})
+rec4 = try_call("U4", lambda: wf._window_spent_record(
+    unit_meta(fresh_run("u4")), "n", None,
+    {"attempts": 2, "log": [{"attempt": 0, "error_class": "transport"},
+                            {"attempt": 1, "error_class": "transport"}]}), {})
 check("U4 refusal record: transport_exhausted, attempts=seed+1, log carried",
-      rec4["status"] == "failed" and rec4["error_class"] == "transport_exhausted"
-      and rec4["attempts"] == 3 and rec4.get("spawn") == 2
-      and len(rec4["attempts_log"]) == 2, json.dumps(rec4))
-rec4b = wf._window_spent_record(unit_meta(fresh_run("u4b")), "n", None, {"attempts": 2})
+      rec4.get("status") == "failed" and rec4.get("error_class") == "transport_exhausted"
+      and rec4.get("attempts") == 3 and rec4.get("spawn") == 2
+      and len(rec4.get("attempts_log") or []) == 2, json.dumps(rec4))
+rec4b = try_call("U4b", lambda: wf._window_spent_record(
+    unit_meta(fresh_run("u4b")), "n", None, {"attempts": 2}), {})
 check("U4b legacy window (no persisted log): count and class still right",
-      rec4b["attempts"] == 3 and rec4b["error_class"] == "transport_exhausted"
-      and rec4b["attempts_log"] == [], json.dumps(rec4b))
+      rec4b.get("attempts") == 3 and rec4b.get("error_class") == "transport_exhausted"
+      and rec4b.get("attempts_log") == [], json.dumps(rec4b))
 
 # U5 record-vs-ledger through the ladder: feeding the refusal record through
 #    _transient_retry must NEVER respawn and must keep the verdict + counts
@@ -127,13 +142,16 @@ run5 = fresh_run("u5")
            "log": [{"attempt": 0, "error_class": "transport"},
                    {"attempt": 1, "error_class": "transport"}]}}))
 calls5 = []
-rec5 = wf._transient_retry(unit_meta(run5, retry_backoff=[0.05, 0.05]), rec4,
+rec5 = wf._transient_retry(unit_meta(run5, retry_backoff=[0.05, 0.05]), dict(rec4),
                            lambda **kw: calls5.append(1) or {"status": "done"},
-                           "node", {"node": "n"}, node={"id": "n"})
+                           "node", {"node": "n"}, node={"id": "n"}) \
+    if rec4 else {}
 kept5 = json.loads((run5 / "retry-window.json").read_text())
 check("U5 seeded-cap settle: zero respawns, transport_exhausted, attempts=3, log=2",
-      rec5["status"] == "failed" and rec5["error_class"] == "transport_exhausted"
-      and rec5["attempts"] == 3 and len(rec5["attempts_log"]) == 2 and not calls5,
+      bool(rec4) and rec5.get("status") == "failed"
+      and rec5.get("error_class") == "transport_exhausted"
+      and rec5.get("attempts") == 3 and len(rec5.get("attempts_log") or []) == 2
+      and not calls5,
       json.dumps({k: rec5.get(k) for k in ("error_class", "attempts")}))
 check("U5b the spent cap stays persisted across the settle",
       kept5["n"]["attempts"] == 2 and len(kept5["n"]["log"]) == 2, json.dumps(kept5))
