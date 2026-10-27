@@ -134,9 +134,9 @@ try:
     r2 = mk_run("ho-off-2")
     wf.notify(r2, "run.failed", key="k1", graph=GRAPH)
     wf.notify(r2, "run.failed", key="k1", graph=GRAPH)
-    check("off+owner: wake ledger behaves as always (missing_endpoint, one row per attempt)",
-          len(jl(r2 / "wake.jsonl")) == 2
-          and all(x.get("error_class") == "missing_endpoint" for x in jl(r2 / "wake.jsonl")))
+    check("off+owner: wake ledger at-most-once (missing_endpoint settles: one row, no re-drive)",
+          len(jl(r2 / "wake.jsonl")) == 1
+          and jl(r2 / "wake.jsonl")[0].get("error_class") == "missing_endpoint")
     check("off: zero outbound rows, zero events lines, no outbound file at all",
           not (r2 / "outbound.jsonl").exists() and not (r2 / "events.jsonl").exists())
 

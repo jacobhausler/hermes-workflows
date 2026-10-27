@@ -2,15 +2,18 @@
 
 ## Unreleased
 
-- feat(audit): persisted launch locations are checked at submit and before each
-  machine-gate probe. PATH targets, interpreter script operands, and symlink
-  targets must exist under stable install roots. Cron shim creation and the
-  source-only post-exit hook refuse nonresident scripts before writing launch
-  orders. `scripts/argv_residency.py` audits home scripts, cron stores, workflow
-  gates, and post-exit registrations without executing or changing them.
-  `--guard` uses the same exit code and stays silent when clean. Dynamic shell
-  paths report unresolved. `WF_ARGV_STABLE_ROOTS` declares custom install roots.
-  Provenance atbrace:hw-cxk. Regression tests use temporary fixtures only.
+- feat(wake): the wake sender is TRI-STATE. `_wake_deliver()` returns
+  True/False/None = delivered / try-later / nowhere-ever (no reachable API
+  server configured, e.g. a headless host), the `wake.jsonl` row mirrors the
+  outcome (`delivered: true/false/null`), and the at-most-once marker rule
+  settles a transition instance only on True-or-None. A nowhere-ever
+  transition stops re-driving one ledger row per respawn instead of re-POSTing
+  a delivery that can never land; a headless no-op never stamps delivered, so
+  a later redrive with an endpoint still fires. Ledger parse settles only on
+  an explicit `delivered` key — legacy rows without one stay open. New test:
+  tests/test_wake_tristate_7rudf.py (hermetic — tmp run dirs + empty HERMES_HOME,
+  the live cron store and runs root are never touched; red at ddc30ec, green
+  after; includes the restart-redrive not-double-noticing case).
 
 - fix(consolidate): the bead close-effect gate now rides the partner-consolidation
   edge in `wf.py` — an unreadable bead store refuses the consolidate-partner step
@@ -348,6 +351,7 @@ Patch release: 37 merged PRs since v1.4.0 — the door-UX version handshake (nam
 - #478 — @jacobhausler.
 
 ### Notes
+
 
 - feat(cron): `cron_bridge.py` — the self-terminating watchdog tick's lifecycle
   (est-ip975, PR-1 of 3; dormant module, no caller yet). One core cron job

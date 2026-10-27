@@ -1128,10 +1128,14 @@ def _wake_opener():
     return urllib.request.build_opener(_NoRedirect)
 
 def _wake_ledger_read(run):
-    """(rows, delivered_ids) from wake.jsonl, fail-open on every shape the file
+    """(rows, settled_ids) from wake.jsonl, fail-open on every shape the file
     can be in (F3): unreadable (a directory), corrupt lines, non-dict records.
-    A probe read must never cost a decided run its exit."""
-    rows, delivered = [], set()
+    A probe read must never cost a decided run its exit. An instance SETTLES
+    (is never re-driven) only on an explicit ``delivered`` that is True-or-None:
+    delivered, or nowhere-ever. A false row is try-later and stays open — the
+    retry path must exist — and a row without the key (a legacy shape) settles
+    nothing."""
+    rows, settled = [], set()
     try:
         for l in (run / "wake.jsonl").read_text().splitlines():
             if not l.strip():
@@ -1143,11 +1147,12 @@ def _wake_ledger_read(run):
             if not isinstance(rec, dict):
                 continue
             rows.append(rec)
-            if rec.get("delivered") and rec.get("id"):
-                delivered.add(rec["id"])
+            if (rec.get("id") and "delivered" in rec
+                    and rec["delivered"] is not False):
+                settled.add(rec["id"])
     except Exception:
         pass
-    return rows, delivered
+    return rows, settled
 
 def _wake_append(run, rec):
     """Append one ledger row; a failure is loud on stderr (runner.log) and NEVER
@@ -1345,6 +1350,63 @@ def _wake_tid(run_name, event, disc):
         return _ob.instance_id(run_name, event, disc)
     return hashlib.sha256(f"{run_name}\0{event}\0{disc}".encode()).hexdigest()[:32]
 
+def _wake_deliver(rec, sid, text, tid):
+    """Attempt ONE wake POST; return the tri-state outcome: True = delivered
+    (2xx), False = try-later (the endpoint answered wrongly, redirected, timed
+    out, or the transport raised — the retry re-drives under the SAME instance
+    id), None = nowhere-ever (the host configures no reachable API server, so
+    no retry can ever land and the marker settles). Typed failure detail lands
+    on rec (error / error_class) for the probe row; never raises."""
+    ep = _wake_endpoint()
+    if ep is None:
+        rec["error"] = ("no reachable api_server (enable platforms.api_server"
+                        " + API_SERVER_KEY)")
+        rec["error_class"] = "missing_endpoint"     # B4: stable typed field
+        return None
+    url, secret, hdr = ep
+    try:
+        req = urllib.request.Request(
+            url,
+            data=json.dumps({"model": "hermes-agent", "stream": False,
+                             "messages": [{"role": "user", "content": text}]}).encode(),
+            headers={"Content-Type": "application/json", hdr: str(sid),
+                     "Idempotency-Key": tid,
+                     **({"Authorization": f"Bearer {secret}"} if secret else {})})
+        with _wake_opener().open(req, timeout=WAKE_TIMEOUT_S) as resp:
+            status = getattr(resp, "status", None) or resp.getcode()
+            if 300 <= status < 400:
+                # A redirect is NOT a delivery: nothing followed, nothing
+                # forwarded; probe undelivered so the retry re-drives under
+                # the SAME identity (same Idempotency-Key).
+                rec["error"] = f"HTTP {status} redirect not followed (undelivered)"
+                return False
+            if 200 <= status < 300:
+                return True
+            rec["error"] = f"HTTP {status}"
+            return False
+    except urllib.error.HTTPError as e:
+        rec["error"] = f"HTTP {e.code}"
+        return False
+    except (socket.timeout, TimeoutError):
+        # F5: a read timeout is NOT a delivery — we never saw a status line,
+        # so we cannot claim the turn was queued. Recording delivered=True
+        # here let the guard suppress the retry FOREVER: a transient gateway
+        # stall permanently lost the transition. Probe it as try-later; the
+        # next pass retries under the SAME instance id. At the pinned-core
+        # route, the measured in-window retry replays one started/completed
+        # turn under that Idempotency-Key; no claim is made after cache expiry
+        # or a core restart.
+        rec["error"] = "timeout: read window closed before a response (retryable)"
+        return False
+    except Exception as e:
+        # F4: a generic stdlib error can carry the bearer IN ITS MESSAGE —
+        # http.client raises ValueError("Invalid header value b'Bearer
+        # <secret>'") for a key with a newline. Record the TYPE plus the
+        # redacted message; never a raw repr, and the ledger redaction runs
+        # again at append time as a second net.
+        rec["error"] = _wake_safe(f"{type(e).__name__}: {e}")
+        return False
+
 # ---------- wake-burst coalescer with trailing re-check (est-zmizd) ----------
 # Ported shape: atbrace:hjs-epl / iw-recon hermes_workflows/hooks.py:50-179
 # (SYNTHESIS.md #12): a cross-process mtime-style debounce so a fan-out /
@@ -1439,9 +1501,12 @@ def notify(run, event, key=None, graph=None, node=None, refire=False):
     carries that identity as Idempotency-Key. At the pinned-core route, the measured
     in-window retry replays one started/completed owner turn; this is not a timeless
     dedupe claim across cache eviction, core restart, or an unmeasured delay.
-    Each ATTEMPT records in <run>/wake.jsonl (the probe); a duplicate of a
-    DELIVERED instance writes nothing. AUTHORITY LAW (r5): this function takes no
-    text parameter at all. The owner-facing content is generated here from
+    Each ATTEMPT records in <run>/wake.jsonl (the probe; its ``delivered``
+    row is TRI-STATE: true/false/null = delivered/try-later/nowhere-ever);
+    a duplicate of a SETTLED instance — delivered or nowhere-ever — writes
+    nothing, while a false row keeps the retry path open. AUTHORITY LAW (r5):
+    this function takes no text parameter at all. The owner-facing content is
+    generated here from
     _WAKE_TEMPLATES via _wake_owner_text(run.name, event) — an event outside the
     finite map wakes ONLY on the fixed catch-all body (est-jbcrw class-coverage
     law: never silent), so no call site can route ad-hoc or graph-authored
@@ -1519,9 +1584,9 @@ def notify(run, event, key=None, graph=None, node=None, refire=False):
         text = _wake_safe(text)          # second net: the fixed templates carry no secret,
         # but the run name is caller-supplied and every persisted field runs the redactor.
         tid = _wake_tid(run.name, event, disc)
-        _rows, delivered = _wake_ledger_read(run)
-        if tid in delivered:
-            return                       # delivered instance: zero rows, zero POSTs
+        _rows, settled = _wake_ledger_read(run)
+        if tid in settled:
+            return                       # settled (delivered or nowhere-ever): zero rows, zero POSTs
         reason = _wake_suppression(run, event, node, graph)
         if reason is not None:
             # RECORDED ONCE, NEVER RETRIED. The row is the receipt of a decision, not
@@ -1538,6 +1603,7 @@ def notify(run, event, key=None, graph=None, node=None, refire=False):
                                "delivered": False, "text": text})
             print(f"WORKFLOW_WAKE_SUPPRESSED {run.name} {event} {reason}")
             return
+
         try:                             # the door's authority-law stamp, for the trail
             proto = (run / "wake_protocol").read_text().strip()
         except OSError:
@@ -1546,57 +1612,7 @@ def notify(run, event, key=None, graph=None, node=None, refire=False):
                "id": tid, "wake_protocol": proto, "text": text}
         if event not in _WAKE_TEMPLATES:
             rec["catchall"] = True      # probe row is typed: template vs catch-all distinguishable
-        ep = _wake_endpoint()
-        if ep is None:
-            rec["delivered"] = False
-            rec["error"] = ("no reachable api_server (enable platforms.api_server"
-                            " + API_SERVER_KEY)")
-            rec["error_class"] = "missing_endpoint"     # B4: stable typed field
-            _wake_append(run, rec)
-            return
-        url, secret, hdr = ep
-        try:
-            req = urllib.request.Request(
-                url,
-                data=json.dumps({"model": "hermes-agent", "stream": False,
-                                 "messages": [{"role": "user", "content": text}]}).encode(),
-                headers={"Content-Type": "application/json", hdr: str(sid),
-                         "Idempotency-Key": tid,
-                         **({"Authorization": f"Bearer {secret}"} if secret else {})})
-            with _wake_opener().open(req, timeout=WAKE_TIMEOUT_S) as resp:
-                status = getattr(resp, "status", None) or resp.getcode()
-                if 300 <= status < 400:
-                    # A redirect is NOT a delivery: nothing followed, nothing
-                    # forwarded; probe undelivered so the retry re-drives under
-                    # the SAME identity (same Idempotency-Key).
-                    rec["delivered"] = False
-                    rec["error"] = f"HTTP {status} redirect not followed (undelivered)"
-                else:
-                    rec["delivered"] = 200 <= status < 300
-                    if not rec["delivered"]:
-                        rec["error"] = f"HTTP {status}"
-        except urllib.error.HTTPError as e:
-            rec["delivered"] = False
-            rec["error"] = f"HTTP {e.code}"
-        except (socket.timeout, TimeoutError):
-            # F5: a read timeout is NOT a delivery — we never saw a status line,
-            # so we cannot claim the turn was queued. Recording delivered=True
-            # here let the guard suppress the retry FOREVER: a transient gateway
-            # stall permanently lost the transition. Probe it as undelivered; the
-            # next pass retries under the SAME instance id. At the pinned-core
-            # route, the measured in-window retry replays one started/completed
-            # turn under that Idempotency-Key; no claim is made after cache expiry
-            # or a core restart.
-            rec["delivered"] = False
-            rec["error"] = "timeout: read window closed before a response (retryable)"
-        except Exception as e:
-            # F4: a generic stdlib error can carry the bearer IN ITS MESSAGE —
-            # http.client raises ValueError("Invalid header value b'Bearer
-            # <secret>'") for a key with a newline. Record the TYPE plus the
-            # redacted message; never a raw repr, and the ledger redaction runs
-            # again at append time as a second net.
-            rec["delivered"] = False
-            rec["error"] = _wake_safe(f"{type(e).__name__}: {e}")
+        rec["delivered"] = _wake_deliver(rec, sid, text, tid)   # tri-state row mirrors the outcome
         _wake_append(run, rec)
     except Exception as e:                       # fail-open encompasses PREPARATION (F3)
         try:
