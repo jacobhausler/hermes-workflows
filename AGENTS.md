@@ -128,7 +128,7 @@ Rules that bite:
   once, logged — `provider_400` stands only when nothing clamps; then read the
   server's message and pick from that list.
 - **`after` orders AND injects.** Every direct parent's committed output lands under
-  `## Inputs` automatically (8 KB per parent; assembled-section budget knob `WORKFLOW_INPUTS_BUDGET` — refused at spawn, never silently truncated; est-x92v7 — detail in references/grammar.md). Use `inputs:["a.key"]` only to pick a
+  `## Inputs` automatically (8 KB per parent; an assembled-section budget applies — see references/grammar.md). Use `inputs:["a.key"]` only to pick a
   dotted path or a non-parent ancestor, or `fanout.items_from:"a.items"`. A missing
   path fails at spawn — the one exception (#473): an explicit `inputs:` ref whose
   head committed `skipped` resolves to a labelled skipped-sentinel block carrying the
