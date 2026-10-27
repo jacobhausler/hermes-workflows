@@ -1,6 +1,7 @@
 #!/bin/bash
-# CI-parity gate: replicates ci.yml gates on the cluster (ubuntu:24.04 = py3.12+node22,
-# closest image to ubuntu-latest). One job per lane HEAD; verdict cached.
+# CI-parity gate: replicates ci.yml gates on the cluster (ubuntu:24.04, closest
+# image to ubuntu-latest; the job script it submits carries the exact interpreter
+# and pin, parsed from ci.yml — est-rmsro). One job per lane HEAD; verdict cached.
 # usage: ci-parity.sh <lane-dir> <bead>
 # exit: 0 green | 1 red | 2 running | 3 submit-failed
 set -u

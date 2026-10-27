@@ -1,24 +1,32 @@
 #!/bin/bash
-# In-lane CI-parity v3: mirrors .github/workflows/ci.yml exactly (pinned hermes
-# editable install, suite, scrub, plugin validate). Baseline admission: the
+# In-lane CI-parity v3: mirrors .github/workflows/ci.yml exactly — the pin and
+# the interpreter are PARSED from ci.yml at run time (est-rmsro), never hardcoded
+# here, so a repin of the workflow cannot leave this mirror stale. Gates: pinned
+# hermes editable install, suite, scrub, plugin validate. Baseline admission: the
 # suite runs on the base SHA first; lane reds are only introduced reds.
 set -u
 export DEBIAN_FRONTEND=noninteractive PIP_BREAK_SYSTEM_PACKAGES=1
 apt-get update -qq >/dev/null 2>&1
-apt-get install -y -qq -t noble python3.12 python3.12-venv nodejs git curl ca-certificates >/dev/null 2>&1 || \
-  apt-get install -y -qq python3 python3-venv nodejs git curl ca-certificates >/dev/null 2>&1
-PY=python3.12; command -v python3.12 >/dev/null || PY=python3
-$PY -c "import yaml" 2>/dev/null || $PY -m pip install -q pyyaml >/dev/null 2>&1 || true
 git config --global --add safe.directory '*' || true
 cd "$(dirname "$0")/.."
+# single source of truth: parse pin + interpreter from ci.yml (est-rmsro)
+HERMES_PIN="$(sed -n 's/^[[:space:]]*HERMES_PIN:[[:space:]]*\([0-9a-f]\{7,\}\).*/\1/p' .github/workflows/ci.yml | head -1)"
+[ -n "$HERMES_PIN" ] || { echo "FATAL: HERMES_PIN not parseable from .github/workflows/ci.yml"; exit 1; }
+PYV="$(sed -n 's/^[[:space:]]*python-version:[[:space:]]*"\{0,1\}\([0-9.]*\)"\{0,1\}.*/\1/p' .github/workflows/ci.yml | head -1)"
+PY=python3
+if [ -n "$PYV" ]; then
+  apt-get install -y -qq "python${PYV}" "python${PYV}-venv" nodejs git curl ca-certificates >/dev/null 2>&1 && PY="python${PYV}"
+fi
+command -v "$PY" >/dev/null || { echo "WARN: python${PYV:-?} unavailable in the image — suite arms ride the image-default interpreter"; PY=python3; }
+apt-get install -y -qq "$PY" "${PY}-venv" nodejs git curl ca-certificates >/dev/null 2>&1 || true
+$PY -c "import yaml" 2>/dev/null || $PY -m pip install -q pyyaml >/dev/null 2>&1 || true
 git init -q 2>/dev/null; git config user.email ci@local; git config user.name ci
 BASE="${BASE_SHA:-$(git rev-parse HEAD~1 2>/dev/null || true)}"
 git add -A -f >/dev/null 2>&1; git commit -qm "ci snapshot"
 git update-ref refs/remotes/origin/main HEAD
 [ -n "$BASE" ] && git tag ci-base "$BASE" 2>/dev/null || true
 
-# pinned hermes-agent, editable — same install as ci.yml (line 69-72)
-HERMES_PIN=d337b736aa1e8ebecfab043842d13e4a2d2f48a3
+# pinned hermes-agent, editable — same install as ci.yml (pin parsed above)
 git clone -q --filter=blob:none https://github.com/NousResearch/hermes-agent /opt/hermes-agent
 git -C /opt/hermes-agent checkout -q $HERMES_PIN || git -C /opt/hermes-agent checkout -q main
 $PY -m venv /opt/hv

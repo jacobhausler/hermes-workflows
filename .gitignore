@@ -31,3 +31,7 @@ tests/probe_*/
 # transient scratch from routing tests + rerun-shim (never committable; SCRUB_LIST pairs)
 .routing-test-*/
 .wf-rerun-*/
+# fanout/ci-parity job scripts are copies of ue/ci-template.sh written into lanes;
+# committed copies were litter (est-rmsro) — only the generator is tracked
+ci/*.sh
+!ci/ci-parity.sh
