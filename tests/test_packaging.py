@@ -208,6 +208,13 @@ def main() -> None:
                   root + "approval_bridge.py" in members)
             check("docs/native-hooks.md ships in the ZIP (the p3/p5 discoverability doc)",
                   root + "docs/native-hooks.md" in members)
+            # est-fi21a (#538 peer miss): the glob never matched conftest.py, so the
+            # ZIP shipped a pytest-capable suite WITHOUT the est-z2heo sandbox floor —
+            # pytest at an unpacked root re-exposed the operator-state-write incident
+            # class. Membership proven here; the binding proof (floor + ScriptItem
+            # subprocesses at an unpacked root) rides the acceptance run.
+            check("tests/conftest.py ships in the ZIP (the sandbox floor binds at an unpacked root)",
+                  root + "tests/conftest.py" in members)
             checksum_text = archive.read(root + "SHA256SUMS").decode("utf-8")
             rows = [line.split("  ", 1) for line in checksum_text.splitlines()]
             check("SHA256SUMS verifies every pinned source entry",

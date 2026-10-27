@@ -178,6 +178,15 @@ INCLUDE_FILES = (
     "tests/fake_hermes.py",
     "tests/wf_test_isolation.py",
     "tests/wf_test_markers.py",  # est-jue3: shared parseable-content marker waits, imported by the shipped tests (est-4vnq finding-4 shape: an unshipped helper kills the suite)
+    # est-fi21a (#538 peer miss): the est-z2heo autouse sandbox floor ships.
+    # tests/test_*.py glob never matches it, so the ZIP carried a pytest-capable
+    # suite WITHOUT the env floor: `pytest` at an unpacked root pinned no sandbox,
+    # script-style modules pinned env at import, and the bare proof test refuses
+    # that Class C shape for exactly the operator-state-write incident it names.
+    # Shipped, the conftest binds the floor at import and turns every merge-gate
+    # script into a floored subprocess item — the suite is safe at an unpacked
+    # root. ZIP membership is pinned by tests/test_packaging.py.
+    "tests/conftest.py",
     "tests/fake_runner.py",  # shared fake-runner helper for door-scan fixtures — same unshipped-helper shape as wf_test_markers above
     "tests/fixtures/mac-source.txt",
     "tests/fixtures/seat_acquire_driver.py",   # est-g2xx: seat-semaphore driver
