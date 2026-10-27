@@ -161,7 +161,8 @@ Rules that bite:
 A human gate holds until `release`; the desktop view shows the question and hands
 the answer back to the owning session. `hold_timeout` + `default_option` makes a
 decorative gate release itself (`gate.auto_released`); `hold_timeout` alone logs
-`gate.expired` once and keeps holding. Fan-out `quorum` (optional) races: once N
+`gate.expired` once and keeps holding, bounded by the park-watchdog floor (a
+persisted time-box, default 6 h, event `gate.watchdog_settled`). Fan-out `quorum` (optional) races: once N
 succeed, the rest are cancelled; without it the fan-out waits for every item;
 `goal` is optional when items carry their own. Machine gates: `wait:{"wait_s":N}` or
 `wait:{"until_argv":[…],"every_s":60,"timeout_s":3600}`. Template guarantees beside author-run receipts and the laws each exercises: [references/example-tour.md](references/example-tour.md). Tested examples:

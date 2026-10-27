@@ -2,21 +2,34 @@
 
 ## Unreleased
 
-- feat(watchdog): the watchdog tick body lands on PR-1's lifecycle and the
-  door starts using it (est-ip975 PR-2, riding #534). Every accepted launch arms
-  the singleton at the door's post-flock tail via `cron_bridge.ensure_tick`
-  (find-by-name, create-once;
-  a core-less host or a partial-tree copy degrades to a fail-open
-  `armed: false` and never fails the launch); the tick (`wf.py tick`, reached
-  by PR-1's shim) re-drives every dead-runner run in the resolved root
-  through the door's ONE respawn bridge (`_respawn_runner`, flock admission
-  makes a raced spawn a harmless loser), stays armed while any run is active,
-  and the tick body ITSELF removes the job when the active set drains - idle
-  cost is exactly zero wakes. Revival scope mirrors `act_wait`
-  (pending/interrupted; verdicts are never revived).
-  Tests: tests/test_runner_watchdog_ip975.py (arm, revive-in-one-tick,
-  drain-self-delete, double-arm idempotence, core-less fail-open; fake
-  `cron.jobs` injected at cron_bridge's seam, the live store never touched).
+<<<<<<< ours
+- feat(wake): the wake sender is TRI-STATE. `_wake_deliver()` returns
+  True/False/None = delivered / try-later / nowhere-ever (no reachable API
+  server configured, e.g. a headless host), the `wake.jsonl` row mirrors the
+  outcome (`delivered: true/false/null`), and the at-most-once marker rule
+  settles a transition instance only on True-or-None. A nowhere-ever
+  transition stops re-driving one ledger row per respawn instead of re-POSTing
+  a delivery that can never land; a headless no-op never stamps delivered, so
+  a later redrive with an endpoint still fires. Ledger parse settles only on
+  an explicit `delivered` key — legacy rows without one stay open. New test:
+  tests/test_wake_tristate_7rudf.py (hermetic — tmp run dirs + empty HERMES_HOME,
+  the live cron store and runs root are never touched; red at ddc30ec, green
+  after; includes the restart-redrive not-double-noticing case).
+=======
+- feat(park-watch): parked work gets a persisted blocked-since clock and a
+  system floor. Every human-gate hold (with or without `hold_timeout`) and
+  every machine-probe park now ticks a watchdog whose state lives in the
+  gate's own persisted mirror (`held.json` / `parked.json`), so a runner
+  restart replays the elapsed window instead of buying a fresh park. N
+  consecutive dispatcher-failure strikes (a probe that cannot launch; an
+  owner wake that comes back undelivered) or the time-box (default 6 h)
+  settle the park failed loudly: event `gate.watchdog_settled`, plus the
+  run's one-shot `run.failed` wake, instead of polling forever. A probe that ran
+  and honestly reported not-ready never strikes; a clean wake clears the
+  clock. Tunable via owner setting `park_watch` (`{timeout_s, strikes}`;
+  `false` disables). Tests: tests/test_park_watchdog.py.
+  (est-hf4wq, peer atbrace:hw-36y)
+>>>>>>> theirs
 
 - fix(consolidate): the bead close-effect gate now rides the partner-consolidation
   edge in `wf.py` — an unreadable bead store refuses the consolidate-partner step

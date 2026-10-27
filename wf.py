@@ -1531,7 +1531,8 @@ def notify(run, event, key=None, graph=None, node=None, refire=False):
     nothing further, so a suppression is recorded once and never retried. The
     operator mirror still fires (it is the operator's endpoint, not an owner
     turn), and a notice with no suppression reason is byte-identical to before
-    this law."""
+    this law. Returns the attempt's verdict ("delivered" | "undelivered" | "skipped") for the park watchdog's strike feed (an undelivered wake is one dispatcher strike). The never-raises law is unchanged."""
+
     try:
         if not run.is_dir():
             return
@@ -1540,7 +1541,8 @@ def notify(run, event, key=None, graph=None, node=None, refire=False):
         # and a trailing re-check re-drives it once the window closes.
         if event in _WAKE_COALESCE and not _wake_coalesce_check(
                 run, event, key, refire=refire):
-            return
+            return "coalesced"
+
         # P1: the operator mirror fires at notify()'s OWN point and fail-opens inside
         # mirror(). Owner-null runs still mirror — the endpoint is the operator's, not
         # the session's, and events.jsonl carries the transition either way.
@@ -1553,13 +1555,13 @@ def notify(run, event, key=None, graph=None, node=None, refire=False):
         # {session_id, ...}; any other truthy value (legacy strings in older/fixed-up
         # run.json files) is not a delivery target — degrade silently, never crash.
         if not isinstance(owner, dict):
-            return
+            return "skipped"
         sid = owner.get("session_id")
         if not sid:
-            return
+            return "skipped"
         disc = _wake_identity(run, event, key, graph)
         if disc is None:
-            return                       # unresolvable identity: silent, never a duplicate
+            return "skipped"                   # unresolvable identity: silent, never a duplicate
         if event not in _WAKE_EVENTS:
             # CLASS GAP (est-jbcrw): a call site woke an event outside the
             # registry — wake on the fixed catch-all body anyway and shout on
@@ -1586,7 +1588,7 @@ def notify(run, event, key=None, graph=None, node=None, refire=False):
         tid = _wake_tid(run.name, event, disc)
         _rows, settled = _wake_ledger_read(run)
         if tid in settled:
-            return                       # settled (delivered or nowhere-ever): zero rows, zero POSTs
+            return "delivered"           # settled (delivered or nowhere-ever): zero rows, zero POSTs
         reason = _wake_suppression(run, event, node, graph)
         if reason is not None:
             # RECORDED ONCE, NEVER RETRIED. The row is the receipt of a decision, not
@@ -1597,12 +1599,12 @@ def notify(run, event, key=None, graph=None, node=None, refire=False):
             # and records its own one row — legible forever in the probe, which is
             # the difference between a suppression and a hole.
             if any(r.get("id") == tid and r.get("suppressed") for r in _rows):
-                return
+                return "skipped"
             _wake_append(run, {"ts": now(), "event": event, "run_id": run.name,
                                "owner": owner, "id": tid, "suppressed": reason,
                                "delivered": False, "text": text})
             print(f"WORKFLOW_WAKE_SUPPRESSED {run.name} {event} {reason}")
-            return
+            return "skipped"   # park-watch: a suppressed wake IS a dispatcher strike (the void is not a hold)
 
         try:                             # the door's authority-law stamp, for the trail
             proto = (run / "wake_protocol").read_text().strip()
@@ -1614,6 +1616,15 @@ def notify(run, event, key=None, graph=None, node=None, refire=False):
             rec["catchall"] = True      # probe row is typed: template vs catch-all distinguishable
         rec["delivered"] = _wake_deliver(rec, sid, text, tid)   # tri-state row mirrors the outcome
         _wake_append(run, rec)
+        # park-watch verdict feed on the est-7rudf tri-state: delivered -> nothing
+        # to see; False -> the ONE strike class; None (nowhere-ever) -> bare — a
+        # host that can never receive owner turns is by-design strike-free.
+        _d = rec.get("delivered")
+        if _d is True:
+            return "delivered"
+        if _d is False:
+            return "undelivered"
+        return
     except Exception as e:                       # fail-open encompasses PREPARATION (F3)
         try:
             _wake_append(run, {"ts": now(), "event": event, "run_id": run.name,
@@ -1622,7 +1633,7 @@ def notify(run, event, key=None, graph=None, node=None, refire=False):
                                "error_class": "notify_prep"})
         except Exception:
             pass
-        return
+        return "undelivered"
 
 _LOCK_FD = None  # kept open for process lifetime except a terminal handoff fence
 
@@ -9271,6 +9282,44 @@ def build_inputs(run, node, outputs):
 
 # ---------- machine-answered gates (P4, jury form) ----------
 
+_PW_UNSET = object()
+_PW_MOD = _PW_UNSET
+
+
+def _park_watch_mod():
+    """Lazy guarded import of the park watchdog kernel (stdlib-only sibling;
+    byte-identical degradation when the file is absent or broken)."""
+    global _PW_MOD
+    if _PW_MOD is _PW_UNSET:
+        try:
+            import park_watch
+            _PW_MOD = park_watch
+        except Exception:
+            _PW_MOD = None
+    return _PW_MOD
+
+
+def _park_watch_cfg():
+    pw = _park_watch_mod()
+    return pw.config(wfcommon) if pw is not None else None
+
+
+def _settle_park_hold(run, gate, byid, hm, reason):
+    """Settle a parked human-gate hold failed, loudly (park watchdog). The loud
+    notice is the run's own run.failed wake (B3 identity, one-shot by law); this
+    commits the typed gate death and the events.jsonl verdict line."""
+    watch = hm.get("watch") or {}
+    _bs = watch.get("blocked_since")
+    held_s = int(time.time() - _bs) if isinstance(_bs, (int, float)) else -1
+    err = (f"park-watchdog: human gate {gate['id']} held for {held_s}s"
+           + (f" with {watch.get('strikes')} consecutive undelivered owner wakes"
+              if reason == "strikes" else "")
+           + "; settling the gate failed instead of holding forever")
+    save_node(run, gate, byid, {"status": "failed", "error": err})
+    log(run, "gate.watchdog_settled", node=gate["id"], reason=reason, kind="human-hold",
+        strikes=int(watch.get("strikes", 0) or 0), blocked_s=held_s)
+
+
 def park_gate(run, run_id, gate, byid, consume_markers):
     """Park on gate.wait in-process: timer (wait_s) and/or a fixed argv check re-run
     every every_s until exit 0. Zero tokens. Returns 'released' | 'failed' | 'stopped'
@@ -9287,9 +9336,23 @@ def park_gate(run, run_id, gate, byid, consume_markers):
     attempt, last = 0, {}
     pk_path = run / "gates" / f"{gate['id']}.parked.json"
     (run / "gates").mkdir(exist_ok=True)
+    pw_cfg = _park_watch_cfg() if kind == "check" else None
+    watch = {}
+    if pw_cfg is not None:
+        # The persisted clock: a re-park inherits the elapsed window (a runner
+        # restart must not buy a fresh park), and an efp-invalid mirror is a
+        # different park and starts clean.
+        _prev = jload(pk_path, {}) or {}
+        if record_efp_valid(_prev, byid, gate, "_def") and isinstance(_prev.get("watch"), dict):
+            watch = {k: v for k, v in _prev["watch"].items()
+                     if k in ("blocked_since", "strikes")}
+        if not isinstance(watch.get("blocked_since"), (int, float)):
+            watch = {"blocked_since": t0, "strikes": 0}
     def mirror(**extra):
         rec = {"_def": efp(byid, gate), "fp_rule_version": FP_RULE_VERSION, "kind": kind, "attempt": attempt, "started": t0,
                "deadline": deadline, "next_at": None, **last, **extra}
+        if watch:
+            rec["watch"] = dict(watch)
         tmp = pk_path.with_suffix(".tmp"); tmp.write_text(json.dumps(rec)); os.replace(tmp, pk_path)
     def answer(rec):
         rec = {**rec, "_def": efp(byid, gate), "fp_rule_version": FP_RULE_VERSION, "_machine": True,
@@ -9299,7 +9362,26 @@ def park_gate(run, run_id, gate, byid, consume_markers):
     log(run, "gate.parked", node=gate["id"], kind=kind, wait_s=w.get("wait_s"),
         every_s=every if kind == "check" else None, timeout_s=deadline - t0)
     mirror()
+    def settle_watchdog(reason):
+        out = {"answer": None, "wait": "watchdog", "reason": reason, "kind": kind,
+               "attempt": attempt, **last}
+        err = (f"park-watchdog: gate {gate['id']} parked ({kind}) for "
+               f"{int(time.time() - watch['blocked_since'])}s"
+               + (f" with {watch.get('strikes')} consecutive dispatcher failures"
+                  if reason == "strikes" else "")
+               + "; settling the gate failed instead of polling forever")
+        save_node(run, gate, byid, {"status": "failed", "error": err, "output": out})
+        log(run, "gate.watchdog_settled", node=gate["id"], reason=reason, kind=kind,
+            attempt=attempt, strikes=int(watch.get("strikes", 0) or 0),
+            blocked_s=int(time.time() - watch["blocked_since"]))
+        return "failed"
     next_check = wait_until
+    if pw_cfg is not None:
+        _r = _park_watch_mod().tick(watch, time.time(), timeout_s=pw_cfg[0],
+                                    strikes_max=pw_cfg[1])
+        mirror()
+        if _r:
+            return settle_watchdog(_r)      # aged clock: fail before re-probing
     while True:
         m = consume_markers()
         if m in ("stopped", "reloaded"):
@@ -9347,12 +9429,24 @@ def park_gate(run, run_id, gate, byid, consume_markers):
             except Exception as e:
                 last = {"last_exit": None, "stdout_tail": "", "stderr_tail": f"{type(e).__name__}: {e}"}
             if last.get("last_exit") == 0:
+                watch.clear()               # clean wake: the clock dies with the park
                 answer({"answer": "check", "attempt": attempt, "waited_s": int(now - t0), **last})
                 log(run, "gate.released", node=gate["id"], by="check", attempt=attempt)
                 mirror(state="released")
                 return "released"
             next_check = now + every
-            mirror(next_at=next_check)
+            if pw_cfg is not None:
+                # A probe that could not be dispatched AT ALL (exit is None: the
+                # launch failed or the probe hung) strikes; a probe that ran and
+                # honestly reported "not ready" (exit != 0) is a legitimate park.
+                _r = _park_watch_mod().tick(watch, time.time(),
+                                            dispatch_failed=(last.get("last_exit") is None),
+                                            timeout_s=pw_cfg[0], strikes_max=pw_cfg[1])
+                mirror(next_at=next_check)
+                if _r:
+                    return settle_watchdog(_r)
+            else:
+                mirror(next_at=next_check)
         time.sleep(min(2.0, max(0.2, next_check - time.time())))
 
 # ---------- main loop ----------
@@ -10354,7 +10448,33 @@ def main(run_id):
                                    or not isinstance(hm.get("since"), (int, float))):
                 hm = {"since": time.time(), "_def": hdef, "fp_rule_version": FP_RULE_VERSION}
                 hf.write_text(json.dumps(hm))
-            notify(run, "gate.held", key=f"{gate['id']}:{hdef}", node=gate["id"])
+            _wv = notify(run, "gate.held", key=f"{gate['id']}:{hdef}", node=gate["id"])
+            pw_cfg = _park_watch_cfg()
+            if pw_cfg is not None:
+                # Park watchdog: an un-woken, un-answered hold must not hang the
+                # run forever (the 9.3 h tour-demo burn shape). The clock lives
+                # in this gate's own held record, so a runner restart replays
+                # the elapsed window; an undelivered owner wake is one strike.
+                if not record_efp_valid(hm, rs.byid, gate, "_def"):
+                    hm = {}                      # stale/amended def: a fresh hold
+                watch = hm.get("watch")
+                if not isinstance(watch, dict):
+                    watch = hm["watch"] = {}
+                if not isinstance(watch.get("blocked_since"), (int, float)):
+                    _seed = hm.get("since") if isinstance(hm.get("since"), (int, float)) else time.time()
+                    watch["blocked_since"] = hm.setdefault("since", _seed)
+                    watch["strikes"] = 0
+                hm["_def"] = hdef
+                hm["fp_rule_version"] = FP_RULE_VERSION
+                _r = _park_watch_mod().tick(watch, time.time(),
+                                            dispatch_failed=(_wv in ("undelivered", "skipped")),  # #561 law: a suppressed wake is one dispatcher strike; owner-null None stays strike-free by design
+                                            timeout_s=pw_cfg[0], strikes_max=pw_cfg[1])
+                hf.write_text(json.dumps(hm))
+                if _r:
+                    _settle_park_hold(run, gate, rs.byid, hm, _r)
+                    continue     # top of loop: the failed gate routes the run out loudly
+
+
             if ht is None:
                 # PR#97 lost-handoff fix: the owner turn runs synchronously inside
                 # notify(). A release/stop/amend can therefore land while this runner
@@ -10371,7 +10491,9 @@ def main(run_id):
             # runner restarts via gates/<id>.held.json (efp-stamped). At expiry, with
             # default_option the gate releases itself exactly like a human answer;
             # without one it logs gate.expired ONCE (loud, never silent) and keeps
-            # holding — tour-demo burned 9.3 h on "either button is fine".
+            # holding — tour-demo burned 9.3 h on "either button is fine". The
+            # keep-holding wait rides the park watchdog above: its persisted
+            # time-box (default 6 h) settles the hold failed, loudly.
             while True:
                 m = consume_markers()
                 if m == "stopped": return "stopped"
@@ -10393,6 +10515,15 @@ def main(run_id):
                         hm["expired"] = True
                         hf.write_text(json.dumps(hm))
                         log(run, "gate.expired", node=gate["id"], held_s=held_s)
+                if pw_cfg is not None:
+                    # The keep-holding wait carries the same persisted time-box:
+                    # an expired hold without a default_option still has a floor.
+                    _r = _park_watch_mod().tick(hm["watch"], time.time(),
+                                                timeout_s=pw_cfg[0], strikes_max=pw_cfg[1])
+                    if _r:
+                        hf.write_text(json.dumps(hm))
+                        _settle_park_hold(run, gate, rs.byid, hm, _r)
+                        break
                 time.sleep(0.5)
             continue   # top of loop: the answer reads exactly like a human release
         _ab = _abort_flag(run)

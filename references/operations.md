@@ -56,8 +56,10 @@ Desktop cards use `::workflow{id="<run_id>"}` and are optional presentation. Pla
   reporting bytes, budget and read/partial/unavailable status. Partial lines are
   excluded. Ordinary list/census projections skip telemetry they do not return.
 - `hold` uses the fingerprint-valid held marker. Missing starts remain unknown.
-  No `hold_timeout` means `unbounded`. An expired timeout without `default_option`
-  **keeps holding**; expiration is not cancellation, release or an answer.
+  No `hold_timeout` means no author ceiling; the park-watchdog box (default 6 h,
+  owner setting `park_watch`, persisted clock) still bounds every hold. An expired
+  timeout without `default_option` **keeps holding until the box settles it
+  failed**; expiration is not cancellation, release or an answer.
 
 Run `accounting` sums observed child-seconds across the current graph's nodes,
 items and attempts. Work from removed nodes is outside this current-node fold.
