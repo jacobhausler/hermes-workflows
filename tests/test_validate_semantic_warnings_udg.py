@@ -73,21 +73,24 @@ class ValidateSemanticWarnings(unittest.TestCase):
         ])
         self.assertNotIn("warnings", result)
 
-    def test_missing_probe_path_warns(self):
-        result = self.validate([
+    def test_missing_probe_path_refused_at_door(self):
+        # est-7ncu0 promoted the dead-probe class from advisory to refusal (door
+        # 1.4.3): a persisted launch order that cannot resolve is a written lie.
+        result = json.loads(self.door.handle({"action": "validate", "graph": {"name": "semwarn", "nodes": [
             {"id": "w", "type": "gate", "question": "up?", "options": ["yes", "no"],
              "wait": {"until_argv": ["/nonexistent-hwudg/probe"]}},
-        ])
-        warnings = result.get("warnings", [])
-        self.assertEqual(len(warnings), 1, result)
-        self.assertEqual(warnings[0]["node"], "w")
-        self.assertEqual(warnings[0]["field"], "wait.until_argv")
-        self.assertIn("/nonexistent-hwudg/probe", warnings[0]["msg"])
+        ]}}))
+        self.assertIs(result.get("ok"), False, result)
+        self.assertEqual(result["error_class"], "graph_invalid")
+        self.assertIn("/nonexistent-hwudg/probe", result["error"])
+        self.assertIn("resident", result["error"])
 
     def test_executable_probe_does_not_warn(self):
+        # est-7ncu0: interpreter wrapper probes need an explicit resident script
+        # argv; a bare system binary is the clean shape under the residency door.
         result = self.validate([
             {"id": "w", "type": "gate", "question": "up?", "options": ["yes", "no"],
-             "wait": {"until_argv": [sys.executable, "--version"]}},
+             "wait": {"until_argv": ["/bin/true"]}},
         ])
         self.assertNotIn("warnings", result)
 
@@ -111,6 +114,9 @@ class ValidateSemanticWarnings(unittest.TestCase):
         self.assertNotIn("warnings", result)
 
     def test_all_three_classes_warn_together_still_ok(self):
+        # est-7ncu0: the dead-probe class is a door REFUSAL now, so an ok-graph
+        # co-display carries only the two surviving advisories against a resident
+        # probe (the refusal itself is pinned in test_missing_probe_path_refused).
         result = self.validate([
             {"id": "a", "type": "agent", "goal": "Judge",
              "schema": {"type": "object", "required": ["verdict"],
@@ -118,12 +124,12 @@ class ValidateSemanticWarnings(unittest.TestCase):
             {"id": "g", "type": "gate", "after": ["a"], "question": "go?",
              "options": ["yes", "no"], "when": "out.a.ship == true"},
             {"id": "w", "type": "gate", "question": "up?", "options": ["yes", "no"],
-             "wait": {"until_argv": ["/nonexistent-hwudg/probe"]}},
+             "wait": {"until_argv": ["/bin/true"]}},
             {"id": "f", "type": "agent", "goal": "x {item}",
              "fanout": {"items": ["a", "b", "c"], "quorum": 2}},
         ])
         self.assertEqual({row["field"] for row in result["warnings"]},
-                         {"when", "wait.until_argv", "fanout.quorum"})
+                         {"when", "fanout.quorum"})
 
 
 if __name__ == "__main__":
