@@ -121,7 +121,7 @@ check("U3 refusal is once-per-boot-per-key (in-boot respawns unaffected)",
 # U4 the exhausted verdict carries the seeded lifetime count and the persisted
 #    log; a legacy window (no log key) still carries the count and class
 rec4 = try_call("U4", lambda: wf._window_spent_record(
-    unit_meta(fresh_run("u4")), "n", None,
+    unit_meta(fresh_run("u4")), {"id": "n"}, "n", None,
     {"attempts": 2, "log": [{"attempt": 0, "error_class": "transport"},
                             {"attempt": 1, "error_class": "transport"}]}), {})
 check("U4 refusal record: transport_exhausted, attempts=seed+1, log carried",
@@ -129,7 +129,7 @@ check("U4 refusal record: transport_exhausted, attempts=seed+1, log carried",
       and rec4.get("attempts") == 3 and rec4.get("spawn") == 2
       and len(rec4.get("attempts_log") or []) == 2, json.dumps(rec4))
 rec4b = try_call("U4b", lambda: wf._window_spent_record(
-    unit_meta(fresh_run("u4b")), "n", None, {"attempts": 2}), {})
+    unit_meta(fresh_run("u4b")), {"id": "n"}, "n", None, {"attempts": 2}), {})
 check("U4b legacy window (no persisted log): count and class still right",
       rec4b.get("attempts") == 3 and rec4b.get("error_class") == "transport_exhausted"
       and rec4b.get("attempts_log") == [], json.dumps(rec4b))

@@ -2806,12 +2806,16 @@ def _retry_window_load(run):
     v = jload(run / RETRY_WINDOW_FILE, {})
     return v if isinstance(v, dict) else {}
 
-def _retry_window_save(run, key, deadline, attempts):
+def _retry_window_save(run, key, deadline, attempts, entries=None):
     if key is None or run is None:
         return
     with _WINDOW_LOCK:
         w = _retry_window_load(run)
-        w[key] = {"deadline": float(deadline), "attempts": int(attempts)}
+        # est-9qhpf (B1): the ledger rides the clock — the entries persisted
+        # here are what a refusal boot commits as attempts_log, so the
+        # record-vs-ledger agreement (est-ja41) survives the restart seam.
+        w[key] = {"deadline": float(deadline), "attempts": int(attempts),
+                  "log": list(entries or [])}
         tmp = run / (RETRY_WINDOW_FILE + ".tmp")
         tmp.write_text(json.dumps(w))
         os.replace(tmp, run / RETRY_WINDOW_FILE)
@@ -2844,22 +2848,63 @@ def _retry_window_keep(meta, wkey, r):
     if not keep:
         _retry_window_clear(meta["_run"], wkey)
 
-def _honor_retry_window(meta, node_id, index=None, cancel=None):
+def _honor_retry_window(meta, node_id, index=None, cancel=None, node=None):
     """Wait out the node's persisted backoff BEFORE this boot's first spawn for
     it (est-9ceqc). Past deadline: no wait. Polled at 0.1 s and abandoned on
-    stop/cancel, so the wait is never a wall on the shutdown path."""
+    stop/cancel, so the wait is never a wall on the shutdown path.
+
+    est-9qhpf (B1): the same read of persisted state also carries the LIFETIME
+    attempt bound. A caller that passes `node` gets a spawn gate, not just a
+    clock: if the persisted attempts already meet the node's transient cap,
+    the cap is spent and this boot must NEVER spawn — the function returns the
+    spent window entry (the caller commits the exhausted verdict via
+    _window_spent_record) instead of waiting. The refusal is evaluated once
+    per boot per window key: a later call for the same key is an in-boot
+    ladder re-spawn, already governed by the ladder's own seeded loop, and
+    refusing there would under-grant the single-boot full ladder (the save
+    written right before the final sleep legitimately reads attempts == cap).
+    Callers without a node def (no cap to consult) keep the clock-only law."""
     wkey = str(node_id) + (f"#{index}" if index is not None else "")
+    seen = meta.setdefault("_window_gate_seen", set())
+    first_sighting = wkey not in seen
+    seen.add(wkey)
     d = _retry_window_load(meta["_run"]).get(wkey)
     if not isinstance(d, dict):
-        return
+        return None
+    if first_sighting and node is not None:
+        seed = d.get("attempts")
+        cap = _retry_caps(node)[0]
+        if type(seed) is int and seed >= cap:
+            return d          # spent lifetime cap: the caller must not spawn
     deadline = d.get("deadline")
     if not isinstance(deadline, (int, float)) or isinstance(deadline, bool) \
             or deadline <= time.time():
-        return
+        return None
     while time.time() < deadline:
         if meta["_stop"].is_set() or (cancel is not None and cancel.is_set()):
-            return
+            return None
         time.sleep(min(0.1, max(0.0, deadline - time.time())))
+    return None
+
+def _window_spent_record(meta, node, node_id, index, spent):
+    """est-9qhpf (B1): the committed shape of a refused spawn — the exhausted
+    verdict carrying the SEEDED lifetime count and the persisted attempt
+    ledger (est-ja41 record-vs-ledger agreement across the restart seam).
+    `spawn` is stamped with the persisted count so the ladder's attempts
+    arithmetic (spawn + 1) reproduces the lifetime total, and the
+    transport_exhausted class is final: the seeded ladder never respawns over
+    a spent cap and never re-demotes this record. A legacy window entry
+    without a persisted `log` still carries the true count — attempts_log is
+    honestly empty there, the class and count are not."""
+    seed = spent.get("attempts")
+    seed = seed if type(seed) is int and seed > 0 else 0
+    return {"status": "failed",
+            "error": (f"transient-retry lifetime bound spent before this boot: "
+                      f"{seed} persisted re-spawn grant(s) against the node "
+                      f"transient cap ({_retry_caps(node)[0]}) — spawn refused"),
+            "error_class": "transport_exhausted", "ms": 0,
+            "attempts": seed + 1, "spawn": seed,
+            "attempts_log": list(spent.get("log") or [])}
 
 # The machine-readable lines the child CLI actually emits (verified against
 # /opt/hermes/hermes_cli/oneshot.py: an escaping provider error reaches the
@@ -7828,8 +7873,10 @@ def _ratelimit_park(meta, r, respawn, ev, ev_kw, node=None, cancel=None,
 
 def _transient_retry(meta, r, respawn, ev, ev_kw, node=None, cancel=None):
     """Q4 transient retry: re-spawn a failed child up to the node's retry.transient
-    cap (default 2 — hw-23c tunable 0..8), backoff 5 s / 20 s (run-tunable via
-    retry_backoff) ONLY when ALL hold — error_class ∈ {transport, unknown} AND the
+    cap (default 2 — hw-23c tunable 0..8), backoff exponential by default
+    (est-9ceqc: base 2 s, doubling, ceiling 30 s — see DEFAULT_RETRY_BACKOFF; a
+    two-element run.json retry_backoff keeps the fixed two-point schedule, and
+    a dict {base, ceiling} tunes the exponential) ONLY when ALL hold — error_class ∈ {transport, unknown} AND the
     dead attempt made api_calls == 0 AND stop is not set AND the per-run retry
     budget (default 6, run-tunable via retry_budget) is not exhausted. Never
     retries schema/no_json/timeout/max_turns/
@@ -7890,13 +7937,16 @@ def _transient_retry(meta, r, respawn, ev, ev_kw, node=None, cancel=None):
         if rate_limited:
             r["subtype"] = "rate_limited"
         # est-ja41: the sleep schedule indexes the LADDER's attempts, never the
-        # merged history — an inherited park log must not shift 5 s -> 20 s.
+        # merged history — an inherited park log must not advance the ladder's
+        # schedule position (2 s -> 4 s under the default exponential policy;
+        # under a fixed [a, b] schedule: a -> b).
         delay = _retry_sleep(backoff, ladder_attempts - 1, r.get("raw"))
         log(run, ev + ".retrying", error_class=r["error_class"], backoff_s=delay,
             rate_limited=rate_limited,
             attempts_log=list(attempts_log), **ev_kw)
         deadline = time.time() + delay
-        _retry_window_save(run, wkey, deadline, ladder_attempts)   # est-9ceqc
+        _retry_window_save(run, wkey, deadline, ladder_attempts,
+                           entries=attempts_log)   # est-9ceqc (+ est-9qhpf ledger)
         while time.time() < deadline:
             if meta["_stop"].is_set():
                 break
@@ -8966,7 +9016,9 @@ def run_agent_node(run, meta, byid, node, outputs, steering):
                 def _book_launch():
                     launch_ts[i] = time.time()
                 def _spawn(resume_preamble="", model_override=None, **kw):
-                    _honor_retry_window(meta, nid, i, cancel=fo_cancel)   # est-9ceqc: resume honors the persisted window
+                    spent = _honor_retry_window(meta, nid, i, cancel=fo_cancel,
+                                                node=node)   # est-9ceqc: resume honors the persisted window; est-9qhpf: the bound gates EVERY first spawn
+                # rebase-union @wake-147: #582 metered **kw + est-9qhpf spent-gate both preserved
                     if _lane_killed(run, nid):
                         return {"status": "failed", "error": "killed by lane kill before launch",
                                 "error_class": "killed", "ms": 0}
@@ -8989,6 +9041,13 @@ def run_agent_node(run, meta, byid, node, outputs, steering):
                                                fo.get("schema") or node.get("schema"),
                                                fo_cancel=fo_cancel)
                         return {**adopted, **_profile_evidence(node)}
+                    if spent is not None:
+                        # est-9qhpf (B1): persisted lifetime attempts already
+                        # at the cap — this item NEVER spawns (an adoptable
+                        # live child above is not a spawn and stays valid);
+                        # commit the exhausted verdict with the seeded count
+                        # and the persisted ledger.
+                        return _window_spent_record(meta, node, nid, i, spent)
                     sk = skey_for(run, byid, node, i)   # fresh nonce per spawn (retry respawns
                     log(run, "item.started", node=nid, index=i, skey=sk)   # are fresh sessions)
                     _book_launch()   # census launch stamp at the ACTUAL spawn instant
@@ -9261,13 +9320,20 @@ def run_agent_node(run, meta, byid, node, outputs, steering):
         else:
             first = {"done": False}
             def spawn(resume_preamble="", model_override=None, **kw):
+                spent = None
                 if not first["done"]:
-                    _honor_retry_window(meta, nid, None, cancel=meta["_stop"])   # est-9ceqc
+                    spent = _honor_retry_window(meta, nid, None, cancel=meta["_stop"],
+                                                node=node)   # est-9ceqc window; est-9qhpf bound gate
                 sk = solo_key if not first["done"] else skey_for(run, byid, node)
                 first["done"] = True
                 detached = _poll_registered_job(meta, node, byid)
                 if detached is not None:
                     return detached
+                if spent is not None:
+                    # est-9qhpf (B1): persisted lifetime attempts already at
+                    # the cap — NEVER spawn; commit the exhausted verdict with
+                    # the seeded count and the persisted ledger.
+                    return _window_spent_record(meta, node, nid, None, spent)
                 with _width_track(meta)(nid):   # #24 width receipt (knob-gated flush)
                     return run_child(meta, node, byid, node.get("goal", ""), node.get("context", ""),
                                      node.get("schema"), steering=steering, skey=sk, inputs=inputs_txt,

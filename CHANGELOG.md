@@ -599,18 +599,44 @@ Patch release: 37 merged PRs since v1.4.0 — the door-UX version handshake (nam
 
 - feat(retry): the transient ladder's backoff window and attempt count persist
   per node (est-9ceqc, grafted from the converged atbrace:hw-r0a mechanism).
-  The runner writes `{deadline, attempts}` to `retry-window.json` in the run
-  dir before each backoff sleep and clears the key once the node settles
-  anything but the transient death; a runner killed mid-backoff resumes by
-  waiting the deadline out (polled, stop-aware, per node — never serializing
-  a sibling) before its first spawn for that node, and the ladder seeds its
-  attempt counter from the persisted count, so restarts cannot amplify
-  attempts past the node's bound. The default transient schedule becomes
-  exponential (base 2 s, ceiling 30 s); an explicit two-element
-  `retry_backoff: [a, b]` keeps the fixed schedule.
+  SHIPPED SCOPE (corrected by est-9qhpf — the merged PR#539 squash subject and
+  body describe a DEFERRED design whose machinery — `retry_state.json`, a
+  `retry_policy` run arg, `wave_boundary_defers`, `_retry_drain` — exists
+  nowhere in this codebase and never shipped): the runner writes
+  `{deadline, attempts, log}` to `retry-window.json` in the run dir before
+  each backoff sleep and clears the key once the node settles anything but
+  the transient death; a runner killed mid-backoff resumes IN THE NODE'S OWN
+  THREAD by waiting the deadline out (polled, stop-aware — never serializing
+  a sibling) before its first spawn for that node, and the in-boot ladder
+  seeds its attempt counter from the persisted count. The default transient
+  schedule is exponential (base 2 s, ceiling 30 s); an explicit two-element
+  `retry_backoff: [a, b]` keeps the fixed schedule. The seed alone did NOT
+  gate the first spawn of a re-drive against a spent cap — that bound is the
+  fix below, not this feature.
   Tests: tests/test_persisted_retry_window_9ceqc.py. Law: full text in
   references/transient-retry-window.md (AGENTS.md carries the one-line
   hint-surface form; the 32k hint cap forced the fold).
+
+- fix(retry): the persisted lifetime attempts gate EVERY spawn, including the
+  first spawn of a re-drive (est-9qhpf, B1 of the PR#539 deep re-review at
+  head 3e5c40f2). The window seed only ever bounded the IN-BOOT ladder: a
+  runner SIGKILLed while the lifetime-Nth spawn (the grant that spent the
+  cap) was in flight resumed past the deadline and spawned N+1 against the
+  bound, and that settled death committed the mislabeled error_class=transport
+  attempts=1 attempts_log=[] — the est-ja41 record-vs-ledger agreement broken
+  across the restart seam. Now `_honor_retry_window` consults the node's
+  transient cap at the same read: a first spawn for a key with persisted
+  attempts >= cap NEVER spawns (once per boot per key, so a single fresh boot
+  still runs the full 1 + cap ladder and ADOPT-NOT-RESPAWN still attaches to
+  live work), and the boot commits transport_exhausted with the SEEDED
+  lifetime count and the persisted ledger — the pre-sleep save now carries
+  the attempts_log entries (`log`) alongside `{deadline, attempts}`. A legacy
+  window without the ledger still refuses at the count and commits the true
+  class and count. New test: tests/test_lifetime_bound_redrive_9qhpf.py
+  (SIGKILL exactly at the kill-during-third-spawn seam — the shipped
+  SIGKILL test pinned only mid-first-sleep — plus refusal-record and
+  persistence units; RED at 31dbf6a as TOTAL_SPAWNS=4 / transport@1 / log
+  empty, GREEN after).
 
 - fix(watchdog): the fanout.stragglers disc formats a missing launch stamp as
   the `'q'` literal, never through `:.3f` (est-waf8y, est-c0jo1 passport D1).
