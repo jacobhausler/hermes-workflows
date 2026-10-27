@@ -244,8 +244,11 @@ an unchanged node re-binds byte-identical and replay-skip keeps its verdict; wit
 no persisted binding to re-bind from the amend REFUSES before any write
 (`error_type: amend_run_context_unbound`, naming the surviving tokens; a ref the
 map lacks refuses as `amend_run_context_rebind`). The plain-lenient law is
-untouched: a run whose committed graph already carries the tokens launched unbound,
-and its amend rides literals exactly as its launch did. `save` derives the `meta.params`
+untouched for the launch-shape tokens: a run whose committed graph already carries
+the tokens launched unbound, and its amend rides those literals as its launch did.
+One asymmetry is deliberate: an amend that injects a NEW {run.KEY} literal into an
+unbound run refuses fail-closed, where a plain launch of the same text would tolerate
+it — persist a run_context map to get re-bind semantics instead. `save` derives the `meta.params`
 display envelope from the block when the author passes no `params` argument (a
 hand-passed envelope that disagrees warns s12), so `library name:` instantiate
 pre-fills tune defaults and lists pins unfilled. `where`/`by` without a `params`
