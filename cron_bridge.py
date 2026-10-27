@@ -124,7 +124,13 @@ def tick_schedule(core_config=None):
 def write_shim(name, *args):
     """Write ``<HERMES_HOME>/scripts/<name>.sh``: an executable bash shim that
     execs this plugin's absolute ``wf.py`` with ``args`` baked in (the core
-    scheduler runs job scripts argument-free, and only inside that dir)."""
+    scheduler runs job scripts argument-free, and only inside that dir).
+    Refuse a nonresident entrypoint before creating or changing any file."""
+    from wfcommon import entrypoint_residency
+    status, detail = entrypoint_residency(str(WF_PY))
+    if status != "resident":
+        raise ValueError(f"refusing to bake {WF_PY} into a persisted cron shim: {status} "
+                         f"({detail}); a cron entrypoint must live at a stable install root")
     scripts = _home() / "scripts"
     scripts.mkdir(parents=True, exist_ok=True)
     quoted = " ".join(shlex.quote(str(a)) for a in args)

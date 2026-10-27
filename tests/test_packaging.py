@@ -124,6 +124,9 @@ def main() -> None:
                                       # exec-modules this at import — packs per the
                                       # est-4vnq finding-4 rationale in pack.py.
                                       "scripts/pr_formal_review.py", "scripts/drift_check.py",
+                                      # est-7ncu0: the persisted-argv residency checker ships
+                                      # beside its test (same finding-4 rationale).
+                                      "scripts/argv_residency.py",
                                       # est-h0huv: tests/test_wofify.py subprocess-executes
                                       # this CLI end to end — the est-4vnq finding-4
                                       # rationale again; the tool ships beside its test.

@@ -33,7 +33,9 @@ def check(cond, msg):
 
 fake = str(HERE / "fake")
 runs = home / "workflows"; runs.mkdir()
-ENV = {**os.environ, "HERMES_HOME": str(home), "WF_RUNS_ROOT": str(runs), "FAKE_LOG": str(home / "fake.log"), "FAKE_PROMPT_LOG": str(home / "prompts.log")}
+ENV = {**os.environ, "HERMES_HOME": str(home), "WF_RUNS_ROOT": str(runs),
+       "WF_ARGV_STABLE_ROOTS": str(home),
+       "FAKE_LOG": str(home / "fake.log"), "FAKE_PROMPT_LOG": str(home / "prompts.log")}
 
 def mkrun(name, graph):
     run = runs / f"20990101-0000{len(list(runs.iterdir())):02d}-{name}"

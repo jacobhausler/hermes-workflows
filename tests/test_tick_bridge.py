@@ -78,6 +78,8 @@ class FakeJobs:
 def main():
     fake = FakeJobs()
     cron_bridge._jobs = lambda: fake  # THE test seam: no core import, ever
+    saved_roots = os.environ.get("WF_ARGV_STABLE_ROOTS")
+    os.environ["WF_ARGV_STABLE_ROOTS"] = str(ROOT)
 
     saved_env = {k: os.environ.get(k) for k in ("HERMES_HOME", "WF_TICK_SCHEDULE")}
     try:
@@ -169,6 +171,11 @@ def main():
         # imported under any code path this test exercised.
         check("Z: the live cron store was never touched (core cron.jobs never imported)",
               "cron.jobs" not in sys.modules, sorted(m for m in sys.modules if m.startswith("cron")))
+
+    if saved_roots is None:
+        os.environ.pop("WF_ARGV_STABLE_ROOTS", None)
+    else:
+        os.environ["WF_ARGV_STABLE_ROOTS"] = saved_roots
 
     print("ALL PASS" if not FAILS else f"FAILED: {FAILS}")
     sys.exit(1 if FAILS else 0)

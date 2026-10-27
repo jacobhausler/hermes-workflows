@@ -5022,6 +5022,121 @@ def dead_end_forks(nodes, states, rec_of=None):
 
 WAIT_KEYS = {"wait_s", "until_argv", "every_s", "timeout_s"}
 
+VOLATILE_PATH_SEGMENTS = {".worktrees", "worktrees", "grafts", "lanes", "scratch", "tmp", "cache", "workflows"}
+
+
+def stable_argv_roots():
+    home = Path(os.environ.get("HERMES_HOME") or (Path.home() / ".hermes"))
+    roots = [Path("/usr"), Path("/bin"), Path("/sbin"), Path("/opt")]
+    raw = os.environ.get("WF_ARGV_STABLE_ROOTS")
+    return roots + ([Path(p).expanduser() for p in raw.split(os.pathsep) if p.strip()] if raw else
+                    [home / "scripts", home / "plugins", home / "installs", Path.home() / ".local" / "bin"])
+
+
+def entrypoint_residency(token, stable_roots=None):
+    """Return (status, detail) for a literal executable or script location.
+
+    Declared roots are boundaries, not permission for a symlink to escape them.
+    A fixture may declare its temporary install root without trusting its siblings.
+    """
+    import shutil
+    t = os.path.expanduser(str(token))
+    if not t or "\x00" in t or "$" in t or "{" in t or "}" in t:
+        return "unresolved", "entrypoint is not a literal path or PATH name"
+    if "/" not in t:
+        t = shutil.which(t)
+        if not t:
+            return "missing", "entrypoint not found on PATH"
+    p = Path(t)
+    if not p.is_absolute():
+        return "unrooted", "relative entrypoint depends on the caller cwd"
+    roots = [Path(r).expanduser().absolute() for r in
+             (stable_argv_roots() if stable_roots is None else stable_roots)]
+    try:
+        resolved = p.resolve()
+        volatile = set()
+        for candidate in (p, resolved):
+            matching = [r for r in roots if candidate.is_relative_to(r)]
+            parts = candidate.relative_to(max(matching, key=lambda r: len(r.parts))).parts if matching else candidate.parts
+            volatile.update(set(parts) & VOLATILE_PATH_SEGMENTS)
+        if volatile:
+            return "volatile", "volatile segments: " + ", ".join(sorted(volatile))
+        if not resolved.is_file():
+            return "missing", "entrypoint absent or not a file at check time"
+        if not (any(p.is_relative_to(r) for r in roots)
+                and any(resolved.is_relative_to(r.resolve()) for r in roots)):
+            return "unrooted", "entrypoint resolves outside the declared stable install roots"
+        for parent in resolved.parents:
+            if (parent / ".git").is_file():
+                return "volatile", "entrypoint is inside a linked git worktree"
+    except (OSError, ValueError, RuntimeError) as exc:
+        return "unreadable", f"cannot resolve entrypoint: {exc}"
+    return "resident", "literal and resolved path are under a stable install root"
+
+
+def argv_residency(argv, stable_roots=None, *, allow_templates=False):
+    """Find nonresident launch locations, including env/interpreter wrappers.
+
+    Records carry index, entrypoint, status, and detail. Non-launch arguments are
+    data. Inline -c and -m payloads have no baked script pathname to validate.
+    """
+    out = []
+    def check(i, script=False):
+        token = argv[i]
+        if allow_templates and re.search(r"\{run\.[^}]+\}", token):
+            return
+        if script and not Path(token).is_absolute():
+            status, detail = "unrooted", "script operand must be an absolute resident path"
+        else:
+            status, detail = entrypoint_residency(token, stable_roots)
+        if status != "resident":
+            out.append(dict(index=i, entrypoint=token, status=status, detail=detail))
+    if not isinstance(argv, list) or not argv or not all(isinstance(a, str) and a for a in argv):
+        return [dict(index=0, entrypoint="", status="invalid", detail="argv must be nonempty strings")]
+    i = 0
+    check(i)
+    while Path(argv[i]).name == "env":
+        i += 1
+        while i < len(argv) and (argv[i].startswith("-") or "=" in argv[i]):
+            if argv[i] != "--" and (argv[i].startswith("-") or argv[i].startswith("PATH=")):
+                out.append(dict(index=i, entrypoint="env", status="unresolved",
+                                detail="env options or PATH changes require an explicit resident argv"))
+                return out
+            i += 1
+        if i == len(argv):
+            return out
+        check(i)
+    program = Path(argv[i]).name
+    if re.fullmatch(r"(?:python(?:\d+(?:\.\d+)?)?|pypy\d*|(?:ba)?sh|dash|zsh|ksh|perl|ruby|node(?:js)?)", program):
+        is_python = program.startswith(("python", "pypy"))
+        is_shell = program.endswith("sh")
+        i += 1
+        while i < len(argv):
+            token = argv[i]
+            inline = {"-"} if is_shell else {"-c", "-m", "-"} if is_python else {"-e", "-p", "-"}
+            if token in inline or (is_shell and re.fullmatch(r"-[A-Za-z]+", token) and "c" in token):
+                break
+            if token == "--":
+                i += 1
+                if i < len(argv):
+                    check(i, script=True)
+                break
+            if (is_python and token in {"-W", "-X", "--check-hash-based-pycs"}) or (is_shell and token in {"-o", "-O"}):
+                i += 2
+                continue
+            if token.startswith("-"):
+                known = ((is_python and (re.fullmatch(r"-[bBdEhiIOPqRsSuvVx]+", token) or token.startswith(("-W", "-X"))))
+                         or (is_shell and re.fullmatch(r"-[abefhiklmnprstuvxBCEHPT]+", token)))
+                if not known:
+                    out.append(dict(index=i, entrypoint=program, status="unresolved",
+                                    detail="unsupported interpreter option; use an explicit resident script argv"))
+                    break
+                i += 1
+                continue
+            check(i, script=True)
+            break
+    return out
+
 def wait_spec_ok(w):
     """gate.wait = {wait_s?, until_argv?, every_s?, timeout_s?}: a machine-answered gate.
     wait_s alone = timer. until_argv = a fixed argv list (never a shell string) re-run
@@ -5045,6 +5160,10 @@ def wait_spec_ok(w):
     if argv is not None and (not isinstance(argv, list) or not argv
                              or not all(isinstance(a, str) and a for a in argv)):
         E("until_argv", "until_argv must be a non-empty list of strings (fixed argv, no shell)")
+    elif isinstance(argv, list) and argv:
+        for finding in argv_residency(argv, allow_templates=True):
+            E("until_argv", f"argv[{finding['index']}] {finding['entrypoint']!r} is not resident "
+              f"({finding['status']}: {finding['detail']}); use a stable install root")
     return out
 
 def validate_graph_warnings(nodes):

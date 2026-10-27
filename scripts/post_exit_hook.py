@@ -30,12 +30,20 @@ def _atomic(path, data):
 
 
 def _check(run, script):
+    script_path = Path(script)
+    if not script_path.is_absolute():
+        raise ValueError("hook must be an absolute shell script")
     run = Path(run).resolve(strict=True)
-    script = Path(script).resolve(strict=True)
+    script = script_path.resolve(strict=True)
     if not run.is_dir() or not script.is_file() or run == script or run in script.parents:
         raise ValueError("hook script must be a file outside the workflow run tree")
     if not script.is_absolute() or script.suffix != ".sh":
         raise ValueError("hook must be an absolute shell script")
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from wfcommon import entrypoint_residency
+    status, detail = entrypoint_residency(str(script_path))
+    if status != "resident":
+        raise ValueError(f"hook residency refused: {script} ({status}: {detail})")
     return run, script
 
 

@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- feat(audit): persisted launch locations are checked at submit and before each
+  machine-gate probe. PATH targets, interpreter script operands, and symlink
+  targets must exist under stable install roots. Cron shim creation and the
+  source-only post-exit hook refuse nonresident scripts before writing launch
+  orders. `scripts/argv_residency.py` audits home scripts, cron stores, workflow
+  gates, and post-exit registrations without executing or changing them.
+  `--guard` uses the same exit code and stays silent when clean. Dynamic shell
+  paths report unresolved. `WF_ARGV_STABLE_ROOTS` declares custom install roots.
+  Provenance atbrace:hw-cxk. Regression tests use temporary fixtures only.
+
 - fix(consolidate): the bead close-effect gate now rides the partner-consolidation
   edge in `wf.py` — an unreadable bead store refuses the consolidate-partner step
   (typed failed, ledger holds) instead of a silent pass, and the case is pinned by

@@ -9063,6 +9063,15 @@ def park_gate(run, run_id, gate, byid, consume_markers):
                 log(run, "gate.released", node=gate["id"], by="timer")
                 mirror(state="released")
                 return "released"
+            findings = wfcommon.argv_residency(w["until_argv"])
+            if findings:
+                error = "wait: nonresident persisted argv: " + "; ".join(
+                    f"{f['entrypoint']} ({f['status']}: {f['detail']})" for f in findings)
+                save_node(run, gate, byid, {"status": "failed", "error_class": "precondition",
+                                           "error": error, "output": {"residency": findings}})
+                log(run, "gate.wait_refused", node=gate["id"], error_class="precondition", error=error)
+                mirror(state="failed", error=error)
+                return "failed"
             attempt += 1
             try:
                 # PR #243 (zap 6017431934): the probe is bound to the run that

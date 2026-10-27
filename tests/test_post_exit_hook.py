@@ -34,6 +34,9 @@ class PostExitHookTest(unittest.TestCase):
         self.temp = TemporaryDirectory(dir=FIXTURES)
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
+        roots = patch.dict(os.environ, {"WF_ARGV_STABLE_ROOTS": str(self.root)})
+        roots.start()
+        self.addCleanup(roots.stop)
         self.run_dir = self.root / "workflows" / "roll-last-test"
         self.run_dir.mkdir(parents=True)
         self.outside = self.root / "work" / "hermes-nightly" / "roll-last-fixture"
@@ -80,6 +83,29 @@ class PostExitHookTest(unittest.TestCase):
         with patch.object(hook.subprocess, "run") as no_relaunch:
             self.assertEqual(hook.dispatch(self.run_dir, "done"), rec)
             no_relaunch.assert_not_called()
+
+    def test_volatile_hook_refused_before_persistence(self):
+        volatile = self.root / "worktrees" / "lane" / "hook.sh"
+        volatile.parent.mkdir(parents=True)
+        volatile.write_text("#!/bin/sh\nexit 0\n")
+        with self.assertRaisesRegex(ValueError, "residen|volatile|worktree"):
+            hook.register(self.run_dir, volatile)
+        self.assertFalse((self.run_dir / hook.REG).exists())
+
+    def test_hook_revalidated_after_registration(self):
+        with patch.dict(os.environ, {"WF_ARGV_STABLE_ROOTS": str(self.root)}):
+            hook.register(self.run_dir, self.script)
+            volatile = self.root / "worktrees" / "lane" / "hook.sh"
+            volatile.parent.mkdir(parents=True)
+            volatile.write_text("#!/bin/sh\nexit 0\n")
+            self.script.unlink()
+            self.script.symlink_to(volatile)
+            with patch.object(hook.subprocess, "run") as launch, \
+                    patch.object(hook, "_detached") as detached:
+                rec = hook.dispatch(self.run_dir, "done", poll_seconds=0)
+            self.assertEqual(rec["state"], "failed")
+            launch.assert_not_called()
+            detached.assert_not_called()
 
     def test_receipt_launching_before_first_attempt(self):
         # est-fdulo (b): a submitted-but-unreceipted dispatch must never be invisible,
