@@ -3,6 +3,21 @@
 ## Unreleased
 
 Ops/chore:
+- fix(retry) est-mqp1f (the #579 review residual): the #164 `fallback_models`
+  ladder no longer walks rungs over a spent-cap boot, and a rung death can no
+  longer re-break the est-ja41 record-vs-ledger agreement. The est-9qhpf
+  lifetime-bound refusal commits `transport_exhausted` BEFORE the boot spawns
+  anything — the same class #164 enters on — so a node declaring
+  `fallback_models` billed rung spawns past a bound that exists to stop
+  billing, and the rung-death `attempts` recompute (boot-local `spawn`+1
+  against the MERGED ledger) could stamp fewer attempts than the record's own
+  ledger carries. Cures: the refusal record now carries a machine-readable
+  `refusal: lifetime_cap_spent` stamp and the ladder bypasses on it (refusal
+  is final); the rung-death merge may only RAISE `attempts`, never drop below
+  the ledger it carries. AGENTS.md §3d hint states the spent-cap refusal
+  explicitly. Pins: `tests/test_plugin_asks_164_fallback.py` (7)(8A)(8B)(8C)
+  — RED at 36c14b4 (`spawned ['m1','m2']`, record `attempts=2` vs 3-entry
+  ledger), GREEN over the cures.
 - feat(knobs): #580 take-over (from atbrace) lands the knob family with three
   cures on the banked rebase, per keep-both LAW v2 (both sides' CHANGELOG rows
   stand; the diff vs 9bc5bcc is additions-only, asserted at commit). B2 — the

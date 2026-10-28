@@ -15,7 +15,13 @@ once per declared model IN ORDER. Gates, tested here:
   * every rung is ONE spawn (no ladder recursion), and each rung consumes the
     run's shared retry budget — the ladder can never bill unboundedly;
   * no `fallback_models` key => byte-identical old behavior (the ladder runs
-    exactly as before and the node lands transport_exhausted).
+    exactly as before and the node lands transport_exhausted);
+  * est-mqp1f (the #579 residual): a SPENT-CAP boot refuses at the est-9qhpf
+    gate BEFORE any spawn, and that refusal — transport_exhausted stamped
+    `refusal` — never enters the ladder either: zero rung spawns, zero
+    node.fallback events, the seeded verdict commits untouched (est-ja41
+    refusal-is-final). A rung death may only RAISE `attempts` against the
+    merged ledger, never re-break the record-vs-ledger agreement.
 Engine-driven with the fake hermes (FAKE_MODE=fallback_ladder): a child whose -m
 is not $FAKE_OK_MODEL dies with the transport marker and 0 api calls (the Q4
 replay-safe shape); the ok model answers with a fenced json block, exit 0.
@@ -203,6 +209,105 @@ g6 = door._common.apply_graph_defaults({"nodes": [{"id": "a", "type": "agent", "
                                         "defaults": {"fallback_models": ["m1", "m2"]}})
 check("(6) defaults.fallback_models bakes into the agent node def",
       g6["nodes"][0].get("fallback_models") == ["m1", "m2"], g6["nodes"][0])
+
+
+# ---- (7) est-mqp1f: a SPENT-CAP boot (est-9qhpf refusal) never walks rungs.
+# ---- The refusal is the lifetime cap speaking BEFORE this boot spawned — the
+# ---- est-ja41 refusal-is-final law outranks #164 over this verdict too: RED
+# ---- at the base, the two declared rungs spawn (billed) and the record's
+# ---- attempts is re-derived from the boot-local rung spawn.
+import time as _t7
+import threading as _th7
+r7 = mk("asks164-spent", [{
+    "id": "a", "type": "agent", "goal": "GO asks164-spent",
+    "model": "m0", "fallback_models": ["m1", "m2"],
+}])
+(r7 / "retry-window.json").write_text(json.dumps(
+    {"a": {"deadline": _t7.time() - 1.0, "attempts": 2,
+           "log": [{"attempt": 0, "error_class": "transport"},
+                   {"attempt": 1, "error_class": "transport"}]}}))
+argv_log7 = BUILD / "argv_164_spent.log"
+argv_log7.unlink(missing_ok=True)
+out7 = wf("asks164-spent", {"FAKE_MODE": "fallback_ladder", "FAKE_API_CALLS": "0",
+                            "FAKE_OK_MODEL": "zzz", "FAKE_ARGV_LOG": str(argv_log7)})
+models7 = argv_models(argv_log7)
+rec7 = json.loads((r7 / "nodes" / "a.json").read_text())
+check("(7) spent-cap boot spawns NOTHING — the refusal bypasses the ladder",
+      models7 == [], f"spawned {models7}")
+check("(7) no node.fallback event on a refusal boot",
+      not [e for e in events(r7) if e.get("event") == "node.fallback"],
+      json.dumps([e.get("event") for e in events(r7)]))
+check("(7) the refusal record commits: transport_exhausted, seeded count, "
+      "persisted log, refusal-stamped, run failed",
+      rec7.get("status") == "failed" and rec7.get("error_class") == "transport_exhausted"
+      and rec7.get("attempts") == 3 and rec7.get("spawn") == 2
+      and rec7.get("refusal") == "lifetime_cap_spent"
+      and len(rec7.get("attempts_log") or []) == 2
+      and "WORKFLOW_FAILED" in out7,
+      json.dumps({k: rec7.get(k) for k in ("error_class", "attempts", "spawn", "refusal")}))
+check("(7) the spent cap STAYS persisted (the refusal clears no ledger)",
+      json.loads((r7 / "retry-window.json").read_text())["a"]["attempts"] == 2)
+
+# ---- (8) unit seams (est-mqp1f): (A) refusal-stamped bypass, (B) the rung-death
+# ---- recompute is MONOTONIC — spawn+1 lives in a boot-local (log-floored)
+# ---- domain while attempts_log is the merged lifetime ledger, so the merge may
+# ---- only raise the count, never drop below the ledger it carries (est-ja41).
+import wf as wf8
+node8 = {"id": "n8", "fallback_models": ["m1"]}
+run8 = RUNS / "u8-fallback-refusal"
+run8.mkdir(parents=True, exist_ok=True)
+meta8 = {"_run": run8, "_stop": _th7.Event(), "_procs_lock": _th7.Lock(),
+         "_retries_left": 6, "_procs": {}, "_spawn_n": {}}
+
+class _Resp8:
+    def __init__(self, rec):
+        self.rec = rec
+        self.calls = []
+    def __call__(self, model, resume_preamble=""):
+        self.calls.append(model)
+        return dict(self.rec)
+
+refusal8 = {"status": "failed", "error": "lifetime bound spent before this boot",
+            "error_class": "transport_exhausted", "ms": 0,
+            "attempts": 3, "spawn": 2, "refusal": "lifetime_cap_spent",
+            "attempts_log": [{"attempt": 0, "error_class": "transport"},
+                             {"attempt": 1, "error_class": "transport"}]}
+rs8 = _Resp8(refusal8)
+out8 = wf8._fallback_ladder(meta8, dict(refusal8), rs8, "node", {"node": "n8"}, node=node8)
+check("(8A) refusal-stamped record bypasses: identical verdict back, zero rung calls",
+      rs8.calls == [] and out8.get("refusal") == "lifetime_cap_spent"
+      and out8.get("attempts") == 3 and len(out8.get("attempts_log") or []) == 2,
+      json.dumps({k: out8.get(k) for k in ("attempts", "refusal")}))
+
+_orig_iso8 = wf8._isolate_prior
+wf8._isolate_prior = lambda *a, **k: None   # no prior tree to quarantine in a unit
+try:
+    # (8B) RED at base: the rung death lands spawn=1 (boot-local domain, logs/
+    # empty in this stub) while the merged ledger has 3 entries — base stamps
+    # attempts=2, re-breaking record-vs-ledger agreement.
+    boot_local_death = {"status": "failed", "error_class": "transport",
+                        "error": "boom", "ms": 9, "attempts": 1, "spawn": 1}
+    base8 = {"status": "failed", "error_class": "transport_exhausted", "ms": 5,
+             "error": "same-model ladder spent", "attempts": 1, "spawn": 1,
+             "attempts_log": [{"attempt": 0, "error_class": "transport"},
+                              {"attempt": 1, "error_class": "transport"}]}
+    outB = wf8._fallback_ladder(meta8, dict(base8), _Resp8(boot_local_death),
+                                "node", {"node": "n8"}, node=node8)
+    check("(8B) out-of-domain rung death may not drop attempts below its own ledger",
+          outB.get("attempts") == 3 and len(outB.get("attempts_log") or []) == 3,
+          json.dumps({"attempts": outB.get("attempts"),
+                      "log_len": len(outB.get("attempts_log") or [])}))
+    # (8C) aligned-domain rung death (spawn continues the merged lifetime count):
+    # spawn+1 arithmetic stays EXACTLY as before — the floor never overwrites
+    # a truthful higher count.
+    outC = wf8._fallback_ladder(meta8, dict(base8),
+                                _Resp8({**boot_local_death, "spawn": 4}),
+                                "node", {"node": "n8"}, node=node8)
+    check("(8C) aligned rung death keeps spawn+1 (no-regression pin)",
+          outC.get("attempts") == 5 and outC.get("spawn") == 4,
+          json.dumps({"attempts": outC.get("attempts"), "spawn": outC.get("spawn")}))
+finally:
+    wf8._isolate_prior = _orig_iso8
 
 print("FAILURES:", fails)
 sys.exit(1 if fails else 0)

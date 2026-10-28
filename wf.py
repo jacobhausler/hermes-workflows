@@ -2895,7 +2895,9 @@ def _window_spent_record(meta, node, node_id, index, spent):
     transport_exhausted class is final: the seeded ladder never respawns over
     a spent cap and never re-demotes this record. A legacy window entry
     without a persisted `log` still carries the true count — attempts_log is
-    honestly empty there, the class and count are not."""
+    honestly empty there, the class and count are not. A stamped record is a
+    REFUSAL, not an executed ladder: the #164 fallback ladder bypasses on the
+    `refusal` key rather than respawning over the spent cap (est-mqp1f)."""
     seed = spent.get("attempts")
     seed = seed if type(seed) is int and seed > 0 else 0
     return {"status": "failed",
@@ -2904,6 +2906,10 @@ def _window_spent_record(meta, node, node_id, index, spent):
                       f"transient cap ({_retry_caps(node)[0]}) — spawn refused"),
             "error_class": "transport_exhausted", "ms": 0,
             "attempts": seed + 1, "spawn": seed,
+            # est-mqp1f: machine-readable refusal stamp — every later seam
+            # (the #164 fallback ladder below) reads the class of verdict
+            # without grepping the message. Refusal is final (est-ja41).
+            "refusal": "lifetime_cap_spent",
             "attempts_log": list(spent.get("log") or [])}
 
 # The machine-readable lines the child CLI actually emits (verified against
@@ -8001,6 +8007,10 @@ def _fallback_ladder(meta, r, respawn_fallback, ev, ev_kw, node=None, cancel=Non
       * ONLY the transport_exhausted verdict enters (the caller invokes this
         right after _transient_retry; every other class never reaches a rung —
         the quota-class 429 dies at ONE attempt, #24 law intact);
+      * est-ja41/est-mqp1f: a REFUSAL-stamped transport_exhausted (the
+        est-9qhpf lifetime-cap refusal, `refusal` key set) NEVER enters —
+        that verdict is the cap speaking BEFORE this boot spawned anything;
+        walking rungs over it bills past a bound that exists to stop billing.
       * no key / empty key => byte-identical old behavior (zero extra spawns);
       * every rung is ONE spawn, never ladder recursion: a dead rung does NOT
         re-run Q4 on the new model;
@@ -8018,7 +8028,8 @@ def _fallback_ladder(meta, r, respawn_fallback, ev, ev_kw, node=None, cancel=Non
     that model (fresh skey, fresh session, like every retry respawn)."""
     fb = (node or {}).get("fallback_models")
     if not (isinstance(fb, list) and fb) or r.get("status") != "failed" \
-            or r.get("error_class") != "transport_exhausted":
+            or r.get("error_class") != "transport_exhausted" \
+            or r.get("refusal"):   # est-mqp1f: spent-cap refusal is final — bypass
         return r
     run = meta["_run"]
     attempts_log = list(r.get("attempts_log") or [])
@@ -8044,8 +8055,16 @@ def _fallback_ladder(meta, r, respawn_fallback, ev, ev_kw, node=None, cancel=Non
     if attempts_log:
         r["attempts_log"] = attempts_log
         last_spawn = r.get("spawn")
-        r["attempts"] = last_spawn + 1 if isinstance(last_spawn, int) \
+        cand = last_spawn + 1 if isinstance(last_spawn, int) \
             else len(attempts_log) + r.get("attempts", 0)
+        # est-ja41/est-mqp1f: a rung death stamps `spawn` in a boot-local
+        # (log-floored) domain, while attempts_log here is the MERGED lifetime
+        # ledger. The spawn+1 arithmetic may only RAISE the count — never
+        # re-break record-vs-ledger agreement below the ledger this record
+        # now carries or its own prior count.
+        prior = r.get("attempts")
+        prior = prior if type(prior) is int else 0
+        r["attempts"] = max(cand, len(attempts_log), prior)
     return r
 
 # ---------- #25: pinned-route hold at commit (field-report fallback-billing ask) ----------
