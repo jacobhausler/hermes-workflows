@@ -142,6 +142,19 @@ st = door.act_status({"run_id": RUN})
 check(st["nodes"]["part"].get("steer") == {"queued": 2, "baked": 2, "consumed": 1},
       "act_status still resolves steer through the door alias")
 
+# ---------- est-t7yod: the spent-cap refusal stamp rides the read model ----------
+check("refusal" not in bf,
+      "node_facts: unstamped records keep the byte-identical pre-refusal shape")
+_part_rec = json.loads((r / "nodes" / "part.json").read_text())
+_part_rec["refusal"] = "lifetime_cap_spent"
+(r / "nodes" / "part.json").write_text(json.dumps(_part_rec))
+_nf_refused = wfcommon.node_facts(r, "part")
+check(_nf_refused.get("refusal") == "lifetime_cap_spent",
+      "node_facts appends the refusal stamp verbatim when the record carries it")
+_st2 = door.act_status({"run_id": RUN})
+check(_st2["nodes"]["part"]["node_facts"].get("refusal") == "lifetime_cap_spent",
+      "the door node_facts whitelist passes refusal through on failed/partial nodes")
+
 # ---------- 3) the log route returns the file's LAST N bytes ----------
 res = call(get_log, run_id=RUN, nid="solo", index=None, attempt=None, kind="log", tail=1024)
 check(isinstance(res, dict) and "content" in res, "log route answered with a content field")

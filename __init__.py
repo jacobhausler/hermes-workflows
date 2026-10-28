@@ -4022,7 +4022,11 @@ def act_status(args):
             if nf:
                 out["nodes"][nid]["node_facts"] = {
                     k: nf[k] for k in ("error_class", "attempts", "attempts_log",
-                                       "final", "log_path", "prompt_path")
+                                       "final", "log_path", "prompt_path",
+                                       # est-t7yod: honest-absence append — the
+                                       # refusal stamp surfaces only on records
+                                       # that were actually refused at the gate.
+                                       "refusal")
                     if k in nf} | ({"stale_because": nf["stale_because"]}
                                    if "stale_because" in nf else {})
         # why-rerun: a pending node WITH a committed record is efp-stale (an amend

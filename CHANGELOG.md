@@ -3,6 +3,17 @@
 ## Unreleased
 
 Ops/chore:
+- fix(read-model) est-t7yod (residual of #583): the spent-cap refusal stamp
+  (`refusal: lifetime_cap_spent`, est-9qhpf/est-mqp1f) now surfaces on the
+  node-truth read instead of living only in the committed record.
+  `wfcommon.node_facts` appends it verbatim when present (append-only law —
+  the same shape as the profile pair and the est-wqml6 telemetry fact; a
+  `FACT_KEYS` row was rejected because it would fabricate
+  `refusal: "unknown"` onto every unstamped node, breaking the file's own
+  byte-identical-shape law) and the door's `node_facts` whitelist passes it
+  through on failed/partial nodes. Pins: three legs in
+  `tests/test_node_facts.py` (absent = shape unchanged; stamped = verbatim
+  append; door passthrough).
 - fix(retry) est-mqp1f (the #579 review residual): the #164 `fallback_models`
   ladder no longer walks rungs over a spent-cap boot, and a rung death can no
   longer re-break the est-ja41 record-vs-ledger agreement. The est-9qhpf

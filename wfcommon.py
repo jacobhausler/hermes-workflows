@@ -6342,6 +6342,12 @@ def node_facts(r, nid, index=None):
     # byte-identical pre-telemetry shape (append-only, like the profile pair).
     if isinstance(rec.get("telemetry"), dict) and rec["telemetry"]:
         facts["telemetry"] = rec["telemetry"]
+    # est-t7yod: the spent-cap refusal stamp (est-9qhpf/est-mqp1f, produced at
+    # wf.py `_window_spent_record`) rides the same append-only law as the
+    # profile pair and telemetry — absent record = absent key, never "unknown"
+    # (a FACT_KEYS row would fabricate the stamp onto every other node).
+    if isinstance(rec.get("refusal"), str) and rec["refusal"]:
+        facts["refusal"] = rec["refusal"]
     pf = precondition_facts(rec)
     if pf:
         facts["fact"] = pf
