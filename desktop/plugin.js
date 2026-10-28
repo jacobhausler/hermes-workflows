@@ -146,6 +146,10 @@ function fanItems(def, st, events) {
     const item = rec?.item ?? (defItems ? defItems[i] : undefined)
     const metrics = im?.[i] || null
     const ec0 = rec?.error_class || ev?.error_class || null
+    // est-zmpx8 (the #584 peer-review residual): the spent-cap refusal stamp is a
+    // record fact like error_class — read it verbatim where the source carries it,
+    // never invent one where it does not (AGENTS rule 8).
+    const rf0 = rec?.refusal || ev?.refusal || null
     const rawStatus = rec?.status || (verified
       ? (nodeLive && metrics?.live > 0 ? 'running' : ev?.status || 'pending')
       : ev?.status || (legacyDone ? 'done' : nodeLive ? (hasStarts ? (startedIdx.has(i) ? 'running' : 'pending') : 'running') : 'pending'))
@@ -156,7 +160,7 @@ function fanItems(def, st, events) {
     const status = rawStatus === 'failed' && ec0 === 'cancelled' ? 'cancelled' : rawStatus
     const goal = item && typeof item === 'object' && typeof item.goal === 'string' ? item.goal : fo.goal ? renderGoal(fo.goal, item, i) : ''
     rows.push({
-      index: i, status, errorClass: ec0, item, goal,
+      index: i, status, errorClass: ec0, refusal: rf0, item, goal,
       label: itemLabel(item, i),
       output: rec && rec.status === 'done' ? rec.output : (recs == null && out && Array.isArray(out.items) && st?.status === 'done' ? out.items[i] : undefined),
       error: rec?.error || ev?.error || null,
@@ -2289,11 +2293,16 @@ function NodePanel({ detail }) {
   // are absent, the fanItems row is the only truth and every other fact reads
   // `unknown`. Node-level facts arrive merged flat onto nodes[id] (the _view
   // merge of wfcommon.node_facts), so `shown` IS the record read.
-  const ITEM_FACTS = ['status', 'error_class', 'error', 'attempts', 'attempts_log', 'final', 'harvest', 'output', 'ms', 'started', 'log_path', 'prompt_path', 'efp', 'skey', 'steer']
+  // est-zmpx8: 'refusal' rides the closed set (wfcommon.FACT_KEYS carries it since
+  // #584), so the synthesized fan-item shape stays key-complete; an item whose row
+  // carries no stamp keeps a null there — the section below hides it, never prints
+  // a fabricated one.
+  const ITEM_FACTS = ['status', 'error_class', 'refusal', 'error', 'attempts', 'attempts_log', 'final', 'harvest', 'output', 'ms', 'started', 'log_path', 'prompt_path', 'efp', 'skey', 'steer']
   const facts = picked
     ? (shown.item_records && shown.item_records[picked.index])
       || Object.fromEntries(ITEM_FACTS.map(k => k === 'status' ? [k, picked.status]
         : k === 'error_class' ? [k, picked.errorClass ?? null]
+        : k === 'refusal' ? [k, picked.refusal ?? null]
         : k === 'error' ? [k, picked.error ?? null]
         : k === 'output' ? [k, picked.output ?? null]
         : k === 'ms' ? [k, picked.ms ?? null] : [k, null]))
@@ -2358,6 +2367,15 @@ function NodePanel({ detail }) {
       : null,
     shown.parked ? sect('parked', box('text-xs text-(--ui-text-secondary)', factText(shown.parked))) : null,
     pre('error', facts && facts.error !== UNKNOWN ? facts.error : shown.error !== UNKNOWN ? shown.error : null, cancelledClass ? undefined : EDGE_TONE.failed),
+    // est-zmpx8 (the #584 residual): the refusal stamp — the machine-readable class
+    // of a REFUSAL (wf.py `_window_spent_record` → wfcommon.FACT_KEYS `refusal`) —
+    // renders verbatim beside the death facts. Same WF-03 discipline as error_class
+    // above: a sentinel/absent stamp hides its section, so rule 8 holds both ways —
+    // honest absence on screen, never a fabricated value.
+    factKnown(facts?.refusal ?? shown.refusal)
+      ? sect('refusal', box('text-xs whitespace-pre-wrap text-(--ui-text-secondary)',
+          unk(facts?.refusal ?? shown.refusal)))
+      : null,
     Array.isArray(facts?.attempts_log) && facts.attempts_log.length
       ? sect('attempts_log', box('text-xs whitespace-pre-wrap text-(--ui-text-secondary)',
           facts.attempts_log.map(a => `#${a.attempt} ${unk(a.error_class)}`).join(' · ')))
