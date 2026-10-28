@@ -6181,8 +6181,13 @@ def run_state(r, *, telemetry=True, lock_state=None):
 # `unknown`, never 0 (AGENTS.md rule 8). `steer` rides along from _steer_state,
 # which moved here from the door — the door re-imports it (move, not copy).
 
-FACT_KEYS = ("status", "error_class", "error", "attempts", "attempts_log", "final",
-             "harvest", "output", "ms", "started", "log_path", "prompt_path", "efp", "skey")
+# est-t7yod (#583 residual): `refusal` joins the core rows, not the append-only
+# tail — it refines error_class (the est-mqp1f stamp says WHICH exhaustion
+# verdict is final), and a core row must answer on every record: a non-refusal
+# failure honestly reads refusal=unknown (AGENTS rule 8), never a prose grep.
+FACT_KEYS = ("status", "error_class", "refusal", "error", "attempts", "attempts_log",
+             "final", "harvest", "output", "ms", "started", "log_path", "prompt_path",
+             "efp", "skey")
 # No-team FACT_KEYS and node_facts shape stay byte-identical. Profile facts are
 # appended only when routed children actually carry them in a spawn/result record;
 # the est-wqml6 telemetry fact rides the same append-only law (absent record =

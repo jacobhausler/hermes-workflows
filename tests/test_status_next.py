@@ -84,8 +84,13 @@ try:
     check(nf and [a["attempt"] for a in nf["attempts_log"]] == [0, 1], "A2: attempts_log rides verbatim", repr(nf.get("attempts_log"))[:120])
     check(nf and nf["prompt_path"] == str(PF),
           "A2: prompt_path rides verbatim (honest unknown if the record lacks it)", repr(nf)[:160])
-    check(set(nf) == {"error_class", "attempts", "attempts_log",
+    check(set(nf) == {"error_class", "refusal", "attempts", "attempts_log",
           "final", "log_path", "prompt_path"}, "A2: closed key set only", str(sorted(nf)))
+    # est-t7yod: `refusal` joined the whitelist beside error_class — this pin
+    # extending IS the residual; the value leg lives in
+    # tests/test_refusal_facts_t7yod.py (a non-refusal death reads `unknown` here).
+    check(nf and nf["refusal"] == "unknown",
+          "A2: a child_exit death reads refusal=unknown (never fabricated)", repr(nf)[:120])
     check(pf["nodes"]["die"].get("error") == "child exit 1",
           "A2: facts ride BESIDE the error line (error still shipped)", repr(pf["nodes"]["die"])[:200])
     check("node_facts" not in pf["nodes"]["solo"], "A2: a done node ships no node_facts", "")

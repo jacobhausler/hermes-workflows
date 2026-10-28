@@ -3,6 +3,25 @@
 ## Unreleased
 
 Ops/chore:
+- fix(read model) est-t7yod (the #583 peer-review residual): the est-mqp1f
+  machine-readable `refusal` stamp now reaches the read model. The producer
+  (#583, merged as 60722b1) commits `refusal: lifetime_cap_spent` on a spent-cap
+  boot, but `wfcommon.FACT_KEYS` and the door's `node_facts` passthrough
+  whitelist didn't carry the key — `workflow status` surfaced the
+  `transport_exhausted` class and the "spawn refused" prose but not WHICH
+  exhaustion verdict is final, so an operator still had to grep the message.
+  `refusal` joins the FACT_KEYS core rows (rendered `unknown` on every
+  non-refusal death, the rule-8 law, not an append-only key) and the door's
+  failed/partial `node_facts` whitelist beside `error_class`, extending the
+  A2 closed-key-set pin in `tests/test_status_next.py` (whose new leg reads
+  `refusal=unknown` on the child_exit death); the operations doc names the
+  stamp. Pins: `tests/test_refusal_facts_t7yod.py` S1-S4 — FACT_KEYS row,
+  verbatim `node_facts` surface, door `act_status` leg on a refusal-stamped
+  record (`node_facts shows refusal=lifetime_cap_spent on a spent-cap boot`),
+  unknown law + row preservation — RED at 60722b1 (S1-S3 fail: no row, no
+  surface, no door key), GREEN over the two whitelist rows. Golden re-baked
+  for the one sanctioned delta: the `retry-partial` door payload's
+  `node_facts` gains `refusal: unknown`.
 - fix(retry) est-mqp1f (the #579 review residual): the #164 `fallback_models`
   ladder no longer walks rungs over a spent-cap boot, and a rung death can no
   longer re-break the est-ja41 record-vs-ledger agreement. The est-9qhpf

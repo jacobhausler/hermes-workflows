@@ -1899,7 +1899,8 @@
             "error_class": "unknown",
             "final": "",
             "log_path": "<TEMP>/home/workflows/<RUN>/logs/a.a0.log",
-            "prompt_path": "<TEMP>/home/workflows/<RUN>/logs/a.a0.prompt.md"
+            "prompt_path": "<TEMP>/home/workflows/<RUN>/logs/a.a0.prompt.md",
+            "refusal": "unknown"
           },
           "output": {
             "result": "harvested"
@@ -1949,7 +1950,8 @@
             "error_class": "unknown",
             "final": "",
             "log_path": "<TEMP>/home/workflows/<RUN>/logs/a.a0.log",
-            "prompt_path": "<TEMP>/home/workflows/<RUN>/logs/a.a0.prompt.md"
+            "prompt_path": "<TEMP>/home/workflows/<RUN>/logs/a.a0.prompt.md",
+            "refusal": "unknown"
           },
           "output": {
             "result": "harvested"

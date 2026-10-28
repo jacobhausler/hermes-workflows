@@ -4017,11 +4017,14 @@ def act_status(args):
         # A2: a failed/partial node also ships the child's last words and the
         # failure facts — pure passthrough through the ONE node-truth read (O2),
         # so the parent never tails logs to learn why a child died.
+        # est-t7yod (#583 residual): `refusal` rides beside `error_class` — the
+        # machine-readable class of a final exhaustion verdict (est-mqp1f);
+        # non-refusal deaths read it `unknown` like every absent core row.
         if rec and v["status"] in ("failed", "partial"):
             nf = _common.node_facts(r, nid)
             if nf:
                 out["nodes"][nid]["node_facts"] = {
-                    k: nf[k] for k in ("error_class", "attempts", "attempts_log",
+                    k: nf[k] for k in ("error_class", "refusal", "attempts", "attempts_log",
                                        "final", "log_path", "prompt_path")
                     if k in nf} | ({"stale_because": nf["stale_because"]}
                                    if "stale_because" in nf else {})
