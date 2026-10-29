@@ -1,6 +1,35 @@
 # Changelog
 
-## Unreleased
+## 1.4.4 — 2026-10-29
+
+Patch release: 40 commits on main since v1.4.3. Retry discipline hardened end to
+end: every spawn gates on the persisted lifetime attempt ledger (#579), the spent-cap
+refusal bypasses the `fallback_models` ladder and now rides `node_facts`/door status
+and the desktop fact sheet (#583, #584, #587), with a work-metered retry ladder and
+validated concurrency knobs (#582) and a persisted, restart-honored transient-retry
+window (#539). The parked-hold watchdog ships: persisted `park_watch` strikes +
+time-box (#566), pack fix so it rides the ZIP (#576), self-tearing singleton tick
+(#571). Runner/door truth: amend re-binds from the persisted launch binding
+(88379dc, est-qohvi), handoff promises only observed effect (43b80cf, est-2fwge),
+release/stop handoff truth (#548), capture-boundary clips and assembled-inputs
+budget (#568, #574), always-settle spawn laws (#567), capped fan-out partial-commit
+gate (#529), bead-close edges on skip/on_exit (#525, #517, @atbrace), wake
+tri-state sender + at-most-once markers (#565) with trailing re-check (#564),
+hold-vs-wall admission refusal (#481), `wf.py validate [--json]` (#479, #474),
+door advisory semantic lints (#559, @atbrace takeover of #520), consent/dissent
+ledger rows + old-form normalizer (#556), per-node telemetry sidecar (#569),
+persisted-argv residency guard (#570), QA wave WF-02..09 (#586), and the
+`_CardText.__reduce__` deepcopy fix after post-tool compression (#588, @atbrace).
+Infra/pack: `tests/conftest.py` ships in the release ZIP (#562), pr-compliance C1
+scopes to the diff and honors C2 first (#561), lane parity mirrors derive
+HERMES_PIN/python-version at run time (#572), core repinned v0.22.0 with the
+private-import contract test running in CI (7777102, est-i3pro), private-core
+imports pinned as a reasoned allow-list that degrades, never raises (#557, #558),
+squash-dropped watchdog entry restored (#578), hint-cap net-zero trim (#560),
+canary walls retimed (#581), amend re-bind law narrowed in docs (#575).
+
+### Carried ship fragments
+
 
 Ops/chore:
 - fix(read model) est-t7yod (the #583 peer-review residual): the est-mqp1f
