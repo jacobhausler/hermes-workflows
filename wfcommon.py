@@ -6062,6 +6062,13 @@ def run_state(r, *, telemetry=True, lock_state=None):
         status = "partial"
     elif verdict.startswith("blocked by failed"):
         status = "failed"
+    elif verdict.startswith("terminated:"):
+        # terminal-record-or-completed: a kill verdict IS the completion truth —
+        # it outranks node-commit done-ness (SIGTERM landing after run.done but
+        # before the exit record must not book a killed run as done). Interrupted
+        # keeps it resumable, matching the external-kill respawn-eligible law.
+        if status == "done":
+            status = "interrupted"
     if verdict.startswith("crashed:") and (status == "interrupted" or stored_graph.get("on_exit")):
         status = "failed"  # an exit handler must never mask the recorded crash verdict
     # sys-5lnm17 (upstream of sys-ntdq1v): WHICH nodes died, derived here from the
