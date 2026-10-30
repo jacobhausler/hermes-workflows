@@ -1,16 +1,21 @@
 # Changelog
 
-## Unreleased
+## 1.4.5 — 2026-10-30
 
-- fix(suite): the per-file wall is a hang backstop, not a performance budget —
-  raise the cap from 90s to a measured 180s with a `--per-file-timeout` override
-  and an anti-truncation test leg (estate-host serial rechecks measured
-  91.14/92.40/94.39/110.68s on four files that the old cap killed deterministically).
-- test(machine-watch): cure the load-window flake at its root — wf.py bounds each
-  gate-wait probe by timeout=min(every,300), so the test's every_s=.15 SIGKILLed
-  the probe (last_exit=-9) at estate-host latency (p50 0.153s at load 32); probe
-  budget raised to every_s=1.0 (~5x worst measured), join to 90s (must contain
-  the 30s wait), park loop to 75s; assertions unchanged. (#592)
+Patch release from five merged pull requests since v1.4.4:
+
+- Fix producer-declared partial results releasing plain after-edges, and record
+  zero attempts for precondition refusals (#522, @atbrace).
+- Keep killed runs from being reported as done: terminal records or completed
+  work are required by the read model (#504, @atbrace).
+- Express pinned routes at spawn time and refuse `route_inexpressible` before
+  a child starts when the requested route cannot be honored (#590, @jacobhausler).
+- Align the operations guide and armed-strip tests with effective `require_route`
+  policy, including the route-refusal branch (#591, @jacobhausler).
+- Fix the suite per-file wall — a measured 180 s hang backstop with a
+  `--per-file-timeout` override — and cure the machine-watch load flake at its
+  probe-kill root (`timeout=min(every,300)` vs every_s=.15); assertions
+  unchanged (#592, @jacobhausler).
 
 ## 1.4.4 — 2026-10-29
 
