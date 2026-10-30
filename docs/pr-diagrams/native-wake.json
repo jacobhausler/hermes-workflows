@@ -1,0 +1,139 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "Native admission path",
+    "quality_profile": "showcase",
+    "output": "native-wake.html",
+    "subtitle": "Protocol for a ready local owner. Legacy HTTP compatibility is outside this view."
+  },
+  "lanes": [
+    {
+      "id": "runner",
+      "label": "Workflow transition and durable wake ledger"
+    },
+    {
+      "id": "native",
+      "label": "Existing canonical gateway. Discover only."
+    }
+  ],
+  "mainPath": [
+    "transition",
+    "discovery",
+    "identity",
+    "submit",
+    "readback",
+    "ledger"
+  ],
+  "nodes": [
+    {
+      "id": "transition",
+      "lane": "runner",
+      "col": 0,
+      "type": "backend",
+      "label": "notify()",
+      "sublabel": "Stamped owner and stable tid",
+      "width": 170
+    },
+    {
+      "id": "ledger",
+      "lane": "runner",
+      "col": 5,
+      "type": "database",
+      "label": "wake.jsonl",
+      "sublabel": "Acceptance receipt, not completion",
+      "width": 190
+    },
+    {
+      "id": "discovery",
+      "lane": "native",
+      "col": 1,
+      "type": "backend",
+      "label": "Discover owner",
+      "sublabel": "Ready endpoint. Never start a daemon.",
+      "width": 190
+    },
+    {
+      "id": "identity",
+      "lane": "native",
+      "col": 2,
+      "type": "security",
+      "label": "session.resume",
+      "sublabel": "Exact session and stored identity",
+      "width": 190
+    },
+    {
+      "id": "submit",
+      "lane": "native",
+      "col": 3,
+      "type": "backend",
+      "label": "prompt.submit",
+      "sublabel": "Stable input_id. unattended=False.",
+      "width": 190
+    },
+    {
+      "id": "readback",
+      "lane": "native",
+      "col": 4,
+      "type": "security",
+      "label": "prompt.receipt",
+      "sublabel": "Matching admission and owner",
+      "width": 190
+    }
+  ],
+  "edges": [
+    {
+      "id": "route-native",
+      "from": "transition",
+      "to": "discovery",
+      "label": "local owner",
+      "variant": "emphasis"
+    },
+    {
+      "id": "resume",
+      "from": "discovery",
+      "to": "identity",
+      "label": "ready",
+      "variant": "emphasis"
+    },
+    {
+      "id": "submit",
+      "from": "identity",
+      "to": "submit",
+      "label": "identity",
+      "variant": "emphasis"
+    },
+    {
+      "id": "readback",
+      "from": "submit",
+      "to": "readback",
+      "label": "receipt",
+      "variant": "emphasis"
+    },
+    {
+      "id": "accept",
+      "from": "readback",
+      "to": "ledger",
+      "label": "accepted",
+      "variant": "emphasis"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Delivery contract",
+      "items": [
+        "Use the existing transition identity on every retry.",
+        "Read back the exact admission before recording acceptance."
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Boundaries",
+      "items": [
+        "Unready owners and unproven identities cannot record acceptance.",
+        "Refusal never falls through to another transport. Approval policy is unchanged."
+      ]
+    }
+  ]
+}
