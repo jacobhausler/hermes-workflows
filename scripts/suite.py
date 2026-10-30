@@ -55,6 +55,18 @@ from pathlib import Path
 # job; the suite only stamps.
 _RUN_ATTEMPT = os.environ.get('GITHUB_RUN_ATTEMPT')
 
+# est-jggzt (#592): the per-file wall is the suite's last line of defence against
+# a HUNG case, not a performance budget. The old inline 90s sat below the measured
+# floor of four integration files on an estate host (serial rechecks at 7faed79:
+# test_11_integration_crash_resume 91.14s, test_11_integration_lane_supervisor
+# 92.40s, test_concurrency_retry_knobs_24 94.39s, test_suite_runs_root_762
+# 110.68s), so the full serial merge gate red-exited 124 deterministically while
+# CI's clean runner stayed under 90s. 180s = 1.6x the observed worst, and strictly
+# above the 120s hook-internal deadline #581 raised, so the inner deadline stays
+# the first responder. Override: --per-file-timeout N (int >= 1); CI's job wall
+# still backstops a pathological shard.
+DEFAULT_PER_FILE_TIMEOUT_S = 180
+
 
 def attempt_fields():
     return {'run_attempt': int(_RUN_ATTEMPT)} if _RUN_ATTEMPT and _RUN_ATTEMPT.isdigit() else {}
@@ -122,6 +134,7 @@ def parse_args(argv):
     baseline = None
     shard = None            # (i, n) for --shard i/n
     merge_dirs = None       # list of shard out-dirs for --merge
+    per_file_timeout = DEFAULT_PER_FILE_TIMEOUT_S
     rest = argv[3:]
     i = 0
     while i < len(rest):
@@ -145,6 +158,19 @@ def parse_args(argv):
                 print(f'suite: --shard {rest[i+1]} out of range (need N>=1, 0<=I<N)', flush=True)
                 raise SystemExit(2)
             shard, i = (si, sn), i + 2
+        elif rest[i] == '--per-file-timeout':
+            if i + 1 >= len(rest):
+                print('suite: --per-file-timeout needs an integer number of seconds', flush=True)
+                raise SystemExit(2)
+            try:
+                pft = int(rest[i + 1])
+            except ValueError:
+                print(f'suite: --per-file-timeout needs an integer, got {rest[i+1]!r}', flush=True)
+                raise SystemExit(2)
+            if pft < 1:
+                print(f'suite: --per-file-timeout must be >= 1, got {pft}', flush=True)
+                raise SystemExit(2)
+            per_file_timeout, i = pft, i + 2
         elif rest[i] == '--merge':
             merge_dirs = rest[i + 1:]
             if not merge_dirs:
@@ -157,10 +183,10 @@ def parse_args(argv):
     if shard and merge_dirs:
         print('suite: --shard and --merge are exclusive modes', flush=True)
         raise SystemExit(2)
-    return root, out, baseline, shard, merge_dirs
+    return root, out, baseline, shard, merge_dirs, per_file_timeout
 
 
-root, out, _baseline_path, _shard, _merge_dirs = parse_args(sys.argv)
+root, out, _baseline_path, _shard, _merge_dirs, _per_file_timeout = parse_args(sys.argv)
 
 
 def invalidate_receipts():
@@ -277,6 +303,7 @@ if _shard:
     _n_all = len(cases)
     cases = cases[_shard[0]::_shard[1]]
     print(f'suite: shard {_shard[0]}/{_shard[1]} — {len(cases)} of {_n_all} cases', flush=True)
+print(f'suite: per-file-timeout={_per_file_timeout}s', flush=True)
 # est-2ek.1.762: the serial run exports a TEMPORARY WF_RUNS_ROOT so a test that
 # forgets its own pin can never land fixture runs in the PRODUCTION runs root
 # (774/1227 zero-log fixture dirs were leaked exactly this way; census spool
@@ -319,7 +346,7 @@ for argv in cases:
         with log.open('w') as fh:
             result = subprocess.run(argv, cwd=root, env={**_base_env, 'HERMES_HOME': str(root / 'tests' / '.suite-home'),
                                                          'WF_RUNS_ROOT': str(_suite_runs_root)},
-                                    stdout=fh, stderr=subprocess.STDOUT, timeout=90)
+                                    stdout=fh, stderr=subprocess.STDOUT, timeout=_per_file_timeout)
         rc = result.returncode
     except subprocess.TimeoutExpired:
         rc = 124

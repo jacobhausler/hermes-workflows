@@ -109,7 +109,23 @@ print('```json\\n'+json.dumps(out)+'\\n```',flush=True)
     for n in g['nodes']:
         if 'goal' in n:
             n['goal'] = n['goal'].replace('$HERMES_HOME/machine-watch-example', str(state))
-    g['nodes'][1]['wait'].update(until_argv=argv(state), every_s=.15, timeout_s=1.5)
+    # est-jggzt (#592) retime, same discipline as #550/#581: at the old budgets
+    # (1.5s bounded wait / 6s two-park loop / 12s runner join) this file flakes
+    # 3/5 on the estate host AND 3/5 on clean main in the SAME interleaved A/B
+    # (receipts: repo-admin/est-jggzt/mw-ab.json, 7faed79 vs 7ae347d, /opt venv
+    # + pinned core) — the red is the load window, not release content. The
+    # estate host is never quiet (tenant load ~25/72 cores), and the REAL
+    # killer is the per-probe budget: wf.py runs each until_argv attempt with
+    # timeout=min(every, 300), so the old every_s=.15 SIGKILLed the probe
+    # before /usr/bin/python3 could even start+run (last_exit=-9; receipts:
+    # repo-admin/est-jggzt/mwdiag + mw-cure3.log) — measured probe latency at
+    # load 32: p50=0.153s p90=0.171s, straddling the old budget exactly. The
+    # shipped example graph uses every_s=3.0 and never flakes; the test
+    # override now goes to every_s=1.0 (~5x worst measured), timeout_s=30, and
+    # a 90s join (which must contain the wait plus spawn and settle) and a 75s
+    # two-park loop — and every assertion stands: a gate that never parks
+    # still dies on the same checks, just later.
+    g['nodes'][1]['wait'].update(until_argv=argv(state), every_s=1.0, timeout_s=30)
     args = {'graph':g, 'name':'native-machine-watch',
             'run_context':{'watch_name':'test-watch','check_cmd':'true'},
             'lane_key':'example/machine-watch-94'}
@@ -119,7 +135,11 @@ print('```json\\n'+json.dumps(out)+'\\n```',flush=True)
         path = tmp / 'runs' / r['run_id']
         return r, path
     def finish(r, path):
-        procs[r['run_id']].wait(timeout=12)
+        # Join must exceed the FULL worst-case lifecycle it contains: the gate
+        # wait alone can spend 30s before the runner settles, so the join is
+        # 90s — beyond wait(30) + spawn + bootstrap child + settle. A runner
+        # still alive past 90s is a real hang, not a scheduling artifact.
+        procs[r['run_id']].wait(timeout=90)  # est-jggzt (#592): join widened past the wait budget, see retime note above
         return json.loads((path / 'runner_exit.json').read_text())
     try:
         first, path = start()
@@ -136,7 +156,7 @@ print('```json\\n'+json.dumps(out)+'\\n```',flush=True)
         # The next dispatch's bootstrap re-installs the seeded command.
         args['run_context']['check_cmd']='exit 2'
         broken, path3 = start()
-        deadline = time.monotonic() + 6
+        deadline = time.monotonic() + 75  # est-jggzt (#592): two parks now cost up to 2x30s plus dispatch slack, see retime note above
         while time.monotonic() < deadline:
             parked = path3 / 'gates/watch.parked.json'
             if parked.exists() and json.loads(parked.read_text()).get('attempt', 0) >= 2:
