@@ -1436,10 +1436,7 @@ _WAKE_NATIVE = None
 _WAKE_NATIVE_TRIED = False
 
 def _native_wake():
-    """Spec-load wake_native.py once, lazily (the hooks_outbound/node_telemetry
-    hygiene: no sys.path mutation, no generic name in sys.modules). None = the
-    adapter is absent or broken: the legacy wake path is byte-identical to the
-    pre-adapter head — the absence-of-feature degradation, never a crash."""
+    """Load the optional native wake adapter without changing import paths."""
     global _WAKE_NATIVE, _WAKE_NATIVE_TRIED
     if _WAKE_NATIVE_TRIED:
         return _WAKE_NATIVE
@@ -1459,24 +1456,18 @@ def _native_wake():
     return _WAKE_NATIVE
 
 def _wake_deliver(rec, sid, text, tid, owner=None):
-    """Attempt ONE wake delivery; return the tri-state outcome: True = delivered
-    (2xx legacy / native admission ACCEPTED), False = try-later (the endpoint
-    answered wrongly, redirected, timed out, the transport raised, or a native
-    refusal failed closed — the retry re-drives under the SAME instance id),
-    None = nowhere-ever (no native owner to reach AND no reachable API server,
-    so no retry can ever land and the marker settles). Typed failure detail
-    lands on rec (error / error_class) for the probe row; never raises.
+    """Return native admission acceptance or the legacy HTTP delivery outcome.
 
-    Routing (wake-native-admission/v1): an owner session stamped
-    platform="local" is owned by the canonical gateway, so the native adapter
-    goes FIRST — discover-only, ready required, exact SID, stable input_id=tid,
-    receipt readback. A native refusal/retry NEVER falls through to legacy (a
-    refused wake must not smuggle itself in under another transport); legacy
-    HTTP is reached only for api_server-stamped owners or when discovery finds
-    no ready gateway at all (the documented fallback, never a hidden one)."""
+    A missing native owner may use legacy compatibility. Refused, unready or
+    unidentifiable native owners must not fall through to another transport.
+    """
     platform = owner.get("platform") if isinstance(owner, dict) else None
     if platform == "local":
         nw = _native_wake()
+        if nw is None and (Path(__file__).resolve().parent / "wake_native.py").is_file():
+            rec["error"] = "native adapter failed to load"
+            rec["error_class"] = "native_retry"
+            return False
         if nw is not None:
             out = nw.deliver(sid, text, tid, wfcommon.hermes_home())
             oc = out.get("outcome")

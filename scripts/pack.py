@@ -89,6 +89,7 @@ INCLUDE_FILES = (
     # tests/test_hooks_outbound_bridge.py (tests glob) crashes at the unpacked root: the exact
     # est-4vnq finding-4 shape. Stdlib-only, so the ZIP side stays honest.
     "hooks_outbound.py",
+    "wake_native.py",
     # P3 (est-w86l0 lane, #430): __init__.py spec-loads this by file path when the
     # `subagent_accounting` token is allowed — absent from the ZIP the module simply
     # fails to load and the lane dies silently (est-4vnq finding-4 pack law).

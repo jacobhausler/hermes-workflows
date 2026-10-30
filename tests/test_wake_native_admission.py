@@ -1,46 +1,5 @@
 #!/usr/bin/env python3
-"""Native gateway owner-wake admission (wake-native-admission/v1, estate lane
-native-wake-20261030).
-
-The failure this pins (wake.jsonl of run 20261030-014334-estate-agent-recovery-gr):
-owner {platform: "local", session_id: "local-f5db..."} recorded
-error_class=missing_endpoint because _wake_deliver knew only the legacy HTTP
-platforms.api_server route, while the canonical gateway was ready and owns the
-session. The repair prefers canonical WS/native admission (discover-only, ready
-required, NEVER ensure/start) with the legacy HTTP path kept as the documented
-fallback for actual api_server sessions.
-
-Data shape (defined BEFORE the logic):
-  input_id      = the wake instance tid (sha256[:32], stable across retries and
-                  respawns of one transition decision — the stable identity a
-                  retried ambiguous call replays under).
-  receipt       = {admission_id, submit_status, status} from prompt.submit
-                  read back through prompt.receipt. status in
-                  {queued, started, terminal} = DELIVERY ACCEPTANCE (durable
-                  admission bound to the exact stored owner session) — never
-                  terminal task completion.
-
-Laws pinned here (RED at the pre-fix head):
-  * NATIVE PREFERRED: a local-platform owner with a READY gateway admits over
-    WS (session.resume exact SID -> prompt.submit queued/unattended/input_id ->
-    prompt.receipt readback) and the legacy sink sees zero POSTs.
-  * DISCOVER ONLY: absence of a ready owner starts nothing — the connect seam is
-    never reached, and the endpoint passed when it IS reached is the discovered
-    one (never None: None is the ensure form that may spawn a daemon).
-  * FAIL CLOSED ON IDENTITY: permission_denied/not_found on the exact SID ->
-    delivered=false, error_class=native_refused, and NO legacy bypass even with
-    a live sink.
-  * STABLE REPLAY: a transient failure retries under the SAME input_id (=tid).
-  * READBACK GATES ACCEPTANCE: submit says queued but the receipt readback says
-    unknown -> try-later, never a delivered stamp.
-  * NATIVE ABSENT == LEGACY BEHAVIOR PRESERVED: sink delivered / nowhere-ever
-    missing_endpoint exactly as before; api_server owners never touch native.
-  * APPROVALS ARE NOT BYPASSED: only session.resume / prompt.submit /
-    prompt.receipt are ever dialed — no respond/resolve verbs.
-
-Direct notify() calls against real run dirs, fake native transport, loopback
-legacy sink (WF_WAKE_SINK_PORT). No provider, synthetic ids, no real gateway.
-"""
+"""Native admission and legacy wake transport compatibility."""
 import asyncio
 import contextlib
 import json
@@ -160,7 +119,7 @@ def exact_sid_resume(store):
     def _resume(method, params):
         if params.get("session_id") != store:
             raise FakeRPCError("not_found")
-        return {"subscription_id": "sub-1", "pending": []}
+        return {"session_id": store, "stored_session_id": store, "subscription_id": "sub-1", "pending": []}
     return _resume
 
 
@@ -173,7 +132,6 @@ def kill_sink():
 
 
 try:
-    # ---- 0. THE ADAPTER MODULE EXISTS AND LAZIES THROUGH WF ------------------
     nw = getattr(wf, "_native_wake", lambda: None)()   # graceful at the pre-fix head
     check("adapter seam: wf._native_wake() loads wake_native.py", nw is not None,
           repr(nw))
@@ -186,13 +144,12 @@ try:
 
     _real_discover, _real_connect = nw.discover, nw._connect
 
-    # ---- 1. NATIVE PREFERRED: happy admission + readback, legacy sees zero ---
     use_sink()
     eps = []
     client = FakeClient({
         "session.resume": exact_sid_resume(STORED_SID),
         "prompt.submit": {"admission_id": "adm-1", "status": "queued"},
-        "prompt.receipt": {"admission_id": "adm-1", "status": "queued"},
+        "prompt.receipt": {"admission_id": "adm-1", "status": "queued", "ref": {"session_id": STORED_SID}},
     })
     nw.discover = lambda home: "EP-SENTINEL"
     nw._connect = fake_connect(client, eps)
@@ -227,7 +184,6 @@ try:
           len(client.calls) == before1 and len(ledger(r1)) == 1,
           f"calls={len(client.calls)} rows={ledger(r1)}")
 
-    # ---- 2. FAIL CLOSED ON IDENTITY: wrong SID, no legacy bypass -------------
     eps2 = []
     client2 = FakeClient({"session.resume": exact_sid_resume("some-OTHER-session")})
     nw._connect = fake_connect(client2, eps2)
@@ -242,7 +198,6 @@ try:
     check("refusal never reached prompt.submit (resume gate held)",
           [m for m, _ in client2.calls] == ["session.resume"], str(client2.calls))
 
-    # ---- 3. PERMISSION refusal likewise fail-closed ---------------------------
     client3 = FakeClient({"session.resume": FakeRPCError("permission_denied")})
     nw._connect = fake_connect(client3, [])
     r3 = mk_run("nv-3", "local")
@@ -253,7 +208,6 @@ try:
           and rows[0].get("error_class") == "native_refused" and len(posts) == 0,
           str(rows))
 
-    # ---- 4. STABLE REPLAY: transient retry reuses the SAME input_id ----------
     attempts = {"n": 0}
 
     def flaky_submit(method, params):
@@ -264,7 +218,7 @@ try:
     client4 = FakeClient({
         "session.resume": exact_sid_resume(STORED_SID),
         "prompt.submit": flaky_submit,
-        "prompt.receipt": {"status": "queued"},
+        "prompt.receipt": {"admission_id": "adm-4", "status": "queued", "ref": {"session_id": STORED_SID}},
     })
     nw._connect = fake_connect(client4, [])
     r4 = mk_run("nv-4", "local")
@@ -282,11 +236,10 @@ try:
           len(submits) == 2 and submits[0].get("input_id") == submits[1].get("input_id")
           == rows[-1].get("id"), str(submits))
 
-    # ---- 5. READBACK GATES ACCEPTANCE: unknown status is never a stamp ------
     client5 = FakeClient({
         "session.resume": exact_sid_resume(STORED_SID),
         "prompt.submit": {"admission_id": "adm-5", "status": "queued"},
-        "prompt.receipt": {"admission_id": "adm-5", "status": "unknown"},
+        "prompt.receipt": {"admission_id": "adm-5", "status": "unknown", "ref": {"session_id": STORED_SID}},
     })
     nw._connect = fake_connect(client5, [])
     r5 = mk_run("nv-5", "local")
@@ -294,13 +247,12 @@ try:
     rows = ledger(r5)
     check("submit queued but readback unknown: try-later, no delivered stamp",
           out == "undelivered" and rows[0].get("delivered") is False
-          and "unknown" in str(rows[0].get("error", "")), str(rows))
+          and rows[0].get("error_class") == "native_retry", str(rows))
 
-    # ---- 6. ACCEPTANCE IS ACCEPTANCE: started readback still delivers -------
     client6 = FakeClient({
         "session.resume": exact_sid_resume(STORED_SID),
         "prompt.submit": {"admission_id": "adm-6", "status": "started"},
-        "prompt.receipt": {"admission_id": "adm-6", "status": "started"},
+        "prompt.receipt": {"admission_id": "adm-6", "status": "started", "ref": {"session_id": STORED_SID}},
     })
     nw._connect = fake_connect(client6, [])
     r6 = mk_run("nv-6", "local")
@@ -309,9 +261,8 @@ try:
     check("started receipt readback = acceptance (not terminal completion)",
           out == "delivered" and rows[0].get("native_status") == "started", str(rows))
 
-    # ---- 7. PENDING APPROVALS ARE NOT BYPASSED -------------------------------
     client7 = FakeClient({
-        "session.resume": lambda m, p: {"subscription_id": "s",
+        "session.resume": lambda m, p: {"session_id": STORED_SID, "stored_session_id": STORED_SID, "subscription_id": "s",
                                         "pending": [{"prompt_id": "ap-1"}]},
         "prompt.submit": FakeRPCError("session_busy"),
     })
@@ -327,7 +278,6 @@ try:
           all(v in ALLOWED_VERBS for v in verbs) and "session.respond" not in verbs,
           str(sorted(verbs)))
 
-    # ---- 8. NATIVE ABSENT: legacy behavior preserved exactly -----------------
     nw.discover = lambda home: None
     trip = fake_connect(FakeClient({}), [], tripwire=True)   # absence must not connect
     nw._connect = trip
@@ -349,7 +299,6 @@ try:
           and rows[0].get("error_class") == "missing_endpoint", str(rows))
     use_sink()
 
-    # ---- 9. api_server owners NEVER touch the native seam --------------------
     nw.discover = lambda home: (_ for _ in ()).throw(
         AssertionError("native discover reached for an api_server owner"))
     r10 = mk_run("nv-10-apiserver", "api_server")
@@ -359,6 +308,18 @@ try:
     check("api_server owner: legacy route intact, native seam never consulted",
           out == "delivered" and rows[0].get("delivered") is True
           and len(posts) == before10 + 1, str(rows))
+
+    use_sink()
+    before_broken = len(posts)
+    wf._WAKE_NATIVE = None
+    wf._WAKE_NATIVE_TRIED = True
+    broken = mk_run("nv-broken-module", "local")
+    broken_result = wf.notify(broken, "gate.held", key="g1")
+    broken_rows = ledger(broken)
+    check("unloadable native adapter cannot bypass through legacy HTTP",
+          broken_result == "undelivered" and len(posts) == before_broken
+          and broken_rows[0].get("error_class") == "native_retry", str(broken_rows))
+    wf._WAKE_NATIVE = nw
 
 finally:
     with contextlib.suppress(Exception):
