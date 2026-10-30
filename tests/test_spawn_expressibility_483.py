@@ -32,6 +32,10 @@ Law pinned:
       provider + gap").
   E6  marker armed + NO pin at all: runs (nothing pinned, nothing held).
   E7  the typed class is a member of the closed ERROR_CLASSES set.
+  E8  marker armed + PROFILE-carried pin (the estate shape: `-p` rides the
+      argv, the strip consumes `-m`/`--provider`): profile evidence does NOT
+      express the pin — refused typed, ZERO attempts, and the why-clause
+      names the armed strip, not a missing profile.
 
 Harness: the repo's own in-process run_child harness with a recording seat
 stub (test_alias_receipt_respawn_318 shape), stdlib only, no network. The
@@ -178,6 +182,30 @@ check("E6 armed + no pin at all: runs unchanged (auto-route is the ask)",
 # ---- E7: the closed set carries the new class --------------------------------
 check("E7 route_inexpressible is in ERROR_CLASSES",
       "route_inexpressible" in wf.ERROR_CLASSES)
+
+# ---- E8: armed + PROFILE-carried pin (estate shape) -> profile is not the pin
+# `-p zap` rides the argv (it is not a frozen-route pair), the strip still
+# consumes -m/--provider, and the door must NOT read profile presence as
+# expressibility: the estate's real lanes all carry both profile and pin.
+LEDGER.write_text("")
+armed(True)
+n8 = node("zapleg", profile="zap", provider=PROV, model=MODEL)
+r8 = wf.run_child(META(RUN_A), n8, {"zapleg": n8}, "do the work", "", None,
+                  skey="wf:ex483a:zapleg")
+check("E8 armed + profile-carried pin: refused, typed, ZERO attempts",
+      r8.get("status") == "failed"
+      and r8.get("error_class") == "route_inexpressible"
+      and ledger_lines() == [] and r8.get("ms") == 0, (r8, ledger_lines()))
+err8 = r8.get("error", "")
+check("E8 the error names the pin and the armed-strip gap",
+      PROV in err8 and MODEL in err8 and "omit" in err8.lower()
+      and "require_route" in err8, err8)
+check("E8 the why-clause does NOT blame a missing profile (the profile rode; the pin did not)",
+      "while the node declares no profile" not in err8, err8)
+ev8 = [e for e in events(RUN_A) if e.get("event") == "dispatch.refused"
+       and e.get("node") == "zapleg"]
+check("E8 one dispatch.refused event for the profile-carried leg",
+      len(ev8) == 1 and ev8[0].get("error_class") == "route_inexpressible", ev8)
 
 print(f"{'FAILED' if not ok else 'OK'}: spawn-expressibility #483 suite")
 sys.exit(1 if not ok else 0)
