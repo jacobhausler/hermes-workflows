@@ -319,6 +319,81 @@ def _route_substitution_refusal(meta, node, spawn_no):
             "error_class": "route_substitution_denied", "raw": "", "ms": 0,
             "attempts": 1, "spawn": spawn_no}
 
+def _spawn_expressibility_refusal(meta, node, cmd, spawn_no, index=None,
+                                  model_override=None):
+    """#483: BEFORE submit — the spawn-time expression gate for a pinned seat.
+    The door's liveness ping probes RAW credentials; the child routes through
+    the spawn argv. When neither argv face can carry the node's pin — no
+    profile evidence (no `-p`), and the est-yq2xq creation overrides `-m`/
+    `--provider` are absent from the launch argv or consumed by the armed
+    strip — the legacy path spawned BARE, silently served the seat default,
+    and died post-work at the `_route_hold` billing gate after 10-25 tool
+    calls on the wrong model. Refuse typed here instead: same posture as that
+    hold, moved to before the child starts. Effective require_route follows
+    the #25 precedence verbatim (node key > graph `defaults` > True only on
+    an authored model pin) — an author who accepted fallback (require_route:
+    false) rides the seat default UNREFUSED, exactly the est-yq2xq design
+    intent; a node that pins nothing is auto-route by contract. The truth is
+    read off the FINAL argv (after `_omit_policy_flags_if_enabled`), so every
+    expressible pin — profile-carried or override-surfacing — is behavior-
+    preserved byte-identically. The refusal never touches the seat (zero
+    attempts) and logs dispatch.refused like the budget gate beside it."""
+    run = meta.get("_run")
+    pin_p = str(node.get("provider") or "")
+    pin_m = str(node.get("model") or "")
+    if not (pin_p or pin_m):
+        return None                             # nothing pinned: auto-route is the ask
+    eff_m = str(model_override) if model_override is not None else pin_m
+    rq = node.get("require_route")
+    if rq is None:
+        try:
+            rq = (json.loads((run / "graph.json").read_text(encoding="utf-8"))
+                  .get("defaults") or {}).get("require_route")
+        except Exception:
+            rq = None
+    if rq is None:
+        rq = bool(pin_m)                        # #25: default-true on an authored model pin
+    if not rq:
+        return None                             # the author accepted fallback: legacy path
+    def carried(flag, want):                    # does the LAUNCH argv actually bear the pin?
+        if flag not in cmd:
+            return False
+        i = cmd.index(flag)
+        return i + 1 < len(cmd) and str(cmd[i + 1]) == want
+    gaps = []
+    if eff_m and not carried("-m", eff_m):
+        gaps.append(f"model {eff_m!r} (-m)")
+    if pin_p and not carried("--provider", pin_p):
+        gaps.append(f"provider {pin_p!r} (--provider)")
+    if not gaps:
+        return None                             # expressible: launch byte-identical
+    if _omit_policy_flags_armed():
+        why = ("the est-yq2xq creation-override strip is armed (WF_OMIT_POLICY_FLAGS=1 "
+               f"or {hermes_home()}/workflows/omit-policy-flags.on) and consumed the "
+               "flags before Popen" + (", while the node declares no profile to carry "
+               "the route" if not node.get("profile") else ""))
+    elif not node.get("profile"):
+        why = "the node declares no profile (no -p route evidence) and the launch argv " \
+              "carries no creation override for the pin"
+    else:
+        why = "the launch argv does not carry the pin this node declares"
+    pin = f"{pin_p}/{pin_m}".strip("/")
+    err = (f"route_inexpressible: node {node['id']!r} pins {pin!r} but this host's spawn "
+           f"argv CANNOT EXPRESS it: {' and '.join(gaps)} — {why}. The child would serve "
+           f"the seat's default model while the door believes the pin (#483). Refused "
+           f"BEFORE the child started (zero attempts) — same posture as the route "
+           f"billing hold, moved earlier. Fix: point the node at a profile this host "
+           f"resolves, lift the omit-policy-flags override so -m/--provider ride, repin "
+           f"a seat this host can express, or accept fallback explicitly with "
+           f"require_route: false ON THAT NODE (a `defaults` flip opts the whole graph in).")
+    ev = {"node": node["id"], "error_class": "route_inexpressible",
+          "error": err, "pin": pin}
+    if index is not None:
+        ev["index"] = index
+    log(run, "dispatch.refused", **ev)
+    return {"status": "failed", "error": err, "error_class": "route_inexpressible",
+            "raw": "", "ms": 0, "attempts": 1, "spawn": spawn_no}
+
 def _stale_route_receipt_clear(meta, node, spawn_no):
     """route-hold escalation (w56): a RE-DRIVE (spawn_no > 1) whose run already
     died on the route family for THIS node (route_unavailable /
@@ -3042,6 +3117,15 @@ ERROR_CLASSES = frozenset(("provider_400", "unresolved_model", "cap_exhausted",
                            # post-admission route substitution is a denial, never a
                            # silent re-billing (runs 20261004-070649-zap-night-*).
                            "route_substitution_denied",
+                           # #483: a spawn refused BEFORE the child starts because the
+                           # node's pinned provider/model cannot be expressed in this
+                           # host's launch argv (profile-less AND the -m/--provider
+                           # creation overrides absent or strip-consumed). The legacy
+                           # path spawned bare, served the seat default silently, and
+                           # died post-work at the _route_hold billing gate. Terminal:
+                           # deterministic on argv + host state — outside every retry
+                           # ladder, same posture as budget_exhausted.
+                           "route_inexpressible",
                            # lease-busy: rc=130 death on the CLI's session-lease wait
                            # (see _is_lease_busy) — bounded transient, one FRESH-session
                            # re-drive, never terminal on a lease collision.
@@ -6654,17 +6738,28 @@ _FROZEN_ROUTE_FLAGS = ("--max-turns", "--run-budget", "--reasoning",
                        "-t", "-m", "--provider")
 
 
+def _omit_policy_flags_armed(home=None, env=None):
+    """est-yq2xq's enable law as ONE predicate (#483): the strip is armed when
+    env WF_OMIT_POLICY_FLAGS=1 or the marker file
+    <hermes_home>/workflows/omit-policy-flags.on exists. Consulted by the
+    strip itself AND by the spawn-time expressibility refusal, whose message
+    names the armed override — a second spelling of this condition is the
+    drift. `home`/`env` are test seams."""
+    env = os.environ if env is None else env
+    if env.get("WF_OMIT_POLICY_FLAGS") == "1":
+        return True
+    root = Path(home) if home is not None else hermes_home()
+    return (root / "workflows" / "omit-policy-flags.on").exists()
+
+
 def _omit_policy_flags_if_enabled(cmd, home=None, env=None):
     """Strip frozen-route creation-override flag PAIRS from a child spawn argv
     (est-yq2xq). Enabled when env WF_OMIT_POLICY_FLAGS=1 or the marker file
     <hermes_home>/workflows/omit-policy-flags.on exists; otherwise returns the
     argv byte-identical. Each flag consumes its own value token — exactly how
     the argv builder materializes them above. `home`/`env` are test seams."""
-    env = os.environ if env is None else env
-    if env.get("WF_OMIT_POLICY_FLAGS") != "1":
-        root = Path(home) if home is not None else hermes_home()
-        if not (root / "workflows" / "omit-policy-flags.on").exists():
-            return list(cmd)
+    if not _omit_policy_flags_armed(home, env):
+        return list(cmd)
     out, i = [], 0
     while i < len(cmd):
         if cmd[i] in _FROZEN_ROUTE_FLAGS:
@@ -6802,6 +6897,16 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
     # on. Turn off: unset the env, delete the marker (byte-identical stock argv
     # returns). Absent both, this line changes nothing.
     cmd = _omit_policy_flags_if_enabled(cmd)
+    # #483: the same seam, one question later — can the launch argv carry this
+    # node's pinned route at all? If neither face can (no profile evidence, and
+    # -m/--provider absent or strip-consumed), the spawn would silently serve
+    # the seat default and die post-work at the _route_hold billing gate;
+    # refuse typed BEFORE the child starts instead. Every expressible pin
+    # returns None here and spawns byte-identical.
+    _rx = _spawn_expressibility_refusal(meta, node, cmd, spawn_no, index=index,
+                                        model_override=model_override)
+    if _rx is not None:
+        return _rx
     lp = spawn_log_path(run, node, index, spawn_no)   # Q1: per-spawn stdout capture
     report_path = lp.with_name(lp.name.replace(".log", ".turn.json"))  # core -Q turn report
     # B1 cooperative steer (feedback #13/#40): bake this node's addressed inbox
