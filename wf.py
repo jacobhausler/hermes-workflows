@@ -1432,13 +1432,65 @@ def _wake_tid(run_name, event, disc):
         return _ob.instance_id(run_name, event, disc)
     return hashlib.sha256(f"{run_name}\0{event}\0{disc}".encode()).hexdigest()[:32]
 
-def _wake_deliver(rec, sid, text, tid):
-    """Attempt ONE wake POST; return the tri-state outcome: True = delivered
-    (2xx), False = try-later (the endpoint answered wrongly, redirected, timed
-    out, or the transport raised — the retry re-drives under the SAME instance
-    id), None = nowhere-ever (the host configures no reachable API server, so
-    no retry can ever land and the marker settles). Typed failure detail lands
-    on rec (error / error_class) for the probe row; never raises."""
+_WAKE_NATIVE = None
+_WAKE_NATIVE_TRIED = False
+
+def _native_wake():
+    """Spec-load wake_native.py once, lazily (the hooks_outbound/node_telemetry
+    hygiene: no sys.path mutation, no generic name in sys.modules). None = the
+    adapter is absent or broken: the legacy wake path is byte-identical to the
+    pre-adapter head — the absence-of-feature degradation, never a crash."""
+    global _WAKE_NATIVE, _WAKE_NATIVE_TRIED
+    if _WAKE_NATIVE_TRIED:
+        return _WAKE_NATIVE
+    _WAKE_NATIVE_TRIED = True
+    try:
+        _p = Path(__file__).resolve().parent / "wake_native.py"
+        if not _p.is_file():
+            return None
+        _spec = importlib.util.spec_from_file_location("_hermes_workflows_wake_native", _p)
+        if _spec is None or _spec.loader is None:
+            return None
+        _mod = importlib.util.module_from_spec(_spec)
+        _spec.loader.exec_module(_mod)
+        _WAKE_NATIVE = _mod
+    except Exception:
+        _WAKE_NATIVE = None
+    return _WAKE_NATIVE
+
+def _wake_deliver(rec, sid, text, tid, owner=None):
+    """Attempt ONE wake delivery; return the tri-state outcome: True = delivered
+    (2xx legacy / native admission ACCEPTED), False = try-later (the endpoint
+    answered wrongly, redirected, timed out, the transport raised, or a native
+    refusal failed closed — the retry re-drives under the SAME instance id),
+    None = nowhere-ever (no native owner to reach AND no reachable API server,
+    so no retry can ever land and the marker settles). Typed failure detail
+    lands on rec (error / error_class) for the probe row; never raises.
+
+    Routing (wake-native-admission/v1): an owner session stamped
+    platform="local" is owned by the canonical gateway, so the native adapter
+    goes FIRST — discover-only, ready required, exact SID, stable input_id=tid,
+    receipt readback. A native refusal/retry NEVER falls through to legacy (a
+    refused wake must not smuggle itself in under another transport); legacy
+    HTTP is reached only for api_server-stamped owners or when discovery finds
+    no ready gateway at all (the documented fallback, never a hidden one)."""
+    platform = owner.get("platform") if isinstance(owner, dict) else None
+    if platform == "local":
+        nw = _native_wake()
+        if nw is not None:
+            out = nw.deliver(sid, text, tid, wfcommon.hermes_home())
+            oc = out.get("outcome")
+            if oc == "delivered":
+                rec["protocol"] = nw.SCHEMA
+                rec["admission_id"] = out.get("admission_id")
+                rec["native_status"] = out.get("status")
+                return True
+            if oc in ("refused", "retry"):
+                # fail closed: typed, try-later, NO legacy bypass for this row
+                rec["error"] = _wake_safe(f"native {oc}: {out.get('reason', '')}")
+                rec["error_class"] = f"native_{oc}"
+                return False
+            # unavailable: no ready canonical owner — legacy below, unchanged
     ep = _wake_endpoint()
     if ep is None:
         rec["error"] = ("no reachable api_server (enable platforms.api_server"
@@ -1696,7 +1748,7 @@ def notify(run, event, key=None, graph=None, node=None, refire=False):
                "id": tid, "wake_protocol": proto, "text": text}
         if event not in _WAKE_TEMPLATES:
             rec["catchall"] = True      # probe row is typed: template vs catch-all distinguishable
-        rec["delivered"] = _wake_deliver(rec, sid, text, tid)   # tri-state row mirrors the outcome
+        rec["delivered"] = _wake_deliver(rec, sid, text, tid, owner=owner)   # tri-state row mirrors the outcome
         _wake_append(run, rec)
         # park-watch verdict feed on the est-7rudf tri-state: delivered -> nothing
         # to see; False -> the ONE strike class; None (nowhere-ever) -> bare — a
