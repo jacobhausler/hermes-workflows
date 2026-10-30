@@ -64,6 +64,11 @@ class AdmissionIdentity(unittest.TestCase):
         self.assertEqual(self.send(client)['outcome'], 'refused')
         self.assertEqual(len(client.calls), 1)
 
+    def test_missing_stored_identity_is_not_invented(self):
+        client = Client(snapshot={'session_id': SID})
+        self.assertEqual(self.send(client)['outcome'], 'refused')
+        self.assertEqual(len(client.calls), 1)
+
     def test_missing_resume_identity_is_not_acceptance(self):
         client = Client(snapshot={})
         self.assertEqual(self.send(client)['outcome'], 'refused')

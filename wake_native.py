@@ -55,7 +55,7 @@ async def _connect(endpoint):
 def _same_session(snapshot, sid):
     return (isinstance(snapshot, dict)
             and snapshot.get("session_id") == sid
-            and snapshot.get("stored_session_id", sid) == sid)
+            and snapshot.get("stored_session_id") == sid)
 
 
 async def _admit(client, sid, text, input_id):
