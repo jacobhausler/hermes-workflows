@@ -182,7 +182,7 @@ publication guards, and crash recovery.
   fanout_empty | fatal_quota | forbidden_model | incomplete_work |
   inputs | item_record | killed | lane_wreckage | lease_busy | left_live_descendants | malformed_turn | precondition | provider_400 | quorum |
   ratelimit |
-  route_substitution_denied | route_unavailable | schema | seat_cap | seat_unsupported | seat_wait | spawn | stale_graph | timeout | transport | transport_exhausted |
+  route_inexpressible | route_substitution_denied | route_unavailable | schema | seat_cap | seat_unsupported | seat_wait | spawn | stale_graph | timeout | transport | transport_exhausted |
   unresolved_model`, plus `unknown` (the harvest-time default) — plus `attempts`. Read the
   class, not the prose; the exit-0-is-not-success settle law (`declared_failure`, transient
   sentinels) is in references/operations.md. `cancelled` (a `stop`, or a fan-out

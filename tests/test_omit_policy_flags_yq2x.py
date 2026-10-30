@@ -86,8 +86,13 @@ class SpawnWiring(unittest.TestCase):
         home.mkdir(parents=True)
         run = run_root / "runs" / "r1"
         (run / "nodes").mkdir(parents=True)
+        # #483: under an ARMED strip a node with an effective require_route now
+        # refuses before the child starts (route_inexpressible) — the lane that
+        # still launches through the strip is an author opted into the seat
+        # default. The refusal itself is pinned by tests/test_spawn_expressibility_483.py E1.
         node = {"id": "child", "type": "agent", "goal": "ok", "model": "test-model",
-                "provider": "test-provider", "max_turns": 65, "run_budget": 300}
+                "provider": "test-provider", "require_route": False,
+                "max_turns": 65, "run_budget": 300}
         (run / "graph.json").write_text(json.dumps({"nodes": [node]}))
         binpath = run_root / "hermes"
         binpath.write_text("#!/usr/bin/python3\n"
