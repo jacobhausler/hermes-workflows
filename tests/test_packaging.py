@@ -72,7 +72,8 @@ def main() -> None:
             root = f"hermes-workflows-{VERSION}/"
             check("archive includes runtime, docs, skill, examples, tests, and checksum manifest",
                   all(root + rel in members for rel in (
-                      "plugin.yaml", "__init__.py", "wf.py", "wfcommon.py",
+                      "plugin.yaml", "__init__.py", "wf.py", "wfcommon.py", "wake_native.py",
+                      "tests/test_wake_native_identity.py", "tests/test_wake_native_admission.py",
                       "dashboard/manifest.json", "dashboard/index.js", "dashboard/plugin_api.py", "desktop/plugin.js",
                       "README.md", "INSTALL.md", "SKILL.md", "examples/README.md", "examples/basics/smoke.json",
                       "examples/basics/approve-publish.json", "examples/review/blind-council.workflow.json",

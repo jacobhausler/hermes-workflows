@@ -1432,13 +1432,56 @@ def _wake_tid(run_name, event, disc):
         return _ob.instance_id(run_name, event, disc)
     return hashlib.sha256(f"{run_name}\0{event}\0{disc}".encode()).hexdigest()[:32]
 
-def _wake_deliver(rec, sid, text, tid):
-    """Attempt ONE wake POST; return the tri-state outcome: True = delivered
-    (2xx), False = try-later (the endpoint answered wrongly, redirected, timed
-    out, or the transport raised — the retry re-drives under the SAME instance
-    id), None = nowhere-ever (the host configures no reachable API server, so
-    no retry can ever land and the marker settles). Typed failure detail lands
-    on rec (error / error_class) for the probe row; never raises."""
+_WAKE_NATIVE = None
+_WAKE_NATIVE_TRIED = False
+
+def _native_wake():
+    """Load the optional native wake adapter without changing import paths."""
+    global _WAKE_NATIVE, _WAKE_NATIVE_TRIED
+    if _WAKE_NATIVE_TRIED:
+        return _WAKE_NATIVE
+    _WAKE_NATIVE_TRIED = True
+    try:
+        _p = Path(__file__).resolve().parent / "wake_native.py"
+        if not _p.is_file():
+            return None
+        _spec = importlib.util.spec_from_file_location("_hermes_workflows_wake_native", _p)
+        if _spec is None or _spec.loader is None:
+            return None
+        _mod = importlib.util.module_from_spec(_spec)
+        _spec.loader.exec_module(_mod)
+        _WAKE_NATIVE = _mod
+    except Exception:
+        _WAKE_NATIVE = None
+    return _WAKE_NATIVE
+
+def _wake_deliver(rec, sid, text, tid, owner=None):
+    """Return native admission acceptance or the legacy HTTP delivery outcome.
+
+    A missing native owner may use legacy compatibility. Refused, unready or
+    unidentifiable native owners must not fall through to another transport.
+    """
+    platform = owner.get("platform") if isinstance(owner, dict) else None
+    if platform == "local":
+        nw = _native_wake()
+        if nw is None and (Path(__file__).resolve().parent / "wake_native.py").is_file():
+            rec["error"] = "native adapter failed to load"
+            rec["error_class"] = "native_retry"
+            return False
+        if nw is not None:
+            out = nw.deliver(sid, text, tid, wfcommon.hermes_home())
+            oc = out.get("outcome")
+            if oc == "delivered":
+                rec["protocol"] = nw.SCHEMA
+                rec["admission_id"] = out.get("admission_id")
+                rec["native_status"] = out.get("status")
+                return True
+            if oc in ("refused", "retry"):
+                # fail closed: typed, try-later, NO legacy bypass for this row
+                rec["error"] = _wake_safe(f"native {oc}: {out.get('reason', '')}")
+                rec["error_class"] = f"native_{oc}"
+                return False
+            # unavailable: no ready canonical owner — legacy below, unchanged
     ep = _wake_endpoint()
     if ep is None:
         rec["error"] = ("no reachable api_server (enable platforms.api_server"
@@ -1696,7 +1739,7 @@ def notify(run, event, key=None, graph=None, node=None, refire=False):
                "id": tid, "wake_protocol": proto, "text": text}
         if event not in _WAKE_TEMPLATES:
             rec["catchall"] = True      # probe row is typed: template vs catch-all distinguishable
-        rec["delivered"] = _wake_deliver(rec, sid, text, tid)   # tri-state row mirrors the outcome
+        rec["delivered"] = _wake_deliver(rec, sid, text, tid, owner=owner)   # tri-state row mirrors the outcome
         _wake_append(run, rec)
         # park-watch verdict feed on the est-7rudf tri-state: delivered -> nothing
         # to see; False -> the ONE strike class; None (nowhere-ever) -> bare — a
