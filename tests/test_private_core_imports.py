@@ -104,6 +104,12 @@ ALLOW_LIST = {
     ("cron_bridge.py", "cron.jobs"):
         "_jobs: except Exception -> None + callable surface check, never a "
         "half-bound module; tests inject a fake at this seam",
+    ("wake_native.py", "hermes_cli.gateway_runtime.discover_gateway_endpoint"):
+        "discover: except ImportError -> native unavailable (legacy compatibility); "
+        "missing module and missing symbol exercised in test_wake_native_identity",
+    ("wake_native.py", "hermes_cli.gateway_client.connect_gateway"):
+        "_connect import failure is caught by deliver -> retry/transport_error, "
+        "never another transport; missing module and symbol both exercised",
 }
 
 

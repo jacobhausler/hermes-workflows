@@ -93,6 +93,15 @@ class AdmissionIdentity(unittest.TestCase):
         client = Client(readback={'admission_id': 'admission-1', 'ref': {'session_id': SID}, 'status': 'unknown'})
         self.assertEqual(self.send(client)['outcome'], 'retry')
 
+    def test_missing_native_client_is_retryable_without_another_transport(self):
+        package = types.ModuleType('hermes_cli')
+        package.__path__ = []
+        for module in [None, types.ModuleType('hermes_cli.gateway_client')]:
+            with self.subTest(module_missing=module is None):
+                with patch.dict(sys.modules, {'hermes_cli': package, 'hermes_cli.gateway_client': module}), patch.object(native, 'discover', return_value='discovered-endpoint'):
+                    result = native.deliver(SID, 'wake', 'stable-input-id', '/home')
+                self.assertEqual(result, {'outcome': 'retry', 'reason': 'transport_error'})
+
     def test_transport_error_does_not_retain_raw_secret(self):
         result = self.send(Client(failure=RuntimeError('Bearer private-credential-in-exception')))
         self.assertEqual(result['outcome'], 'retry')
@@ -107,6 +116,14 @@ class DiscoveryBoundary(unittest.TestCase):
         setattr(module, 'discover_gateway_endpoint', lambda home, timeout: types.SimpleNamespace(state=state, endpoint=endpoint))
         with patch.dict(sys.modules, {'hermes_cli': package, 'hermes_cli.gateway_runtime': module}):
             return native.deliver(SID, 'wake', 'stable-input-id', '/home')
+
+    def test_missing_native_discovery_preserves_optional_compatibility(self):
+        package = types.ModuleType('hermes_cli')
+        package.__path__ = []
+        for module in [None, types.ModuleType('hermes_cli.gateway_runtime')]:
+            with self.subTest(module_missing=module is None):
+                with patch.dict(sys.modules, {'hermes_cli': package, 'hermes_cli.gateway_runtime': module}):
+                    self.assertEqual(native.deliver(SID, 'wake', 'stable-input-id', '/home'), {'outcome': 'unavailable'})
 
     def test_absent_owner_allows_legacy_compatibility(self):
         self.assertEqual(self.discover('absent')['outcome'], 'unavailable')
