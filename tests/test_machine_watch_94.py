@@ -109,7 +109,15 @@ print('```json\\n'+json.dumps(out)+'\\n```',flush=True)
     for n in g['nodes']:
         if 'goal' in n:
             n['goal'] = n['goal'].replace('$HERMES_HOME/machine-watch-example', str(state))
-    g['nodes'][1]['wait'].update(until_argv=argv(state), every_s=.15, timeout_s=1.5)
+    # est-jggzt: the gate kills each probe at min(every_s, 300) — the cadence IS
+    # the probe's kill budget. The old .15 s cadence handed an interpreter-spawn
+    # probe (`/usr/bin/python3 -c …` which itself shells out) 150 ms: red on an
+    # estate host at load ~19 as 'did not park twice' (line 126), absent
+    # probe_broken (147) and last_exit None (148) — identically on main and the
+    # release candidate, so test fragility under load, never a release
+    # regression. 1 s cadence still yields the two required parks well inside
+    # the bounded wait while giving each probe an honest startup budget.
+    g['nodes'][1]['wait'].update(until_argv=argv(state), every_s=1, timeout_s=4.5)
     args = {'graph':g, 'name':'native-machine-watch',
             'run_context':{'watch_name':'test-watch','check_cmd':'true'},
             'lane_key':'example/machine-watch-94'}
@@ -119,7 +127,7 @@ print('```json\\n'+json.dumps(out)+'\\n```',flush=True)
         path = tmp / 'runs' / r['run_id']
         return r, path
     def finish(r, path):
-        procs[r['run_id']].wait(timeout=12)
+        procs[r['run_id']].wait(timeout=30)
         return json.loads((path / 'runner_exit.json').read_text())
     try:
         first, path = start()
@@ -136,7 +144,7 @@ print('```json\\n'+json.dumps(out)+'\\n```',flush=True)
         # The next dispatch's bootstrap re-installs the seeded command.
         args['run_context']['check_cmd']='exit 2'
         broken, path3 = start()
-        deadline = time.monotonic() + 6
+        deadline = time.monotonic() + 12
         while time.monotonic() < deadline:
             parked = path3 / 'gates/watch.parked.json'
             if parked.exists() and json.loads(parked.read_text()).get('attempt', 0) >= 2:

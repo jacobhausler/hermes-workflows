@@ -55,6 +55,19 @@ from pathlib import Path
 # job; the suite only stamps.
 _RUN_ATTEMPT = os.environ.get('GITHUB_RUN_ATTEMPT')
 
+# est-jggzt: the per-file cap is a HANG guard, not a speed budget — it must not
+# cut a file that honestly needs longer, and it must exceed the wrapped
+# deadlines the file itself enforces. #581 raised the two 11-integration hook
+# walls to 120 s but left this cap at 90 s, so crash-resume (91.14 s standalone
+# wall), lane-supervisor (92.40 s), concurrency_retry_knobs_24 (94.39 s) and
+# suite_runs_root_762 (110.68 s) — measured serial at pinned core, full numbers
+# in the v1.4.5 qualification ledger — died exit 124 in the release full-serial
+# pass while passing outside the suite. 180 s = max observed wall + ~60 % margin
+# (qualification passes run on shared estate hosts under real load; CI has its
+# own job wall). tests/test_suite_cap_headroom_jggzt.py keeps this constant
+# >= the wrapped hook walls + margin, so the #581 split-brain cannot re-open.
+PER_FILE_TIMEOUT_S = 180
+
 
 def attempt_fields():
     return {'run_attempt': int(_RUN_ATTEMPT)} if _RUN_ATTEMPT and _RUN_ATTEMPT.isdigit() else {}
@@ -319,7 +332,7 @@ for argv in cases:
         with log.open('w') as fh:
             result = subprocess.run(argv, cwd=root, env={**_base_env, 'HERMES_HOME': str(root / 'tests' / '.suite-home'),
                                                          'WF_RUNS_ROOT': str(_suite_runs_root)},
-                                    stdout=fh, stderr=subprocess.STDOUT, timeout=90)
+                                    stdout=fh, stderr=subprocess.STDOUT, timeout=PER_FILE_TIMEOUT_S)
         rc = result.returncode
     except subprocess.TimeoutExpired:
         rc = 124
