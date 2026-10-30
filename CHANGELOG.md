@@ -5,18 +5,26 @@
 Patch release from five merged pull requests since v1.4.4:
 
 - Fix producer-declared partial results releasing plain after-edges, and record
-  zero attempts for precondition refusals (#522, @atbrace).
+  zero attempts for precondition refusals (#522).
 - Keep killed runs from being reported as done: terminal records or completed
-  work are required by the read model (#504, @atbrace).
+  work are required by the read model (#504).
 - Express pinned routes at spawn time and refuse `route_inexpressible` before
-  a child starts when the requested route cannot be honored (#590, @jacobhausler).
+  a child starts when the requested route cannot be honored (#590).
 - Align the operations guide and armed-strip tests with effective `require_route`
-  policy, including the route-refusal branch (#591, @jacobhausler).
+  policy, including the route-refusal branch (#591).
 - Raise the suite's per-file wall from 90 s to a measured 180 s hang backstop
   with a `--per-file-timeout` override and anti-truncation test legs, and cure
   the machine-watch load-window flake at its probe-kill root — the gate-wait
   `timeout=min(every,300)` bound SIGKILLed the probe at `every_s=.15` estate
-  latency; budgets raised, assertions unchanged (#592, @jacobhausler).
+  latency; budgets raised, assertions unchanged (#592).
+
+### PR authors
+
+- #522 — @atbrace.
+- #504 — @atbrace.
+- #590 — @jacobhausler.
+- #591 — @jacobhausler.
+- #592 — @jacobhausler.
 
 ## 1.4.4 — 2026-10-29
 
