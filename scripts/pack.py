@@ -22,7 +22,26 @@ PACKAGE_NAME = f"hermes-workflows-{VERSION}"
 # installed seat can tell "still broken" from "fixed, not deployed". Test seam:
 # HERMES_WF_PACK_COMMIT pins the commit (sanitized: 40-hex only, never raw);
 # SOURCE_DATE_EPOCH pins packaged_at for reproducibility.
+# est-opuob (one sidecar schema): the record also names its ORIGIN —
+# source_repo "owner/repo" — so an installed seat answers "what am I" cold and
+# sidecar / live manifest / qualified archive stop disagreeing without a
+# re-resolve. The repo pin obeys the same sanitize law as the commit pin:
+# HERMES_WF_PACK_REPO is echoed only when it already matches owner/repo, else
+# the git remote read answers, else "unknown" — never a raw caller string.
+# The git fallback accepts ONLY host-carrying URLs (scheme://[user@]host/... or
+# scp-style user@host:...): a bare path or file:// origin has no host, so no
+# trustworthy owner — it answers "unknown" rather than fabricate one from
+# directory names. The owner segment is GitHub grammar, dots excluded (an
+# IP/dotted-host remote never echoes verbatim into a shipped sidecar the scrub
+# audit never reads).
+# Build inputs for the sidecar bytes: the tree, the date pins, and THIS clone's
+# reported origin (HERMES_WF_PACK_REPO, else the packing clone's `origin`
+# remote) — two clones of one commit can ship different source_repo, so the
+# byte-identity test leg pins HERMES_WF_PACK_REPO and the claim stays honest.
+# Readers must tolerate sidecars written BEFORE this field: the door reads the
+# gap as null, never an invented origin (tests/test_version_truth_159.py D10).
 _COMMIT_PIN = re.compile(r"^[0-9a-f]{40}$")
+_REPO_PIN = re.compile(r"^[A-Za-z0-9_-]+/[A-Za-z0-9._-]+$")
 
 
 def _source_commit() -> str:
@@ -41,10 +60,40 @@ def _source_commit() -> str:
     return "unknown"
 
 
+def _source_repo() -> str:
+    pin = os.environ.get("HERMES_WF_PACK_REPO", "").strip()
+    if _REPO_PIN.fullmatch(pin):
+        return pin
+    try:
+        url = subprocess.run(
+            ["git", "remote", "get-url", "origin"], cwd=ROOT,
+            capture_output=True, text=True, timeout=10,
+        )
+        u = url.stdout.strip() if url.returncode == 0 else ""
+        if u.endswith("/"):
+            u = u[:-1]
+        if u.endswith(".git"):
+            u = u[:-4]
+        # Host-carrying URLs only: scheme://[user@]host/owner/repo or scp-style
+        # user@host:owner/repo (re-run through the sanitizer, so a dotted owner
+        # is refused here too). A bare path or file:// origin carries no host
+        # and no trustworthy owner — fall through to "unknown", never fabricate
+        # an owner from directory names.
+        m = (re.fullmatch(r"[a-zA-Z][a-zA-Z0-9+.-]*://(?:[^/@\s]+@)?[^/@\s]+/([^/:]+)/([A-Za-z0-9._-]+)", u)
+             or re.fullmatch(r"[^/@\s]+@[^/@\s]+:([^/:]+)/([A-Za-z0-9._-]+)", u))
+        if m and _REPO_PIN.fullmatch(f"{m.group(1)}/{m.group(2)}"):
+            return f"{m.group(1)}/{m.group(2)}"
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return "unknown"
+
+
 def _packaged_at() -> str:
     # Reproducibility law: no wall-clock byte may ever enter the ZIP. Pinned by
     # SOURCE_DATE_EPOCH, else the HEAD commit's own committer date (deterministic
-    # per tree — two packs of one tree stay byte-identical), else "unknown".
+    # per tree — two packs of one tree from one reported origin stay
+    # byte-identical; origin is a build input too, see the sidecar note above),
+    # else "unknown".
     epoch = os.environ.get("SOURCE_DATE_EPOCH", "").strip()
     if epoch.isdigit():
         # Explicit UTC: astimezone()/local conversion lets the HOST timezone leak
@@ -64,9 +113,11 @@ def _packaged_at() -> str:
 
 
 def install_provenance() -> bytes:
+    # One sidecar schema (est-opuob): {version, source_commit, packaged_at,
+    # source_repo}. Appended last — readers grow tolerant-first.
     return (json.dumps(
         {"version": VERSION, "source_commit": _source_commit(),
-         "packaged_at": _packaged_at()},
+         "packaged_at": _packaged_at(), "source_repo": _source_repo()},
         separators=(",", ":"),
     ) + "\n").encode("utf-8")
 
