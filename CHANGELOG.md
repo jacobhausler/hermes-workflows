@@ -1,8 +1,8 @@
 # Changelog
 
-## 1.4.5 — 2026-10-30
+## 1.4.5 — 2026-10-31
 
-Patch release from five merged pull requests since v1.4.4:
+Patch release from six merged pull requests since v1.4.4:
 
 - Fix producer-declared partial results releasing plain after-edges, and record
   zero attempts for precondition refusals (#522).
@@ -17,6 +17,10 @@ Patch release from five merged pull requests since v1.4.4:
   the machine-watch load-window flake at its probe-kill root — the gate-wait
   `timeout=min(every,300)` bound SIGKILLed the probe at `every_s=.15` estate
   latency; budgets raised, assertions unchanged (#592).
+- Deliver local-owner wake transitions through the native gateway: discovery
+  without starting a daemon, one stable input id, session verification —
+  completion notices reach the owner's exact session even when the legacy
+  API-server wake endpoint is unconfigured (#594).
 
 ### PR authors
 
@@ -25,6 +29,7 @@ Patch release from five merged pull requests since v1.4.4:
 - #590 — @jacobhausler.
 - #591 — @jacobhausler.
 - #592 — @jacobhausler.
+- #594 — @jacobhausler.
 
 ## 1.4.4 — 2026-10-29
 
