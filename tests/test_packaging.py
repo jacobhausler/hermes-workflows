@@ -52,10 +52,16 @@ def main() -> None:
         temp = Path(temp_dir)
         first = temp / "first.zip"
         second = temp / "second.zip"
+        # Determinism's named build inputs (est-opuob reconcile F3): the tree,
+        # the date pins, and the REPORTED ORIGIN — pack.py's sidecar reads the
+        # packing clone's origin unless pinned, so the byte-identity claim only
+        # holds for a fixed origin. Pin the seam; two clones of one commit with
+        # different remotes stay honestly outside this guarantee.
+        pack_env = {**os.environ, "HERMES_WF_PACK_REPO": "octo/fake-workflows"}
         for target in (first, second):
             result = subprocess.run(
                 [sys.executable, str(ROOT / "scripts/pack.py"), "--output", str(target)],
-                cwd=ROOT, capture_output=True, text=True,
+                cwd=ROOT, capture_output=True, text=True, env=pack_env,
             )
             if result.returncode != 0:
                 raise AssertionError(

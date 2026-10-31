@@ -23,9 +23,11 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import types
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
+from unittest import mock
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
@@ -128,7 +130,7 @@ with tempfile.TemporaryDirectory(prefix=".tmp-vt159-") as td:
         # pack with no repo pin answers from the git remote (or unknown), and
         # the four-key schema stands regardless.
         check("V13b unpinned source_repo is owner/repo or unknown (git read, never blank)",
-              re.fullmatch(r"[A-Za-z0-9._-]+/[A-Za-z0-9._-]+|unknown",
+              re.fullmatch(r"[A-Za-z0-9_-]+/[A-Za-z0-9._-]+|unknown",
                            str(rec2.get("source_repo"))) is not None,
               repr(rec2.get("source_repo")))
 
@@ -149,9 +151,63 @@ with tempfile.TemporaryDirectory(prefix=".tmp-vt159-") as td:
             rec_rb = json.loads(archive.read(root + "install.json").decode("utf-8"))
         check("V14b malformed repo pin refused: value is owner/repo or unknown, never raw",
               rec_rb.get("source_repo") != "https://x.example/a; rm -rf /"
-              and re.fullmatch(r"[A-Za-z0-9._-]+/[A-Za-z0-9._-]+|unknown",
+              and re.fullmatch(r"[A-Za-z0-9_-]+/[A-Za-z0-9._-]+|unknown",
                                str(rec_rb.get("source_repo"))) is not None,
               repr(rec_rb.get("source_repo")))
+
+        # est-opuob reconcile F2: a dotted-owner pin is host grammar, not repo
+        # grammar — GitHub owner names carry no dot. Refuse at the door; the
+        # git read answers instead of the pin echoing verbatim.
+        env_host_bad = {**os.environ, "HERMES_WF_PACK_COMMIT": FAKE_SHA,
+                        "HERMES_WF_PACK_REPO": "dotted.example/wf",
+                        "SOURCE_DATE_EPOCH": EPOCH}
+        out_hb = Path(td) / "pkg-hostpin.zip"
+        result_hb = subprocess.run(
+            [sys.executable, str(ROOT / "scripts/pack.py"), "--output", str(out_hb)],
+            cwd=ROOT, capture_output=True, text=True, env=env_host_bad,
+        )
+        check("V15 pack exits 0 with a dotted-owner repo pin (refused, never verbatim)",
+              result_hb.returncode == 0 and out_hb.exists(), result_hb.stderr[-200:])
+        if out_hb.exists():
+            with zipfile.ZipFile(out_hb) as archive:
+                rec_hb = json.loads(archive.read(root + "install.json").decode("utf-8"))
+            check("V15b dotted-owner pin refused: dot-free owner/repo or unknown stands",
+                  rec_hb.get("source_repo") != "dotted.example/wf"
+                  and re.fullmatch(r"[A-Za-z0-9_-]+/[A-Za-z0-9._-]+|unknown",
+                                   str(rec_hb.get("source_repo"))) is not None,
+                  repr(rec_hb.get("source_repo")))
+
+    # ---------- 1a-bis) _source_repo unit legs (reconcile F1/F2) ----------
+    # Direct fallback probes: empty seam, canned `git remote get-url origin`
+    # answer. A host-less origin (file://, bare path, host: without userinfo)
+    # must answer "unknown" — never an owner fabricated from directory names —
+    # while host-carrying forms keep resolving, and a dotted owner from any
+    # source is refused by the sanitizer.
+    _pack_spec = importlib.util.spec_from_file_location(
+        "hwpack159", str(ROOT / "scripts" / "pack.py"))
+    pack_mod = importlib.util.module_from_spec(_pack_spec)
+    _pack_spec.loader.exec_module(pack_mod)
+
+    def repo_from(url):
+        canned = types.SimpleNamespace(returncode=0, stdout=url + "\n", stderr="")
+        with mock.patch.dict(os.environ, {"HERMES_WF_PACK_REPO": ""}), \
+             mock.patch.object(pack_mod.subprocess, "run", lambda *a, **k: canned):
+            return pack_mod._source_repo()
+
+    check("V16 file:// origin answers unknown, never a fabricated owner (F1)",
+          repo_from("file:///srv/git/hermes-workflows") == "unknown",
+          repr(repo_from("file:///srv/git/hermes-workflows")))
+    check("V16b bare-path origin answers unknown (F1)",
+          repo_from("/srv/ci/lanes/est-opuob") == "unknown",
+          repr(repo_from("/srv/ci/lanes/est-opuob")))
+    check("V16c host-carrying forms still resolve (F1 controls)",
+          repo_from("git@github.com:octo/fake-workflows.git") == FAKE_REPO
+          and repo_from("https://github.com/octo/fake-workflows") == FAKE_REPO
+          and repo_from("https://user@github.com/octo/fake-workflows") == FAKE_REPO
+          and repo_from("dotted.example:wf/tools") == "unknown")
+    check("V16d dotted owner refused by the sanitizer whatever the URL (F2)",
+          repo_from("https://mirror.example/owner.dotted/tools") == "unknown",
+          repr(repo_from("https://mirror.example/owner.dotted/tools")))
 
     # ---------- 1b) cross-TZ regression (zap review #198) ----------
     # Identical HEAD, identical pinned seams, ONLY TZ differs: both packs must
@@ -226,7 +282,7 @@ with tempfile.TemporaryDirectory(prefix=".tmp-vt159door-") as td:
 
     fourkey = fake_plugin_dir(td, "1.2.1", "1.2.0", with_repo=FAKE_REPO, tag="-4k")
     out4 = call(action="doctor_version", plugin_dir=str(fourkey))
-    check("D11 one sidecar schema end to end: source_repo passes through verbatim",
+    check("D11 one sidecar schema, composed passthrough: source_repo passes through verbatim",
           out4.get("source_repo") == FAKE_REPO and out4.get("drift") is True, repr(out4))
 
     agree = fake_plugin_dir(td, "1.2.1", "1.2.1")

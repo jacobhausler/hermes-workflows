@@ -30,7 +30,9 @@ Set `HERMES_HOME` to the active backend profile home; the default is `$HOME/.her
 
 The package root's `install.json` — the one sidecar schema `pack.py` stamps at build
 time (`version`, `source_commit`, `packaged_at`, `source_repo`) — rides the copy, so
-the plugin directory records its origin atomically with the install; the door's
+the plugin directory records its origin in the same step as the code — one copy,
+no separate write step (the documented step is `test ! -e` + `cp -R`, not an
+atomic write); the door's
 `doctor_version` reads that origin back in one pass. A plugin directory installed
 before `source_repo` existed keeps working: the field reads `null`, never an
 invented origin.

@@ -4987,8 +4987,9 @@ def act_doctor_version(args):
     1.1.0-source shape); a missing install.json says null provenance, never an
     invented version. est-opuob one sidecar schema: the same read surfaces
     source_repo — the ORIGIN pack.py stamped ({version, source_commit,
-    packaged_at, source_repo} is the whole sidecar, installed with the atomic
-    package copy). A sidecar predating the field still loads: source_repo:null,
+    packaged_at, source_repo} is the whole sidecar, installed with the single
+    package copy — one copy, no separate write step). A sidecar predating the
+    field still loads: source_repo:null,
     honest absence, never an invented origin."""
     d = Path(args["plugin_dir"]).expanduser() if args.get("plugin_dir") else HERE
     yaml_p, inst_p = d / "plugin.yaml", d / "install.json"
