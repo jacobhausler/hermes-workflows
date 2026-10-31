@@ -2,11 +2,19 @@
 """Version truth (est-2ek.1.159): pack.py stamps install.json provenance into the ZIP
 root, and the door's doctor_version action flags live-vs-packaged drift in one read.
 
+est-opuob (one sidecar schema): the stamped record gains source_repo — exactly
+{version, source_commit, packaged_at, source_repo} — and the door passes it
+through ONLY when the sidecar records it, so a legacy 3-key install.json (every
+archive packed before the change) keeps the exact legacy field set and keeps
+verifying under the old rules.
+
 1) pack: a ZIP built from the tree carries install.json {version, source_commit,
-   packaged_at} at the package root — with HERMES_WF_PACK_COMMIT pinned (the test seam
-   for a fake sha off-git) the bytes are exactly the pinned triple.
+   packaged_at, source_repo} at the package root — with HERMES_WF_PACK_COMMIT
+   pinned (the test seam for a fake sha off-git) the commit bytes are exactly the
+   pinned value; source_repo is the manifest homepage verbatim.
 2) door: action=doctor_version on a fake plugin dir where plugin.yaml disagrees with
-   install.json returns drift:true with the exact field set; agreement drift:false;
+   install.json returns drift:true with the exact field set (legacy 3-key sidecar
+   shape AND new 4-key shape, each pinned); agreement drift:false;
    a dir with no install.json reports null provenance, never a fabricated version.
 """
 import json
@@ -43,6 +51,11 @@ def check(label, cond, detail=""):
 def call(**a):
     return json.loads(hw.handle(a))
 
+# Independent read of the contract input (never a replay of pack.py's expression).
+MANIFEST_HOMEPAGE = re.search(r"(?m)^homepage:\s*(\S+)\s*$",
+                              (ROOT / "plugin.yaml").read_text()).group(1)
+LEGACY_KEYS = {"live_version", "newest_packaged", "source_commit", "drift"}
+
 FAKE_SHA = "0" * 39 + "f"
 EPOCH = "1757000000"
 
@@ -67,8 +80,10 @@ with tempfile.TemporaryDirectory(prefix=".tmp-vt159-") as td:
     check("V2 install.json sits at the ZIP root next to SHA256SUMS", info is not None)
     if blob is not None:
         rec = json.loads(blob.decode("utf-8"))
-        check("V3 install.json carries exactly {version, source_commit, packaged_at}",
-              set(rec) == {"version", "source_commit", "packaged_at"}, repr(rec))
+        check("V3 install.json carries exactly {version, source_commit, packaged_at, source_repo} (one sidecar schema)",
+              set(rec) == {"version", "source_commit", "packaged_at", "source_repo"}, repr(rec))
+        check("V3b source_repo is the manifest homepage verbatim (origin recorded, never fabricated)",
+              rec.get("source_repo") == MANIFEST_HOMEPAGE, repr(rec.get("source_repo")))
         check("V4 version is the manifest version verbatim", rec.get("version") == VERSION, repr(rec))
         check("V5 source_commit is the pinned fake sha verbatim",
               rec.get("source_commit") == FAKE_SHA, repr(rec.get("source_commit")))
@@ -81,7 +96,8 @@ with tempfile.TemporaryDirectory(prefix=".tmp-vt159-") as td:
               rec.get("packaged_at") == expected_at,
               f"{rec.get('packaged_at')!r} != {expected_at!r}")
     else:
-        check("V3 install.json carries exactly {version, source_commit, packaged_at}", False, "no bytes")
+        check("V3 install.json carries exactly {version, source_commit, packaged_at, source_repo} (one sidecar schema)", False, "no bytes")
+        check("V3b source_repo is the manifest homepage verbatim (origin recorded, never fabricated)", False, "no bytes")
         check("V4 version is the manifest version verbatim", False, "no bytes")
         check("V5 source_commit is the pinned fake sha verbatim", False, "no bytes")
         check("V6 packaged_at is the pinned SOURCE_DATE_EPOCH as ISO-8601", False, "no bytes")
@@ -152,13 +168,17 @@ check("D0 doctor_version is a registered action",
       "doctor_version" in hw.ACTIONS and "doctor_version" in
       hw.WORKFLOW_PARAMS["properties"]["action"]["enum"])
 
-def fake_plugin_dir(tmp, live, packaged):
-    d = Path(tmp) / f"seat-{live}-{packaged}"
+def fake_plugin_dir(tmp, live, packaged, shape="legacy"):
+    """Seat fixture. shape='legacy' writes the pre-est-opuob 3-key sidecar (every
+    archive packed before the change); shape='origin' writes the new 4-key record."""
+    d = Path(tmp) / f"seat-{live}-{packaged}-{shape}"
     d.mkdir(parents=True)
     (d / "plugin.yaml").write_text(f"name: hermes-workflows\nversion: {live}\n", encoding="utf-8")
     if packaged is not None:
         rec = {"version": packaged, "source_commit": "a" * 40,
                "packaged_at": "2026-10-01T00:00:00+00:00"}
+        if shape == "origin":
+            rec["source_repo"] = MANIFEST_HOMEPAGE
         (d / "install.json").write_text(json.dumps(rec), encoding="utf-8")
     return d
 
@@ -166,13 +186,22 @@ with tempfile.TemporaryDirectory(prefix=".tmp-vt159door-") as td:
     drifted = fake_plugin_dir(td, "1.2.1", "1.2.0")
     out1 = call(action="doctor_version", plugin_dir=str(drifted))
     check("D1 drifted seat reports drift:true", out1.get("drift") is True, repr(out1))
-    check("D2 exact field set {live_version, newest_packaged, source_commit, drift}",
-          set(out1) == {"live_version", "newest_packaged", "source_commit", "drift"}, repr(out1))
+    check("D2 legacy 3-key sidecar keeps the exact legacy field set (old archives verify unchanged)",
+          set(out1) == LEGACY_KEYS, repr(out1))
     check("D3 live_version is the plugin.yaml bytes", out1.get("live_version") == "1.2.1", repr(out1))
     check("D4 newest_packaged is the install.json bytes",
           out1.get("newest_packaged") == "1.2.0", repr(out1))
     check("D5 source_commit passes through verbatim",
           out1.get("source_commit") == "a" * 40, repr(out1))
+
+    origin = fake_plugin_dir(td, "1.2.1", "1.2.0", shape="origin")
+    out1n = call(action="doctor_version", plugin_dir=str(origin))
+    check("D5b new 4-key sidecar adds source_repo and nothing else",
+          set(out1n) == LEGACY_KEYS | {"source_repo"}, repr(out1n))
+    check("D5c source_repo passes through verbatim (the seat can answer its origin repo)",
+          out1n.get("source_repo") == MANIFEST_HOMEPAGE, repr(out1n.get("source_repo")))
+    check("D5d the origin-shape seat still answers drift exactly like the legacy shape",
+          out1n.get("drift") is True and out1n.get("newest_packaged") == "1.2.0", repr(out1n))
 
     agree = fake_plugin_dir(td, "1.2.1", "1.2.1")
     out2 = call(action="doctor_version", plugin_dir=str(agree))

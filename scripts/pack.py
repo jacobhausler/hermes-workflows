@@ -14,7 +14,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = re.search(r"^version:\s*([\d.]+)", (ROOT / "plugin.yaml").read_text(), re.M).group(1)  # single source: the manifest
+_PLUGIN_YAML = (ROOT / "plugin.yaml").read_text()
+VERSION = re.search(r"^version:\s*([\d.]+)", _PLUGIN_YAML, re.M).group(1)  # single source: the manifest
 PACKAGE_NAME = f"hermes-workflows-{VERSION}"
 
 
@@ -22,6 +23,16 @@ PACKAGE_NAME = f"hermes-workflows-{VERSION}"
 # installed seat can tell "still broken" from "fixed, not deployed". Test seam:
 # HERMES_WF_PACK_COMMIT pins the commit (sanitized: 40-hex only, never raw);
 # SOURCE_DATE_EPOCH pins packaged_at for reproducibility.
+#
+# est-opuob (one sidecar schema): install.json is THE origin record. The schema
+# is exactly {version, source_commit, packaged_at, source_repo}; source_repo is
+# the manifest homepage verbatim, so an archive-installed seat answers
+# "where does this artifact come from" from one file instead of three
+# coexisting identifiers, and the provenance classifier can compute
+# update_available against the catalog instead of terminal-flagging artifact
+# installs as drift. Archives packed before this change carry the legacy
+# 3-key shape {version, source_commit, packaged_at} — consumers MUST accept
+# both shapes; the old key set is never rewritten or fabricated into.
 _COMMIT_PIN = re.compile(r"^[0-9a-f]{40}$")
 
 
@@ -63,10 +74,19 @@ def _packaged_at() -> str:
     return "unknown"
 
 
+def _source_repo() -> str:
+    # Manifest homepage verbatim (same single-source law as VERSION); sanitized to
+    # a whitespace-free token, never an arbitrary line. "unknown" only when the
+    # manifest carries no homepage at all — the sidecar then records the truth
+    # that origin is unrecorded, and never fabricates a URL.
+    m = re.search(r"(?m)^homepage:\s*(\S+)\s*$", _PLUGIN_YAML)
+    return m.group(1) if m else "unknown"
+
+
 def install_provenance() -> bytes:
     return (json.dumps(
         {"version": VERSION, "source_commit": _source_commit(),
-         "packaged_at": _packaged_at()},
+         "packaged_at": _packaged_at(), "source_repo": _source_repo()},
         separators=(",", ":"),
     ) + "\n").encode("utf-8")
 

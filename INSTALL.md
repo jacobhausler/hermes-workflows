@@ -15,6 +15,24 @@ Place the ZIP and `.zip.sha256` sidecar together. Use `python3` (or an explicit 
 
 Use `unzip` rather than Python `ZipFile.extractall` when running the tests: the archive stores executable modes, but Python extraction may discard them. In particular, `tests/fake` — the fake Hermes launcher the hermetic tests use in place of a real install — must stay executable. Keep the staging tree until verification completes.
 
+### The install.json origin record (one sidecar schema)
+
+`install.json` at the package root is the single origin record for an
+archive-installed seat. Current schema — exactly these four keys:
+`{"version", "source_commit", "packaged_at", "source_repo"}` (`source_repo` is
+the manifest homepage, i.e. the canonical source repository). Archives packed
+before this schema change carry the legacy three-key shape
+`{"version", "source_commit", "packaged_at"}`; verifiers and readers MUST accept
+both shapes and MUST NOT rewrite the old key set or fabricate the new key.
+`SHA256SUMS` deliberately does not cover `install.json` (it is generated after
+the ledger); the outer `.zip.sha256` sidecar authenticates every archive byte
+including it, so strict verification is: outer hash check, then `sha256sum -c
+SHA256SUMS` over every source entry it lists, then the `install.json` key/type
+rules above. Carry `install.json` into the plugin directory with the package (the
+`cp -R` below does exactly that) — that copy is what `doctor_version` and the
+provenance classifier read at the seat to answer "which repo/commit is this
+artifact pinned to" without a `.git` directory.
+
 Hermes Agent v2026.9.21 or newer (package version >=0.21.4) is required for the measured stock quiet one-shot and turn-report contract. Older core versions may skip plugin admission.
 
 ## Backend host

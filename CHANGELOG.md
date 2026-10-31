@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- feat(pack): one sidecar schema — `install.json` is THE origin record. `pack.py`
+  now stamps exactly {version, source_commit, packaged_at, source_repo}
+  (`source_repo` = the manifest homepage verbatim, never fabricated; "unknown"
+  only if the manifest carries none), so an archive-installed seat answers
+  "which repo is this pinned to" from one file and the provenance classifier can
+  compute update_available against the catalog instead of terminal-flagging
+  artifact installs as drift. `doctor_version` passes `source_repo` through ONLY
+  when recorded — legacy 3-key sidecars keep the exact legacy field set and old
+  archives verify unchanged (pinned by tests V3/V3b and D2/D5b-D5d; the rollout
+  atomic installer's QUALIFICATION contract amended to the two accepted
+  generations). (est-opuob)
 - fix(suite): the per-file wall is a hang backstop, not a performance budget —
   raise the cap from 90s to a measured 180s with a `--per-file-timeout` override
   and an anti-truncation test leg (estate-host serial rechecks measured
