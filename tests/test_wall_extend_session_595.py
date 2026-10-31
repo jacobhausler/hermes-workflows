@@ -57,8 +57,16 @@ def events(r):
     return [json.loads(l) for l in (r / "events.jsonl").read_text().splitlines()]
 
 # (1) session row keeps moving past the wall; the spawn log stays at 0 bytes
-r = mk("w595-pulse", [{"id": "a", "type": "agent", "goal": "SLOW", "timeout": 3}])
-out, _ = drive("w595-pulse", FAKE_MODE="session_pulse", FAKE_SESSION_SEC="4")
+# timeout 3->8 / pulse 4->10 (serial#7 @d001953): the fake's 4 s work + interpreter
+# boot under load overran the EXTENDED wall (killed at 5.014 s = timeout 3 + one
+# +2 s extend) — the product extended exactly once as pinned; the fixture budget
+# gave the child <1 s of slack. The survive-window is [wall, 1.5*wall], so both
+# sides scale: timeout 8 => must cross the 8 s base wall (extension fires) and
+# finish under the 12 s extended wall; pulse 10 s + ~0.4 boot = ~10.4 measured at
+# load avg 10 -> 1.5 s top margin, 2.4 s base margin. Contract (1) unchanged:
+# ONE session-basis extension, child survives the base wall, node commits done.
+r = mk("w595-pulse", [{"id": "a", "type": "agent", "goal": "SLOW", "timeout": 8}])
+out, _ = drive("w595-pulse", FAKE_MODE="session_pulse", FAKE_SESSION_SEC="10")
 ev = events(r)
 ext = [e for e in ev if e["event"] == "node.extended"]
 rec = json.loads((r / "nodes" / "a.json").read_text())
