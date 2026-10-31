@@ -65,10 +65,17 @@ try:
     argv = [a for a in argv if a]
     check("argv tail matches the probe guard",
           Path(argv[-3]).name == "wf.py" and argv[-2:] == ["run", rid])
-    # (3) live seat twin
-    kids = [int(e) for e in os.listdir("/proc")
-            if e.isdigit() and Path(f"/proc/{e}/stat").read_text(errors="replace")
-            .rsplit(")", 1)[-1].split()[1] == str(p.pid)] if Path("/proc").exists() else []
+    # (3) live seat twin. /proc enumeration races: a helper exiting between
+    # listdir and read is exactly the non-child we must skip, not crash on.
+    def _ppid(e):
+        try:
+            return (Path(f"/proc/{e}/stat").read_text(errors="replace")
+                    .rsplit(")", 1)[-1].split()[1])
+        except (FileNotFoundError, ProcessLookupError, PermissionError, IndexError):
+            return None
+    kids = ([int(e) for e in os.listdir("/proc")
+             if e.isdigit() and _ppid(e) == str(p.pid)]
+            if Path("/proc").exists() else [])
     check("fake has a live seat child", any(fake_runner.alive(k) for k in kids))
 
     check("runners_for finds the fake", p.pid in fake_runner.runners_for(rid))

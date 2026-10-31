@@ -1,6 +1,6 @@
 {
   "name": "hermes-workflows",
-  "version": "1.4.4",
+  "version": "1.4.5",
   "api": "plugin_api.py",
   "entry": "index.js",
   "tab": { "hidden": true }

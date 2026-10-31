@@ -1,16 +1,40 @@
 # Changelog
 
-## Unreleased
+## 1.4.5 — 2026-10-31
 
-- fix(suite): the per-file wall is a hang backstop, not a performance budget —
-  raise the cap from 90s to a measured 180s with a `--per-file-timeout` override
-  and an anti-truncation test leg (estate-host serial rechecks measured
-  91.14/92.40/94.39/110.68s on four files that the old cap killed deterministically).
-- test(machine-watch): cure the load-window flake at its root — wf.py bounds each
-  gate-wait probe by timeout=min(every,300), so the test's every_s=.15 SIGKILLed
-  the probe (last_exit=-9) at estate-host latency (p50 0.153s at load 32); probe
-  budget raised to every_s=1.0 (~5x worst measured), join to 90s (must contain
-  the 30s wait), park loop to 75s; assertions unchanged. (#592)
+Patch release from seven merged pull requests since v1.4.4:
+
+- Fix producer-declared partial results releasing plain after-edges, and record
+  zero attempts for precondition refusals (#522).
+- Keep killed runs from being reported as done: terminal records or completed
+  work are required by the read model (#504).
+- Express pinned routes at spawn time and refuse `route_inexpressible` before
+  a child starts when the requested route cannot be honored (#590).
+- Align the operations guide and armed-strip tests with effective `require_route`
+  policy, including the route-refusal branch (#591).
+- Raise the suite's per-file wall from 90 s to a measured 180 s hang backstop
+  with a `--per-file-timeout` override and anti-truncation test legs, and cure
+  the machine-watch load-window flake at its probe-kill root — the gate-wait
+  `timeout=min(every,300)` bound SIGKILLed the probe at `every_s=.15` estate
+  latency; budgets raised, assertions unchanged (#592).
+- Deliver local-owner wake transitions through the native gateway: discovery
+  without starting a daemon, one stable input id, session verification —
+  completion notices reach the owner's exact session even when the legacy
+  API-server wake endpoint is unconfigured (#594).
+- One sidecar schema: install.json grows source_repo so an installed seat
+  answers "what am I pinned to" cold; the door accepts the legacy 3-key and
+  current 4-key generations without rewriting old archives, and pack/door
+  sanitize the origin pin exactly as they sanitize the commit pin (#597).
+
+### PR authors
+
+- #522 — @atbrace.
+- #504 — @atbrace.
+- #590 — @jacobhausler.
+- #591 — @jacobhausler.
+- #592 — @jacobhausler.
+- #594 — @jacobhausler.
+- #597 — @jacobhausler.
 
 ## 1.4.4 — 2026-10-29
 
