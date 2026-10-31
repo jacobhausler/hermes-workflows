@@ -22,7 +22,16 @@ PACKAGE_NAME = f"hermes-workflows-{VERSION}"
 # installed seat can tell "still broken" from "fixed, not deployed". Test seam:
 # HERMES_WF_PACK_COMMIT pins the commit (sanitized: 40-hex only, never raw);
 # SOURCE_DATE_EPOCH pins packaged_at for reproducibility.
+# est-opuob (one sidecar schema): the record also names its ORIGIN —
+# source_repo "owner/repo" — so an installed seat answers "what am I" cold and
+# sidecar / live manifest / qualified archive stop disagreeing without a
+# re-resolve. The repo pin obeys the same sanitize law as the commit pin:
+# HERMES_WF_PACK_REPO is echoed only when it already matches owner/repo, else
+# the git remote read answers, else "unknown" — never a raw caller string.
+# Readers must tolerate sidecars written BEFORE this field: the door reads the
+# gap as null, never an invented origin (tests/test_version_truth_159.py D10).
 _COMMIT_PIN = re.compile(r"^[0-9a-f]{40}$")
+_REPO_PIN = re.compile(r"^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$")
 
 
 def _source_commit() -> str:
@@ -36,6 +45,30 @@ def _source_commit() -> str:
         )
         if sha.returncode == 0 and _COMMIT_PIN.fullmatch(sha.stdout.strip()):
             return sha.stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return "unknown"
+
+
+def _source_repo() -> str:
+    pin = os.environ.get("HERMES_WF_PACK_REPO", "").strip()
+    if _REPO_PIN.fullmatch(pin):
+        return pin
+    try:
+        url = subprocess.run(
+            ["git", "remote", "get-url", "origin"], cwd=ROOT,
+            capture_output=True, text=True, timeout=10,
+        )
+        u = url.stdout.strip() if url.returncode == 0 else ""
+        if u.endswith("/"):
+            u = u[:-1]
+        if u.endswith(".git"):
+            u = u[:-4]
+        # scp-style (git@host:owner/repo) and https-style both end in the
+        # owner/repo pair; strip the transport, then re-run the sanitizer.
+        m = re.fullmatch(r".*[/:]([^/:]+)/([A-Za-z0-9._-]+)", u)
+        if m and _REPO_PIN.fullmatch(f"{m.group(1)}/{m.group(2)}"):
+            return f"{m.group(1)}/{m.group(2)}"
     except (OSError, subprocess.SubprocessError):
         pass
     return "unknown"
@@ -64,9 +97,11 @@ def _packaged_at() -> str:
 
 
 def install_provenance() -> bytes:
+    # One sidecar schema (est-opuob): {version, source_commit, packaged_at,
+    # source_repo}. Appended last — readers grow tolerant-first.
     return (json.dumps(
         {"version": VERSION, "source_commit": _source_commit(),
-         "packaged_at": _packaged_at()},
+         "packaged_at": _packaged_at(), "source_repo": _source_repo()},
         separators=(",", ":"),
     ) + "\n").encode("utf-8")
 

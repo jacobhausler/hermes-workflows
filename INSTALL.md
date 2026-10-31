@@ -28,6 +28,13 @@ Set `HERMES_HOME` to the active backend profile home; the default is `$HOME/.her
     hermes plugins validate "$HERMES_HOME/plugins/hermes-workflows"
     hermes plugins enable hermes-workflows
 
+The package root's `install.json` — the one sidecar schema `pack.py` stamps at build
+time (`version`, `source_commit`, `packaged_at`, `source_repo`) — rides the copy, so
+the plugin directory records its origin atomically with the install; the door's
+`doctor_version` reads that origin back in one pass. A plugin directory installed
+before `source_repo` existed keeps working: the field reads `null`, never an
+invented origin.
+
 The bundled skill is registered by the plugin as `hermes-workflows:workflow`; that registration is the skill's single source of truth. For direct CLI discovery outside plugin registration, link the INSTALLED plugin directory's skill into the active profile so it tracks every plugin update — do NOT maintain a copied fork (a copy silently freezes at the plugin version it was taken from and trains stale grammar), and do not link the temporary `$PACKAGE_DIR` staging tree (it vanishes when unpacked, leaving a dangling link):
 
     test ! -e "$HERMES_HOME/skills/workflow"

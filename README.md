@@ -82,7 +82,7 @@ One tool, action-routed — the complete surface, with the flags that matter:
 | `submit` | Quarantine a hand-rolled graph the library didn't cover for human-gated study — requires a `why_not_library` receipt (≥80 chars); never joins the library. |
 | `library` | List shelved graphs richly (nodes, gates, fan-outs, description, tags, provenance), filterable by ALL-match tags; an empty filtered result says which tag starved. `name:"<name>"` returns required inputs and an instantiate command. |
 | `validate` | Dry-run the door's validation pipeline (defaults fill, defect collection, model/route policy) with no ping and no writes — `{ok, errors:[{node,field,msg}], resolved_routes}`. Same pipeline on argv, for heads that have no tool in reach (CI, pre-commit, plain shells): `python3 wf.py validate [--json] <graph.json>` — exit 0 ok, 1 red (the `errors[]` rows print), 2 usage/IO fault. No `--plugin-dir`: `wf.py` binds its own siblings. |
-| `doctor_version` | Read-only version truth for THIS install: `{live_version, newest_packaged, source_commit, drift}` — plugin.yaml vs the `install.json` provenance `pack.py` stamps at build time; one read, no network. |
+| `doctor_version` | Read-only version truth for THIS install: `{live_version, newest_packaged, source_commit, source_repo, drift}` — plugin.yaml vs the one sidecar schema `pack.py` stamps at build time (`install.json`: `version`, `source_commit`, `packaged_at`, `source_repo`); one read, no network. A sidecar predating `source_repo` loads with that field null — never an invented origin. |
 
 Plus a `/wf` slash command: bare `/wf` lists the library; `/wf <name> [note]`
 returns the atomic run instruction for that graph, carrying the note as its
