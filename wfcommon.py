@@ -2004,6 +2004,8 @@ def validate_graph_errors(nodes, *, admission=False, defaults=None):
                     E(nid, "default_option", f"default_option {dopt!r} must be one of the gate's options")
                 if n.get("wait") is not None:
                     E(nid, "default_option", "default_option applies to human gates, not machine wait-gates")
+            if n.get("question") is not None and n.get("wait") is not None:
+                E(nid, "question", "question applies to human gates, not machine wait-gates")
             hto = n.get("hold_timeout")
             if hto is not None and (not isinstance(hto, (int, float)) or isinstance(hto, bool) or hto <= 0):
                 E(nid, "hold_timeout", "hold_timeout must be a positive number of seconds")

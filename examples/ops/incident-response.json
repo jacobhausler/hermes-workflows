@@ -238,7 +238,7 @@
         "every_s": 300,
         "timeout_s": 86400
       },
-      "question": "Incident alerts STILL firing after the mitigation pass's probe window (or the probe itself broke). Answer 'extend 1h' to re-arm the probe for another window, or 'escalate' to stop and wake a human.",
+      "context": "Incident alerts STILL firing after the mitigation pass's probe window (or the probe itself broke). Answer 'extend 1h' to re-arm the probe for another window, or 'escalate' to stop and wake a human.",
       "options": [
         "extend 1h",
         "escalate"

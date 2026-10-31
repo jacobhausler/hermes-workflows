@@ -77,7 +77,7 @@ class ValidateSemanticWarnings(unittest.TestCase):
         # est-7ncu0 promoted the dead-probe class from advisory to refusal (door
         # 1.4.3): a persisted launch order that cannot resolve is a written lie.
         result = json.loads(self.door.handle({"action": "validate", "graph": {"name": "semwarn", "nodes": [
-            {"id": "w", "type": "gate", "question": "up?", "options": ["yes", "no"],
+            {"id": "w", "type": "gate",
              "wait": {"until_argv": ["/nonexistent-hwudg/probe"]}},
         ]}}))
         self.assertIs(result.get("ok"), False, result)
@@ -89,7 +89,7 @@ class ValidateSemanticWarnings(unittest.TestCase):
         # est-7ncu0: interpreter wrapper probes need an explicit resident script
         # argv; a bare system binary is the clean shape under the residency door.
         result = self.validate([
-            {"id": "w", "type": "gate", "question": "up?", "options": ["yes", "no"],
+            {"id": "w", "type": "gate",
              "wait": {"until_argv": ["/bin/true"]}},
         ])
         self.assertNotIn("warnings", result)
@@ -123,7 +123,7 @@ class ValidateSemanticWarnings(unittest.TestCase):
                         "properties": {"verdict": {"type": "string"}}}},
             {"id": "g", "type": "gate", "after": ["a"], "question": "go?",
              "options": ["yes", "no"], "when": "out.a.ship == true"},
-            {"id": "w", "type": "gate", "question": "up?", "options": ["yes", "no"],
+            {"id": "w", "type": "gate",
              "wait": {"until_argv": ["/bin/true"]}},
             {"id": "f", "type": "agent", "goal": "x {item}",
              "fanout": {"items": ["a", "b", "c"], "quorum": 2}},
