@@ -107,7 +107,8 @@ class CardBackend(unittest.TestCase):
         self.assertEqual(set(ctx.hooks), {"post_tool_call", "pre_llm_call",
                                           "transform_llm_output", "post_gateway_admission",
                                           "pre_gateway_dispatch", "on_session_end",
-                                          "on_session_finalize", "agent_loop_stopped"})   # card ledger 3 + PR-3 admission/witness + PR-4 orphan observers
+                                          "on_session_finalize", "agent_loop_stopped",
+                                          "on_session_delete"})   # card ledger 3 + PR-3 admission/witness + PR-4 orphan observers (now four: +on_session_delete, core v0.22.5)
         self.assertIs(ctx.hooks["transform_llm_output"],
                       wf._card_enforcement._card_hook)
 

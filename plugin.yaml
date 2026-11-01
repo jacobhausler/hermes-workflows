@@ -25,6 +25,7 @@ provides_hooks:
   - on_session_end
   - on_session_finalize
   - agent_loop_stopped
+  - on_session_delete
   - subagent_stop            # gated: settings.hooks_allow lists subagent_accounting
   - pre_approval_request     # gated: settings.hooks_bridge_allow lists approval_bridge
   - post_approval_response   # gated: settings.hooks_bridge_allow lists approval_bridge
