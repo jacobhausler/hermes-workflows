@@ -72,8 +72,8 @@ try:
         def register_skill(self, *a, **k): pass
         def get_config(self, k, d): return d
     _c = _Ctx(); door.register(_c)
-    check({"on_session_end", "on_session_finalize", "agent_loop_stopped"} <= set(_c.hooks),
-          "register() wires the three orphan observers by default", str(sorted(_c.hooks)))
+    check({"on_session_end", "on_session_finalize", "agent_loop_stopped", "on_session_delete"} <= set(_c.hooks),
+          "register() wires the four orphan observers by default", str(sorted(_c.hooks)))
 
     # --- held gate + dead session -> index row + stamp -------------------------
     r1 = mk("o-held", "sess-dead-0001", HELD)
@@ -116,6 +116,34 @@ try:
     mk("o-short", "ab", HELD)
     ow.on_agent_loop_stopped(session_key="agent:main:xxab")
     check("o-short" not in {x["run_id"] for x in rows()}, "short ids never suffix-match (conservative)")
+
+    # --- on_session_delete (core v0.22.5 post-commit row-delete observer) ------
+    mk("o-del-single", "sess-del-00010", HELD)
+    mk("o-del-bulk-a", "sess-del-00011", HELD)
+    mk("o-del-bulk-b", "sess-del-00012", HELD)
+    n_d = len(rows())
+    ow.on_session_delete(session_id="sess-del-00010")
+    new1 = [x for x in rows()[n_d:] if x["run_id"] == "o-del-single"]
+    check(len(rows()) == n_d + 1 and len(new1) == 1 and new1[0]["hook"] == "on_session_delete"
+          and new1[0]["session_id"] == "sess-del-00010" and new1[0]["gate_id"] == "approve",
+          "single delete (session_id only) -> owner marked via on_session_delete", str(rows()[n_d:]))
+    ow.on_session_delete(session_id="sess-del-00011",
+                         deleted_ids=["sess-del-00011", "sess-del-00012"])
+    new2 = {x["run_id"]: x for x in rows()[n_d + 1:]}
+    check(len(rows()) == n_d + 3 and "o-del-bulk-a" in new2 and "o-del-bulk-b" in new2
+          and all(x["hook"] == "on_session_delete" for x in new2.values()),
+          "bulk delete (deleted_ids) -> every member marked, session_id is one of them", str(new2))
+    check("o-other" not in {x["run_id"] for x in rows()},
+          "live owner NOT marked by a bulk delete that omits its id")
+    ow.on_session_delete(session_id="sess-del-00011",
+                         deleted_ids=["sess-del-00011", "sess-del-00012"])
+    check(len(rows()) == n_d + 3, "re-delete of the same ids -> idempotent, still one row per gate")
+    n_no = len(rows())
+    ow.on_session_delete()
+    ow.on_session_delete(session_id=None, deleted_ids=[])
+    ow.on_session_delete(session_id="", deleted_ids="prune")            # malformed: reason-shaped str in the ids slot
+    ow.on_session_delete(session_id=None, deleted_ids=["", 7, None])    # junk members dropped
+    check(len(rows()) == n_no, "no-op / malformed shapes -> no rows and no raise")
 
     # --- status flag ----------------------------------------------------------
     OBSERVER["sid"] = None
@@ -183,6 +211,8 @@ try:
         ow.on_session_finalize(session_id="sess-fo-000009")
         ow.on_session_end(session_id="sess-fo-000009", interrupted=True)
         ow.on_agent_loop_stopped(session_key="x:sess-fo-000009")
+        ow.on_session_delete(session_id="sess-fo-000009")
+        ow.on_session_delete(deleted_ids=["sess-fo-000009", "sess-fo-nope"])
         ow.on_session_finalize()           # no ids
         ow.on_session_end(**{"turn_exit_reason": None})
         raised = False
