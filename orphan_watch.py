@@ -1,8 +1,9 @@
 """Orphan-held awareness (docs/orphan-held.md).
 
 A run parked at a human gate whose OWNER session is dead waits silently forever.
-Core fires `on_session_end` / `on_session_finalize` / `agent_loop_stopped` at the
-moments "this session will never answer again"; these observers turn that into a
+Core fires `on_session_end` / `on_session_finalize` / `agent_loop_stopped` /
+`on_session_delete` at the moments "this session will never answer again"; these
+observers turn that into a
 named state: an index row in `<runs_root>/orphan-held.jsonl`, an advisory
 `orphan_at` stamp on the run's run.json, a status flag and `/wf orphans`.
 
@@ -255,9 +256,31 @@ def on_agent_loop_stopped(session_key=None, **_):
     return None
 
 
+def on_session_delete(session_id=None, deleted_ids=None, **_):
+    """on_session_delete (core v0.22.5, upstream ee3ce9a4d9) fires ONCE per committed
+    session-row delete: single, bulk (`deleted_ids` carries the full set whenever the
+    count differs from 1), empty-sweep, prune and ghost-prune. No end/finalize signal
+    ever follows a deleted row, so without this a gateway-deleted owner's parked gates
+    hold their claim forever. Mark the deleted id and every deleted_ids member; the
+    floor core ignores the unknown-name registration (no requires_hermes bump)."""
+    try:
+        dead = set()
+        if isinstance(session_id, str) and session_id:
+            dead.add(session_id)
+        if isinstance(deleted_ids, (list, tuple)):
+            dead.update(x for x in deleted_ids if isinstance(x, str) and x)
+        if dead:
+            ids = tuple(sorted(dead))
+            mark_session(lambda s: s in ids, "on_session_delete")
+    except Exception:
+        pass
+    return None
+
+
 HOOKS = {"on_session_end": on_session_end,
          "on_session_finalize": on_session_finalize,
-         "agent_loop_stopped": on_agent_loop_stopped}
+         "agent_loop_stopped": on_agent_loop_stopped,
+         "on_session_delete": on_session_delete}
 
 
 # ---------- read side + revoke ----------

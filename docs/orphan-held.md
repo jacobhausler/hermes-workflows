@@ -21,13 +21,14 @@ the card window.
 
 ## How it is detected
 
-Three core hooks, all observers, registered by default:
+Four core hooks, all observers, registered by default:
 
 | Hook | Marks runs owned by |
 |---|---|
 | `on_session_end` | `session_id`, only when the turn was interrupted / exited abort-shaped (`interrupted`, `turn_exit_reason` containing interrupt/abort/shutdown/cancel). The hook fires after EVERY turn; a normally completed turn of a live session is never marked. |
 | `on_session_finalize` | `old_session_id` when present (rotation), else `session_id` |
 | `agent_loop_stopped` | the session whose id is the suffix of `session_key` (separator-delimited, id >= 8 chars) |
+| `on_session_delete` | `session_id` plus every member of `deleted_ids` (core >= v0.22.5: fires once per committed row delete — single, bulk, empty-sweep, prune, ghost-prune; after a delete no end/finalize signal can ever follow). Floor cores never fire it and the unknown-name registration is ignored, so no `requires_hermes` bump is needed. |
 
 Each fire scans `<runs_root>/*/run.json` (one read per run dir; the 64-line events tail fires only for matched holds).
 Idempotent per `(run_id, gate_id)`.
