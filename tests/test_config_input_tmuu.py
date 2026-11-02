@@ -68,7 +68,7 @@ FAST_CFG = ("Warning: Unknown provider 'nope'. Check 'hermes model' for availabl
 hit, marker = wf._classify_config_input(FAST_CFG, 120)
 check("fast death + config marker -> config_input hit", hit and marker and "Unknown provider" in marker,
       f"{hit}/{marker}")
-hit2, m2 = wf._classify_config_input(FAST_CFG, 1500)
+hit2, m2 = wf._classify_config_input(FAST_CFG, wf._CONFIG_INPUT_WINDOW_MS + 500)
 check("same capture dying LATE is not config_input (window is the precision guard)",
       hit2 is False and m2 is None, f"{hit2}/{m2}")
 hit3, _ = wf._classify_config_input("hermes -z: agent failed: openai.APIConnectionError. Connection error.", 100)
@@ -77,7 +77,11 @@ check("fast transport death stays transport (needs the config marker, not just s
 hit4, _ = wf._classify_config_input("Warning: Unknown model 'turbo-x42' vanished", 90)
 check("'unknown model' is unresolved_model territory, never config_input",
       hit4 is False)
-check("window constant is the ~1s reported shape", wf._CONFIG_INPUT_WINDOW_MS == 1000,
+# est-f6a4i (2026-11-02): the constant is now the estate-derived 3.5s, not the
+# CI-reported ~1s — see the retime note at the constant in wf.py. Tripwire kept
+# on purpose: touching the window must force a read of this family.
+check("window constant is the estate-derived 3500ms (est-f6a4i retime)",
+      wf._CONFIG_INPUT_WINDOW_MS == 3500,
       str(wf._CONFIG_INPUT_WINDOW_MS))
 check("config_input is in the closed set", "config_input" in wf.ERROR_CLASSES)
 check("config_input is never retryable (neither ladder)",
@@ -169,7 +173,11 @@ check("control: transport ladder still spends its full 2 respawns (3 spawns)",
 (HOME / "fake.log").write_text("")
 r = mk("tmuu-slow", [{"id": "a", "type": "agent", "goal": "cfg TMUU-SLOW", "model": "turbo-a", "provider": "nope"}],
        retry_backoff=[0.05, 0.1])
-out = wf_run("tmuu-slow", {"FAKE_MODE": "cfgtypos", "FAKE_CFG_SLOW": "1.5",
+# est-f6a4i: window-relative slow (window + 0.5s), not a fixed 1.5s — a fixed
+# sleep overlaps the estate host's loaded spawn floor (~3.0s) and would land the
+# control INSIDE the widened window. Same law: outside means outside on any host.
+out = wf_run("tmuu-slow", {"FAKE_MODE": "cfgtypos", "FAKE_CFG_SLOW":
+                           str(wf._CONFIG_INPUT_WINDOW_MS / 1000.0 + 0.5),
                            "FAKE_API_CALLS": "0"})
 rec = rec_of(r, "a")
 check("same capture dying OUTSIDE the window is NOT config_input (window gate, not prose grep)",

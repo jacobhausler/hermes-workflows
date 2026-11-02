@@ -107,8 +107,12 @@ check("T8c the death keeps its EVIDENCE: raw capture names the provider failure"
 r = mk("jam8-slow-fenced", [{"id": "a", "type": "agent", "goal": "cfg JAM8-SLOWF",
                              "model": "turbo-a", "provider": "nope", "schema": SCHEMA}],
        retry_backoff=[0.05, 0.1])
+# est-f6a4i: window-relative slow (window + 0.5s), not a fixed 1.5s — a fixed
+# sleep overlaps the estate host's loaded spawn floor (~3.0s) and would land the
+# control INSIDE the widened window. Same law: outside the window, harvest wins.
 out = wf_run("jam8-slow-fenced", {"FAKE_MODE": "cfgtypos", "FAKE_CFG_FENCED": "1",
-                                 "FAKE_CFG_SLOW": "1.5", "FAKE_API_CALLS": "0"})
+                                  "FAKE_CFG_SLOW": str(wf._CONFIG_INPUT_WINDOW_MS / 1000.0 + 0.5),
+                                  "FAKE_API_CALLS": "0"})
 rec = rec_of(r, "a")
 check("T9 OUTSIDE the window the fence still harvests as before (reorder is window-gated)",
       rec.get("error_class") != "config_input",

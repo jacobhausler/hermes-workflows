@@ -3661,7 +3661,8 @@ def _classify_rc_output(out):
 #
 # Two facts must BOTH hold — neither alone is sufficient:
 #   1. the child died rc!=0 within _CONFIG_INPUT_WINDOW_MS of spawn (wall,
-#      runner-known; the report measures ~0.1s, the window is 1s with slack);
+#      runner-known; the CI report measures ~0.1s — the estate host floor is
+#      slower and load-dependent, see the est-f6a4i retime note below);
 #   2. its capture carries the config-error marker line (core emits these to
 #      stdout — hermes_cli/main.py:2036, providers.py, tools_config_providers.py).
 # The window is the precision guard: a provider-registry failure at session START
@@ -3670,7 +3671,17 @@ def _classify_rc_output(out):
 # its existing classification. The tokens are CLI config messages, deliberately
 # disjoint from _UNRESOLVED_MODEL_TOKENS ("unknown model" is a dead model id, a
 # different fact) and from the transient transport markers.
-_CONFIG_INPUT_WINDOW_MS = 1000
+#
+# est-f6a4i retime (2026-11-02, estate-host measurement): the estate corpus of
+# fenced config deaths (nightly ledgers 10-31..11-02 + lane node records, n=36)
+# measures warm p50 ~0.5s, max ~3.0s (two RED tails recorded at 2925/2982 ms).
+# Three consecutive nightlies died PAST the old 1s window while CI stayed green
+# at the same tip. The window is a host-timing bound, not a law number: derive
+# it from the slowest honest arg-parse-class death seen on the estate (2982 ms
+# + ~17% headroom). The OUT-window harvest twins (jam8 T9, tmuu (d)) are
+# window-relative so the control keeps its meaning on any host. Set
+# WF_CONFIG_INPUT_WINDOW_MS to retime without a code change.
+_CONFIG_INPUT_WINDOW_MS = int(os.environ.get("WF_CONFIG_INPUT_WINDOW_MS", "3500"))
 _CONFIG_INPUT_TOKENS = ("unknown provider", "not a known provider",
                         "provider not found", "no provider named")
 
