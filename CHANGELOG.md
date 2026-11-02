@@ -8,6 +8,12 @@
   symbols present at the tag; `test_upstream_hook_contract`,
   `test_private_core_imports` (15/15) and `test_validate_0923` (57/57) pass with
   the core resolved at the tag. `requires_hermes` floor unchanged (>=0.21.4).
+- CI installs the pinned core with `uv pip install --system --override`
+  (`Pillow==13.0.0`) at both install points: core v0.22.5 requires Pillow 13 on
+  py>=3.14 while browser-harness 0.1.13 pins pillow==12.3.0, and plain pip —
+  blind to core's `[tool.uv] override-dependencies` — died at
+  `ResolutionImpossible` in all 8 shards (run 41441923619). The mirror drops
+  when browser-harness allows Pillow 13.
 
 ## 1.4.5 — 2026-10-31
 

@@ -29,7 +29,12 @@
 # est-i3pro). The measured requires_hermes runtime floor stays v2026.9.21
 # (first release whose quiet turn report carries
 # HERMES_QUIET_TURN_REPORT_FILE; evidence in docs/catalog/pr-body.md). Bump
-# deliberately; never track a branch.
+# deliberately; never track a branch. Install note: the pinned core is
+# installed with `uv pip install --system --override` (Pillow==13.0.0) at both
+# points, mirroring core's own [tool.uv] override-dependencies — plain pip is
+# blind to it, and v0.22.5's Pillow-13 bump collides with browser-harness
+# 0.1.13's pillow==12.3.0 pin (ResolutionImpossible, est-xddra run 41441923619).
+# Drop the mirror when browser-harness allows Pillow 13.
 #
 # Order matters: the pinned core is installed BEFORE the suite because the suite
 # asserts vocabulary parity against it (tests/test_validate_0923.py imports
@@ -83,9 +88,16 @@ jobs:
           git clone --filter=blob:none https://github.com/NousResearch/hermes-agent /tmp/hermes-agent
           git -C /tmp/hermes-agent checkout "$HERMES_PIN"
 
-      - name: Install pinned hermes (editable)
+      - name: Install pinned hermes (editable, uv override mirror)
+        # Plain pip is blind to core's [tool.uv] override-dependencies: core
+        # v0.22.5 needs Pillow==13.0.0 on py>=3.14 while browser-harness 0.1.13
+        # pins pillow==12.3.0 -> ResolutionImpossible (est-xddra, run 41441923619).
+        # Install with uv and mirror the single override; drop the mirror when
+        # browser-harness allows Pillow 13.
         run: |
-          pip install -e /tmp/hermes-agent
+          python -m pip install -q uv
+          printf 'Pillow==13.0.0\n' > /tmp/hermes-pin-overrides.txt
+          uv pip install --system -e /tmp/hermes-agent --override /tmp/hermes-pin-overrides.txt
           hermes --version || true
 
       - name: Desktop half parses (ESM)
@@ -154,9 +166,16 @@ jobs:
           git clone --filter=blob:none https://github.com/NousResearch/hermes-agent /tmp/hermes-agent
           git -C /tmp/hermes-agent checkout "$HERMES_PIN"
 
-      - name: Install pinned hermes (editable)
+      - name: Install pinned hermes (editable, uv override mirror)
+        # Plain pip is blind to core's [tool.uv] override-dependencies: core
+        # v0.22.5 needs Pillow==13.0.0 on py>=3.14 while browser-harness 0.1.13
+        # pins pillow==12.3.0 -> ResolutionImpossible (est-xddra, run 41441923619).
+        # Install with uv and mirror the single override; drop the mirror when
+        # browser-harness allows Pillow 13.
         run: |
-          pip install -e /tmp/hermes-agent
+          python -m pip install -q uv
+          printf 'Pillow==13.0.0\n' > /tmp/hermes-pin-overrides.txt
+          uv pip install --system -e /tmp/hermes-agent --override /tmp/hermes-pin-overrides.txt
           hermes --version || true
 
       - name: Lane trio (canary + supervisor kill/resume, golden-solo compare)
