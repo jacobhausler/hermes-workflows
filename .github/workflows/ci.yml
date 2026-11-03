@@ -20,7 +20,7 @@
 #
 # HERMES_PIN = the CI core pin, tag v0.22.6 (current stable; still carries the
 # private-import lint first shipped in v0.22.0, so tests/test_private_core_imports.py
-# RUNS — 15/15 allow-list rows exact — instead of skipping, and carries the
+# RUNS — 14/14 allow-list rows exact — instead of skipping, and carries the
 # on_session_delete observer orphan_watch adopted at db146e08 so CI exercises
 # the contract we actually rely on. Re-pin probe 2026-11-03 (nightly pass):
 # 6 of 7 contract files moved v0.22.5→v0.22.6; all 8 consumed backend symbols,

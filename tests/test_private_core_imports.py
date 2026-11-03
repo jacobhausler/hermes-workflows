@@ -87,9 +87,9 @@ ALLOW_LIST = {
     # --- agent.retry_utils: backoff parsing for liveness retries.
     ("__init__.py", "agent.retry_utils.parse_retry_after_seconds"):
         "_ping_retry_after: except Exception -> None (caller uses default backoff)",
-    # --- gateway.session_context: per-session env overlay for lane scopes.
-    ("__init__.py", "gateway.session_context.get_session_env"):
-        "_session_env: except ImportError -> plain os.environ value",
+    # (was: gateway.session_context.get_session_env — core v0.22.6 granted it a
+    # public-admission exemption in plugin_validate_private_imports, so the lint
+    # no longer reports it; row deleted per this test's own law.)
     # --- toolsets / hermes_cli.plugins: child toolset name validation is an
     # optional garnish; pass-through is the guarded path.
     ("wf.py", "toolsets.validate_toolset"):
