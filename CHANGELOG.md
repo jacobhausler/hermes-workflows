@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- CI core pin raised v0.22.5 -> v0.22.6 (`f0d94882e8`, peeled; current stable).
+  Re-pin probe 2026-11-03: all consumed symbols present at the tag;
+  `test_upstream_hook_contract`, `test_private_core_imports` (14/14) and
+  `test_validate_0923` (57/57) pass with the core resolved at the tag. The
+  allow-list shed one row: v0.22.6 promoted
+  `gateway.session_context:get_session_env` to the public surface, so the
+  private-import lint no longer reports our import. Pillow/browser-harness
+  pins unchanged at the tag, so the CI uv-override mirror stays.
+  `requires_hermes` floor unchanged (>=0.21.4).
+
 - CI core pin raised v0.22.0 -> v0.22.5 (`bf0203a794`, peeled): the plugin adopted
   the v0.22.5 `on_session_delete` observer at `db146e08`, so CI now tests against
   the contract release we actually rely on. Re-pin probe 2026-11-02: all consumed
