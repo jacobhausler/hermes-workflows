@@ -18,14 +18,16 @@
 # audit, `hermes plugins validate` against the pinned core. Concurrency cancels
 # superseded pushes instead of queueing a second full pass.
 #
-# HERMES_PIN = the CI core pin, tag v0.22.5 (current stable; still carries the
+# HERMES_PIN = the CI core pin, tag v0.22.6 (current stable; still carries the
 # private-import lint first shipped in v0.22.0, so tests/test_private_core_imports.py
 # RUNS — 15/15 allow-list rows exact — instead of skipping, and carries the
 # on_session_delete observer orphan_watch adopted at db146e08 so CI exercises
-# the contract we actually rely on. Re-pin probe 2026-11-02: every consumed
-# symbol exists at the tag and the contract suites pass at it
+# the contract we actually rely on. Re-pin probe 2026-11-03 (nightly pass):
+# 6 of 7 contract files moved v0.22.5→v0.22.6; all 8 consumed backend symbols,
+# all 20 SDK exports and all 5 hooks in use are proven present at the tag
 # (test_upstream_hook_contract, test_private_core_imports, test_validate_0923
-# — 57/57). v0.22.0 law-7 re-derivation: workflows run 20261026-122817 /
+# re-run as this repin's `gates` — the suite authority at the new pin).
+# v0.22.0 law-7 re-derivation: workflows run 20261026-122817 /
 # est-i3pro). The measured requires_hermes runtime floor stays v2026.9.21
 # (first release whose quiet turn report carries
 # HERMES_QUIET_TURN_REPORT_FILE; evidence in docs/catalog/pr-body.md). Bump
@@ -60,7 +62,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  HERMES_PIN: bf0203a794a07aac3ff764972ab9087baa4e4f4e   # v0.22.5 (peeled commit of tag v0.22.5)
+  HERMES_PIN: f0d94882e89ab8d4098b5bb2f166adfb9ee0a0ab   # v0.22.6 (peeled commit of tag v0.22.6)
   SHARDS: 8
 
 jobs:
@@ -90,7 +92,7 @@ jobs:
 
       - name: Install pinned hermes (editable, uv override mirror)
         # Plain pip is blind to core's [tool.uv] override-dependencies: core
-        # v0.22.5 needs Pillow==13.0.0 on py>=3.14 while browser-harness 0.1.13
+        # v0.22.6 needs Pillow==13.0.0 on py>=3.14 while browser-harness 0.1.13
         # pins pillow==12.3.0 -> ResolutionImpossible (est-xddra, run 41441923619).
         # Install with uv and mirror the single override; drop the mirror when
         # browser-harness allows Pillow 13.
@@ -168,7 +170,7 @@ jobs:
 
       - name: Install pinned hermes (editable, uv override mirror)
         # Plain pip is blind to core's [tool.uv] override-dependencies: core
-        # v0.22.5 needs Pillow==13.0.0 on py>=3.14 while browser-harness 0.1.13
+        # v0.22.6 needs Pillow==13.0.0 on py>=3.14 while browser-harness 0.1.13
         # pins pillow==12.3.0 -> ResolutionImpossible (est-xddra, run 41441923619).
         # Install with uv and mirror the single override; drop the mirror when
         # browser-harness allows Pillow 13.

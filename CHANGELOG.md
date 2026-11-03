@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- CI core pin raised v0.22.5 -> v0.22.6 (`f0d94882e8`, peeled): adopted-contract
+  floor — v0.22.6 is the current stable tag and the nightly precheck (2026-11-03)
+  proved the consumed surface survives the move: 6 of 7 contract files changed
+  v0.22.5→v0.22.6 but all 8 consumed backend symbols, all 20 SDK exports and all
+  5 hooks in use are present at the tag. The `[tool.uv]` override is unchanged
+  (`Pillow==13.0.0`), so the uv-override mirror at both install points stays
+  valid. `requires_hermes` floor unchanged (>=0.21.4).
+
 - CI core pin raised v0.22.0 -> v0.22.5 (`bf0203a794`, peeled): the plugin adopted
   the v0.22.5 `on_session_delete` observer at `db146e08`, so CI now tests against
   the contract release we actually rely on. Re-pin probe 2026-11-02: all consumed
