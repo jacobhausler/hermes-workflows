@@ -178,7 +178,8 @@ def main() -> None:
   # #477 (est-xl5n5): the gate lint is the refuse seam of source-only
   # make_public.py; declared source-only in pack.py SOURCE_ONLY_SCRIPTS.
   "gate_lint.py",
-  "admission_ledger.py"})
+  "admission_ledger.py",
+    "retention.py"})
             else:
                 print("SKIP pack-list repo-side half: no .git — running from an "
                       "unpacked ZIP/archive, where the premise does not exist")

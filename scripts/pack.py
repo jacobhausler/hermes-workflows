@@ -330,6 +330,11 @@ SOURCE_ONLY_SCRIPTS = {
     # make_public.py imports it at the refuse seam, so it travels with make_public.
     "scripts/gate_lint.py": "publish-door gate lint (#477); refuse seam of source-only make_public.py, not release surface",
     "scripts/admission_ledger.py": "estate consent/dissent ledger normalizer for receipts/workflow-mechanic/ (issue #104 item-3; not release surface)",
+    # est-fxpsl: run-dir + drill-scratch retention speaks estate vocabulary
+    # (the unclosed-row tracker export, the disk-janitor receipt spine); the
+    # seat gets it as a deployed copy refreshed from this repo. Not release
+    # surface — the plugin's own tooling does not import it.
+    "scripts/retention.py": "estate retention pruner (tracker-fed never-delete law + janitor receipt spine; deployed-copy distribution path)",
 }
 
 
