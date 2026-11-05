@@ -1,29 +1,58 @@
 # Changelog
 
-## Unreleased
+## 1.4.6 — 2026-11-05
 
-- CI core pin raised v0.22.5 -> v0.22.6 (`f0d94882e8`, peeled; current stable).
-  Re-pin probe 2026-11-03: all consumed symbols present at the tag;
-  `test_upstream_hook_contract`, `test_private_core_imports` (14/14) and
-  `test_validate_0923` (57/57) pass with the core resolved at the tag. The
-  allow-list shed one row: v0.22.6 promoted
+Patch release from five merged pull requests since v1.4.5. Session-delete
+orphan release, a measured classifier retime, and size-cap-first retention
+ship together with two CI core-pin raises that track the adopted contract.
+
+- Subscribe `orphan_watch` to the core `on_session_delete` observer: owner
+  sessions removed through single, bulk, retention-prune, or ghost-prune
+  paths now release held gates instead of parking forever; fail-open like
+  its sibling hooks, one `mark_session` scan for `deleted_ids` sets
+  (#599, est-afeea).
+- Retime the config-input classifier window to the estate-derived 3500 ms:
+  the ~1 s window let the estate spawn floor push arg-parse-class deaths
+  outside it — the harvest-on-death path claimed the capture first and
+  fenced config deaths landed `partial/unknown`. Three consecutive nightly
+  ledgers of deterministic reds, a 36-sample corpus, measured cure
+  (#602, est-f6a4i).
+- Size-cap-first run-dir retention plus assurance-drill scratch:
+  `scripts/retention.py` prunes with the per-run SIZE CAP as the first-class
+  criterion (age-only cleanup cannot bound a seat disk), a never-delete law
+  for run dirs referenced by unfinished work, and a per-class rule table in
+  `docs/retention.md`; first apply returned 71.1 GiB and cleared the
+  forecast disk alert within one 15 s eval window (#605, est-fxpsl).
+- CI core pin raised v0.22.0 -> v0.22.5 (`bf0203a794`, peeled): the plugin
+  adopted the v0.22.5 `on_session_delete` observer, so CI now tests against
+  the contract release we actually rely on. Re-pin probe 2026-11-02: all
+  consumed symbols present at the tag; `test_upstream_hook_contract`,
+  `test_private_core_imports` (15/15) and `test_validate_0923` (57/57) pass
+  with the core resolved at the tag. `requires_hermes` floor unchanged
+  (>=0.21.4). CI installs the pinned core with
+  `uv pip install --system --override` (`Pillow==13.0.0`) at both install
+  points: core v0.22.5 requires Pillow 13 on py>=3.14 while browser-harness
+  0.1.13 pins pillow==12.3.0, and plain pip — blind to core's
+  `[tool.uv] override-dependencies` — died at `ResolutionImpossible` in all
+  8 shards (run 41441923619). The mirror drops when browser-harness allows
+  Pillow 13 (#601).
+- CI core pin raised v0.22.5 -> v0.22.6 (`f0d94882e8`, peeled; current
+  stable). Re-pin probe 2026-11-03: all consumed symbols present at the
+  tag; `test_upstream_hook_contract`, `test_private_core_imports` (14/14)
+  and `test_validate_0923` (57/57) pass with the core resolved at the tag.
+  The allow-list shed one row: v0.22.6 promoted
   `gateway.session_context:get_session_env` to the public surface, so the
   private-import lint no longer reports our import. Pillow/browser-harness
   pins unchanged at the tag, so the CI uv-override mirror stays.
-  `requires_hermes` floor unchanged (>=0.21.4).
+  `requires_hermes` floor unchanged (>=0.21.4) (#604).
 
-- CI core pin raised v0.22.0 -> v0.22.5 (`bf0203a794`, peeled): the plugin adopted
-  the v0.22.5 `on_session_delete` observer at `db146e08`, so CI now tests against
-  the contract release we actually rely on. Re-pin probe 2026-11-02: all consumed
-  symbols present at the tag; `test_upstream_hook_contract`,
-  `test_private_core_imports` (15/15) and `test_validate_0923` (57/57) pass with
-  the core resolved at the tag. `requires_hermes` floor unchanged (>=0.21.4).
-- CI installs the pinned core with `uv pip install --system --override`
-  (`Pillow==13.0.0`) at both install points: core v0.22.5 requires Pillow 13 on
-  py>=3.14 while browser-harness 0.1.13 pins pillow==12.3.0, and plain pip —
-  blind to core's `[tool.uv] override-dependencies` — died at
-  `ResolutionImpossible` in all 8 shards (run 41441923619). The mirror drops
-  when browser-harness allows Pillow 13.
+### PR authors
+
+- #599 — @jacobhausler.
+- #602 — @jacobhausler.
+- #605 — @jacobhausler.
+- #601 — @jacobhausler.
+- #604 — @jacobhausler.
 
 ## 1.4.5 — 2026-10-31
 
