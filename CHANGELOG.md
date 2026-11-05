@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Test-first coverage for `wf.clip_head_tail` (est-13fu5, census est-tscez): new
+  `tests/test_clip_head_tail_par_qx7.py` pins the ceiling contract behind
+  `_clip_record` — pass-through boundary, marker names dropped/total/ceiling,
+  tiny-ceiling marker truncation, tail=0/odd-budget rounding, re-clip idempotence.
+  The export had zero test references; production code untouched.
+
 ## 1.4.6 — 2026-11-05
 
 Patch release from five merged pull requests since v1.4.5. Session-delete
