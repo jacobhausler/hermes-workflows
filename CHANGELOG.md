@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Tests: direct coverage for `wf.clip_head_tail` (`tests/test_clip_head_tail_par_qx7.py`).
+  The store-clip helper had zero direct test references; the new serial test pins every
+  branch at tip `026edf0` — boundary pass-through, retention marker and ceiling hold,
+  the tiny-ceiling truncation, the tail=0 odd-budget leg (guards the `text[-0:]`
+  whole-string leak), and re-clip idempotence. Production untouched.
+
 ## 1.4.6 — 2026-11-05
 
 Patch release from five merged pull requests since v1.4.5. Session-delete
