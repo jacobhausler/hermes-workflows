@@ -124,7 +124,7 @@ check("tool description: provider inheritance", "INHERITED" in desc, desc[:120])
 # every_s/timeout_s ARE allowed inside wait{} (gen-pilot-3's shape) — verified open...
 check("wait.every_s/timeout_s allowed in wait{}", V([
     {"id": "a", "type": "agent", "goal": "x"},
-    {"id": "g", "type": "gate", "after": ["a"], "question": "q",
+    {"id": "g", "type": "gate", "after": ["a"],
      "wait": {"until_argv": ["true"], "every_s": 60, "timeout_s": 3600}}]) == [])
 # ...and rejected at gate TOP level with the gate's allowed list (gen-pilot-3 crash shape)
 e = V([{"id": "lane_gate", "type": "gate", "after": ["a"], "question": "q",
