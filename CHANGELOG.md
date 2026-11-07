@@ -8,6 +8,12 @@
   the tiny-ceiling truncation, the tail=0 odd-budget leg (guards the `text[-0:]`
   whole-string leak), and re-clip idempotence. Production untouched.
 
+- CI: core pin rolled v0.22.6 -> v0.23.0 (`2bd378ed`, peeled). Nightly re-pin probe
+  2026-11-07: consumed core/SDK symbols verified at the tag (contract suites green at
+  it: hook contract, private-imports 14/14, validate_0923 57/57); `plugins.py` and
+  `areas.ts` byte-identical pin->tag; SDK delta additive; `model_switch.py` deltas
+  preserve `_ensure_direct_aliases`/`DIRECT_ALIASES` (consumption already guarded).
+
 ## 1.4.6 — 2026-11-05
 
 Patch release from five merged pull requests since v1.4.5. Session-delete
