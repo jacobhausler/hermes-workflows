@@ -115,6 +115,31 @@ def observed_native():
     return real_native()
 
 
+def optional_loaders():
+    for loader, value, tried in (
+        (wf._native_wake, "_WAKE_NATIVE", "_WAKE_NATIVE_TRIED"),
+        (wf._outbound_bridge, "_OUTBOUND", "_OUTBOUND_TRIED"),
+    ):
+        for mode in ("absent", "invalid_spec", "broken_import"):
+            setattr(wf, value, None)
+            setattr(wf, tried, False)
+            if mode == "absent":
+                seam = patch.object(wf.Path, "is_file", return_value=False)
+            elif mode == "invalid_spec":
+                seam = patch.object(wf.importlib.util, "spec_from_file_location", return_value=None)
+            else:
+                seam = patch.object(wf.importlib.util, "spec_from_file_location", side_effect=ImportError("broken optional adapter"))
+            with seam as observed:
+                assert loader() is None
+                assert loader() is None
+                assert observed.call_count == 1, (mode, observed.call_count)
+                assert getattr(wf, tried) is True
+        setattr(wf, value, None)
+        setattr(wf, tried, False)
+    print("PASS absent, invalid and failed optional loaders settle once without raising")
+
+
+optional_loaders()
 with patch.object(wf, "_native_wake", side_effect=observed_native):
     concurrent_failures()
 print("PASS two distinct native admissions before healthy sibling drain; replay stable; graph reader live")
