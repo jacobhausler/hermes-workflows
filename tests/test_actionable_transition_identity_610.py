@@ -141,10 +141,17 @@ class CommittedTransitions(unittest.TestCase):
         self.assertIn('\\"rev\\":1', self.calls[-1][0])
 
     def test_legacy_records_load_without_migration(self):
-        self.save()
-        record = wf.jload(self.directory / "nodes" / "worker.json")
-        self.assertNotIn("wake", record)
+        path = self.directory / "nodes" / "worker.json"
+        path.parent.mkdir()
+        record = {"status": "failed", "error_class": "unknown", "error": "old failure",
+                  "def_hash": wf.wfcommon.def_hash(self.node), "fp_rule_version": wf.FP_RULE_VERSION}
+        path.write_text(json.dumps(record))
+        before = path.read_bytes()
         self.assertEqual(wf.node_rec(self.directory, self.node, self.byid)[0], "failed")
+        wf._notify_node_failure(self.directory, "worker")
+        wf._notify_node_failure(self.directory, "worker")
+        self.assertEqual(len(self.calls), 1)
+        self.assertEqual(path.read_bytes(), before)
 
     def test_observer_failure_never_overwrites_verdict(self):
         with patch.object(wf, "notify", side_effect=RuntimeError("delivery failed")):
