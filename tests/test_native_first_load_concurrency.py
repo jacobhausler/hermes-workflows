@@ -110,9 +110,23 @@ native_calls = []
 
 def observed_native():
     native_calls.append(threading.get_ident())
-    if len(native_calls) == 2:
+    result = real_native()
+    if threading.get_ident() == native_calls[1]:
         second_entered.set()
-    return real_native()
+    return result
+
+
+class ObservedInitLock:
+    def __init__(self):
+        self.lock = threading.Lock()
+
+    def __enter__(self):
+        if len(native_calls) == 2:
+            second_entered.set()
+        self.lock.acquire()
+
+    def __exit__(self, *args):
+        self.lock.release()
 
 
 def optional_loaders():
@@ -140,6 +154,8 @@ def optional_loaders():
 
 
 optional_loaders()
-with patch.object(wf, "_native_wake", side_effect=observed_native):
+with patch.object(wf, "_native_wake", side_effect=observed_native), patch.object(
+    wf, "_WAKE_NATIVE_INIT_LOCK", ObservedInitLock(), create=True
+):
     concurrent_failures()
 print("PASS two distinct native admissions before healthy sibling drain; replay stable; graph reader live")
