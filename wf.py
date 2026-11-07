@@ -1384,28 +1384,31 @@ def _wake_identity(run, event, key, graph=None):
 # or broken hooks_outbound.py means NO bridge: the run loop is byte-identical.
 _OUTBOUND = None
 _OUTBOUND_TRIED = False
+_OUTBOUND_INIT_LOCK = threading.Lock()
 
 def _outbound_bridge():
     """Load + bind hooks_outbound once, lazily; None = no bridge (feature off by
     absence or by a broken file — both the same byte-identical degradation)."""
     global _OUTBOUND, _OUTBOUND_TRIED
-    if _OUTBOUND_TRIED:
+    with _OUTBOUND_INIT_LOCK:
+        if _OUTBOUND_TRIED:
+            return _OUTBOUND
+        try:
+            _p = Path(__file__).resolve().parent / "hooks_outbound.py"
+            if not _p.is_file():
+                return None
+            _spec = importlib.util.spec_from_file_location("_hermes_workflows_hooks_outbound", _p)
+            if _spec is None or _spec.loader is None:
+                return None
+            _mod = importlib.util.module_from_spec(_spec)
+            _spec.loader.exec_module(_mod)
+            _mod.bind(wfcommon, _wake_identity, log)   # ONE discriminant fn, the runner's own log voice
+            _OUTBOUND = _mod
+        except Exception:
+            _OUTBOUND = None
+        finally:
+            _OUTBOUND_TRIED = True
         return _OUTBOUND
-    _OUTBOUND_TRIED = True
-    try:
-        _p = Path(__file__).resolve().parent / "hooks_outbound.py"
-        if not _p.is_file():
-            return None
-        _spec = importlib.util.spec_from_file_location("_hermes_workflows_hooks_outbound", _p)
-        if _spec is None or _spec.loader is None:
-            return None
-        _mod = importlib.util.module_from_spec(_spec)
-        _spec.loader.exec_module(_mod)
-        _mod.bind(wfcommon, _wake_identity, log)   # ONE discriminant fn, the runner's own log voice
-        _OUTBOUND = _mod
-    except Exception:
-        _OUTBOUND = None
-    return _OUTBOUND
 
 _NODE_TELEMETRY = None
 _NODE_TELEMETRY_TRIED = False
@@ -1445,26 +1448,29 @@ def _wake_tid(run_name, event, disc):
 
 _WAKE_NATIVE = None
 _WAKE_NATIVE_TRIED = False
+_WAKE_NATIVE_INIT_LOCK = threading.Lock()
 
 def _native_wake():
     """Load the optional native wake adapter without changing import paths."""
     global _WAKE_NATIVE, _WAKE_NATIVE_TRIED
-    if _WAKE_NATIVE_TRIED:
+    with _WAKE_NATIVE_INIT_LOCK:
+        if _WAKE_NATIVE_TRIED:
+            return _WAKE_NATIVE
+        try:
+            _p = Path(__file__).resolve().parent / "wake_native.py"
+            if not _p.is_file():
+                return None
+            _spec = importlib.util.spec_from_file_location("_hermes_workflows_wake_native", _p)
+            if _spec is None or _spec.loader is None:
+                return None
+            _mod = importlib.util.module_from_spec(_spec)
+            _spec.loader.exec_module(_mod)
+            _WAKE_NATIVE = _mod
+        except Exception:
+            _WAKE_NATIVE = None
+        finally:
+            _WAKE_NATIVE_TRIED = True
         return _WAKE_NATIVE
-    _WAKE_NATIVE_TRIED = True
-    try:
-        _p = Path(__file__).resolve().parent / "wake_native.py"
-        if not _p.is_file():
-            return None
-        _spec = importlib.util.spec_from_file_location("_hermes_workflows_wake_native", _p)
-        if _spec is None or _spec.loader is None:
-            return None
-        _mod = importlib.util.module_from_spec(_spec)
-        _spec.loader.exec_module(_mod)
-        _WAKE_NATIVE = _mod
-    except Exception:
-        _WAKE_NATIVE = None
-    return _WAKE_NATIVE
 
 def _wake_deliver(rec, sid, text, tid, owner=None):
     """Return native admission acceptance or the legacy HTTP delivery outcome.

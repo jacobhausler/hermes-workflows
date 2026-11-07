@@ -1,5 +1,6 @@
 """Concurrent committed failures must not miss healthy native admission."""
 import importlib.util
+import fcntl
 import json
 from pathlib import Path
 import sys
@@ -26,10 +27,12 @@ def concurrent_failures():
         admissions = []
         errors = []
         real_spec = importlib.util.spec_from_file_location
+        delivery_barrier = threading.Barrier(2)
 
         def spec(name, path, *args, **kwargs):
             result = real_spec(name, path, *args, **kwargs)
             if Path(path).name == "wake_native.py":
+                assert result is not None and result.loader is not None
                 original = result.loader.exec_module
 
                 def load(module):
@@ -40,10 +43,9 @@ def concurrent_failures():
                     def deliver(sid, text, tid, home):
                         # Delivery must not retain graph.lock. A different thread
                         # must be able to read the committed graph during admission.
-                        read = threading.Thread(target=lambda: wf._wake_ledger_read(run))
-                        read.start()
-                        read.join(5)
-                        assert not read.is_alive(), "delivery blocks graph reader"
+                        with (run / "graph.lock").open("a+b") as lock:
+                            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                        delivery_barrier.wait(5)
                         assert not release_healthy.is_set(), "sibling drained before admission"
                         admissions.append(tid)
                         return {"outcome": "delivered", "admission_id": tid, "status": "queued"}
