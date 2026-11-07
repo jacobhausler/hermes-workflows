@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- CI core pin raised v0.22.6 -> v0.23.0 (`2bd378ed1b`, peeled; current stable).
+  Re-pin probe 2026-11-07: all consumed symbols present at the tag;
+  `test_upstream_hook_contract`, `test_private_core_imports` (14/14),
+  `test_validate_0923` (57/57) and the soft-guard variant pass with the core
+  resolved at the tag. `hermes_cli/plugins.py` and `sdk/areas.ts` are
+  byte-identical pin->tag; the `model_switch.py` and SDK deltas are additive
+  or symbol-preserved. `requires_hermes` floor unchanged (>=0.21.4).
+
 - Tests: direct coverage for `wf.clip_head_tail` (`tests/test_clip_head_tail_par_qx7.py`).
   The store-clip helper had zero direct test references; the new serial test pins every
   branch at tip `026edf0` — boundary pass-through, retention marker and ceiling hold,
