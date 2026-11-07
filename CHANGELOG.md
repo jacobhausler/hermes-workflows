@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+## 1.4.7 — 2026-11-07
+
+Patch release from four merged pull requests since v1.4.6. A failure wake
+now fires while healthy siblings still run, the store-clip helper finally has
+direct branch coverage, and the catalog rule-6 row is recounted for the
+post-#599 hook surface. The CI core pin rolls to the
+v0.23.0 contract release.
+
+- Notify actionable node failures before sibling drain: committed unhandled
+  failures emit `node.action_required` through the existing wake transport and
+  identity ledger instead of waiting for the whole wave to drain; healthy
+  sibling execution, handled-failure suppression, replay identity and final
+  run notifications are preserved, and cooperative steering plus durable
+  amendments stay admitted during a live wave. Deterministic
+  failure-before-drain and concurrent-initialization regressions added.
+  Fixes #610 (#612).
+- Direct coverage for `wf.clip_head_tail` (`tests/test_clip_head_tail_par_qx7.py`).
+  The store-clip helper had zero direct test references; the new serial test pins every
+  branch at tip `026edf0` — boundary pass-through, retention marker and ceiling hold,
+  the tiny-ceiling truncation, the tail=0 odd-budget leg (guards the `text[-0:]`
+  whole-string leak), and re-clip idempotence. Production untouched (#609, est-tscez).
+- Recount the catalog rule-6 row for the post-#599 hook surface
+  (`docs/catalog/pr-body.md`) (#607, est-gl6a4).
 - CI core pin raised v0.22.6 -> v0.23.0 (`2bd378ed1b`, peeled; current stable).
   Re-pin probe 2026-11-07: all consumed symbols present at the tag;
   `test_upstream_hook_contract`, `test_private_core_imports` (14/14),
@@ -9,18 +32,18 @@
   resolved at the tag. `hermes_cli/plugins.py` and `sdk/areas.ts` are
   byte-identical pin->tag; the `model_switch.py` and SDK deltas are additive
   or symbol-preserved. `requires_hermes` floor unchanged (>=0.21.4).
-
-- Tests: direct coverage for `wf.clip_head_tail` (`tests/test_clip_head_tail_par_qx7.py`).
-  The store-clip helper had zero direct test references; the new serial test pins every
-  branch at tip `026edf0` — boundary pass-through, retention marker and ceiling hold,
-  the tiny-ceiling truncation, the tail=0 odd-budget leg (guards the `text[-0:]`
-  whole-string leak), and re-clip idempotence. Production untouched.
-
 - CI: core pin rolled v0.22.6 -> v0.23.0 (`2bd378ed`, peeled). Nightly re-pin probe
   2026-11-07: consumed core/SDK symbols verified at the tag (contract suites green at
   it: hook contract, private-imports 14/14, validate_0923 57/57); `plugins.py` and
   `areas.ts` byte-identical pin->tag; SDK delta additive; `model_switch.py` deltas
   preserve `_ensure_direct_aliases`/`DIRECT_ALIASES` (consumption already guarded).
+
+### PR authors
+
+- #607 — @jacobhausler.
+- #609 — @jacobhausler.
+- #612 — @jacobhausler.
+- #613 — @jacobhausler.
 
 ## 1.4.6 — 2026-11-05
 
