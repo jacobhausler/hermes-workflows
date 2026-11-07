@@ -336,6 +336,7 @@ publication guards, and crash recovery.
   [references/example-tour.md](references/example-tour.md) §Lane hygiene.
 - Steering: `steer` queues text; a running child pulls it via `inbox` at its next
   seam. It does not interrupt a child mid-turn.
+- Unhandled node failures wake before sibling drain. Live-wave steer and amend timing: [operations](references/operations.md).
 
 ### 3e. Reporting a finished run
 

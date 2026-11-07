@@ -26,7 +26,7 @@ if os.environ.get("WF_TEST_BUILD") and not (BUILD / "fake").exists():
 ROOT = BUILD.parent
 HOME = ROOT / "home-40"
 RUNS = HOME / "workflows"
-FAKE = str(BUILD / "fake")
+FAKE = str(HOME / "fake")
 os.environ["HERMES_HOME"] = str(HOME)
 os.environ["WF_RUNS_ROOT"] = str(Path(os.environ["HERMES_HOME"]) / "workflows")  # est-2ek.1.762 pin: HERMES_HOME alone is not a sandbox
 sys.path.insert(0, str(ROOT))
@@ -79,6 +79,8 @@ def wait_done(r, nid="w", timeout=90):
 
 shutil.rmtree(HOME, ignore_errors=True)
 HOME.mkdir(parents=True); RUNS.mkdir()
+Path(FAKE).write_text(f'#!{sys.executable}\nimport os, sys\nos.execv(sys.executable, [sys.executable, {str(BUILD / "fake_hermes.py")!r}] + sys.argv[1:])\n')
+Path(FAKE).chmod(0o755)
 
 # ---- 1 & 2: live pull + cursor + HWM exclusion ------------------------------
 # 'early nudge' exists BEFORE spawn (must be baked and pulled).

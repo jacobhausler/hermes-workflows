@@ -4475,7 +4475,9 @@ def act_steer(args):
     node_status = (st.get("nodes", {}).get(node["id"]) or {}).get("status")
     if kind(node).spawns is not True:
         return {"ok": False, "error": "gate nodes do not accept steering; use release for a held gate"}
-    if run_status in ("done", "partial", "failed", "stopped"):
+    live_failure = (run_status == "failed" and st.get("runner_live")
+                    and not (r / "stop.request").exists() and not _common.run_abort_flag(r))
+    if run_status in ("done", "partial", "failed", "stopped") and not live_failure:
         # est-3acn: `partial` joins the terminal refusals — a capped run has no
         # runner that will ever spawn that node either; the ledger + harvest are
         # the report, and amend/re-run is the correct verb.
@@ -4753,14 +4755,12 @@ def act_amend(args):
     # node_rec), computed on the RESOLVED defs (what lands in graph.json), read-only.
     # dry_run returns here WITHOUT touching graph.json, amends.jsonl, or the runner.
     preview = amend_preview(r, new["nodes"])
-    # #366: this amend resets EVERY node whose record is a live spawn record, def or
-    # no def (node_rec reads status=running as pending, and the solo branch never
-    # adopts — only the fan-out `_spawn` calls active_child). Name that in the hint,
-    # not only in the key: the shape that hid the destruction was a response that read
-    # as "1 changed / 1 will rerun" and said nothing about the children dying.
+    # A live wave drains before reload. If recovery needs a fresh runner instead,
+    # the preview's live records identify work that may need a new spawn.
     _rz = preview.get("will_reset_running") or []
-    _rz_note = (f" — WARNING: {len(_rz)} RUNNING node(s) reset by this amend "
-                f"(live children die, their work re-runs from zero): {', '.join(_rz)}") if _rz else ""
+    _rz_note = (f" — {len(_rz)} RUNNING node(s) at admission: {', '.join(_rz)}. "
+                "A live wave drains before reload; unchanged commits replay-skip. "
+                "Recovery with a fresh runner may reset live work.") if _rz else ""
     if args.get("dry_run"):
         return {"ok": True, "dry_run": True, "models": _models, "routes": _routes, **preview,
                 "graph_diff": _graph_unified_diff(old, new),
@@ -4789,6 +4789,9 @@ def act_amend(args):
         tmp.write_text(json.dumps(new, ensure_ascii=False, indent=2))
         os.replace(tmp, r / "graph.json")
         _new_rev = _graph_revision(r)
+        with open(r / "events.jsonl", "a") as f:
+            f.write(json.dumps({"ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                                "event": "graph.amended"}) + "\n")
     # est-2ek.1.641: an applied amend re-proves routes through this submit's
     # ping — bake the proved-alive receipts for the NEW defs (frozen replay-skip
     # nodes keep their committed receipt: the file is merged, never rewritten).
@@ -4841,9 +4844,6 @@ def act_amend(args):
         mtmp = r / f"run.json.{os.getpid()}.tmp"
         mtmp.write_text(json.dumps(meta, ensure_ascii=False))
         os.replace(mtmp, r / "run.json")
-    with open(r / "events.jsonl", "a") as f:
-        f.write(json.dumps({"ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-                            "event": "graph.amended"}) + "\n")
     (r / "restart.request").write_text("1")
     mode = _resume_after_action(r, consumed=lambda: not (r / "restart.request").exists())
     # est-gexk5 restart leg (hw-83v): promise continuation only for what the

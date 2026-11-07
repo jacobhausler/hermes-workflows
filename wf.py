@@ -738,6 +738,11 @@ def _clip_record(rec):
 # resolvable. The bodies above stay verbatim; the table stays the ONLY author
 # of owner prose. Absent pointer = unresolvable, never a fabricated value.
 _WAKE_TEMPLATES = {
+    "node.action_required": "A workflow node has a committed unhandled failure. "
+                            "The run is not necessarily finished; independent siblings may still be running. "
+                            "Inspect status once. Steering remains cooperative and amendments may wait "
+                            "for the wave boundary. This notification does not authorize repair, "
+                            "resume or additional work.",
     "gate.held": "The workflow is HELD at a human gate. Status contains the question "
                  "and options; release requires the human's decision. This notification "
                  "does not authorize choosing an answer or additional work.",
@@ -772,7 +777,7 @@ _WAKE_TEMPLATES = {
 # run 20261016-172339-iron-gravity). Drift — a call site waking an event not
 # listed here — is a CLASS GAP: it still wakes on the fixed catch-all body
 # below and prints WORKFLOW_WAKE_UNMAPPED_EVENT; it never goes silent again.
-_WAKE_EVENTS = frozenset({"gate.held", "run.failed", "run.done", "run.partial",
+_WAKE_EVENTS = frozenset({"gate.held", "run.failed", "run.done", "run.partial", "node.action_required",
                           # runner-emitted mid-flight class (est-fanout-straggler
                           # sys-nxrhxo; registered at rebase onto the est-jbcrw
                           # registry so the mapped template carries no alarm)
@@ -789,7 +794,7 @@ _WAKE_CATCHALL_BODY = (
     "once. This notification is a drift alarm and does not authorize repair, "
     "dispatch or new work.")
 
-def _wake_owner_text(run_id, event, run_dir=None, failed_node_logs=None):
+def _wake_owner_text(run_id, event, run_dir=None, failed_node_logs=None, transition=None):
     """The runner-authored owner turn. Known events use their template; an
     event with no template uses the fixed catch-all body (est-jbcrw: never
     None — silence on an unmapped class was the gravity hole the dead-landing
@@ -808,6 +813,8 @@ def _wake_owner_text(run_id, event, run_dir=None, failed_node_logs=None):
     if body is None:
         body = _WAKE_CATCHALL_BODY
     pointers = ""
+    if transition is not None:
+        pointers += f" transition={json.dumps(transition)}"
     if run_dir is not None:
         pointers += f" run_dir={json.dumps(str(run_dir))}"
     if failed_node_logs:
@@ -1340,6 +1347,10 @@ def _wake_identity(run, event, key, graph=None):
       run.failed     -> the committed failed-node set + graph fingerprint + rev.
     A failed decision whose node records/graph cannot be read returns None:
     silence is safer than a duplicate paid owner turn."""
+    if event == "node.action_required":
+        # The commit observer captured the revision under graph.lock. Delivery
+        # may invoke an owner amend, so never re-bind this transition to its head.
+        return f"{event}|x:{key}" if key is not None else None
     rev = _wake_rev(run)
     if key is not None:
         return f"{event}|x:{key}|r{rev}"
@@ -1705,7 +1716,8 @@ def notify(run, event, key=None, graph=None, node=None, refire=False):
         failed_logs = (_wake_failed_node_logs(run, graph)
                        if event == "run.failed" else None)
         text = _wake_owner_text(run.name, event, run_dir=run_dir,
-                                failed_node_logs=failed_logs)
+                                failed_node_logs=failed_logs,
+                                transition=disc if event == "node.action_required" else None)
         # never None since est-jbcrw: unmapped classes take the fixed catch-all
         # body — the template table remains the ONLY author of owner text.
         text = _wake_safe(text)          # second net: the fixed templates carry no secret,
@@ -1968,6 +1980,56 @@ def save_node(run, node, byid, rec):
     tmp.write_text(json.dumps(rec, ensure_ascii=False, default=str))
     os.replace(tmp, p)  # atomic: a completed node file is a committed fact
     _mint_suite_proof(run, node, rec, byid)   # est-2ek.1.603 (no-op unless declared)
+    if rec.get("status") == "failed":
+        _notify_node_failure(run, node["id"])
+
+
+def _on_fail_handles(node, byid):
+    """Whether the existing catch policy tolerates this agent's failure."""
+    if node.get("type") != "agent":
+        return False
+    policy = node.get("on_fail")
+    if policy == "skip":
+        return True
+    if not isinstance(policy, str) or policy == "abort":
+        return False
+    fallback = byid.get(policy)
+    ancestors, stack = set(), list(node.get("after", []))
+    while stack:
+        ancestor = stack.pop()
+        if ancestor in ancestors or ancestor not in byid:
+            continue
+        ancestors.add(ancestor)
+        stack.extend(byid[ancestor].get("after", []))
+    return (fallback is not None and fallback.get("type") == "agent"
+            and policy not in ancestors and policy != node["id"])
+
+
+def _notify_node_failure(run, node_id):
+    """Observe canonical commits only, never retry attempts or fan-out items."""
+    try:
+        with (run / "graph.lock").open("a+b") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            graph = jload(run / "graph.json", {}) or {}
+            byid = {n["id"]: n for n in graph.get("nodes", [])}
+            node = byid.get(node_id)
+            if node is None:
+                return
+            status, rec = node_rec(run, node, byid)
+            if status != "failed" or rec.get("error_class") in (
+                    "cancelled", "stale_graph", "budget_exhausted"):
+                return
+            empty_abort = rec.get("error_class") == "fanout_empty" and node.get("on_fail") == "skip"
+            if _on_fail_handles(node, byid) and not empty_abort:
+                return
+            key = json.dumps({"node": node_id, "efp": rec.get("efp"),
+                              "skey": rec.get("skey"), "attempts": rec.get("attempts", 0),
+                              "graph": graph_fingerprint(graph), "rev": _wake_rev(run)},
+                             sort_keys=True, separators=(",", ":"))
+        # No door lock during delivery: a synchronous owner may steer or amend.
+        return notify(run, "node.action_required", key=key, node=node_id, graph=graph)
+    except Exception:
+        return None  # observation must never replace a committed verdict
 
 # ---------- effect-receipt gate (est-pygyy, issue #56) ----------
 # A node whose stated purpose is EXTERNAL publication declares the postconditions
@@ -9720,18 +9782,10 @@ def _on_fail_catch(run, rs, states):
                 caught_error_class=(rec or {}).get("error_class"))
             caught = True
             continue
-        if of != "skip":
-            fb = rs.byid.get(of)
-            anc, stack = set(), list(n.get("after", []))
-            while stack:
-                a = stack.pop()
-                if a in anc or a not in rs.byid:
-                    continue
-                anc.add(a); stack.extend(rs.byid[a].get("after", []))
-            if fb is None or fb.get("type") != "agent" or of in anc or of == n["id"]:
-                log(run, "node.on_fail_invalid", node=n["id"], on_fail=of,
-                    reason="fallback must exist, be an agent, and not be an ancestor")
-                continue
+        if not _on_fail_handles(n, rs.byid):
+            log(run, "node.on_fail_invalid", node=n["id"], on_fail=of,
+                reason="fallback must exist, be an agent, and not be an ancestor")
+            continue
         _, rec = node_rec(run, n, rs.byid)
         save_node(run, n, rs.byid,
                   {"status": "skipped",
@@ -10670,6 +10724,8 @@ def main(run_id):
         for n in rs.nodes:
             st, rec = node_rec(run, n, rs.byid)
             states[n["id"]] = st
+            if st == "failed":
+                _notify_node_failure(run, n["id"])
             if st in ("done", "partial"): outputs[n["id"]] = (rec or {}).get("output")  # #4: partial output IS output
             # e68544a37be37657; est-ggqs: a validate-clamped harvest is the node's
             # own vouched `done` — its declared schema already held the answer.

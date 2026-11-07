@@ -214,9 +214,11 @@ try:
     r4 = mk("w4", [{"id": "boom", "type": "agent", "goal": "FAILME"}], OWNER)
     out4 = drive(r4).stdout.strip()
     check("stdout vocabulary intact (FAILED)", out4.startswith(f"WORKFLOW_FAILED {r4.name}"), out4)
-    w4 = wakes(r4)
+    w4 = [w for w in wakes(r4) if w.get("event") == "run.failed"]
+    check("unhandled node failure also wakes once",
+          [w.get("event") for w in wakes(r4)] == ["node.action_required", "run.failed"], str(wakes(r4)))
     check("run.failed fires exactly one wake",
-          len(w4) == 1 and w4[0].get("event") == "run.failed", w4)
+          len(w4) == 1 and w4[0].get("event") == "run.failed", str(w4))
     t4 = w4[0].get("text", "") if w4 else ""
     p4, logs4 = ptr(t4, "run_dir"), ptr(t4, "failed_node_logs")
     check("run.failed end-to-end carries run_dir + committed log pointers (#501)",
@@ -482,7 +484,7 @@ try:
     # ---- 14. terminal dedupe is per TRANSITION INSTANCE, not once-per-run/event
     #          and never a hand-crafted ledger line (finding 5, round-1 #5): a real
     #          runner respawn of ONE decided failure re-derives the identical
-    #          instance from ledger facts — exactly one row, one POST. The
+    #          instance from ledger facts, one node wake and one terminal wake. The
     #          FAILED->amend->DONE->amend->FAILED amend cycle (real act_amend) and
     #          the gate A->B->A revert law live in section 15 below. ----
     r14 = mk("w14", [{"id": "boom", "type": "agent", "goal": "FAILME"}], OWNER)
@@ -493,11 +495,11 @@ try:
     w14 = wakes(r14)
     check("three runs of one failed decision = one terminal wake",
           out14a.startswith(f"WORKFLOW_FAILED {r14.name}")
-          and len(w14) == 1 and w14[0].get("event") == "run.failed"
-          and w14[0].get("delivered") is True and len(sinks) == before14 + 1,
+          and [w.get("event") for w in w14] == ["node.action_required", "run.failed"]
+          and all(w.get("delivered") is True for w in w14) and len(sinks) == before14 + 2,
           f"{out14a} {w14} posts={len(sinks) - before14}")
     check("terminal row carries a stable instance id",
-          bool(w14) and bool(w14[0].get("id")) and w14[0].get("key") == w14[0].get("id"),
+          bool(w14) and bool(w14[-1].get("id")) and w14[-1].get("key") == w14[-1].get("id"),
           str(w14))
 finally:
     _sink_srv.shutdown()
