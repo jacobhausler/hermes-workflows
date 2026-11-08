@@ -26,14 +26,38 @@ law invented here):
      the PR's author bot stamp `repo-admin bot-id=` in the body (fallback
      --owner-bot; no author identity known = refuse, fail-closed). The shared
      GitHub login is NOT authorship — markers are the identity of record.
-  4. Only when 1-3 hold: PUT /merge {merge_method: squash}, then read back the
-     PR: merged == true and merge_commit_sha == the returned sha. An
-     unverified merge is reported merged=false, loud, never silent, and no
-     receipt is written.
+  4. Only when 1-3 hold: PUT /merge {merge_method: squash}, then PROVE the
+     merge by ANCESTRY, never by the POST status, a merged_at timestamp, or
+     sha-equality alone (est-xihc8, atbrace forgejo-lane shape): GET the PR,
+     require merged == true, and run the compare containment discriminator
+     `GET /repos/{repo}/compare/{base}...{head}` — a leg resolves CONTAINED
+     only on status ∈ {behind, identical}:
+       leg A  compare/{merge_commit_sha}...{armed head} — the head is an
+              ancestor of the merge commit (true merge-commit / ff method);
+       leg B  compare/{base ref}...{merge_commit_sha} — the merge commit is
+              an ancestor of the base branch (squash/rebase rewrite the head,
+              so leg A cannot hold for them; live-pinned 2026-11-08 on this
+              repo's #613 and #545: both legs diverged for leg A, leg B
+              reads status=behind for the squash commit on main).
+     Contained on either leg => merged. Neither leg => NOT merged, refuse
+     the close (`merge-not-proven-by-ancestry`) even when the PR object
+     claims merged — a stamp is not ancestry. A POST refused with 404/405
+     (e.g. an already-merged race) is NOT a death: the containment read-back
+     decides (fixture class: 405-merged-stamped). The returned sha must
+     equal the PR's merge_commit_sha as an integrity stamp, never as the
+     discriminator.
+  5. RE-GATE, never bail: if the read-back shows the head moved off the
+     armed head between the predicate and the POST (re-push mid-flight),
+     the old seal does not carry (law 1) — refuse typed `head-repushed-regate`
+     with the new head, so the babysit loop re-arms the gate at that head
+     once a fresh peer marker sits on it. This is never `merge-write-failed`
+     and never a silent success.
 
-Exit codes: 0 = merged AND read-back verified (receipt written when --receipt
-given); 1 = refused on the predicate (typed reason, ZERO write attempted);
-2 = transport/read failure (predicate unverifiable — fail-closed, zero merge).
+Exit codes: 0 = merged AND ancestry-proven (receipt written when --receipt
+given); 1 = refused (typed reason — a pre-merge refuse attempts ZERO writes; a
+post-merge close-out refuse means the merge, if it happened, rode no proof and
+is never accepted); 2 = transport/read failure (predicate or ancestry
+unverifiable — fail-closed, zero merge acceptance).
 The token is read from GITHUB_TOKEN (or --token-file) and NEVER printed.
 Stdlib only; one network seam (`_transport`) so behavior tests fake GitHub.
 Usage:
@@ -109,6 +133,24 @@ def refuse(reason, **extra):
     return out
 
 
+def contained(repo, base, head_sha, token, transport):
+    """One compare leg: True when the armed pair proves CONTAINMENT —
+    GET /repos/{repo}/compare/{base}...{head_sha} answers status ∈
+    {behind, identical} (head_sha is an ancestor of base, or the same commit).
+    A 404 is a dead leg (unknown ref => not contained, another leg may still
+    hold). Any other non-2xx or a body without a status RAISES: an
+    unverifiable ancestry is never silently 'not merged' — the caller rides
+    exit 2, fail-closed, exactly like the marker census."""
+    st, cmp_ = transport("GET", f"{API}/repos/{repo}/compare/"
+                                f"{base}...{head_sha}", None, token)
+    if st == 404:
+        return False
+    if not _ok(st) or not isinstance(cmp_, dict) or "status" not in cmp_:
+        raise RuntimeError(f"compare-read-failed {base}...{head_sha} "
+                           f"status={st}")
+    return str(cmp_.get("status")) in ("behind", "identical")
+
+
 def gate(repo, pr, head, owner_bot="", token=None, transport=_transport):
     """The predicate + (only on pass) the squash-merge + read-back. Returns a
     verdict dict; `merged=True` only ever alongside a verified read-back."""
@@ -137,17 +179,45 @@ def gate(repo, pr, head, owner_bot="", token=None, transport=_transport):
         return refuse("marker-no-reviewer", reviewed=m_sha)
     if reviewer.lower() == author_id.lower():
         return refuse("self-review", reviewer=reviewer, author=author_id)
-    # Predicate holds — issue the merge, then PROVE it by read-back.
+    # Predicate holds — issue the merge, then PROVE it by ANCESTRY (law 4).
     st_m, res = transport("PUT", f"{API}/repos/{repo}/pulls/{pr}/merge",
                           {"merge_method": "squash"}, token)
-    sha = str((res or {}).get("sha") or "")
-    if not _ok(st_m) or not sha:
-        return refuse("merge-write-failed", status=st_m)
+    post_sha = str((res or {}).get("sha") or "")
     st_b, back = transport("GET", f"{API}/repos/{repo}/pulls/{pr}", None, token)
-    if not _ok(st_b) or not (back or {}).get("merged") \
-            or str(back.get("merge_commit_sha") or "") != sha:
-        return refuse("read-back-unverified", sha=sha, status=st_b)
+    if not _ok(st_b):
+        return refuse("read-back-unverified", sha=post_sha, status=st_b)
+    rb_head = str(((back or {}).get("head") or {}).get("sha") or "")
+    if rb_head and rb_head != head:
+        # Re-push between gate and POST (law 5): RE-GATE, never bail — the
+        # old seal does not carry; the babysit loop re-arms at the new head
+        # once a fresh peer marker sits on it. Never merge-write-failed,
+        # never a silent accept.
+        return refuse("head-repushed-regate", head_seen=rb_head,
+                      post_status=st_m)
+    sha = str((back or {}).get("merge_commit_sha") or "") or post_sha
+    if not (back or {}).get("merged") or not sha:
+        # A POST refused 404/405 (already-merged race is the benign class)
+        # is final ONLY when the read-back also shows no merge (fixture:
+        # 405-merged-stamped proves merged CONTAINED, not POST status).
+        if _ok(st_m):
+            return refuse("read-back-unverified", sha=sha, status=st_b)
+        return refuse("merge-write-failed", status=st_m, sha=sha)
+    base = str(((back or {}).get("base") or {}).get("ref")
+               or ((pull or {}).get("base") or {}).get("ref") or "")
+    if not base:
+        raise RuntimeError("compare-leg-base-unknown: no base ref to grade")
+    # leg A: head contained in the merge commit (merge-commit/ff methods);
+    # leg B: merge commit contained in the base branch (squash/rebase truth).
+    in_merge = contained(repo, sha, head, token, transport)
+    on_base = in_merge or contained(repo, base, sha, token, transport)
+    if not (in_merge or on_base):
+        return refuse("merge-not-proven-by-ancestry", sha=sha,
+                      post_status=st_m)
     return {"merged": True, "sha": sha, "head": head,
+            "proof": {"leg": ("head-in-merge-commit" if in_merge
+                              else "merge-commit-on-base"),
+                      "post_status": st_m,
+                      "sha_equals_post": bool(post_sha) and post_sha == sha},
             "marker": {"ts": ts, "reviewed": m_sha, "verdict": verdict,
                        "reviewer": reviewer},
             "author_bot": author_id}
