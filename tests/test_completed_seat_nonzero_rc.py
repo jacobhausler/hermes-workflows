@@ -21,8 +21,18 @@ comment on sys-bknard; this file pins the RUNNER-side law:
  B  noise-only capture (no fence) over rc=1:
     B1 stays `unknown` — no new class is invented for a capture with no answer;
     B2 the error names the noise-only shape instead of quoting the noise line.
- C  schema-VALID fenced answer over rc=1 (noise included): the #4 harvest
-    accept rule is byte-unchanged — partial + output, not answer_schema_invalid.
+ C  schema-VALID fenced answer over rc=1 (noise included): the #4 harvest accept rule
+    is byte-unchanged — partial + output, not answer_schema_invalid.
+ D-G est-fjac6 (#616 residuals 1+2): per-shape verdict quoting + adopted typing.
+    D rc=1 malformed_turn over a banner-carrying capture (empty turn report):
+      typed malformed_turn; the markup quoted; the #102 line NOT quoted.
+    E adopted malformed_turn (rc unobservable), same capture shape: identical
+      class and identical clean quoting — est-2ek.1.541 R8 extended to the QUOTE.
+    F adopted schema-miss fence: answer_schema_invalid (the sys-bknard class is
+      path-invariant, not the exit-0 `schema`); misses named; noise never quoted;
+      the declined answer still rides `output`.
+    G adopted prose-coercion (no valid last fence): keeps `schema` — the waiver
+      shape pinned at the author note: a coercion is not a declined answer.
 
 Style: PASS/FAIL lines + exit code (test_malformed_turn_541 house style); the
 fake's DEADSEAT <path|NONE> mode replays a capture file and exits FAKE_RC.
@@ -141,5 +151,84 @@ check("C harvest-on-death still accepts a valid fence over rc=1 (partial, not re
       rec.get("status") == "partial" and rec.get("error_class") != "answer_schema_invalid"
       and (rec.get("output") or {}).get("verdict") == "ready", json.dumps(rec)[:240])
 
+
+# ============ D-G est-fjac6 (#616 residuals): per-shape quoting + adopted typing =========
+# D is end-to-end over the real runner: the fake DEADSEAT mode prints the #102
+# banner itself, replays the capture file, and writes NO turn report — so
+# final_reply is empty and the capture is exactly what the verdict quotes.
+# E/F/G drive wf._adopt_child at unit level (the jam8 T10/T11 form): child
+# facts are injected, rc stays unobservable, classification is race-free.
+import threading
+from datetime import datetime, timezone
+
+NL = chr(10)
+LC, Q = chr(60), chr(34)
+MARKUP = (LC + 'invoke name=' + Q + 'process_manage' + Q + '>' + NL
+          + LC + 'parameter name=' + Q + 'action' + Q + '>poll' + LC + '/parameter>' + NL
+          + LC + 'parameter name=' + Q + 'session_id' + Q + '>lane-7' + NL
+          + LC + '/invoke>')
+BANNER = 'Session wf:fjac6:fan:0:t.dead found but has no messages. Starting fresh.' + NL
+MISS_ANS = {'bead_id': 'sys-ggxeiu', 'verdict': 'ready'}   # section A answer, minus 2 required keys
+FENCE = '```json' + NL + json.dumps(MISS_ANS) + NL + '```' + NL
+
+# ---- D: rc=1 malformed_turn, banner in the capture, empty turn report ----
+MK = HOME / 'fjac6_markup.txt'
+MK.write_text(MARKUP)
+r = mk('fjac6-malformed', 'DEADSEAT ' + str(MK) + ' fjac6-malformed claim-plan', SCHEMA)
+wf('fjac6-malformed')
+rec = rec_of(r)
+err = rec.get('error') or ''
+check('D1 rc=1 tool-call-as-text death (no turn report) types malformed_turn',
+      rec.get('status') == 'failed' and rec.get('error_class') == 'malformed_turn',
+      json.dumps(rec)[:240])
+check('D2 markup rides the verdict; the #102 line does NOT (wf.py:7789 quoting cure)',
+      'tool-call-as-text' in err and 'invoke name=' in err
+      and 'found but has no messages' not in err, err[:240])
+
+# ---- unit harness for E/F/G: the jam8 _adopt_child form ----
+def _adopt_meta(run):
+    return {'_run': run, '_stop': threading.Event(), '_procs_lock': threading.Lock(),
+            '_procs': {}, '_spawn_n': {}, '_retries_left': wfmod.DEFAULT_RETRY_BUDGET,
+            'retry_backoff': [0.05]}
+
+def _adopt(tag, cap, schema):
+    r = RUNS / tag
+    (r / 'nodes').mkdir(parents=True); (r / 'logs').mkdir(parents=True)
+    lp = r / 'logs' / 'fan.0.a0.log'
+    lp.write_text(cap)
+    started = datetime.now(timezone.utc).isoformat(timespec='milliseconds')
+    child = {'pid': 424242, 'skey': 'wf:' + tag + ':fan:0:t.dead', 'log_path': str(lp),
+             'started': started, 'attempt': 0}
+    node = {'id': 'fan', 'type': 'agent', 'goal': 'g'}
+    return wfmod._adopt_child(_adopt_meta(r), node, {'fan': node}, 0, child, schema)
+
+# ---- E: adopted malformed_turn, banner + markup, no schema (wf.py:6801 cure) ----
+recE = _adopt('fjac6-e', BANNER + MARKUP, None)
+errE = recE.get('error') or ''
+check('E1 adopted malformed_turn: same class as the fresh path (est-2ek.1.541 R8)',
+      recE.get('status') == 'failed' and recE.get('error_class') == 'malformed_turn',
+      json.dumps(recE)[:240])
+check('E2 adopted quoting is #102-clean too: markup rides the verdict, the banner does not',
+      'invoke name=' in errE and 'found but has no messages' not in errE, errE[:240])
+
+# ---- F: adopted schema-miss fence types answer_schema_invalid (residual 2 cure) ----
+recF = _adopt('fjac6-f', BANNER + 'plan written to the run dir.' + NL + FENCE, SCHEMA)
+errF = recF.get('error') or ''
+check('F1 schema-miss fence on an adopted death lands answer_schema_invalid (A-parity class)',
+      recF.get('status') == 'failed'
+      and recF.get('error_class') == 'answer_schema_invalid'
+      and recF.get('error_class') in wfmod.ERROR_CLASSES, json.dumps(recF)[:240])
+check('F2 the error names the validate() misses (missing required premise_verdict, sha)',
+      'missing required' in errF and 'premise_verdict' in errF and 'sha' in errF, errF[:240])
+check('F3 the #102 line is never quoted on the adopted schema-miss shape',
+      'found but has no messages' not in errF, errF[:240])
+check('F4 the declined answer still rides the record (output kept on the adopted twin)',
+      (recF.get('output') or {}).get('verdict') == 'ready', json.dumps(recF)[:240])
+
+# ---- G: adopted prose-coercion keeps `schema` (author-note waiver shape) ----
+recG = _adopt('fjac6-g', BANNER + 'plan written; no fenced answer anywhere.' + NL, SCHEMA)
+check('G1 prose-coercion miss KEEPS schema — a coercion is not a declined answer (waiver pinned)',
+      recG.get('status') == 'failed' and recG.get('error_class') == 'schema',
+      json.dumps(recG)[:240])
 print("RESULT " + ("ok" if ok else "FAILED"))
 sys.exit(0 if ok else 1)

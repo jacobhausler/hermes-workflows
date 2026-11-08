@@ -6774,8 +6774,21 @@ def _adopt_child(meta, node, byid, index, child, schema, fo_cancel=None):
             rec.update(hv)
         return rec
     if errs is not None:
+        # est-fjac6 (#616 residual 2 — path-invariance, est-2ek.1.541 R8): the
+        # sys-bknard branch on the rc!=0 path types a FENCED answer that parses
+        # but misses the node schema `answer_schema_invalid`; the identical
+        # capture on an adopted death (rc unobservable) must land the identical
+        # class, not the exit-0 `schema`. The accept rule is
+        # _schema_failed_answer's, line for line (fenced-only, last fence,
+        # dict-only) — the two can never disagree, same as its rc!=0 twin.
+        # AUTHOR NOTE (the review's "defensible for partial captures"): a
+        # prose-coerced miss (extract_json's {result} fallback, no valid last
+        # fence) KEEPS `schema` — answer_schema_invalid names a DECLINED
+        # ANSWER, and a coercion is not one; the harvest law never sees it.
+        _asi = _schema_failed_answer(out, harvest_schema)
         return {"status": "failed", "error": f"adopted child answer failed schema validation: {errs}",
-                "error_class": "schema", "output": parsed, "raw": (out or "")[-2000:],
+                "error_class": "answer_schema_invalid" if _asi else "schema",
+                "output": parsed, "raw": (out or "")[-2000:],
                 "ms": ms, "final": final_reply, **evd}
     hv = _harvest_death(out, harvest_schema)   # #4 law applies to adopted deaths too
     if hv:
@@ -6798,7 +6811,13 @@ def _adopt_child(meta, node, byid, index, child, schema, fo_cancel=None):
         # same class, whatever path the runner reaches it by. The bounded ladder
         # may not be available here (the attempt already committed its spend and
         # the rc is unobservable); the classification law itself is path-invariant.
-        verdict = _verdict_lines(final_reply or out)
+        # est-fjac6 (#616 residual 1): the QUOTING law is path-invariant too —
+        # when final_reply is empty the capture is quoted, and the capture can
+        # carry the #102 banner. _clean_capture first, exactly like the generic
+        # death fallback below; a banner-only capture names its shape instead
+        # of quoting the noise back.
+        verdict = _verdict_lines(_clean_capture(final_reply or out)) \
+            or "capture held only dead-session noise (no verdict lines)"
         return {"status": "failed",
                 "error": "adopted child died with a malformed turn: reply is a "
                         "serialized tool call rendered as text (tool-call-as-text; "
@@ -7786,7 +7805,12 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
             # NOT a generic unknown death: type it, carry the verbatim diagnostic, and let
             # the bounded (tool-progress) ladder re-drive it exactly once — a turn that
             # rendered its call as the answer made real tool calls by definition.
-            verdict = _verdict_lines(final_reply or out)
+            # est-fjac6 (#616 residual 1): the quoting is #102-clean, the sibling
+            # law of the adopted-death site and of the generic fallback below —
+            # an empty turn report with a banner-carrying capture must not have
+            # the startup noise quoted back as the verdict.
+            verdict = _verdict_lines(_clean_capture(final_reply or out)) \
+                or "capture held only dead-session noise (no verdict lines)"
             return {"status": "failed",
                     "error": f"child exited rc={rc} with a malformed turn: reply is a "
                              "serialized tool call rendered as text (tool-call-as-text; "
