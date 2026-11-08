@@ -103,6 +103,28 @@ check(f"…[truncated {n - 8000} chars; full record at nodes/pbig.json]" in pr,
 check("[truncated: read nodes/pbig.json for the full record before deciding coverage]" in pr,
       "#476: oversized auto-parent carries the same advisement naming nodes/pbig.json")
 
+# --- (2c) suppression direction: dotted-only picks REMOVE the parent whole-output block ---
+# #471 close-out (est-4neu8): the covered-set at the parent loop drops the auto-block when
+# any `inputs:` ref names the parent — the dotted picks are the ONLY channel. Presence was
+# locked in (1); this locks the removal, so a refactor can never resurrect a duplicate
+# whole-parent block (which would re-leak every un-picked sibling field).
+g2c = {"name": "supp", "nodes": [
+    {"id": "par", "type": "agent", "goal": "unused (seeded)"},
+    {"id": "kid", "type": "agent", "after": ["par"], "goal": "KID",
+     "inputs": ["par.artifact", "par.candidate_prompt"]}]}
+run, prompts, out = run_graph("20990101-000008-supp", g2c,
+                              seed={"par": {"status": "done", "output": {
+                                  "artifact": "ART-42", "candidate_prompt": "CP-7",
+                                  "rubric": "RUBRIC-UNPICKED"}}})
+check(len(prompts) == 1, f"only the child spawned, seeded parent replay-skipped ({out[-120:]})")
+pr = prompts[0]
+check("\npar.artifact\n```json\n" in pr and "\npar.candidate_prompt\n```json\n" in pr,
+      "both dotted picks arrive as their own labelled blocks")
+check("\npar\n```json\n" not in pr,
+      "dotted-only picks suppress the parent's whole-output auto-block (zero whole-parent blocks)")
+check("RUBRIC-UNPICKED" not in pr,
+      "un-picked sibling field leaks nowhere: suppression is removal, not addition")
+
 # --- (3) unresolvable ref => node FAILS at spawn, never a silent empty spawn ---
 g3 = {"name": "unres", "nodes": [
     {"id": "gen", "type": "agent", "goal": "LIST:"},
