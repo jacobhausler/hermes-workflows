@@ -18,17 +18,19 @@
 # audit, `hermes plugins validate` against the pinned core. Concurrency cancels
 # superseded pushes instead of queueing a second full pass.
 #
-# HERMES_PIN = the CI core pin, tag v0.23.0 (current stable; still carries the
+# HERMES_PIN = the CI core pin, tag v0.23.1 (current stable; still carries the
 # private-import lint first shipped in v0.22.0, so tests/test_private_core_imports.py
-# RUNS — 14/14 allow-list rows exact — instead of skipping, and its
-# hermes_cli/plugins.py is byte-identical to the v0.22.6 pin, so the
-# on_session_delete observer orphan_watch contract we rely on is carried
-# unchanged. Re-pin probe 2026-11-07: every consumed symbol exists at the tag
-# and the contract suites pass at it (test_upstream_hook_contract,
-# test_private_core_imports, test_validate_0923 — 57/57, plus the soft-guard
-# variant); SDK deltas are additive (all consumed exports present, areas.ts
-# byte-identical) and model_switch.py still exposes _ensure_direct_aliases +
-# DIRECT_ALIASES (consumption already try/except-guarded). v0.22.6 promoted
+# RUNS — 14/14 allow-list rows exact — instead of skipping. Re-pin probe
+# 2026-11-10: every consumed symbol exists at the tag and the contract suites
+# pass at it (test_upstream_hook_contract, test_private_core_imports,
+# test_validate_0923 — 57/57, plus the soft-guard variant); config.py and
+# gateway_runtime.py moved but load_config_readonly, read_raw_config,
+# discover_gateway_endpoint and get_plugin_toolset_keys_nowait are intact, and
+# VALID_HOOKS gained only additive entries (on_session_open, post_curator_run),
+# so the on_session_delete observer orphan_watch contract is carried unchanged;
+# SDK deltas are cosmetic and model_switch.py still exposes
+# _ensure_direct_aliases + DIRECT_ALIASES (consumption already
+# try/except-guarded). v0.22.6 promoted
 # `gateway.session_context:get_session_env` to the public surface
 # (plugins/index.md § platform plugins), so the lint no longer reports it.
 # v0.22.0 law-7 re-derivation: workflows run 20261026-122817 /
@@ -67,7 +69,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  HERMES_PIN: 2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19   # v0.23.0 (peeled commit of tag v0.23.0)
+  HERMES_PIN: 3b421578588243f920886e6fe79a6faa87ea026e   # v0.23.1 (peeled commit of tag v0.23.1)
   SHARDS: 8
 
 jobs:

@@ -5,6 +5,10 @@
 - Tests: direct contract pins for five `wfcommon` validators (grammar, budget shape,
   model policy, fingerprint rule-matching, dead-end forks) — zero direct references at
   tip `b5988cd`; production untouched. `tests/test_wfcommon_validator_contracts_par_c9k.py`.
+- chore(ci): roll HERMES_PIN v0.23.0 -> v0.23.1 (current stable). Re-pin probe
+  2026-11-10: every consumed symbol exists at the tag and the contract suites
+  pass at it (private-imports 14/14 exact, hook contract, validate 57/57);
+  VALID_HOOKS gained only additive entries.
 
 ## 1.4.7 — 2026-11-07
 
