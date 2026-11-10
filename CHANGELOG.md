@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Tests: direct contract pins for five `wfcommon` validators (grammar, budget shape,
+  model policy, fingerprint rule-matching, dead-end forks) — zero direct references at
+  tip `b5988cd`; production untouched. `tests/test_wfcommon_validator_contracts_par_c9k.py`.
+
 ## 1.4.7 — 2026-11-07
 
 Patch release from four merged pull requests since v1.4.6. A failure wake
