@@ -12,9 +12,9 @@ def check(label, cond, detail=""):
     print(("PASS " if cond else "FAIL ") + label + (f"  -- {detail}" if detail and not cond else ""))
     fails += 0 if cond else 1
 
-# grammar_errors: absent/known -> []; any other value -> ONE fail-closed typed refusal
-check("grammar: pass/wf2-verbatim/non-string",
-      W.grammar_errors({}) == [] and W.grammar_errors({"grammar": "wf/1"}) == []
+# grammar_errors: absent/known/non-dict -> []; any other value -> ONE fail-closed typed refusal
+check("grammar: pass/non-dict/wf2-verbatim/non-string",
+      W.grammar_errors({}) == [] == W.grammar_errors({"grammar": "wf/1"}) == W.grammar_errors(["wf/2"])
       and W.grammar_errors({"grammar": "wf/2"}) == [{"node": None, "field": "grammar",
           "msg": "unsupported grammar 'wf/2'; this reader supports: [\"wf/1\"] (absent = 'wf/1')"}]
       and len(W.grammar_errors({"grammar": 2})) == 1)
