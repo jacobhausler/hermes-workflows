@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+## 1.4.8 — 2026-11-11
+
+Patch release from ten merged pull requests since v1.4.7. The door no longer
+re-shelves launch concurrency widths it cannot honor, typed error classification
+for completed-seat deaths got two fixes, the seat-cap operator band was
+corrected to [4, 64], merge proof moved from stamps to ancestry, the CI core pin
+rolled to v0.23.1, and ten zero-reference `wfcommon` validators/predicates
+acquired direct contract pins in two batches.
+
+- Fix: `wf` types rc=1 completed-seat deaths with a missing answer schema as
+  `answer_schema_invalid` and strips dead-session noise (PR#616).
+- Fix: `wf` strips+types `malformed_turn` and adopted schema-miss verdicts (PR#617).
+- Tests: lock the inputs suppression direction — dotted-only picks remove the
+  parent's whole-output block (est-4neu8, PR#615).
+- Seat cap: widen the operator band to [4, 64] — typo bracket, not capacity
+  model (hw-e65, PR#618).
+- Gate: `release_merge_gate` proves merges by ancestry, not stamps (est-xihc8, PR#619).
+- chore(ci): drop the `pr-feed.yml` observer workflow — never green at
+  workflow-load (PR#622).
 - Tests: direct contract pins for five more wfcommon validators/predicates
   (on_exit, params totality, quote-JSON error window, model-names, budget token
   sum) — zero direct references at tip cb1fd1e; production untouched.
@@ -22,6 +41,19 @@
   2026-11-10: every consumed symbol exists at the tag and the contract suites
   pass at it (private-imports 14/14 exact, hook contract, validate 57/57);
   VALID_HOOKS gained only additive entries.
+
+### PR authors
+
+- #615 — @jacobhausler.
+- #616 — @atbrace.
+- #617 — @jacobhausler.
+- #618 — @atbrace-hermes.
+- #619 — @jacobhausler.
+- #620 — @jacobhausler.
+- #621 — @jacobhausler.
+- #622 — @jacobhausler.
+- #623 — @jacobhausler.
+- #624 — @jacobhausler.
 
 ## 1.4.7 — 2026-11-07
 
