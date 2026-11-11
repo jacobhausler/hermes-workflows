@@ -1,0 +1,290 @@
+{
+  "grammar": "wf/1",
+  "name": "bead-to-prod",
+  "provenance": {
+    "owner": "author-estate (study-council distillation)",
+    "source": "pack1 bead-to-prod carrier, genericized 2026-11-11"
+  },
+  "description": "BLUEPRINT carrier-class reference (validated cold, no author-run receipt — the lanes name YOUR tracker and repo conventions): a work-item-to-PR-open pipeline at full carrier scale — law in defaults.context, a complementary premise-gate pair, detached-lap testing, blind tiered review through a join, a policy judge on after_partial, a stand-down terminal for dead premises, and a fail-closed MACHINE exit-check. THE RULES THIS SHAPE ENCODES: (1) CLOSEOUT LAW — the graph ends at PR-open; whoever merges closes the record ONCE with the merge cite in the reason, and a seat holding the closeout may not end its turn without attempting it (a soft note is not a receipt; merged-but-unclosed is the defect this law exists to catch). (2) PREMISE-FIRST — intake re-reads the record and judges the premise BEFORE any code is written; a dead premise takes the stand-down terminal, never a half-build. (3) COMMIT BEFORE VERIFY — a verify receipt printed against a dirty tree is not a receipt. (4) RECEIPT TERMINATOR — a trailing non-zero tool call harvests a valid answer as a dead lane; append a trailing '; true' (append, never wrap a chain with ||). (5) WALL WINDOWS — any probe expected to run past ~120s is launched detached and waited on, never foreground-polled. (6) FAIL-CLOSED EXIT-CHECK — the run may not end greener than the checkout it found: a machine gate compares a worktree snapshot taken at intake against live status and only releases on empty diff; a machine timeout is a failure, not an approval. run_context seeds (ALL required): 'item' = the work record (id or path); 'repo_dir' = a lane-dedicated pre-provisioned git worktree (never the shared main checkout); 'trunk_remote' = the remote to diff and PR against. Blueprints are validated, not proven: smoke-run it against one real item before trusting it with your queue.",
+  "defaults": {
+    "timeout": 1800,
+    "max_turns": 20,
+    "context": "You are one node in a bead-to-prod carrier. Binding rules for every seat:\n- The tracker record as committed is truth; re-read it — the triggering event is a trigger only.\n- CLOSEOUT LAW: a merge-class close carries the merge cite in the reason; never close a fix whose commit is not on the trunk via a merged PR; an unlanded fix is an open record.\n- Treat existing branch/worktree state as input to verify and continue, never permission to overwrite.\n- Never print secrets, rewrite history, push the trunk, or improvise destructive actions.\n- Finish with only the required fenced JSON and exit 0; stop every child/background process before finishing; append a trailing '; true' to your final shell command (RECEIPT TERMINATOR)."
+  },
+  "nodes": [
+    {
+      "id": "claim_plan",
+      "type": "agent",
+      "max_turns": 8,
+      "shape": "recon",
+      "harvest_policy": "validate",
+      "goal": "Intake gate only for record {run.item} — no planning re-derivation: the promote/authoring pass already committed symptom, root cause, bounded fix scope and Acceptance to the record body; re-planning at intake was measured as restatement. FIRST actions, batched: (1) snapshot the checkout's pre-lane state so the exit-check only reddens what THIS lane caused: `git -C {run.repo_dir} status --porcelain --untracked-files=all > ./checkout.baseline` (the exit-check gate re-reads this file from the run dir); (2) verify {run.repo_dir} is a real linked worktree; (3) re-read the record and probe its premise read-only. Verdict rules: the premise is 'valid' only after that probe; invalid or inconclusive must stop implementation. Reply with ONLY fenced json {\"item\": \"{run.item}\", \"verdict\": \"ready|blocked\", \"premise_verdict\": \"valid|invalid|inconclusive\", \"premise_evidence\": \"<what the probe showed>\", \"premise_delta\": \"<one line: a real discovery beyond the record body; empty when none>\", \"branch\": \"<branch this lane will own>\", \"sha\": \"<current base sha>\"}",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "item": {"type": "string"},
+          "verdict": {"type": "string", "description": "ready|blocked"},
+          "premise_verdict": {"type": "string", "description": "valid only after a probe; invalid/inconclusive stop the build"},
+          "premise_evidence": {"type": "string"},
+          "premise_delta": {"type": "string"},
+          "branch": {"type": "string"},
+          "sha": {"type": "string"}
+        },
+        "required": ["item", "verdict", "premise_verdict", "premise_evidence", "branch", "sha"]
+      }
+    },
+    {
+      "id": "gate-build-armed",
+      "type": "gate",
+      "after": ["claim_plan"],
+      "when": "out.claim_plan.verdict == 'ready' and out.claim_plan.premise_verdict == 'valid'",
+      "on_skip": "prune"
+    },
+    {
+      "id": "gate-premise-dead",
+      "type": "gate",
+      "after": ["claim_plan"],
+      "when": "out.claim_plan.verdict == 'blocked' or out.claim_plan.premise_verdict != 'valid'",
+      "on_skip": "prune"
+    },
+    {
+      "id": "build",
+      "type": "agent",
+      "after": ["gate-build-armed"],
+      "inputs": ["claim_plan"],
+      "timeout": 5400,
+      "harvest_policy": "validate",
+      "goal": "Implementation seat. Read claim_plan from your inputs. Work ONLY in the prepared worktree {run.repo_dir} on the claim_plan branch. COMMIT BEFORE VERIFY: commit before launching any verify; never verify a dirty tree. If claim_plan verdict/premise are not ready/valid, make no edits and return verdict=blocked. Produce a cross-stage digest so review seats read your handoff instead of re-discovering the diff. Reply with ONLY fenced json {\"verdict\": \"built|blocked\", \"branch\": \"<sha>\", \"sha\": \"<head sha>\", \"diffstat\": \"<one line>\", \"changed_lines\": <int added+deleted vs {run.trunk_remote} trunk>, \"tree_clean\": true|false, \"digest\": {\"changed_files\": [\"<path>\"], \"test_cmd\": \"<how to re-run it>\", \"gotchas\": \"<landmines>\"}, \"notes\": \"<one line>\"}",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "verdict": {"type": "string"},
+          "branch": {"type": "string"},
+          "sha": {"type": "string"},
+          "diffstat": {"type": "string"},
+          "changed_lines": {"type": "integer", "description": "lines added+deleted vs trunk; tiers the second review seat"},
+          "tree_clean": {"type": "boolean"},
+          "digest": {
+            "type": "object",
+            "properties": {
+              "changed_files": {"type": "array", "items": {"type": "string"}},
+              "test_cmd": {"type": "string"},
+              "gotchas": {"type": "string"}
+            },
+            "required": ["changed_files", "test_cmd", "gotchas"]
+          },
+          "notes": {"type": "string"}
+        },
+        "required": ["verdict", "branch", "sha", "changed_lines", "tree_clean", "digest"]
+      }
+    },
+    {
+      "id": "test",
+      "type": "agent",
+      "after": ["build"],
+      "inputs": ["claim_plan", "build"],
+      "timeout": 3600,
+      "harvest_policy": "validate",
+      "goal": "Deterministic test seat — you run checks, you do not judge design. If build.verdict is not 'built', reply the SCHEMA-COMPLETE no-op {\"verdict\":\"no-op\",\"stages\":\"stand-down: build verdict=<verdict>, no build to test\",\"failures\":[],\"committed\":false} and stop (a schema-incomplete reply dies the lane at validation — a real lane lost a full run to exactly this). Otherwise re-run the digest's test_cmd on the committed head sha. Checks longer than ~120s: launch detached and wait on it, never foreground-poll (WALL WINDOWS). Reply with ONLY fenced json {\"verdict\": \"pass|fail|no-op\", \"stages\": \"<what ran, on what sha>\", \"failures\": [\"<failing check with its one-line error>\"], \"committed\": true|false}",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "verdict": {"type": "string", "description": "pass (checks green on the committed head), fail (a check is red or nothing was committed), no-op (no build — clean stand-down)"},
+          "stages": {"type": "string"},
+          "failures": {"type": "array", "items": {"type": "string"}},
+          "committed": {"type": "boolean"}
+        },
+        "required": ["verdict", "stages", "committed"]
+      }
+    },
+    {
+      "id": "fix",
+      "type": "agent",
+      "after": ["test"],
+      "after_partial": true,
+      "inputs": ["claim_plan", "build", "test"],
+      "timeout": 3000,
+      "harvest_policy": "validate",
+      "goal": "Fix lane. If test.verdict is 'pass' or 'no-op', change nothing and return verdict=pass. On 'fail': repair the NAMED failing checks in the worktree, re-run, commit; return verdict=pass with the new head sha, or verdict=blocked stating what you cannot fix. A partially-dead lane must still return the schema — name what ran and what did not. Reply with ONLY fenced json {\"verdict\": \"pass|blocked\", \"sha\": \"<new head or empty>\", \"stages\": \"<what you re-ran>\", \"reason\": \"<what could not be fixed, or empty>\"}",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "verdict": {"type": "string"},
+          "sha": {"type": "string"},
+          "stages": {"type": "string"},
+          "reason": {"type": "string"}
+        },
+        "required": ["verdict", "stages"]
+      }
+    },
+    {
+      "id": "policy",
+      "type": "agent",
+      "after": ["claim_plan", "build", "test", "fix"],
+      "after_partial": true,
+      "inputs": ["claim_plan", "build", "test", "fix"],
+      "harvest_policy": "validate",
+      "goal": "Policy judge, read-only. tests_green=true only when the premise is valid, build.verdict is built, test/fix report committed green checks — any blocked/red/missing receipt makes tests_green=false. destructive reflects real reboot/quorum/driver/storage/data risk in the planned change — a normal edit is NOT destructive. stand_down=true when the runtime premise is invalid OR test.verdict is no-op (the no-code close arm may run and stamps the class from your reason). Reply with ONLY fenced json {\"tests_green\": true|false, \"destructive\": true|false, \"record_touching\": true|false, \"stand_down\": true|false, \"reason\": \"<one line class for the stand-down or green light>\"}",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "tests_green": {"type": "boolean"},
+          "destructive": {"type": "boolean"},
+          "record_touching": {"type": "boolean"},
+          "stand_down": {"type": "boolean"},
+          "reason": {"type": "string"}
+        },
+        "required": ["tests_green", "destructive", "stand_down"]
+      }
+    },
+    {
+      "id": "gate-stand-down",
+      "type": "gate",
+      "after": ["policy"],
+      "when": "out.policy.stand_down == True",
+      "on_skip": "prune"
+    },
+    {
+      "id": "code-review",
+      "type": "agent",
+      "after": ["test"],
+      "inputs": ["claim_plan", "build", "test"],
+      "when": "out.test.verdict == 'pass'",
+      "on_skip": "prune",
+      "harvest_policy": "validate",
+      "goal": "Blind code review: inspect only the branch diff against {run.trunk_remote} trunk and the supplied test receipt — read the digest, do not re-discover the diff. Do not edit. Find correctness, safety, data-loss, secret, and contract regressions. Reply with ONLY fenced json {\"verdict\": \"ready|fix|blocked\", \"findings\": [\"<load-bearing file:line finding>\"], \"minimal_fix\": \"<smallest correction or empty>\", \"notes\": \"<one line>\"} — 'ready' only with no load-bearing finding.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "verdict": {"type": "string"},
+          "findings": {"type": "array", "items": {"type": "string"}},
+          "minimal_fix": {"type": "string"},
+          "notes": {"type": "string"}
+        },
+        "required": ["verdict", "findings"]
+      }
+    },
+    {
+      "id": "big-diff-review",
+      "type": "agent",
+      "after": ["test"],
+      "inputs": ["claim_plan", "build", "test"],
+      "when": "out.test.verdict == 'pass' and out.build.changed_lines >= 50",
+      "on_skip": "pass",
+      "harvest_policy": "validate",
+      "goal": "Second review seat, diff-tiered in: it joins the review ONLY for diffs of 50+ changed lines (a small diff is single-reviewed; the join below must read this seat's tier-skip as policy, not as a missing review). Same blind rule as the first reviewer: diff vs {run.trunk_remote} trunk, no edits, load-bearing findings only. Reply with ONLY fenced json {\"verdict\": \"ready|fix|blocked\", \"findings\": [\"<load-bearing file:line finding>\"], \"minimal_fix\": \"<smallest correction or empty>\", \"notes\": \"<one line>\"}",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "verdict": {"type": "string"},
+          "findings": {"type": "array", "items": {"type": "string"}},
+          "minimal_fix": {"type": "string"},
+          "notes": {"type": "string"}
+        },
+        "required": ["verdict", "findings"]
+      }
+    },
+    {
+      "id": "review_join",
+      "type": "agent",
+      "after": ["code-review", "big-diff-review"],
+      "after_partial": true,
+      "inputs": ["code-review", "big-diff-review"],
+      "when": "out.test.verdict == 'pass'",
+      "on_skip": "prune",
+      "harvest_policy": "validate",
+      "goal": "Review join. Deduplicate the blind review outputs. A reviewer reading {\"agent\": \"skipped\"} is the diff-tier skip — the surviving reviewer IS the full review; never treat a tier-skip as a missing review. A cited load-bearing finding means verdict=fix; an uncited or speculative concern is non-blocking. If either reviewer is blocked, verdict=blocked. Reply with ONLY fenced json {\"verdict\": \"ready|fix|blocked\", \"findings\": [\"<deduped actionable finding>\"], \"minimal_fix\": \"<smallest complete change or empty>\"}",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "verdict": {"type": "string"},
+          "findings": {"type": "array", "items": {"type": "string"}},
+          "minimal_fix": {"type": "string"}
+        },
+        "required": ["verdict", "findings"]
+      }
+    },
+    {
+      "id": "gate-review-fix",
+      "type": "gate",
+      "after": ["review_join"],
+      "when": "out.review_join.verdict == 'fix'",
+      "on_skip": "prune"
+    },
+    {
+      "id": "gate-review-ready",
+      "type": "gate",
+      "after": ["review_join"],
+      "when": "out.review_join.verdict == 'ready'",
+      "on_skip": "prune"
+    },
+    {
+      "id": "review_fix",
+      "type": "agent",
+      "after": ["gate-review-fix", "fix"],
+      "inputs": ["claim_plan", "build", "review_join"],
+      "timeout": 3600,
+      "harvest_policy": "validate",
+      "goal": "Apply the review's deduped findings: fix the NAMED issues in the worktree, re-run the digest's test_cmd, commit. Push the branch to {run.trunk_remote} so the PR carries the reviewed head. Reply with ONLY fenced json {\"verdict\": \"pass|blocked\", \"sha\": \"<new head>\", \"applied\": [\"<finding you fixed>\"], \"reason\": \"<what still needs human eyes, or empty>\"}",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "verdict": {"type": "string"},
+          "sha": {"type": "string"},
+          "applied": {"type": "array", "items": {"type": "string"}},
+          "reason": {"type": "string"}
+        },
+        "required": ["verdict", "sha"]
+      }
+    },
+    {
+      "id": "review-complete",
+      "type": "agent",
+      "after": ["gate-review-ready", "review_fix"],
+      "inputs": ["review_join", "review_fix"],
+      "max_turns": 4,
+      "goal": "One seat, two doors: it arrives either through the ready gate (review clean — say so) or behind review_fix (findings applied — re-state the reviewed head sha from review_fix). No edits. Reply with ONLY fenced json {\"ready\": true|false, \"sha\": \"<reviewed head>\", \"note\": \"<one line on which door you came through>\"}"
+    },
+    {
+      "id": "push-pr",
+      "type": "agent",
+      "after": ["review-complete", "policy"],
+      "inputs": ["claim_plan", "review-complete", "policy"],
+      "when": "out.test.verdict == 'pass'",
+      "on_skip": "prune",
+      "timeout": 1800,
+      "harvest_policy": "validate",
+      "goal": "Open the PR: push (if review_fix did not already), then open it against {run.trunk_remote} trunk from the reviewed branch. The body carries the receipts: symptom/root-cause/scope from the record, the test stages the test seat ran, the review disposition, and the changed-line count. Do NOT merge — the trunk's checks and the owner's merge own that step; stamp the record with the PR link (comment the URL; the closeout happens once, at merge, with the merge cite). Reply with ONLY fenced json {\"opened\": true|false, \"pr_url\": \"<url or empty>\", \"head_sha\": \"<sha the PR carries>\", \"notes\": \"<one line>\"}",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "opened": {"type": "boolean"},
+          "pr_url": {"type": "string"},
+          "head_sha": {"type": "string"},
+          "notes": {"type": "string"}
+        },
+        "required": ["opened", "pr_url", "head_sha"]
+      }
+    },
+    {
+      "id": "stand-down",
+      "type": "agent",
+      "after": ["gate-stand-down", "gate-premise-dead"],
+      "inputs": ["claim_plan", "policy"],
+      "harvest_policy": "validate",
+      "goal": "No-code close arm: this lane reached a terminal WITHOUT a build (dead premise at intake, or policy stand-down). Comment the record with the stand-down class citing claim_plan.premise_evidence (and policy.reason when present), then apply the tracker's 'needs-decision' label so a human or the next lap can re-open the question — never silently. Reply with ONLY fenced json {\"closed_pending\": true, \"class\": \"<premise-dead|stand-down>\", \"note\": \"<one line>\"}"
+    },
+    {
+      "id": "exit-check",
+      "type": "gate",
+      "after": ["push-pr", "stand-down"],
+      "after_partial": true,
+      "wait": {
+        "until_argv": ["python3", "-c", "import os, subprocess, sys, pathlib\nroot = pathlib.Path('.')\nbases = sorted(root.glob('**/checkout.baseline'))\nr = os.environ.get('WF_B2P_REPO', '.')\ncur = subprocess.run(['git', '-C', r, 'status', '--porcelain', '--untracked-files=all'], capture_output=True, text=True).stdout\nbase = bases[0].read_text() if bases else ''\nsys.exit(0 if len(bases) == 1 and cur == base else 1)"],
+        "every_s": 30,
+        "timeout_s": 300
+      },
+      "context": "Zero-token fail-closed law: this gate releases ONLY when exactly one intake snapshot is found in the run tree and the worktree matches it (empty delta vs the snapshot; the repo comes from WF_B2P_REPO). It times out red after 300s — a machine timeout is a failure, not an approval; the run stays parked honestly for the next lap to inspect."
+    }
+  ]
+}
