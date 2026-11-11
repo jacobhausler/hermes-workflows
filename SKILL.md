@@ -98,7 +98,7 @@ delegated subagent; `wait` = OPTIONAL blocking observation, the only revive verb
   report `included`) and reads badly as spend.
 - Cards are optional desktop presentation; CLI text and returned run IDs suffice.
   Completion is execution state, not task verification or authority for more work.
-  The owner wake is the delivery contract, fail-open (`wake.jsonl` is the ledger). `wait` = inline blocking/revive.
+  The owner wake is the delivery contract, fail-open (`wake.jsonl` is the ledger). `wait` = inline blocking/revive. Event wakes carry an admission law: [event admission](docs/event-admission.md).
 - `graph_path` replaces embedding on run/save/amend/validate: a caller-authorized
   absolute JSON file, exactly one graph source. [grammar](references/grammar.md).
   File-shareable graphs: [portable](references/portable.md).
