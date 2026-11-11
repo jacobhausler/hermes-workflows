@@ -417,8 +417,9 @@ Optional AST-only exploration aid, folded to [references/graphify-navigation.md]
    named). Enumerate `laps[]` with run_ids; let clauses cite it.
 10. **A run's fingerprint lives in `runner_exit.json` (with `reason` +
     `fp_rule_version`); `run.json` carries no fingerprint.** Same-shape trap:
-    a shelf row saved from a *run-id* carries the run-dir digest (budgets baked
-    in), only save-from-*file* carries the template's own `source_digest`. The
+    A shelf row saved from a *run-id* carries the run-dir digest (budgets baked
+    in; arg-channel launch widths stripped — the run.json `knob_arg_keys` stamp
+    names them, est-yka3m), only save-from-*file* carries the template's own `source_digest`. The
     door writes `source` only when passed explicitly — a null-source row is a
     bare save, not a broken shelf.
 11. **Changed an example graph? Its diagram is derived, never drawn.** Edit the

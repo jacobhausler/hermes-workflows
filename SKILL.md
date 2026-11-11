@@ -84,7 +84,7 @@ delegated subagent; `wait` = OPTIONAL blocking observation, the only revive verb
 - Lint before launching with `workflow{action:"validate", graph:…}` — the door's
   whole validation, zero writes, no liveness ping.
 - Optional recipes: `library` lists; `run` with `from:<name>` replays; `save` explicitly shelves reusable graphs and always stamps provenance.
-  The save source shapes the row: `save(run_id)` shelves the run's baked `graph.json` — defaults/shape budgets concrete, `source: null` unless passed —
+  The save source shapes the row: `save(run_id)` shelves the run's baked `graph.json` — defaults/shape budgets concrete, arg-channel launch widths stripped (`knobs_stripped` names them; author-written widths stay), `source: null` unless passed —
   so its `source_digest` (sha256 over the canonical `nodes`, budgets included) never equals the author file's digest; a `graph`/`graph_path` save
   shelves author bytes and the digests match. A `run_context:{required?,defaults?}` contract refuses a launch missing a key, pre-write. One-off `run` needs no library lookup, tags, save or `why_not_library`. Explicit study-only `submit` retains its receipt requirement. A composite run refuses `save(run_id)` — shelf the author form. [grammar](references/grammar.md).
 - Optional typed `params` contract (pin/tune) with node `where`/`by` door-time seams: the door materializes, refuses every violation in one answer, and stamps the reproducibility triple. [grammar](references/grammar.md#params--the-typed-contract-and-the-door-time-seam-optional).

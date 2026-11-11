@@ -2222,10 +2222,14 @@ def act_save(args):
     Overwrites — a library entry is the CURRENT best version of that graph.
     #50: `description` (<=200) and `tags` (1-10 flat or #70 `facet:value` tokens) ride
     in the entry's `meta` envelope; a save carrying NEITHER keeps writing the pre-#50
-    BARE bytes. #70: omitting a field carries the previous envelope's value forward."""
+    BARE bytes. #70: omitting a field carries the previous envelope's value
+    forward. est-yka3m: a run_id save STRIPS arg-channel widths (the run.json
+    `knob_arg_keys` stamp names them) and echoes `knobs_stripped`.
+    """
     graph, bad = _input_graph(args, run_id=True)
     if bad:
         return bad
+    stripped_knobs = []   # est-yka3m: arg-channel widths stripped (run_id source only)
     if graph is None and args.get("run_id"):
         graph = jload(run_dir(args["run_id"]) / "graph.json")
         # A composite run's graph.json is the EXPANDED, include-stripped truth —
@@ -2240,6 +2244,20 @@ def act_save(args):
                              "freeze the shelf. Save the AUTHOR graph instead: "
                              "save(graph=...) or save(graph_path=...) with the graph's "
                              "`include` annotation intact"}
+        # est-yka3m (PR#500 shelf-leak residual): widths the launch ARGS channel
+        # injected (stamped at submit into run.json `knob_arg_keys`) are door
+        # bytes, not author bytes — re-shelving them would silently freeze a
+        # per-run width on the shelf (against launch-only law #580 B1) and turn
+        # the entry's forged key into a co-declaration refusal on the next
+        # from=<entry> + concurrency launch. Strip exactly the stamped keys;
+        # author-written graph keys never carry the stamp, and an unstamped
+        # (pre-fix) run dir keeps its bytes verbatim — no retroactive strip.
+        _arg_knobs = _run_meta.get("knob_arg_keys")
+        if graph is not None and isinstance(_arg_knobs, list):
+            for _ck in _arg_knobs:
+                if (isinstance(_ck, str) and _ck in _CONCURRENCY_CAPS
+                        and graph.pop(_ck, None) is not None):
+                    stripped_knobs.append(_ck)
     if graph is None:
         return {"error": "save needs graph, graph_path or run_id of an existing run"}
     # Composite graphs: a shelved composite keeps the AUTHOR form (include key on
@@ -2397,6 +2415,10 @@ def act_save(args):
     saved = _lib_rel_name(p)   # #50: a general/<name> save must echo the replayable name
     out = {"saved": saved, "nodes": len(graph["nodes"]),
            "hint": f"re-run any time: workflow run from={saved}  |  /wf {saved}"}
+    if stripped_knobs:
+        # est-yka3m: warn-and-surface, the save channel's own idiom — a clean
+        # save's response stays byte-identical (no empty key, golden bytes).
+        out["knobs_stripped"] = sorted(stripped_knobs)
     # est-2ek.1.245: warn-and-surface on a shelved graph that hard-codes
     # launch-varying literals while carrying ZERO {run.KEY} binding points —
     # such entries silently replay the launch that froze them. NON-FATAL by
@@ -3354,11 +3376,13 @@ def act_run(args):
     # #498: launch-time concurrency args join the graph channel BEFORE validation, so the
     # existing law applies unchanged (shape, owner clamp, bake, fingerprint exemption);
     # one channel per key — co-declaration is refused, silence is not an option.
+    _arg_knobs = []   # est-yka3m: the merged keys ride the stamp (see _create_run)
     for _ck in _CONCURRENCY_CAPS:
         if _ck in args:
             if _ck in graph:
                 return {"error": f"run: {_ck} declared both as a run arg and a graph key (one channel per key)"}
             graph = {**graph, _ck: args[_ck]}
+            _arg_knobs.append(_ck)
     bad = _validation_error(graph) or _team_args_error(args)
     if bad:
         return bad
@@ -3571,13 +3595,13 @@ def act_run(args):
             out = _create_run(args, graph, lib_name, models, routes, _liveness_notes, path,
                               includes=_includes, include_notes=_include_notes,
                               concurrency_meta=concurrency_meta, retry_meta=retry_meta,
-                              binding=_binding)
+                              binding=_binding, arg_knobs=_arg_knobs)
         _arm_from_launch(out)   # OUTSIDE the flock — see _arm_from_launch's law
         return out
     out = _create_run(args, graph, lib_name, models, routes, _liveness_notes,
                       includes=_includes, include_notes=_include_notes,
                       concurrency_meta=concurrency_meta, retry_meta=retry_meta,
-                      binding=_binding)
+                      binding=_binding, arg_knobs=_arg_knobs)
     _arm_from_launch(out)
     return out
 
@@ -3652,7 +3676,8 @@ def _prove_run_dir(r, extra_dirs=()):
 
 
 def _create_run(args, graph, lib_name, models, routes, _liveness_notes, lane_path=None,
-                *, concurrency_meta=None, retry_meta=None, includes=None, include_notes=None, binding=None):
+                *, concurrency_meta=None, retry_meta=None, includes=None, include_notes=None, binding=None,
+                arg_knobs=None):
     """Under the lane flock: complete run dir, atomic registry entry, then spawn."""
     name = graph["name"]
     base = time.strftime("%Y%m%d-%H%M%S") + "-" + "".join(
@@ -3698,6 +3723,16 @@ def _create_run(args, graph, lib_name, models, routes, _liveness_notes, lane_pat
             "owner": _owner_stamp()}
     if concurrency_meta:
         meta.update(concurrency_meta)
+    if arg_knobs:
+        # est-yka3m (PR#500 shelf-leak residual): the arg-channel stamp. #498
+        # merged launch-time run args into the graph channel BEFORE the run-dir
+        # write, so graph.json is not author bytes for those keys and a later
+        # save(run_id) cannot tell which widths the door injected. The stamp
+        # names them; save(run_id) strips exactly those (launch-only law #580
+        # B1 — per-run widths never ride the shelf) and act_amend drops it (it
+        # describes the launched bytes an amend replaces). Absent args => no
+        # key: legacy run.json bytes preserved.
+        meta["knob_arg_keys"] = sorted(arg_knobs)
     # hw-23c (est-mcwq6): author-reachable retry knobs, VALIDATED AT THE DOOR
     # before any write — the bake runs in act_run beside _concurrency_bake and
     # arrives as retry_meta (parity with the sibling; the first #497 shape
@@ -4839,8 +4874,17 @@ def act_amend(args):
         meta["max_seats"] = new["max_seats"]
     else:
         meta.pop("max_seats", None)
+    # est-yka3m: the arg-channel stamp (run.json `knob_arg_keys`) describes the
+    # LAUNCHED bytes. An amend replaces graph.json with author truth and the
+    # widths stay frozen anyway (#580 B1), so the stamp dies with the bytes it
+    # described — set-or-drop, the same law as the include notes and max_seats
+    # above. A save(run_id) after an amend re-shelves re-shelves the amended
+    # author bytes unstripped.
+    _kab_before = meta.get("knob_arg_keys", _MS_MISSING)
+    meta.pop("knob_arg_keys", None)
     if (_name_changed or _includes or _include_notes
-            or _ms_before != _ms_now):
+            or _ms_before != _ms_now
+            or _kab_before is not _MS_MISSING):
         mtmp = r / f"run.json.{os.getpid()}.tmp"
         mtmp.write_text(json.dumps(meta, ensure_ascii=False))
         os.replace(mtmp, r / "run.json")

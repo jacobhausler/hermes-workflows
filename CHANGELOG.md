@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Door: `save(run_id)` no longer shelves arg-channel concurrency widths (est-yka3m,
+  PR#500 shelf-leak residual). #498 merged launch-time `concurrency`/`item_concurrency`
+  args into the graph channel before the run-dir write, so a re-shelve silently froze
+  widths the author never wrote onto the shelf entry and the forged key made every
+  later `from=<entry>` + width-arg launch refuse as co-declaration. The door now
+  stamps the injected keys into `run.json` (`knob_arg_keys`); `save(run_id)` strips
+  exactly those keys and echoes `knobs_stripped`; author-written widths stay, an
+  unstamped (pre-fix) run dir keeps its bytes verbatim, and an amend drops the stamp
+  with the bytes it described. Pinned by `tests/test_save_knob_strip_yka3m.py` (T1-T5).
 - Tests: direct contract pins for five `wfcommon` validators (grammar, budget shape,
   model policy, fingerprint rule-matching, dead-end forks) — zero direct references at
   tip `b5988cd`; production untouched. `tests/test_wfcommon_validator_contracts_par_c9k.py`.
