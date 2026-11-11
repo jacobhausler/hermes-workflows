@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Tests: direct contract pins for five more wfcommon validators/predicates
+  (on_exit, params totality, quote-JSON error window, model-names, budget token
+  sum) — zero direct references at tip cb1fd1e; production untouched.
+  tests/test_wfcommon_validator_contracts_batch2_vq9.py.
 - Door: `save(run_id)` no longer shelves arg-channel concurrency widths (est-yka3m,
   PR#500 shelf-leak residual). #498 merged launch-time `concurrency`/`item_concurrency`
   args into the graph channel before the run-dir write, so a re-shelve silently froze
