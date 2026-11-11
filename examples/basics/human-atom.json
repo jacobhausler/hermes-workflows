@@ -45,7 +45,7 @@
       "type": "gate",
       "after": ["gate-is-decision"],
       "question": "Owner decision needed for {run.record}. The intake seat's answer carries the QUESTION, the concrete OPTIONS (first = recommended), the STAKES and the CONTEXT — read it first (this run's status or gates view). Answer by choosing an option, or reply free-text with your ruling — the release answer flows verbatim to the capture seat, which applies it in the tracker. Not deciding now? Pick 'defer' — nothing changes and the record stays parked (no answer within the hold timeout releases with this same default).",
-      "context": "Choose one of the presented options, or answer free-text with your ruling. No answer by the hold_timeout releases the gate with the 'defer' default — the record then simply stays parked, nothing is decided.",
+      "context": "Choose one of the presented options, or answer free-text with your ruling. No answer by the hold_timeout releases the gate with the 'defer — keep the record parked, re-ask later' default — the record then simply stays parked, nothing is decided.",
       "options": ["defer — keep the record parked, re-ask later"],
       "default_option": "defer — keep the record parked, re-ask later",
       "hold_timeout": 86400
