@@ -155,6 +155,13 @@ for unfinished work with no verified live runner (see operations.md).
   decisive verdict (good or bad), 1 while undecided, 2 on probe error itself.
   An exit-0-only-on-green probe makes a red reality poll until the gate timeout
   and the run gets a failed gate, not a verdict.
+- **Wake-lane reply contract — drift is the default:** a wake route whose job is
+  pipe-stdin/echo-stdout needs an explicit reply contract: one mechanical line,
+  no commentary, no cards, no status prose. Long wake lanes outlive context
+  compaction and the drifted transcript reads as house style to the next leg;
+  zero user corrections is not ratification. Write the contract skill (literal
+  reply shapes, per-reply draft-time check) before the lane is 100 messages old
+  (operations.md, mirror law).
 
 ## Ergonomics
 

@@ -6,6 +6,11 @@ library (`workflow save graph_path=... name=...`). Each file's top-level
 `description` is the full contract — seeds it expects, arms it can take, and
 what each node owns; this page is just the map.
 
+Adopting graphs published elsewhere (someone else's pack)? The recipe — verify
+manifest digests BEFORE save, always pass `source=`, absolute `graph_path`, and
+expect machine-baked gate argv to refuse off the owning machine — is
+[Adopting an external pack](../references/operations.md#adopting-an-external-pack).
+
 Every example with a `receipts/<name>/author-run.json` beside it has been **run
 for real** against a live target: the receipt pins the graph digest and the run
 ids of the laps that proved each arm (including the halt arms — a template
