@@ -1,5 +1,7 @@
 # Showcase — four diagrams, four claims
 
+The stance these pictures assume is [North stars for agent workflow estates](posture.md).
+
 Each picture is derived from a checked-in archify spec JSON (same name,
 `.workflow.json`, beside the PNG under `docs/pr-diagrams/`): the JSON is the
 re-derivable truth, the PNG is the human face. Re-render with
