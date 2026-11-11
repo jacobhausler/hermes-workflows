@@ -57,7 +57,7 @@ delegated subagent; `wait` = OPTIONAL blocking observation, the only revive verb
   machine waits use `gate.wait`. Agents and gates share bounded `when`/`on_skip`: a false
   predicate prunes the node and exclusively dependent arms (agents spawn nothing);
   `on_skip:"pass"` lets descendants run. Malformed or non-ancestor-head predicates are refused
-  before write/spawn; echo/join reject both. Examples `approve-publish`, `branch-on-verdict`: [grammar](references/grammar.md).
+  before write/spawn; echo/join reject both; `when` heads are hyphen-free (`out.<id>.answer`). Route arms on `out.<gate>.answer` — any other field name resolves to None and prunes the arm SILENTLY (green run, zero wake). Probes read `out.<gate>.answer` too: `_machine: "auto_release"` marks a default, not a human. Examples `approve-publish`, `branch-on-verdict`: [grammar](references/grammar.md).
 - `profile` runs a node AS a named teammate: DELEGATION, not isolation — same UID,
   the target's SOUL/memory/`.env`/tools; the target's `workflow_team.json` must list
   the launcher in `accept_from`; `default` is never a target.
