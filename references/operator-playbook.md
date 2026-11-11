@@ -125,8 +125,14 @@ for unfinished work with no verified live runner (see operations.md).
 
 ## Babysitting (read the status model, not `ps`)
 
-- **Stall detection:** a running node whose idle grows with flat `api_calls` is
-  stalled — `steer` it or `stop` + amend; don't wait it out.
+- **Stall detection needs a signature, not a hunch.** Idle growth with flat
+  `api_calls` is necessary evidence, not sufficient: a healthy long-reasoning
+  lane legitimately writes nothing until it answers (one in-flight call IS flat
+  api_calls on a slow route). Corroborate against `node_facts`/
+  `logs/<id>.a<n>.log` tail and process state before acting. When you do kill,
+  kill AND re-drive in the same pass (`kill`/`stop` + `amend`, or let the
+  watchdog tick revive it) — a kill without a re-drive strands the lane exactly
+  as thoroughly as the wedge did.
 - **The host kills a long tool call at its own deadline** — typically around 420 s
   on the default concurrent-batch setup, but host-dependent, not a plugin
   constant. `wait` self-yields in 330 s segments with a "call wait again" note —
@@ -155,6 +161,85 @@ for unfinished work with no verified live runner (see operations.md).
   decisive verdict (good or bad), 1 while undecided, 2 on probe error itself.
   An exit-0-only-on-green probe makes a red reality poll until the gate timeout
   and the run gets a failed gate, not a verdict.
+
+## Death table (signature → repair index)
+
+A pure index over shipped behavior: one row per `error_class` token the engine
+already emits — the closed `wf.py` `ERROR_CLASSES` set every `node.failed`
+(record + event) must carry. Nothing here is a new mechanism; each class's full
+law lives in the cited doc. Every row surfaces in `status`/`wait` payloads
+(`failed_nodes`, `node_facts`) and `events.jsonl` (`node.failed`) unless noted.
+Read the class, not the prose.
+
+| error_class | Signature / where it surfaces | One documented repair |
+| --- | --- | --- |
+| `answer_schema_invalid` | Fenced answer PARSED but failed the schema; terminal, outside both ladders | Fix prompt/schema — the answer's own defect (`validate()` misses quoted) |
+| `bead_close` | The runner's own store read-back shows the claimed close did not happen | Read the receipt row on the record; close for real, then re-drive — never retried |
+| `budget_exhausted` | A RunBudget cap refused the spawn BEFORE submit, billed nothing | Raise the run budget or shrink the wave (operations.md) |
+| `cancelled` | A `stop`, or a fan-out straggler at quorum; the run reads `stopped` | `wait` re-drives it — never a failure |
+| `cap_exhausted` | The core's own `max_iterations_reached(n/m)` stamp | Raise the cap with answer-writing calls counted, or split the node (budgets.md) |
+| `config_input` | rc!=0 within ~1 s of spawn + `Unknown provider '<alias>' …` marker | Fix the provider pin or seat config; a re-run dies identically |
+| `crashed` | Lane exited without a typed artifact receipt (e.g. `crashed: graph invalid`) | Correct the graph/definition and amend — a recorded fatal crash is not wait-recoverable |
+| `declared_failure` | The child's own `node_outcome` token declared failure | Read the child's answer; deterministic, outside both ladders |
+| `early_death` | Progressed death, bounded set | Automatic: ONE machine-resume re-drive (`retry.bounded`) |
+| `effect_receipt` | Declared effects with no provable receipt at commit; proven-fail | Write/prove the artifact, then re-drive — outside both ladders |
+| `fanout_empty` | A settled router with no satisfiable edge (`on_fail:"skip"` included) | Fix the items source; the empty router fails the run by law |
+| `fatal_quota` | A 429 whose own text carries a reset horizon beyond the run's reach | Switch models until the horizon passes; the seat cache refuses launches on that model |
+| `forbidden_model` | The resolved route hits the seat ∪ graph forbidden floor | Re-pin to a permitted model (an invalid seat floor fails closed) |
+| `incomplete_work` | done/partial over a declared `repo:` lane with uncommitted TRACKED changes (`lane_dirty`) | Commit in the lane, then amend/re-run re-drives the node |
+| `inputs` | Explicit `inputs:` ref missing or unresolvable at spawn | Fix the ref — a committed `skipped` head is the one sentinel exception |
+| `item_record` | Fan-out aggregate refused: per-item records do not back the claimed completion | Read `record_problems`; re-drive the named items |
+| `killed` | A node-targeted `kill`; siblings and the run keep going | Re-drive in the same pass — the law above in Babysitting |
+| `lane_wreckage` | Admission refuses: uncommitted wreckage from a dead attempt | Bank first (`git stash push -m redrive:<run>:<node>`, or a patch at `<run>/wip/<node>.patch`), then re-drive |
+| `lease_busy` | rc=130 carrying the CLI's own lease notice; collision, not a verdict | Automatic: ONE bounded re-drive as a FRESH session |
+| `left_live_descendants` | Exit-0 verdict while the spawn's /proc tree was live; terminal | The verdict comes from the exit code after the tree drains — never from chatter |
+| `malformed_turn` | Reply is a serialized tool call rendered as text (tool-call-as-text) | Bounded set: re-drive; the text is not harvestable |
+| `precondition` | Zero spawns: unmet `requires`, `blocked_by_partial_ancestor`, or `publisher_ungated` | `amend` the missing field, set `after_partial:true`, or land suite proof upstream (grammar.md) |
+| `provider_400` | The provider refused the request itself (400) | Fix the payload/model params; never retryable |
+| `quorum` | A fan-out node died so N is unreachable; survivors still commit | Read `failed_detail`; re-drive only the dead items |
+| `ratelimit` | The `credentials are rate-limited for <model>` banner; parks at jittered ~5-min intervals | Wait the window out or switch model — the error text is verbatim for the switch |
+| `route_inexpressible` | A `require_route` lane on a host stripping creation overrides (`WF_OMIT_POLICY_FLAGS` / marker file) | Drop the strip workaround, or opt the lane into the fallback (`require_route:false`) |
+| `route_substitution_denied` | A post-admission substitution would bill a route other than the proved-alive receipt | Amend the node to the route you accept (or delete the receipts and re-admit through the door ping) |
+| `route_unavailable` | The door's submit ping proved a pinned route dead, or `served_model` contradicts the receipt | Fix the pin/fallback ladder — never a silent re-billing |
+| `schema` | Answer missed the schema after its one correction retry (enum misses included) | Fix the schema or the goal prose; a misspelled verdict never commits |
+| `seat_cap` | The seats knob named a non-integer or a value outside [4, 64]; the door refuses the whole launch | Fix `WORKFLOW_MAX_SEATS` / config `workflows.max_seats` |
+| `seat_unsupported` | Semaphore full and the host exposes no process-ancestry channel | Set `WORKFLOW_MAX_SEATS=0` on such a host — nested runners there are unsupported |
+| `seat_wait` | No global agent seat freed within the node wall; `exhaustion_reason: queue_timeout`, zero tokens spent | Re-drive when seats free; size waves to the resolved seat cap |
+| `spawn` | Spawn-time death (e.g. the target profile deleted before Popen) | Restore the target profile/consent; never a silent fallback |
+| `stale_graph` | An amend moved the efp at the Popen instant; the queued definition never launches | None needed — the wave boundary re-drives under the CURRENT definition |
+| `timeout` | The node wall closed; bounded set | Raise the wall/shape presets, or split the work (budgets.md) |
+| `transport` | A transient provider sentinel line, marker verbatim on the record | Automatic: the bounded transient ladder (transient-retry-window.md) |
+| `transport_exhausted` | The persisted retry window met the author cap before the first spawn of the boot | Fresh lap after provider recovery — restarts cannot re-grant a spent cap |
+| `unresolved_model` | A model-not-found marker or a model-id 404; distinct from a generic 400 | Fix the model id/alias; never retryable |
+| `unknown` | The harvest-time default | Read the raw tail — a typable death landing here is a drift alarm, not a verdict |
+
+Typed deaths beyond the class set (same read model, all in operations.md):
+
+- **`lifetime_cap_spent`** — a `node_facts.refusal` value, not an error class: the
+  node's persisted re-spawn grant was spent before this boot and nothing
+  spawned; re-running the same graph dies identically until the ledger resets.
+- **`interrupted`** — a run state, not a node death: unfinished work with no
+  verified live runner. `wait` (or `amend`) re-drives it; let the watchdog tick
+  revive it — inspect saved outputs and uncertain side effects first.
+- **Silent death** — detector, not inference: `runner.reaped` (plus one
+  `node.interrupted` per falsely-claimed record) lands in `events.jsonl` before
+  the replacement runner spawns.
+- **Wedged `runner.lock`** — the lock truth of a run dir is `free | busy | eacces |
+  wedged`; `wait` heals only the proven-wedged shape, and the operator hatch is
+  `release_lock`, which REFUSES unless zero live holders are proven.
+
+## Admission and metering
+
+- Guards mechanical, judgment only in graph seats: a zero-LLM script decides
+  WHETHER a subject deserves a judgment lap; anything a regex cannot prove is
+  left untouched for the graph, and the woken session is forbidden from
+  hand-promoting. Every dispatch is capped by an explicit number — per-subject
+  interval (e.g. 1/hr), per-tick launches (e.g. ≤3), live laps (e.g. ≤4) — the
+  cap is a meter, never the governor's opinion; when the meter says full, the
+  tick ends without judgment.
+- Lanes are terminal on the subjects their guards watch: no re-publish from
+  inside the lane. A re-publish would bypass the very guard that admitted the
+  lap; the next tick re-reads the shelf state instead.
 
 ## Ergonomics
 

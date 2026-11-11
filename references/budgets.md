@@ -63,7 +63,13 @@ reserve turns inside one: raise the cap with the answer-writing calls counted
 in; split a big node into two nodes whose budgets each include their own
 commit turn; and write-first — persist artifacts to the work dir every few
 turns and emit the fenced JSON the moment the last required section lands, so a
-cap death costs only the answer, not the work.
+cap death costs only the answer, not the work. The escape hatch when it still
+happens: a seat one call short of finishing with a complete schema-valid harvest
+otherwise blocks every plain downstream edge (`blocked_by_partial_ancestor`) and
+strands the publish — declare `harvest_policy:"validate"` on that producer
+(grammar.md §harvest_policy) so its schema-valid, no-Remaining harvest commits
+`done` with the death kept on the record, or give the consumer
+`after_partial:true` explicitly.
 
 This contract is pinned by `tests/test_turn_accounting_contract_lw1eh.py`
 (spawn carries `--max-turns <cap>`; the capped lane's recorded `api_calls`
