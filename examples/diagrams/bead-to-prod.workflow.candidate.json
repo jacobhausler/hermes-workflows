@@ -1,0 +1,401 @@
+{
+  "cards": [
+    {
+      "dot": "cyan",
+      "items": [
+        "Carrier scale without the folklore: every rule that keeps carriers honest is a node or a gate here \u2014 premise-first intake, commit-before-verify, tiered blind review through a join, after_partial on the judges",
+        "A complementary premise-gate pair routes dead questions to a stand-down terminal, so a blocked premise ends in a labeled record, never a silent drop",
+        "The exit is a no-token machine gate: the run cannot go greener than the checkout snapshot it found, and a machine timeout is failure, not approval"
+      ],
+      "title": "Why it works"
+    },
+    {
+      "dot": "rose",
+      "items": [
+        "18 nodes, 6 gates, 9 branches, 26 edges: intake -> premise pair -> build -> test -> fix -> judges -> review join -> PR | stand-down -> machine exit-check",
+        "Review tiers itself on the diff-size line: sub-threshold diffs are single-reviewed and the join reads the skip as policy, not as loss",
+        "Derived from this example's bytes by scripts/graph_diagram.py"
+      ],
+      "title": "Contract"
+    }
+  ],
+  "diagram_type": "workflow",
+  "edges": [
+    {
+      "from": "claim_plan",
+      "id": "claim_plan-gate-build-armed",
+      "to": "gate-build-armed",
+      "variant": "security"
+    },
+    {
+      "from": "claim_plan",
+      "id": "claim_plan-gate-premise-dead",
+      "to": "gate-premise-dead",
+      "variant": "security"
+    },
+    {
+      "from": "gate-build-armed",
+      "id": "gate-build-armed-build",
+      "to": "build",
+      "variant": "default"
+    },
+    {
+      "from": "build",
+      "id": "build-test",
+      "to": "test",
+      "variant": "default"
+    },
+    {
+      "from": "test",
+      "id": "test-fix",
+      "to": "fix",
+      "variant": "default"
+    },
+    {
+      "from": "claim_plan",
+      "id": "claim_plan-policy",
+      "to": "policy",
+      "variant": "default"
+    },
+    {
+      "from": "build",
+      "id": "build-policy",
+      "to": "policy",
+      "variant": "default"
+    },
+    {
+      "from": "test",
+      "id": "test-policy",
+      "to": "policy",
+      "variant": "default"
+    },
+    {
+      "from": "fix",
+      "id": "fix-policy",
+      "to": "policy",
+      "variant": "default"
+    },
+    {
+      "from": "policy",
+      "id": "policy-gate-stand-down",
+      "to": "gate-stand-down",
+      "variant": "security"
+    },
+    {
+      "from": "test",
+      "id": "test-code-review",
+      "to": "code-review",
+      "variant": "security"
+    },
+    {
+      "from": "test",
+      "id": "test-big-diff-review",
+      "to": "big-diff-review",
+      "variant": "security"
+    },
+    {
+      "from": "code-review",
+      "id": "code-review-review_join",
+      "to": "review_join",
+      "variant": "security"
+    },
+    {
+      "from": "big-diff-review",
+      "id": "big-diff-review-review_join",
+      "to": "review_join",
+      "variant": "security"
+    },
+    {
+      "from": "review_join",
+      "id": "review_join-gate-review-fix",
+      "to": "gate-review-fix",
+      "variant": "security"
+    },
+    {
+      "from": "review_join",
+      "id": "review_join-gate-review-ready",
+      "to": "gate-review-ready",
+      "variant": "security"
+    },
+    {
+      "from": "gate-review-fix",
+      "id": "gate-review-fix-review_fix",
+      "to": "review_fix",
+      "variant": "default"
+    },
+    {
+      "from": "fix",
+      "id": "fix-review_fix",
+      "to": "review_fix",
+      "variant": "default"
+    },
+    {
+      "from": "gate-review-ready",
+      "id": "gate-review-ready-review-complete",
+      "to": "review-complete",
+      "variant": "default"
+    },
+    {
+      "from": "review_fix",
+      "id": "review_fix-review-complete",
+      "to": "review-complete",
+      "variant": "default"
+    },
+    {
+      "from": "review-complete",
+      "id": "review-complete-push-pr",
+      "to": "push-pr",
+      "variant": "security"
+    },
+    {
+      "from": "policy",
+      "id": "policy-push-pr",
+      "to": "push-pr",
+      "variant": "security"
+    },
+    {
+      "from": "gate-stand-down",
+      "id": "gate-stand-down-stand-down",
+      "to": "stand-down",
+      "variant": "default"
+    },
+    {
+      "from": "gate-premise-dead",
+      "id": "gate-premise-dead-stand-down",
+      "to": "stand-down",
+      "variant": "default"
+    },
+    {
+      "from": "push-pr",
+      "id": "push-pr-exit-check",
+      "to": "exit-check",
+      "variant": "default"
+    },
+    {
+      "from": "stand-down",
+      "id": "stand-down-exit-check",
+      "to": "exit-check",
+      "variant": "default"
+    }
+  ],
+  "lanes": [
+    {
+      "id": "work",
+      "label": "Agents",
+      "variant": "normal"
+    },
+    {
+      "id": "gates",
+      "label": "Gates",
+      "variant": "normal"
+    }
+  ],
+  "meta": {
+    "output": "examples/diagrams/bead-to-prod.html",
+    "quality_profile": "standard",
+    "subtitle": "BLUEPRINT carrier-class reference (validated cold, no author-run receipt \u2014 the lanes name YOUR tracker and rep",
+    "title": "bead-to-prod"
+  },
+  "nodes": [
+    {
+      "col": 0,
+      "id": "claim_plan",
+      "label": "Claim Plan",
+      "lane": "work",
+      "sublabel": "intake gate only for",
+      "type": "backend",
+      "width": 104
+    },
+    {
+      "col": 1,
+      "id": "gate-build-armed",
+      "label": "Gate Build\u2026",
+      "lane": "gates",
+      "sublabel": "",
+      "tag": "branch",
+      "type": "security",
+      "width": 104
+    },
+    {
+      "col": 1,
+      "id": "gate-premise-dead",
+      "label": "Gate Premise\u2026",
+      "lane": "gates",
+      "sublabel": "",
+      "tag": "branch",
+      "type": "security",
+      "width": 104,
+      "yOffset": 92
+    },
+    {
+      "col": 2,
+      "id": "build",
+      "label": "Build",
+      "lane": "work",
+      "sublabel": "implementation seat",
+      "type": "backend",
+      "width": 104
+    },
+    {
+      "col": 3,
+      "id": "test",
+      "label": "Test",
+      "lane": "work",
+      "sublabel": "deterministic test",
+      "type": "backend",
+      "width": 104
+    },
+    {
+      "col": 4,
+      "id": "big-diff-review",
+      "label": "Big Diff Revi\u2026",
+      "lane": "work",
+      "sublabel": "second review seat",
+      "type": "backend",
+      "width": 104
+    },
+    {
+      "col": 4,
+      "id": "code-review",
+      "label": "Code Review",
+      "lane": "work",
+      "sublabel": "blind code review",
+      "type": "backend",
+      "width": 104,
+      "yOffset": 92
+    },
+    {
+      "col": 4,
+      "id": "fix",
+      "label": "Fix",
+      "lane": "work",
+      "sublabel": "fix lane if test",
+      "type": "backend",
+      "width": 104,
+      "yOffset": 184
+    },
+    {
+      "col": 5,
+      "id": "exit-check",
+      "label": "Exit Check",
+      "lane": "gates",
+      "sublabel": "python3",
+      "tag": "machine hold",
+      "type": "security",
+      "width": 104
+    },
+    {
+      "col": 5,
+      "id": "gate-review-fix",
+      "label": "Gate Review\u2026",
+      "lane": "gates",
+      "sublabel": "",
+      "tag": "branch",
+      "type": "security",
+      "width": 104,
+      "yOffset": 92
+    },
+    {
+      "col": 5,
+      "id": "gate-review-ready",
+      "label": "Gate Review\u2026",
+      "lane": "gates",
+      "sublabel": "",
+      "tag": "branch",
+      "type": "security",
+      "width": 104,
+      "yOffset": 184
+    },
+    {
+      "col": 5,
+      "id": "gate-stand-down",
+      "label": "Gate Stand\u2026",
+      "lane": "gates",
+      "sublabel": "",
+      "tag": "branch",
+      "type": "security",
+      "width": 104,
+      "yOffset": 276
+    },
+    {
+      "col": 5,
+      "id": "policy",
+      "label": "Policy",
+      "lane": "work",
+      "sublabel": "policy judge read",
+      "type": "backend",
+      "width": 104
+    },
+    {
+      "col": 5,
+      "id": "push-pr",
+      "label": "Push Pr",
+      "lane": "work",
+      "sublabel": "open the pr push",
+      "type": "backend",
+      "width": 104,
+      "yOffset": 92
+    },
+    {
+      "col": 5,
+      "id": "review-complete",
+      "label": "Review Comple\u2026",
+      "lane": "work",
+      "sublabel": "one seat two doors",
+      "type": "backend",
+      "width": 104,
+      "yOffset": 184
+    },
+    {
+      "col": 5,
+      "id": "review_fix",
+      "label": "Review Fix",
+      "lane": "work",
+      "sublabel": "apply the review s",
+      "type": "backend",
+      "width": 104,
+      "yOffset": 276
+    },
+    {
+      "col": 5,
+      "id": "review_join",
+      "label": "Review Join",
+      "lane": "work",
+      "sublabel": "review join",
+      "type": "backend",
+      "width": 104,
+      "yOffset": 368
+    },
+    {
+      "col": 5,
+      "id": "stand-down",
+      "label": "Stand Down",
+      "lane": "work",
+      "sublabel": "no code close arm",
+      "type": "backend",
+      "width": 104,
+      "yOffset": 460
+    }
+  ],
+  "phases": [
+    {
+      "fromCol": 0,
+      "id": "roots",
+      "label": "entry",
+      "toCol": 0
+    },
+    {
+      "fromCol": 1,
+      "id": "mid",
+      "label": "hand-offs",
+      "toCol": 4
+    },
+    {
+      "fromCol": 5,
+      "id": "out",
+      "label": "terminus",
+      "toCol": 5
+    }
+  ],
+  "schema_version": 2
+}

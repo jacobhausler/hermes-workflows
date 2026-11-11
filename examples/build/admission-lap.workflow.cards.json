@@ -1,0 +1,22 @@
+{
+ "cards": [
+  {
+   "dot": "cyan",
+   "title": "Why it works",
+   "items": [
+    "The typed launch contract, exercised: pins carry content, the tune knob carries presence and patch, and the door refuses every missing or unknown binding before any write",
+    "The depth seam removes the second rubric seat at LAUNCH time \u2014 the run record is the concrete graph, so what you read is what ran",
+    "A dispatcher can build the launch brief with no-LLM: required pins listed, tune defaults pre-filled, refusals named together in a single refusal"
+   ]
+  },
+  {
+   "dot": "rose",
+   "title": "Contract",
+   "items": [
+    "{{nodes}} nodes, {{gates}} gate, {{branches}} branch: author -> gate -> twin blind rubrics -> by-patched report",
+    "The report seat survives fast-depth removal exactly as the prune law says: a terminal-skipped sibling is not a live dependency",
+    "Derived from this example's bytes by scripts/graph_diagram.py"
+   ]
+  }
+ ]
+}

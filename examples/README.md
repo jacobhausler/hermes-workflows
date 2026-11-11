@@ -28,6 +28,7 @@ repo docs tree; the runtime zip ships maps and graphs, not art.
 |---|---|---|
 | [`smoke.json`](basics/smoke.json) | 1 echo node | The smallest legal graph; zero tokens. |
 | [`approve-publish.json`](basics/approve-publish.json) | draft → human gate → single arm | The two gate laws: a human `gate` holds until released, and complementary `when` + `on_skip: "prune"` branches route exactly one arm. |
+| [`human-atom.json`](basics/human-atom.json) | intake → when-gate → bounded hold → capture | The BOUNDED human hold: a one-option `defer` default releases on `hold_timeout` and the capture treats every answer as EVIDENCE DATA (timer default != a result); the #475 hold-vs-wall law pins the capture seat's timeout to the hold ceiling. |
 | [`branch-on-verdict.json`](basics/branch-on-verdict.json) | judge → verdict-branch pair | Routing on a *machine* answer instead of a human one. |
 | [`exchange-run.workflow.json`](basics/exchange-run.workflow.json) | echo → courier → leaf | Byte portability: a graph travels save → library → re-run and the hand-off is proven by re-reading committed records, never chat memory. |
 
@@ -39,6 +40,8 @@ repo docs tree; the runtime zip ships maps and graphs, not art.
 | [`bulk-transform.workflow.json`](build/bulk-transform.workflow.json) | manifest → per-item lanes → audit | Barrier fan-out: the audit reconciles `all_results` against the declared manifest *and* re-checks the filesystem — evidence-without-command is a failed lane. |
 | [`census-fanout.workflow.json`](build/census-fanout.workflow.json) | roster → no-quorum barrier → tally | Deterministic tally over N machines: every item answered or *named missing*, counts computed from the record, a dead gauge prints as a loud red row, never silent loss. |
 | [`quorum-probe.workflow.json`](build/quorum-probe.workflow.json) | raced probe ‖ reconciled barrier | The speed/coverage contrast in one run: `quorum` cancels stragglers (report them honestly); the no-quorum barrier reconciles survivors against a master catalog. |
+| [`rubric-repair.workflow.json`](build/rubric-repair.workflow.json) | author → blind rubric → one repair → re-score → stop rule | The smallest honest admission pipeline: the rubric seat re-reads the record AS COMMITTED, exactly one repair round exists, a second disagreement is the stop rule (never another loop), and the disposition node fires on its one live dependency whichever path the gates took. |
+| [`admission-lap.workflow.json`](build/admission-lap.workflow.json) | typed params + door-time seams | The worked launch contract: `pin`/`tune` slots, a `where` depth-ladder that removes the peer seat at launch time, a `by` verb-family patch on the report's context — and one refusal naming every missing/unknown/undomain binding before any write. |
 
 ## review/ — independent judgment
 
@@ -63,6 +66,7 @@ repo docs tree; the runtime zip ships maps and graphs, not art.
 | File | Shape | Teaches |
 |---|---|---|
 | [`incident-response.json`](ops/incident-response.json) | alert → sweep → verdict-branch → recovery probe → close | Full incident lifecycle: verdict-branch gate pair, machine recovery probe with human escalation, merge-gated close. Adapt the lanes to your stack. |
+| [`bead-to-prod.workflow.json`](ops/bead-to-prod.workflow.json) | premise pair → build → test → tiered review join → PR \| stand-down → machine check | Carrier-class BLUEPRINT (validated cold — no author-run receipt yet): law lives in `defaults.context`, a dead premise ends at a labeled stand-down terminal, judges ride `after_partial`, and a fail-closed machine `exit-check` refuses to end the run greener than the snapshot it found at intake. |
 
 ## Running one
 
