@@ -1,6 +1,6 @@
 {
   "meta": {
-    "description": "Decision park: present one parked decision to a human, hold it a week with a self-releasing 'defer' default, capture the answer as data and apply its effect in the tracker. The tier-routed twin of examples/basics/human-atom — a fresh install runs a real human atom with zero authoring.",
+    "description": "Decision park: present a parked decision to a human, hold it a week on a self-releasing 'defer' default, capture the answer as data, apply its effect in the tracker. Twin of basics/human-atom.",
     "tags": ["use_case:decision", "domain:human-loop", "starter", "human-gate"],
     "params": {
       "record": {"desc": "where the decision request lives: a file path or a tracker id readable with your tools", "required": true}
