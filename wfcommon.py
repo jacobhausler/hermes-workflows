@@ -1285,8 +1285,17 @@ def _defaults_errors(d):
     if d.get("reasoning") is not None and d["reasoning"] not in reasoning_levels():
         E("defaults.reasoning", f"reasoning {d['reasoning']!r} invalid; allowed: "
                                 f"{list(reasoning_levels())}")
-    if d.get("schema") is not None and not isinstance(d["schema"], dict):
-        E("defaults.schema", "schema must be an object")
+    if d.get("schema") is not None:
+        if not isinstance(d["schema"], dict):
+            E("defaults.schema", "schema must be an object")
+        else:
+            # est-j14j3: the CONTENT goes through the same _schema_check a node
+            # key gets. defaults.schema bakes into every agent node at
+            # materialization and boot re-validates the baked nodes; checking
+            # the subset here is what makes "the door admits" equal
+            # "boot admits" — a union type ('type': ['integer', 'null']) here
+            # once passed action=validate and killed the run at boot.
+            _schema_check(d["schema"], "defaults.schema", E)
     if d.get("model") is not None and not isinstance(d.get("model"), str):
         E("defaults.model", "model must be a string")
     if d.get("require_route") is not None and not isinstance(d.get("require_route"), bool):
@@ -1582,6 +1591,105 @@ def wall_invariant_warnings(graph):
     return rows
 
 
+def _schema_check(schema, field, report):
+    """est-j14j3: the ONE schema-shape law, shared by every door pass. `report(field,
+    msg)` receives every defect, so the CALLER owns the node/None binding:
+    validate_graph_errors reports per node; _defaults_errors reports the graph-level
+    `defaults.schema` subtree. Before this extraction the defaults pass measured only
+    the value's dict-ness, so a JSON-Schema union type ('type': ['integer', 'null'])
+    sitting in defaults.schema sailed through action=validate, was baked into every
+    agent node by apply_graph_defaults, and the runner boot refused it AFTER the run
+    dir existed — the run died at boot in ~9 s and every claim stamp was lost
+    (receipt: runner_exit.json of run 20261111-211056-wof-pr-forge). One helper, one
+    fault line per occurrence, pointing at the schema path: what boot refuses can
+    never reach spawn. The boot-side refusal words come from this same line, so they
+    cannot drift (pinned by tests/test_defaults_schema_union.py).
+
+    The runner's validator consumes exactly this subset; description is
+    prompt-only annotation; enum is ENFORCED at harvest (#107 — the old
+    law "never accept a constraint that cannot be enforced" stays TRUE:
+    enum joined the subset only once wf.validate() checks membership).
+    #96: minItems/minLength joined the SAME way — wf.validate() now
+    enforces both (array length; non-blank char count via v.strip(),
+    fail-closed: a whitespace-only probe is not a probe), so the door
+    admits exactly what the harvester can enforce, nothing more.
+    #472: maxItems joins as minItems' mirror (wf.validate enforces the
+    cap), and enum widens onto type:'boolean'/'integer' — membership in
+    those closed domains is trivial at harvest. A refusal now also NAMES
+    the fallback: an unenforceable cap belongs in the description prose,
+    advisory by admission, never silently dropped."""
+    def E(f, m):
+        report(f, m)
+    for k in sorted(set(schema) - {"type", "required", "properties", "items",
+                                   "description", "enum", "minItems", "minLength",
+                                   "maxItems"}):
+        E(f"{field}.{k}", "unsupported schema keyword; supported: type, required, properties, items, description, enum, minItems, minLength, maxItems — a constraint the harvester cannot enforce here (integer bounds, patterns) belongs in the description prose: an advisory ceiling beats a silent pass")
+    if "type" in schema and schema["type"] not in ("object", "array", "string", "number", "integer", "boolean"):
+        E(f"{field}.type", "unsupported schema type")
+    if "required" in schema and (not isinstance(schema["required"], list)
+                                  or not all(isinstance(x, str) for x in schema["required"])):
+        E(f"{field}.required", "required must be a list of strings")
+    if "enum" in schema:
+        # #107: closed vocabulary. #472 widened placement from string-only
+        # to the three closed domains whose membership wf.validate()
+        # enforces trivially: type:'string' (non-empty string members),
+        # type:'boolean' (boolean members — the bug-fix playbook's
+        # `reproduced: enum[true,false]` gate-key is the repro), and
+        # type:'integer' (integer members; bool is never a member — the
+        # same bool law as #113). Still REJECTED on a type-less, number-,
+        # array- or object-typed schema: the closed-subset law refuses it
+        # at the door instead of shipping a dead keyword.
+        en = schema["enum"]
+        _et = schema.get("type")
+        if not isinstance(en, list) or not en:
+            E(f"{field}.enum", "enum must be a non-empty list of non-empty strings")
+        elif _et == "string" and not all(isinstance(x, str) and x for x in en):
+            E(f"{field}.enum", "enum members must be a list of non-empty strings")
+        elif _et == "boolean" and not all(isinstance(x, bool) for x in en):
+            E(f"{field}.enum", "enum members must be a list of booleans")
+        elif _et == "integer" and not all(isinstance(x, int) and not isinstance(x, bool) for x in en):
+            E(f"{field}.enum", "enum members must be a list of integers (bool is never a member)")
+        elif _et not in ("string", "boolean", "integer"):
+            E(f"{field}.enum", "enum is only legal on type:'string', 'boolean' or 'integer' (the harvester enforces membership there only)")
+    # #96: minItems/minLength — same enforceability law as enum. The door
+    # admits a floor ONLY where wf.validate() can actually enforce it:
+    # minItems on type:'array', minLength on type:'string', each a
+    # non-negative int (bool is never a count — same bool law as #113).
+    # #472: maxItems joins as minItems' mirror — type:'array', the same
+    # non-negative int shape, enforced as a cap at harvest.
+    for _kw, _t in (("minItems", "array"), ("minLength", "string"), ("maxItems", "array")):
+        if _kw in schema:
+            mv = schema[_kw]
+            if isinstance(mv, bool) or not isinstance(mv, int) or mv < 0:
+                E(f"{field}.{_kw}", f"{_kw} must be a non-negative integer")
+            elif schema.get("type") != _t:
+                E(f"{field}.{_kw}", f"{_kw} is only legal on type:'{_t}' (the harvester enforces it only there)")
+    # #472: an unsatisfiable interval is a dead constraint — with both
+    # bounds otherwise well-formed, minItems > maxItems admits no value at
+    # all, so the door refuses the pair instead of shipping a schema that
+    # can only ever fail the harvest.
+    _mi, _ma = schema.get("minItems"), schema.get("maxItems")
+    if (isinstance(_mi, int) and not isinstance(_mi, bool) and _mi >= 0
+            and isinstance(_ma, int) and not isinstance(_ma, bool) and _ma >= 0
+            and _mi > _ma):
+        E(f"{field}.maxItems", f"unsatisfiable range: minItems {_mi} > maxItems {_ma}")
+    props = schema.get("properties")
+    if props is not None:
+        if not isinstance(props, dict):
+            E(f"{field}.properties", "properties must be an object")
+        else:
+            for k, sub in props.items():
+                if not isinstance(sub, dict):
+                    E(f"{field}.properties.{k}", "property schema must be an object")
+                else:
+                    _schema_check(sub, f"{field}.properties.{k}", report)
+    if "items" in schema:
+        if not isinstance(schema["items"], dict):
+            E(f"{field}.items", "items schema must be an object")
+        else:
+            _schema_check(schema["items"], f"{field}.items", report)
+
+
 def validate_graph_errors(nodes, *, admission=False, defaults=None):
     """Return a LIST of {node, field, msg} — EVERY defect, not the first. Strict ids:
     node ids double as filenames.
@@ -1603,87 +1711,12 @@ def validate_graph_errors(nodes, *, admission=False, defaults=None):
         errs.append({"node": nid, "field": field, "msg": msg})
 
     def schema_check(nid, field, schema):
-        # The runner's validator consumes exactly this subset; description is
-        # prompt-only annotation; enum is ENFORCED at harvest (#107 — the old
-        # law "never accept a constraint that cannot be enforced" stays TRUE:
-        # enum joined the subset only once wf.validate() checks membership).
-        # #96: minItems/minLength joined the SAME way — wf.validate() now
-        # enforces both (array length; non-blank char count via v.strip(),
-        # fail-closed: a whitespace-only probe is not a probe), so the door
-        # admits exactly what the harvester can enforce, nothing more.
-        # #472: maxItems joins as minItems' mirror (wf.validate enforces the
-        # cap), and enum widens onto type:'boolean'/'integer' — membership in
-        # those closed domains is trivial at harvest. A refusal now also NAMES
-        # the fallback: an unenforceable cap belongs in the description prose,
-        # advisory by admission, never silently dropped.
-        for k in sorted(set(schema) - {"type", "required", "properties", "items",
-                                       "description", "enum", "minItems", "minLength",
-                                       "maxItems"}):
-            E(nid, f"{field}.{k}", "unsupported schema keyword; supported: type, required, properties, items, description, enum, minItems, minLength, maxItems — a constraint the harvester cannot enforce here (integer bounds, patterns) belongs in the description prose: an advisory ceiling beats a silent pass")
-        if "type" in schema and schema["type"] not in ("object", "array", "string", "number", "integer", "boolean"):
-            E(nid, f"{field}.type", "unsupported schema type")
-        if "required" in schema and (not isinstance(schema["required"], list)
-                                      or not all(isinstance(x, str) for x in schema["required"])):
-            E(nid, f"{field}.required", "required must be a list of strings")
-        if "enum" in schema:
-            # #107: closed vocabulary. #472 widened placement from string-only
-            # to the three closed domains whose membership wf.validate()
-            # enforces trivially: type:'string' (non-empty string members),
-            # type:'boolean' (boolean members — the bug-fix playbook's
-            # `reproduced: enum[true,false]` gate-key is the repro), and
-            # type:'integer' (integer members; bool is never a member — the
-            # same bool law as #113). Still REJECTED on a type-less, number-,
-            # array- or object-typed schema: the closed-subset law refuses it
-            # at the door instead of shipping a dead keyword.
-            en = schema["enum"]
-            _et = schema.get("type")
-            if not isinstance(en, list) or not en:
-                E(nid, f"{field}.enum", "enum must be a non-empty list of non-empty strings")
-            elif _et == "string" and not all(isinstance(x, str) and x for x in en):
-                E(nid, f"{field}.enum", "enum members must be a list of non-empty strings")
-            elif _et == "boolean" and not all(isinstance(x, bool) for x in en):
-                E(nid, f"{field}.enum", "enum members must be a list of booleans")
-            elif _et == "integer" and not all(isinstance(x, int) and not isinstance(x, bool) for x in en):
-                E(nid, f"{field}.enum", "enum members must be a list of integers (bool is never a member)")
-            elif _et not in ("string", "boolean", "integer"):
-                E(nid, f"{field}.enum", "enum is only legal on type:'string', 'boolean' or 'integer' (the harvester enforces membership there only)")
-        # #96: minItems/minLength — same enforceability law as enum. The door
-        # admits a floor ONLY where wf.validate() can actually enforce it:
-        # minItems on type:'array', minLength on type:'string', each a
-        # non-negative int (bool is never a count — same bool law as #113).
-        # #472: maxItems joins as minItems' mirror — type:'array', the same
-        # non-negative int shape, enforced as a cap at harvest.
-        for _kw, _t in (("minItems", "array"), ("minLength", "string"), ("maxItems", "array")):
-            if _kw in schema:
-                mv = schema[_kw]
-                if isinstance(mv, bool) or not isinstance(mv, int) or mv < 0:
-                    E(nid, f"{field}.{_kw}", f"{_kw} must be a non-negative integer")
-                elif schema.get("type") != _t:
-                    E(nid, f"{field}.{_kw}", f"{_kw} is only legal on type:'{_t}' (the harvester enforces it only there)")
-        # #472: an unsatisfiable interval is a dead constraint — with both
-        # bounds otherwise well-formed, minItems > maxItems admits no value at
-        # all, so the door refuses the pair instead of shipping a schema that
-        # can only ever fail the harvest.
-        _mi, _ma = schema.get("minItems"), schema.get("maxItems")
-        if (isinstance(_mi, int) and not isinstance(_mi, bool) and _mi >= 0
-                and isinstance(_ma, int) and not isinstance(_ma, bool) and _ma >= 0
-                and _mi > _ma):
-            E(nid, f"{field}.maxItems", f"unsatisfiable range: minItems {_mi} > maxItems {_ma}")
-        props = schema.get("properties")
-        if props is not None:
-            if not isinstance(props, dict):
-                E(nid, f"{field}.properties", "properties must be an object")
-            else:
-                for k, sub in props.items():
-                    if not isinstance(sub, dict):
-                        E(nid, f"{field}.properties.{k}", "property schema must be an object")
-                    else:
-                        schema_check(nid, f"{field}.properties.{k}", sub)
-        if "items" in schema:
-            if not isinstance(schema["items"], dict):
-                E(nid, f"{field}.items", "items schema must be an object")
-            else:
-                schema_check(nid, f"{field}.items", schema["items"])
+        # est-j14j3: the law lives in the module-level _schema_check — the ONE
+        # schema-shape helper; this is the per-node report binding. The graph
+        # defaults pass (_defaults_errors) calls the same helper, so the words
+        # boot refuses with are structurally the words the door refuses with,
+        # and no second copy of the rules exists to drift.
+        _schema_check(schema, field, lambda f, m: E(nid, f, m))
 
     if not isinstance(nodes, list) or not nodes:
         return errs + [{"node": None, "field": "nodes", "msg": "nodes must be a non-empty list"}]
