@@ -1,0 +1,174 @@
+{
+  "cards": [
+    {
+      "dot": "cyan",
+      "items": [
+        "The smallest honest admission pipeline: author, blind rubric, single repair round, re-score, stop rule, single disposition \u2014 no native loop engine needed because the round count is structural",
+        "Blindness is load-bearing: the rubric re-reads the record AS COMMITTED, so an author cannot grade its own homework",
+        "Second disagreement stops to a human with the open question named \u2014 the lane that loops forever is the lane that never admits it needs a person"
+      ],
+      "title": "Why it works"
+    },
+    {
+      "dot": "rose",
+      "items": [
+        "7 nodes, 2 gates, 2 branches: author -> gate -> rubric -> gate -> repair -> rescore -> disposition",
+        "The disposition join keeps a live dependency on the rubric, so agreement (pruned repair arm) still lands its single disposition",
+        "Derived from this example's bytes by scripts/graph_diagram.py"
+      ],
+      "title": "Contract"
+    }
+  ],
+  "diagram_type": "workflow",
+  "edges": [
+    {
+      "from": "author",
+      "id": "author-gate-authored",
+      "to": "gate-authored",
+      "variant": "security"
+    },
+    {
+      "from": "gate-authored",
+      "id": "gate-authored-rubric",
+      "to": "rubric",
+      "variant": "default"
+    },
+    {
+      "from": "rubric",
+      "id": "rubric-gate-disagree",
+      "to": "gate-disagree",
+      "variant": "security"
+    },
+    {
+      "from": "gate-disagree",
+      "id": "gate-disagree-repair",
+      "to": "repair",
+      "variant": "default"
+    },
+    {
+      "from": "repair",
+      "id": "repair-rescore",
+      "to": "rescore",
+      "variant": "default"
+    },
+    {
+      "from": "rubric",
+      "id": "rubric-disposition",
+      "to": "disposition",
+      "variant": "default"
+    },
+    {
+      "from": "rescore",
+      "id": "rescore-disposition",
+      "to": "disposition",
+      "variant": "default"
+    }
+  ],
+  "lanes": [
+    {
+      "id": "work",
+      "label": "Agents",
+      "variant": "normal"
+    },
+    {
+      "id": "gates",
+      "label": "Gates",
+      "variant": "normal"
+    }
+  ],
+  "meta": {
+    "output": "examples/diagrams/rubric-repair.html",
+    "quality_profile": "standard",
+    "subtitle": "The smallest honest admission pipeline, on existing grammar only: author -> blind rubric -> one repair round -",
+    "title": "rubric-repair"
+  },
+  "nodes": [
+    {
+      "col": 0,
+      "id": "author",
+      "label": "Author",
+      "lane": "work",
+      "sublabel": "subject tracker",
+      "type": "backend",
+      "width": 104
+    },
+    {
+      "col": 1,
+      "id": "gate-authored",
+      "label": "Gate Authored",
+      "lane": "gates",
+      "sublabel": "",
+      "tag": "branch",
+      "type": "security",
+      "width": 104
+    },
+    {
+      "col": 2,
+      "id": "rubric",
+      "label": "Rubric",
+      "lane": "work",
+      "sublabel": "blind rubric review",
+      "type": "backend",
+      "width": 104
+    },
+    {
+      "col": 3,
+      "id": "gate-disagree",
+      "label": "Gate Disagree",
+      "lane": "gates",
+      "sublabel": "",
+      "tag": "branch",
+      "type": "security",
+      "width": 104
+    },
+    {
+      "col": 4,
+      "id": "repair",
+      "label": "Repair",
+      "lane": "work",
+      "sublabel": "one repair round for",
+      "type": "backend",
+      "width": 104
+    },
+    {
+      "col": 5,
+      "id": "disposition",
+      "label": "Disposition",
+      "lane": "work",
+      "sublabel": "apply exactly one",
+      "type": "backend",
+      "width": 104
+    },
+    {
+      "col": 5,
+      "id": "rescore",
+      "label": "Rescore",
+      "lane": "work",
+      "sublabel": "blind re score of",
+      "type": "backend",
+      "width": 104,
+      "yOffset": 92
+    }
+  ],
+  "phases": [
+    {
+      "fromCol": 0,
+      "id": "roots",
+      "label": "entry",
+      "toCol": 0
+    },
+    {
+      "fromCol": 1,
+      "id": "mid",
+      "label": "hand-offs",
+      "toCol": 4
+    },
+    {
+      "fromCol": 5,
+      "id": "out",
+      "label": "terminus",
+      "toCol": 5
+    }
+  ],
+  "schema_version": 2
+}

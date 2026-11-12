@@ -1,0 +1,114 @@
+{
+  "grammar": "wf/1",
+  "name": "rubric-repair",
+  "provenance": {
+    "owner": "author-estate (study-council distillation)",
+    "source": "pack3 bead-promote, genericized 2026-11-11"
+  },
+  "description": "The smallest honest admission pipeline, on existing grammar only: author -> blind rubric -> one repair round -> re-score -> stop rule -> exactly one disposition. THE BLIND LAW: the rubric seat re-reads the record AS COMMITTED in the tracker and never trusts the author seat's narrative — an author that could grade its own homework was not being reviewed. THE ONE-ROUND LAW: disagreement routes through exactly one repair, then one re-score; a second disagreement is the STOP RULE — it routes the record to a human with the open question named, NOT another round (no native loop engine exists, and retry ownership is spelled out, never implied). THE SINGLE-DISPOSITION LAW: the disposition node applies exactly one label from its decision ladder and never hedges. PRUNE LAW (visible here twice): the repair arm prunes on agreement, and the disposition node still fires afterwards because it keeps one live dependency (rubric) — a skipped sibling dependency does not cascade-kill it. run_context seeds (both required): 'item' = the tracker record under admission; 'scratch' = an absolute pre-existing artifact directory every seat writes its answer JSON into.",
+  "defaults": {
+    "timeout": 1200,
+    "max_turns": 12,
+    "context": "You are one seat of a rubric-repair admission lane. Ground rules:\n- The tracker record as committed is truth; re-read it, never trust a prior seat's narrative.\n- Prior-art citations come only from a real search you ran; 'no prior art found' is the honest empty — never invent a citation.\n- Unsure is a first-class answer: emit the stop-rule verdict, do not guess.\n- All artifact paths absolute, under the run's scratch dir only.\n- Keep answers to the schema; one fenced ```json block as your final message. Never print secrets."
+  },
+  "nodes": [
+    {
+      "id": "author",
+      "type": "agent",
+      "max_turns": 12,
+      "timeout": 2400,
+      "goal": "Subject: tracker record {run.item}. Re-read it with your tracker's read tools. If it is already dispositioned (workable, needs-*, blocked, closed) or plainly outside this lane's reach, write the artifact with verdict=skip-not-mine and stop. Otherwise TRANSFORM it: search for prior art on the subject (near-dupes, prior failures of this idea class, superseded machinery), then rewrite the body to the canonical spine — ## Symptom, ## Root cause, ## Fix scope, ## Vision alignment, ## Rejected simpler alternatives (each rejection citing a real prior-art hit or the honest empty). Name the done-check: an Acceptance section with one concrete command that exits 0 iff done. If the body spans multiple independent deliverables, set split_campaign=true and scope the card down to the first instead of authoring a monster. Apply the rewrite to the record (body only — labels are the disposition seat's job). Write your answer JSON to {run.scratch}/author.json.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "item": {"type": "string"},
+          "verdict": {"type": "string", "description": "authored | skip-not-mine"},
+          "sections_ok": {"type": "boolean", "description": "true iff the body now carries all canonical sections with real content"},
+          "named_done_check": {"type": "boolean", "description": "true iff Acceptance names a concrete machine-checkable done-command"},
+          "hindsight_cited": {"type": "boolean", "description": "true iff Rejected alternatives cites at least one real prior-art hit or states the honest empty"},
+          "split_campaign": {"type": "boolean", "description": "true iff scope warrants a parent+children campaign instead of one card"},
+          "summary": {"type": "string", "description": "one paragraph: what you changed and why"}
+        },
+        "required": ["item", "verdict", "sections_ok", "named_done_check", "hindsight_cited", "split_campaign"]
+      }
+    },
+    {
+      "id": "gate-authored",
+      "type": "gate",
+      "after": ["author"],
+      "when": "out.author.verdict == 'authored'",
+      "on_skip": "prune"
+    },
+    {
+      "id": "rubric",
+      "type": "agent",
+      "after": ["gate-authored"],
+      "inputs": ["author"],
+      "goal": "BLIND rubric review of record {run.item} AS COMMITTED in the tracker (re-read it — do not trust the author seat's narrative; the author's summary in your inputs tells you where to look, nothing more). Score 0-10: does the body state the real symptom, the actual root cause, a bounded fix scope, why it serves the larger goal, at least one rejected simpler alternative with a real prior-art citation or the stated honest empty, and an Acceptance done-check that is a command someone can run? Thin, vague, or invented prior art = findings lines and agreement=false. A record whose scope is genuinely a campaign = agreement=false with the finding 'split-campaign: <n parts>'. agreement=true only when the score clears the bar AND every canonical section holds real content. Write {run.scratch}/rubric.json.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "agreement": {"type": "boolean", "description": "true iff the score clears the bar and every canonical section has real content"},
+          "score": {"type": "integer", "description": "0-10 rubric score"},
+          "findings": {"type": "string", "description": "each defect as one line; empty iff clean"}
+        },
+        "required": ["agreement", "score", "findings"]
+      }
+    },
+    {
+      "id": "gate-disagree",
+      "type": "gate",
+      "after": ["rubric"],
+      "when": "out.rubric.agreement == False",
+      "on_skip": "prune"
+    },
+    {
+      "id": "repair",
+      "type": "agent",
+      "after": ["gate-disagree"],
+      "inputs": ["rubric"],
+      "timeout": 1800,
+      "goal": "One repair round for record {run.item}: the rubric seat's findings are in your Inputs. Fix each NAMED defect in the body (re-search prior art if prior art was the defect); do not re-derive what the first pass got right. If a finding cannot be fixed without human input (intent unclear, scope dispute), set repaired=false and say exactly what is unclear. Write {run.scratch}/repair.json.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "repaired": {"type": "boolean", "description": "true iff every finding was addressed in a body revision"},
+          "summary": {"type": "string", "description": "finding-by-finding: what you changed"}
+        },
+        "required": ["repaired", "summary"]
+      }
+    },
+    {
+      "id": "rescore",
+      "type": "agent",
+      "after": ["repair"],
+      "goal": "Blind re-score of record {run.item} after ONE repair round: re-read the tracker, ignore all narratives, apply the same rubric as round one. This is the second-disagreement stop: if you still disagree, agreement=false and findings must name what a human must decide — the lane stop-rules this record, so make the open question crisp and short. Write {run.scratch}/rescore.json.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "agreement": {"type": "boolean", "description": "true iff the repaired body clears the rubric"},
+          "score": {"type": "integer"},
+          "findings": {"type": "string"}
+        },
+        "required": ["agreement", "score", "findings"]
+      }
+    },
+    {
+      "id": "disposition",
+      "type": "agent",
+      "after": ["rubric", "rescore"],
+      "inputs": ["author", "rubric", "repair", "rescore"],
+      "timeout": 900,
+      "goal": "Apply exactly ONE disposition to record {run.item}. Read {run.scratch}/author.json, rubric.json, and (if present) repair.json, rescore.json. Decision rule, in order: author verdict=skip-not-mine -> skip-not-mine (no write). rubric agreement=true -> workable. rescore present with agreement=true -> workable. rescore present with agreement=false (second disagreement — the stop rule fired) -> needs-human. repair said repaired=false, or a finding names unclear intent -> needs-human. author split_campaign=true or a finding says 'split-campaign' -> needs-design. rubric finds the record should not exist -> reject-close (comment first, then close with the reason). Writes: set the disposition label on the record (skip for skip-not-mine) and leave one verdict-line comment: 'admission-lane: <disposition> — <one-line rationale>'. needs-human comments must open with 'needs-decision:' so the human-intake carrier can find them. Exactly one disposition — no hedging, no untouched record unless skip-not-mine. Write {run.scratch}/disposition.json.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "applied": {"type": "boolean", "description": "true iff the label+comment write succeeded"},
+          "disposition": {"type": "string", "description": "exactly one of: workable | needs-design | needs-human | reject-close | skip-not-mine"},
+          "rationale": {"type": "string"}
+        },
+        "required": ["disposition", "applied"]
+      }
+    }
+  ]
+}

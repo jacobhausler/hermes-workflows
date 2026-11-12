@@ -1,0 +1,96 @@
+{
+  "grammar": "wf/1",
+  "name": "admission-lap",
+  "provenance": {
+    "owner": "author-estate (study-council distillation)",
+    "source": "peer dispatch guard, restated in native grammar 2026-11-11"
+  },
+  "description": "The worked TYPED-LAUNCH-CONTRACT example: a graph-level `params` block, a `where` depth-ladder seam, and a `by` verb-family patch — the dispatcher story a zero-LLM guard needs. THE DISPATCHER FLOW this file is built for: a small non-LLM guard script prints one LAUNCH brief (graph_path + lane_key + the run_context binding map); the session launches `run from: admission-lap` with that map; the DOOR refuses every missing or unknown binding in ONE answer (error_type params_contract, violations named) BEFORE any state is written — no half-run to clean up. The shelf surfaces the contract to dispatchers: `library name:admission-lap` / `/wf show admission-lap` lists required pins unfilled and tune defaults pre-filled (the meta.params envelope is derived from the block at save). THE SEAMS: `where: {param: depth, in: [full]}` removes the peer-rubric node entirely when depth=fast — removal cascade-prunes its descendants BEFORE the graph exists (the depth-ladder idiom); `by: {depth: {...}}` value-patches the report seat's context per effective value (the verb-family idiom). At depth=fast the report still fires: the structurally-absent peer is not a dependency that died, and the live rubric dep carries it — removal differs from pruning exactly as the door-time seam differs from a false `when`. Totality law: every declared slot must be referenced and every operative {run.KEY} must be declared; this graph carries its ONE contract as `params` (no run_context contract block).",
+  "params": {
+    "BEAD": {"kind": "pin", "desc": "subject record id under admission"},
+    "SCRATCH": {"kind": "pin", "desc": "absolute pre-existing artifact directory every seat writes into"},
+    "depth": {"kind": "tune", "domain": ["fast", "full"], "default": "fast"}
+  },
+  "defaults": {
+    "timeout": 1200,
+    "max_turns": 10,
+    "context": "You are one seat of an admission lap running under a typed launch contract. Ground rules:\n- The tracker record as committed is truth; re-read it, never trust a prior seat's narrative.\n- All artifact paths absolute, under the run's scratch dir only.\n- Keep answers to the schema; one fenced ```json block as your final message. Never print secrets."
+  },
+  "nodes": [
+    {
+      "id": "author",
+      "type": "agent",
+      "goal": "Subject: tracker record {run.BEAD}. Re-read it with your tracker's read tools. Bring it to the canonical spine (symptom, root cause, bounded fix scope, one rejected simpler alternative citing real prior art or the honest empty, and an Acceptance done-check that is a command). Write your answer JSON to {run.SCRATCH}/author.json and reply with ONLY fenced json {\"verdict\": \"authored|skip-not-mine\", \"summary\": \"<one paragraph: what you changed and why>\"}",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "verdict": {"type": "string"},
+          "summary": {"type": "string"}
+        },
+        "required": ["verdict", "summary"]
+      }
+    },
+    {
+      "id": "gate-armed",
+      "type": "gate",
+      "after": ["author"],
+      "when": "out.author.verdict == 'authored'",
+      "on_skip": "prune"
+    },
+    {
+      "id": "rubric",
+      "type": "agent",
+      "after": ["gate-armed"],
+      "inputs": ["author"],
+      "goal": "BLIND rubric pass on record {run.BEAD} as committed (re-read it; the author's summary only says where to look). Score 0-10 against the canonical spine; thin, vague, or invented content = named findings. Write {run.SCRATCH}/rubric.json and reply with ONLY fenced json {\"agreement\": true|false, \"score\": <0-10>, \"findings\": \"<one line per defect; empty iff clean>\"}",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "agreement": {"type": "boolean"},
+          "score": {"type": "integer"},
+          "findings": {"type": "string"}
+        },
+        "required": ["agreement", "score", "findings"]
+      }
+    },
+    {
+      "id": "peer-rubric",
+      "type": "agent",
+      "after": ["gate-armed"],
+      "inputs": ["author"],
+      "where": {"param": "depth", "in": ["full"]},
+      "goal": "Second BLIND rubric pass on record {run.BEAD} as committed — an independent seat, same 0-10 spine rubric, its own findings. Disagreement between the two passes is the signal the full-depth lap pays for; do not read the sibling's artifact. Write {run.SCRATCH}/peer_rubric.json and reply with ONLY fenced json {\"agreement\": true|false, \"score\": <0-10>, \"findings\": \"<one line per defect; empty iff clean>\"}",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "agreement": {"type": "boolean"},
+          "score": {"type": "integer"},
+          "findings": {"type": "string"}
+        },
+        "required": ["agreement", "score", "findings"]
+      }
+    },
+    {
+      "id": "report",
+      "type": "agent",
+      "after": ["rubric", "peer-rubric"],
+      "inputs": ["rubric", "peer-rubric"],
+      "by": {
+        "depth": {
+          "fast": {"context": "Depth tier 'fast': the report seat compresses hard — one verdict line plus the findings array verbatim; no narrative."},
+          "full": {"context": "Depth tier 'full': the report seat expands — reconcile the two blind passes, name where they disagree and why, and state the single disposition the lap recommends for record {run.BEAD}."}
+        }
+      },
+      "goal": "Report the admission lap for {run.BEAD}. At full depth your inputs carry BOTH blind passes: reconcile them, name the disagreement, recommend exactly one disposition (workable | needs-fix | needs-human | reject). At fast depth the peer pass was removed at the door — report from the rubric pass alone and say so in one line. Write {run.SCRATCH}/report.json and reply with ONLY fenced json {\"disposition\": \"<recommended label>\", \"disagreement\": \"<lines where the passes differ, or 'single-pass lap'>\", \"findings\": [\"<actionable finding lines>\"]}",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "disposition": {"type": "string"},
+          "disagreement": {"type": "string"},
+          "findings": {"type": "array", "items": {"type": "string"}}
+        },
+        "required": ["disposition", "disagreement", "findings"]
+      }
+    }
+  ]
+}

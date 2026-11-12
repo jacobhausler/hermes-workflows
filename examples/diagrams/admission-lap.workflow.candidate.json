@@ -1,0 +1,143 @@
+{
+  "cards": [
+    {
+      "dot": "cyan",
+      "items": [
+        "The typed launch contract, exercised: pins carry content, the tune knob carries presence and patch, and the door refuses every missing or unknown binding before any write",
+        "The depth seam removes the second rubric seat at LAUNCH time \u2014 the run record is the concrete graph, so what you read is what ran",
+        "A dispatcher can build the launch brief with no-LLM: required pins listed, tune defaults pre-filled, refusals named together in a single refusal"
+      ],
+      "title": "Why it works"
+    },
+    {
+      "dot": "rose",
+      "items": [
+        "5 nodes, 1 gate, 1 branch: author -> gate -> twin blind rubrics -> by-patched report",
+        "The report seat survives fast-depth removal exactly as the prune law says: a terminal-skipped sibling is not a live dependency",
+        "Derived from this example's bytes by scripts/graph_diagram.py"
+      ],
+      "title": "Contract"
+    }
+  ],
+  "diagram_type": "workflow",
+  "edges": [
+    {
+      "from": "author",
+      "id": "author-gate-armed",
+      "to": "gate-armed",
+      "variant": "security"
+    },
+    {
+      "from": "gate-armed",
+      "id": "gate-armed-rubric",
+      "to": "rubric",
+      "variant": "default"
+    },
+    {
+      "from": "gate-armed",
+      "id": "gate-armed-peer-rubric",
+      "to": "peer-rubric",
+      "variant": "default"
+    },
+    {
+      "from": "rubric",
+      "id": "rubric-report",
+      "to": "report",
+      "variant": "default"
+    },
+    {
+      "from": "peer-rubric",
+      "id": "peer-rubric-report",
+      "to": "report",
+      "variant": "default"
+    }
+  ],
+  "lanes": [
+    {
+      "id": "work",
+      "label": "Agents",
+      "variant": "normal"
+    },
+    {
+      "id": "gates",
+      "label": "Gates",
+      "variant": "normal"
+    }
+  ],
+  "meta": {
+    "output": "examples/diagrams/admission-lap.html",
+    "quality_profile": "standard",
+    "subtitle": "The worked TYPED-LAUNCH-CONTRACT example: a graph-level `params` block, a `where` depth-ladder seam, and a `by",
+    "title": "admission-lap"
+  },
+  "nodes": [
+    {
+      "col": 0,
+      "id": "author",
+      "label": "Author",
+      "lane": "work",
+      "sublabel": "subject tracker",
+      "type": "backend",
+      "width": 104
+    },
+    {
+      "col": 1,
+      "id": "gate-armed",
+      "label": "Gate Armed",
+      "lane": "gates",
+      "sublabel": "",
+      "tag": "branch",
+      "type": "security",
+      "width": 104
+    },
+    {
+      "col": 2,
+      "id": "peer-rubric",
+      "label": "Peer Rubric",
+      "lane": "work",
+      "sublabel": "second blind rubric",
+      "type": "backend",
+      "width": 104
+    },
+    {
+      "col": 2,
+      "id": "rubric",
+      "label": "Rubric",
+      "lane": "work",
+      "sublabel": "blind rubric pass on",
+      "type": "backend",
+      "width": 104,
+      "yOffset": 92
+    },
+    {
+      "col": 3,
+      "id": "report",
+      "label": "Report",
+      "lane": "work",
+      "sublabel": "report the admission",
+      "type": "backend",
+      "width": 104
+    }
+  ],
+  "phases": [
+    {
+      "fromCol": 0,
+      "id": "roots",
+      "label": "entry",
+      "toCol": 0
+    },
+    {
+      "fromCol": 1,
+      "id": "mid",
+      "label": "hand-offs",
+      "toCol": 2
+    },
+    {
+      "fromCol": 3,
+      "id": "out",
+      "label": "terminus",
+      "toCol": 3
+    }
+  ],
+  "schema_version": 2
+}

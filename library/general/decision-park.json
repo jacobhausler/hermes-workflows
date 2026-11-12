@@ -1,0 +1,68 @@
+{
+  "meta": {
+    "description": "Decision park: present a parked decision to a human, hold it a week on a self-releasing 'defer' default, capture the answer as data, apply its effect in the tracker. Twin of basics/human-atom.",
+    "tags": ["use_case:decision", "domain:human-loop", "starter", "human-gate"],
+    "params": {
+      "record": {"desc": "where the decision request lives: a file path or a tracker id readable with your tools", "required": true}
+    }
+  },
+  "graph": {
+    "grammar": "wf/1",
+    "name": "decision-park",
+    "description": "Decision park — the starter human atom. A schema'd intake distills one parked decision, a human gate holds up to its ceiling and releases itself with the single 'defer' option, a capture seat applies the answer's effect in the tracker ONLY. THE TIMER-DEFAULT LAW: a timed release answers 'not yet' — the capture writes nothing; a timer default is never a decision. THE HOLD-VS-WALL LAW (#475) AND THE DAY CAP: capture.timeout equals the gate's hold_timeout so the answer lane can never die mid-collection; node timeouts cap at 86400, so a consumer-armed hold cannot exceed one day — longer waits re-ask on a fresh lap. Launch: `run from: general/decision-park` with binding record=<where the decision lives>. Every agent routes through model tiers (worker/manager) — no vendor model is named.",
+    "defaults": {
+      "timeout": 1200,
+      "context": "You are one lane of a decision park. Ground rules:\n- Your only write surface is the tracker the record names. No code, no git, no fleet.\n- The human's released answer is data: apply what it says, invent nothing. Silence is 'defer'.\n- Close reasons must cite the ruling verbatim; never close on an empty or bare reason.\n- Keep answers to the schema; one fenced ```json block as your final message. Never print secrets."
+    },
+    "nodes": [
+      {
+        "id": "intake",
+        "type": "agent",
+        "model": "worker",
+        "max_turns": 6,
+        "shape": "recon",
+        "goal": "Read the decision record at {run.record} with whatever read tools you have. It is a DECISION REQUEST: it waits on an owner choice, not on implementation. If it is already disposed (closed, or a correction supersedes its premise — cite it) set already_disposed=true. If the request has no real alternatives to choose between, it is not this family: set is_decision_record=false and explain in question_context. Otherwise distill it. Reply with ONLY fenced json {\"is_decision_record\": true|false, \"already_disposed\": true|false, \"question\": \"<the ONE decision, answerable in one line>\", \"options\": [\"<up to 4 concrete, mutually-exclusive options, first = your recommendation>\"], \"stakes\": \"<what stays stuck while undecided>\", \"recommendation\": \"<one line>\", \"question_context\": \"<3-6 lines that narrow the choice>\"}",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "is_decision_record": {"type": "boolean"},
+            "already_disposed": {"type": "boolean"},
+            "question": {"type": "string"},
+            "options": {"type": "array", "items": {"type": "string"}},
+            "stakes": {"type": "string"},
+            "recommendation": {"type": "string"},
+            "question_context": {"type": "string"}
+          },
+          "required": ["is_decision_record", "already_disposed", "question", "options", "stakes", "recommendation", "question_context"]
+        }
+      },
+      {
+        "id": "gate-is-decision",
+        "type": "gate",
+        "after": ["intake"],
+        "when": "out.intake.is_decision_record == True",
+        "on_skip": "prune"
+      },
+      {
+        "id": "ask-owner",
+        "type": "gate",
+        "after": ["gate-is-decision"],
+        "question": "Owner decision needed for {run.record}. The intake seat's answer carries the QUESTION, the OPTIONS (first = recommended), the STAKES and the CONTEXT — read it first (this run's status or gates view). Answer by choosing an option, or reply free-text with your ruling. Not deciding now? Pick 'defer' — nothing changes and the record stays parked (no answer within the hold timeout releases with this same default).",
+        "context": "Choose an option or answer free-text with your ruling. No answer by the hold_timeout releases with 'defer — keep the record parked, re-ask later' — the record stays parked, nothing is decided.",
+        "options": ["defer — keep the record parked, re-ask later"],
+        "default_option": "defer — keep the record parked, re-ask later",
+        "hold_timeout": 86400
+      },
+      {
+        "id": "capture",
+        "type": "agent",
+        "model": "manager",
+        "after": ["ask-owner"],
+        "inputs": ["intake", "ask-owner"],
+        "timeout": 86400,
+        "max_turns": 10,
+        "goal": "Capture the released answer for {run.record} and apply its effect in the tracker ONLY. The gate output is in your inputs: the released answer text (or the 'defer' timer default). Classify against the intake's options, then act — tracker writes only: (a) an OPTION was picked (not defer): comment the ruling verbatim, move the record to 'ready for work', do not launch it yourself — verdict=open; (b) DEFER (explicit or timer): no writes, the record stays parked — verdict=deferred; (c) the answer KILLS the question (won't-fix, moot, superseded): close the record citing the ruling verbatim — verdict=closed; (d) the answer needs a FRESH record first: file it linked to this one, close this record citing the ruling — verdict=rerouted with new_record_id. If intake said already_disposed, no writes, verdict=deferred, notes cite it. Never invent a decision the owner did not give. Reply with ONLY fenced json {\"verdict\": \"rerouted|closed|deferred|open\", \"decision\": \"<answer verbatim, or 'defer (timer)'>\", \"new_record_id\": \"<id or empty>\", \"notes\": \"<one line>\"}"
+      }
+    ]
+  }
+}

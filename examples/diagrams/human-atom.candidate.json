@@ -1,0 +1,122 @@
+{
+  "cards": [
+    {
+      "dot": "cyan",
+      "items": [
+        "The minimal BOUNDED human-in-the-loop atom: an intake distills the single decision, a person answers (or the hold expires into the defer default), a capture lane applies the released answer as data",
+        "Timer default != a result: the deferred release writes nothing and the record stays parked \u2014 the lane cannot mistake silence for a ruling",
+        "The hold-vs-wall law is baked in: the capture seat's own timeout equals the gate's hold ceiling, so no consumer can die mid-collection (and the day cap marks the longest legal armed hold)"
+      ],
+      "title": "Why it works"
+    },
+    {
+      "dot": "rose",
+      "items": [
+        "4 nodes, 2 gates, 1 branch: intake -> when-gate -> human hold -> capture",
+        "Single-option defer default releases the hold with 'not yet' instead of hanging forever",
+        "Derived from this example's bytes by scripts/graph_diagram.py"
+      ],
+      "title": "Contract"
+    }
+  ],
+  "diagram_type": "workflow",
+  "edges": [
+    {
+      "from": "intake",
+      "id": "intake-gate-is-decision",
+      "to": "gate-is-decision",
+      "variant": "security"
+    },
+    {
+      "from": "gate-is-decision",
+      "id": "gate-is-decision-ask-owner",
+      "to": "ask-owner",
+      "variant": "default"
+    },
+    {
+      "from": "ask-owner",
+      "id": "ask-owner-capture",
+      "to": "capture",
+      "variant": "default"
+    }
+  ],
+  "lanes": [
+    {
+      "id": "work",
+      "label": "Agents",
+      "variant": "normal"
+    },
+    {
+      "id": "gates",
+      "label": "Gates",
+      "variant": "normal"
+    }
+  ],
+  "meta": {
+    "output": "examples/diagrams/human-atom.html",
+    "quality_profile": "standard",
+    "subtitle": "The smallest honest human-in-the-loop atom: a schema'd intake presents ONE decision with concrete options, a h",
+    "title": "human-atom"
+  },
+  "nodes": [
+    {
+      "col": 0,
+      "id": "intake",
+      "label": "Intake",
+      "lane": "work",
+      "sublabel": "read the decision",
+      "type": "backend",
+      "width": 104
+    },
+    {
+      "col": 1,
+      "id": "gate-is-decision",
+      "label": "Gate Is Decis\u2026",
+      "lane": "gates",
+      "sublabel": "",
+      "tag": "branch",
+      "type": "security",
+      "width": 104
+    },
+    {
+      "col": 2,
+      "id": "ask-owner",
+      "label": "Ask Owner",
+      "lane": "gates",
+      "sublabel": "owner decision",
+      "tag": "human hold",
+      "type": "security",
+      "width": 104
+    },
+    {
+      "col": 3,
+      "id": "capture",
+      "label": "Capture",
+      "lane": "work",
+      "sublabel": "capture the released",
+      "type": "backend",
+      "width": 104
+    }
+  ],
+  "phases": [
+    {
+      "fromCol": 0,
+      "id": "roots",
+      "label": "entry",
+      "toCol": 0
+    },
+    {
+      "fromCol": 1,
+      "id": "mid",
+      "label": "hand-offs",
+      "toCol": 2
+    },
+    {
+      "fromCol": 3,
+      "id": "out",
+      "label": "terminus",
+      "toCol": 3
+    }
+  ],
+  "schema_version": 2
+}

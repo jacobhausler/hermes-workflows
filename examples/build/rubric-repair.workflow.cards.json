@@ -1,0 +1,22 @@
+{
+ "cards": [
+  {
+   "dot": "cyan",
+   "title": "Why it works",
+   "items": [
+    "The smallest honest admission pipeline: author, blind rubric, single repair round, re-score, stop rule, single disposition \u2014 no native loop engine needed because the round count is structural",
+    "Blindness is load-bearing: the rubric re-reads the record AS COMMITTED, so an author cannot grade its own homework",
+    "Second disagreement stops to a human with the open question named \u2014 the lane that loops forever is the lane that never admits it needs a person"
+   ]
+  },
+  {
+   "dot": "rose",
+   "title": "Contract",
+   "items": [
+    "{{nodes}} nodes, {{gates}} gates, {{branches}} branches: author -> gate -> rubric -> gate -> repair -> rescore -> disposition",
+    "The disposition join keeps a live dependency on the rubric, so agreement (pruned repair arm) still lands its single disposition",
+    "Derived from this example's bytes by scripts/graph_diagram.py"
+   ]
+  }
+ ]
+}

@@ -266,7 +266,8 @@ hand-passed envelope that disagrees warns s12), so `library name:` instantiate
 pre-fills tune defaults and lists pins unfilled. `where`/`by` without a `params`
 block is refused by name (a gate that can never fire is a typo).
 `wfcommon.params_errors` is the shared validator — run, validate, amend, save,
-and include doors measure the same law.
+and include doors measure the same law. Worked example:
+[examples/build/admission-lap.workflow.json](../examples/build/admission-lap.workflow.json).
 
 ## Composite graphs (include)
 

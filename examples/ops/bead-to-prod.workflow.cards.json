@@ -1,0 +1,22 @@
+{
+ "cards": [
+  {
+   "dot": "cyan",
+   "title": "Why it works",
+   "items": [
+    "Carrier scale without the folklore: every rule that keeps carriers honest is a node or a gate here \u2014 premise-first intake, commit-before-verify, tiered blind review through a join, after_partial on the judges",
+    "A complementary premise-gate pair routes dead questions to a stand-down terminal, so a blocked premise ends in a labeled record, never a silent drop",
+    "The exit is a no-token machine gate: the run cannot go greener than the checkout snapshot it found, and a machine timeout is failure, not approval"
+   ]
+  },
+  {
+   "dot": "rose",
+   "title": "Contract",
+   "items": [
+    "{{nodes}} nodes, {{gates}} gates, {{branches}} branches, {{edges}} edges: intake -> premise pair -> build -> test -> fix -> judges -> review join -> PR | stand-down -> machine exit-check",
+    "Review tiers itself on the diff-size line: sub-threshold diffs are single-reviewed and the join reads the skip as policy, not as loss",
+    "Derived from this example's bytes by scripts/graph_diagram.py"
+   ]
+  }
+ ]
+}
