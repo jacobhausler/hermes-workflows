@@ -846,7 +846,7 @@ WORKFLOW_PARAMS = {
         "action": {
             "type": "string",
             "enum": ["run", "status", "wait", "release", "release_lock", "steer", "inbox", "amend", "diff", "stop", "kill", "list", "save", "submit", "library", "doctor_version", "validate"],
-            "description": "run=launch a graph; wait=OPTIONAL blocking observation (not the default loop: lifecycle transitions wake the owner session on their own — end your turn after run); read state, RESPAWNING an idle runner if work is pending (blocks to the next boundary when one is live; when the lock is PROVEN wedged — Errno 11 with the kernel ledger showing zero holders and the admission lease dead — wait heals it first, the #44 escape hatch); status=read-model of a run; release=answer a held human gate; release_lock=operator hatch for a wedged runner.lock (#44): renames the stranded inode aside under the admission heal-barrier and hands the lane a fresh lock path — REFUSES unless zero live holders are proven (never heals on EACCES or a live holder); steer=queue steering text for a node; inbox=(child-side, cooperative) pull late steering lines baked for THIS spawn — call once at a natural seam; amend=replace the graph (invalidates changed nodes + all downstream by fingerprint), or pass patch to edit a few node fields without resubmitting the whole graph; submitted node text carrying {run.KEY} re-binds from the run's persisted launch binding (run_context_binding) or the amend refuses before any write (est-qohvi); diff=confirm surface: runs the amend door with dry_run FORCED (accepts patch or graph), returns the preview + graph_diff and touches nothing; stop=request stop; kill=node-targeted lane kill (node required): that lane's in-flight children are SIGKILLed, the node finishes failed error_class=killed, siblings and the run keep going; list=all runs; save=shelve a graph in the library under a name (from run_id or inline graph); library=list shelved graphs richly (name, description, tags, provenance, path-relative id). validate=dry-run the door's validation pipeline (defaults fill + defect collection + model/route policy) with no ping and no writes; returns {ok, errors:[{node,field,msg}], resolved_routes}. run from=<name> replays a shelved graph. submit=quarantine a hand-rolled graph for study (requires why_not_library >=80 chars; never joins the library — the quartermaster's human-gated loop decides); inbox kind=submissions lists them newest-first. doctor_version=read-only version truth for THIS install: {live_version, newest_packaged, source_commit, source_repo, drift} comparing plugin.yaml against the install.json provenance that pack.py stamps at build time (one sidecar schema; a sidecar predating source_repo loads and reads null) \u2014 one read, no network.",
+            "description": "run=launch a graph; wait=OPTIONAL blocking observation (not the default loop: lifecycle transitions wake the owner session on their own — end your turn after run); read state, RESPAWNING an idle runner if work is pending (blocks to the next boundary when one is live; when the lock is PROVEN wedged — Errno 11 with the kernel ledger showing zero holders and the admission lease dead — wait heals it first, the #44 escape hatch); status=read-model of a run; release=answer a held human gate; release_lock=operator hatch for a wedged runner.lock (#44): renames the stranded inode aside under the admission heal-barrier and hands the lane a fresh lock path — REFUSES unless zero live holders are proven (never heals on EACCES or a live holder); steer=queue steering text for a node; inbox=(child-side, cooperative) pull late steering lines baked for THIS spawn — call once at a natural seam; amend=replace the graph (invalidates changed nodes + all downstream by fingerprint), or pass patch to edit a few node fields without resubmitting the whole graph; submitted node text carrying {run.KEY} re-binds from the run's persisted launch binding (run_context_binding) or the amend refuses before any write (est-qohvi); diff=confirm surface: runs the amend door with dry_run FORCED (accepts patch or graph), returns the preview + graph_diff and touches nothing; stop=request stop; kill=node-targeted lane kill (node required): that lane's in-flight children are SIGKILLed, the node finishes failed error_class=killed, siblings and the run keep going; list=all runs; save=shelve a graph in the library under a name (from run_id or inline graph); library=list shelved graphs richly (name, description, tags, provenance, path-relative id); optional check:true echoes a digest re-check block — the shelf-vs-author drift verb (est-dv8q4). validate=dry-run the door's validation pipeline (defaults fill + defect collection + model/route policy) with no ping and no writes; returns {ok, errors:[{node,field,msg}], resolved_routes}. run from=<name> replays a shelved graph. submit=quarantine a hand-rolled graph for study (requires why_not_library >=80 chars; never joins the library — the quartermaster's human-gated loop decides); inbox kind=submissions lists them newest-first. doctor_version=read-only version truth for THIS install: {live_version, newest_packaged, source_commit, source_repo, drift} comparing plugin.yaml against the install.json provenance that pack.py stamps at build time (one sidecar schema; a sidecar predating source_repo loads and reads null) \u2014 one read, no network.",
         },
         "run_id": {"type": "string", "description": "Run id (required for every action except run/list)."},
         "name": {"type": "string", "description": "run: overrides graph.name (default workflow); save: library name overrides graph.name (lowercase, [-_.]); library: return one entry with refs-derived required params and an instantiate command. amend: set graph.name in the replacement graph; omitting it retains the run name."},
@@ -858,6 +858,7 @@ WORKFLOW_PARAMS = {
         "params": {"type": "object", "additionalProperties": {"type": "object"}, "description": "save: optional meta.params descriptions/default suggestions for run_context keys. Required keys derive from graph refs, never this metadata. Omission retains prior params; {} deliberately clears them. Missing/dead declarations warn, never prevent saving."},
         "tags": {"type": "array", "items": {"type": "string"}, "description": "save (optional): 1-10 discovery tags — legacy flat tokens (lowercase alnum [-_.] <=32) or faceted `facet:value` (facets: use_case, repo, domain, risk, note; values [a-z0-9._-] <=48; e.g. use_case:code-review). For explicit curation, library exposes tag_vocab for optional reuse. Resaving without tags keeps the entry's existing tags; stored in the meta envelope. library (optional): filter to entries carrying ALL listed tags (same 1-10 law as save — an empty array errors on BOTH verbs; omit tags for no filter); an empty result's tag_match_counts says which term starved."},
         "why_not_library": {"type": "string", "description": "submit (REQUIRED, >=80 chars): why no library graph covered this task — name the entries you checked and the shape you needed. Only explicit study submissions require this field; ordinary run does not."},
+        "check": {"type": "boolean", "description": "library (optional, default false): true = echo a `check` block — the shelf-vs-author drift verb (est-dv8q4). For every echoed row recompute wfcommon.source_digest over the entry's own canonical nodes and compare against the stored provenance.source_digest; when provenance.source resolves to a readable local graph file, recompute from that file's nodes too. Echo: {checked, ok, drifted:[{id, stored, recomputed, source_digest_match}], unstamped, unresolvable_source}; source_digest_match is null when no source-side measurement was possible (no source, or an unresolvable one). Read-only — never mutates the shelf; the response is byte-identical when the flag is absent. A drifted row is a shelf that no longer matches the bytes its author source carries."},
         "lane": {"type": "string", "description": "submit (optional, <=128 chars): lane label carried beside the submission for the quartermaster's triage; no scheduling effect."},
         "kind": {"type": "string", "enum": ["submissions"], "description": "inbox (optional): 'submissions' = list workflow submit study items newest-first (read-only; promotion is a human decision). Omit inside a child spawn to pull baked steering as before."},
         "team": {"type": "string", "description": "run (optional, <=64 chars): team label stamped into run.json and shown by list; no effect on scheduling."},
@@ -2540,7 +2541,78 @@ def _library_rows():
             rows.append(row)
     return rows, skipped, quarantined
 
+def _lib_entry_path(name):
+    """READ resolver for listing rows: the file that produced a listed name.
+    Mirrors the _library_rows walk (roots in _library_roots order; `general/`
+    is part of the name, so the same relative join addresses it) — first
+    existing match wins, which is exactly the first-seen `seen` law the walk
+    applies, so the check can never examine a different file than the row
+    came from."""
+    rel = str(name) + ".json"
+    for root in _library_roots():
+        p = root / rel
+        if p.is_file():
+            return p
+    return None
+
+
+def _library_digest_check(rows):
+    """est-dv8q4 (WOF study council s3_engine, PR-6 shelf tooling): the
+    shelf-vs-author drift verb. For each listed row recompute
+    wfcommon.source_digest over the row's own canonical nodes and compare
+    against the stored provenance.source_digest; when provenance.source
+    resolves to a readable local graph file, recompute from that file's nodes
+    too. A drifted row is a shelf that no longer matches the bytes its author
+    source carries — today only a hand-compare finds it. Read-only: NOTHING
+    mutates; a bare save (source never passed, rule 10) is unstamped-or-not,
+    never a broken shelf, and an unresolvable source names itself rather than
+    fabricating a match (honest degradation). Collapse-to-one: `drifted` is
+    name-ASC — a total order keyed on unique listing names.
+    `ok` is CONFIRMED match only: an unreadable row file lands in `drifted`
+    with recomputed=null (drift is the complement of a confirmed match)."""
+    checked = ok = unstamped = unresolvable = 0
+    drifted = []
+    for row in rows:
+        stored = row.get("source_digest")
+        if not isinstance(stored, str) or not stored:
+            unstamped += 1
+            continue
+        checked += 1
+        recomputed = None
+        p = _lib_entry_path(row.get("name"))
+        if p is not None:
+            try:
+                data = json.loads(p.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                data = None
+            graph = _common.library_entry(data).get("graph") if data is not None else None
+            if isinstance(graph, dict):
+                recomputed = _common.source_digest(graph)
+        match = None
+        src = row.get("source")
+        if isinstance(src, str) and src.strip():
+            try:
+                sdata = json.loads(Path(src.strip()).expanduser().read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                sdata = None
+            sgraph = _common.library_entry(sdata).get("graph") if sdata is not None else None
+            if isinstance(sgraph, dict):
+                match = _common.source_digest(sgraph) == stored
+            else:
+                unresolvable += 1
+        if recomputed != stored or match is False:
+            drifted.append({"id": row.get("id") or str(row.get("name")),
+                            "stored": stored, "recomputed": recomputed,
+                            "source_digest_match": match})
+    ok = checked - len(drifted)
+    drifted.sort(key=lambda d: str(d["id"]))
+    return {"checked": checked, "ok": ok, "drifted": drifted,
+            "unstamped": unstamped, "unresolvable_source": unresolvable}
+
+
 def act_library(args):
+    if "check" in args and not isinstance(args["check"], bool):
+        return {"error": "check must be a boolean"}
     rows, skipped, quarantined = _library_rows()
     if args.get("name") is not None:
         name = args["name"]
@@ -2559,7 +2631,9 @@ def act_library(args):
         if row.get("params"):
             launch["run_context"] = {k: v.get("default", "") for k, v in row["params"].items()}
         return {"entry": dict(row, instantiate=launch, unfilled=unfilled,
-                              command="workflow " + json.dumps(launch, ensure_ascii=False))}
+                              command="workflow " + json.dumps(launch, ensure_ascii=False)),
+                              **({"check": _library_digest_check([row])}
+                                 if args.get("check") else {})}
     # Preserve the bare-library hint; populated recipes remain optional reuse.
     hinted = "workflow run from=<name> replays one; workflow save graph=... shelves a new one"
     if any(("id" in r) for r in rows):
@@ -2626,6 +2700,11 @@ def act_library(args):
                            "co-occur; drop the rarest term (" + rarest
                            + ") or union with two calls")
             out["hint"] = hinted   # out was built pre-diagnosis; refresh it
+    if args.get("check"):
+        # est-dv8q4: the drift verb covers exactly the rows this listing echoes
+        # (a tags filter narrows it) and lands no key when the flag is absent —
+        # golden-bytes law untouched.
+        out["check"] = _library_digest_check(rows)
     if skipped:
         out["skipped"] = skipped
     if quarantined:   # F-2 (#62): every refused entry is named WITH its typed reason;
