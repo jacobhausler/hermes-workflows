@@ -4,7 +4,7 @@ State truth lives in wfcommon.run_state (same function the door uses); gate rele
 shares the door's single answer path. Endpoints land under /api/plugins/hermes-workflows.
 The UI does NOT resume runs — the owning agent does (philosophy: agent owns the run).
 """
-import hashlib, importlib.util, json, os, sys
+import hashlib, importlib.util, json, os, sys, threading, time
 from pathlib import Path
 
 _PLUGIN_ROOT = Path(__file__).resolve().parent.parent
@@ -198,7 +198,10 @@ def _fold_metrics(ms):
     # on ANY unknown child — the door and this surface cannot diverge.
     return _workflow_common().fold_child_metrics(ms)
 
-def _list_runs():
+def _scan_runs():
+    """The full census: every de-duplicated run VIEW (uncapped), plus the
+    whole-census summary. est-ey31s: split out of _list_runs so the route can
+    slice pages from ONE scan; response keys are produced by _list_runs."""
     # F1 #14: merge the legacy launch root the way the door's act_list does — a
     # pre-fix run opens by URL via _safe_run's find_run fallback and must also
     # appear in the list. Resolved root wins on id collision.
@@ -242,17 +245,79 @@ def _list_runs():
                 executed += 1
             runs.append(v)
     summary = common.run_summary(runs, executed=executed)
-    return {**({"roots": [str(x) for x in roots]} if not runs else {}),
-            "runs": runs[:100], **summary}
+    # _roots is the scan record's private key: _list_runs renders it as the
+    # public `roots` ONLY on an empty census, exactly as before the split.
+    return {"_roots": [str(x) for x in roots], "runs": runs, **summary}
+
+
+def _list_runs(offset=0, limit=100, *, _record=None):
+    """Public list response (contract unchanged since before est-ey31s):
+    first page of 100 newest rows by default, whole-census summary, `roots`
+    alongside the summary when the census is empty. Direct callers get a
+    FRESH scan (no cache) unless they pass a scan record — the dashboard
+    route below is the only cache consumer, so every existing in-process
+    probe of _list_runs keeps seeing live truth."""
+    rec = _record if _record is not None else _scan_runs()
+    off = max(0, offset)
+    page = rec["runs"][off:off + max(0, limit)]
+    return {**({"roots": rec["_roots"]} if not rec["runs"] else {}),
+            "runs": page,
+            **{k: v for k, v in rec.items() if k not in ("_roots", "runs")}}
+
+
+# est-ey31s (webui slowness at agents.hausler.cc): the census scan measured
+# 1.06-1.29s over ~560 run dirs (dir walk + ONE batch lock-probe child + a
+# per-dir _view + a per-row logs check). Two changes keep the SHARED event
+# loop responsive — the serve process hosts every agent lane's traffic:
+#   (a) the GET routes are plain `def`, so Starlette dispatches them to a
+#       worker thread; an `async def` calling this scan blocks the loop and
+#       every other webui call queues behind it (the owner-visible "not
+#       working"). Same dispatch the /api/sessions reads already use.
+#   (b) scans collapse through a short-TTL snapshot cache with a lock —
+#       the shape of hermes-agent's _TOPOLOGY_CACHE (web_server_gateway.py),
+#       proven against the same poll-storm class. N concurrent pollers pay
+#       ONE scan per window, not N.
+# Freshness: run progress is polled data; RUNS_CACHE_TTL staleness is
+# invisible to a human, and the gate-release POST invalidates so a UI action
+# reflects on the very next read. The cache stores the full scan RECORD;
+# responses are built per request, so no shared mutable payload.
+RUNS_CACHE_TTL = 2.0
+_monotonic = time.monotonic  # seam for time-free tests (behaviour, not source)
+_RUNS_CACHE = {"ts": 0.0, "data": None}
+_RUNS_CACHE_LOCK = threading.Lock()
+
+
+def _runs_snapshot():
+    c = _RUNS_CACHE
+    now = _monotonic()
+    if c["data"] is not None and now - c["ts"] < RUNS_CACHE_TTL:
+        return c["data"]
+    with _RUNS_CACHE_LOCK:
+        now = _monotonic()
+        if c["data"] is not None and now - c["ts"] < RUNS_CACHE_TTL:
+            return c["data"]
+        rec = _scan_runs()
+        _RUNS_CACHE.update(ts=_monotonic(), data=rec)
+        return rec
+
+
+def _runs_cache_invalidate():
+    _RUNS_CACHE["data"] = None
 
 
 if router is not None:
     @router.get("/runs")
-    async def list_runs():
-        return _list_runs()
+    def list_runs(offset: int = 0, limit: int = 100):
+        # est-ey31s: sync def => threadpool (off the shared loop); the scan is
+        # TTL-collapsed, pages slice from the ONE cached census. Plain int
+        # defaults (not Query()): FastAPI reads them as query params, and
+        # _list_runs clamps negatives — no new 422 class, no import growth.
+        # Default call answers exactly the pre-est-ey31s payload (newest 100
+        # + summary).
+        return _list_runs(offset, limit, _record=_runs_snapshot())
 
     @router.get("/settings")
-    async def get_settings():
+    def get_settings():
         """est-z717: the desktop's tray-gate bootstrap read. Answers ONLY the
         keys the desktop consumes — {tray: bool}. owner_setting('tray') is THE
         established settings shape (wfcommon: the door's plugin ctx reader when
@@ -269,12 +334,12 @@ if router is not None:
         return {"tray": v is True}
 
     @router.get("/runs/{run_id}")
-    async def get_run(run_id: str):
+    def get_run(run_id: str):  # est-ey31s: sync def — the detail view is FS I/O
         r = _safe_run(run_id)
         return (_view(r, full=True) if r else None) or {"error": "unknown run"}
 
     @router.get("/runs/{run_id}/nodes/{nid}/log")
-    async def get_node_log(run_id: str, nid: str, index: int | None = None,
+    def get_node_log(run_id: str, nid: str, index: int | None = None,
                            attempt: int | None = None, kind: str = "log",
                            tail: int = LOG_TAIL):
         """O2's ONE tail (the desktop's `rec?.raw` plumbing dies with this route).
@@ -291,6 +356,11 @@ if router is not None:
     async def release_gate(run_id: str, body: dict):
         """UI door onto the SAME answer path the tool uses (incl. stale-answer
         overwrite). Does NOT resume the run — the owning agent does."""
+        # est-ey31s: a gate answer changes the census — invalidate the snapshot
+        # FIRST (even for an unknown id, where the next scan is free labour) so
+        # the releasing UI's very next GET reflects the action inside one
+        # response, not one TTL window.
+        _runs_cache_invalidate()
         r = _safe_run(run_id)
         if not r:
             return {"ok": False, "error": "unknown run"}
