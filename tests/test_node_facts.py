@@ -46,7 +46,13 @@ def check(cond, msg):
     ok += 1; print("PASS", msg)
 
 def call(route_fn, **kw):
-    return asyncio.get_event_loop_policy().new_event_loop().run_until_complete(route_fn(**kw))
+    out = route_fn(**kw)
+    if hasattr(out, "__await__"):
+        # est-ey31s: GET routes moved to plain def (threadpool dispatch, off
+        # the shared event loop). Awaited answers stay supported, so this pin
+        # tracks the RESPONSE contract, not the coroutine-ness of the handler.
+        return asyncio.get_event_loop_policy().new_event_loop().run_until_complete(out)
+    return out
 
 def route_for(path):
     for rt in api.router.routes:

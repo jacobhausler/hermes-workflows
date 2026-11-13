@@ -2,8 +2,8 @@
 """est-ey31s — the /runs census must not occupy the shared event loop, and
 the same census must be scanned ONCE per short window, not once per poll.
 
-Production measurement (rhuidean serve :9119, 2026-11-12): one GET /runs cost
-1.06-1.29s over ~560 run dirs, SYNCHRONOUS inside an `async def` handler — so
+Production measurement (the estate's production serve, 2026-11-12): one GET
+/runs cost 1.06-1.29s over ~560 run dirs, SYNCHRONOUS inside an `async def` handler — so
 it froze the event loop of the process that also hosts every agent lane, and
 every other webui call queued behind it (the owner-visible "webui not
 working"). /api/sessions already reads through sync def (threadpool); this
