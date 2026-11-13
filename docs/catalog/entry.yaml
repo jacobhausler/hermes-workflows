@@ -10,7 +10,7 @@ tier: community
 category: automation
 requires_hermes: ">=0.21.4"
 docs_url: https://github.com/jacobhausler/hermes-workflows#readme
-version: "1.4.8"
+version: "1.4.9"
 image: https://raw.githubusercontent.com/jacobhausler/hermes-workflows/REPLACE_AT_RELEASE/assets/dag-review.png
 screenshots:
   - https://raw.githubusercontent.com/jacobhausler/hermes-workflows/REPLACE_AT_RELEASE/assets/dag-review.png
@@ -20,6 +20,6 @@ platforms: []
 capabilities:
   provides_tools:
     - workflow
-  provides_hooks: [post_tool_call, pre_llm_call, transform_llm_output, post_gateway_admission, pre_gateway_dispatch, on_session_end, on_session_finalize, agent_loop_stopped]
+  provides_hooks: [post_tool_call, pre_llm_call, transform_llm_output, post_gateway_admission, pre_gateway_dispatch, on_session_end, on_session_finalize, agent_loop_stopped, on_session_delete, subagent_stop, pre_approval_request, post_approval_response, post_api_request]
   provides_middleware: []
   requires_env: []

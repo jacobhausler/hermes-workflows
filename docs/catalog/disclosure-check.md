@@ -86,12 +86,14 @@ No other clause needed correction.
 
 ## 5. Network, cron, credentials — the corrected clause
 
-> "The plugin registers no cron and does not directly open network sockets or
-> read a credential store; however, run/amend may issue one provider liveness
-> request per distinct explicitly routed model through Hermes' core auxiliary
-> client, child agents may make provider/tool calls with inherited
-> environment, Desktop uses the Hermes plugin REST API, and gate commands
-> inherit the runner environment."
+> "The plugin arms exactly one self-terminating core cron watchdog
+> (`hermes-workflows-tick`, `no_agent` — armed idempotently by every accepted
+> launch, deleted by the tick itself once no run stays active) and does not
+> directly open network sockets or read a credential store; however,
+> run/amend may issue one provider liveness request per distinct explicitly
+> routed model through Hermes' core auxiliary client, child agents may make
+> provider/tool calls with inherited environment, Desktop uses the Hermes
+> plugin REST API, and gate commands inherit the runner environment."
 
 - No direct network: zero `urllib`/`socket`/`requests` imports and zero
   `fetch(`/`urlopen` in shipped code (`__init__.py`, `wf.py`, `wfcommon.py`,
@@ -103,7 +105,21 @@ No other clause needed correction.
   run/amend submit tail (`__init__.py:549-557`). This uses the core client,
   i.e. core's network path and seat configuration — the qualification the
   original draft omitted.
-- No cron: zero cron/scheduler registration anywhere (grep verified).
+- Watchdog tick cron: ONE core cron job keyed by name (`cron_bridge.py:33
+  `TICK_NAME`), `no_agent=True`, `prompt=None` — the job's stdout is its result;
+  it wakes no agent. Arming is find-then-create at the accepted-launch tail
+  (`__init__.py:3395` `_arm_from_launch` → `runner_watchdog.py:66` →
+  `cron_bridge.py:155` `ensure_tick`), idempotent by name. The job runs an
+  argument-free bash shim under `$HERMES_HOME/scripts/` that execs
+  `wf.py tick` (`cron_bridge.py:124` `write_shim`, `wf.py:11556`). Cadence
+  `every 2m` by default (`cron_bridge.py:34`), overridable by
+  `WF_TICK_SCHEDULE` env or config `workflows.tick_schedule`
+  (`cron_bridge.py:68-120`). The tick body revives dead-runner runs, re-arms
+  while any run stays active, and deletes the job itself at drain — deletion,
+  never disable (`runner_watchdog.py:98-133`, `cron_bridge.py:172`
+  `teardown_tick`). Between runs there is no job row to fire: zero idle wakes
+  is structural, not a polling promise. A host without core cron degrades
+  silently (`cron_bridge.py:26-27`).
 - No credential-store access: the plugin never reads a secret store or
   credential file; children merely inherit the runner's environment
   (`wf.py:875`), and ping error notes are key-redacted

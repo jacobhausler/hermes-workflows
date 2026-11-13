@@ -21,9 +21,9 @@ screenshots, `AGENTS.md` (agent front door: install / operate / contribute),
 
 | Rule | Evidence |
 |---|---|
-| 2 — exact pin | at release, `sha` will be the 40-char commit of tag `v1.4.8`; `image`/`screenshots` are raw URLs pinned to the same SHA |
+| 2 — exact pin | at release, `sha` will be the 40-char commit of tag `v1.4.9`; `image`/`screenshots` are raw URLs pinned to the same SHA |
 | 3 — no self-updater | No update checks; the only outbound HTTP is the config-gated, default-OFF p1 webhook (`hooks_outbound.py`, ships OFF: no setting, no socket) and the core-client liveness ping; zero `fetch(` in `desktop/plugin.js`; the plugin never loads code it did not ship |
-| 6 — capabilities match | `provides_tools: [workflow]`; 12 hooks declared. Three are opt-in, config-gated DEFAULT-OFF — OFF means zero registrations: `subagent_stop` registers only when `hooks_allow` lists `subagent_accounting` (P3), and `pre_approval_request`/`post_approval_response` only when `hooks_bridge_allow` lists `approval_bridge` (P5). The other nine are the shipped surface, registered behind the operator's `enabled_hooks` allow-list (unset = shipped surface; a malformed list registers NOTHING — fail-closed), every handler fail-open advisory; the admission-gate and dispatch-witness behaviors are additionally call-time flag-gated DEFAULT-OFF (`admission_gates` / `dispatch_witness`), and the orphan-watch quartet is default-ON advisory, disabled with `orphan_watch: false`. The P1 outbound bridge (`hooks_outbound.py`) is not a hook surface — see rule 3. No middleware; `requires_env: []` — the runner's `HERMES_WF_STEER_*` vars are plugin-internal IPC set by the runner for its own children, never user-provided (`docs/manifest-decisions.md`) |
+| 6 — capabilities match | `provides_tools: [workflow]`; 13 hooks declared. Three are opt-in, config-gated DEFAULT-OFF — OFF means zero registrations: `subagent_stop` registers only when `hooks_allow` lists `subagent_accounting` (P3), and `pre_approval_request`/`post_approval_response` only when `hooks_bridge_allow` lists `approval_bridge` (P5). One more is spawn-env-gated: `post_api_request` registers only inside runner-spawned workflow children, where the runner pins the `HERMES_WF_TELEMETRY` join key in the child spawn environment — anywhere else, zero registrations. The other nine are the shipped surface, registered behind the operator's `enabled_hooks` allow-list (unset = shipped surface; a malformed list registers NOTHING — fail-closed), every handler fail-open advisory; the admission-gate and dispatch-witness behaviors are additionally call-time flag-gated DEFAULT-OFF (`admission_gates` / `dispatch_witness`), and the orphan-watch quartet is default-ON advisory, disabled with `orphan_watch: false`. The P1 outbound bridge (`hooks_outbound.py`) is not a hook surface — see rule 3. No middleware; `requires_env: []` — the runner's `HERMES_WF_STEER_*` vars are plugin-internal IPC set by the runner for its own children, never user-provided (`docs/manifest-decisions.md`) |
 | 7 — install scanner | `hermes plugins validate .` → `Validation passed.`, security scan `safe`, zero `caution` findings |
 | 8 — desktop surface | `desktop/plugin.js` imports only `@hermes/plugin-sdk` / `react`; gate resumes use `host.composer.submit(ownerSessionId, text)` (visible) or SDK `insertText`; no app DOM reach or private composer events |
 | 9 — dependencies | None. Stdlib-only Python; no `python_dependencies`, no `pyproject.toml` |
@@ -40,8 +40,12 @@ settings / `HERMES_WF_HERMES_BIN`, never from tool arguments), with optional
 routing/budget flags and a copy of the runner environment plus workflow IPC
 variables. A graph-authored gate `wait.until_argv` executes a fixed argv
 command without a shell directly in the runner, outside Hermes tool approval.
-Run state is stored under `$HERMES_HOME/workflows/`. The plugin registers no
-cron and opens no sockets or credential-store reads of its own; however,
+Run state is stored under `$HERMES_HOME/workflows/`. The plugin arms exactly one
+self-terminating core cron watchdog (`hermes-workflows-tick`, `no_agent` — zero agent
+wakes; armed idempotently by every accepted launch, deleted by the tick itself once no
+run stays active; default cadence `every 2m`, tunable via `WF_TICK_SCHEDULE` or config
+`workflows.tick_schedule`) and opens no sockets or credential-store reads of its own;
+however,
 run/amend may issue one provider liveness request per distinct explicitly
 routed model through Hermes' core auxiliary client, child agents may make
 provider/tool calls with the inherited environment, the Desktop half uses the

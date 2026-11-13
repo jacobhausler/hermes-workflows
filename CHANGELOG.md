@@ -2,6 +2,40 @@
 
 ## Unreleased
 
+## 1.4.9 — 2026-11-13
+
+Patch release from eleven merged pull requests since v1.4.8. The manifest now
+declares the spawn-env-gated `post_api_request` telemetry hook (the upstream
+catalog review at NousResearch/hermes-agent#154476 caught the declaration gap
+— validation only sees what `provides_hooks` lists), and the catalog
+disclosure and README tell the truth about the self-terminating watchdog tick
+cron the runner arms at launch. A docs wave shipped the grammar gate-output
+shape, the wake-route admission law, the posture layer, the operator playbook,
+the worked-example set and four field-scarred operations laws; the door gained
+a shelf-drift `library check` verb with a census husks bucket,
+`defaults.schema` content passes the ONE schema law at the door, batch-3
+direct contract pins cover five more zero-reference `wfcommon` validators,
+and the dashboard /runs census left the event loop.
+
+- Fix: `plugin.yaml` declares `post_api_request`, marked gated on the
+  `HERMES_WF_TELEMETRY` spawn env; `node_telemetry.py` registers it only in
+  runner-spawned workflow children (upstream review #154476, PR#638).
+- Docs: pr-body / disclosure-check / README disclose the watchdog tick cron;
+  the catalog draft entry mirrors the full 13-hook declared surface (PR#638).
+- Docs: grammar gate-output shape and hyphen/bare-path law (PR#626);
+  wake-route admission law (PR#627); posture layer (PR#628); operations:
+  self-wake guard, wake-lane reply contract, pack-adoption, FIFO seat-queue
+  fairness (PR#629); operator playbook (PR#630); worked-example wave
+  (PR#631).
+- Door: `library check:true` digest re-check verb + shelf-census husks bucket
+  (est-dv8q4, PR#632).
+- Fix: `defaults.schema` content passes the ONE schema law — boot-refused
+  shapes never reach spawn (est-j14j3, PR#633).
+- Tests: batch-3 direct contract pins for five zero-reference validators
+  (est-ckxqk, PR#635).
+- Perf: the /runs census leaves the event loop — threadpool dispatch + TTL
+  snapshot; /health p95 during scans 666ms -> 74ms (est-ey31s, PR#636).
+
 ## 1.4.8 — 2026-11-11
 
 Patch release from ten merged pull requests since v1.4.7. The door no longer
