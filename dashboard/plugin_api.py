@@ -247,12 +247,19 @@ def _list_runs():
 
 
 if router is not None:
+    # SYNC handlers on purpose (est-ey31s): every route below does blocking work
+    # — _list_runs walks every scanned run dir plus one batched lock-probe child,
+    # get_run/_node_log read state and event files, release_gate writes the answer
+    # and resumes through the door. Declared `async def` they ran ON THE EVENT LOOP:
+    # one /runs scan (1.27s first call, 0.60s warm, ~560 dirs) froze every other
+    # dashboard route on the serve process. Plain `def` routes run on the threadpool.
+    # tests/test_dashboard_routes_offloop.py pins the shape.
     @router.get("/runs")
-    async def list_runs():
+    def list_runs():
         return _list_runs()
 
     @router.get("/settings")
-    async def get_settings():
+    def get_settings():
         """est-z717: the desktop's tray-gate bootstrap read. Answers ONLY the
         keys the desktop consumes — {tray: bool}. owner_setting('tray') is THE
         established settings shape (wfcommon: the door's plugin ctx reader when
@@ -269,12 +276,12 @@ if router is not None:
         return {"tray": v is True}
 
     @router.get("/runs/{run_id}")
-    async def get_run(run_id: str):
+    def get_run(run_id: str):
         r = _safe_run(run_id)
         return (_view(r, full=True) if r else None) or {"error": "unknown run"}
 
     @router.get("/runs/{run_id}/nodes/{nid}/log")
-    async def get_node_log(run_id: str, nid: str, index: int | None = None,
+    def get_node_log(run_id: str, nid: str, index: int | None = None,
                            attempt: int | None = None, kind: str = "log",
                            tail: int = LOG_TAIL):
         """O2's ONE tail (the desktop's `rec?.raw` plumbing dies with this route).
@@ -288,7 +295,7 @@ if router is not None:
         return out
 
     @router.post("/runs/{run_id}/gate")
-    async def release_gate(run_id: str, body: dict):
+    def release_gate(run_id: str, body: dict):
         """UI door onto the SAME answer path the tool uses (incl. stale-answer
         overwrite). Does NOT resume the run — the owning agent does."""
         r = _safe_run(run_id)

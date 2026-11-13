@@ -31,7 +31,7 @@ class SettingsRoute(unittest.TestCase):
             return value
         fake = types.SimpleNamespace(owner_setting=reader)
         with patch.object(api, "_workflow_common", return_value=fake):
-            return asyncio.run(api.get_settings())
+            return api.get_settings()
 
     def test_true_enables(self):
         self.assertEqual(self._settings(True), {"tray": True},
@@ -52,7 +52,7 @@ class SettingsRoute(unittest.TestCase):
             return True
         fake = types.SimpleNamespace(owner_setting=reader)
         with patch.object(api, "_workflow_common", return_value=fake):
-            asyncio.run(api.get_settings())
+            api.get_settings()
         self.assertEqual(seen, ["tray"],
                          "the read rides wfcommon.owner_setting - THE established settings shape "
                          "(ctx reader else raw config, settings>legacy)")
@@ -65,7 +65,7 @@ class SettingsRoute(unittest.TestCase):
     def test_no_other_setting_leaks(self):
         fake = types.SimpleNamespace(owner_setting=lambda k: True)
         with patch.object(api, "_workflow_common", return_value=fake):
-            out = asyncio.run(api.get_settings())
+            out = api.get_settings()
         self.assertEqual(set(out.keys()), {"tray"},
                          "the route answers ONLY the tray key - never a settings dump")
 

@@ -46,7 +46,10 @@ def check(cond, msg):
     ok += 1; print("PASS", msg)
 
 def call(route_fn, **kw):
-    return asyncio.get_event_loop_policy().new_event_loop().run_until_complete(route_fn(**kw))
+    # est-ey31s: dashboard routes are plain-def (threadpool) handlers; stay
+    # awaitable-tolerant so the driver cannot silently miss an asyncio bug.
+    out = route_fn(**kw)
+    return asyncio.run(out) if asyncio.iscoroutine(out) else out
 
 def route_for(path):
     for rt in api.router.routes:
