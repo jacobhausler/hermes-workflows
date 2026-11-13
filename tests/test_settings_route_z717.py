@@ -23,6 +23,13 @@ api = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(api)
 
 
+def _invoke(out):
+    """est-ey31s: GET /settings is a plain def now (threadpool dispatch, off
+    the shared loop); the route's ANSWER contract is what this file pins, so
+    the call site accepts either dispatch mode instead of re-pinning async."""
+    return asyncio.run(out) if hasattr(out, "__await__") else out
+
+
 class SettingsRoute(unittest.TestCase):
     def _settings(self, value, raises=False):
         def reader(k):
@@ -31,7 +38,7 @@ class SettingsRoute(unittest.TestCase):
             return value
         fake = types.SimpleNamespace(owner_setting=reader)
         with patch.object(api, "_workflow_common", return_value=fake):
-            return asyncio.run(api.get_settings())
+            return _invoke(api.get_settings())
 
     def test_true_enables(self):
         self.assertEqual(self._settings(True), {"tray": True},
@@ -52,7 +59,7 @@ class SettingsRoute(unittest.TestCase):
             return True
         fake = types.SimpleNamespace(owner_setting=reader)
         with patch.object(api, "_workflow_common", return_value=fake):
-            asyncio.run(api.get_settings())
+            _invoke(api.get_settings())
         self.assertEqual(seen, ["tray"],
                          "the read rides wfcommon.owner_setting - THE established settings shape "
                          "(ctx reader else raw config, settings>legacy)")
@@ -65,7 +72,7 @@ class SettingsRoute(unittest.TestCase):
     def test_no_other_setting_leaks(self):
         fake = types.SimpleNamespace(owner_setting=lambda k: True)
         with patch.object(api, "_workflow_common", return_value=fake):
-            out = asyncio.run(api.get_settings())
+            out = _invoke(api.get_settings())
         self.assertEqual(set(out.keys()), {"tray"},
                          "the route answers ONLY the tray key - never a settings dump")
 
