@@ -18,9 +18,9 @@ def own(key, value, call):
 RR = lambda v, home=MINE: own("runs_root", v, lambda: W.settings_runs_root(home=home))
 SP = lambda v: own("profile", v, lambda: W.settings_profile())
 N = lambda i, after=(), oo=(): {"id": i, "after": list(after), "order_only": list(oo)}
-S = {"from": "opus", "to": "sonnet", "reason": "billing gate"}
-TXT = ("SUBSTRATE DISCLOSURE (engine-stamped, not author-written): this node was pinned 'opus'; "
-       "the estate confidence_substrate policy served 'sonnet' (billing gate).")
+S = {"from": "pin-a", "to": "served-b", "reason": "billing gate"}   # neutral fixture names (scrub law)
+TXT = ("SUBSTRATE DISCLOSURE (engine-stamped, not author-written): this node was pinned 'pin-a'; "
+       "the estate confidence_substrate policy served 'served-b' (billing gate).")
 KEY = W.SUBSTRATE_DISCLOSURE_KEY
 SCH = {"type": "object", "properties": {KEY: {"type": "string"}, "answer": {"type": "string"}}, "required": [KEY, "answer"]}
 ONLY = {"type": "object", "properties": {KEY: {"type": "string"}}, "required": [KEY]}
