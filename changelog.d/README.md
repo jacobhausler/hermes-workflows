@@ -51,8 +51,10 @@ is a function of the directory alone, so two runs over the same tree agree byte-
 One entry per fragment. Prose only:
 
 * no `##` heading (a fragment is an entry, not a section);
-* no nested list — use `;` clauses, the assembler owns the bullet and the two-space
-  continuation, and it normalizes either indentation style you happen to write;
+* no nested list — a list marker indented under another line is refused; top-level
+  bullet lines are legal because the assembler owns the assembled bullet: it
+  re-indents them to the two-space continuation (use `;` clauses if you prefer prose),
+  normalizing either indentation style you happen to write;
 * no conflict markers (if you are resolving a rebase, resolve the rebase).
 
 `check` refuses the above, refuses an empty fragment, and refuses two fragments that
@@ -60,7 +62,9 @@ render to the same entry.
 
 ## At release
 
-The release commit runs `fold`: entries land above the existing `## Unreleased` content,
+The release commit runs `fold`. It validates the directory first — the same refusals
+`check` applies — so a bad fragment fails the release instead of being silently
+consumed. Entries then land above the existing `## Unreleased` content,
 the consumed fragments are deleted (that deletion is the idempotence guard — a second
 `fold` over an empty directory changes nothing, and a fragment whose text is already in
 the changelog is refused rather than duplicated), and the section heading is then renamed

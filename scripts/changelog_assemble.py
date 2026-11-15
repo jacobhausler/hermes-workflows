@@ -18,9 +18,10 @@ VERBS
   list  [--dir D]                print the assembled block; never writes
   check [--dir D]                validate names + bodies; exit 1 on any violation
   fold  [--dir D] [--changelog C] [--keep]
-       insert the assembled block at the top of the `## Unreleased` section, then
-       delete the consumed fragments (`--keep` leaves them). Every other byte of
-       the changelog is left untouched.
+       validate the directory exactly as `check` does, then insert the assembled
+       block at the top of the `## Unreleased` section and delete the consumed
+       fragments (`--keep` leaves them). A bad fragment fails the fold; it is
+       never silently consumed. Every other byte of the changelog is untouched.
 
 NAMING  `<PR-number>.md` once the number exists, otherwise `<lane-token>.md`
         (stem = digits, or a letter followed by [A-Za-z0-9._-]). Ordering: numeric
@@ -33,8 +34,11 @@ IDEMPOTENCE  the consumed fragment files are the guard, and they are the honest
         in the changelog, so a re-run after a partial merge cannot post an entry
         twice. No state file, no sidecar — the directory is the state.
 
-ONE ENTRY PER FRAGMENT, prose only: no `##` heading, no nested list (use `;`
-clauses), no conflict markers. `check` enforces exactly that and nothing more.
+ONE ENTRY PER FRAGMENT, prose only: no `##` heading, no nested list (a list marker
+indented under another line — top-level bullet lines are legal: render re-indents
+them to the two-space continuation; use `;` clauses if you prefer prose), no
+conflict markers. `check` enforces exactly that and nothing more, and `fold` runs
+the same refusals before inserting or consuming anything.
 
 Stdlib only (repo rule 4c.7). Run: python3 scripts/changelog_assemble.py check
 """
@@ -49,6 +53,7 @@ ROOT = Path(__file__).resolve().parents[1]
 KEY_STEM = re.compile(r"^(?:[0-9]{2,6}|[A-Za-z][A-Za-z0-9._-]{1,40})$")
 CONFLICT_MARK = re.compile(r"^(?:<{7}|={7}|>{7})(?:\s|$)")
 HEADING = re.compile(r"^##\s")
+NESTED_LIST = re.compile(r"^\s+[-*+](?:\s|$)")
 
 FRAG_GLOB = "*.md"
 README_NAME = "README.md"
@@ -121,6 +126,11 @@ def violations(dirn: Path) -> list[str]:
             if HEADING.match(ln):
                 bad.append(f"{path.name}: carries a '##' heading (a fragment is one entry, not a section)")
                 break
+        body_lines = raw.strip().splitlines()
+        for ln in body_lines[1:]:
+            if NESTED_LIST.match(ln):
+                bad.append(f"{path.name}: nested list in a fragment (marker indented under another line — use ';' clauses)")
+                break
         text = render(stem, raw)
         if text and text in seen_text:
             bad.append(f"{path.name}: identical entry already contributed by {seen_text[text]}")
@@ -141,6 +151,9 @@ def _section_span(text: str) -> tuple[int, int]:
 
 def fold(dirn: Path, changelog: Path, keep: bool = False) -> list[str]:
     """Insert the assembled block above the existing Unreleased entries. Returns keys consumed."""
+    bad = violations(dirn)
+    if bad:
+        raise Violation("refusing to fold — " + "; ".join(bad))
     pairs = [p for p in load(dirn) if p[1]]
     if not pairs:
         return []

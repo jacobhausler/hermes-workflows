@@ -81,6 +81,7 @@ BAD = {
     "heading.md": ("feat: x\n\n## Unreleased\n\n- no\n", "heading"),
     "clash.md": ("feat: y\n<<<<<<< HEAD\nours\n", "conflict marker"),
     "-nope.md": ("feat: z\n", "illegal fragment key"),
+    "nested.md": ("feat: outer\n  - inner bullet\n", "nested list"),
 }
 for name, (body, why) in BAD.items():
     d = tree({name: body}, CHANGELOG)
@@ -147,6 +148,45 @@ clg.fold(d / "changelog.d", d / "CHANGELOG.md", keep=True)
 check("fold --keep leaves the fragment for the next run", (d / "changelog.d" / "505.md").is_file())
 shutil.rmtree(d)
 
+# --- 5b. fold self-validates: a bad fragment fails the fold, it is not consumed --
+# est-0izi7 cert finding 2: `fold` used to run only `render`, so an empty or
+# illegal fragment was silently deleted and two fragments rendering to one entry
+# were double-posted. `fold` now runs the `check` refusals first and writes
+# nothing on refusal.
+d = tree({"511.md": "feat: good\n", "empty511.md": "\n \n"}, CHANGELOG)
+try:
+    clg.fold(d / "changelog.d", d / "CHANGELOG.md")
+    refused = False
+except clg.Violation as exc:
+    refused = "empty fragment" in str(exc)
+check("fold refuses an empty fragment instead of silently consuming it", refused)
+check("that refusal wrote nothing and consumed nothing",
+      (d / "CHANGELOG.md").read_text() == CHANGELOG
+      and (d / "changelog.d" / "empty511.md").is_file()
+      and (d / "changelog.d" / "511.md").is_file())
+shutil.rmtree(d)
+
+d = tree({"512.md": "feat: twin\n", "513.md": "feat: twin\n"}, CHANGELOG)
+try:
+    clg.fold(d / "changelog.d", d / "CHANGELOG.md")
+    refused = False
+except clg.Violation as exc:
+    refused = "identical entry" in str(exc)
+check("fold refuses two fragments rendering to one entry instead of double-posting", refused)
+check("that refusal leaves both fragments and every changelog byte as found",
+      (d / "CHANGELOG.md").read_text() == CHANGELOG
+      and sorted(p.name for p in (d / "changelog.d").glob("*.md")) == ["512.md", "513.md"])
+shutil.rmtree(d)
+
+d = tree({"514.md": "feat: outer\n  - nested bullet\n", "-nope514.md": "feat: z\n"}, CHANGELOG)
+try:
+    clg.fold(d / "changelog.d", d / "CHANGELOG.md")
+    refused = False
+except clg.Violation as exc:
+    refused = "nested list" in str(exc) and "illegal fragment key" in str(exc)
+check("fold refuses a nested list and an illegal key (the check refusals run first)", refused)
+shutil.rmtree(d)
+
 # --- 6. the CLI is the seam a lane and a release both use ------------------------
 d = tree({"506.md": "feat: via cli\n"}, CHANGELOG)
 r = subprocess.run([sys.executable, str(SCRIPT), "check", "--dir", str(d / "changelog.d")],
@@ -170,6 +210,11 @@ check("self-proof: a conflict marker flips check() to nonzero",
 clg.fold(d / "changelog.d", d / "CHANGELOG.md")
 (d / "changelog.d" / "507.md").write_text("feat: mutation target\n")
 check("self-proof: a re-fold of the same text is refused, not duplicated",
+      subprocess.run([sys.executable, str(SCRIPT), "fold", "--dir", str(d / "changelog.d"),
+                      "--changelog", str(d / "CHANGELOG.md")],
+                     capture_output=True, text=True).returncode != 0)
+(d / "changelog.d" / "507.md").write_text("feat: mutation target\n  - nested after the fold law\n")
+check("self-proof: a nested list flips CLI fold to nonzero (fold self-validates at the CLI seam)",
       subprocess.run([sys.executable, str(SCRIPT), "fold", "--dir", str(d / "changelog.d"),
                       "--changelog", str(d / "CHANGELOG.md")],
                      capture_output=True, text=True).returncode != 0)
