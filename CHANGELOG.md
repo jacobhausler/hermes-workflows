@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+## 1.4.10 — 2026-11-15
+
+Patch release from four merged pull requests since v1.4.9. The lifecycle
+wake clause turns bidirectional: a failure notice told the woken owner only
+what it did NOT authorize ("does not authorize repair, resume or a new
+launch"), which an agent-user read as a stop order mid-task — but the
+launch-time mandate already covers assess, repair and relaunch. Every wake
+body now closes with "This notice grants no new scope and revokes no
+existing authority", and the failure bodies name the expected action
+affirmatively. AUTHORITY LAW r5 (finite runner-authored table, zero caller
+text) is untouched. Three test batches closed the zero-reference census on
+the remaining `wfcommon` callables.
+
+- Fix: bidirectional wake clause across the five `_WAKE_TEMPLATES` bodies,
+  the catch-all, and the doc family in SKILL.md / AGENTS.md /
+  references/operations.md; four template pins updated (owner ruling
+  2026-11-15, PR#643).
+- Tests: direct contract pins for five zero-reference wfcommon callables,
+  batches 4-6 (`on_exit`-era census closure, PRs #639, #640, #641).
+
 ## 1.4.9 — 2026-11-13
 
 Patch release from eleven merged pull requests since v1.4.8. The manifest now
