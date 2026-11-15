@@ -121,7 +121,7 @@ def normalize(value, paths):
                                           if (k in RUNNER_ENV_CORE or k.startswith('HERMES_WF_'))
                                           and k not in SANCTIONED_ENV_DELTA])
         return {k: normalize(v, paths) for k,v in sorted(value.items()) if k not in
-                {'ts','started','ended','at','saved_at','ms','pid','run_id','started_at','last_activity','last_event_ts',
+                {'ts','started','started_ns','ended','at','saved_at','ms','pid','run_id','started_at','last_activity','last_event_ts',
                  'last_activity_at','elapsed_s','elapsed_ms','last_heartbeat','created_at','duration_s',
                  'committed_at',        # est-2ek.1.765: per-item commit wall-clock (volatile stamp;
                                         # the est-2ek.1.765 fanout law COMMITTED the per-item records,
