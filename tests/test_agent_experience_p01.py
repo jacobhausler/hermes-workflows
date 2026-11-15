@@ -166,12 +166,12 @@ class Experience(unittest.TestCase):
         for event in ("run.done", "run.failed", "gate.held"):
             text = wf._wake_owner_text("research-only", event)
             self.assertIn('event=' + json.dumps(event), text)
-            self.assertIn("does not authorize", text)
+            self.assertIn("grants no new scope and revokes no existing authority", text)
             if event == "gate.held":
                 self.assertIn("HELD at a human gate", text)
                 self.assertIn("Status contains the question", text)
                 self.assertIn("release requires the human's decision", text)
-                self.assertIn("does not authorize choosing an answer or additional work", text)
+                self.assertIn("existing mandate continues", text)
             for mandate in ("must land", "must be dispatched", "apply ONE", "wakes this session", "FAILED run", "PRs"):
                 self.assertNotIn(mandate, text)
         # est-jbcrw fix 3 inverted the unmapped-class contract: a class gap wakes
@@ -182,7 +182,7 @@ class Experience(unittest.TestCase):
         self.assertIsNotNone(catchall, "unmapped class must wake, never silent-skip")
         self.assertIn('event=' + json.dumps("unknown"), catchall)
         self.assertIn("wake-router class gap", catchall)
-        self.assertIn("does not authorize", catchall)
+        self.assertIn("grants no new scope and revokes no existing authority", catchall)
         for mandate in ("must land", "must be dispatched", "apply ONE", "wakes this session", "FAILED run", "PRs"):
             self.assertNotIn(mandate, catchall)
 

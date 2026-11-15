@@ -97,7 +97,7 @@ delegated subagent; `wait` = OPTIONAL blocking observation, the only revive verb
   dollar figure: `estimated_cost_usd` is a price-table estimate (subscription routes
   report `included`) and reads badly as spend.
 - Cards are optional desktop presentation; CLI text and returned run IDs suffice.
-  Completion is execution state, not task verification or authority for more work.
+  Completion is execution state, not task verification; a wake grants no new scope and revokes no existing authority.
   The owner wake is the delivery contract, fail-open (`wake.jsonl` is the ledger). `wait` = inline blocking/revive. Event wakes carry an admission law: [event admission](docs/event-admission.md).
 - `graph_path` replaces embedding on run/save/amend/validate: a caller-authorized
   absolute JSON file, exactly one graph source. [grammar](references/grammar.md).

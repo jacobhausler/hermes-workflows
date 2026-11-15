@@ -201,11 +201,11 @@ try:
           not (r3 / "wake.jsonl").exists() and len(sinks) == before,
           str(ledger(r3)))
 
-    # 8. mapped templates untouched: fixed authority clauses still present.
+    # 8. mapped templates untouched: fixed bidirectional clauses still present.
     check("templates still finite runner-authored bodies",
           all(k in wf._WAKE_TEMPLATES for k in KNOWN)
-          and "does not authorize" in wf._WAKE_TEMPLATES["gate.held"]
-          and "does not authorize" in wf._WAKE_TEMPLATES["run.failed"], "")
+          and "grants no new scope and revokes no existing authority" in wf._WAKE_TEMPLATES["gate.held"]
+          and "grants no new scope and revokes no existing authority" in wf._WAKE_TEMPLATES["run.failed"], "")
 finally:
     srv.shutdown()
     shutil.rmtree(tmp, ignore_errors=True)

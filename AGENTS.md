@@ -99,7 +99,7 @@ workflow { "action": "stop",   "run_id": "<id>" }         → terminal, not roll
 `wait` blocks while a verified runner is live and self-yields ~330 s with a
 "call wait again" note to stay under the harness tool deadline. **Stay in the loop.**
 Push delivery is best-effort, not guaranteed. `wait` can resume an interrupted run;
-`status` is read-only. Completion grants no new authority, and cards/curation are optional.
+`status` is read-only. A wake grants no new scope and revokes no existing authority — a failed run is assessed and, under the mandate already on the table, repaired, amended or relaunched; cards/curation stay optional.
 
 ### 3b. Minimal graph
 

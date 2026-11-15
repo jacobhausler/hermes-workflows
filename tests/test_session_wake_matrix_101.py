@@ -236,9 +236,9 @@ try:
         check("wake factually points at the held human gate and status",
               "HELD at a human gate" in msg["content"]
               and "Status contains the question" in msg["content"], msg["content"])
-        check("wake requires a human decision and grants no answer/work authority",
+        check("wake requires a human decision; clause grants none, revokes none",
               "release requires the human's decision" in msg["content"]
-              and "does not authorize choosing an answer or additional work" in msg["content"],
+              and "grants no new scope and revokes no existing authority" in msg["content"],
               msg["content"])
     r = RUNS / rid if rid else None
     if r:

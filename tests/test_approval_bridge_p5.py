@@ -134,8 +134,8 @@ def mk_run(rid):
 
 WAKE_TEXT = ('[runner-authored/v1] run_id="p5-run" event="gate.held" \\u2014 The workflow is HELD '
              'at a human gate. Status contains the question and options; release requires the '
-             "human's decision. This notification does not authorize choosing an answer or "
-             "additional work.")
+             "human's decision. Your other work under the existing mandate continues. This "
+             "notice grants no new scope and revokes no existing authority.")
 
 def hold_row(gate):
     return json.dumps({"ts": "2026-10-15T00:01:%02d+00:00" % (hold_row.n % 60),

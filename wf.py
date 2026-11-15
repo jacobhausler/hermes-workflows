@@ -737,18 +737,28 @@ def _clip_record(rec):
 # failed_node_logs (the efp-valid committed records' log_path set) when
 # resolvable. The bodies above stay verbatim; the table stays the ONLY author
 # of owner prose. Absent pointer = unresolvable, never a fabricated value.
+# OWNER RULING 2026-11-15 (clause inversion): the closing sentence of every body is
+# bidirectional — "grants no new scope and revokes no existing authority". The old
+# prohibition clause ("does not authorize repair, resume or a new launch") read to a
+# woken agent as a stop order mid-task: an operator who launched a run never planned
+# for its failure, so a failure notice must induce assess -> repair/amend -> relaunch
+# under the mandate already on the table, not silence. The r5 law itself is unchanged:
+# finite runner-authored table, zero caller text.
 _WAKE_TEMPLATES = {
     "node.action_required": "A workflow node has a committed unhandled failure. "
                             "The run is not necessarily finished; independent siblings may still be running. "
-                            "Inspect status once. Steering remains cooperative and amendments may wait "
-                            "for the wave boundary. This notification does not authorize repair, "
-                            "resume or additional work.",
+                            "Inspect status once, then act under your existing mandate; steering remains "
+                            "cooperative and amendments may wait for the wave boundary. This notice grants "
+                            "no new scope and revokes no existing authority.",
     "gate.held": "The workflow is HELD at a human gate. Status contains the question "
-                 "and options; release requires the human's decision. This notification "
-                 "does not authorize choosing an answer or additional work.",
+                 "and options; release requires the human's decision. Your other work under "
+                 "the existing mandate continues. This notice grants no new scope and "
+                 "revokes no existing authority.",
     "run.failed": "The workflow execution FAILED. Status contains failed nodes, exit "
-                  "records and original error details. This notification does not authorize "
-                  "repair, resume or a new launch. Push delivery is optional; wait is the "
+                  "records and original error details. Assess the failure and act under "
+                  "the existing user mandate: repair, amend or relaunch when the task "
+                  "still needs the run. This notice grants no new scope and revokes no "
+                  "existing authority. Push delivery is optional; wait is the "
                   "blocking path and may resume an interrupted run.",
     # est-fanout-straggler (sys-nxrhxo): mid-flight observation, NOT a node state.
     # The fan-out wave loop's cohort watchdog fires this once per driven wave when
@@ -763,13 +773,16 @@ _WAKE_TEMPLATES = {
                          "run — then stop. Do not poll: completion and failure still "
                          "wake this session.",
     "run.done": "The workflow execution is DONE. Status contains node outputs; summary.md "
-                "contains the run summary. Execution completion is not verification of the "
-                "user's task and does not authorize additional work. Research-only work "
-                "can end with its report; no dispatch, publication or curation is required.",
+                "contains the run summary. Verify the outputs against the user's task before "
+                "building on them — execution completion is not verification of the user's "
+                "task. This notice grants no new scope and revokes no existing authority. "
+                "Research-only work can end with its report; no dispatch, publication or "
+                "curation is required.",
     "run.partial": "The workflow execution ended PARTIAL — a graceful RunBudget cap: the "
-                   "ledger names what never launched, banked verdicts are committed. This "
-                   "notification does not authorize additional work; re-launch under a "
-                   "larger budget or amend if the capped work must finish.",
+                   "ledger names what never launched, banked verdicts are committed. When "
+                   "the capped work must finish, relaunch under a larger budget or amend, "
+                   "under your existing mandate. This notice grants no new scope and "
+                   "revokes no existing authority.",
 }
 
 # CLOSED registry of lifecycle events a call site may pass to notify()
@@ -791,8 +804,8 @@ _WAKE_EVENTS = frozenset({"gate.held", "run.failed", "run.done", "run.partial", 
 _WAKE_CATCHALL_BODY = (
     "The workflow recorded a lifecycle event outside the runner's emitted-event "
     "registry — a wake-router class gap. Status contains the run state; inspect it "
-    "once. This notification is a drift alarm and does not authorize repair, "
-    "dispatch or new work.")
+    "once and report the gap. This notice is a drift alarm: it grants no new scope "
+    "and revokes no existing authority.")
 
 def _wake_owner_text(run_id, event, run_dir=None, failed_node_logs=None, transition=None):
     """The runner-authored owner turn. Known events use their template; an
