@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import sys
 import tempfile
+import time
 import threading
 from unittest.mock import patch
 
@@ -43,8 +44,21 @@ def concurrent_failures():
                     def deliver(sid, text, tid, home):
                         # Delivery must not retain graph.lock. A different thread
                         # must be able to read the committed graph during admission.
-                        with (run / "graph.lock").open("a+b") as lock:
-                            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                        # A sibling admission's OWN momentary probe hold is
+                        # legitimate: retry through it. A delivery that actually
+                        # retains the lock never lets go, so this probe still go
+                        # red at the deadline. (est-ee6rc: a single LOCK_NB
+                        # attempt raced the sibling's probe and manufactured
+                        # BlockingIOError->BrokenBarrierError flakes on CI.)
+                        deadline = time.monotonic() + 5
+                        while True:
+                            try:
+                                with (run / "graph.lock").open("a+b") as lock:
+                                    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                                break
+                            except BlockingIOError:
+                                assert time.monotonic() < deadline, "delivery retained graph.lock"
+                                time.sleep(0.01)
                         delivery_barrier.wait(5)
                         assert not release_healthy.is_set(), "sibling drained before admission"
                         admissions.append(tid)
