@@ -353,6 +353,13 @@ def adopt_probe(tag, log_text, stop_set=False):
     lp.parent.mkdir(parents=True, exist_ok=True)
     lp.write_text(log_text)
     started_ns = time.time_ns()          # the simulated Popen instant — BEFORE the write
+    # The kernel stamps file mtimes from its COARSE clock, which lags the fine
+    # time_ns() clock by up to one tick: a write microseconds after the anchor
+    # can carry st_mtime_ns < started_ns (measured ~10% of immediate writes,
+    # max lag ~1.4 ms) and the gate then correctly refuses it as stale. A real
+    # child writes long after its Popen; the probe sleeps past one tick so the
+    # simulated child does too. The assertion is unchanged.
+    time.sleep(0.02)
     wd = wf.child_work_dir(run, {"id": "ad"}, None)
     (wd / "answer.json").write_text(json.dumps({"result": "answer-first", "status": "done"}))
     kid = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(0.3)"])
