@@ -6837,7 +6837,9 @@ def _adopt_child(meta, node, byid, index, child, schema, fo_cancel=None):
             evd["banked"] = bk
         hv = _harvest_death(out, harvest_schema)
         if hv is None:                            # est-c4wx4: answer-first workdir adopt
-            hv = _harvest_workdir(run, node, index, harvest_schema, harvest_anchor)
+            # R1 law applies identically HERE: the re-armed-wall capture is a
+            # dead capture too — its declared `## Remaining` rides the adoption.
+            hv = _harvest_workdir(run, node, index, harvest_schema, harvest_anchor, out)
         if hv:
             return {"status": "partial", "error": f"adopted child exceeded its re-armed wall "
                     f"(answer harvested from {_harvest_source(hv)})", "error_class": "timeout",
