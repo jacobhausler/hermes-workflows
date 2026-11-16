@@ -82,6 +82,24 @@ if os.environ.get("FAKE_GC"):
     if _gcp:
         with open(_gcp, "a") as _f:
             _f.write(str(_gc.pid) + "\n")
+# est-2lcp8: FAKE_DETACH_WRITER=<path> + a DETACH-WRITER marker in the prompt:
+# background a DETACHED writer (start_new_session=True — its own session and
+# group, so killpg on the child's group cannot reach it: the #541 shape) that
+# sleeps FAKE_WRITER_DELAY (default 4) s and appends one line to that path —
+# the post-hoc marker/merge of the incident. Writer pid -> $FAKE_WRITER_PIDS.
+# Inert without the env AND the prompt marker.
+if os.environ.get("FAKE_DETACH_WRITER") and "DETACH-WRITER" in q:
+    import subprocess as _spw
+    _w = _spw.Popen([sys.executable, "-c",
+        "import sys, time; time.sleep(float(sys.argv[1])); "
+        "open(sys.argv[2], 'a').write('post-hoc\\n')",
+        os.environ.get("FAKE_WRITER_DELAY", "4"),
+        os.environ["FAKE_DETACH_WRITER"]],
+        start_new_session=True)
+    _wp = os.environ.get("FAKE_WRITER_PIDS")
+    if _wp:
+        with open(_wp, "a") as _f:
+            _f.write(str(_w.pid) + "\n")
 # est-13z1: CLOSE-CLAIM {<json>} — the child returns EXACTLY that object as its
 # fenced answer (the false-close shape: output prose/note claims "est-x closed"
 # while the estate store says otherwise). The bead-close gate must anchor to the
