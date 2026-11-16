@@ -2720,7 +2720,10 @@ def commit_item_record(run, node, byid, index, result):
     for k in ("output", "error", "error_class", "reason", "ms", "attempts", "attempts_log",
               "skey", "log_path", "prompt_path", "pid", "started", "started_ns", "spawn",
               "served_model", "served_billing_provider", "billed_models", "adopted", "harvested",
-              "tree_descendants", "final", "banked", "telemetry"):   # est-wqml6: child telemetry rides the commit
+              "tree_descendants", "tree_pids", "tree_proof",   # est-2lcp8: the kill-seam
+                                                                 # descendant proof rides the
+                                                                 # canonical item record
+              "final", "banked", "telemetry"):   # est-wqml6: child telemetry rides the commit
         v = result.get(k)
         if v is not None:
             rec[k] = v
@@ -5363,24 +5366,80 @@ def _lane_killed(run, nid):
     """est-cl7t: a node-targeted lane kill (act_kill) marker exists for this node."""
     return (run / "kill" / f"{nid}.json").exists()
 
+def _lane_kill_endtree(meta, node_id, pid=None, seen=None, group=None):
+    """est-2lcp8: the end of a lane-killed node attempt ENDS the whole child
+    tree. killpg reaches only the seat's own group — a setsid/detached
+    grandchild escapes it and keeps acting after the node record is final
+    (run 20261116-131135: review.1 committed killed at 13:59:58Z, the leftover
+    writer posted marker 6919844319 and squash-merged #541 52 min later). The
+    kill seam therefore gathers every NODE-attributable pid through the /proc
+    channels (#61c machinery, node-scoped): the live subtree of the seat while
+    its intermediary still lives (pass `seen` snapshotted pre-kill on the
+    watcher path), the persisted #61b B1 tracked set, and token-matched
+    survivors from the registry / adoption pool — then quiesces them
+    (SIGTERM grace -> SIGKILL -> #448 reap settle). `group` is the seat's pgid
+    ONLY where the seat is already reaped by its owner (the run_child seam):
+    quiesce may then sweep that group, but it never reaps a live seat — its
+    Popen owner is waiting on that status. Returns the record evidence:
+    tree_descendants counts what was attributed, tree_proof says dead/stuck/
+    unknown; {} when nothing was ever attributed, so a killed lane without
+    descendants keeps its exact prior record bytes (honest absence)."""
+    run = meta["_run"]
+    known = {p for p in (seen or ()) if isinstance(p, int)}
+    for (nid, _idx), tset in list(_proctree_tracked(meta).items()):
+        if nid == node_id:
+            known |= {p for p in tset if isinstance(p, int)}
+    toks = [t for k, vs in (meta.get("_spawn_tokens") or {}).items()
+            if str(k).split(":", 1)[0] == node_id for t in vs]
+    if toks:
+        surv = _sidecar_live_registered(run, toks, meta)
+        if surv:
+            known |= {p for p in surv if isinstance(p, int)}
+    known.discard(pid)
+    known.discard(os.getpid())
+    if not known:
+        return {}
+    proof, stuck = _tree_quiesce(known, group if group else -1, 0.0,
+                                _proctree_kill_proof_s(meta))
+    try:
+        log(run, "node.kill_tree", node=node_id, pids=sorted(known),
+            proof=proof, stuck=sorted(stuck))
+    except Exception:
+        pass
+    ev = {"tree_descendants": sorted(known),
+          "tree_proof": ("dead" if proof in ("dead", "") else
+                         "stuck" if proof == "stuck" else "unknown")}
+    if stuck:
+        ev["tree_pids"] = sorted(stuck)
+    return ev
+
 def _lane_kill_sweep(run, meta):
     """est-cl7t: SIGKILL every in-flight child registered under a killed node.
     Registry keys are "<node_id>:..."; sibling lanes are untouched and the run-level
-    stop Event / stop.request are never set, so the run keeps going."""
+    stop Event / stop.request are never set, so the run keeps going.
+    est-2lcp8: the group kill alone lets a setsid-detached grandchild act
+    post-hoc after the killed record (#541), so each killed seat's subtree is
+    snapshotted while the intermediary still lives (in the lock — the only
+    moment attribution holds, #61b B1) and every attributed descendant is
+    killed and proven dead at this seam."""
     kd = run / "kill"
     if not kd.is_dir():
         return
+    seats = []
     for kf in kd.glob("*.json"):
         pre = kf.stem + ":"
         with meta["_procs_lock"]:
             for key, p in list(meta["_procs"].items()):
-                if not str(key).startswith(pre):
-                    continue
-                try:
-                    os.killpg(os.getpgid(p.pid), signal.SIGKILL)
-                except Exception:
-                    try: p.kill()
-                    except Exception: pass
+                if str(key).startswith(pre):
+                    sub = _proc_children_of(p.pid)
+                    seats.append((kf.stem, p, set() if sub is None else set(sub)))
+    for nid, p, sub in seats:
+        try:
+            os.killpg(os.getpgid(p.pid), signal.SIGKILL)
+        except Exception:
+            try: p.kill()
+            except Exception: pass
+        _lane_kill_endtree(meta, nid, pid=p.pid, seen=sub)
 
 def _kill_registered_children(meta, reason):
     """killpg EVERY registered child (each is its own group leader —
@@ -6819,6 +6878,12 @@ def _adopt_child(meta, node, byid, index, child, schema, fo_cancel=None):
            "attempts": (child.get("attempt") or 0) + 1}
     if cancelled:
         if _lane_killed(run, nid) and not meta["_stop"].is_set():
+            # est-2lcp8: the adoption seam ends the whole child tree too —
+            # _kill_adopted's killpg cannot reach setsid escapees; quiesce the
+            # attributed descendants and ride the proof on the record.
+            _kt = _lane_kill_endtree(meta, nid, pid=pid, seen=tree_seen)
+            if _kt:
+                evd.update(_kt)
             return {"status": "failed", "error": "killed by lane kill (action=kill)",
                     "error_class": "killed", "raw": "", "ms": ms, **evd}
         return {"status": "failed", "error": "cancelled by stop", "error_class": "cancelled",
@@ -7849,7 +7914,18 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
     if _tree_live:
         evd["tree_pids"] = _tree_live
     if (rc or 0) != 0 and _lane_killed(run, node["id"]):
-        # est-cl7t: node-targeted lane kill — terminal and readable, never retried
+        # est-cl7t: node-targeted lane kill — terminal and readable, never retried.
+        # est-2lcp8: attempt end IS the child tree's end — quiesce every
+        # attributed descendant (setsid escapees included; the seat itself is
+        # already reaped here, its group is a legal target) BEFORE this record
+        # commits, so a killed attempt can never act post-hoc (#541). The
+        # evidence REPLACES the raw tree_pids snapshot: the record states the
+        # settled truth, not the liveness of processes that died at the seam.
+        _kt = _lane_kill_endtree(meta, node["id"], pid=proc.pid,
+                                 seen=tree_seen, group=proc.pid)
+        if _kt:
+            evd.pop("tree_pids", None)
+            evd.update(_kt)
         return {"status": "failed", "error": "killed by lane kill (action=kill)",
                 "error_class": "killed", "raw": (out or "")[-2000:], "ms": ms,
                 "final": final_reply, **sk, **evd}
@@ -9476,6 +9552,16 @@ def run_agent_node(run, meta, byid, node, outputs, steering):
                     r = {"status": "failed", "item": item, "error": "stopped before launch",
                          "error_class": "killed" if _lane_killed(run, nid) else "cancelled",
                          "attempts": 0, "attempts_log": [], "ms": 0}
+                    if r["error_class"] == "killed":
+                        # est-2lcp8: an attempts-0 "stopped before launch"
+                        # record is exactly where #541's leftover writer hid —
+                        # a prior generation tracked live descendants that this
+                        # branch committed as if nothing had ever run. End the
+                        # node's attributed tree BEFORE the record is final, so
+                        # the record matches process reality (tree_descendants
+                        # counts them, tree_proof says dead/stuck); {} when
+                        # nothing was attributed keeps the record byte-exact.
+                        r.update(_lane_kill_endtree(meta, nid) or {})
                     with lock:
                         results[i] = r
                     # est-2ek.1.765 single-writer ordering: the canonical record
@@ -9549,7 +9635,8 @@ def run_agent_node(run, meta, byid, node, outputs, steering):
                 # rebase-union @wake-147: #582 metered **kw + est-9qhpf spent-gate both preserved
                     if _lane_killed(run, nid):
                         return {"status": "failed", "error": "killed by lane kill before launch",
-                                "error_class": "killed", "ms": 0}
+                                "error_class": "killed", "ms": 0,
+                                **(_lane_kill_endtree(meta, nid) or {})}
                     if meta["_stop"].is_set() or fo_cancel.is_set():
                         return {"status": "failed", "error": "cancelled at quorum",
                                 "error_class": "cancelled", "ms": 0}
