@@ -92,7 +92,11 @@ PROBE_FAIL = ["/bin/false"]              # a probe that RUNS and reports not-rea
 # est-7ncu0 (merged #570) refuses nonresident until_argv before dispatch, so a
 # dispatcher-failure probe must be resident yet still fail to exec: an executable
 # with a missing interpreter yields ENOENT at spawn — the always-settle field shape.
-_STABLE = TMP / "stable-root"; _STABLE.mkdir(exist_ok=True)
+# issues #650/#651: the stable root must live OUTSIDE the checkout — in a linked
+# git worktree the est-7ncu0 rule is unconditional (the checkout's .git file sits
+# in the parents), so any in-repo fixture is volatile there no matter what is
+# declared. mkdtemp + resolve keeps it stable for any TMPDIR, worktree or not.
+_STABLE = Path(tempfile.mkdtemp(prefix="pw-stable-")).resolve()
 PROBE_SH = _STABLE / "probe"; PROBE_SH.write_text("#!/nonexistent-interpreter\n")
 PROBE_SH.chmod(0o755)
 os.environ["WF_ARGV_STABLE_ROOTS"] = str(_STABLE)
@@ -259,4 +263,5 @@ try:
     print(f"\n{ok} checks passed")
 finally:
     shutil.rmtree(TMP, ignore_errors=True)
+    shutil.rmtree(_STABLE, ignore_errors=True)
 sys.exit(0)

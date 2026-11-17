@@ -32,7 +32,11 @@ def relhome(base, *parts):
     return h.joinpath(*parts)
 
 with tempfile.TemporaryDirectory(prefix="wf-residency-") as tdir:
-    T = Path(tdir)
+    # issue #649: resolve the fixture root before declaring it. A TMPDIR behind a
+    # symlink (hermes-managed runners keep it under ~/.hermes, often bind-mounted)
+    # would make every candidate resolve outside the declared root, leaking the
+    # path's own volatile segments into the scan.
+    T = Path(tdir).resolve()
     homeR = relhome(T / "homeR")
     target = homeR / "payload" / "job.sh"
     target.parent.mkdir(parents=True)
@@ -145,7 +149,7 @@ with tempfile.TemporaryDirectory(prefix="wf-residency-") as tdir:
           and p.stat().st_mode & stat.S_IXUSR, p)
 
 with tempfile.TemporaryDirectory(prefix="wf-residency-boundary-") as tdir:
-    T = Path(tdir)
+    T = Path(tdir).resolve()  # issue #649: same location-independence as above
     stable = T / "install"
     stable.mkdir()
     good = stable / "probe"
@@ -172,7 +176,13 @@ with tempfile.TemporaryDirectory(prefix="wf-residency-boundary-") as tdir:
     with patch.dict(os.environ, {"PATH": str(volatile.parent)}):
         check("boundary: PATH resolution also checks the actual target",
               wfcommon.entrypoint_residency("probe", [stable])[0] != "resident")
-    with patch.dict(os.environ, {"WF_ARGV_STABLE_ROOTS": str(stable)}):
+    # issue #649: a patched WF_ARGV_STABLE_ROOTS REPLACES the install defaults, so
+    # on hosts whose python3 lives under ~/.hermes/installs the interpreter operand
+    # alone would flip the -O cases. Declaring the resolved interpreter directory
+    # keeps residency identical for /usr, /opt, and installs-tree interpreters
+    # (venv symlinks resolve to the real binary's directory).
+    interp_root = str(Path(sys.executable).resolve().parent)
+    with patch.dict(os.environ, {"WF_ARGV_STABLE_ROOTS": str(stable) + os.pathsep + interp_root}):
         errors = wfcommon.wait_spec_ok({"until_argv": [sys.executable, str(volatile)]})
         check("boundary: interpreter does not hide a volatile script operand",
               any(str(volatile) in e["msg"] for e in errors), errors)

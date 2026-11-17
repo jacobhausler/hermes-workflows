@@ -6,15 +6,17 @@ the gate with its last stdout/stderr tail as output (usable via inputs downstrea
 A human `release` pre-empts a park. status shows pending nodes' blocked_by (nearest
 unfinished ancestors + state) and a parked gate's parked{kind, attempt, last_exit,...}.
 Real runner + fake hermes; nothing mocked inside the engine."""
-import json, os, subprocess, sys, threading, time
+import json, os, subprocess, sys, tempfile, threading, time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 BUILD = HERE.parent
-home = HERE / "home8"
-if home.exists():
-    import shutil; shutil.rmtree(home)
-home.mkdir()
+# issue #651: the fixture home must live OUTSIDE the checkout — in a linked git
+# worktree every in-repo path is volatile to the est-7ncu0 residency rule (its
+# .git file sits in the parents), so the check-gate script below would crash the
+# runner at boot before it wrote any event row. Resolved mkdtemp is stable for
+# any TMPDIR; the script inside it is covered by the declared root further down.
+home = Path(tempfile.mkdtemp(prefix="wf-home8-")).resolve()
 os.environ["HERMES_HOME"] = str(home)
 os.environ["WF_RUNS_ROOT"] = str(Path(os.environ["HERMES_HOME"]) / "workflows")  # est-2ek.1.762 pin: HERMES_HOME alone is not a sandbox
 (home / "config.yaml").write_text("model:\n  default: seat-default\n")

@@ -15,6 +15,11 @@ shutil.rmtree(HOME, ignore_errors=True)
 # pins runs/library wherever the door resolves. Without it, saves pollute prod.
 os.environ["HERMES_HOME"] = str(HOME)
 os.environ["WF_RUNS_ROOT"] = str(HOME / "workflows")
+# issue #649 (review-rig note): the literal-until_argv gate below
+# pins the running interpreter. Declare its resolved directory as a stable root
+# so the admission law passes identically whether python3 lives under /usr,
+# /opt, or an installs tree (a venv symlink resolves to the real binary).
+os.environ["WF_ARGV_STABLE_ROOTS"] = str(Path(sys.executable).resolve().parent)
 spec = importlib.util.spec_from_file_location("binding_door", str(BUILD.parent / "__init__.py"))
 hw = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(hw)

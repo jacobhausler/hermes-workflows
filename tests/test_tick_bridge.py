@@ -89,6 +89,20 @@ def main():
             os.environ["HERMES_HOME"] = str(home)
             os.environ["WF_TICK_SCHEDULE"] = "every 7m"  # env precedence, pinned hermetically
 
+            # issue #652: the bake used to point at the checkout's own wf.py,
+            # which the residency rule correctly refuses when the checkout is
+            # a linked git worktree (the .git file sits in the parents and the
+            # worktree is reclaimable). The law here is the SHIM, not the kind
+            # of checkout: bake a fixture entrypoint under the hermetic home so
+            # every host runs the same legs.
+            if (ROOT / ".git").is_file():
+                stable = (home / "stable-plugin").resolve()
+                stable.mkdir()
+                (stable / "wf.py").write_text("# fixture entrypoint\n")
+                cron_bridge.PLUGIN_ROOT = stable
+                cron_bridge.WF_PY = stable / "wf.py"
+                os.environ["WF_ARGV_STABLE_ROOTS"] = os.environ["WF_ARGV_STABLE_ROOTS"] + os.pathsep + str(stable)
+
             # A. arm: exactly one job, no_agent, right name, shim under tmp scripts dir.
             jid = cron_bridge.ensure_tick()
             check("A: ensure_tick returns a job id", isinstance(jid, str) and bool(jid), jid)
@@ -111,7 +125,7 @@ def main():
                 body = script.read_text()
                 mode = script.stat().st_mode
                 check("A: the shim is executable", bool(mode & stat.S_IXUSR), oct(mode))
-                wf_py = (ROOT / "wf.py").resolve()
+                wf_py = Path(cron_bridge.WF_PY).resolve()  # the module's own entrypoint, fixture-substituted on worktrees (#652)
                 check("A: the shim execs this plugin's absolute wf.py",
                       str(wf_py) in body and body.lstrip().startswith("#!"), body[:200])
 
