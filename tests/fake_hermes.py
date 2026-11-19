@@ -306,6 +306,12 @@ if _FAKE_MODE == "quota":          # #24: subscription-quota 429 with a reset ho
     print('Provider said: HTTP 429: {"error": {"message": "ChatGPT or Codex '
           'Subscription usage limit reached, resets in ~109 hours"}}')
     sys.exit(1)
+if _FAKE_MODE == "resume_policy":  # est-25t/E19: the update-wall shape — banner head,
+    # fallback-switch noise, the REAL cause on the last Error: line, argparse-class rc=2.
+    print("Warning: A previous `hermes update` pulled new code; restart the gateway to load it.")
+    print("Switching to the seat default model for this session.")
+    print("Error: Resume retains gateway session policy; creation overrides are unsupported on resume.")
+    sys.exit(2)
 # ---- est-imp1z (WF-GRAFT-2): the exit-0-lie family (exit-0-is-not-success) ----
 _IMP1Z_LIE = "API call failed after 3 retries: HTTP 429 Too Many Requests"
 if _FAKE_MODE == "exit0lie":       # est-imp1z: THE exit-0 lie — provider retries exhausted,

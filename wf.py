@@ -3242,6 +3242,14 @@ _QUOTA_PHRASE_TOKENS = ("usage limit", "quota exceeded", "quota exceeded for",
                         "subscription", "out of credits", "spending limit",
                         "insufficient_quota")
 _QUOTA_HORIZON_RE = re.compile(r"reset(?:s|ting)?\D{0,10}?(\d+)\s*(hour|hr|h|day|d|min|minute)")
+# E19 (bd_2026-11-13-25t): the core's typed RESUME refusal — the deterministic
+# rc=2 argv death whose capture opens with the update banner. Corpus: 34 attempt
+# logs + 661/662 banners pointing operators at "gateway restart" while the real
+# cause sat on the LAST Error: line ("Resume retains gateway session policy;
+# creation overrides are unsupported on resume."). A deterministic INPUT fact —
+# terminal at the first attempt, outside both ladders, like config_input.
+_RESUME_POLICY_TOKENS = ("unsupported on resume",
+                         "resume retains gateway session policy")
 # est-t0vz (issue #54): the credential-window 429 — its OWN class, never transport.
 # The banner is the hermes CLI's own AuthError text, raised verbatim at
 # /opt/hermes/hermes_cli/runtime_provider.py:370
@@ -3272,6 +3280,10 @@ _CAP_TOKENS = ("tool-call limit", "tool call limit", "turn limit",
 ERROR_CLASSES = frozenset(("provider_400", "unresolved_model", "cap_exhausted",
                            "timeout", "transport", "transport_exhausted",
                            "fatal_quota", "ratelimit", "route_unavailable",
+                           # E19: the deterministic resume-policy argv death (the
+                           # child's last Error: line names it) — outside both
+                           # ladders, like config_input; zero transient draws.
+                           "resume_policy",
                            "incomplete_work", "early_death", "cancelled",
                            "schema", "spawn", "inputs", "killed",
                            # sys-bknard: rc!=0 death whose capture carries a fenced
@@ -3813,10 +3825,13 @@ def _classify_rc_output(out):
     """(error_class, last-marker line) from the child's MERGED stdout/stderr
     capture. Pin on the LAST line that looks like a machine-readable marker line
     (oneshot's escalation line, the CLI's `Provider said:` trailer, or a bare SDK
-    exception str) — never grep prose.
-    `timeout` is a fact the runner knows (it killed the child); `max_turns` comes
-    ONLY from _typed_error_class() reading the child's core -Q turn report —
-    nothing on stdout can prove it (the usage-file report is -z-only)."""
+    exception str) — never grep prose. When no machine marker exists, the child's
+    LAST `Error:` line is the cause (E19): the head of the capture is CLI startup
+    banner, and quoting it as the verdict pointed 661/662 operators at a gateway
+    restart that never was the disease. `timeout` is a fact the runner knows (it
+    killed the child); `max_turns` comes ONLY from _typed_error_class() reading
+    the child's core -Q turn report — nothing on stdout can prove it (the
+    usage-file report is -z-only)."""
     lines = [l.strip() for l in (out or "").splitlines() if l.strip()]
     marker = None
     for l in reversed(lines):  # the LAST machine-readable marker line wins
@@ -3825,9 +3840,14 @@ def _classify_rc_output(out):
                 or low.rstrip(".") in _TRANSPORT_EXACT or low.startswith(_TRANSPORT_EXACT):
             marker = l
             break
+    err_line = next((l for l in reversed(lines) if l.lower().startswith("error:")), None)
+    if err_line and any(t in err_line.lower() for t in _RESUME_POLICY_TOKENS):
+        return "resume_policy", err_line
     if marker is None:
-        return "unknown", None
+        return "unknown", err_line
     low = marker.lower()
+    if any(t in low for t in _RESUME_POLICY_TOKENS):
+        return "resume_policy", marker
     if any(t in low for t in _UNRESOLVED_MODEL_TOKENS) or any(t in low for t in _MODEL404_TOKENS):
         return "unresolved_model", marker
     if any(t in low for t in _PROVIDER400_TOKENS) or "error code: 400" in low or "http 400" in low:
