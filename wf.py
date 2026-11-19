@@ -9,6 +9,12 @@ Run dir: $HERMES_HOME/workflows/<run_id>/
   reconcile.stamp.json  last reconcile-pass view {ident, rev, vector (total per-node
                 disposition, UNKNOWN explicit), touched_ts, notified_ts} — the full
                 shape note and the stamp law live at RECONCILE_STAMP_FILE below
+  side_effects.jsonl  committed side-effect journal — `wf.py recover <run>`
+                      reads it back as {applied[], torn[], unprovable[], safe_redrive[]} (E16)
+  quarantine/<node>[.<i>].jsonl  durable #61 tree-quarantine rows; finalized
+                      fan item records carry disposition + quarantine target (E17)
+  logs/boundary.log + nodes/<id>/amendment-applied.json  amendment application
+                      evidence, one boundary row per amends revision (E18)
 
 Lifecycle lines on stdout (for the spawning agent's notify patterns):
   WORKFLOW_HELD <run_id> <gate_id> | WORKFLOW_DONE <run_id> | WORKFLOW_FAILED <run_id> | WORKFLOW_STOPPED <run_id>
@@ -1256,6 +1262,113 @@ def recovery_state(run, byid):
                                  "untopological": True})
     return {"applied": applied, "torn": torn, "unprovable": unprovable,
             "safe_redrive": safe_redrive}
+
+
+# ---------- E18 (bd_2026-11-13-4hc): amendment application evidence ----------
+# The runtime docs (01-quickstart, 03-incidents) promise amendment application
+# evidence at runs/<run>/nodes/<name>/amendment-applied.json + logs/boundary.log;
+# the plugin wrote none of that. The runner now SHIPS both AT APPLICATION TIME,
+# keyed by the amends.jsonl row's revision (its physical line ordinal — the
+# same identity as the door's _graph_revision seq):
+#   nodes/<id>/amendment-applied.json — latest application per applied node:
+#     {node, from_efp (null when the node was added), to_efp, amendment_rev,
+#      trigger (boot | wave-boundary), applied_at}. The amends row, the
+#      graph.amended / graph.reloaded event pair, and the named efp movement
+#      together ARE the proof.
+#   logs/boundary.log — one JSON line per amendment revision:
+#     {ts, event: "amendment.applied", rev, trigger, added: [ids],
+#      removed: [ids], changed: [{id, from_efp, to_efp}], unchanged: [ids]};
+#     an unparseable amends line gets one {event: "amendment.row_torn", rev}
+#     line instead of silence.
+# Idempotent by construction: a revision already named in boundary.log writes
+# nothing, so re-boots and re-reloads never duplicate the evidence.
+def _amend_revision_rows(run):
+    """(rev, row-or-None) per physical amends.jsonl line; the ordinal IS the
+    revision. Fail-open read: no file -> no rows (a fresh run has none)."""
+    try:
+        lines = (Path(run) / "amends.jsonl").read_text(errors="replace").splitlines()
+    except OSError:
+        return []
+    out = []
+    for rev, line in enumerate(lines, 1):
+        if not line.strip():
+            continue
+        try:
+            out.append((rev, json.loads(line)))
+        except Exception:
+            out.append((rev, None))
+    return out
+
+def _evidenced_amend_revs(run):
+    try:
+        text = (Path(run) / "logs" / "boundary.log").read_text(errors="replace")
+    except OSError:
+        return set()
+    revs = set()
+    for line in text.splitlines():
+        try:
+            rec = json.loads(line)
+        except Exception:
+            continue
+        if isinstance(rec, dict) and isinstance(rec.get("rev"), int):
+            revs.add(rec["rev"])
+    return revs
+
+def _evidence_amendments(run, trigger):
+    """Write the promised application evidence for every amends.jsonl revision
+    not yet named in logs/boundary.log. Observer law (fail-open): an evidence
+    failure prints loudly on stderr and never breaks an application — the
+    graph reload itself stands."""
+    try:
+        evidenced = _evidenced_amend_revs(run)
+        boundary = Path(run) / "logs" / "boundary.log"
+        for rev, row in _amend_revision_rows(run):
+            if rev in evidenced:
+                continue
+            boundary.parent.mkdir(parents=True, exist_ok=True)
+            if not isinstance(row, dict):
+                with open(boundary, "a") as f:
+                    f.write(json.dumps({"ts": now(), "event": "amendment.row_torn",
+                                        "rev": rev, "trigger": trigger}) + "\n")
+                evidenced.add(rev)
+                continue
+            old_byid = {n["id"]: n for n in (row.get("old") or {}).get("nodes", [])}
+            new_byid = {n["id"]: n for n in (row.get("new") or {}).get("nodes", [])}
+            memo_new = {}
+            added, removed, changed, unchanged = [], [], [], []
+            for nid, n in new_byid.items():
+                to_efp = efp(new_byid, n, memo=memo_new)
+                if nid not in old_byid:
+                    added.append(nid)
+                    from_efp = None
+                else:
+                    try:
+                        from_efp = efp(old_byid, old_byid[nid])
+                    except Exception:
+                        from_efp = None
+                    (changed if from_efp != to_efp else unchanged).append(nid)
+                if from_efp is None or from_efp != to_efp:
+                    nd = Path(run) / "nodes" / nid.replace("/", "_").replace("\\", "_")
+                    nd.mkdir(parents=True, exist_ok=True)
+                    doc = {"node": nid, "from_efp": from_efp, "to_efp": to_efp,
+                           "amendment_rev": rev, "trigger": trigger, "applied_at": now()}
+                    tmp = nd / ("amendment-applied.json.%s.tmp" % os.getpid())
+                    tmp.write_text(json.dumps(doc, ensure_ascii=False))
+                    os.replace(tmp, nd / "amendment-applied.json")
+            removed = [nid for nid in old_byid if nid not in new_byid]
+            with open(boundary, "a") as f:
+                f.write(json.dumps({"ts": now(), "event": "amendment.applied",
+                                    "rev": rev, "trigger": trigger, "added": added,
+                                    "removed": removed,
+                                    "changed": [{"id": nid,
+                                                 "from_efp": efp(old_byid, old_byid[nid]),
+                                                 "to_efp": efp(new_byid, new_byid[nid], memo=memo_new)}
+                                                for nid in changed],
+                                    "unchanged": unchanged}) + "\n")
+            evidenced.add(rev)
+    except Exception as exc:                           # fail-open (observer law)
+        print(f"hermes-workflows: amendment evidence failed for {run}: {exc}",
+              file=sys.stderr)
 
 
 def _respawn_effects_preamble(run, meta, byid, node):
@@ -12603,6 +12716,10 @@ def main(run_id):
     # line — emitting it earlier would create events.jsonl and make the FIRST
     # runner misread itself as a resume (the reaper test pins the trace order).
     _receipt_concurrency(meta)                # once per runner process
+    # E18: an amendment admitted while this runner was down applied AT BOOT
+    # (this boot read the amended graph.json) — ship the promised evidence for
+    # every amends revision not yet named in logs/boundary.log.
+    _evidence_amendments(run, "boot")
     rs = Run(run)
     exit_graph[0] = rs.graph
     consumed, steering = set(), {}
@@ -12627,6 +12744,10 @@ def main(run_id):
             except OSError: pass
             if ok:
                 rs.reload(); exit_graph[0] = rs.graph; log(run, "graph.reloaded")
+                # E18: the amendment just consumed at this wave boundary ships
+                # its promised nodes/<id>/amendment-applied.json + boundary.log
+                # evidence (idempotent per amends revision).
+                _evidence_amendments(run, "wave-boundary")
                 return "reloaded"
         if (run / "stop.request").exists():
             with meta["_procs_lock"]:
