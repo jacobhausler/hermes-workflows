@@ -126,10 +126,11 @@ def mk(run_id, goals, grace_s=2, poll_s=0.5, item_concurrency=None):
         # est-waf8y D2: pin the fixture's launch-all precondition against the
         # GLOBAL seat semaphore too (default cap 4 < 6 items). Under machine
         # load the semaphore splits the wave into launch waves; each queued->
-        # launched stamp flip re-arms the latch BY ENGINE LAW, minting a second
-        # honest wake and breaking the EXACTLY-ONE count (the passport's run1
-        # flake). The per-run meta opt-out is the door's sanctioned disable —
-        # these fixtures test the census, not seat admission.
+        # launched stamp flip re-arms the AUDIT latch (and, before az9, used to
+        # mint a second honest wake and break the EXACTLY-ONE count — the
+        # passport's run1 flake). The per-run meta opt-out is the door's
+        # sanctioned disable — these fixtures test the census, not seat
+        # admission.
         "max_seats": 0,
         "owner": {"session_id": "nxr-test-session"},
         "straggler_grace_s": grace_s, "straggler_poll_s": poll_s}))
@@ -227,8 +228,9 @@ if wb:
 # formats item 4's missing stamp with :.3f -> ValueError -> wake NEVER fires
 # for this shape and every poll logs a straggler-watchdog item.commit.error.
 # Post-fix the wake fires. A later fire when the pair lands and 4/5's stamps
-# flip is HONEST engine law (stamp overwrite re-arms the latch), so the count
-# pins >=1; the regression pair is (>=1 event line, mixed first payload) +
+# flip is an AUDIT-ONLY refresh under the az9 notice-identity law (the re-stamp
+# moves the disc, not the disposition shape), so the wake pin stays at the
+# first trip; the regression pair is (>=1 event line, mixed first payload) +
 # (zero straggler-watchdog errors).
 rc_ = mk("nxr-mixedcap", ["reply ok"] * 2 + ["QSLEEP 12 reply ok"] * 2
          + ["reply ok"] * 2, grace_s=2, poll_s=0.5, item_concurrency=2)
