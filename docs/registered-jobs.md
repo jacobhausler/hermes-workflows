@@ -41,3 +41,30 @@ interrupted run needs no manual sweep and the idle cost is zero wakes. The door 
 a graph-bound typed exit receipt and claim-bound interruption receipts under
 `interruptions/`. The node read model exposes current interrupted truth while
 preserving original spawn bytes as cold incident evidence. Reads remain pure.
+
+## The tick launcher is interpreter-pinned (P41)
+
+The baked job script (`<HERMES_HOME>/scripts/hermes-workflows-tick.sh`) is
+
+    #!/usr/bin/env bash
+    exec <INTERPRETER> <plugin>/wf.py tick
+
+with `<INTERPRETER>` absolute at bake time (env `WF_TICK_PYTHON` > the bundled
+python that ran the bake). The entrypoint rides as an argument, so the launch
+needs neither `wf.py`'s exec bit nor a shebang resolution — `hermes update`
+reinstalling plugin files at mode 0644, or `env python3` resolving to the
+macOS 3.9.6 system python (the plugin is >=3.10 syntax), cannot silently
+revert the tick. Every re-arm over a running tick re-bakes the launcher on
+drift (content or exec mode) only, so the repair converges and a settled
+launcher is never clobbered. After any plugin update, the self-check re-pins,
+runs the tick once through the baked shim exactly as the scheduler will, and
+exits with the tick's rc:
+
+    python3 ~/.hermes/plugins/hermes-workflows/cron_bridge.py selfcheck
+    TICK SELFCHECK rc=0 shim=$HOME/.hermes/scripts/hermes-workflows-tick.sh
+
+One-line rule-out when runs look stuck under a "⏳ Gateway draining" banner:
+run that line — `rc=0` means the watchdog tick is alive and re-driving, so the
+drain is real (agents genuinely active), not a dead tick leaving interrupted
+runs unreaped (the P41 shape); a nonzero rc names the launcher itself as the
+suspect, not the gateway.

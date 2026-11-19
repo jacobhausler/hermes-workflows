@@ -100,7 +100,7 @@ def main() -> None:
                       # part of the shipped surface — desktop contributors read it from
                       # the package. Mandatory new-file pack-surface gate: an unshipped
                       # doc is invisible to every install.
-                      "docs/card-toolresult-hook.md", "docs/orphan-held.md", "orphan_watch.py", "SHA256SUMS")))
+                      "docs/card-toolresult-hook.md", "docs/orphan-held.md", "docs/registered-jobs.md", "orphan_watch.py", "SHA256SUMS")))
             check("fake child retains executable mode in ZIP",
                   (archive.getinfo(root + "tests/fake").external_attr >> 16) & 0o111 == 0o111)
             # P41: the tick entrypoint's exec bit is packaging state — a ZIP

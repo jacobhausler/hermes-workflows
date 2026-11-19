@@ -161,6 +161,10 @@ INCLUDE_FILES = (
     # park_watch.py shipped by 8763ea1). Stdlib-only.
     "cron_bridge.py",
     "docs/native-hooks.md",  # the p3/p5 switch board: an unshipped doc is invisible to ZIP installs
+    # P41 (hw-g6v): the tick launcher law and the one-line "Gateway draining"
+    # operator rule-out — the tick-ops doc of an installed plugin must travel
+    # with it (the unshipped-doc-is-invisible law above, verbatim shape).
+    "docs/registered-jobs.md",
     "dashboard/manifest.json",
     "dashboard/index.js",  # hidden API plugin still needs the web host's script/registration contract
     "dashboard/plugin_api.py",
