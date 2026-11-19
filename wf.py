@@ -808,6 +808,13 @@ def _clip_record(rec):
 # JSON-encoded protocol fields (quoted via json.dumps, so a hostile run name can never
 # break out of the field or read as instruction prose) — exactly what makes a wake
 # actionable: inspect status/gates once, act, stop, never poll.
+# EST-MND (E10/E13) AMENDMENT: the runner itself may additionally append runner-
+# RECOMPUTED graph content — the gate.held question/options/context read from the
+# COMMITTED graph.json at the notify point, the failed-set delta, the cascade trio —
+# as further inert JSON-quoted pointer fields in that same position. The law is
+# about the AUTHOR, not the alphabet: call sites still pass no text, the template
+# table stays the only author of owner PROSE, and quoted graph strings can speak
+# only from inside their quotes (the #501 precedent, extended by owner ruling).
 # #501 (est-qcyfi): run.failed/run.done additionally carry runner-COMPUTED
 # pointer fields in that same inert JSON-quoted position — run_dir always,
 # failed_node_logs (the efp-valid committed records' log_path set) when
@@ -912,13 +919,15 @@ def _wake_owner_text(run_id, event, run_dir=None, failed_node_logs=None, transit
     unresolvable failed_node_logs emits nothing — absent is honest, the
     renderer never fabricates a list (AGENTS rule 8).
 
-    est-mnd (E10): the `pointers` argument carries the notice funnel's own
-    runner-computed delta fields (failed_delta/failed_set, the cascade trio)
-    in the same inert JSON-quoted position, ahead of the existing #501
-    pointers; the body after the separator stays verbatim, so the authority
-    law keeps its single author and a hostile string can never break out of
-    its quoted field or read as instruction prose (E13 later extends the
-    same precedent to the hold payload)."""
+    est-mnd (E10/E13): the `pointers` argument carries the notice funnel's
+    own runner-computed delta fields (failed_delta/failed_set, the
+    cascade trio, the gate.held payload: gate_id, the diff-first
+    gate_hold_diff verdict, dwell age, then the rendered question/options/
+    context read from the COMMITTED graph.json — never a call-site string).
+    They ride in the same inert JSON-quoted position, ahead of the existing
+    #501 pointers; the body after the separator stays verbatim, so the
+    authority law keeps its single author and a hostile graph string can
+    never break out of its quoted field or read as instruction prose."""
     body = _WAKE_TEMPLATES.get(event)
     if body is None:
         body = _WAKE_CATCHALL_BODY
@@ -2235,6 +2244,91 @@ def _notice_route_check(run):
     except Exception:
         pass
 
+def _gate_hold_pointers(run, event, key, node, graph, rows):
+    """E13: a hold notice carries its payload instead of pointing at status
+    — the gate id, a diff-first verdict over the fields a re-fire moved,
+    the dwell age since the hold (the park marker's clock, else the last
+    notice for this gate), then the rendered question/options/context. The
+    values are read at THIS point from the run's committed graph.json (the
+    same fact source the identity already rides), JSON-quoted inert fields:
+    AUTHORITY LAW r5 keeps its single author — the call site passes no text,
+    and a graph-authored string can only ever speak from inside its quotes
+    (the #501 precedent, extended by the E13 owner ruling). Returns
+    (ordered pointer pairs, ledger fields to persist) — never raises."""
+    try:
+        if event != "gate.held":
+            return [], {}
+        gate_id = node if isinstance(node, str) else (
+            key.split(":", 1)[0] if isinstance(key, str) and key else None)
+        if gate_id is None:
+            return [], {}
+        g = graph if isinstance(graph, dict) else (jload(run / "graph.json", {}) or {})
+        nodes = g.get("nodes")
+        if not isinstance(nodes, list):
+            nodes = (jload(run / "graph.json", {}) or {}).get("nodes") or []
+        byid = {n["id"]: n for n in nodes if isinstance(n, dict) and n.get("id")}
+        gdef = byid.get(gate_id)
+        fields = {}
+        q = o = c = None
+        if isinstance(gdef, dict):
+            def _digest(v):
+                if v is None:
+                    return None
+                return hashlib.sha256(json.dumps(v, sort_keys=True, default=str)
+                                      .encode()).hexdigest()[:12]
+            def _clamp(v):
+                if isinstance(v, str) and len(v) > GATE_HOLD_TEXT_CLAMP:
+                    return v[:GATE_HOLD_TEXT_CLAMP] + "\u2026[clamped]"
+                return v
+            q, o, c = _clamp(gdef.get("question")), gdef.get("options"), _clamp(gdef.get("context"))
+            fields = {"question": _digest(gdef.get("question")),
+                      "options": _digest(gdef.get("options")),
+                      "context": _digest(gdef.get("context"))}
+        lfields = {"gate": gate_id, "gate_fields": fields}
+        prev_fields, prev_ts = None, None
+        for r_ in rows:
+            if (isinstance(r_, dict) and r_.get("event") == "gate.held"
+                    and r_.get("gate") == gate_id and not r_.get("suppressed")):
+                prev_fields, prev_ts = r_.get("gate_fields"), r_.get("ts")
+        if prev_fields is None:
+            diff = {"question": "new_hold", "options": "new_hold", "context": "new_hold"}
+        else:
+            diff = {}
+            for fname in ("question", "options", "context"):
+                a = (prev_fields or {}).get(fname)
+                b = fields.get(fname)
+                if a == b:
+                    diff[fname] = "unchanged"
+                elif a is None:
+                    diff[fname] = "added"
+                elif b is None:
+                    diff[fname] = "removed"
+                else:
+                    diff[fname] = "changed"
+        dwell = None
+        hm = jload(run / "gates" / f"{gate_id}.held.json", {}) or {}
+        since = hm.get("since") if isinstance(hm, dict) else None
+        if isinstance(since, (int, float)):
+            dwell = max(0, int(time.time() - float(since)))
+        elif isinstance(prev_ts, str):
+            try:
+                _p = datetime.fromisoformat(prev_ts.replace("Z", "+00:00"))
+                if _p.tzinfo is None:
+                    _p = _p.replace(tzinfo=timezone.utc)
+                dwell = max(0, int(time.time() - _p.timestamp()))
+            except ValueError:
+                pass
+        pairs = [("gate_id", gate_id), ("gate_hold_diff", diff)]
+        if isinstance(gdef, dict) and isinstance(gdef.get("hold_timeout"), (int, float)):
+            pairs.append(("gate_hold_timeout_s", gdef["hold_timeout"]))
+        pairs.append(("gate_hold_dwell_s", dwell))
+        pairs.append(("gate_question", q))
+        pairs.append(("gate_options", o))
+        pairs.append(("gate_context", c))
+        return pairs, lfields
+    except Exception:
+        return [], {}
+
 def notify(run, event, key=None, graph=None, node=None, refire=False, cascade=None):
     """Push ONE lifecycle transition instance to the owner session stamp. Owner-null
     (tests, CLI, tool hosts without a session env) writes NOTHING — the door's
@@ -2342,7 +2436,8 @@ def notify(run, event, key=None, graph=None, node=None, refire=False, cascade=No
         # separator; the template bodies stay verbatim and the redactor below
         # runs over them like every persisted field. Delivery/identity/dedupe
         # are untouched: the discriminant never reads these fields.
-        ptr_pairs = []
+        gate_pairs, gate_lf = _gate_hold_pointers(run, event, key, node, graph, _rows)
+        ptr_pairs = list(gate_pairs)
         if event == "run.failed":
             ptr_pairs.append(("failed_delta", mnd_ptr.get("failed_delta")))
             ptr_pairs.append(("failed_set", mnd_ptr.get("failed_set")))
@@ -2387,6 +2482,8 @@ def notify(run, event, key=None, graph=None, node=None, refire=False, cascade=No
         rec = {"ts": now(), "event": event, "run_id": run.name, "owner": owner,
                "id": tid, "wake_protocol": proto, "text": text,
                **trio}
+        if gate_lf:
+            rec.update(gate_lf)          # E13: the row itself carries the gate subject
         if event not in _WAKE_TEMPLATES:
             rec["catchall"] = True      # probe row is typed: template vs catch-all distinguishable
         rec["delivered"] = _wake_deliver(rec, sid, text, tid, owner=owner)   # tri-state row mirrors the outcome
@@ -12415,11 +12512,15 @@ def main(run_id):
             log(run, "gate.held", node=gate["id"], question=gate.get("question"),
                 options=gate.get("options"), context=gate.get("context"))
             emit(f"WORKFLOW_HELD {run_id} {gate['id']}")
-            # AUTHORITY LAW (owner ruling, PR#97 review): the automatic owner wake
-            # is RUNNER-AUTHORED protocol text only. The gate's question/options/
-            # context are graph-authored — attributed DATA that lives in the
-            # events.jsonl line above, the run's status, and the desktop gate card;
-            # they are NEVER interpolated into a role:user owner turn. A graph
+            # AUTHORITY LAW (owner ruling, PR#97 review; est-mnd E13 amendment):
+            # the automatic owner wake is RUNNER-AUTHORED protocol text only —
+            # this call site passes no text. The gate's question/options/context
+            # no longer force the operator to poll status (E13: 28/28 cold seats
+            # missed the question): notify() re-reads them AT THE NOTIFY POINT
+            # from the run's committed graph.json and rides them as inert
+            # JSON-quoted pointer fields (gate_id, gate_hold_diff first, dwell,
+            # then the rendered question) — attributed, quoted data that can
+            # never speak outside its field. A graph
             # author therefore cannot speak as the owner's master.
             # The hold marker (gates/<id>.held.json, efp-stamped) is written BEFORE
             # the wake when the gate parks (hold_timeout): a respawn of the same
