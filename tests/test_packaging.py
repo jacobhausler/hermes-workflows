@@ -158,10 +158,12 @@ def main() -> None:
             # runs and REDs. The ZIP-side equality above stays unconditional
             # and still bites a smuggled extra script INTO the package.
             if (ROOT / ".git").exists():
-                check("pack-list contract: every repo scripts/*.py is packed or declared source-only (no silent middle)",
-                      {p.name for p in (ROOT / "scripts").glob("*.py")} ==
-                      {Path(s).name for s in packed_scripts}
-                      | {"make_public.py", "lane_recover.py",
+                # Test-side ledger, cross-checked against pack.py's reason-of-record
+                # below: neither list can move alone without going RED (the shape
+                # tests/test_package_source_only_756.py already pins for
+                # SOURCE_ONLY_TESTS; est-0izi7 cert finding 1 asks for the same
+                # for scripts).
+                test_side_source_only = {"make_public.py", "lane_recover.py",
   # est-xwvu9 (upstream #133387 accepted ask): the post-exit
   # hook is stripped from the shipped build; kept here for
   # our own distribution path, executed by the source-only
@@ -184,7 +186,21 @@ def main() -> None:
   # make_public.py; declared source-only in pack.py SOURCE_ONLY_SCRIPTS.
   "gate_lint.py",
   "admission_ledger.py",
-    "retention.py"})
+    "retention.py",
+  # est-0izi7 (PR #531): the changelog.d fragment assembler is release-commit
+  # tooling over the checkout's changelog.d/ — declared source-only in pack.py
+  # SOURCE_ONLY_SCRIPTS.
+  "changelog_assemble.py"}
+                check("pack-list contract: every repo scripts/*.py is packed or declared source-only (no silent middle)",
+                      {p.name for p in (ROOT / "scripts").glob("*.py")} ==
+                      {Path(s).name for s in packed_scripts} | test_side_source_only)
+                ledger_spec = importlib.util.spec_from_file_location(
+                    "pack_ledger_probe", ROOT / "scripts/pack.py")
+                assert ledger_spec is not None and ledger_spec.loader is not None
+                pack_ledger = importlib.util.module_from_spec(ledger_spec)
+                ledger_spec.loader.exec_module(pack_ledger)
+                check("ledger cross-check: the test-side source-only set equals pack.py SOURCE_ONLY_SCRIPTS",
+                      test_side_source_only == {Path(n).name for n in pack_ledger.SOURCE_ONLY_SCRIPTS})
             else:
                 print("SKIP pack-list repo-side half: no .git — running from an "
                       "unpacked ZIP/archive, where the premise does not exist")
