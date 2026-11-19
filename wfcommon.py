@@ -7610,3 +7610,108 @@ def validate(out, schema):
             for i, it in enumerate(v): chk(it, s["items"], f"{path}[{i}]")
     chk(out, schema, "$")
     return errs
+
+# ---------- hw-6og (1/4): the SEATS read surface — occupancy as a query ----------
+# Canonical home of the seat-queue constants the READ view needs (wf.py rebinds
+# these names for the write side — one table, door and runner).
+SEAT_QUEUE_DIR = "queue"
+SEAT_QUEUE_LIVE_S = 8.0
+
+def _seat_pid_same(pid, boottime):
+    """Observer-side liveness+occupant probe for the hw-6og READ view: the pid
+    must exist and be non-zombie, and a boot tick pinned by the row must be
+    matched by the live /proc starttime (a recycled pid wearing an old ticket
+    is a stranger — the #80 occupant law, observer shape). The runner's
+    two-pass reconfirm/prune law (est-2ek.1.857) belongs to CAPACITY
+    decisions; this probe only reports and never prunes, so the fail-open is
+    safe by construction: an unreadable row counts live — on an occupancy
+    report, unknown is never undercounted."""
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    try:
+        rest = Path(f"/proc/{pid}/stat").read_text(errors="replace").rsplit(")", 1)[1].split()
+        if rest[0].startswith("Z"):
+            return False
+        live_bt = int(rest[19])
+    except (OSError, IndexError, ValueError):
+        return True                              # no procfs: unknown, never death
+    return boottime is None or int(boottime) <= live_bt
+
+def seats_view(seats_dir, now_s=None):
+    """hw-6og (1/4): engine-wide seat-pool occupancy as a query — the read
+    surface that retires pgrep + log-staleness heuristics (b2p supervision
+    glue). READ-ONLY by law: no prune, no cap seeding, no locks taken. Every
+    field derives from the ledger files admission itself writes:
+      cap      the pool-recorded cap (<seats>/.cap, first-writer-wins); None
+               while the pool has recorded no truth (0/negative means the
+               semaphore is disabled upstream — also reported as None);
+      live     held tickets whose holder (runner OR bound child) the occupant
+               probe still verifies, PLUS unparseable tickets (uncertain
+               capacity is counted, never undercounted);
+      free     cap - live whenever cap is known (negative = over-admitted,
+               surfaced honestly, never clamped);
+      holders  per live ticket: {pid, name, held_for_s, child_pid?};
+      queued   per live FIFO marker (owner alive AND heartbeat younger than
+               SEAT_QUEUE_LIVE_S): {pid, name, waited_s}, oldest first.
+    The seats dir is the CALLER-resolved one (WF_SEATS_DIR, else the resolved
+    runs root's .seats) — the door reports the pool it can see, so `dir` rides
+    along and a cross-root read is visible, not silent."""
+    seats = Path(seats_dir)
+    now_s = time.time() if now_s is None else now_s
+    view = {"dir": str(seats), "cap": None, "live": 0, "holders": [], "queued": []}
+    try:
+        raw = (seats / ".cap").read_text(encoding="utf-8").strip()
+        n = int(raw)
+        view["cap"] = n if n > 0 else None
+    except (OSError, ValueError):
+        pass
+    try:
+        tickets = sorted(seats.glob("*.json"))
+    except OSError:
+        tickets = []
+    for t in tickets:
+        if t.name == ".cap":
+            continue
+        try:
+            row = json.loads(t.read_text(encoding="utf-8"))
+            pid = int(row["pid"])
+        except (OSError, ValueError, TypeError, KeyError):
+            view["live"] += 1                # uncertain capacity: count, can't name
+            continue
+        child = None if row.get("child") is None else int(row["child"])
+        if not (_seat_pid_same(pid, row.get("boottime"))
+                or (child is not None and _seat_pid_same(child, row.get("child_boottime")))):
+            continue                         # holder dead on this instant: not counted
+        view["live"] += 1
+        h = {"pid": pid, "held_for_s": round(max(0.0, now_s - float(row.get("ts", now_s))), 1)}
+        if row.get("name") is not None:
+            h["name"] = str(row["name"])
+        if child is not None:
+            h["child_pid"] = child
+        view["holders"].append(h)
+    try:
+        markers = sorted((seats / SEAT_QUEUE_DIR).glob("*.json"))
+    except OSError:
+        markers = []
+    for m in markers:
+        try:
+            row = json.loads(m.read_text(encoding="utf-8"))
+            pid = int(row["pid"])
+            enq = float(row.get("enqueued", row.get("ts", now_s)))
+        except (OSError, ValueError, TypeError, KeyError):
+            continue                         # unreadable marker: unknown waiter, skip
+        if _seat_pid_same(pid, row.get("boottime")) \
+                and now_s - float(row.get("hb", 0)) <= SEAT_QUEUE_LIVE_S:
+            q = {"pid": pid, "waited_s": round(max(0.0, now_s - enq), 1)}
+            if row.get("name") is not None:
+                q["name"] = str(row["name"])
+            view["queued"].append(q)
+    view["queued"].sort(key=lambda q: -q["waited_s"])          # longest wait first
+    view["holders"].sort(key=lambda h: -h["held_for_s"])
+    if view["cap"] is not None:
+        view["free"] = view["cap"] - view["live"]
+    return view

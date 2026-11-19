@@ -4802,9 +4802,9 @@ SEATS_DEFAULT = 4
 # report 2026-10-08 12:19Z: accept_probe sat seat.wait 17 min while short-run
 # cron re-launches re-took every freed seat). Markers gate FAIRNESS only — never
 # capacity; the bounded wait + typed seat_wait stay the outer bound.
-SEAT_QUEUE_DIR = "queue"
+SEAT_QUEUE_DIR = wfcommon.SEAT_QUEUE_DIR          # "queue" — canonical in wfcommon
 SEAT_QUEUE_HB_S = 0.5      # own-marker heartbeat refresh cadence
-SEAT_QUEUE_LIVE_S = 8.0    # a marker is a live waiter while pid lives AND hb is this fresh
+SEAT_QUEUE_LIVE_S = wfcommon.SEAT_QUEUE_LIVE_S    # live waiter while pid lives AND hb this fresh
 SEAT_QUEUE_PRUNE_S = 20.0  # owner liveness has failed this long -> marker pruned (reconfirmed)
 
 def _seat_prune_ledger(seats, kind, name, row, reason):
