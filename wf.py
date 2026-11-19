@@ -6,6 +6,9 @@ Run dir: $HERMES_HOME/workflows/<run_id>/
   events.jsonl   append-only log      nodes/<id>.json  finished node results (efp-guarded)
   gates/<id>.json  human gate answers inbox.jsonl     steering / kill lines dropped by the owner
   stop.request / restart.request  marker files dropped by the owner      wf.pid  live runner pid
+  reconcile.stamp.json  last reconcile-pass view {ident, rev, vector (total per-node
+                disposition, UNKNOWN explicit), touched_ts, notified_ts} — the full
+                shape note and the stamp law live at RECONCILE_STAMP_FILE below
 
 Lifecycle lines on stdout (for the spawning agent's notify patterns):
   WORKFLOW_HELD <run_id> <gate_id> | WORKFLOW_DONE <run_id> | WORKFLOW_FAILED <run_id> | WORKFLOW_STOPPED <run_id>
@@ -866,6 +869,16 @@ _WAKE_TEMPLATES = {
                    "the capped work must finish, relaunch under a larger budget or amend, "
                    "under your existing mandate. This notice grants no new scope and "
                    "revokes no existing authority.",
+    # az9 reconcile-pass law: the ONE notice a pass may send when the state moved
+    # since the last narrated transition. Which node moved old->new (or the
+    # amendment-generation step) rides the run.reconcile audit row and the
+    # identity key — never interpolated into this body (AUTHORITY LAW r5).
+    "run.reconciled": "A workflow reconcile pass found the run's state moved since the "
+                      "last narrated transition. The run.reconcile line in events.jsonl "
+                      "names which node moved to which disposition (or an amendment-"
+                      "generation step). Inspect status once, then act under the "
+                      "existing mandate. This notice grants no new scope and revokes no "
+                      "existing authority.",
 }
 
 # CLOSED registry of lifecycle events a call site may pass to notify()
@@ -877,7 +890,10 @@ _WAKE_EVENTS = frozenset({"gate.held", "run.failed", "run.done", "run.partial", 
                           # runner-emitted mid-flight class (est-fanout-straggler
                           # sys-nxrhxo; registered at rebase onto the est-jbcrw
                           # registry so the mapped template carries no alarm)
-                          "fanout.stragglers"})
+                          "fanout.stragglers",
+                          # az9: the reconcile pass's change notice (one per real
+                          # move; unchanged passes never reach notify at all)
+                          "run.reconciled"})
 
 # Fixed catch-all body — runner-authored like every template: the text table is
 # the only author, so AUTHORITY LAW r5 holds unchanged. The old fail-silent
@@ -1218,8 +1234,157 @@ def _respawn_attempt_record(run, meta, byid):
             os.replace(tmp, p)                         # atomic: durable verdict
         except OSError:
             pass
+        # az9: the boot scan IS a reconcile pass. One pass per respawn: the
+        # stamp decides whether anything the owner has not already been told
+        # actually moved (0 notices + one audit row on settled unchanged).
+        # A move found HERE is narrated without an owner POST (notice=False):
+        # the loud voice of a dead runner is the tick's REAP wake (E23 — one
+        # wake per death scene), and the boundary the re-drive reaches (the
+        # settled-failed branch) owns its own transition notice. The stamp is
+        # what the boot pass owes the next pass; the prose the owner already
+        # got is never re-sold.
+        reconcile_pass(run, {"nodes": list(byid.values())} if byid else None,
+                       notice=False)
     except Exception:
         meta.setdefault("_effects_valid", [])
+
+# ---------- reconcile-pass stamp (bd_2026-11-13-az9): passes are cheap, notices
+# are transitions ----------
+# The quorum-storm audit (4,343-row events.jsonl, 16 provably zero-info owner
+# re-notices) traced every churn source to reconcile passes — the respawn boot
+# scan and the settled-failed re-entry — re-logging the block and re-firing
+# owner notices over runs whose state had not moved. The law this stamp owns:
+#
+#   A RECONCILE PASS re-reads the run's disposition vector (the TOTAL
+#   DISPOSITION_BY_STATUS table shipped with #684 — an unreadable, stale or
+#   uncommitted record is an EXPLICIT UNKNOWN, never absent, never a silent
+#   success) plus the durable amendment generation, and compares both against
+#   <run>/reconcile.stamp.json. Every pass writes exactly ONE audit row
+#   (`run.reconcile`);
+#
+#   * a pass with no prior stamp SEEDS it and notices nothing: on the live
+#     path the commit edge already narrated every transition — a pass is not
+#     a second narrator;
+#   * a pass that finds the stamped vector and rev unchanged — the pass that
+#     "finds explicit-unknowns" is exactly this case, an UNKNOWN cell that is
+#     still UNKNOWN moves nothing — refreshes only the stamp's touched
+#     fields: 0 notices, one audit row;
+#   * the FIRST pass that finds a real move (a node disposition differs from
+#     the stamped vector, or the amendment generation advanced) writes exactly
+#     ONE notice (`run.reconciled`) naming what changed in its identity key,
+#     then rewrites the stamp.
+#
+# Idempotent by construction: two consecutive passes always converge (the
+# second lands in the unchanged branch). Fail-open (F3 family): a stamp that
+# cannot be read or written degrades to a seed pass — a stamp that never
+# lands can cost at most ONE re-seed, never a re-notice.
+#
+# STAMP ROW SHAPE — the module-head note points here. One file, atomic
+# tmp+os.replace under the same rename law as side_effects.reconcile.json
+# above, serialized by an flock on <run>/reconcile.stamp.lock (the crash_gen
+# idiom):
+#   {"ident":       sha256 hex over the canonical (vector, rev) — what the
+#                   pass compares; the only identity a pass trusts,
+#    "rev":          the durable amendment generation (_wake_rev) at touch,
+#    "vector":       {node_id: disposition} — TOTAL over the committed graph:
+#                   every declared node has exactly one row; UNKNOWN is an
+#                   explicit value, no node is ever absent,
+#    "touched_ts":   epoch seconds of the most recent pass (this is the only
+#                   field an unchanged pass writes),
+#    "notified_ts":  epoch seconds of the last change-notice, or null while
+#                   no change has ever been noticed from this stamp}
+RECONCILE_STAMP_FILE = "reconcile.stamp.json"
+RECONCILE_DIFF_CAP = 20
+
+def reconcile_vector(run, graph=None):
+    """The run's TOTAL disposition vector: one row per committed-graph node,
+    status read through node_rec (the efp-validity law — a stale record reads
+    pending, and pending maps to UNKNOWN) and mapped by
+    wfcommon.disposition_of (the shipped total table). Never raises: an
+    unreadable graph yields {} (the pass degrades to a seed)."""
+    try:
+        g = _wake_graph(run, graph)
+        nodes = [n for n in (g.get("nodes") or [])
+                 if isinstance(n, dict) and n.get("id")]
+        byid = {n["id"]: n for n in nodes}
+        out = {}
+        for n in nodes:
+            status, rec = node_rec(run, n, byid)
+            out[n["id"]] = wfcommon.disposition_of(
+                status, (rec or {}).get("error_class") if isinstance(rec, dict) else None)
+        return out
+    except Exception:
+        return {}
+
+def _reconcile_ident(vector, rev):
+    canon = json.dumps({"v": vector, "r": rev}, sort_keys=True,
+                       separators=(",", ":"))
+    return hashlib.sha256(canon.encode()).hexdigest()
+
+def reconcile_pass(run, graph=None, notice=True):
+    """ONE reconcile pass over `run` (the law above). Returns the verdict the
+    call site consumes: {"changed": bool, "first": bool, "diff": [row...],
+    "noticed": bool, "ident": str}. The audit row (`run.reconcile`) is exactly
+    one per pass. When the state moved AND `notice` is on, the pass itself
+    fires the single `run.reconciled` notice; a call site that owns its own
+    loud transition path (the settled-failed branch re-narrating run.failed
+    under the fresh rev) passes notice=False and reads `changed`/`first` to
+    decide whether ITS notice is the transition's one."""
+    run = Path(run)
+    vector = reconcile_vector(run, graph)
+    rev = _wake_rev(run)
+    ident = _reconcile_ident(vector, rev)
+    p = run / RECONCILE_STAMP_FILE
+    first = changed = noticed = False
+    diff = []
+    try:
+        lock_fd = os.open(run / "reconcile.stamp.lock", os.O_CREAT | os.O_RDWR, 0o644)
+        try:
+            fcntl.flock(lock_fd, fcntl.LOCK_EX)
+            old = jload(p, None)
+            if not (isinstance(old, dict) and isinstance(old.get("ident"), str)):
+                first = True                     # no baseline: seed, narrate nothing
+            elif old["ident"] != ident:
+                changed = True
+                old_v = old.get("vector")
+                if not isinstance(old_v, dict):
+                    old_v = {}
+                for nid in sorted(set(vector) | set(old_v)):
+                    frm, to = old_v.get(nid), vector.get(nid)
+                    if frm != to:
+                        diff.append({"node": nid, "from": frm, "to": to})
+                if old.get("rev") != rev:
+                    diff.append({"rev": "%s->%s" % (old.get("rev"), rev)})
+        finally:
+            try: fcntl.flock(lock_fd, fcntl.LOCK_UN)
+            except OSError: pass
+            os.close(lock_fd)
+        if changed and notice:
+            key = json.dumps({"diff": diff[:RECONCILE_DIFF_CAP],
+                              "diff_count": len(diff), "ident": ident[:16]},
+                             sort_keys=True, separators=(",", ":"))
+            notify(run, "run.reconciled", key=key, graph=_wake_graph(run, graph))
+            noticed = True            # the ATTEMPT is the pass's one notice: an
+            #                           owner-null degradation writes no probe row
+            #                           but must still settle the stamp, or every
+            #                           later owner-null pass re-mints the notice.
+        stamp = {"ident": ident, "rev": rev, "vector": vector,
+                 "touched_ts": time.time(),
+                 "notified_ts": (time.time() if (changed and noticed)
+                                 else (old.get("notified_ts")
+                                       if isinstance(old, dict) else None))}
+        tmp = p.with_name(f"{p.name}.{os.getpid()}.tmp")
+        tmp.write_text(json.dumps(stamp, ensure_ascii=False, default=str))
+        os.replace(tmp, p)
+    except Exception:
+        return {"changed": True, "first": True, "diff": [], "noticed": False,
+                "ident": None}                   # fail-open: a broken stamp re-seeds,
+        #                                          it never re-notices on its own
+    log(run, "run.reconcile", first=first, changed=changed, noticed=noticed,
+        ident=ident[:16], rev=rev,
+        diff=diff[:RECONCILE_DIFF_CAP], diff_count=len(diff))
+    return {"changed": changed, "first": first, "diff": diff,
+            "noticed": noticed, "ident": ident}
 
 def _crash_gen(run):
     """Allocate THIS runner process's crash-decision generation: a durable,
@@ -2469,7 +2634,8 @@ def notify(run, event, key=None, graph=None, node=None, refire=False, cascade=No
                        if event == "run.failed" else None)
         text = _wake_owner_text(run.name, event, run_dir=run_dir,
                                 failed_node_logs=failed_logs,
-                                transition=disc if event == "node.action_required" else None,
+                                transition=disc if event in ("node.action_required",
+                                                             "run.reconciled") else None,
                                 pointers=_wake_pointer_str(ptr_pairs))
         # never None since est-jbcrw: unmapped classes take the fixed catch-all
         # body — the template table remains the ONLY author of owner text.
@@ -10367,7 +10533,18 @@ def run_agent_node(run, meta, byid, node, outputs, steering):
             # straggler's second home"). Wave-local by design: a runner respawn or
             # amend re-drive builds a fresh wave with a fresh ledger.
             launch_ts = {}
-            census = {"finish": [], "dur": [], "fired": None}
+            census = {"finish": [], "dur": [], "fired": None,
+                      # az9: the NOTICE identity is the cohort's disposition
+                      # shape (open indices + done count), kept apart from the
+                      # audit identity (the full disc) — the 4,343-row storm
+                      # class: a straggler completing (open set shrinking) or
+                      # a retry overwriting its launch stamp moves the disc
+                      # but says the owner nothing new, so it refreshes the
+                      # latch and the audit row silently; only a GROWN or
+                      # RE-SHAPED open set (a re-drive re-launching work) or
+                      # a done count that rolled BACK (a re-drive un-committed
+                      # an item) is a transition that re-notices.
+                      "noticed_open": None, "noticed_done": None}
             strag_lock = threading.RLock()   # re-entrant: a tick books under it and
             #                                  re-evaluates through the same frame
             strag_stop = threading.Event()
@@ -10414,19 +10591,29 @@ def run_agent_node(run, meta, byid, node, outputs, steering):
                                 for j in v["open"]
                             ).encode()).hexdigest()[:8])
                     if census["fired"] == disc:
-                        return      # same cohort state: one wake per driven wave;
+                        return      # same cohort state: one audit row per state;
                         #             a retry overwrites its launch stamp -> fresh
-                        #             disc -> re-armed (retry is the straggler's
-                        #             second home)
+                        #             disc -> fresh AUDIT row. az9 law: the retry
+                        #             re-stamp no longer re-notices — the wake
+                        #             identity is the disposition shape below.
                     census["fired"] = disc
+                    nopen = set(v["open"])
+                    notice_new = (census["noticed_open"] is None
+                                  or bool(nopen - set(census["noticed_open"]))
+                                  or (type(census["noticed_done"]) is int
+                                      and v["done"] < census["noticed_done"]))
+                    census["noticed_open"] = nopen
+                    census["noticed_done"] = v["done"]
                     silent = [j for j in v["open"]
                               if not any(e.get("event") == "budget_cue.injected"
                                          and e.get("node") == nid and e.get("index") == j
                                          for e in _events_iter(run))]
                     log(run, "fanout.stragglers", node=nid, open=v["open"],
                         silent=silent, done=v["done"], items=v["items"],
-                        oldest_open_age_s=v["oldest_open_age_s"], floor_s=v["floor_s"])
-                    notify(run, "fanout.stragglers", key=disc, node=nid)
+                        oldest_open_age_s=v["oldest_open_age_s"], floor_s=v["floor_s"],
+                        noticed=notice_new)
+                    if notice_new:
+                        notify(run, "fanout.stragglers", key=disc, node=nid)
             def _straggler_tick(r):
                 # A completing item records ITS completion, then re-evaluates the
                 # cohort — the event a wake names already carries this item (this
@@ -12833,12 +13020,23 @@ def main(run_id):
                 continue
             blocked = [n["id"] for n in rs.nodes if states[n["id"]] == "pending" and not deps_ok(n)]
             unconverged, blockers = blocked_legibility(rs.nodes, states, blocked)
-            log(run, "run.blocked", failed=[n["id"] for n in failed], blocked=blocked,
-                unconverged=unconverged, blocked_by=blockers,
-                residue=residue(rs.nodes, states, blocked, unconverged, outputs),
-                dead_letter=_dead_letter(run, failed, rs.byid))
+            # az9 (smallest-diff form of the stamp law at this seam): the
+            # settled-failed re-entry IS a reconcile pass. The pass writes the
+            # single audit row either way and settles/refreshes the stamp; only
+            # a FIRST pass or one that finds the disposition vector / amendment
+            # generation MOVED gets the loud re-narration (run.blocked row +
+            # run.failed wake — the branch owns its transition's one notice,
+            # hence notice=False). An unchanged settled run re-EMITS the
+            # lifecycle line (spawner contract) and notifies NOBODY.
+            _rp = reconcile_pass(run, rs.graph, notice=False)
+            if _rp["first"] or _rp["changed"]:
+                log(run, "run.blocked", failed=[n["id"] for n in failed], blocked=blocked,
+                    unconverged=unconverged, blocked_by=blockers,
+                    residue=residue(rs.nodes, states, blocked, unconverged, outputs),
+                    dead_letter=_dead_letter(run, failed, rs.byid))
             emit(f"WORKFLOW_FAILED {run_id} ({','.join(n['id'] for n in failed)})")
-            notify(run, "run.failed", graph=rs.graph)
+            if _rp["first"] or _rp["changed"]:
+                notify(run, "run.failed", graph=rs.graph)
             # The corrective owner turn is synchronous with notify(). Consume a
             # restart/stop written by amend/stop before taking the parked verdict.
             m = consume_markers()
