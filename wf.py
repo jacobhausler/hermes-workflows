@@ -1686,13 +1686,16 @@ def _wake_deliver(rec, sid, text, tid, owner=None):
                 # forwarded; probe undelivered so the retry re-drives under
                 # the SAME identity (same Idempotency-Key).
                 rec["error"] = f"HTTP {status} redirect not followed (undelivered)"
+                rec["error_class"] = "redirect"            # est-mnd B4: class every miss
                 return False
             if 200 <= status < 300:
                 return True
             rec["error"] = f"HTTP {status}"
+            rec["error_class"] = "http_status"             # est-mnd B4: class every miss
             return False
     except urllib.error.HTTPError as e:
         rec["error"] = f"HTTP {e.code}"
+        rec["error_class"] = "redirect" if 300 <= e.code < 400 else "http_status"
         return False
     except (socket.timeout, TimeoutError):
         # F5: a read timeout is NOT a delivery — we never saw a status line,
@@ -1704,6 +1707,7 @@ def _wake_deliver(rec, sid, text, tid, owner=None):
         # turn under that Idempotency-Key; no claim is made after cache expiry
         # or a core restart.
         rec["error"] = "timeout: read window closed before a response (retryable)"
+        rec["error_class"] = "timeout"                 # est-mnd B4: class every miss
         return False
     except Exception as e:
         # F4: a generic stdlib error can carry the bearer IN ITS MESSAGE —
@@ -1712,6 +1716,7 @@ def _wake_deliver(rec, sid, text, tid, owner=None):
         # redacted message; never a raw repr, and the ledger redaction runs
         # again at append time as a second net.
         rec["error"] = _wake_safe(f"{type(e).__name__}: {e}")
+        rec["error_class"] = "transport"               # est-mnd B4: class every miss
         return False
 
 # ---------- wake-burst coalescer with trailing re-check (est-zmizd) ----------
@@ -2152,6 +2157,84 @@ def _cascade_drain(run, graph=None, force=False):
     except Exception:
         pass
 
+def _notice_class_of_error(err):
+    e = str(err or "")
+    if "redirect" in e:
+        return "redirect"
+    if e.startswith("HTTP "):
+        return "http_status"
+    if "timeout" in e:
+        return "timeout"
+    return "transport"
+
+def _notice_drop(run, event, rec):
+    """E11: a delivery miss is LOUD where status can see it — a typed
+    notice_drop.json row, an events.jsonl line, and a stdout lifecycle
+    line. The run's own verdict was already decided; this records only that
+    nobody was told."""
+    try:
+        p = run / "notice_drop.json"
+        doc = jload(p, {}) or {}
+        rows = doc.get("rows") if isinstance(doc.get("rows"), list) else []
+        cls = rec.get("error_class") or _notice_class_of_error(rec.get("error"))
+        rows.append({"event": event, "class": cls, "at": now(), "tid": rec.get("id")})
+        p.write_text(json.dumps({"rows": rows[-200:]}, ensure_ascii=False))
+        log(run, "notice.drop", event=event, error_class=cls)
+        emit(f"WORKFLOW_NOTICE_DROP {run.name} {event} {cls}")
+    except Exception:
+        pass
+
+def _notice_drop_suffix(run):
+    """The finalize line's tail (E11 acceptance: a later failed delivery
+    appends notice_drop=<class> next to run.done) — the LAST recorded miss
+    class, from the same durable marker status reads."""
+    try:
+        doc = jload(run / "notice_drop.json", {}) or {}
+        rows = doc.get("rows") if isinstance(doc.get("rows"), list) else []
+        if rows:
+            return f" notice_drop={rows[-1].get('class') or 'unknown'}"
+    except Exception:
+        pass
+    return ""
+
+def _notice_route_probe(owner):
+    """(reachable, error_class) for one owner stamp at admission time.
+    A platform-native lane has no legacy endpoint to probe; the local/absent
+    lane resolves exactly the way _wake_deliver will later resolve it: the
+    native adapter file, else the api_server endpoint, else missing_endpoint."""
+    try:
+        platform = owner.get("platform") if isinstance(owner, dict) else None
+        if platform not in (None, "local"):
+            return True, None
+        if platform == "local" and (Path(__file__).resolve().parent / "wake_native.py").is_file():
+            return True, None
+        return (True, None) if _wake_endpoint() is not None else (False, "missing_endpoint")
+    except Exception:
+        return True, None
+
+def _notice_route_check(run):
+    """E11 at accept time: the admitted runner states the run's notice-route
+    truth ONCE, before it spawns anything — a stamp file (status reads it),
+    an events line, and when the route is missing, a loud stdout line naming
+    the drop risk (the shape E11 measured: 'the run looked silently orphaned
+    from outside'). Fail-open: a probe error states nothing, it never blocks
+    the run the owner just paid for."""
+    try:
+        meta = jload(run / "run.json", {}) or {}
+        owner = meta.get("owner")
+        if not isinstance(owner, dict) or not owner.get("session_id"):
+            return                       # no owner lane: no route claim either way
+        reachable, cls = _notice_route_probe(owner)
+        (run / "notice_route.json").write_text(json.dumps(
+            {"reachable": reachable, "error_class": cls, "at": now()}))
+        log(run, "notice.route", reachable=reachable, error_class=cls)
+        if not reachable:
+            emit(f"WORKFLOW_NOTICE_ROUTE {run.name} drop_risk={cls} "
+                 "(owner notices will be dropped; every drop writes a "
+                 "notice_drop.json marker in the run dir)")
+    except Exception:
+        pass
+
 def notify(run, event, key=None, graph=None, node=None, refire=False, cascade=None):
     """Push ONE lifecycle transition instance to the owner session stamp. Owner-null
     (tests, CLI, tool hosts without a session env) writes NOTHING — the door's
@@ -2308,17 +2391,23 @@ def notify(run, event, key=None, graph=None, node=None, refire=False, cascade=No
             rec["catchall"] = True      # probe row is typed: template vs catch-all distinguishable
         rec["delivered"] = _wake_deliver(rec, sid, text, tid, owner=owner)   # tri-state row mirrors the outcome
         _wake_append(run, rec)
-        # est-mnd (E10): a SETTLED outcome (delivered or nowhere-ever) moves
-        # the funnel baselines; a try-later False leaves them stale so the
-        # retry path re-notices — the funnel never suppresses what never
-        # landed.
+        # est-mnd (E10/E11): a SETTLED outcome (delivered or nowhere-ever —
+        # the same classes the ledger dedupe treats as closed) moves the
+        # funnel baselines; a try-later False leaves them stale so the retry
+        # re-notices. Any non-delivered outcome is a MISS: it lands a typed
+        # notice_drop.json row + events line + stdout line where status and
+        # the terminal lifecycle line can show it (E11: never a silent
+        # orphan-outside).
         _d = rec.get("delivered")
         if _d is not False:
             _notice_funnel_after_deliver(run, event, mnd_ptr)
+        else:
+            _notice_drop(run, event, rec)
         if _d is True:
             return "delivered"
         if _d is False:
             return "undelivered"
+        _notice_drop(run, event, rec)    # nowhere-ever: the miss is settled, not retryable
         return
     except Exception as e:                       # fail-open encompasses PREPARATION (F3)
         try:
@@ -11728,6 +11817,11 @@ def main(run_id):
     _EXIT_WRITTEN[0] = False
     _CRASH_GEN[:] = [None, None]  # fresh runner: later crashes mint a new durable generation
     ready_stamp(run)   # #8: own-pid stamp + ready-pipe announce (door observes, never guesses)
+    # est-mnd (E11): state the notice-route truth of the accepted run BEFORE
+    # anything spawns — an owner with no reachable route hears nothing at
+    # gate.held/run.done, and silence from outside is exactly the E11 shape.
+    # Stamp file + events line + (when unreachable) a loud stdout line.
+    _notice_route_check(run)
     meta["_procs"] = {}
     meta["_procs_lock"] = threading.Lock()
     meta["_stop"] = threading.Event()
@@ -12602,15 +12696,17 @@ def finalize(run, graph, status):
                          + "\n```")
     (run / "summary.md").write_text("\n".join(lines) + "\n")
     log(run, f"run.{status}")
-    emit(f"WORKFLOW_{status.upper()} {run.name}")
-    # est-mnd (E10): cascade retry-net records held open by an undelivered
-    # leading notice drain at the terminal boundary too.
+    # est-mnd (E10/E11): the terminal boundary flushes deferred cascade
+    # notices and trailing re-checks BEFORE the terminal wake, then the
+    # lifecycle line names any recorded notice miss next to the verdict —
+    # a run that could not tell its owner does not look silently done.
     _cascade_drain(run, graph=graph)
     # est-zmizd: flush ALL pending trailing re-checks (force: inside a still-open
     # window too) BEFORE the terminal wake: a coalesced straggler burst must not
     # die un-woken behind run.done/failed; a delivered instance dedupes to zero POSTs.
     _wake_refire_pending(run, graph=graph, force=True)
     notify(run, f"run.{status}", graph={"nodes": nodes})
+    emit(f"WORKFLOW_{status.upper()} {run.name}" + _notice_drop_suffix(run))
 
 
 # ---------- CLI: validate (issue #474) ----------
