@@ -28,6 +28,63 @@ Owner-session wake visibility has a deliberate boundary (#8 crash-visibility leg
 
 Mixed-version door/runner skew (#152): the door that answers a gate respawns the runner from ITS OWN bundled `wf.py`, so a release from an older install can consume a gate answer into an admission death the old runner inflicts on a newer committed graph (`crashed: graph invalid`) — the answer is then unrecoverable (`gate already answered`) and the lap must be re-walked. Two fail-closed laws keep the answer durable: the door runs the respawner's own admission validator over the committed `graph.json` BEFORE writing `gates/<id>.json` and refuses (`this door cannot drive this graph — drive it from its own tree (<offending node/field>)`, zero writes, hold intact); and a runner that still dies at admission graph-invalid un-consumes any answer whose gate node never committed done/skipped — `gates/<id>.json` -> `gates/<id>.json.unconsumed` (evidence, never deleted), event `gate.answer_unconsumed` carrying the prior answer's `at`, the exit record reads `interrupted: admission graph invalid` so the run stays resumeable and the next release from a capable door re-lands the answer. An answer already committed at a real boundary (node done/skipped) never un-consumes.
 
+## The efp field law: which fields move a fingerprint (fp_rule_version = 2)
+
+Every node definition has an **effective fingerprint (efp)**: the 16-hex `sha256` of
+`def_hash(node)` joined with each ancestor's efp in sorted-id order
+(`wfcommon.def_hash`, `wfcommon.efp`). A committed record is **current** only while its stored efp equals the
+recomputed efp of the definition in `graph.json`; a stale record is never trusted for replay, handoff, or a
+suite-proof token (see `stale_graph` in the death table). The law is fully determined by field membership, so it is
+stated here in prose instead of leaving it to be reverse-engineered from the amend ledgers:
+
+**Where the fingerprint lives.** The committed definitions are `runs/<run>/graph.json`. Every committed node
+record stamps the efp it was settled under (`_def` / `efp`) plus the membership rule that produced it
+(`fp_rule_version`). The whole-graph signature (`graph_fingerprint`) rides `runner_exit.json` and status payloads,
+never `run.json`. `amends.jsonl` is the amendment ledger: one row per applied amend carrying `old`/`new` whole
+graphs and `base_revision` — the hash of the graph head the row was written against (the #19 compare-and-set chain;
+`cas: true` means the caller pinned that head). `diff`/`dry_run` previews `will_rerun` from the same recomputation,
+so the preview is the observation, not a promise.
+
+**When `fp_rule_version` rotates.** Only when field MEMBERSHIP changes — a field starts or stops participating in
+`def_hash`. v1 -> v2 fired at b79fa21, when budgets were excluded ("budgets are not work"). Records carry the rule
+that minted them, so pre-v2 ledgers stay verifiable under their own rule (`FP_RULES = (1, 2)`); every new write
+stamps the live rule (currently **2**). A release that only renames fields or changes validation is NOT a rule bump;
+a release that moves the boundary below IS, and must name the old and new membership here.
+
+**Field membership (rule v2).** `def_hash` serializes the node JSON minus exactly the inert keys below; every field
+not named inert MOVES the fingerprint. Ancestor efp values chain identically for every field set.
+
+| Field | Verdict | Why |
+|---|---|---|
+| `max_turns`, `timeout`, `run_budget`, `shape`, `budget` | efp-inert | Budget is not work: raising a wall must not invalidate a committed node (b79fa21; these participated under v1) |
+| `concurrency`, `item_concurrency` | efp-inert | Scheduling limits are policy, not work (#100) — and launch-frozen in `run.json`, so editing them neither re-runs nor re-widens a live run |
+| `require_route`, `route_verified`, `substrate_substituted` | efp-inert | Route POLICY and the door's/engine's proof ANNOTATIONS: the door bakes these into `graph.json` after validation, so a bake must not un-freeze what it just validated (#25/#116). The node's real `model`/`provider` are NOT inert — a re-route changes the work |
+| `resume_hint` | efp-inert | Prompt-side policy for RE-RUNS only; flipping it changes the next attempt's words, never the committed result (#130) |
+| `id`, `type`, `goal`, `after`, `context`, `schema`, `inputs`, `model`, `provider`, `reasoning`, `toolsets`, `max_api_calls`, `max_input_tokens`, `repo`, `fanout`, `when`, `on_skip`, `fallback_models`, `tier`, `profile`, `requires`, `after_partial`, `harvest_policy`, `order_only`, `publishes`, `suite_proof`, `retry`, `consolidate`, `on_fail`, and all remaining gate/echo/join fields | efp-moving | Work, route, or dataflow: anything that could change the node's result or an ancestor's chain must stale the record — the note "usually none" cuts both ways |
+
+Note the boundary cases the table pins: per-node ceilings `max_api_calls` / `max_input_tokens` and the author
+`retry` block MOVE the efp (they are declared work-shape, not launch policy), while the graph-level knob family is
+launch-frozen and never reaches `def_hash` at all.
+
+**Edit-without-rerun — the annotate verb.** `amend` with a node-scoped `patch` (above) is the annotate surface:
+patch ONLY efp-inert fields on a DONE node and you change the record without moving the fingerprint. The wave
+reload compares efp, finds it equal, and replay-skips the commit; descendants inherit an unchanged ancestor efp, so
+nothing downstream re-runs — collateral re-drive is zero. The amend still lands durably (the ledger row +
+`graph.amended` event prove the annotation), and a `diff` preview of the same patch confirms it before you apply:
+`changed` names the node, `will_rerun` stays empty. Example — annotate a committed node's route policy after the
+fact, keeping its result:
+
+```
+workflow {action: "diff",  run_id: R, patch: {"nodes": {"facts": {"require_route": false, "resume_hint": true}}}}
+  -> {"changed": ["facts"], "will_rerun": []}          # efp identical under rule 2: inert fields only
+workflow {action: "amend", run_id: R, patch: {"nodes": {"facts": {"require_route": false, "resume_hint": true}}}}
+  -> applied; amends.jsonl gains one base_revision row; nodes/facts.json untouched; descendants untouched
+```
+
+Patching any efp-MOVING field is the other verb (a real amendment): the node's efp moves, the node and its
+descendants are stale, and `will_rerun` names them. One patch, one verdict per field set — never mix inert and
+moving fields in a patch you expected to annotate.
+
 ## Small, parent-gated escalation recipe (no new engine feature)
 
 Use a terminal, decision-only agent node with no automatically runnable work descendants. Its ordinary schema-defined final JSON can contain `needs_escalation: true` and a short reason (the node schema must actually permit these fields). The parent inspects that exact value and any external effects, selects an explicit model and amends the graph with original committed inputs plus a bounded factual handoff. Check `dry_run`'s `will_rerun` before applying. A timeout remains a failed node, not a safe auto-retry: the parent investigates and decides. Never use this on a work-product node with downstream execution; schema-valid JSON is committed as done even if its text requests escalation. This recipe adds no tool, status, automatic fallback or guarantee of side-effect rollback.

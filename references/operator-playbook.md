@@ -69,6 +69,21 @@ for unfinished work with no verified live runner (see operations.md).
   budgets-only amend leaves a dead node dead: change a definition-bearing field,
   and confirm the node is listed in `will_rerun` via `dry_run`/`diff` before
   replacing the graph.
+- **Lane-dirty wreckage is one lookup away.** A re-drive onto a dead attempt's
+  uncommitted TRACKED changes refuses at admission with `error_class:"lane_wreckage"`
+  before any spawn, and the refusal row (in `runner_exit.json` and the
+  `run.lane_wreckage` event) already names both banking paths: the named stash
+  command (`bank_cmd`: `git -C <lane> stash push -m redrive:<run>:<node>`) and the
+  **`bank_patch` retrieval path `<run>/wip/<node>.patch`** — the offender row carries
+  that string verbatim; `mkdir -p <run>/wip` first, the runner never creates it. Bank,
+  re-drive, done; if the tree is gone entirely, `scripts/lane_recover.py --run <run>
+  --node <node> --out <dir>` rebuilds it from the journaled tool calls. The exact five
+  commands, worktree paths, and the timeout-corpus harvest are on one page:
+  [scripts/lane-recovery.md](../scripts/lane-recovery.md).
+- **The fingerprint law is in prose, not archaeology.** Which node fields move an
+  efp (and so re-drive a committed node on amend) and which are inert annotations is
+  tabled in [operations.md](operations.md#the-efp-field-law-which-fields-move-a-fingerprint-fp_rule_version--2);
+  an inert-only `patch` amend is the annotate verb — change the record, keep the result.
 
 ## Fleet children (audits, censuses, sweeps)
 
