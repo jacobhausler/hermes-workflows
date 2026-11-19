@@ -9,6 +9,12 @@ Run dir: $HERMES_HOME/workflows/<run_id>/
   reconcile.stamp.json  last reconcile-pass view {ident, rev, vector (total per-node
                 disposition, UNKNOWN explicit), touched_ts, notified_ts} — the full
                 shape note and the stamp law live at RECONCILE_STAMP_FILE below
+  side_effects.jsonl  committed side-effect journal — `wf.py recover <run>`
+                      reads it back as {applied[], torn[], unprovable[], safe_redrive[]} (E16)
+  quarantine/<node>[.<i>].jsonl  durable #61 tree-quarantine rows; finalized
+                      fan item records carry disposition + quarantine target (E17)
+  logs/boundary.log + nodes/<id>/amendment-applied.json  amendment application
+                      evidence, one boundary row per amends revision (E18)
 
 Lifecycle lines on stdout (for the spawning agent's notify patterns):
   WORKFLOW_HELD <run_id> <gate_id> | WORKFLOW_DONE <run_id> | WORKFLOW_FAILED <run_id> | WORKFLOW_STOPPED <run_id>
@@ -87,6 +93,7 @@ graph_fingerprint = wfcommon.graph_fingerprint
 jload = wfcommon.jload
 validate_graph = wfcommon.validate_graph
 node_rec = wfcommon.node_rec
+disposition_of = wfcommon.disposition_of
 gate_answer_valid = wfcommon.gate_answer_valid
 when_true = wfcommon.when_true
 child_metrics = wfcommon.child_metrics
@@ -1158,6 +1165,211 @@ def reconcile_effects(run, byid):
     valid = [r for r in rows if _effect_row_valid(r, byid)]
     return {"reconciled": len(valid), "orphaned": len(rows) - len(valid),
             "valid": valid}
+
+# ---------- E16 (bd_2026-11-13-4hc): the recovery-state readout ----------
+# Named data shape returned by recovery_state() and printed verbatim by the
+# `wf.py recover <run_id>` query verb. Every field is computed from the
+# JOURNAL ON DISK (side_effects.jsonl + the node records + graph.json) —
+# never from runner memory — so a post-SIGKILL operator can ask the one
+# question the crash leaves open: what effects are durable, which record is
+# torn, and what re-drive order is idempotent.
+#   applied[]      — journal rows that ARE committed facts under the current
+#                    graph: {node, kind, key, evidence, spawn, node_efp}.
+#   torn           — physical lines that never fully landed (a writer killed
+#                    mid-append): {line, bytes, head}. The effect they
+#                    describes is UNPROVEN, not absent.
+#   unprovable[]   — rows that parsed but cannot be proven current:
+#                    {node, kind, key, line, reason: node-gone | amended-efp
+#                    | not-a-row}. History, never a fact (reconcile's law).
+#   safe_redrive[] — the idempotent re-drive order: every unfinished node in
+#                    after-edge topological order, entries
+#                    {node, mode, committed_effects}; mode="reconcile" means
+#                    the re-drive must carry the reconcile-don't-redo
+#                    preamble (committed_effects > 0), mode="fresh" means the
+#                    journal proves no prior effect for that node.
+def recovery_state(run, byid):
+    """The journal-only recovery readout (E16). Fail-open reads: an absent or
+    unreadable journal degrades to an empty applied set (honest ignorance,
+    never a fabricated zero of knowledge)."""
+    run = Path(run)
+    applied, torn, unprovable = [], [], []
+    valid_by_node = {}
+    try:
+        lines = _effects_path(run).read_text(errors="replace").splitlines()
+    except OSError:
+        lines = []
+    for ln, raw in enumerate(lines, 1):
+        s = raw.strip()
+        if not s:
+            continue
+        try:
+            rec = json.loads(s)
+        except Exception:
+            torn.append({"line": ln, "bytes": len(raw.encode("utf-8", "replace")),
+                         "head": s[:80]})
+            continue
+        kind = rec.get("kind") if isinstance(rec, dict) else None
+        key = rec.get("key") if isinstance(rec, dict) else None
+        if not (isinstance(rec, dict) and rec.get("node")):
+            unprovable.append({"node": None, "kind": kind, "key": key,
+                               "line": ln, "reason": "not-a-row"})
+            continue
+        slim = {"node": rec["node"], "kind": kind, "key": key,
+                "evidence": rec.get("evidence"), "spawn": rec.get("spawn"),
+                "node_efp": rec.get("node_efp")}
+        if _effect_row_valid(rec, byid):
+            applied.append(slim)
+            valid_by_node[rec["node"]] = valid_by_node.get(rec["node"], 0) + 1
+        else:
+            slim["line"] = ln
+            slim["reason"] = "node-gone" if rec["node"] not in byid else "amended-efp"
+            unprovable.append(slim)
+    # safe_redrive: Kahn over the after-edge subgraph induced by the unfinished
+    # nodes, ties broken in graph (byid insertion) order — deterministic from
+    # the graph alone, so two reads of the same journal name the same order.
+    unfinished = set()
+    for nid, n in byid.items():
+        try:
+            st, _ = node_rec(run, n, byid)
+        except Exception:                              # a broken record reads pending
+            st = "pending"
+        if st not in ("done", "partial", "skipped"):
+            unfinished.add(nid)
+    indeg = {nid: sum(1 for d in byid[nid].get("after", []) if d in unfinished)
+             for nid in unfinished}
+    kids = {nid: [] for nid in unfinished}
+    for nid in unfinished:
+        for d in byid[nid].get("after", []):
+            if d in unfinished:
+                kids[d].append(nid)
+    ready = [nid for nid in byid if nid in unfinished and indeg[nid] == 0]
+    safe_redrive = []
+    while ready:
+        nid = ready.pop(0)
+        n_eff = valid_by_node.get(nid, 0)
+        safe_redrive.append({"node": nid,
+                             "mode": "reconcile" if n_eff else "fresh",
+                             "committed_effects": n_eff})
+        for kid in kids[nid]:
+            indeg[kid] -= 1
+            if indeg[kid] == 0:
+                ready.append(kid)
+    for nid in byid:                                   # cyclic byid (malformed): honest tail
+        if nid in unfinished and not any(e["node"] == nid for e in safe_redrive):
+            safe_redrive.append({"node": nid,
+                                 "mode": "reconcile" if valid_by_node.get(nid) else "fresh",
+                                 "committed_effects": valid_by_node.get(nid, 0),
+                                 "untopological": True})
+    return {"applied": applied, "torn": torn, "unprovable": unprovable,
+            "safe_redrive": safe_redrive}
+
+
+# ---------- E18 (bd_2026-11-13-4hc): amendment application evidence ----------
+# The runtime docs (01-quickstart, 03-incidents) promise amendment application
+# evidence at runs/<run>/nodes/<name>/amendment-applied.json + logs/boundary.log;
+# the plugin wrote none of that. The runner now SHIPS both AT APPLICATION TIME,
+# keyed by the amends.jsonl row's revision (its physical line ordinal — the
+# same identity as the door's _graph_revision seq):
+#   nodes/<id>/amendment-applied.json — latest application per applied node:
+#     {node, from_efp (null when the node was added), to_efp, amendment_rev,
+#      trigger (boot | wave-boundary), applied_at}. The amends row, the
+#      graph.amended / graph.reloaded event pair, and the named efp movement
+#      together ARE the proof.
+#   logs/boundary.log — one JSON line per amendment revision:
+#     {ts, event: "amendment.applied", rev, trigger, added: [ids],
+#      removed: [ids], changed: [{id, from_efp, to_efp}], unchanged: [ids]};
+#     an unparseable amends line gets one {event: "amendment.row_torn", rev}
+#     line instead of silence.
+# Idempotent by construction: a revision already named in boundary.log writes
+# nothing, so re-boots and re-reloads never duplicate the evidence.
+def _amend_revision_rows(run):
+    """(rev, row-or-None) per physical amends.jsonl line; the ordinal IS the
+    revision. Fail-open read: no file -> no rows (a fresh run has none)."""
+    try:
+        lines = (Path(run) / "amends.jsonl").read_text(errors="replace").splitlines()
+    except OSError:
+        return []
+    out = []
+    for rev, line in enumerate(lines, 1):
+        if not line.strip():
+            continue
+        try:
+            out.append((rev, json.loads(line)))
+        except Exception:
+            out.append((rev, None))
+    return out
+
+def _evidenced_amend_revs(run):
+    try:
+        text = (Path(run) / "logs" / "boundary.log").read_text(errors="replace")
+    except OSError:
+        return set()
+    revs = set()
+    for line in text.splitlines():
+        try:
+            rec = json.loads(line)
+        except Exception:
+            continue
+        if isinstance(rec, dict) and isinstance(rec.get("rev"), int):
+            revs.add(rec["rev"])
+    return revs
+
+def _evidence_amendments(run, trigger):
+    """Write the promised application evidence for every amends.jsonl revision
+    not yet named in logs/boundary.log. Observer law (fail-open): an evidence
+    failure prints loudly on stderr and never breaks an application — the
+    graph reload itself stands."""
+    try:
+        evidenced = _evidenced_amend_revs(run)
+        boundary = Path(run) / "logs" / "boundary.log"
+        for rev, row in _amend_revision_rows(run):
+            if rev in evidenced:
+                continue
+            boundary.parent.mkdir(parents=True, exist_ok=True)
+            if not isinstance(row, dict):
+                with open(boundary, "a") as f:
+                    f.write(json.dumps({"ts": now(), "event": "amendment.row_torn",
+                                        "rev": rev, "trigger": trigger}) + "\n")
+                evidenced.add(rev)
+                continue
+            old_byid = {n["id"]: n for n in (row.get("old") or {}).get("nodes", [])}
+            new_byid = {n["id"]: n for n in (row.get("new") or {}).get("nodes", [])}
+            memo_new = {}
+            added, removed, changed, unchanged = [], [], [], []
+            for nid, n in new_byid.items():
+                to_efp = efp(new_byid, n, memo=memo_new)
+                if nid not in old_byid:
+                    added.append(nid)
+                    from_efp = None
+                else:
+                    try:
+                        from_efp = efp(old_byid, old_byid[nid])
+                    except Exception:
+                        from_efp = None
+                    (changed if from_efp != to_efp else unchanged).append(nid)
+                if from_efp is None or from_efp != to_efp:
+                    nd = Path(run) / "nodes" / nid.replace("/", "_").replace("\\", "_")
+                    nd.mkdir(parents=True, exist_ok=True)
+                    doc = {"node": nid, "from_efp": from_efp, "to_efp": to_efp,
+                           "amendment_rev": rev, "trigger": trigger, "applied_at": now()}
+                    tmp = nd / ("amendment-applied.json.%s.tmp" % os.getpid())
+                    tmp.write_text(json.dumps(doc, ensure_ascii=False))
+                    os.replace(tmp, nd / "amendment-applied.json")
+            removed = [nid for nid in old_byid if nid not in new_byid]
+            with open(boundary, "a") as f:
+                f.write(json.dumps({"ts": now(), "event": "amendment.applied",
+                                    "rev": rev, "trigger": trigger, "added": added,
+                                    "removed": removed,
+                                    "changed": [{"id": nid,
+                                                 "from_efp": efp(old_byid, old_byid[nid]),
+                                                 "to_efp": efp(new_byid, new_byid[nid], memo=memo_new)}
+                                                for nid in changed],
+                                    "unchanged": unchanged}) + "\n")
+            evidenced.add(rev)
+    except Exception as exc:                           # fail-open (observer law)
+        print(f"hermes-workflows: amendment evidence failed for {run}: {exc}",
+              file=sys.stderr)
+
 
 def _respawn_effects_preamble(run, meta, byid, node):
     """#8 item 3 (c): the machine preamble naming the VALID committed side
@@ -3608,6 +3820,43 @@ _ITEM_COMMITTED_FACTS = ("done", "partial", "failed", "skipped")
 # (item_records_certified) still byte-checks the claimed completion.
 _ITEM_ADOPTED_RETIRE = "adopted"
 
+# ---------- E17 (bd_2026-11-13-4hc): the fan item-level ledger ----------
+# Shipped layout (this block is the signature; every path below exists on a
+# run that saw the event it names):
+#   <run>/quarantine/<node>[.<index>].jsonl — one durable row per quarantine
+#     event on that (node, item): {ts, node, index, stage, pids, proof}.
+#     stage ∈ {<ev>.tree_kill, <ev>.respawn_reap, <ev>.unprovable,
+#     <ev>.left_live}; proof ∈ {dead, unknown, stuck, unreadable}.
+#   the committed item record (nodes/<id>.<i>.json) carries, at finalize:
+#     disposition       — disposition_of()'s total table (wfcommon, est-25t):
+#                         SUCCEEDED/PARTIAL/FAILED/CANCELLED/SKIPPED/UNKNOWN,
+#                         never an absent field read as success;
+#     quarantine        — {rows_path, rows}: rows_path is run-dir relative
+#                         and the file EXISTS whenever a quarantine happened;
+#   at aggregate certification (item_records_certified) each item record is
+#   additionally stamped with
+#     receipt_vs_parent — {claim_status, output_matches, problem, at}: the
+#                         receipt-vs-parent reconciliation line the wave's T20
+#                         deferred item addressing demanded (receipt checked
+#                         against the aggregate claim, on disk, per item).
+def _quarantine_file(run, node_id, index):
+    name = str(node_id).replace("/", "_").replace("\\", "_")
+    return Path(run) / "quarantine" / (name + (f".{index}" if index is not None else "") + ".jsonl")
+
+def _quarantine_row(run, node_id, index, stage, pids, proof):
+    """Append one durable quarantine row. Observer law (same as telemetry):
+    a ledger write failure suppresses the ledger line, never a verdict."""
+    try:
+        p = _quarantine_file(run, node_id, index)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        with open(p, "a") as f:
+            f.write(json.dumps({"ts": now(), "node": node_id, "index": index,
+                                "stage": stage,
+                                "pids": sorted({p for p in (pids or []) if isinstance(p, int)}),
+                                "proof": proof}) + "\n")
+    except Exception:
+        pass
+
 def commit_item_record(run, node, byid, index, result):
     """Finalize the canonical per-item record with the item's real outcome,
     MERGED over the spawn-time record (spawn evidence retained: spawn_cmd, pid,
@@ -3648,6 +3897,18 @@ def commit_item_record(run, node, byid, index, result):
     if rec_status not in ("failed", "skipped"):
         rec.pop("error", None)
         rec.pop("error_class", None)
+    # E17: the item's terminal disposition rides the committed fact (the ONE
+    # total table, never a locally re-invented vocabulary), and the quarantine
+    # TARGET — the durable row file for this (node, item) — is named only when
+    # it exists, so a reader can always stat what the record points at.
+    rec["disposition"] = disposition_of(rec_status, rec.get("error_class"))
+    _qf = _quarantine_file(run, node.get("id"), index)
+    try:
+        _qrows = sum(1 for l in _qf.read_text(errors="replace").splitlines() if l.strip())
+    except OSError:
+        _qrows = 0
+    if _qrows:
+        rec["quarantine"] = {"rows_path": str(_qf.relative_to(Path(run))), "rows": _qrows}
     # est-rucmf (residual wf#568): the SAME capture-boundary choke save_node
     # applies at its persist edge — redact-then-clip every string leaf at
     # WORKFLOW_OUTPUT_CLIP before the atomic swap, so a fan-out item's
@@ -3678,8 +3939,32 @@ def item_records_certified(run, node, byid, results):
     must equal the aggregate's claimed output — byte-for-byte after stable
     serialization. A missing/uncommitted/diverging record — including a
     committed failure (failed+crashed, failed+cancelled) under a done claim —
-    means the aggregate may NOT commit done with claimed-complete results."""
+    means the aggregate may NOT commit done with claimed-complete results.
+
+    E17: every walk is also the reconciliation ledger — each EXISTING item
+    record is stamped with a receipt_vs_parent line
+    {claim_status, output_matches, problem, at}: the receipt (the item's own
+    committed record) adjudicated against the parent's aggregate claim, durable
+    per item, re-stamped (never re-invented) on every certification pass."""
     problems = []
+    def _stamp(i, rec, claim, problem, matches):
+        """Persist the reconciliation line onto the item's own record (atomic
+        tmp+replace, the commit idiom). Observer law: a stamp failure costs
+        the ledger line, never the verdict — the problems entry already made
+        the refuse decision from the pre-stamp bytes."""
+        try:
+            rec = dict(rec)
+            rec["receipt_vs_parent"] = {
+                "claim_status": (claim or {}).get("status") if isinstance(claim, dict) else None,
+                "output_matches": matches,
+                "problem": (problem[:300] if problem else None),
+                "at": now()}
+            np = run / "nodes" / f"{_node_file(node, i)}.json"
+            tmp = np.with_name(f"{np.name}.{os.getpid()}.tmp")
+            tmp.write_text(json.dumps(rec, ensure_ascii=False, default=str))
+            os.replace(tmp, np)
+        except Exception:
+            pass
     for i, r in enumerate(results):
         rec = jload(run / "nodes" / f"{_node_file(node, i)}.json")
         if not isinstance(rec, dict):
@@ -3696,9 +3981,11 @@ def item_records_certified(run, node, byid, results):
             problems.append({"index": i,
                              "problem": f"record status={rec.get('status')!r} is not a committed fact "
                                         "(spawn-time record never finalized)"})
+            _stamp(i, rec, r, "record status is not a committed fact (spawn-time record never finalized)", None)
             continue
         if not record_efp_valid(rec, byid, node):
             problems.append({"index": i, "problem": "committed record is not efp-valid"})
+            _stamp(i, rec, r, "committed record is not efp-valid", None)
             continue
         if r is not None and r.get("status") in ("done", "partial"):
             # PR #258 zap r4: a committed FAILURE (failed+crashed, failed+
@@ -3715,6 +4002,7 @@ def item_records_certified(run, node, byid, results):
                 problems.append({"index": i,
                                  "problem": f"aggregate claims a {r['status']} item whose committed "
                                             f"record is status={rec_st!r} (incompatible status)"})
+                _stamp(i, rec, r, f"incompatible status: claim {r['status']} vs record {rec_st!r}", None)
                 continue
             want, have = r.get("output"), rec.get("output")
             # est-rucmf parity: the committed record is redact-then-clipped at
@@ -3733,6 +4021,14 @@ def item_records_certified(run, node, byid, results):
                 problems.append({"index": i,
                                  "problem": "aggregate claims a done item whose committed "
                                             "output is missing or diverges from the record"})
+                _stamp(i, rec, r, "claimed output missing or diverges from the committed record", False)
+            else:
+                _stamp(i, rec, r, None, True)
+        else:
+            # a non-done/partial aggregate row (failed/skipped/absent claim):
+            # the record stands as the committed fact; no output adjudication
+            # is owed, and the ledger says so rather than staying silent.
+            _stamp(i, rec, r, None, None)
     return (not problems), problems
 
 # ---------- typed failure classification (facts the RUNNER knows only) ----------
@@ -7638,9 +7934,15 @@ def _isolate_prior(meta, r, ev, ev_kw):
         return None                              # drained naturally mid-check
     kw = dict(ev_kw); kw["pids"] = live; kw["proof"] = proof
     log(run, f"{ev}.tree_kill", **kw)
+    _quarantine_row(run, ev_kw.get("node"), ev_kw.get("index"),
+                    f"{ev}.tree_kill", live, proof)
     if proof == "unknown":
+        _quarantine_row(run, ev_kw.get("node"), ev_kw.get("index"),
+                        f"{ev}.unprovable", live, "unreadable")
         return _proc_unreadable_record(pid, ev_kw.get("node"), r.get("spawn"), r)
     if proof != "dead":
+        _quarantine_row(run, ev_kw.get("node"), ev_kw.get("index"),
+                        f"{ev}.left_live", live, proof)
         return _left_live_record(pid, stuck,
                                  "attempt N+1 must never share a workdir with live "
                                  "attempt-N descendants: failing closed instead of "
@@ -7652,10 +7954,14 @@ def _isolate_prior(meta, r, ev, ev_kw):
     rk["proof"] = proof
     rk["prior_alive"] = [p for p in live if _proc_alive(p)]   # must be [] — proven below
     if rk["prior_alive"]:
+        _quarantine_row(run, ev_kw.get("node"), ev_kw.get("index"),
+                        f"{ev}.left_live", live, "alive-after-reap")
         return _left_live_record(pid, rk["prior_alive"],
                                  "the quarantine reported dead yet /proc still lists live "
                                  "prior-generation pids. ", r)
     log(run, f"{ev}.respawn_reap", **rk)
+    _quarantine_row(run, ev_kw.get("node"), ev_kw.get("index"),
+                    f"{ev}.respawn_reap", live, "dead")
     r["tree_descendants"] = list(live)
     r["tree_proof"] = "dead"
     return None
@@ -7718,7 +8024,11 @@ def _final_quiesce(meta, r, ev, ev_kw):
                                  _proctree_hold_s(meta), _proctree_kill_proof_s(meta))
     kw = dict(ev_kw); kw["pids"] = live; kw["proof"] = proof; kw["final"] = True
     log(run, f"{ev}.tree_kill", **kw)
+    _quarantine_row(run, ev_kw.get("node"), ev_kw.get("index"),
+                    f"{ev}.tree_kill", live, proof)
     if proof == "unknown":
+        _quarantine_row(run, ev_kw.get("node"), ev_kw.get("index"),
+                        f"{ev}.unprovable", live, "unreadable")
         return _proc_unreadable_record(pid, ev_kw.get("node"), r.get("spawn"), r)
     if proof == "":
         # #448: the tree drained between this guard's liveness sample and the
@@ -7730,9 +8040,13 @@ def _final_quiesce(meta, r, ev, ev_kw):
         # the guard itself quoted the live tree as []).
         return r
     if proof != "dead":
+        _quarantine_row(run, ev_kw.get("node"), ev_kw.get("index"),
+                        f"{ev}.left_live", live, proof)
         return _left_live_record(pid, stuck,
                                  "the node may not commit over a still-running process "
                                  "tree (the false-green suite shape). ", r)
+    _quarantine_row(run, ev_kw.get("node"), ev_kw.get("index"),
+                    f"{ev}.respawn_reap", live, "dead")
     r = dict(r)
     r["tree_descendants"] = list(live)
     r["tree_proof"] = "dead"
@@ -12402,6 +12716,10 @@ def main(run_id):
     # line — emitting it earlier would create events.jsonl and make the FIRST
     # runner misread itself as a resume (the reaper test pins the trace order).
     _receipt_concurrency(meta)                # once per runner process
+    # E18: an amendment admitted while this runner was down applied AT BOOT
+    # (this boot read the amended graph.json) — ship the promised evidence for
+    # every amends revision not yet named in logs/boundary.log.
+    _evidence_amendments(run, "boot")
     rs = Run(run)
     exit_graph[0] = rs.graph
     consumed, steering = set(), {}
@@ -12426,6 +12744,10 @@ def main(run_id):
             except OSError: pass
             if ok:
                 rs.reload(); exit_graph[0] = rs.graph; log(run, "graph.reloaded")
+                # E18: the amendment just consumed at this wave boundary ships
+                # its promised nodes/<id>/amendment-applied.json + boundary.log
+                # evidence (idempotent per amends revision).
+                _evidence_amendments(run, "wave-boundary")
                 return "reloaded"
         if (run / "stop.request").exists():
             with meta["_procs_lock"]:
@@ -13326,6 +13648,19 @@ if __name__ == "__main__":
     # copying directories. Refuses everything else (live holder, EACCES-ambiguous,
     # legacy lease-absent shape): wfcommon.heal_wedged_runner_lock is the single
     # safety authority; this door only renders its verdict.
+    # E16 (bd_2026-11-13-4hc): the single recovery query verb — `wf.py recover
+    # <run_id>` prints the recovery-state readout (applied-set, torn-record,
+    # safe-redrive-order) as one JSON line, computed from the journal on disk
+    # alone, so a post-kill operator asks once and reads nothing from memory.
+    if len(sys.argv) == 3 and sys.argv[1] == "recover":
+        _rc_run = wfcommon.find_run(sys.argv[2])
+        _rc_graph = jload(_rc_run / "graph.json", {}) or {}
+        if not _rc_graph.get("nodes"):
+            print(f"REFUSED {sys.argv[2]} (unknown run — no graph.json)")
+            sys.exit(1)
+        print(json.dumps(recovery_state(
+            _rc_run, {n["id"]: n for n in _rc_graph["nodes"]})))
+        sys.exit(0)
     if len(sys.argv) == 3 and sys.argv[1] == "release-lock":
         _rl_run = wfcommon.find_run(sys.argv[2])
         if not jload(_rl_run / "graph.json", {}):
@@ -13382,7 +13717,8 @@ if __name__ == "__main__":
         sys.exit(_cli_validate(sys.argv))
     if len(sys.argv) < 3 or sys.argv[1] != "run":
         print("usage: wf.py run <run_id> | wf.py validate [--json] <graph.json> "
-              "| wf.py release-lock <run_id> | wf.py redrive <run_id> --mode=<mode>"); sys.exit(2)
+              "| wf.py release-lock <run_id> | wf.py redrive <run_id> --mode=<mode> "
+              "| wf.py recover <run_id>"); sys.exit(2)
     # 5c37b19 guard 2 (belt-and-braces): a runner whose cwd was deleted mid-life dies
     # on the FIRST relative-path/cwd-touching call. HERE is durable — the same dir
     # __init__.py pins as the spawn cwd — so recover there before main() can raise.

@@ -725,6 +725,7 @@
         "attempt": 0,
         "attempts": 1,
         "attempts_log": [],
+        "disposition": "SUCCEEDED",
         "efp": "5db8f3eef87eb252",
         "fp_rule_version": 2,
         "log_path": "<TEMP>/home/workflows/<RUN>/logs/b.0.a0.log",
@@ -733,6 +734,11 @@
           "result": "ok"
         },
         "prompt_path": "<TEMP>/home/workflows/<RUN>/logs/b.0.a0.prompt.md",
+        "receipt_vs_parent": {
+          "claim_status": "done",
+          "output_matches": true,
+          "problem": null
+        },
         "skey": "wf:<RUN>:b:0:5db8f3ee.<NONCE>",
         "spawn": 0,
         "spawn_cmd": [
@@ -756,6 +762,7 @@
         "attempt": 0,
         "attempts": 1,
         "attempts_log": [],
+        "disposition": "SUCCEEDED",
         "efp": "5db8f3eef87eb252",
         "fp_rule_version": 2,
         "log_path": "<TEMP>/home/workflows/<RUN>/logs/b.1.a0.log",
@@ -764,6 +771,11 @@
           "result": "ok"
         },
         "prompt_path": "<TEMP>/home/workflows/<RUN>/logs/b.1.a0.prompt.md",
+        "receipt_vs_parent": {
+          "claim_status": "done",
+          "output_matches": true,
+          "problem": null
+        },
         "skey": "wf:<RUN>:b:1:5db8f3ee.<NONCE>",
         "spawn": 0,
         "spawn_cmd": [
@@ -787,6 +799,7 @@
         "attempt": 0,
         "attempts": 1,
         "attempts_log": [],
+        "disposition": "SUCCEEDED",
         "efp": "5db8f3eef87eb252",
         "fp_rule_version": 2,
         "log_path": "<TEMP>/home/workflows/<RUN>/logs/b.2.a0.log",
@@ -795,6 +808,11 @@
           "result": "ok"
         },
         "prompt_path": "<TEMP>/home/workflows/<RUN>/logs/b.2.a0.prompt.md",
+        "receipt_vs_parent": {
+          "claim_status": "done",
+          "output_matches": true,
+          "problem": null
+        },
         "skey": "wf:<RUN>:b:2:5db8f3ee.<NONCE>",
         "spawn": 0,
         "spawn_cmd": [
