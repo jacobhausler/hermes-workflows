@@ -241,21 +241,21 @@ check("validate(): out-of-set string refused naming path + allowed set",
       and "'ship'" in errs[0] and "'hold'" in errs[0], json.dumps(errs))
 check("validate(): in-set string passes", wf.validate({"verdict": "ship"}, ENUM_SCHEMA) == [])
 check("validate(): wrong-typed value keeps the type error (no double-report)",
-      wf.validate({"verdict": 5}, ENUM_SCHEMA) == ["$.verdict: expected string"])
+      wf.validate({"verdict": 5}, ENUM_SCHEMA) == ["$.verdict: expected string, got 5"])
 check("validate(): enum enforced inside items",
       wf.validate(["a", "zz"], {"type": "array", "items": {"type": "string",
                                                            "enum": ["a", "b"]}})
-      == ["$[1]: not an allowed value (allowed: 'a', 'b')"])
+      == ["$[1]: not an allowed value (got 'zz'; allowed: 'a', 'b')"])
 check("validate(): enum enforced on the top-level string itself",
       wf.validate("nope", {"type": "string", "enum": ["yes", "no"]})
-      == ["$: not an allowed value (allowed: 'yes', 'no')"])
+      == ["$: not an allowed value (got 'nope'; allowed: 'yes', 'no')"])
 # 5. byte-identical behavior for non-enum schemas: the classic type/required
 # errors are character-for-character what they were.
 classic = {"type": "object", "required": ["answer"], "properties": {"answer": {"type": "string"}}}
 check("validate(): missing-required message byte-stable",
-      wf.validate({}, classic) == ["$: missing required 'answer'"])
+      wf.validate({}, classic) == ["$: missing required 'answer' (the object has {})"])
 check("validate(): type-violation message byte-stable",
-      wf.validate({"answer": 3}, classic) == ["$.answer: expected string"])
+      wf.validate({"answer": 3}, classic) == ["$.answer: expected string, got 3"])
 check("validate(): no schema => no errors (unchanged)", wf.validate({"a": 1}, None) == [])
 check("validate(): a schema WITHOUT enum behaves exactly as before",
       wf.validate({"verdict": "anything-goes"},

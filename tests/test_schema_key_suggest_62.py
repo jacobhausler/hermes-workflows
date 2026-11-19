@@ -76,18 +76,18 @@ check("missing 'mean_rank' with extra 'mean_ranking' names both keys",
 # 2. BYTE-IDENTICAL non-suggestion paths (the #107 byte-stability law).
 classic = {"type": "object", "required": ["answer"], "properties": {"answer": {"type": "string"}}}
 check("no extras => byte-identical to today's form",
-      wf.validate({}, classic) == ["$: missing required 'answer'"],
+      wf.validate({}, classic) == ["$: missing required 'answer' (the object has {})"],
       wf.validate({}, classic))
 check("missing with UNRELATED extras => byte-identical to today's form",
       wf.validate({"summary": "s", "rationale": "r"}, classic)
-      == ["$: missing required 'answer'"],
+      == ["$: missing required 'answer' (the object has {'summary', 'rationale'})"],
       wf.validate({"summary": "s", "rationale": "r"}, classic))
 check("close-name that is a KEY THE SCHEMA NAMES (unfilled property) => no suggestion",
       wf.validate({"verdict": "x"},
                   {"type": "object", "required": ["answer"],
                    "properties": {"answer": {"type": "string"},
                                   "verdict": {"type": "string"}}})
-      == ["$: missing required 'answer'"],
+      == ["$: missing required 'answer' (the object has {'verdict'})"],
       wf.validate({"verdict": "x"},
                   {"type": "object", "required": ["answer"],
                    "properties": {"answer": {"type": "string"},
@@ -100,7 +100,7 @@ schema_typed = {"type": "object", "required": ["id"],
                 "properties": {"id": {"type": "string"}}}
 errs = wf.validate({"idd": 7}, schema_typed)
 check("close name whose value type CONTRADICTS the required property's type => no suggestion",
-      errs == [BARE], errs)
+      errs == [BARE + " (the object has {'idd'})"], errs)
 errs = wf.validate({"idd": "text"}, schema_typed)
 check("same sibling once the value type MATCHES => suggestion appears",
       len(errs) == 1 and "you wrote 'idd'" in errs[0], errs)
@@ -108,7 +108,7 @@ check("same sibling once the value type MATCHES => suggestion appears",
 errs = wf.validate({"idd": True}, {"type": "object", "required": ["id"],
                                    "properties": {"id": {"type": "number"}}})
 check("bool value never 'matches' a number-typed required (no suggestion)",
-      errs == [BARE], errs)
+      errs == [BARE + " (the object has {'idd'})"], errs)
 # no declared type for the required property => any sibling value is consistent
 errs = wf.validate({"idd": {"deep": 1}}, {"type": "object", "required": ["id"]})
 check("undeclared required type => suggestion allowed (nothing left to contradict)",
@@ -130,7 +130,7 @@ errs = wf.validate({"idd": "x"}, schema_two)
 check("two missing, one close sibling => one suggestion + one bare error, byte-identical",
       len(errs) == 2
       and "you wrote 'idd'" in errs[0] and errs[0].startswith(BARE)
-      and errs[1] == "$: missing required 'verdict'",
+      and errs[1] == "$: missing required 'verdict' (the object has {'idd'})",
       errs)
 
 print()

@@ -70,9 +70,9 @@ check("integer: integral-valued float 1.0 is a valid integer (modern JSON Schema
       "an unnecessary semantic restriction)",
       wf.validate(1.0, INT) == [], wf.validate(1.0, INT))
 check("integer: fractional float 1.5 rejected naming the path",
-      wf.validate(1.5, INT) == ["$: expected number"], wf.validate(1.5, INT))
+      wf.validate(1.5, INT) == ["$: expected number, got 1.5"], wf.validate(1.5, INT))
 check("integer: negative fractional float rejected too",
-      wf.validate(-2.5, INT) == ["$: expected number"], wf.validate(-2.5, INT))
+      wf.validate(-2.5, INT) == ["$: expected number, got -2.5"], wf.validate(-2.5, INT))
 check("integer: integral negative float accepted",
       wf.validate(-3.0, INT) == [])
 
@@ -81,33 +81,33 @@ NUM = {"type": "number"}
 check("number: int stays valid", wf.validate(1, NUM) == [])
 check("number: fractional float stays valid (2.5 as number — no over-tightening)",
       wf.validate(2.5, NUM) == [])
-check("number: True rejected", wf.validate(True, NUM) == ["$: expected number"],
+check("number: True rejected", wf.validate(True, NUM) == ["$: expected number, got True"],
       wf.validate(True, NUM))
-check("number: False rejected", wf.validate(False, NUM) == ["$: expected number"],
+check("number: False rejected", wf.validate(False, NUM) == ["$: expected number, got False"],
       wf.validate(False, NUM))
 
 # ============ 3. no coercion: strings never numeric-pass ============
 check("integer: numeric string still rejected (control)",
-      wf.validate("3", INT) == ["$: expected number"], wf.validate("3", INT))
+      wf.validate("3", INT) == ["$: expected number, got '3'"], wf.validate("3", INT))
 check("number: numeric string still rejected (control)",
-      wf.validate("2.5", NUM) == ["$: expected number"], wf.validate("2.5", NUM))
+      wf.validate("2.5", NUM) == ["$: expected number, got '2.5'"], wf.validate("2.5", NUM))
 
 # ============ 4. nested: dotted property paths, indexed item paths ============
 check("nested properties: violation names the dotted path",
       wf.validate({"count": 1.5},
                   {"type": "object", "properties": {"count": INT}})
-      == ["$.count: expected number"],
+      == ["$.count: expected number, got 1.5"],
       wf.validate({"count": 1.5}, {"type": "object", "properties": {"count": INT}}))
 check("nested properties: bool violation names the dotted path",
       wf.validate({"count": True},
                   {"type": "object", "properties": {"count": INT}})
-      == ["$.count: expected number"],
+      == ["$.count: expected number, got True"],
       wf.validate({"count": True}, {"type": "object", "properties": {"count": INT}}))
 check("array items: violation names the indexed path",
-      wf.validate([1.5], {"type": "array", "items": INT}) == ["$[0]: expected number"],
+      wf.validate([1.5], {"type": "array", "items": INT}) == ["$[0]: expected number, got 1.5"],
       wf.validate([1.5], {"type": "array", "items": INT}))
 check("array items: valid ints + integral floats pass, fractional item refused at index",
-      wf.validate([1, 2.0, 1.5], {"type": "array", "items": INT}) == ["$[2]: expected number"],
+      wf.validate([1, 2.0, 1.5], {"type": "array", "items": INT}) == ["$[2]: expected number, got 1.5"],
       wf.validate([1, 2.0, 1.5], {"type": "array", "items": INT}))
 
 # ============ 5. the door still admits both type names (subset unchanged) ====

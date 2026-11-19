@@ -130,44 +130,44 @@ check("the supported list names minItems, minLength and (since #472) maxItems",
 # before the fix; each must now be a typed error naming its path.
 e = wf.validate({"verify_list": []}, VERIFY_SCHEMA)
 check("validate(): verify_list [] refused naming $.verify_list",
-      e == ["$.verify_list: expected at least 1 item(s)"], json.dumps(e))
+      e == ["$.verify_list: expected at least 1 item(s), got [] (0 items)"], json.dumps(e))
 e = wf.validate({"verify_list": [""]}, VERIFY_SCHEMA)
 check("validate(): verify_list [''] refused naming $.verify_list[0]",
-      e == ["$.verify_list[0]: expected at least 1 non-blank char(s)"], json.dumps(e))
+      e == ["$.verify_list[0]: expected at least 1 non-blank char(s), got 0: ''"], json.dumps(e))
 e = wf.validate({"verify_list": ["   "]}, VERIFY_SCHEMA)
 check("validate(): verify_list ['   '] refused — a whitespace-only probe is NOT a probe"
       " (strip-count deviation from JSON Schema, fail-closed)",
-      e == ["$.verify_list[0]: expected at least 1 non-blank char(s)"], json.dumps(e))
+      e == ["$.verify_list[0]: expected at least 1 non-blank char(s), got 0: '   '"], json.dumps(e))
 check("validate(): a real verify_list commits clean",
       wf.validate({"verify_list": ["pytest -q"]}, VERIFY_SCHEMA) == [])
 check("validate(): missing required key keeps its exact message (no new error)",
-      wf.validate({}, VERIFY_SCHEMA) == ["$: missing required 'verify_list'"],
+      wf.validate({}, VERIFY_SCHEMA) == ["$: missing required 'verify_list' (the object has {})"],
       json.dumps(wf.validate({}, VERIFY_SCHEMA)))
 check("validate(): type violation keeps the type error (no double-report)",
-      wf.validate({"verify_list": "pytest"}, VERIFY_SCHEMA) == ["$.verify_list: expected array"])
+      wf.validate({"verify_list": "pytest"}, VERIFY_SCHEMA) == ["$.verify_list: expected array, got 'pytest'"])
 check("validate(): minItems/minLength IGNORED when the value type is wrong (no pile-on)",
       wf.validate({"answer": 5}, {"type": "object", "required": ["answer"],
                                   "properties": {"answer": {"type": "string",
                                                            "minLength": 3}}})
-      == ["$.answer: expected string"])
+      == ["$.answer: expected string, got 5"])
 check("validate(): minLength counts NON-BLANK chars, not raw chars"
       " (' '  x  ' has 1 non-blank < 3)",
       wf.validate("  x  ", {"type": "string", "minLength": 3})
-      == ["$: expected at least 3 non-blank char(s)"])
+      == ["$: expected at least 3 non-blank char(s), got 1: '  x  '"])
 check("validate(): a string at/above the floor passes",
       wf.validate("ab c", {"type": "string", "minLength": 4}) == [])
 check("validate(): minItems enforced on the top-level array itself",
       wf.validate([], {"type": "array", "minItems": 1, "items": {"type": "string"}})
-      == ["$: expected at least 1 item(s)"])
+      == ["$: expected at least 1 item(s), got [] (0 items)"])
 check("validate(): minItems:0 accepts the empty array (non-negative, not positive)",
       wf.validate([], {"type": "array", "minItems": 0}) == [])
 # byte-stability: a schema WITHOUT the new keywords behaves identically to
 # before (the classic messages are character-for-character the pre-#96 ones).
 classic = {"type": "object", "required": ["answer"], "properties": {"answer": {"type": "string"}}}
 check("validate(): missing-required message byte-stable",
-      wf.validate({}, classic) == ["$: missing required 'answer'"])
+      wf.validate({}, classic) == ["$: missing required 'answer' (the object has {})"])
 check("validate(): type-violation message byte-stable",
-      wf.validate({"answer": 3}, classic) == ["$.answer: expected string"])
+      wf.validate({"answer": 3}, classic) == ["$.answer: expected string, got 3"])
 check("validate(): no schema => no errors (unchanged)", wf.validate({"a": 1}, None) == [])
 check("validate(): malformed minItems/minLength in a hand-built schema is IGNORED,"
       " never crashes (forgiving validator — the door is the enforcement point)",

@@ -71,18 +71,18 @@ check(any("missing required 'clean'" in x for x in e), "empty object fails requi
 
 # --- (5) no regressions on the other types ---
 check(wf.validate({"clean": True, "notes": 5}, BOOL_SCHEMA)
-      == ["$.notes: expected string"], "string error still reported beside boolean ok",
+      == ["$.notes: expected string, got 5"], "string error still reported beside boolean ok (E25: names the rejected value)",
       wf.validate({"clean": True, "notes": 5}, BOOL_SCHEMA))
 NUM = {"type": "object", "required": ["n"], "properties": {"n": {"type": "integer"}}}
 check(wf.validate({"n": 3}, NUM) == [], "integer still validates")
-check(wf.validate({"n": "3"}, NUM) == ["$.n: expected number"], "integer string still rejected")
+check(wf.validate({"n": "3"}, NUM) == ["$.n: expected number, got '3'"], "integer string still rejected")
 BOOLARRAY = {"type": "object", "properties": {"flags": {"type": "array", "items": {"type": "boolean"}}}}
 check(wf.validate({"flags": [True, False]}, BOOLARRAY) == [],
-      "array of booleans validates", wf.validate({"flags": [True, False]}, BOOLARRAY))
-check(wf.validate({"flags": [True, "yes"]}, BOOLARRAY) == ["$.flags[1]: expected boolean"],
+      "array of booleans validates", wf.validate({"flags": [True, False], }, BOOLARRAY))
+check(wf.validate({"flags": [True, "yes"]}, BOOLARRAY) == ["$.flags[1]: expected boolean, got 'yes'"],
       "array item string rejected at its index", wf.validate({"flags": [True, "yes"]}, BOOLARRAY))
 check(wf.validate({"clean": "True"}, {"type": "object",
                                      "properties": {"clean": {"type": "boolean"}}})
-      == ["$.clean: expected boolean"], "non-required boolean property still type-checked")
+      == ["$.clean: expected boolean, got 'True'"], "non-required boolean property still type-checked")
 
 print(f"\nALL PASS ({ok})")

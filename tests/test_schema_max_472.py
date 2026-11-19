@@ -168,18 +168,18 @@ check("the refusal NAMES the description-prose fallback (the #472 ask)",
 # AUTHOR TEST 1: a committed answer OVER the cap FAILS, naming its path.
 e = wf.validate({"candidates": ["a", "b", "c"]}, CAP_SCHEMA)
 check("validate(): committed-over-cap refused naming $.candidates",
-      e == ["$.candidates: expected at most 2 item(s)"], json.dumps(e))
+      e == ["$.candidates: expected at most 2 item(s), got ['a', 'b', 'c'] (3 items)"], json.dumps(e))
 check("validate(): at the cap commits clean (AUTHOR TEST: legal uses pass)",
       wf.validate({"candidates": ["a", "b"]}, CAP_SCHEMA) == [])
 check("validate(): under the cap commits clean",
       wf.validate({"candidates": ["a"]}, CAP_SCHEMA) == [])
 check("validate(): maxItems enforced on the top-level array itself",
       wf.validate(["a", "b"], {"type": "array", "maxItems": 1, "items": {"type": "string"}})
-      == ["$: expected at most 1 item(s)"])
+      == ["$: expected at most 1 item(s), got ['a', 'b'] (2 items)"])
 check("validate(): maxItems:0 accepts the empty array",
       wf.validate([], {"type": "array", "maxItems": 0}) == [])
 check("validate(): over-cap on a wrong-typed value gets the type error, no pile-on",
-      wf.validate({"candidates": "abc"}, CAP_SCHEMA) == ["$.candidates: expected array"])
+      wf.validate({"candidates": "abc"}, CAP_SCHEMA) == ["$.candidates: expected array, got 'abc'"])
 check("validate(): malformed maxItems in a hand-built schema IGNORED, never crashes",
       wf.validate(["a"], {"type": "array", "maxItems": "two"}) == []
       and wf.validate(["a"], {"type": "array", "maxItems": True}) == []
@@ -189,22 +189,22 @@ e = wf.validate({"reproduced": False}, {"type": "object", "required": ["reproduc
                                         "properties": {"reproduced": {
                                             "type": "boolean", "enum": [True]}}})
 check("validate(): boolean enum non-member refused naming the allowed set",
-      e == ["$.reproduced: not an allowed value (allowed: True)"], json.dumps(e))
+      e == ["$.reproduced: not an allowed value (got False; allowed: True)"], json.dumps(e))
 e = wf.validate({"tier": 3}, {"type": "object", "required": ["tier"],
                               "properties": {"tier": {
                                   "type": "integer", "enum": [1, 2, 4]}}})
 check("validate(): integer enum non-member refused naming the allowed set",
-      e == ["$.tier: not an allowed value (allowed: 1, 2, 4)"], json.dumps(e))
+      e == ["$.tier: not an allowed value (got 3; allowed: 1, 2, 4)"], json.dumps(e))
 e = wf.validate({"tier": True}, {"type": "object", "required": ["tier"],
                                  "properties": {"tier": {
                                      "type": "integer", "enum": [1, 2, 4]}}})
 check("validate(): True NEVER satisfies an integer enum's 1 rung (#113 bool law)",
-      e == ["$.tier: expected number"], json.dumps(e))
+      e == ["$.tier: expected number, got True"], json.dumps(e))
 check("validate(): integral float may hit its integer rung (#113 contract)",
       wf.validate(2.0, {"type": "integer", "enum": [1, 2, 4]}) == [])
 check("validate(): integral float outside the set still FAILS",
       wf.validate(3.0, {"type": "integer", "enum": [1, 2, 4]})
-      == ["$: not an allowed value (allowed: 1, 2, 4)"])
+      == ["$: not an allowed value (got 3.0; allowed: 1, 2, 4)"])
 # AUTHOR TEST 3: legal uses pass in every admitted domain.
 check("validate(): boolean enum in-set passes",
       wf.validate(False, {"type": "boolean", "enum": [True, False]}) == []
@@ -213,7 +213,7 @@ check("validate(): integer enum in-set passes",
       wf.validate(4, {"type": "integer", "enum": [1, 2, 4]}) == [])
 check("validate(): string enum keeps byte-identical refusal",
       wf.validate("maybe", {"type": "string", "enum": ["ship", "hold"]})
-      == ["$: not an allowed value (allowed: 'ship', 'hold')"])
+      == ["$: not an allowed value (got 'maybe'; allowed: 'ship', 'hold')"])
 check("validate(): heterogeneous/malformed enum IGNORED, never crashes",
       wf.validate(5, {"type": "integer", "enum": [1, "x"]}) == []
       and wf.validate("x", {"enum": [True, False]}) == []
@@ -222,7 +222,7 @@ check("validate(): heterogeneous/malformed enum IGNORED, never crashes",
 classic = {"type": "object", "required": ["answer"], "properties": {"answer": {"type": "string"}}}
 check("validate(): no-schema => no errors (unchanged)", wf.validate({"a": 1}, None) == [])
 check("validate(): missing-required message byte-stable",
-      wf.validate({}, classic) == ["$: missing required 'answer'"])
+      wf.validate({}, classic) == ["$: missing required 'answer' (the object has {})"])
 check("validate(): enum-less schema under a cap stays clean",
       wf.validate({"candidates": ["a"]},
                   {"type": "object", "required": ["candidates"],

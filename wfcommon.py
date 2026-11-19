@@ -3276,6 +3276,19 @@ def structural_graph_errors(graph, extra_keys=()):
     errs = []
     def E(field, msg):
         errs.append({"node": None, "field": field, "msg": msg})
+    if ("nodes" not in graph and "include" not in graph
+            and graph.get("old") is not None and graph.get("new") is not None):
+        # E25/s36 (est-25t): the one untyped crash of the window was an amend
+        # pointed at an {old,new} ENVELOPE — a stored amends.jsonl ROW, a
+        # ledger OUTPUT shape. A bare TypeError named no violated rule; refuse
+        # it by name, quoting the rule and the executable fix. One rule, on the
+        # graph-level half that owns top-level shape, so every door surface
+        # (run, amend, diff, shelf) refuses with the same words.
+        return [{"node": None, "field": "nodes",
+                 "msg": "amend ENVELOPE, not a graph: this is the stored amends.jsonl "
+                        "row shape {at, old, new} — a ledger OUTPUT. Rule: an amend call "
+                        "takes the GRAPH document ({name?, nodes:[...]}) or a patch "
+                        "object; replay the row by sending its 'new' half"}]
     for key in sorted(set(graph) - STRUCTURAL_GRAPH_KEYS - set(extra_keys)):
         # #509: layer hint + reload note + nearest-key on the refusal text;
         # the legacy prefix before the first `;` stays byte-identical.
@@ -3421,7 +3434,9 @@ def _run_ref_scan(graph, safe_nodes):
         return out
 
     errs = []
-    for node in safe_nodes:
+    if safe_nodes is None and isinstance(graph, dict):
+        safe_nodes = graph.get("nodes")   # an input without nodes has none to scan
+    for node in safe_nodes or []:         # (E25/s36: the TypeError that named no rule)
         if not isinstance(node, dict):
             continue
         nid = node.get("id") if isinstance(node.get("id"), str) else None
@@ -7481,9 +7496,34 @@ def _rename_hint(r, v, s):
         return ""                     # never recommend a rename that still fails
     return f" (you wrote '{hit}'? the schema needs '{r}')"
 
+def _fmt_val(v):
+    """E25 (bd_2026-11-13-25t): every rejection names the violating JSON path
+    AND the rejected value — a bare "expected string" left the correction
+    retry blind to what the child actually produced (the s36 lesson: a trace
+    with no rule is no refusal). Containers render as their shape so a large
+    answer object cannot bury the message."""
+    if isinstance(v, dict):
+        keys = list(v)[:8]
+        more = ", ..." if len(v) > len(keys) else ""
+        return "{" + ", ".join(repr(k) for k in keys) + f"{more}}}" + \
+               (f" (only {len(v)} keys)" if len(v) > len(keys) else "")
+    if isinstance(v, list):
+        head = ", ".join(_fmt_val(x) for x in v[:3])
+        more = ", ..." if len(v) > 3 else ""
+        return f"[{head}{more}] ({len(v)} items)"
+    r = repr(v)
+    return r if len(r) <= 80 else r[:77] + "..."
+
+
 def validate(out, schema):
     """Tiny forgiving validator: type / required / properties / items / enum
     / minItems / minLength / maxItems.
+    E25 (bd_2026-11-13-25t): every emitted error carries the violating JSON
+    path and the rejected value (`_fmt_val`) — the wave6 case already named
+    missing keys; the law is now universal, so any node.failed text with
+    error_class=schema tells the retry what to change without re-reading the
+    capture. The strings flow verbatim into the typed-correction retry prompt
+    (callers pass errors through unchanged).
     #107: `enum` membership is ENFORCED here — a str value against a
     string-membered enum (exactly what the door's schema_check admits: a
     non-empty list of non-empty strings on type:'string'), so a misspelled
@@ -7511,10 +7551,10 @@ def validate(out, schema):
         return errs
     def chk(v, s, path):
         t = s.get("type")
-        if t == "object" and not isinstance(v, dict): errs.append(f"{path}: expected object")
-        elif t == "array" and not isinstance(v, list): errs.append(f"{path}: expected array")
-        elif t == "string" and not isinstance(v, str): errs.append(f"{path}: expected string")
-        elif t == "boolean" and not isinstance(v, bool): errs.append(f"{path}: expected boolean")
+        if t == "object" and not isinstance(v, dict): errs.append(f"{path}: expected object, got {_fmt_val(v)}")
+        elif t == "array" and not isinstance(v, list): errs.append(f"{path}: expected array, got {_fmt_val(v)}")
+        elif t == "string" and not isinstance(v, str): errs.append(f"{path}: expected string, got {_fmt_val(v)}")
+        elif t == "boolean" and not isinstance(v, bool): errs.append(f"{path}: expected boolean, got {_fmt_val(v)}")
         elif t in ("number", "integer") and (
                 isinstance(v, bool)
                 or not isinstance(v, (int, float))
@@ -7524,7 +7564,7 @@ def validate(out, schema):
             # isinstance(v, (int, float)) let True/False through both).
             # integer accepts integral-valued floats (1.0 is an integer, the
             # modern JSON Schema contract) but rejects fractional ones.
-            errs.append(f"{path}: expected number")
+            errs.append(f"{path}: expected number, got {_fmt_val(v)}")
         en = s.get("enum")
         if isinstance(en, list) and en:
             # #107 (string members) + #472 (boolean/integer members):
@@ -7539,28 +7579,31 @@ def validate(out, schema):
                          or (isinstance(v, float) and v.is_integer()))
                         and all(isinstance(x, int) and not isinstance(x, bool) for x in en)))
             if _dom and v not in en:
-                errs.append(f"{path}: not an allowed value (allowed: "
+                errs.append(f"{path}: not an allowed value (got {_fmt_val(v)}; allowed: "
                             + ", ".join(repr(x) for x in en) + ")")
         # #96: floors, enforced only where the door admits them (right value
         # type, non-negative int floor). bool refused: True is not a count.
         mi = s.get("minItems")
         if (t == "array" and isinstance(v, list) and isinstance(mi, int)
                 and not isinstance(mi, bool) and mi >= 0 and len(v) < mi):
-            errs.append(f"{path}: expected at least {mi} item(s)")
+            errs.append(f"{path}: expected at least {mi} item(s), got {_fmt_val(v)}")
         ml = s.get("minLength")
         if (t == "string" and isinstance(v, str) and isinstance(ml, int)
                 and not isinstance(ml, bool) and ml >= 0 and len(v.strip()) < ml):
-            errs.append(f"{path}: expected at least {ml} non-blank char(s)")
+            errs.append(f"{path}: expected at least {ml} non-blank char(s), "
+                        f"got {len(v.strip())}: {_fmt_val(v)}")
         # #472: the cap mirror of minItems — same placement, same forgiving
         # shape: enforced only on a real list under an admitted integer cap.
         mx = s.get("maxItems")
         if (t == "array" and isinstance(v, list) and isinstance(mx, int)
                 and not isinstance(mx, bool) and mx >= 0 and len(v) > mx):
-            errs.append(f"{path}: expected at most {mx} item(s)")
+            errs.append(f"{path}: expected at most {mx} item(s), got {_fmt_val(v)}")
         if isinstance(v, dict):
             for r in s.get("required", []):
                 if r not in v:
-                    errs.append(f"{path}: missing required '{r}'" + _rename_hint(r, v, s))
+                    hint = _rename_hint(r, v, s)
+                    errs.append(f"{path}: missing required '{r}'"
+                                + (hint or f" (the object has {_fmt_val(v)})"))
             for k, sub in (s.get("properties") or {}).items():
                 if k in v: chk(v[k], sub, f"{path}.{k}")
         if isinstance(v, list) and s.get("items"):
