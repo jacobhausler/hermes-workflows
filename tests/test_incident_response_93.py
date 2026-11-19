@@ -74,7 +74,16 @@ def engine_case(root, name, sequence, deadline):
     graph = copy.deepcopy(GRAPH)
     gate = next(n for n in graph["nodes"] if n["id"] == "recovery-probe")
     gate["wait"]["until_argv"] = probe_argv(scratch)
-    gate["wait"]["every_s"] = .3
+    # The engine caps the probe wall at min(every, 300), so this cadence IS
+    # the probe's budget. Measured 2026-11 floor on a loaded shared CI host
+    # (load1 17-19/72, 105 samples, engine _aux_run shape): p50 0.164s,
+    # p90 0.188s, max-completed 0.211s — but the /usr/bin/python3 cold-start
+    # tail at fork moments SIGKILLed probes at the old .3s wall in ~1 of 6
+    # spawns (last_exit flips to -9; the incident diagnostic stays truncated
+    # and empty). 1.2s ~= 6x the measured max: timing margin only, all
+    # behavioral assertions intact. Dependent deadlines below scale by the
+    # same 4x factor to preserve attempt counts and case shapes.
+    gate["wait"]["every_s"] = 1.2
     gate["wait"]["timeout_s"] = deadline
     (run / "graph.json").write_text(json.dumps(graph))
     (scratch / "verify_cmd.txt").write_text("exit " + str(sequence[0]))
@@ -120,7 +129,9 @@ with tempfile.TemporaryDirectory(prefix="incident-93-") as tmp:
     assert [r["counter"] for r in baseline] == [0, 1, 2, 0, 1, 2, 0], baseline
     assert baseline[-1]["diagnostic"]["marker"] == "probe_broken"
     print("PASS #86 poll table")
-    outcome, obs, mirror, diag = engine_case(root, "permanently-broken", [2], 1.15)
+    # 4.6s deadline = old 1.15s budget x the same 4 factor as every_s: the
+    # four doomed attempts still land (t~=0/1.2/2.4/3.6) before the timeout.
+    outcome, obs, mirror, diag = engine_case(root, "permanently-broken", [2], 4.6)
     assert outcome == "failed" and mirror["state"] == "timeout", (outcome, mirror)
     assert mirror["last_exit"] == 2 and "probe_broken" in mirror["stdout_tail"], mirror
     assert diag == {"incident_id": "engine-permanently-broken", "event": "probe_broken",
@@ -128,7 +139,9 @@ with tempfile.TemporaryDirectory(prefix="incident-93-") as tmp:
     assert all(r["exit"] == 2 and r["diagnostic"] == diag for r in obs), obs
     assert not (root / "engine-permanently-broken" / "gates" / "recovery-probe.json").exists()
     print("PASS permanent break emits native stdout and bounded run incident diagnostic")
-    outcome, obs, mirror, diag = engine_case(root, "healing", [0, 2, 0, 0], 3)
+    # Deadline 12s = old 3s budget x the same 4 factor: the gate still
+    # releases on its 4th genuine attempt (t~=3.6s) far inside the budget.
+    outcome, obs, mirror, diag = engine_case(root, "healing", [0, 2, 0, 0], 12)
     assert outcome == "released" and [r["exit"] for r in obs] == [1, 2, 1, 0], obs
     assert obs[1]["diagnostic"]["marker"] == "probe_broken" and diag is None, (obs, diag)
     assert not (root / "engine-healing" / "scratch" / "probe_broken").exists()
