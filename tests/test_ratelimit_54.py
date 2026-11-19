@@ -9,7 +9,7 @@ The banner under test is the VERBATIM AuthError the stock CLI raises at
 reaching the runner's merged capture only as the oneshot escalation line
 (oneshot.py:322 `hermes -z: agent failed: {failure}`, rc=1). Pinned here:
   (1) the classifier returns `ratelimit` for the banner and NOTHING else changes
-      (plain 429 stays transport; quota-horizon stays fatal_quota; the banner wins
+      (plain 429 stays transport; quota-horizon stays quota_exhausted; the banner wins
       even when a quota phrase rides the same marker);
   (2) each park emits node.retrying with error_class=ratelimit and backoff_s inside
       the jittered interval;
@@ -55,7 +55,7 @@ check("plain 429 stays transport (pin unchanged)", ec2 == "transport", ec2)
 QUOTA_MARK = ('Provider said: HTTP 429: {"error": {"message": "ChatGPT or Codex '
               'Subscription usage limit reached, resets in ~109 hours"}}')
 ec3, _ = wf._classify_rc_output(QUOTA_MARK)
-check("quota phrase + horizon stays fatal_quota (pin unchanged)", ec3 == "fatal_quota", ec3)
+check("quota phrase + horizon stays quota-classed, never transport", ec3 == "quota_exhausted", ec3)
 
 CONN = "hermes -z: agent failed: openai.APIConnectionError. Connection error."
 ec4, _ = wf._classify_rc_output(CONN)

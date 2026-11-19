@@ -54,7 +54,7 @@ def test_error_class_contract():
     captures = [
         ("unresolved_model", "Provider said: unknown model"),
         ("provider_400", "Provider said: Error code: 400"),
-        ("fatal_quota", "Provider said: Error code: 429 quota resets in 3 days"),
+        ("quota_exhausted", "Provider said: Error code: 429 quota resets in 3 days"),
         ("cap_exhausted", "Provider said: turn limit reached"),
         ("transport", "Provider said: Error code: 503"),
         ("unknown", "ordinary child prose"),

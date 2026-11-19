@@ -3250,6 +3250,14 @@ _QUOTA_HORIZON_RE = re.compile(r"reset(?:s|ting)?\D{0,10}?(\d+)\s*(hour|hr|h|day
 # terminal at the first attempt, outside both ladders, like config_input.
 _RESUME_POLICY_TOKENS = ("unsupported on resume",
                          "resume retains gateway session policy")
+# E21 (bd_2026-11-13-25t): the account-state phrases that make a 429 a FACT
+# about the subscription, not a window. A horizon-less account cap classed
+# transient legally burned the full 8-attempt cap and 60 minutes of lane on
+# one deterministic condition (est-lw1eh corpus); the class below parks the
+# node pending at attempt 1 instead. Superset of #24's quota phrases.
+_ACCOUNT_STATE_TOKENS = _QUOTA_PHRASE_TOKENS + ("quota limit", "limit reached",
+                                                "billing", "hard limit",
+                                                "usage cap")
 # est-t0vz (issue #54): the credential-window 429 — its OWN class, never transport.
 # The banner is the hermes CLI's own AuthError text, raised verbatim at
 # /opt/hermes/hermes_cli/runtime_provider.py:370
@@ -3262,7 +3270,7 @@ _RESUME_POLICY_TOKENS = ("unsupported on resume",
 # digits, so before this class it fell to `unknown` and burned the 5s/20s ladder in
 # ~10 s against a 36+ minute window (field repro 2026-09-30 03:14-03:55Z). Match the
 # exact banner; a marker carrying a quota phrase/reset horizon still classifies
-# fatal_quota BELOW this check only when the banner is absent (banner wins: the
+# quota_exhausted BELOW this check only when the banner is absent (banner wins: the
 # CLI-named credential window must never stamp the seat's quota cache).
 _RATELIMIT_BANNER_RE = re.compile(
     r"credentials are rate-limited for ([a-z0-9][a-z0-9._:/+-]*)", re.IGNORECASE)
@@ -3284,6 +3292,12 @@ ERROR_CLASSES = frozenset(("provider_400", "unresolved_model", "cap_exhausted",
                            # child's last Error: line names it) — outside both
                            # ladders, like config_input; zero transient draws.
                            "resume_policy",
+                           # E21: the deterministic account-state 429, with or
+                           # without a reset horizon — quota_exhausted carries
+                           # {identity, reset} and never consumes the attempt
+                           # cap. fatal_quota remains the class name of
+                           # historical records (same law, older spelling).
+                           "quota_exhausted",
                            "incomplete_work", "early_death", "cancelled",
                            "schema", "spawn", "inputs", "killed",
                            # sys-bknard: rc!=0 death whose capture carries a fenced
@@ -3524,7 +3538,8 @@ def _quota_cache_path():
     return wfcommon.quota_cache_path()
 
 def _quota_note(model, marker, provider=None):
-    """#24 (b): record model -> reset horizon from a fatal_quota marker.
+    """#24 (b): record model -> reset horizon from a quota_exhausted marker
+    (#24-era class name: fatal_quota; same law, E21 widens the phrase set).
     Advisory only: the cache NEVER deletes or blocks on its own; the door pings
     once before refusing, so a stale stamp can't wedge a run forever. A death on
     an EXPLICIT provider rides the key as 'provider/model' (the est-699 identity
@@ -3852,12 +3867,14 @@ def _classify_rc_output(out):
         return "unresolved_model", marker
     if any(t in low for t in _PROVIDER400_TOKENS) or "error code: 400" in low or "http 400" in low:
         return "provider_400", marker
-    if "429" in low and (any(t in low for t in _QUOTA_PHRASE_TOKENS)
+    if "429" in low and (any(t in low for t in _ACCOUNT_STATE_TOKENS)
                          or _QUOTA_HORIZON_RE.search(low)) \
             and not _RATELIMIT_BANNER_RE.search(low):
-        return "fatal_quota", marker    # #24: horizon outlasts the ladder — never retry
-                                        # (est-t0vz: unless the CLI named the credential
-                                        # window — the banner below wins the class)
+        return "quota_exhausted", marker  # #24/E21: the account state outlasts the
+                                        # ladder — never retry, ONE attempt is the
+                                        # verdict (est-t0vz: unless the CLI named the
+                                        # credential window — the banner below wins
+                                        # the class; that one IS time-bound)
     if _RATELIMIT_BANNER_RE.search(low):
         return "ratelimit", marker      # est-t0vz (issue #54): credential-window 429 —
                                         # its own bounded park, not the 5s/20s ladder
@@ -3878,7 +3895,7 @@ def _classify_rc_output(out):
 # attempt sequence on a deterministic input error — respawn 1 and 2 re-died
 # byte-identically, then the run landed transport_exhausted. A typo-class death is
 # an INPUT fact, not transient transport: it is terminal at the first attempt and
-# burns no respawn budget (the same law as fatal_quota #24).
+# burns no respawn budget (the same law as quota_exhausted #24/E21).
 #
 # Two facts must BOTH hold — neither alone is sufficient:
 #   1. the child died rc!=0 within _CONFIG_INPUT_WINDOW_MS of spawn (wall,
@@ -7224,7 +7241,7 @@ def _adopt_child(meta, node, byid, index, child, schema, fo_cancel=None):
         return {"status": "failed", "error": "adopted child died with an empty log (no messages)",
                 "error_class": "crashed", "raw": "", "ms": ms, **evd}
     eclass, marker = _classify_rc_output(out)
-    if eclass == "fatal_quota":   # #24: adopted death caches the horizon too
+    if eclass == "quota_exhausted":   # #24/E21: adopted death caches the horizon too
         _quota_note(node.get("model") or node.get("provider") or "seat default", marker, node.get("provider"))
     if eclass == "unknown" and _tool_call_as_text(final_reply or out or ""):
         # est-2ek.1.541 R8 (sibling coverage): the adopted-death path must classify
@@ -8319,17 +8336,31 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
             return {"status": "partial",
                     "error": f"child exited rc={rc} (answer harvested from {_harvest_source(hv)})",
                     "error_class": eclass, "ms": ms, "final": final_reply, **hv, **sk, **evd}
-        if eclass == "fatal_quota":
-            # #24: name the model + record the horizon (advisory cache); the class
-            # is outside _RETRYABLE_CLASSES/_BOUNDED_RETRY_CLASSES, so the ladder
-            # never fires — this ONE attempt is the node's verdict.
-            _quota_note(node.get("model") or node.get("provider") or "seat default", marker, node.get("provider"))
+        if eclass == "quota_exhausted":
+            # E21: the deterministic account-state 429. Its machine-readable form
+            # is `quota_exhausted{identity, reset}`: identity is the subscription
+            # that died, reset is the horizon the provider's own message carries —
+            # null when the message carries none (a horizon-less account cap is
+            # the MOST deterministic shape, not a window). It lands at attempt 1
+            # (outside both ladders — zero transient draws) and the lane parks
+            # pending on it: the run blocks at this node and only a re-pin/
+            # retry-shape amend re-admits it. The seat quota cache remembers it
+            # (advisory, #24). The node parks pending instead of
+            # burning the attempt cap on an unchanging account fact.
+            ident = node.get("model") or node.get("provider") or "seat default"
+            _quota_note(ident, marker, node.get("provider"))
+            hm = _QUOTA_HORIZON_RE.search((marker or "").lower())
+            reset_s = f"{hm.group(1)} {hm.group(2)}" if hm else None
             return {"status": "failed",
-                    "error": f"child exited rc={rc}: subscription quota exhausted for model "
-                             f"'{node.get('model') or 'seat default'}' — reset horizon in the "
-                             f"provider message below; amend the node to a live model instead "
-                             f"of waiting. Marker: {marker}",
-                    "error_class": "fatal_quota", "raw": (out or "")[-2000:], "ms": ms,
+                    "error": f"child exited rc={rc}: quota_exhausted for "
+                             f"'{ident}' (reset: {reset_s or 'none'}) — this is a "
+                             f"deterministic account state, not a transient window; "
+                             f"the node parked pending at attempt 1 (zero transient "
+                             f"draws). Amend the node to a live model, or wait the "
+                             f"horizon out if one is named. Marker: {marker}",
+                    "error_class": "quota_exhausted",
+                    "quota": {"identity": ident, "reset": reset_s},
+                    "raw": (out or "")[-2000:], "ms": ms,
                     "final": final_reply, **sk, **evd}
         lb, lb_marker = _is_lease_busy(rc, out)
         if lb:
@@ -8426,7 +8457,7 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
                     r2["attempts_log"] = al
                     return r2
         # WF-GRAFT-2 (est-imp1z): the generic-death settle gate. Every typed
-        # deterministic class above (config_input, fatal_quota, lease_busy,
+        # deterministic class above (config_input, quota_exhausted, lease_busy,
         # malformed_turn, cap, signals, provider_400…) already returned with its
         # own fact — this classifier reclassifies NOTHING of that. For a death
         # that would otherwise land `unknown`, the classifier is the single gate:
@@ -8533,7 +8564,7 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
     # a token-declared failure is `declared_failure`, outside BOTH ladders. A
     # token declaring SUCCESS outranks the sentinels (the node knows its result)
     # but manufactures nothing: the schema/answer law below stays in force.
-    # Typed deterministic deaths (config_input/fatal_quota/lease_busy/…) all
+    # Typed deterministic deaths (config_input/quota_exhausted/lease_busy/…) all
     # live on the rc!=0 path and returned above this line — this classifier can
     # never reclassify them transient.
     ov = _outcome.classify(rc, out, _outcome.parse_node_outcome(out))

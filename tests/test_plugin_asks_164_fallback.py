@@ -157,8 +157,8 @@ argv_log3.unlink(missing_ok=True)
 out3 = wf("asks164-quota", {"FAKE_MODE": "quota", "FAKE_ARGV_LOG": str(argv_log3)})
 models3 = argv_models(argv_log3)
 rec3 = json.loads((r3 / "nodes" / "a.json").read_text())
-check("(3) quota 429 stays one-attempt fatal_quota — no fallback spawn",
-      models3 == ["m0"] and rec3.get("error_class") == "fatal_quota",
+check("(3) quota 429 stays one-attempt quota_exhausted — no fallback spawn",
+      models3 == ["m0"] and rec3.get("error_class") == "quota_exhausted",
       f"spawned {models3}, class {rec3.get('error_class')}")
 
 # ---- (4) no fallback_models key: byte-identical old ladder — same model

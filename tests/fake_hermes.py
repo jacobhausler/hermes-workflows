@@ -312,6 +312,13 @@ if _FAKE_MODE == "resume_policy":  # est-25t/E19: the update-wall shape — bann
     print("Switching to the seat default model for this session.")
     print("Error: Resume retains gateway session policy; creation overrides are unsupported on resume.")
     sys.exit(2)
+if _FAKE_MODE == "quota_horizonless":   # est-25t/E21: account-state 429 WITHOUT a reset
+    # horizon — today's `_TRANSPORT_STATUS` pin burns the whole ladder on a deterministic
+    # account fact; the phrase carries none of the #24-era quota tokens.
+    print("Warning: install out of sync")
+    print("hermes -z: agent failed: Error code: 429 - {\"error\": {\"message\": "
+          "\"Account usage cap reached for this billing period\"}}")
+    sys.exit(1)
 # ---- est-imp1z (WF-GRAFT-2): the exit-0-lie family (exit-0-is-not-success) ----
 _IMP1Z_LIE = "API call failed after 3 retries: HTTP 429 Too Many Requests"
 if _FAKE_MODE == "exit0lie":       # est-imp1z: THE exit-0 lie — provider retries exhausted,

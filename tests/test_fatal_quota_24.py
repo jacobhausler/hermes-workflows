@@ -2,7 +2,8 @@
 """#24 — subscription-quota 429s are NOT transient transport.
 
 (a) a marker carrying a reset horizon (or a quota-exhaustion phrase) classifies
-    fatal_quota: fails on the FIRST attempt (no retry ladder), error names the model;
+    quota_exhausted (historical name fatal_quota): fails on the FIRST attempt
+    (no retry ladder), error names the model;
 (b) the runner remembers an exhausted resolved model (seat-local cache);
 (c) the door refuses to launch a node whose explicit model is cache-exhausted
     (advisory: a liveness ping that answers recovers the model).
@@ -30,7 +31,7 @@ QUOTA_MARK = ("Warning: x\n"
               "Provider said: HTTP 429: {\"error\": {\"message\": \"ChatGPT or Codex "
               "Subscription usage limit reached, resets in ~109 hours\"}}\n")
 ec, marker = wf._classify_rc_output(QUOTA_MARK)
-check("quota phrase + horizon -> fatal_quota", ec == "fatal_quota", f"{ec}/{marker}")
+check("quota phrase + horizon -> quota_exhausted", ec == "quota_exhausted", f"{ec}/{marker}")
 check("marker preserved", marker and "resets in" in marker, str(marker))
 
 PLAIN_429 = "hermes -z: agent failed: Error code: 429 - {'error': 'slow down'}"
@@ -42,9 +43,9 @@ RATE_LIMIT_LONG = ("Provider said: HTTP 429: Too Many Requests. "
 ec3, _ = wf._classify_rc_output(RATE_LIMIT_LONG)
 check("'rate limiting' prose alone is NOT quota", ec3 == "transport", ec3)
 
-check("fatal_quota is in the closed set", "fatal_quota" in wf.ERROR_CLASSES)
-check("fatal_quota is never retryable", "fatal_quota" not in wf._RETRYABLE_CLASSES
-      and "fatal_quota" not in wf._BOUNDED_RETRY_CLASSES)
+check("quota_exhausted is in the closed set", "quota_exhausted" in wf.ERROR_CLASSES)
+check("quota_exhausted is never retryable", "quota_exhausted" not in wf._RETRYABLE_CLASSES
+      and "quota_exhausted" not in wf._BOUNDED_RETRY_CLASSES)
 
 # ---------- (a) end-to-end: one attempt only, error names the model ----------
 if HOME.exists(): shutil.rmtree(HOME)
@@ -69,7 +70,7 @@ subprocess.run([sys.executable, str(BUILD.parent / "wf.py"), "run", str(r)],
                env=env, capture_output=True, timeout=120)
 rec = json.loads((r / "nodes" / "a.json").read_text())
 check("e2e: node failed", rec.get("status") == "failed", str(rec.get("status")))
-check("e2e: class fatal_quota", rec.get("error_class") == "fatal_quota", str(rec.get("error_class")))
+check("e2e: class quota_exhausted", rec.get("error_class") == "quota_exhausted", str(rec.get("error_class")))
 check("e2e: ONE attempt (no ladder)", (rec.get("attempts_log") or [0]) and len(rec.get("attempts_log") or []) <= 1
       and rec.get("attempts", 1) <= 1, f"attempts={rec.get('attempts')} log={len(rec.get('attempts_log') or [])}")
 spawns = LOG.read_text().count("GO") if LOG.exists() else 0
