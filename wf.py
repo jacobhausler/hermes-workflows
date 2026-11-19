@@ -13142,6 +13142,41 @@ if __name__ == "__main__":
             sys.exit(0)
         print(f"REFUSED {_rl_run.name} ({_rl.get('reason')})")
         sys.exit(1)
+    # #692 slice 1: the engine redrive verb rides the SAME door pipeline as the
+    # tool action — this entry spec-loads the sibling door and calls its
+    # handle({"action": "redrive", ...}) verbatim (one door, one mode law, no
+    # second validator). `wf.py redrive <run_id> --mode=<mode>`; a missing or
+    # unknown --mode is the door's OWN typed refusal, printed and exit 1 — the
+    # CLI never invents a default the door forbids.
+    if len(sys.argv) >= 3 and sys.argv[1] == "redrive":
+        _rd = {"action": "redrive", "run_id": sys.argv[2]}
+        for _a in sys.argv[3:]:
+            if _a.startswith("--mode="):
+                _rd["mode"] = _a.split("=", 1)[1]
+            else:
+                print(f"redrive: unknown argument {_a!r} "
+                      "(usage: wf.py redrive <run_id> --mode=same-fingerprint-resume|"
+                      "new-fingerprint-rerun)")
+                sys.exit(2)
+        _rd_spec = importlib.util.spec_from_file_location(
+            _DOOR_MOD_NAME, Path(__file__).resolve().parent / "__init__.py")
+        if _rd_spec is None or _rd_spec.loader is None:
+            print("redrive: no door module beside this runner (install the plugin dir, "
+                  "not a lone wf.py copy)")
+            sys.exit(2)
+        _rd_door = importlib.util.module_from_spec(_rd_spec)
+        _rd_spec.loader.exec_module(_rd_door)
+        _rd_out = json.loads(_rd_door.handle(_rd))
+        if not _rd_out.get("ok"):
+            print(f"REFUSED {sys.argv[2]} ({_rd_out.get('error_type', 'refused')}: "
+                  f"{_rd_out.get('error')})")
+            sys.exit(1)
+        print(f"REDRIVEN {_rd_out['run_id']} ({_rd_out['mode']}): "
+              f"re-drive {', '.join(_rd_out['re_drive']) or 'nothing'}; "
+              f"{len(_rd_out['preserved'])} completed receipt(s) preserved"
+              + ("; scheduled redrive.request consumed"
+                 if _rd_out.get("scheduled_redrive") else ""))
+        sys.exit(0)
     # #474: the graph-lint entrypoint for heads with no `workflow` tool in reach
     # (CI, pre-commit, plain shells). Same door pipeline as action=validate — see
     # _cli_validate for the one-pipeline law and the exit-code contract.
@@ -13149,7 +13184,7 @@ if __name__ == "__main__":
         sys.exit(_cli_validate(sys.argv))
     if len(sys.argv) < 3 or sys.argv[1] != "run":
         print("usage: wf.py run <run_id> | wf.py validate [--json] <graph.json> "
-              "| wf.py release-lock <run_id>"); sys.exit(2)
+              "| wf.py release-lock <run_id> | wf.py redrive <run_id> --mode=<mode>"); sys.exit(2)
     # 5c37b19 guard 2 (belt-and-braces): a runner whose cwd was deleted mid-life dies
     # on the FIRST relative-path/cwd-touching call. HERE is durable — the same dir
     # __init__.py pins as the spawn cwd — so recover there before main() can raise.

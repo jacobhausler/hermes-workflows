@@ -845,8 +845,8 @@ WORKFLOW_PARAMS = {
     "properties": {
         "action": {
             "type": "string",
-            "enum": ["run", "status", "wait", "release", "release_lock", "steer", "inbox", "amend", "diff", "stop", "kill", "list", "save", "submit", "library", "doctor_version", "validate"],
-            "description": "run=launch a graph; wait=OPTIONAL blocking observation (not the default loop: lifecycle transitions wake the owner session on their own — end your turn after run); read state, RESPAWNING an idle runner if work is pending (blocks to the next boundary when one is live; when the lock is PROVEN wedged — Errno 11 with the kernel ledger showing zero holders and the admission lease dead — wait heals it first, the #44 escape hatch); status=read-model of a run (optional seats:true attaches the engine-wide seat-pool occupancy block — cap, live, holders, FIFO queue as a query, read-only); release=answer a held human gate; release_lock=operator hatch for a wedged runner.lock (#44): renames the stranded inode aside under the admission heal-barrier and hands the lane a fresh lock path — REFUSES unless zero live holders are proven (never heals on EACCES or a live holder); steer=queue steering text for a node; inbox=(child-side, cooperative) pull late steering lines baked for THIS spawn — call once at a natural seam; amend=replace the graph (invalidates changed nodes + all downstream by fingerprint), or pass patch to edit a few node fields without resubmitting the whole graph; submitted node text carrying {run.KEY} re-binds from the run's persisted launch binding (run_context_binding) or the amend refuses before any write (est-qohvi); diff=confirm surface: runs the amend door with dry_run FORCED (accepts patch or graph), returns the preview + graph_diff and touches nothing; stop=request stop; kill=node-targeted lane kill (node required): that lane's in-flight children are SIGKILLed, the node finishes failed error_class=killed, siblings and the run keep going; list=all runs; save=shelve a graph in the library under a name (from run_id or inline graph); library=list shelved graphs richly (name, description, tags, provenance, path-relative id); optional check:true echoes a digest re-check block — the shelf-vs-author drift verb (est-dv8q4). validate=dry-run the door's validation pipeline (defaults fill + defect collection + model/route policy) with no ping and no writes; returns {ok, errors:[{node,field,msg}], resolved_routes}. run from=<name> replays a shelved graph. submit=quarantine a hand-rolled graph for study (requires why_not_library >=80 chars; never joins the library — the quartermaster's human-gated loop decides); inbox kind=submissions lists them newest-first. doctor_version=read-only version truth for THIS install: {live_version, newest_packaged, source_commit, source_repo, drift} comparing plugin.yaml against the install.json provenance that pack.py stamps at build time (one sidecar schema; a sidecar predating source_repo loads and reads null) \u2014 one read, no network.",
+            "enum": ["run", "status", "wait", "release", "release_lock", "steer", "inbox", "amend", "diff", "stop", "kill", "redrive", "list", "save", "submit", "library", "doctor_version", "validate"],
+            "description": "run=launch a graph; wait=OPTIONAL blocking observation (not the default loop: lifecycle transitions wake the owner session on their own — end your turn after run); read state, RESPAWNING an idle runner if work is pending (blocks to the next boundary when one is live; when the lock is PROVEN wedged — Errno 11 with the kernel ledger showing zero holders and the admission lease dead — wait heals it first, the #44 escape hatch); status=read-model of a run (optional seats:true attaches the engine-wide seat-pool occupancy block — cap, live, holders, FIFO queue as a query, read-only); release=answer a held human gate; release_lock=operator hatch for a wedged runner.lock (#44): renames the stranded inode aside under the admission heal-barrier and hands the lane a fresh lock path — REFUSES unless zero live holders are proven (never heals on EACCES or a live holder); steer=queue steering text for a node; inbox=(child-side, cooperative) pull late steering lines baked for THIS spawn — call once at a natural seam; amend=replace the graph (invalidates changed nodes + all downstream by fingerprint), or pass patch to edit a few node fields without resubmitting the whole graph; submitted node text carrying {run.KEY} re-binds from the run's persisted launch binding (run_context_binding) or the amend refuses before any write (est-qohvi); diff=confirm surface: runs the amend door with dry_run FORCED (accepts patch or graph), returns the preview + graph_diff and touches nothing; stop=request stop; kill=node-targeted lane kill (node required): that lane's in-flight children are SIGKILLed, the node finishes failed error_class=killed, siblings and the run keep going; redrive=engine retry-failed-run (#692 slice 1, mode REQUIRED, no default): drop the failed lanes' committed records + the runner verdict, relaunch detached, resume from the preserved completed receipts; mode=same-fingerprint-resume refuses (writes nothing) when a completed receipt's effective fingerprint has drifted — mode=new-fingerprint-rerun re-drives drifted lanes under the efp override rule; the response enumerates re_drive + preserved receipts and consumes any scheduled watchdog redrive.request; list=all runs; save=shelve a graph in the library under a name (from run_id or inline graph); library=list shelved graphs richly (name, description, tags, provenance, path-relative id); optional check:true echoes a digest re-check block — the shelf-vs-author drift verb (est-dv8q4). validate=dry-run the door's validation pipeline (defaults fill + defect collection + model/route policy) with no ping and no writes; returns {ok, errors:[{node,field,msg}], resolved_routes}. run from=<name> replays a shelved graph. submit=quarantine a hand-rolled graph for study (requires why_not_library >=80 chars; never joins the library — the quartermaster's human-gated loop decides); inbox kind=submissions lists them newest-first. doctor_version=read-only version truth for THIS install: {live_version, newest_packaged, source_commit, source_repo, drift} comparing plugin.yaml against the install.json provenance that pack.py stamps at build time (one sidecar schema; a sidecar predating source_repo loads and reads null) \u2014 one read, no network.",
         },
         "run_id": {"type": "string", "description": "Run id (required for every action except run/list)."},
         "name": {"type": "string", "description": "run: overrides graph.name (default workflow); save: library name overrides graph.name (lowercase, [-_.]); library: return one entry with refs-derived required params and an instantiate command. amend: set graph.name in the replacement graph; omitting it retains the run name."},
@@ -912,6 +912,7 @@ WORKFLOW_PARAMS = {
         "answer": {"type": "string", "description": "release: the human's answer text (from clarify)."},
         "graph_revision": {"type": "string", "description": "amend/steer/release: optional CAS token — the run's current graph revision (from run/status/amend). A token that differs from the head is refused with {error:'graph_revision_stale', yours, head} and NOTHING is written (no graph.json, no amends row, no restart.request, no inbox line, no gate answer). Absent = last-writer-wins (today's behavior). amend echoes the new head as graph_revision."},
         "gate_id": {"type": "string", "description": "release: gate node id."},
+        "mode": {"type": "string", "enum": ["same-fingerprint-resume", "new-fingerprint-rerun"], "description": "redrive: REQUIRED mode, there is NO silent default (wake-consumer law #692). same-fingerprint-resume re-drives only the failed lanes and REFUSES with redrive_fingerprint_drift, naming the nodes, when a committed done/partial/skipped receipt sits under an effective fingerprint the current graph no longer produces — the resume is promised only where the receipts are current truth. new-fingerprint-rerun accepts the drift: drifted receipts re-run under the efp override rule (stale == pending, amend's law) and only still-valid receipts are preserved."},
         "node": {"type": "string", "description": "steer/kill: target node id (steer: a pending node picks it up at spawn; a LIVE child pulls it at its next seam via its own inbox call — the prompt is never rewritten. kill: see action=kill)."},
         "text": {"type": "string", "description": "steer: the steering message."},
         "cmd": {"type": "string", "enum": ["kill"], "description": "steer: cmd=kill = node-targeted lane kill (node required): that lane's in-flight children are SIGKILLed and the node finishes failed with error_class=killed; sibling nodes and the run keep going. Never queues steering text."},
@@ -5087,6 +5088,168 @@ def act_kill(args):
                     "within ~2s and the node finishes failed with error_class=killed; sibling nodes "
                     "and the run continue. The kill marker stays for this run: a killed lane stays killed."}
 
+_REDRIVE_MODES = ("same-fingerprint-resume", "new-fingerprint-rerun")
+
+def _watchdog_module():
+    """Lazily spec-load the sibling runner_watchdog bound to THIS door's common
+    (the act_run arm-tail's pattern, same by-path law). Honest None on a partial-
+    tree copy. redrive CONSUMES this module's `redrive.request` continuation and
+    its P40 grant ledger — one authority for both file shapes, no second
+    scheduler and no second copy of the constant next to the tick's."""
+    try:
+        spec = importlib.util.spec_from_file_location(
+            "_hermes_workflows_runner_watchdog",
+            Path(__file__).resolve().parent / "runner_watchdog.py")
+        if spec is None or spec.loader is None:
+            return None
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        mod.bind(_common)
+        return mod
+    except Exception:
+        return None
+
+def act_redrive(args):
+    """#692 slice 1: the engine lifecycle REDRIVE verb (action=redrive).
+
+    ONE supported retry-failed-run: drops the failed lanes' committed failed
+    records (node record + runner verdict; fan-out DONE items untouched),
+    relaunches the runner detached, and resumes from the preserved completed
+    receipts. Replaces hand-run `setsid` + node-record deletion, which carried
+    the two known failure modes: a silent re-run of completed nodes from
+    scratch, and an unexplained refusal under creation-override drift.
+
+    Mode law (wake-consumer law, binding; NO silent default): mode in
+    {same-fingerprint-resume, new-fingerprint-rerun}. same-fingerprint-resume
+    REFUSES (writing nothing) when a committed done/partial/skipped receipt
+    sits under an effective fingerprint the current graph no longer produces —
+    the resume is only promised where the receipts are still current truth;
+    the refusal names the drifted nodes and the mode that owns them.
+    new-fingerprint-rerun accepts the drift: drifted receipts re-run under the
+    efp override rule (stale == pending, amend's law verbatim) and only the
+    still-valid receipts stand as preserved.
+
+    The response enumerates both sides of the transaction: which nodes re-run
+    and which completed-work receipts the resume preserves (receipts before
+    re-drive). A pending watchdog `redrive.request` is CONSUMED here — the
+    verb is that mechanism's consumer, the tick keeps scheduling, no second
+    scheduler. The respawn goes through the door's ONE bridge (reaper then
+    spawn), so a SIGKILL scene still gets its interruption receipts before
+    the new generation boots, and the retry-grant ledger is zeroed at this
+    runner-generation boundary exactly as the tick zeroes it (P40)."""
+    mode = args.get("mode")
+    if mode not in _REDRIVE_MODES:
+        return {"ok": False, "field": "mode", "error_type": "redrive_mode_required",
+                "error": f"redrive needs an explicit mode — one of {list(_REDRIVE_MODES)}, "
+                         "there is no default (wake-consumer law #692)"}
+    r = run_dir(args.get("run_id"))
+    if not (r / "graph.json").exists():
+        return {"error": "unknown run_id"}
+
+    def _refusal(st):
+        s = (st or {}).get("status")
+        if s == "failed":
+            if (st or {}).get("runner_live"):
+                return {"ok": False,
+                        "error": "runner alive with failed lanes — redrive refuses to replace a live "
+                                 "generation; let it exit or stop it first"}
+            return None
+        if s in ("running", "pending", "interrupted"):
+            return {"ok": False, "error": f"run is {s}, not failed — nothing to redrive; "
+                                          "`wait` respawns idle unfinished work"}
+        return {"ok": False, "error": f"run is {s} — no failed verdict to redrive (nothing re-runs; "
+                                      "re-run the graph to continue)"}
+
+    refusal = _refusal(run_state(r))
+    if refusal:
+        return refusal
+    if (r / "stop.request").exists():
+        return {"ok": False, "error": "stop pending — the run was stopped, not left failed; "
+                                      "resume a stopped run with `run`/`amend`, redrive refuses"}
+    wd = _watchdog_module()
+    with _graph_lock(r):
+        refusal = _refusal(run_state(r))          # THE authoritative re-read under the door lock
+        if refusal:
+            return refusal
+        if (r / "stop.request").exists():
+            return {"ok": False, "error": "stop pending — the run was stopped, not left failed; "
+                                          "resume a stopped run with `run`/`amend`, redrive refuses"}
+        graph = jload(r / "graph.json", {}) or {}
+        nodes = [n for n in (graph.get("nodes") or []) if isinstance(n, dict) and n.get("id")]
+        byid = {n["id"]: n for n in nodes}
+        memo = {}
+        re_drive, preserved, drifted, deletes = [], [], [], []
+        for n in nodes:
+            nid = n["id"]
+            s_val, rec = _common.node_rec(r, n, byid, memo=memo)
+            disk = jload(r / "nodes" / f"{nid}.json") or {}
+            dstat = disk.get("status")
+            if s_val == "failed" or (s_val == "pending" and dstat == "failed"):
+                re_drive.append(nid)              # committed failure, and a cancelled leg that
+                deletes.append(r / "nodes" / f"{nid}.json")   # re-drives by the #7 law anyway
+                for p in sorted((r / "nodes").glob(f"{nid}.[0-9]*.json")):
+                    irec = jload(p) or {}
+                    if not _common.record_efp_valid(irec, byid, n, memo=memo):
+                        continue                  # already stale: the runner treats it as pending
+                    if irec.get("status") in ("done", "partial", "skipped"):
+                        preserved.append({"node": nid, "item": p.stem[len(nid) + 1:],
+                                          "status": irec["status"], "at": irec.get("at"),
+                                          "efp": irec.get("efp")})
+                    elif irec.get("status") == "failed":
+                        deletes.append(p)         # only the failed leg re-runs; done legs stay
+            elif s_val in ("done", "partial", "skipped"):
+                preserved.append({"node": nid, "status": s_val, "at": (rec or {}).get("at"),
+                                  "efp": (rec or {}).get("efp")})
+            elif s_val == "pending" and dstat in ("done", "partial", "skipped"):
+                drifted.append(nid)               # committed receipt, moved fingerprint
+        if drifted and mode == "same-fingerprint-resume":
+            return {"ok": False, "error_type": "redrive_fingerprint_drift",
+                    "error": f"{len(drifted)} committed receipt(s) sit under an effective fingerprint "
+                             f"the current graph no longer produces: {', '.join(drifted)} — "
+                             "same-fingerprint-resume refuses instead of silently re-running them; "
+                             "re-issue with mode=new-fingerprint-rerun to re-drive the drifted lanes "
+                             "under the efp override rule",
+                    "drifted": drifted, "re_drive": re_drive,
+                    "preserved": [p["node"] + (f".{p['item']}" if "item" in p else "") for p in preserved]}
+        if mode == "new-fingerprint-rerun":
+            re_drive += drifted                   # staleness law re-runs them; bytes stay cold
+        for p in deletes:
+            try:
+                p.unlink()
+            except FileNotFoundError:
+                pass
+        rx = jload(r / "runner_exit.json", {}) or {}
+        try:
+            (r / "runner_exit.json").unlink()
+        except FileNotFoundError:
+            pass
+        consumed_request = grants = None
+        if wd is not None:
+            consumed_request = (r / wd.REDRIVE_NAME).exists()
+            if consumed_request:
+                wd._drop_redrive(r)
+                wd._append_event(r, "watchdog.redrive_consumed", mode=mode)
+            grants = wd._reset_grant_ledger(r)    # P40: grants die with the generation
+            if grants:
+                wd._append_event(r, "watchdog.grant_ledger_reset", grants=grants)
+        with open(r / "events.jsonl", "a") as f:
+            f.write(json.dumps({"ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                                "event": "run.redriven", "mode": mode, "re_drive": re_drive,
+                                "preserved": [p["node"] + (f".{p['item']}" if "item" in p else "")
+                                              for p in preserved],
+                                "prev_exit": rx.get("reason"),
+                                "scheduled_redrive": "consumed" if consumed_request else None},
+                               ensure_ascii=False) + "\n")
+        _respawn_runner(r)                        # the ONE bridge: reaper (loud) then spawn
+    st = run_state(r) or {}
+    return {"ok": True, "action": "redrive", "run_id": (st.get("run_id") or r.name),
+            "mode": mode, "re_drive": re_drive, "preserved": preserved,
+            "runner_status": st.get("status"),
+            "scheduled_redrive": "consumed" if consumed_request else None,
+            "grant_ledger_reset": grants or None,
+            "hint": "runner relaunched detached; completed receipts stand and the run resumes from "
+                    "them — watch with status/wait; transitions wake the owner session on their own"}
+
 def act_list(_args):
     roots = [runs_root()]
     legacy = _common.launch_runs_root()
@@ -5173,7 +5336,7 @@ def act_doctor_version(args):
 
 ACTIONS = {"run": act_run, "status": act_status, "wait": act_wait, "release": act_release,
            "release_lock": act_release_lock,
-           "steer": act_steer, "inbox": act_inbox, "amend": act_amend, "diff": act_diff, "stop": act_stop, "kill": act_kill, "list": act_list,
+           "steer": act_steer, "inbox": act_inbox, "amend": act_amend, "diff": act_diff, "stop": act_stop, "kill": act_kill, "redrive": act_redrive, "list": act_list,
            "save": act_save, "submit": act_submit, "library": act_library,
            "doctor_version": act_doctor_version, "validate": act_validate}
 
