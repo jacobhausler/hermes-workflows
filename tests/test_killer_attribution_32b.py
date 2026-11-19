@@ -5,16 +5,17 @@ fields to the est-6226 class constant. The class constant stays the verbatim
 prefix (every pre-32b reader keeps matching); 'gateway restart' is still never
 claimed — the record names the MEASURED sender process, not an interpretation.
 
-Rows (Linux only; the signalfd leg is linux):
-  A  a /bin/kill -TERM lands runner_exit.json whose reason keeps the class
-     constant as prefix AND carries killer_pid=<int> killer_cmd containing the
-     kill argv; the process still dies the default SIGTERM (rc -15 — the door's
-     reaper semantics unchanged).
+Rows (Linux only; the siginfo leg is linux):
+  A  a SIGTERM from an identified live sender lands runner_exit.json whose
+     reason keeps the class constant as prefix AND carries killer_pid,
+     killer_cmd containing the sender's argv marker, killer_uid == ours; the
+     process still dies the default SIGTERM (rc -15 — the door's reaper
+     semantics unchanged).
   B  a clean exit writes no SIGTERM runner_exit record (atexit path untouched).
 
 Run: cd tests && python3 test_killer_attribution_32b.py
 """
-import json, os, subprocess, sys, tempfile, time
+import json, os, signal, subprocess, sys, tempfile, time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -47,33 +48,25 @@ def run_probe(tmp):
     return p, run
 
 if sys.platform != "linux" or os.uname().machine not in ("x86_64", "aarch64"):
-    print("SKIP (signalfd leg is linux x86_64/aarch64)")
+    print("SKIP (siginfo leg is linux x86_64/aarch64)")
     print("QH32B_OK"); sys.exit(0)
 
-def _signalfd_alive():
-    # Hosts may intercept signalfd (seccomp); the code degrades to the plain
-    # est-6226 handler there, and the field rows degrade with it — the prefix
-    # and rc semantics are asserted on EVERY host.
-    import ctypes
-    try:
-        libc = ctypes.CDLL(None, use_errno=True)
-        libc.syscall.restype = ctypes.c_long
-        m = (ctypes.c_char * 128)()
-        import struct as _s
-        _s.pack_into("@Q", m, 0, 1 << 14)
-        fd = libc.syscall(ctypes.c_long(43), ctypes.c_int(-1), m, ctypes.c_size_t(128), ctypes.c_int(0))
-        if fd >= 0:
-            os.close(fd)
-        return fd >= 0
-    except OSError:
-        return False
-
-FIELDS = _signalfd_alive()
+# The route is stdlib sigwaitinfo (no syscall-number games): available on
+# every linux the door runs on. Degradation to the plain handler (no fields)
+# only when signal.sigwaitinfo is missing — belt asserted, prefix+rc rows
+# hold for BOTH routes on every host.
+FIELDS = hasattr(signal, "sigwaitinfo")
 
 with tempfile.TemporaryDirectory() as tmp:
     p, run = run_probe(tmp)
-    k = subprocess.run(["kill", "-TERM", str(p.pid)])   # /bin/kill: an identifiable sender
+    # A sender that STAYS ALIVE while the runner records: /proc/<pid>/cmdline
+    # is a race against a quick /bin/kill's reap, and the argv marker proves
+    # the record names the measured sender, not a guess.
+    sender = subprocess.Popen([sys.executable, "-c",
+        "import os, signal, sys, time; os.kill(int(sys.argv[2]), signal.SIGTERM); time.sleep(10)",
+        "kill32b_sender", str(p.pid)])
     rc = p.wait(timeout=15)
+    sender.kill(); sender.wait()
     rec = json.loads((run / "runner_exit.json").read_text())
     reason = rec.get("reason", "")
     check("A still dies the default SIGTERM (rc -15, door reaper unchanged)", rc == -15, f"rc={rc}")
@@ -81,12 +74,13 @@ with tempfile.TemporaryDirectory() as tmp:
     check("A no interpretation word", "gateway restart" not in reason, reason)
     if FIELDS:
         check("A reason names a numeric killer_pid", any(
-            t.startswith("killer_pid=") and t.split("=", 1)[1].lstrip("-").isdigit()
+            t.startswith("killer_pid=") and t.split("=", 1)[1].isdigit()
             for t in reason.split()), reason)
-        check("A killer_cmd names the measured sender argv", "kill -TERM" in reason, reason)
-        check("A killer_uid rides", "killer_uid=" in reason, reason)
+        check("A killer_cmd carries the sender's argv marker", "kill32b_sender" in reason, reason)
+        check(f"A killer_uid matches this uid ({os.getuid()})",
+              f"killer_uid={os.getuid()}" in reason, reason)
     else:
-        print("SKIP-FIELDS (signalfd unavailable on this host — fallback handler row only)")
+        print("SKIP-FIELDS (sigwaitinfo unavailable on this host — fallback handler row only)")
 
 with tempfile.TemporaryDirectory() as tmp:
     run2 = Path(tmp) / "run2"

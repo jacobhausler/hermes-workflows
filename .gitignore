@@ -40,3 +40,4 @@ ci/*.sh
 
 # NFS silly-rename phantoms (f9439b2): keep out of every listing
 .nfs*
+tests/writer_2lcp8.pids

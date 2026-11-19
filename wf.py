@@ -5708,7 +5708,15 @@ def _install_runner_term_cleanup(meta):
     children and the lock-loser's sys.exit(0) must stay untouched)."""
     import atexit
     atexit.register(_runner_term_cleanup, meta, "atexit")
-    def _term_die(reason_text):
+    def _term_die(reason_text, restore_handler=False):
+        # FIRST act, everywhere (both routes): the loop-node bookkeeping gates
+        # on this flag — a child dying inside the kill's cleanup is NOT a
+        # verdict (the killer took it, est-6226), and the SIGSTOP-based freeze
+        # cannot be used to replicate the old synchronous-handler stall
+        # (SIGSTOP stops every thread, not just the target).
+        _TERM_PENDING[0] = True
+        try: _TERM_PENDING[1] = reason_text
+        except IndexError: _TERM_PENDING.append(reason_text)
         try: _runner_term_cleanup(meta, "sigterm")
         except Exception: pass
         try:
@@ -5728,15 +5736,34 @@ def _install_runner_term_cleanup(meta):
                 # ("gateway restart" is still not a word the runner says).
                 write_runner_exit(meta["_run"], reason_text)
         except Exception: pass
-        signal.signal(signal.SIGTERM, signal.SIG_DFL)
+        if restore_handler:                    # only the plain path ever replaced it
+            signal.signal(signal.SIGTERM, signal.SIG_DFL)   # main-thread handler only
+        else:
+            # fd route: Python's handler (installed alongside for the
+            # stray-thread default-death guard) keeps recatching every re-raise
+            # and the live fd re-queues it — an endless consume loop. Drop the
+            # disposition to TRUE SIG_DFL via libc.signal (callable from this
+            # thread, unlike signal.signal) before the re-raise.
+            try:
+                import ctypes as _ct
+                _ct.CDLL(None).signal(_ct.c_int(signal.SIGTERM), _ct.c_void_p(0))
+            except (OSError, ValueError): pass
         try: signal.pthread_sigmask(signal.SIG_UNBLOCK, {signal.SIGTERM})
         except (ValueError, OSError): pass
         os.kill(os.getpid(), signal.SIGTERM)     # re-raise the default
+        # Final belt (hw-32b): the re-raise only lands if some thread has
+        # SIGTERM unblocked — a long-lived runner can hold threads created
+        # BEFORE the install (unmaskable from outside). If we're still here
+        # after the cleanup budget (drain + grace + slack), die anyway: the
+        # door reaper reads the record and classifies the death by the
+        # RECORDED reason; the exit code never rewrites the bookkeeping
+        # (est-6226 law).
+        threading.Timer(7.0, lambda: os._exit(0x80 | signal.SIGKILL)).start()
 
-    def _killer_fields(si_pid):
-        # hw-32b: kernel truth (siginfo.si_pid, resolved in the runner's pid
-        # namespace) at signal time. Every field degrades to what /proc can
-        # still answer — a sender that already reaped shows <exited>.
+    def _killer_fields(si_pid, si_uid):
+        # hw-32b: kernel truth (signalfd_siginfo ssi_pid/ssi_uid) at signal time.
+        # cmd comes from /proc and degrades to <exited> for a sender already
+        # reaped; uid never degrades — the kernel struct already carried it.
         parts = [f"killer_pid={si_pid}"]
         try:
             cmd = (Path(f"/proc/{si_pid}/cmdline").read_bytes()
@@ -5744,10 +5771,7 @@ def _install_runner_term_cleanup(meta):
         except OSError:
             cmd = "<exited>"
         parts.append(f"killer_cmd={cmd}")
-        try:
-            stat = Path(f"/proc/{si_pid}/stat").read_text()
-            parts.append("killer_uid=" + stat[stat.rindex(")") + 3:].split()[2])   # past "(comm) "
-        except (OSError, ValueError, IndexError): pass
+        parts.append(f"killer_uid={si_uid}")
         try:
             unit = next((l.rsplit("/", 1)[-1] for l in Path("/proc/self/cgroup").read_text()
                          .splitlines() if ".service" in l or ".scope" in l), None)
@@ -5756,42 +5780,54 @@ def _install_runner_term_cleanup(meta):
         except OSError: pass
         return EXTERNAL_SIGTERM_REASON + "; " + " ".join(parts)
 
-    def _signalfd_sender_watch():
-        # signalfd + one reader thread: the fd carries siginfo_t, so si_pid is the
-        # kernel's answer, not inference. Linux-only; ANY setup failure returns
-        # False and the plain handler (source unknown, est-6226 shape) installs.
-        import ctypes, struct
+    def _siginfo_sender_watch():
+        # sigwaitinfo + one reader thread: SignalInfo is the kernel's answer,
+        # not inference. stdlib-only (no signalfd syscall-number tables, no
+        # CLOEXEC, no ordering contract with the fd); sigwaitinfo consumes the
+        # blocked signal atomically and between iterations the kernel QUEUES
+        # it for the next call, so nothing can be lost to the plain handler
+        # while the loop is alive. Linux-only; any failure installs the plain
+        # pre-32b handler instead.
         if sys.platform != "linux":
             return False
-        machine = os.uname().machine
-        nr = {"x86_64": 43, "aarch64": 74}.get(machine)
-        if nr is None:
-            return False
-        libc = ctypes.CDLL(None, use_errno=True)
-        mask = (ctypes.c_char * 128)()
-        struct.pack_into("@Q", mask, 0, 1 << (signal.SIGTERM - 1))
-        fd = libc.syscall(ctypes.c_long(nr), ctypes.c_int(-1), mask,
-                          ctypes.c_size_t(128), ctypes.c_int(8))   # SFD_CLOEXEC
-        if not isinstance(fd, int) or fd < 0:
-            return False
-        signal.pthread_sigmask(signal.BLOCK, {signal.SIGTERM})     # threads inherit
+        signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGTERM})   # installer thread;
         def _watch():
+            # CPython's thread bootstrap RESETS the signal mask (threading is
+            # not a sigwait-inheritance vehicle) — block again in the thread
+            # body, before sigwaitinfo. Deliveries in the start->block window
+            # go to the plain-handler belt (never lost, est-6226 shape).
+            signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGTERM})
             while True:
                 try:
-                    data = os.read(fd, 128)
-                except OSError:
-                    return
-                if len(data) < 20:
+                    si = signal.sigwaitinfo({signal.SIGTERM})        # releases the GIL
+                except (InterruptedError, OSError):
                     continue
-                _term_die(_killer_fields(struct.unpack_from("@i", data, 16)[0]))
-        t = threading.Thread(target=_watch, name="wf-term-sigfd", daemon=True)
+                try:
+                    _term_die(_killer_fields(si.si_pid, si.si_uid))
+                except Exception:
+                    # The UPGRADE route failed after the signal was consumed:
+                    # never leave the process alive with SIGTERM blocked (the
+                    # door's term would queue forever) and never crash-clean
+                    # without a record — fall back to the plain death shape,
+                    # unblocking THIS thread so the re-raise lands (libc SIG_DFL
+                    # branch handles disposition from a non-main thread).
+                    try:
+                        signal.pthread_sigmask(signal.SIG_UNBLOCK, {signal.SIGTERM})
+                    except (ValueError, OSError): pass
+                    _term_die(EXTERNAL_SIGTERM_REASON)
+        t = threading.Thread(target=_watch, name="wf-term-siginfo", daemon=True)
         t.start()
         return True
 
-    if _signalfd_sender_watch():
-        return
+    _siginfo_sender_watch()         # best-effort UPGRADE route (siginfo fields);
+                                    # the handler below is the guaranteed one:
+                                    # it was previously SKIPPED whenever the fd
+                                    # installed, and a stray unblocked thread
+                                    # then took the default action — dying with
+                                    # no record at all (detach-6226 C, caught
+                                    # by this lane's own regression suite)
     def _on_sigterm(signum, frame):
-        _term_die(EXTERNAL_SIGTERM_REASON)
+        _term_die(EXTERNAL_SIGTERM_REASON, restore_handler=True)
     try:
         signal.signal(signal.SIGTERM, _on_sigterm)
     except (ValueError, OSError):
@@ -6334,6 +6370,12 @@ def _start_reaper(meta):
     if not meta.get("_subreaper"):
         return None
     def loop():
+        # hw-32b belt hygiene: this thread can predate the SIGTERM handler
+        # install, and an unmasked pre-existing thread would CATCH the term
+        # with the belt handler and stall its dispatch on a blocked main.
+        # Block here so every SIGTERM lands pending and routes to the sigwait
+        # watcher (or the belt once the install owns the disposition).
+        signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGTERM})
         stop = meta["_stop"]
         while not stop.is_set():
             try:
@@ -8412,6 +8454,22 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
                 rec.update(hv)
             return rec
         if rc is not None and rc < 0:
+            if _TERM_PENDING[0]:
+                # The runner's OWN external death is mid-flight (a watcher
+                # route set the flag before cleanup reaped children): a child
+                # dying inside that reaping is NOT a lane verdict — the KILLER
+                # took it (est-6226). Write the external record HERE if the
+                # watcher has not yet (its cleanup can still be draining when
+                # this SystemExit takes the interpreter down — first writer
+                # wins on the _EXIT_WRITTEN guard), then exit the loop quietly:
+                # the door reaper reads the record as external_kill
+                # (interrupted, respawn eligible — never node.failed).
+                # (SIGSTOP-freeze cannot replicate the old synchronous-handler
+                # stall: SIGSTOP stops every thread, proven.)
+                try:
+                    write_runner_exit(run, (_TERM_PENDING[1:2] or ["interrupted: runner killed"])[0])
+                except Exception: pass
+                raise SystemExit(0)
             signum = -rc
             try:
                 sig_name = signal.Signals(signum).name
@@ -10976,6 +11034,8 @@ def park_gate(run, run_id, gate, byid, consume_markers):
 # ---------- main loop ----------
 
 _EXIT_WRITTEN = [False]  # one exit record per runner process (first verdict wins)
+_TERM_PENDING = [False]  # hw-32b: an external death's bookkeeping is in flight —
+                         # children reaped inside the kill are NOT lane verdicts
 
 def _boot_lane_assert(run, nodes):
     """est-2ek.1.660: the clean-lane assert at (re-)drive STARTUP. A re-drive of a

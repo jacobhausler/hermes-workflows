@@ -93,7 +93,10 @@ def mk_run(runs, run_id):
     (r / "nodes").mkdir(parents=True)
     (r / "gates").mkdir()
     (r / "graph.json").write_text(json.dumps({"name": run_id, "nodes": [
-        {"id": "work", "type": "agent", "goal": "hang a while"}]}))
+        # QSLEEP: the fake sleeps printing NOTHING, so rows B/C actually
+        # find a live child to signal-kill over (the plain "hang a while"
+        # text answers in ~0.2s — the rows raced the clean completion).
+        {"id": "work", "type": "agent", "goal": "hang a while QSLEEP 30"}]}))
     (r / "run.json").write_text(json.dumps(
         {"hermes_bin": FAKE, "concurrency": 1, "node_timeout": 120}))
     return r
@@ -246,6 +249,9 @@ with tempfile.TemporaryDirectory(prefix=".tmp-gwsig6226-", dir=HERE,
               bool(st_b), json.dumps(st_b)[:120] if st_b else "none")
         # and it records its own exit later, honestly, when WE end it (part C
         # vocabulary): kill -TERM the survivor, its handler writes the record.
+        # (0.5s grace: the wf.pid stamp slightly predates the handler install;
+        # a pre-install kill would land on the default disposition.)
+        time.sleep(0.5)
         os.kill(runner_b, signal.SIGTERM)
         died = wait_for(lambda: not alive(runner_b), timeout=20)
         check("B: the runner records its OWN exit after the later signal-kill",
@@ -270,6 +276,7 @@ with tempfile.TemporaryDirectory(prefix=".tmp-gwsig6226-", dir=HERE,
     check("C setup: runner live with a running child claim", bool(rec_c) and alive(runner_c),
           f"runner={runner_c}")
     child_c = (rec_c or {}).get("pid")
+    time.sleep(0.5)                               # same pre-install grace as row B
     os.kill(runner_c, signal.SIGTERM)      # the wave reaching the runner itself
     died_c = wait_for(lambda: not alive(runner_c))
     check("C: runner is dead after the external SIGTERM", bool(died_c))
