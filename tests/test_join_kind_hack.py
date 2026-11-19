@@ -145,7 +145,11 @@ r = mk("j-termfail", [
 out = wf("j-termfail")
 rec = json.loads((r / "nodes/j.json").read_text())
 check("wait:terminal join FAILS when a parent failed (run fails too)",
-      out.startswith("WORKFLOW_FAILED j-termfail") and rec["status"] == "failed"
+      # est-mnd (E10): the terminal line shares the stdout channel with the
+      # funnel's field-loud audit lines — pin the terminal VERDICT line, not
+      # the first byte of the run's whole lifecycle stream.
+      any(l.startswith("WORKFLOW_FAILED j-termfail") for l in out.splitlines())
+      and rec["status"] == "failed"
       and rec.get("error_class") == "precondition", (out, rec))
 
 # ---------- wait:'any' quorum flavour: failed leg dropped, join commits ----------

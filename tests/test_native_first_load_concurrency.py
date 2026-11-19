@@ -87,7 +87,13 @@ def concurrent_failures():
             try:
                 if node["id"] == "b":
                     second_started.set()
-                wf.save_node(run, node, byid, {"status": "failed", "error_class": "precondition"})
+                # est-mnd (E10): with one shared error_class the two sibling
+                # commits would FOLD into one cascade notice (that is the
+                # fan law working). This probe needs TWO leads to exercise
+                # concurrent loader admission, so b carries its own class.
+                wf.save_node(run, node, byid, {"status": "failed",
+                                               "error_class": "precondition"
+                                               if node["id"] != "b" else "unknown"})
             except BaseException as exc:
                 errors.append(exc)
 

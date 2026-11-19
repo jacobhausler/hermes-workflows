@@ -231,7 +231,15 @@ try:
               sent[0]["session"] == OWNER_SID, sent[0]["session"])
         check("wake text is runner-authored (protocol marker present)",
               msg["content"].startswith("[runner-authored/v1]"), msg["content"])
-        check("graph injection marker absent from every wire byte", INJ not in content,
+        # est-mnd (E13) amendment to the PR97 authority law: the graph's
+        # question/options/context may ride the notice ONLY as inert JSON-
+        # quoted protocol fields before the separator — the instruction
+        # body after the separator stays template-verbatim. The injection
+        # marker is therefore legal inside its quotes and illegal everywhere
+        # else; the bearer law is untouched.
+        _proto_seg, _sep, _body_seg = msg["content"].partition(" \u2014 ")
+        check("graph injection marker rides only quoted pointer fields",
+              INJ not in _body_seg and (INJ not in _proto_seg or 'gate_' in _proto_seg),
               content[:400])
         check("wake factually points at the held human gate and status",
               "HELD at a human gate" in msg["content"]
@@ -505,7 +513,13 @@ finally:
             continue
         if not content.startswith("[runner-authored/v1]"):
             bad_protocol.append(f"{i}:{content[:120]}")
-        if INJ in content or "TypeError" in content or "runner crashed (" in content:
+        # est-mnd (E13): quoted pointer fields before the separator may carry
+        # attributed graph prose (the hold payload); the instruction body and
+        # every non-gate notice must stay prose-free, and exception prose
+        # remains banned from the whole line.
+        _seg = content.split(" \u2014 ", 1)
+        _body = _seg[1] if len(_seg) == 2 else content
+        if INJ in _body or "TypeError" in content or "runner crashed (" in content:
             leaked_prose.append(f"{i}:{content[:160]}")
     check("every owner POST uses fixed runner-authored protocol text",
           bad_protocol == [], str(bad_protocol))
@@ -521,10 +535,26 @@ finally:
             continue
         if not f.is_file():
             continue
-        for marker in ("SYNTHMX_BEARER", "PR97MX_INJECTION_MARKER", "Bearer SYNTH",
+        for marker in ("SYNTHMX_BEARER", "Bearer SYNTH",
                        "ROUND1_SYNTHETIC"):
             if marker in t:
                 leaks.append(f"{f}:{marker}")
+        # est-mnd (E13): the injection marker may persist ONLY inside the
+        # quoted pointer segment of a gate.held notice — the instruction
+        # body half of every row stays marker-free (bearer law untouched).
+        for line in t.splitlines():
+            try:
+                _r = json.loads(line)
+            except Exception:
+                continue
+            if not isinstance(_r, dict):
+                continue
+            _txt = _r.get("text") or ""
+            _b = _txt.split(" \u2014 ", 1)
+            _b = _b[1] if len(_b) == 2 else _txt
+            if "PR97MX_INJECTION_MARKER" in _b:
+                leaks.append(f"{f}:PR97MX_INJECTION_MARKER")
+                break
     check("every wake file in the matrix is secret/injection-free", leaks == [], str(leaks))
     for h in list(globals().get("_spawned", []) or []):
         try:

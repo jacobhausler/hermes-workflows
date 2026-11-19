@@ -202,8 +202,10 @@ try:
     check("run.done body verbatim",
           t.split(" \u2014 ", 1)[1] == wf._WAKE_TEMPLATES["run.done"], t[:200])
 
-    # ---- 7. gate.held / run.partial text byte-identical to the pre-#501 render
-    #         (authority surface unchanged for every other event) ----
+    # ---- 7. run.partial stays byte-identical to the pre-#501 render;
+    #         gate.held gained the est-mnd E13 payload: the body after the
+    #         separator stays template-verbatim and the pointer segment
+    #         names the gate + a diff-first verdict ----
     legacy = (lambda run_id, event: "[runner-authored/v1] run_id="
               + json.dumps(str(run_id)) + " event=" + json.dumps(event)
               + " \u2014 " + wf._WAKE_TEMPLATES[event])
@@ -212,8 +214,15 @@ try:
                                                    "error": "x", "error_class": "transport",
                                                    "log_path": "/irrelevant/a.log"}})
         t = wake(r, ev, key="held-def-x", graph=g)[0]["text"]
-        check(f"{ev} byte-identical (no pointer fields)",
-              t == legacy(r.name, ev), t[:200])
+        _pre, _sep, _post = t.partition(" \u2014 ")
+        if ev == "run.partial":
+            check(f"{ev} byte-identical (no pointer fields)",
+                  t == legacy(r.name, ev), t[:200])
+        else:
+            check("gate.held body stays template-verbatim (E13 pointers ride before it)",
+                  _post == wf._WAKE_TEMPLATES[ev], t[:200])
+            check("gate.held carries the gate id and a diff-first verdict pointer",
+                  'gate_id="held-def-x"' in _pre and "gate_hold_diff" in _pre, _pre[:200])
 
     # ---- 8. backward-compat render: the 2-arg call keeps its exact old shape
     #         (callers/tests that know no pointers are untouched) ----

@@ -118,7 +118,18 @@ def test_error_class_contract():
                     # a notify_prep row stays false (try-later, retry path open).
                     assert rows[0]["delivered"] is (None if expected == "missing_endpoint" else False)
                     assert expected not in wf.ERROR_CLASSES, expected
-                    assert not (run / "events.jsonl").exists()
+                    # est-mnd (E11): a delivery miss is LOUD — the miss may
+                    # touch events.jsonl ONLY as a typed notice.drop row
+                    # (renamed subject: notice_event, never a duplicate of
+                    # the lifecycle line itself). No other event class may
+                    # appear here, and nodes/ stays empty either way.
+                    if (run / "events.jsonl").exists():
+                        _ev = [json.loads(l) for l in
+                               (run / "events.jsonl").read_text().splitlines()]
+                        assert all(x.get("event") == "notice.drop" and
+                                   x.get("notice_event") == "run.failed"
+                                   and x.get("error_class") == expected
+                                   for x in _ev), _ev
                     assert not list((run / "nodes").glob("*.json"))
                     print(f"PASS wake-ledger namespace: {expected}", flush=True)
     print("ALL PASS node.failed producer/contract coverage", flush=True)

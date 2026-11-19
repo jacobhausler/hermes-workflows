@@ -138,7 +138,12 @@ try:
           len(jl(r2 / "wake.jsonl")) == 1
           and jl(r2 / "wake.jsonl")[0].get("error_class") == "missing_endpoint")
     check("off: zero outbound rows, zero events lines, no outbound file at all",
-          not (r2 / "outbound.jsonl").exists() and not (r2 / "events.jsonl").exists())
+          # est-mnd (E11): the owner lane's own typed notice.* rows are legal
+          # here (this run has an owner and no endpoint); the bridge must
+          # write nothing — no outbound.jsonl and no non-notice events line.
+          not (r2 / "outbound.jsonl").exists()
+          and all(x.get("event", "").startswith("notice.")
+                  for x in jl(r2 / "events.jsonl")))
 
     # ---- 2: ON — delivery, identity reuse, delivered-cache dedupe -----------
     port = sink_start()
@@ -228,9 +233,12 @@ try:
     r8 = mk_run("ho-floor", run_extra={"outbound_bridge": {"enabled": True}})
     hits_before = len(_Sink.hits)
     wf.notify(r8, "run.done", graph=GRAPH)
+    # est-mnd (E11): the owner lane may log its OWN typed notice rows here;
+    # the bridge floor is about bridge rows/lines/POSTs.
     check("operator false is a carrier-proof floor: no rows, no lines, no POSTs",
           len(_Sink.hits) == hits_before and not (r8 / "outbound.jsonl").exists()
-          and not (r8 / "events.jsonl").exists())
+          and all(x.get("event", "").startswith("notice.")
+                  for x in jl(r8 / "events.jsonl")))
     _CFG["outbound_bridge"] = None             # settings absent, carrier opts in, no url
     r9 = mk_run("ho-carrier-nourl", run_extra={"outbound_bridge": {"enabled": True}})
     wf.notify(r9, "run.done", graph=GRAPH)
@@ -257,7 +265,11 @@ try:
     try:
         r11 = mk_run("ho-redact")
         wf.notify(r11, "gate.held", key="gX:d", graph=GRAPH)
-        rows = jl(r11 / "outbound.jsonl") + jl(r11 / "events.jsonl")
+        # bridge rows only: est-mnd (E11) adds typed notice.* rows (their own
+        # error_class namespace) next to the bridge's outbound receipts.
+        rows = jl(r11 / "outbound.jsonl") + [x for x in jl(r11 / "events.jsonl")
+                                             if x.get("event") in ("outbound.failed",
+                                                                   "outbound.delivered")]
         blob = json.dumps(rows)
         check("generic stdlib death is typed transport and the bearer is [redacted] on disk",
               rows and all(x.get("error_class") == "transport" for x in rows)
@@ -273,7 +285,8 @@ try:
     wf.notify(r12, "run.done", graph=GRAPH)
     check("filter: a non-matching transition is skipped — no POST, no row, no line",
           len(_Sink.hits) == hits_before and not (r12 / "outbound.jsonl").exists()
-          and not (r12 / "events.jsonl").exists())
+          and all(x.get("event", "").startswith("notice.")
+                  for x in jl(r12 / "events.jsonl")))
     wf.notify(r12, "gate.held", key="gF:d", graph=GRAPH)
     check("filter: a matching transition ships", len(_Sink.hits) == hits_before + 1)
 

@@ -808,6 +808,13 @@ def _clip_record(rec):
 # JSON-encoded protocol fields (quoted via json.dumps, so a hostile run name can never
 # break out of the field or read as instruction prose) — exactly what makes a wake
 # actionable: inspect status/gates once, act, stop, never poll.
+# EST-MND (E10/E13) AMENDMENT: the runner itself may additionally append runner-
+# RECOMPUTED graph content — the gate.held question/options/context read from the
+# COMMITTED graph.json at the notify point, the failed-set delta, the cascade trio —
+# as further inert JSON-quoted pointer fields in that same position. The law is
+# about the AUTHOR, not the alphabet: call sites still pass no text, the template
+# table stays the only author of owner PROSE, and quoted graph strings can speak
+# only from inside their quotes (the #501 precedent, extended by owner ruling).
 # #501 (est-qcyfi): run.failed/run.done additionally carry runner-COMPUTED
 # pointer fields in that same inert JSON-quoted position — run_dir always,
 # failed_node_logs (the efp-valid committed records' log_path set) when
@@ -883,7 +890,20 @@ _WAKE_CATCHALL_BODY = (
     "once and report the gap. This notice is a drift alarm: it grants no new scope "
     "and revokes no existing authority.")
 
-def _wake_owner_text(run_id, event, run_dir=None, failed_node_logs=None, transition=None):
+def _wake_pointer_str(pairs):
+    """Render ordered (name, value) pointer pairs as inert JSON-quoted
+    protocol fields (est-mnd): a None value omits the field — absent is
+    honest, the renderer never fabricates (the #501 omission law, shared)."""
+    s = ""
+    for name, value in pairs:
+        if value is None:
+            continue
+        s += f" {name}={json.dumps(value, ensure_ascii=False)}"
+    return s
+
+
+def _wake_owner_text(run_id, event, run_dir=None, failed_node_logs=None, transition=None,
+                     pointers=""):
     """The runner-authored owner turn. Known events use their template; an
     event with no template uses the fixed catch-all body (est-jbcrw: never
     None — silence on an unmapped class was the gravity hole the dead-landing
@@ -897,11 +917,21 @@ def _wake_owner_text(run_id, event, run_dir=None, failed_node_logs=None, transit
     separator stays verbatim, so AUTHORITY LAW r5 is untouched and the
     template table remains the only author of owner prose. An empty or
     unresolvable failed_node_logs emits nothing — absent is honest, the
-    renderer never fabricates a list (AGENTS rule 8)."""
+    renderer never fabricates a list (AGENTS rule 8).
+
+    est-mnd (E10/E13): the `pointers` argument carries the notice funnel's
+    own runner-computed delta fields (failed_delta/failed_set, the
+    cascade trio, the gate.held payload: gate_id, the diff-first
+    gate_hold_diff verdict, dwell age, then the rendered question/options/
+    context read from the COMMITTED graph.json — never a call-site string).
+    They ride in the same inert JSON-quoted position, ahead of the existing
+    #501 pointers; the body after the separator stays verbatim, so the
+    authority law keeps its single author and a hostile graph string can
+    never break out of its quoted field or read as instruction prose."""
     body = _WAKE_TEMPLATES.get(event)
     if body is None:
         body = _WAKE_CATCHALL_BODY
-    pointers = ""
+    pointers = str(pointers or "")
     if transition is not None:
         pointers += f" transition={json.dumps(transition)}"
     if run_dir is not None:
@@ -1665,13 +1695,16 @@ def _wake_deliver(rec, sid, text, tid, owner=None):
                 # forwarded; probe undelivered so the retry re-drives under
                 # the SAME identity (same Idempotency-Key).
                 rec["error"] = f"HTTP {status} redirect not followed (undelivered)"
+                rec["error_class"] = "redirect"            # est-mnd B4: class every miss
                 return False
             if 200 <= status < 300:
                 return True
             rec["error"] = f"HTTP {status}"
+            rec["error_class"] = "http_status"             # est-mnd B4: class every miss
             return False
     except urllib.error.HTTPError as e:
         rec["error"] = f"HTTP {e.code}"
+        rec["error_class"] = "redirect" if 300 <= e.code < 400 else "http_status"
         return False
     except (socket.timeout, TimeoutError):
         # F5: a read timeout is NOT a delivery — we never saw a status line,
@@ -1683,6 +1716,7 @@ def _wake_deliver(rec, sid, text, tid, owner=None):
         # turn under that Idempotency-Key; no claim is made after cache expiry
         # or a core restart.
         rec["error"] = "timeout: read window closed before a response (retryable)"
+        rec["error_class"] = "timeout"                 # est-mnd B4: class every miss
         return False
     except Exception as e:
         # F4: a generic stdlib error can carry the bearer IN ITS MESSAGE —
@@ -1691,6 +1725,7 @@ def _wake_deliver(rec, sid, text, tid, owner=None):
         # redacted message; never a raw repr, and the ledger redaction runs
         # again at append time as a second net.
         rec["error"] = _wake_safe(f"{type(e).__name__}: {e}")
+        rec["error_class"] = "transport"               # est-mnd B4: class every miss
         return False
 
 # ---------- wake-burst coalescer with trailing re-check (est-zmizd) ----------
@@ -1776,7 +1811,542 @@ def _wake_refire_pending(run, graph=None, now=None, force=False):
         except Exception:
             pass   # the marker stays pending: the next boundary tries again
 
-def notify(run, event, key=None, graph=None, node=None, refire=False):
+# ---------- NOTICE FUNNEL: state-identity dedupe, cascade coalescing, ----------
+# ---------- failed-set delta, loud delivery misses (E10/E11/E13 mnd) ----------
+# Measured against: 33 delivered re-notices of which 16 were provably
+# zero-info; 7 real failures rendering as one indistinguishable sentence; one
+# root failure fanning into 9 'Inspect status once' owner notices in 74 s.
+# The funnel's law is one sentence: an OWNER NOTICE must carry a delta of
+# state over the last delivered one — a transition with no delta costs an
+# audit row in wake.jsonl (`funnel:"suppressed"`, `suppressed:<reason>`,
+# delivered False), never an owner turn. The settled-instance dedupe (B3)
+# stays the first net (a redrive of one delivered instance writes zero rows);
+# the funnel is the net for the SAME state reached over a DIFFERENT instance
+# (a different call-site reason string, a bumped crash generation).
+#
+# Named data shapes (docs/notice-ledger.md is the ledger contract; every
+# file lives under the run dir, every write is tmp+os.replace atomic, every
+# read fail-opens to "no claim": a store that cannot be read passes the
+# transition through, it never eats one):
+#   StateIdentity      — sha256[:16] over json [skey, efp, attempts, rev]. A
+#                        node record's `attempts` int is the size of the
+#                        0..N-1 attempt ladder, so the count IS the
+#                        attempts-set; rev is the durable amendment generation
+#                        (the #610 amend re-arm law, kept whole under the
+#                        delta law).
+#   FailedSetBaseline  — notices/failed_set.json
+#                        {"state": <current compared state: {"ids": [<sorted
+#                        committed failed node ids>], "efps": {id: efp|null},
+#                        "rev": int, "crash_gen": int|str|null}>, "at": <iso>}
+#   StateIdentityLedger— notices/state_seen.json {"ids": [<hashes>, newest
+#                        first, capped]}
+#   CascadeRecord      — notices/cascade.json, keyed by root node id:
+#                        {"root": id, "error_class": str|null,
+#                         "first_at": <epoch>, "members": [<folded ids>],
+#                         "notified": <bool>, "key": <wake key str>}
+#                        The leading notice of a cascade is HELD here until
+#                        the next drain point (wave boundary, terminal flush,
+#                        runner boot — the same boundary law as the trailing
+#                        re-checks), so the one notice names the root AND
+#                        the members folded so far.
+#   NoticeDropRow      — notice_drop.json {"rows": [{"event", "class",
+#                        "at", "tid"}...]} — one row per delivery miss; the
+#                        class is the wake row's typed error_class closed
+#                        set (missing_endpoint | http_status | redirect |
+#                        timeout | transport | native_* | notify_prep).
+#   NoticeRouteStamp   — notice_route.json {"reachable", "error_class",
+#                        "at"} — written at runner admission (E11: the
+#                        accepted run states its drop risk, not a silent
+#                        orphan-outside later).
+
+NOTICE_DIRNAME = "notices"
+NOTICE_SEEN_CAP = 200
+CASCADE_COALESCE_S = 120.0          # the measured fan: 9 notices over 74 s
+GATE_HOLD_TEXT_CLAMP = 2000         # a hold notice is terse; full text lives in status
+
+def _notice_path(run, name):
+    return run / NOTICE_DIRNAME / name
+
+def _notice_read(p, default=None):
+    return jload(p, default)
+
+def _notice_write(p, doc):
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_name(p.name + f".{os.getpid()}.tmp")
+    tmp.write_text(json.dumps(doc, ensure_ascii=False))
+    os.replace(tmp, p)              # a notice fact is a committed fact
+
+def _notice_state_identity(run, key, node=None, graph=None):
+    """The state identity of a node-subject transition: a hash over
+    (skey, efp, attempts, rev) — the same committed facts wake-observe/v2
+    already exposes (E12), never a fresh guess. REV IS part of the identity:
+    the #610 amend-generation law is a pinned wake-matrix law (an amendment
+    always re-arms the failed node's notice — the operator re-decided the
+    graph, so the notice lives at a generation the first one never saw);
+    the same state without an intervening amendment is the zero-info
+    re-notice E10 exists to cut. None (fail-open: unidentifiable is never
+    suppressed) when the facts are absent from both the caller payload
+    and the efp-valid committed record."""
+    try:
+        payload = None
+        if isinstance(key, str) and key.startswith("{"):
+            try:
+                p = json.loads(key)
+                payload = p if isinstance(p, dict) else None
+            except Exception:
+                payload = None
+        skey = payload.get("skey") if payload and isinstance(payload.get("skey"), str) else None
+        efp_v = payload.get("efp") if payload and isinstance(payload.get("efp"), str) else None
+        attempts = payload.get("attempts") if payload and type(payload.get("attempts")) is int else None
+        if skey is None or attempts is None or efp_v is None:
+            t = _wake_subject_fields(run, key, node=node, graph=graph)
+            if skey is None:
+                skey = t["skey"]
+            if attempts is None:
+                attempts = t["attempts"]
+            if efp_v is None and isinstance(node, str):
+                g = graph if isinstance(graph, dict) else (jload(run / "graph.json", {}) or {})
+                byid = {n["id"]: n for n in (g.get("nodes") or [])
+                        if isinstance(n, dict) and n.get("id")}
+                if node in byid:
+                    st, rec = node_rec(run, byid[node], byid)
+                    if isinstance(rec, dict) and isinstance(rec.get("efp"), str):
+                        efp_v = rec["efp"]
+        if skey is None and efp_v is None and attempts is None:
+            return None
+        rev_v = (payload.get("rev") if payload and type(payload.get("rev")) is int
+                 else _wake_rev(run))
+        return hashlib.sha256(json.dumps([skey, efp_v, attempts, rev_v],
+                                         sort_keys=True).encode()).hexdigest()[:16]
+    except Exception:
+        return None
+
+def _notice_failed_state(run, graph):
+    """(sorted ids, {id: efp}) for the run's efp-valid COMMITTED failed
+    records, or None when unresolvable. The per-node efp is part of the state
+    identity: a re-failure after an amend is a NEW failure of a DIFFERENT
+    node (its definition moved), not an unchanged set — the wake-matrix
+    FAILED->DONE->FAILED law, kept whole under the delta law."""
+    try:
+        nodes = (graph or {}).get("nodes")
+        if not isinstance(nodes, list):
+            return None
+        byid = {n["id"]: n for n in nodes if isinstance(n, dict) and n.get("id")}
+        if not byid:
+            return None
+        ids, efps = [], {}
+        for nid, n in byid.items():
+            st, rec = node_rec(run, n, byid)
+            if st == "failed":
+                ids.append(nid)
+                efps[nid] = rec.get("efp") if isinstance(rec, dict) and isinstance(rec.get("efp"), str) else None
+        return sorted(ids), {k: efps[k] for k in sorted(efps)}
+    except Exception:
+        return None
+
+def _notice_crash_gen(key):
+    """The durable crash generation a keyed crash notice carries (crash:gN),
+    or None. A later crash is a NEW runner-process death — new state under
+    the delta law — even when the committed failed set never moved (the
+    wake-matrix catchable-crash pin)."""
+    if isinstance(key, str) and key.startswith("crash:g"):
+        tail = key[len("crash:g"):]
+        try:
+            return int(tail)
+        except ValueError:
+            return key
+    return None
+
+def _notice_funnel(run, event, key, node, graph):
+    """(reason, pointers): reason None = the transition carries a delta and
+    may reach the owner; pointers are the delta fields the notice renders.
+    run.failed compares the COMMITTED failed SET WITH PER-NODE EFPS + the
+    amendment rev + crash generation (delta law: with no amend and no new
+    crash, a re-notice of an unchanged set under any reason string is
+    zero-info and re-notices zero times; a change — new id, moved efp, a
+    genuine amendment generation, or a later crash generation — emits one
+    notice rendering the newly-failed node ids).
+    node.action_required compares the state identity
+    against the delivered ledger (a redrive of one instance was already cut
+    by the settled check — this catches the same state over a new instance).
+    Every other class (gate.held, run.done, stragglers, catch-all) passes:
+    one decision, one instance, B3 law unchanged."""
+    try:
+        if event == "run.failed":
+            g = graph if isinstance(graph, dict) else (jload(run / "graph.json", {}) or {})
+            st = _notice_failed_state(run, g)
+            if st is None:
+                return None, {}          # unresolvable: no claim, never a suppression
+            ids, efps = st
+            # The comparison is over the failed SET (ids + per-node efp) plus
+            # the durable amendment generation and crash generation: an amend
+            # RE-DECIDES the run (#610/B3 law — a reverted definition still
+            # lives at a rev the first notice never saw), and a later crash is
+            # a new runner-process death, so both re-arm the delta. With no
+            # amendment and no new crash, a re-notice of the same set — under
+            # any call-site reason string — is zero-info (E10: an unchanged
+            # set re-notices zero times).
+            cur = {"ids": ids, "efps": efps, "rev": _wake_rev(run),
+                   "crash_gen": _notice_crash_gen(key)}
+            base = _notice_read(_notice_path(run, "failed_set.json"), {}) or {}
+            prev = base.get("state") if isinstance(base.get("state"), dict) else None
+            if prev == cur:
+                return "failed_set_unchanged", {}
+            if not isinstance(prev, dict):
+                delta = list(ids)
+            else:
+                pids, pef = prev.get("ids") or [], prev.get("efps") or {}
+                delta = sorted(i for i in ids if i not in pids or pef.get(i) != efps.get(i))
+            return None, {"failed_delta": delta, "failed_set": ids, "__base": cur}
+        if event == "node.action_required":
+            ident = _notice_state_identity(run, key, node=node, graph=graph)
+            if ident is None:
+                return None, {}
+            seen = (_notice_read(_notice_path(run, "state_seen.json"), {}) or {}).get("ids") or []
+            if ident in seen:
+                return "state_identity_delivered", {}
+            return None, {"__state_identity": ident}
+    except Exception:
+        pass
+    return None, {}
+
+def _notice_funnel_after_deliver(run, event, funnel):
+    """A funnel-passed transition whose delivery SETTLED (delivered or
+    nowhere-ever — the tri-state law's settled classes) moves the baselines:
+    the failed-set state and/or the seen state identity. A try-later False
+    leaves them stale, so the retry path re-notices — the funnel never
+    suppresses what never landed."""
+    try:
+        if event == "run.failed" and "__base" in funnel:
+            _notice_write(_notice_path(run, "failed_set.json"),
+                          {"state": funnel["__base"], "at": now()})
+        elif event == "node.action_required" and funnel.get("__state_identity"):
+            p = _notice_path(run, "state_seen.json")
+            ids = (_notice_read(p, {}) or {}).get("ids") or []
+            ident = funnel["__state_identity"]
+            _notice_write(p, {"ids": [ident] + [i for i in ids if i != ident][:NOTICE_SEEN_CAP]})
+    except Exception:
+        pass
+
+def _notice_audit_row(run, event, reason, key=None, node=None, graph=None):
+    """One wake.jsonl audit row per funnel suppression — the difference
+    between a suppression and a hole (the WF-GRAFT-1 legibility law): the
+    re-notice is recorded, reason-typed, and cost the owner zero turns."""
+    try:
+        _wake_append(run, {"ts": now(), "event": event, "run_id": run.name,
+                           "funnel": "suppressed", "suppressed": reason,
+                           "delivered": False,
+                           **_wake_subject_fields(run, key, node=node, graph=graph)})
+        print(f"WORKFLOW_WAKE_SUPPRESSED {run.name} {event} {reason}")
+    except Exception:
+        pass
+
+def _notice_failed_ancestors(run, node_id, byid):
+    """Transitive `after`-ancestors of a node (cycle-safe walk)."""
+    seen, stack = set(), list((byid.get(node_id) or {}).get("after") or [])
+    while stack:
+        a = stack.pop()
+        if a in seen or a not in byid:
+            continue
+        seen.add(a)
+        stack.extend(byid[a].get("after") or [])
+    return seen
+
+def _notice_causal_root(run, node_id, byid):
+    """The topologically-highest COMMITTED-FAILED ancestor of a node (the
+    root of a causal cascade), None when no failed ancestor exists. When
+    several incomparable failed ancestors exist the smallest node id is the
+    deterministic root (rule 6: one derivation, no wall-clock, no pid)."""
+    try:
+        anc = _notice_failed_ancestors(run, node_id, byid)
+        failed = {a for a in anc if node_rec(run, byid[a], byid)[0] == "failed"}
+        roots = [a for a in failed
+                 if not (failed & _notice_failed_ancestors(run, a, byid))]
+        return min(roots) if roots else None
+    except Exception:
+        return None
+
+def _notice_cascade(run, node_id, rec, byid, key):
+    """One committed node failure meets the cascade record (E10 fan net).
+    Returns True = NO notice for this commit — it folded under an open
+    cascade root (its audit row names the root) — or it is the silent
+    redrive of an already-accounted commit (the wave-top observation loop
+    re-notices every failed node every tick). Returns False = this commit
+    leads its own cascade: the caller notices it IMMEDIATELY (the 610
+    actionable-transition law: a committed failure wakes the owner while
+    independent siblings still run) and opens the record. Folded members
+    ride the record's member list; the terminal run.failed delta renders
+    the whole newly-failed set. Deterministic: the causal (topologically-
+    highest committed-failed ancestor) fold wins; else the same
+    error_class inside the coalesce window (the gateway-death fan: siblings
+    with no edges between them, one shared typed cause, 74 s apart at the
+    limit). Only a broken store (False, no record) degrades to the plain
+    pre-funnel per-commit notice: the coalescer never eats a transition."""
+    try:
+        p = _notice_path(run, "cascade.json")
+        doc = _notice_read(p, {}) or {}
+        if not isinstance(doc, dict):
+            doc = {}
+        now_s = time.time()
+        e = doc.get(node_id)
+        if isinstance(e, dict) and e.get("key") == key:
+            return False if not e.get("notified") else True   # redrive: silent once notified
+        ecls = rec.get("error_class") if isinstance(rec.get("error_class"), str) else None
+        causal = _notice_causal_root(run, node_id, byid)
+        target = None
+        if causal is not None and causal != node_id:
+            target = causal                       # causal fold wins over the class window
+        else:
+            for rid, e in doc.items():
+                if (isinstance(e, dict) and rid != node_id
+                        and e.get("error_class") == ecls
+                        and now_s - float(e.get("first_at", 0.0)) < CASCADE_COALESCE_S):
+                    target = rid
+                    break
+        if target is not None:
+            e = doc.get(target)
+            if isinstance(e, dict) and node_id in (e.get("members") or []):
+                return True                       # member redrive: silent, no duplicate row
+            if not isinstance(e, dict):
+                # the root's own commit predates the funnel (or the record is
+                # junk): its direct notice already went out — open a fold
+                # record marked notified so nothing ever double-notifies.
+                e = {"root": target, "error_class": ecls, "first_at": now_s,
+                     "members": [], "notified": True, "key": key}
+            members = e.get("members") if isinstance(e.get("members"), list) else []
+            e["members"] = members + [node_id]
+            doc[target] = e
+            _notice_write(p, doc)
+            _notice_audit_row(run, "node.action_required", f"cascade_of={target}",
+                              key=key, node=node_id, graph={"nodes": list(byid.values())})
+            return True
+        doc[node_id] = {"root": node_id, "error_class": ecls, "first_at": now_s,
+                        "members": [], "notified": True, "key": key}
+        _notice_write(p, doc)
+        return False                              # this commit leads: caller notices now
+    except Exception:
+        return False
+
+def _notice_cascade_state(run, node_id):
+    """{root, members} for a just-opened cascade record (the leading notice's
+    count pointer); None when unresolvable (pointer omission, never a 0-lie
+    about a store we could not read)."""
+    try:
+        e = (_notice_read(_notice_path(run, "cascade.json"), {}) or {}).get(node_id)
+        if not isinstance(e, dict):
+            return None
+        members = [m for m in (e.get("members") or []) if isinstance(m, str)]
+        return {"root": e.get("root") or node_id, "members": members}
+    except Exception:
+        return None
+
+def _notice_cascade_reopen(run, node_id):
+    """A leading notice that came back UNDELIVERED leaves its record open
+    (notified=False): the wave-top redrive and the drain net re-notice it
+    under the same instance id until the tri-state row settles."""
+    try:
+        p = _notice_path(run, "cascade.json")
+        doc = _notice_read(p, {}) or {}
+        e = doc.get(node_id) if isinstance(doc, dict) else None
+        if isinstance(e, dict):
+            e["notified"] = False
+            _notice_write(p, doc)
+    except Exception:
+        pass
+
+def _cascade_drain(run, graph=None, force=False):
+    """Retry net for cascade records whose leading notice never settled (a
+    record opened notified=False by a crashed first pass, or an undelivered
+    attempt held open by the tri-state law). Drains at the wave boundary and
+    the terminal flush — the same points the trailing re-checks use."""
+    try:
+        p = _notice_path(run, "cascade.json")
+        doc = _notice_read(p, None)
+        if not isinstance(doc, dict) or not doc:
+            return
+        dirty = False
+        for rid, e in sorted(doc.items()):
+            if not isinstance(e, dict) or e.get("notified"):
+                continue
+            members = [m for m in (e.get("members") or []) if isinstance(m, str)]
+            verdict = notify(run, "node.action_required", key=e.get("key"),
+                             node=rid, graph=graph,
+                             cascade={"root": rid, "members": members})
+            if verdict != "undelivered":
+                e["notified"] = True
+                dirty = True
+        if dirty:
+            _notice_write(p, doc)
+    except Exception:
+        pass
+
+def _notice_class_of_error(err):
+    e = str(err or "")
+    if "redirect" in e:
+        return "redirect"
+    if e.startswith("HTTP "):
+        return "http_status"
+    if "timeout" in e:
+        return "timeout"
+    return "transport"
+
+def _notice_drop(run, event, rec):
+    """E11: a delivery miss is LOUD where status can see it — a typed
+    notice_drop.json row, an events.jsonl line, and a stdout lifecycle
+    line. The run's own verdict was already decided; this records only that
+    nobody was told."""
+    try:
+        p = run / "notice_drop.json"
+        doc = jload(p, {}) or {}
+        rows = doc.get("rows") if isinstance(doc.get("rows"), list) else []
+        cls = rec.get("error_class") or _notice_class_of_error(rec.get("error"))
+        rows.append({"event": event, "class": cls, "at": now(), "tid": rec.get("id")})
+        p.write_text(json.dumps({"rows": rows[-200:]}, ensure_ascii=False))
+        # `notice_event` (not `event`): log() spreads kwargs OVER the event
+        # name — an `event=` kwarg would rename the drop row into a duplicate
+        # of the notice's own lifecycle line and confuse every events reader.
+        log(run, "notice.drop", notice_event=event, error_class=cls)
+        emit(f"WORKFLOW_NOTICE_DROP {run.name} {event} {cls}")
+    except Exception:
+        pass
+
+def _notice_drop_suffix(run):
+    """The finalize line's tail (E11 acceptance: a later failed delivery
+    appends notice_drop=<class> next to run.done) — the LAST recorded miss
+    class, from the same durable marker status reads."""
+    try:
+        doc = jload(run / "notice_drop.json", {}) or {}
+        rows = doc.get("rows") if isinstance(doc.get("rows"), list) else []
+        if rows:
+            return f" notice_drop={rows[-1].get('class') or 'unknown'}"
+    except Exception:
+        pass
+    return ""
+
+def _notice_route_probe(owner):
+    """(reachable, error_class) for one owner stamp at admission time.
+    A platform-native lane has no legacy endpoint to probe; the local/absent
+    lane resolves exactly the way _wake_deliver will later resolve it: the
+    native adapter file, else the api_server endpoint, else missing_endpoint."""
+    try:
+        platform = owner.get("platform") if isinstance(owner, dict) else None
+        if platform not in (None, "local"):
+            return True, None
+        if platform == "local" and (Path(__file__).resolve().parent / "wake_native.py").is_file():
+            return True, None
+        return (True, None) if _wake_endpoint() is not None else (False, "missing_endpoint")
+    except Exception:
+        return True, None
+
+def _notice_route_check(run):
+    """E11 at accept time: the admitted runner states the run's notice-route
+    truth ONCE, before it spawns anything — a stamp file (status reads it),
+    an events line, and when the route is missing, a loud stdout line naming
+    the drop risk (the shape E11 measured: 'the run looked silently orphaned
+    from outside'). Fail-open: a probe error states nothing, it never blocks
+    the run the owner just paid for."""
+    try:
+        meta = jload(run / "run.json", {}) or {}
+        owner = meta.get("owner")
+        if not isinstance(owner, dict) or not owner.get("session_id"):
+            return                       # no owner lane: no route claim either way
+        reachable, cls = _notice_route_probe(owner)
+        (run / "notice_route.json").write_text(json.dumps(
+            {"reachable": reachable, "error_class": cls, "at": now()}))
+        log(run, "notice.route", reachable=reachable, error_class=cls)
+        if not reachable:
+            emit(f"WORKFLOW_NOTICE_ROUTE {run.name} drop_risk={cls} "
+                 "(owner notices will be dropped; every drop writes a "
+                 "notice_drop.json marker in the run dir)")
+    except Exception:
+        pass
+
+def _gate_hold_pointers(run, event, key, node, graph, rows):
+    """E13: a hold notice carries its payload instead of pointing at status
+    — the gate id, a diff-first verdict over the fields a re-fire moved,
+    the dwell age since the hold (the park marker's clock, else the last
+    notice for this gate), then the rendered question/options/context. The
+    values are read at THIS point from the run's committed graph.json (the
+    same fact source the identity already rides), JSON-quoted inert fields:
+    AUTHORITY LAW r5 keeps its single author — the call site passes no text,
+    and a graph-authored string can only ever speak from inside its quotes
+    (the #501 precedent, extended by the E13 owner ruling). Returns
+    (ordered pointer pairs, ledger fields to persist) — never raises."""
+    try:
+        if event != "gate.held":
+            return [], {}
+        gate_id = node if isinstance(node, str) else (
+            key.split(":", 1)[0] if isinstance(key, str) and key else None)
+        if gate_id is None:
+            return [], {}
+        g = graph if isinstance(graph, dict) else (jload(run / "graph.json", {}) or {})
+        nodes = g.get("nodes")
+        if not isinstance(nodes, list):
+            nodes = (jload(run / "graph.json", {}) or {}).get("nodes") or []
+        byid = {n["id"]: n for n in nodes if isinstance(n, dict) and n.get("id")}
+        gdef = byid.get(gate_id)
+        fields = {}
+        q = o = c = None
+        if isinstance(gdef, dict):
+            def _digest(v):
+                if v is None:
+                    return None
+                return hashlib.sha256(json.dumps(v, sort_keys=True, default=str)
+                                      .encode()).hexdigest()[:12]
+            def _clamp(v):
+                if isinstance(v, str) and len(v) > GATE_HOLD_TEXT_CLAMP:
+                    return v[:GATE_HOLD_TEXT_CLAMP] + "\u2026[clamped]"
+                return v
+            q, o, c = _clamp(gdef.get("question")), gdef.get("options"), _clamp(gdef.get("context"))
+            fields = {"question": _digest(gdef.get("question")),
+                      "options": _digest(gdef.get("options")),
+                      "context": _digest(gdef.get("context"))}
+        lfields = {"gate": gate_id, "gate_fields": fields}
+        prev_fields, prev_ts = None, None
+        for r_ in rows:
+            if (isinstance(r_, dict) and r_.get("event") == "gate.held"
+                    and r_.get("gate") == gate_id and not r_.get("suppressed")):
+                prev_fields, prev_ts = r_.get("gate_fields"), r_.get("ts")
+        if prev_fields is None:
+            diff = {"question": "new_hold", "options": "new_hold", "context": "new_hold"}
+        else:
+            diff = {}
+            for fname in ("question", "options", "context"):
+                a = (prev_fields or {}).get(fname)
+                b = fields.get(fname)
+                if a == b:
+                    diff[fname] = "unchanged"
+                elif a is None:
+                    diff[fname] = "added"
+                elif b is None:
+                    diff[fname] = "removed"
+                else:
+                    diff[fname] = "changed"
+        dwell = None
+        hm = jload(run / "gates" / f"{gate_id}.held.json", {}) or {}
+        since = hm.get("since") if isinstance(hm, dict) else None
+        if isinstance(since, (int, float)):
+            dwell = max(0, int(time.time() - float(since)))
+        elif isinstance(prev_ts, str):
+            try:
+                _p = datetime.fromisoformat(prev_ts.replace("Z", "+00:00"))
+                if _p.tzinfo is None:
+                    _p = _p.replace(tzinfo=timezone.utc)
+                dwell = max(0, int(time.time() - _p.timestamp()))
+            except ValueError:
+                pass
+        pairs = [("gate_id", gate_id), ("gate_hold_diff", diff)]
+        if isinstance(gdef, dict) and isinstance(gdef.get("hold_timeout"), (int, float)):
+            pairs.append(("gate_hold_timeout_s", gdef["hold_timeout"]))
+        pairs.append(("gate_hold_dwell_s", dwell))
+        pairs.append(("gate_question", q))
+        pairs.append(("gate_options", o))
+        pairs.append(("gate_context", c))
+        return pairs, lfields
+    except Exception:
+        return [], {}
+
+def notify(run, event, key=None, graph=None, node=None, refire=False, cascade=None):
     """Push ONE lifecycle transition instance to the owner session stamp. Owner-null
     (tests, CLI, tool hosts without a session env) writes NOTHING — the door's
     silent degradation, unchanged. The transition instance (B3 law) is a
@@ -1858,29 +2428,53 @@ def notify(run, event, key=None, graph=None, node=None, refire=False):
             # the field-loud stdout channel (same idiom as
             # WORKFLOW_WAKE_RECORD_FAILED). Silence here was the gravity hole.
             print(f"WORKFLOW_WAKE_UNMAPPED_EVENT {run.name} {_wake_safe(event)}")
-        # AUTHORITY LAW unchanged + #501 (est-qcyfi): the text is runner-generated
-        # only. For run.failed/run.done the runner additionally computes INERT
-        # POINTER FIELDS at this point — the run dir (notify's own argument) and,
-        # for run.failed, the efp-valid committed failed-node log paths — which
-        # _wake_owner_text rides as JSON-quoted protocol fields BEFORE the
-        # separator; the template bodies stay verbatim and the redactor below
-        # runs over them like every persisted field. Delivery/identity/dedupe
-        # are untouched: the discriminant never reads these fields.
-        run_dir = str(run) if event in ("run.failed", "run.done") else None
-        failed_logs = (_wake_failed_node_logs(run, graph)
-                       if event == "run.failed" else None)
-        text = _wake_owner_text(run.name, event, run_dir=run_dir,
-                                failed_node_logs=failed_logs,
-                                transition=disc if event == "node.action_required" else None)
-        # never None since est-jbcrw: unmapped classes take the fixed catch-all
-        # body — the template table remains the ONLY author of owner text.
-        text = _wake_safe(text)          # second net: the fixed templates carry no secret,
-        # but the run name is caller-supplied and every persisted field runs the redactor.
         tid = _wake_tid(run.name, event, disc)
         trio = _wake_subject_fields(run, key, node=node, graph=graph)
         _rows, settled = _wake_ledger_read(run)
         if tid in settled:
             return "delivered"           # settled (delivered or nowhere-ever): zero rows, zero POSTs
+        # est-mnd (E10): the notice funnel — a zero-delta re-notice over state
+        # that already reached the owner costs ONE audit row, never an owner
+        # turn. It sits AFTER the settled-instance net (a re-drive of one
+        # delivered instance stays zero-row) and BEFORE the text/POST: the
+        # delta it computed is what the passing notice then renders.
+        mnd_reason, mnd_ptr = _notice_funnel(run, event, key, node, graph)
+        if mnd_reason is not None:
+            _notice_audit_row(run, event, mnd_reason, key=key, node=node, graph=graph)
+            return "skipped"
+        # AUTHORITY LAW unchanged + #501 (est-qcyfi) + est-mnd (E10/E13): the
+        # text is runner-generated only. The runner computes INERT POINTER
+        # FIELDS at this point — the run dir, the efp-valid committed
+        # failed-node log paths, the funnel's failed-set delta, the cascade
+        # trio, and the gate.held payload (gate id, diff-first verdict, dwell
+        # age, then the question rendered from the run's COMMITTED graph.json
+        # — never a call-site string; the E13 ruling extends the #501
+        # precedent) — all riding as JSON-quoted protocol fields BEFORE the
+        # separator; the template bodies stay verbatim and the redactor below
+        # runs over them like every persisted field. Delivery/identity/dedupe
+        # are untouched: the discriminant never reads these fields.
+        gate_pairs, gate_lf = _gate_hold_pointers(run, event, key, node, graph, _rows)
+        ptr_pairs = list(gate_pairs)
+        if event == "run.failed":
+            ptr_pairs.append(("failed_delta", mnd_ptr.get("failed_delta")))
+            ptr_pairs.append(("failed_set", mnd_ptr.get("failed_set")))
+        if event == "node.action_required" and isinstance(cascade, dict):
+            _cm = sorted({m for m in (cascade.get("members") or []) if isinstance(m, str)})
+            ptr_pairs.append(("cascade_root", cascade.get("root")))
+            ptr_pairs.append(("cascade_members", len(_cm)))
+            if _cm:
+                ptr_pairs.append(("cascade_member_ids", _cm))
+        run_dir = str(run) if event in ("run.failed", "run.done") else None
+        failed_logs = (_wake_failed_node_logs(run, graph)
+                       if event == "run.failed" else None)
+        text = _wake_owner_text(run.name, event, run_dir=run_dir,
+                                failed_node_logs=failed_logs,
+                                transition=disc if event == "node.action_required" else None,
+                                pointers=_wake_pointer_str(ptr_pairs))
+        # never None since est-jbcrw: unmapped classes take the fixed catch-all
+        # body — the template table remains the ONLY author of owner text.
+        text = _wake_safe(text)          # second net: the fixed templates carry no secret,
+        # but the run name is caller-supplied and every persisted field runs the redactor.
         reason = _wake_suppression(run, event, node, graph)
         if reason is not None:
             # RECORDED ONCE, NEVER RETRIED. The row is the receipt of a decision, not
@@ -1905,18 +2499,29 @@ def notify(run, event, key=None, graph=None, node=None, refire=False):
         rec = {"ts": now(), "event": event, "run_id": run.name, "owner": owner,
                "id": tid, "wake_protocol": proto, "text": text,
                **trio}
+        if gate_lf:
+            rec.update(gate_lf)          # E13: the row itself carries the gate subject
         if event not in _WAKE_TEMPLATES:
             rec["catchall"] = True      # probe row is typed: template vs catch-all distinguishable
         rec["delivered"] = _wake_deliver(rec, sid, text, tid, owner=owner)   # tri-state row mirrors the outcome
         _wake_append(run, rec)
-        # park-watch verdict feed on the est-7rudf tri-state: delivered -> nothing
-        # to see; False -> the ONE strike class; None (nowhere-ever) -> bare — a
-        # host that can never receive owner turns is by-design strike-free.
+        # est-mnd (E10/E11): a SETTLED outcome (delivered or nowhere-ever —
+        # the same classes the ledger dedupe treats as closed) moves the
+        # funnel baselines; a try-later False leaves them stale so the retry
+        # re-notices. Any non-delivered outcome is a MISS: it lands a typed
+        # notice_drop.json row + events line + stdout line where status and
+        # the terminal lifecycle line can show it (E11: never a silent
+        # orphan-outside).
         _d = rec.get("delivered")
+        if _d is not False:
+            _notice_funnel_after_deliver(run, event, mnd_ptr)
+        else:
+            _notice_drop(run, event, rec)
         if _d is True:
             return "delivered"
         if _d is False:
             return "undelivered"
+        _notice_drop(run, event, rec)    # nowhere-ever: the miss is settled, not retryable
         return
     except Exception as e:                       # fail-open encompasses PREPARATION (F3)
         try:
@@ -2182,8 +2787,24 @@ def _notify_node_failure(run, node_id):
                               "skey": rec.get("skey"), "attempts": rec.get("attempts", 0),
                               "graph": graph_fingerprint(graph), "rev": _wake_rev(run)},
                              sort_keys=True, separators=(",", ":"))
+            # est-mnd (E10): the cascade net, computed under the same door
+            # lock that read the committed record. True = folded under an
+            # open root (one audit row naming the root) or a silent redrive.
+            # False = this commit LEADS: the direct notice fires immediately
+            # (the 610 actionable-transition law — a committed failure wakes
+            # the owner while independent siblings still run) and carries the
+            # cascade trio (root, member count). Only a broken store (False,
+            # no record) degrades to the plain pre-funnel notice.
+            _mnd_leads = not _notice_cascade(run, node_id, rec, byid, key)
         # No door lock during delivery: a synchronous owner may steer or amend.
-        return notify(run, "node.action_required", key=key, node=node_id, graph=graph)
+        if not _mnd_leads:
+            return None
+        _mnd_cs = _notice_cascade_state(run, node_id) if _mnd_leads else None
+        _mnd_v = notify(run, "node.action_required", key=key, node=node_id,
+                        graph=graph, cascade=_mnd_cs)
+        if _mnd_leads and _mnd_v == "undelivered":
+            _notice_cascade_reopen(run, node_id)   # keep the tri-state retry line open
+        return _mnd_v
     except Exception:
         return None  # observation must never replace a committed verdict
 
@@ -11490,6 +12111,11 @@ def main(run_id):
     _EXIT_WRITTEN[0] = False
     _CRASH_GEN[:] = [None, None]  # fresh runner: later crashes mint a new durable generation
     ready_stamp(run)   # #8: own-pid stamp + ready-pipe announce (door observes, never guesses)
+    # est-mnd (E11): state the notice-route truth of the accepted run BEFORE
+    # anything spawns — an owner with no reachable route hears nothing at
+    # gate.held/run.done, and silence from outside is exactly the E11 shape.
+    # Stamp file + events line + (when unreachable) a loud stdout line.
+    _notice_route_check(run)
     meta["_procs"] = {}
     meta["_procs_lock"] = threading.Lock()
     meta["_stop"] = threading.Event()
@@ -11663,6 +12289,10 @@ def main(run_id):
         # wave boundary; finalize() flushes whatever is still pending before the
         # terminal wake, so the final event of a burst always reaches the owner.
         _wake_refire_pending(run, graph=rs.graph)
+        # est-mnd (E10): deferred cascade leading notices drain at the same
+        # boundary — one notice per cascade, naming the root and the members
+        # folded since the last boundary.
+        _cascade_drain(run, graph=rs.graph)
 
         states, outputs, prov = {}, {}, {}
         _capped = []   # est-3acn: nodes whose COMMITTED record carries the RunBudget death
@@ -12079,11 +12709,15 @@ def main(run_id):
             log(run, "gate.held", node=gate["id"], question=gate.get("question"),
                 options=gate.get("options"), context=gate.get("context"))
             emit(f"WORKFLOW_HELD {run_id} {gate['id']}")
-            # AUTHORITY LAW (owner ruling, PR#97 review): the automatic owner wake
-            # is RUNNER-AUTHORED protocol text only. The gate's question/options/
-            # context are graph-authored — attributed DATA that lives in the
-            # events.jsonl line above, the run's status, and the desktop gate card;
-            # they are NEVER interpolated into a role:user owner turn. A graph
+            # AUTHORITY LAW (owner ruling, PR#97 review; est-mnd E13 amendment):
+            # the automatic owner wake is RUNNER-AUTHORED protocol text only —
+            # this call site passes no text. The gate's question/options/context
+            # no longer force the operator to poll status (E13: 28/28 cold seats
+            # missed the question): notify() re-reads them AT THE NOTIFY POINT
+            # from the run's committed graph.json and rides them as inert
+            # JSON-quoted pointer fields (gate_id, gate_hold_diff first, dwell,
+            # then the rendered question) — attributed, quoted data that can
+            # never speak outside its field. A graph
             # author therefore cannot speak as the owner's master.
             # The hold marker (gates/<id>.held.json, efp-stamped) is written BEFORE
             # the wake when the gate parks (hold_timeout): a respawn of the same
@@ -12360,12 +12994,17 @@ def finalize(run, graph, status):
                          + "\n```")
     (run / "summary.md").write_text("\n".join(lines) + "\n")
     log(run, f"run.{status}")
-    emit(f"WORKFLOW_{status.upper()} {run.name}")
+    # est-mnd (E10/E11): the terminal boundary flushes deferred cascade
+    # notices and trailing re-checks BEFORE the terminal wake, then the
+    # lifecycle line names any recorded notice miss next to the verdict —
+    # a run that could not tell its owner does not look silently done.
+    _cascade_drain(run, graph=graph)
     # est-zmizd: flush ALL pending trailing re-checks (force: inside a still-open
     # window too) BEFORE the terminal wake: a coalesced straggler burst must not
     # die un-woken behind run.done/failed; a delivered instance dedupes to zero POSTs.
     _wake_refire_pending(run, graph=graph, force=True)
     notify(run, f"run.{status}", graph={"nodes": nodes})
+    emit(f"WORKFLOW_{status.upper()} {run.name}" + _notice_drop_suffix(run))
 
 
 # ---------- CLI: validate (issue #474) ----------
