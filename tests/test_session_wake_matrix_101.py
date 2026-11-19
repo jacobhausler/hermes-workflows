@@ -247,7 +247,7 @@ try:
               bool(ev) and ev[0].get("question") == Q, str(ev))
         w = wakes(r)
         check("wake carries schema + door protocol stamp + instance id",
-              bool(w) and w[0].get("schema") == "wake-observe/v1"
+              bool(w) and w[0].get("schema") == "wake-observe/v2"
               and w[0].get("wake_protocol") == "runner-authored/v1"
               and bool(w[0].get("id")), str(w))
         # same-decision respawn through the real door: a second run of the SAME

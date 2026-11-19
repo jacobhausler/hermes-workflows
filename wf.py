@@ -1249,7 +1249,11 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         return None
 
-_WAKE_SCHEMA = "wake-observe/v1"   # the ONLY schema the runner ever persists
+_WAKE_SCHEMA = "wake-observe/v2"   # the ONLY schema the runner ever persists
+# v2 is v1 plus the FIRST-CLASS transition trio skey/rev/attempts (E12): the
+# dedupe law's own inputs are JSON fields, not substrings of a double-escaped
+# text payload. v1 rows stay readable forever (legacy string parse: the `|x:`
+# payload still rides the text and the identity, kept for one release).
 
 def _wake_opener():
     """Fresh no-redirect opener per call. Module-level would share urllib's
@@ -1325,6 +1329,51 @@ def _wake_rev(run):
         return n
     except Exception:
         return 0
+
+def _wake_subject_fields(run, key, node=None, graph=None):
+    """The first-class transition trio (E12, wake-observe/v2): {skey, rev,
+    attempts} as JSON values for every persisted wake row — the dedupe law's
+    own inputs stop being substrings of a double-escaped `|x:{...}` payload.
+    Sources, in authority order: a caller-named JSON payload (the commit
+    observer's node.action_required key carries node/efp/skey/attempts/rev);
+    else the node subject's own committed record (node_rec — same validity law
+    as the identity, a stale record contributes honest nulls); else null.
+    rev is the durable amendment generation read directly (_wake_rev), or the
+    payload's own rev when it carries one. Absent facts stay null — a field
+    that exists with a null value answers "no lane", while an absent field
+    would be the same hole the regex-era readers fell into. Never raises."""
+    fields = {"skey": None, "attempts": None, "rev": _wake_rev(run)}
+    try:
+        payload = None
+        if isinstance(key, str) and key.startswith("{"):
+            try:
+                p = json.loads(key)
+                payload = p if isinstance(p, dict) else None
+            except Exception:
+                payload = None
+        if payload is not None:
+            if isinstance(payload.get("skey"), str):
+                fields["skey"] = payload["skey"]
+            if type(payload.get("attempts")) is int:
+                fields["attempts"] = payload["attempts"]
+            if type(payload.get("rev")) is int:
+                fields["rev"] = payload["rev"]
+            return fields
+        if isinstance(node, str) and isinstance(graph, dict):
+            byid = {n["id"]: n for n in (graph.get("nodes") or [])
+                    if isinstance(n, dict) and n.get("id")}
+            n = byid.get(node)
+            if n is not None:
+                status, rec = node_rec(run, n, byid)
+                if status in ("done", "partial", "failed", "skipped") \
+                        and isinstance(rec, dict):
+                    if isinstance(rec.get("skey"), str):
+                        fields["skey"] = rec["skey"]
+                    if type(rec.get("attempts")) is int:
+                        fields["attempts"] = rec["attempts"]
+        return fields
+    except Exception:
+        return fields
 
 def _wake_resolved_failed(run, graph):
     """The run's ALREADY-COMMITTED failed-node set straight from the node records
@@ -1692,7 +1741,11 @@ def notify(run, event, key=None, graph=None, node=None, refire=False):
     in-window retry replays one started/completed owner turn; this is not a timeless
     dedupe claim across cache eviction, core restart, or an unmeasured delay.
     Each ATTEMPT records in <run>/wake.jsonl (the probe; its ``delivered``
-    row is TRI-STATE: true/false/null = delivered/try-later/nowhere-ever);
+    row is TRI-STATE: true/false/null = delivered/try-later/nowhere-ever;
+    wake-observe/v2 rows additionally expose the transition trio
+    ``skey``/``rev``/``attempts`` as first-class JSON fields — zero substring
+    parsing, while the legacy ``|x:`` payload stays in the text for one
+    release);
     a duplicate of a SETTLED instance — delivered or nowhere-ever — writes
     nothing, while a false row keeps the retry path open. AUTHORITY LAW (r5):
     this function takes no text parameter at all. The owner-facing content is
@@ -1777,6 +1830,7 @@ def notify(run, event, key=None, graph=None, node=None, refire=False):
         text = _wake_safe(text)          # second net: the fixed templates carry no secret,
         # but the run name is caller-supplied and every persisted field runs the redactor.
         tid = _wake_tid(run.name, event, disc)
+        trio = _wake_subject_fields(run, key, node=node, graph=graph)
         _rows, settled = _wake_ledger_read(run)
         if tid in settled:
             return "delivered"           # settled (delivered or nowhere-ever): zero rows, zero POSTs
@@ -1793,7 +1847,7 @@ def notify(run, event, key=None, graph=None, node=None, refire=False):
                 return "skipped"
             _wake_append(run, {"ts": now(), "event": event, "run_id": run.name,
                                "owner": owner, "id": tid, "suppressed": reason,
-                               "delivered": False, "text": text})
+                               "delivered": False, "text": text, **trio})
             print(f"WORKFLOW_WAKE_SUPPRESSED {run.name} {event} {reason}")
             return "skipped"   # park-watch: a suppressed wake IS a dispatcher strike (the void is not a hold)
 
@@ -1802,7 +1856,8 @@ def notify(run, event, key=None, graph=None, node=None, refire=False):
         except OSError:
             proto = "unstamped"          # run dir made outside the door (recorded as such)
         rec = {"ts": now(), "event": event, "run_id": run.name, "owner": owner,
-               "id": tid, "wake_protocol": proto, "text": text}
+               "id": tid, "wake_protocol": proto, "text": text,
+               **trio}
         if event not in _WAKE_TEMPLATES:
             rec["catchall"] = True      # probe row is typed: template vs catch-all distinguishable
         rec["delivered"] = _wake_deliver(rec, sid, text, tid, owner=owner)   # tri-state row mirrors the outcome
