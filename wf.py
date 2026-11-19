@@ -2202,7 +2202,10 @@ def _notice_drop(run, event, rec):
         cls = rec.get("error_class") or _notice_class_of_error(rec.get("error"))
         rows.append({"event": event, "class": cls, "at": now(), "tid": rec.get("id")})
         p.write_text(json.dumps({"rows": rows[-200:]}, ensure_ascii=False))
-        log(run, "notice.drop", event=event, error_class=cls)
+        # `notice_event` (not `event`): log() spreads kwargs OVER the event
+        # name — an `event=` kwarg would rename the drop row into a duplicate
+        # of the notice's own lifecycle line and confuse every events reader.
+        log(run, "notice.drop", notice_event=event, error_class=cls)
         emit(f"WORKFLOW_NOTICE_DROP {run.name} {event} {cls}")
     except Exception:
         pass
