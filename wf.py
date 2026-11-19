@@ -1113,6 +1113,104 @@ def reconcile_effects(run, byid):
     return {"reconciled": len(valid), "orphaned": len(rows) - len(valid),
             "valid": valid}
 
+# ---------- E16 (bd_2026-11-13-4hc): the recovery-state readout ----------
+# Named data shape returned by recovery_state() and printed verbatim by the
+# `wf.py recover <run_id>` query verb. Every field is computed from the
+# JOURNAL ON DISK (side_effects.jsonl + the node records + graph.json) —
+# never from runner memory — so a post-SIGKILL operator can ask the one
+# question the crash leaves open: what effects are durable, which record is
+# torn, and what re-drive order is idempotent.
+#   applied[]      — journal rows that ARE committed facts under the current
+#                    graph: {node, kind, key, evidence, spawn, node_efp}.
+#   torn           — physical lines that never fully landed (a writer killed
+#                    mid-append): {line, bytes, head}. The effect they
+#                    describes is UNPROVEN, not absent.
+#   unprovable[]   — rows that parsed but cannot be proven current:
+#                    {node, kind, key, line, reason: node-gone | amended-efp
+#                    | not-a-row}. History, never a fact (reconcile's law).
+#   safe_redrive[] — the idempotent re-drive order: every unfinished node in
+#                    after-edge topological order, entries
+#                    {node, mode, committed_effects}; mode="reconcile" means
+#                    the re-drive must carry the reconcile-don't-redo
+#                    preamble (committed_effects > 0), mode="fresh" means the
+#                    journal proves no prior effect for that node.
+def recovery_state(run, byid):
+    """The journal-only recovery readout (E16). Fail-open reads: an absent or
+    unreadable journal degrades to an empty applied set (honest ignorance,
+    never a fabricated zero of knowledge)."""
+    run = Path(run)
+    applied, torn, unprovable = [], [], []
+    valid_by_node = {}
+    try:
+        lines = _effects_path(run).read_text(errors="replace").splitlines()
+    except OSError:
+        lines = []
+    for ln, raw in enumerate(lines, 1):
+        s = raw.strip()
+        if not s:
+            continue
+        try:
+            rec = json.loads(s)
+        except Exception:
+            torn.append({"line": ln, "bytes": len(raw.encode("utf-8", "replace")),
+                         "head": s[:80]})
+            continue
+        kind = rec.get("kind") if isinstance(rec, dict) else None
+        key = rec.get("key") if isinstance(rec, dict) else None
+        if not (isinstance(rec, dict) and rec.get("node")):
+            unprovable.append({"node": None, "kind": kind, "key": key,
+                               "line": ln, "reason": "not-a-row"})
+            continue
+        slim = {"node": rec["node"], "kind": kind, "key": key,
+                "evidence": rec.get("evidence"), "spawn": rec.get("spawn"),
+                "node_efp": rec.get("node_efp")}
+        if _effect_row_valid(rec, byid):
+            applied.append(slim)
+            valid_by_node[rec["node"]] = valid_by_node.get(rec["node"], 0) + 1
+        else:
+            slim["line"] = ln
+            slim["reason"] = "node-gone" if rec["node"] not in byid else "amended-efp"
+            unprovable.append(slim)
+    # safe_redrive: Kahn over the after-edge subgraph induced by the unfinished
+    # nodes, ties broken in graph (byid insertion) order — deterministic from
+    # the graph alone, so two reads of the same journal name the same order.
+    unfinished = set()
+    for nid, n in byid.items():
+        try:
+            st, _ = node_rec(run, n, byid)
+        except Exception:                              # a broken record reads pending
+            st = "pending"
+        if st not in ("done", "partial", "skipped"):
+            unfinished.add(nid)
+    indeg = {nid: sum(1 for d in byid[nid].get("after", []) if d in unfinished)
+             for nid in unfinished}
+    kids = {nid: [] for nid in unfinished}
+    for nid in unfinished:
+        for d in byid[nid].get("after", []):
+            if d in unfinished:
+                kids[d].append(nid)
+    ready = [nid for nid in byid if nid in unfinished and indeg[nid] == 0]
+    safe_redrive = []
+    while ready:
+        nid = ready.pop(0)
+        n_eff = valid_by_node.get(nid, 0)
+        safe_redrive.append({"node": nid,
+                             "mode": "reconcile" if n_eff else "fresh",
+                             "committed_effects": n_eff})
+        for kid in kids[nid]:
+            indeg[kid] -= 1
+            if indeg[kid] == 0:
+                ready.append(kid)
+    for nid in byid:                                   # cyclic byid (malformed): honest tail
+        if nid in unfinished and not any(e["node"] == nid for e in safe_redrive):
+            safe_redrive.append({"node": nid,
+                                 "mode": "reconcile" if valid_by_node.get(nid) else "fresh",
+                                 "committed_effects": valid_by_node.get(nid, 0),
+                                 "untopological": True})
+    return {"applied": applied, "torn": torn, "unprovable": unprovable,
+            "safe_redrive": safe_redrive}
+
+
 def _respawn_effects_preamble(run, meta, byid, node):
     """#8 item 3 (c): the machine preamble naming the VALID committed side
     effects of THIS node (kind/key/evidence), so a re-driven child reconciles
@@ -12309,6 +12407,19 @@ if __name__ == "__main__":
     # copying directories. Refuses everything else (live holder, EACCES-ambiguous,
     # legacy lease-absent shape): wfcommon.heal_wedged_runner_lock is the single
     # safety authority; this door only renders its verdict.
+    # E16 (bd_2026-11-13-4hc): the single recovery query verb — `wf.py recover
+    # <run_id>` prints the recovery-state readout (applied-set, torn-record,
+    # safe-redrive-order) as one JSON line, computed from the journal on disk
+    # alone, so a post-kill operator asks once and reads nothing from memory.
+    if len(sys.argv) == 3 and sys.argv[1] == "recover":
+        _rc_run = wfcommon.find_run(sys.argv[2])
+        _rc_graph = jload(_rc_run / "graph.json", {}) or {}
+        if not _rc_graph.get("nodes"):
+            print(f"REFUSED {sys.argv[2]} (unknown run — no graph.json)")
+            sys.exit(1)
+        print(json.dumps(recovery_state(
+            _rc_run, {n["id"]: n for n in _rc_graph["nodes"]})))
+        sys.exit(0)
     if len(sys.argv) == 3 and sys.argv[1] == "release-lock":
         _rl_run = wfcommon.find_run(sys.argv[2])
         if not jload(_rl_run / "graph.json", {}):
@@ -12330,7 +12441,7 @@ if __name__ == "__main__":
         sys.exit(_cli_validate(sys.argv))
     if len(sys.argv) < 3 or sys.argv[1] != "run":
         print("usage: wf.py run <run_id> | wf.py validate [--json] <graph.json> "
-              "| wf.py release-lock <run_id>"); sys.exit(2)
+              "| wf.py release-lock <run_id> | wf.py recover <run_id>"); sys.exit(2)
     # 5c37b19 guard 2 (belt-and-braces): a runner whose cwd was deleted mid-life dies
     # on the FIRST relative-path/cwd-touching call. HERE is durable — the same dir
     # __init__.py pins as the spawn cwd — so recover there before main() can raise.
