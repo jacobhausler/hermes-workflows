@@ -149,9 +149,21 @@ if bake0.is_file() and cur0.is_file():
 check("(1) the live spawn pulls the cue via its inbox seam (door._steer_lines)",
       len(pulled) == 1 and "persist your work now" in pulled[0], json.dumps(pulled)[:200])
 bake2 = r / "steer" / "a.a1.jsonl"
-check("(3) the cue rides the worker's next spawn seam via the steer.baked channel",
-      bake2.is_file() and "persist your work now" in bake2.read_text(encoding="utf-8"),
-      str(bake2) + (" (missing)" if not bake2.is_file() else ""))
+# E14 (bd_2026-11-13-42t): the cue is the DYING generation's fact — 'turn
+# budget: N left' named a0's remaining turns. a1 has a fresh budget, so the
+# respawn DRAINS the cue: the prior spawn already saw it, the lie never rides.
+check("(3) respawn drains the stale cue: a1's bake carries no budget cue",
+      bake2.is_file() and "persist your work now" not in bake2.read_text(encoding="utf-8"),
+      str(bake2) + (" (missing)" if not bake2.is_file() else bake2.read_text()[:200]))
+_ev_bake = [e for e in events(r) if e.get("event") == "steer.baked" and e.get("node") == "a"
+            and e.get("spawn_no") == 1]
+check("(3) the drain is an event fact: steer.baked carries drained_cues>=1 and the mechanism",
+      len(_ev_bake) == 1 and _ev_bake[0].get("drained_cues") == 1
+      and _ev_bake[0].get("mechanism") == "bake-at-spawn",
+      json.dumps(_ev_bake)[:300])
+_claim = json.loads((r / "budget_cue" / "a").read_text())
+check("(3) the claim names the generation that earned the cue (spawn stamp)",
+      _claim.get("spawn") == 0, json.dumps(_claim)[:200])
 check("(3) idempotence: STILL exactly one cue after the respawn", len(cue_rows(r)) == 1,
       f"got {len(cue_rows(r))}")
 
