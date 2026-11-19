@@ -3,6 +3,30 @@
 Imported by wf.py (runner), __init__.py (tool door), dashboard/plugin_api.py (UI API).
 Everything that decides "is this result still trustworthy" or "what state is this run
 in" lives here, so the three readers can never disagree.
+
+DATA SHAPES — node-record disposition (the total mapping; est-25t / E15):
+
+  A node record's `status` is the raw engine value (lowercase, as committed);
+  its `disposition` is the terminal answer an operator may state as known.
+  ONE total table (DISPOSITION_BY_STATUS) maps EVERY status value the engine
+  ever writes; a record whose status is not pinnable from the journal carries
+  disposition=unknown explicitly — an absent field is never read as success.
+
+    record status            -> disposition
+    done                     -> SUCCEEDED
+    partial                  -> PARTIAL      (committed, incomplete: re-drive is a decision, not an obligation)
+    failed                   -> FAILED
+    failed + cancelled       -> CANCELLED    (stop is history, not failure: a resume re-drives)
+    skipped                  -> SKIPPED
+    running                  -> UNKNOWN      (torn: applied effects may outrank the record)
+    interrupted              -> UNKNOWN      (crash mid-flight: say UNKNOWN; never upgrade, never downgrade)
+    registered               -> UNKNOWN
+    (anything else / absent) -> UNKNOWN
+
+  Committed pinnable records (done/failed/skipped/partial) need no stamped
+  disposition field — they are pinnable from the journal — but every read view
+  (run_state's per-node dict) carries `disposition` so the answer is one field
+  read, never a state-table guess.
 """
 import hashlib, json, os, re, shlex, subprocess, sys, time
 from datetime import datetime, timezone
@@ -4746,6 +4770,37 @@ def _died_but_harvested(n, rec):
         return True
     return (rec or {}).get("status") == "failed" and _answer_harvest_valid(n, rec)
 
+# ---------- est-25t (E15): the ONE total state->disposition table ----------
+# Module head documents the mapping; this is its only implementation. The
+# engine's own record vocabulary (lowercase `status`) is the DOMAIN — every
+# value any commit site writes appears here, so a reader never has to guess
+# whether `done` is terminal or what a torn `running` means. Callers: the
+# run_state per-node view, node_rec's interruption demotion, and any operator
+# read (wfcommon.disposition_of is importable from the door and the runner).
+
+DISPOSITION_BY_STATUS = {
+    "done": "SUCCEEDED",
+    "partial": "PARTIAL",
+    "failed": "FAILED",
+    "skipped": "SKIPPED",
+    "running": "UNKNOWN",
+    "interrupted": "UNKNOWN",
+    "registered": "UNKNOWN",
+}
+DISPOSITION_UNKNOWN = "UNKNOWN"
+
+
+def disposition_of(status, error_class=None):
+    """Total: (record status, error class) -> terminal disposition. A failed
+    record whose error_class says cancelled is CANCELLED (stop != failure, the
+    same fact node_rec uses to keep it re-drivable); anything outside the
+    table — including an absent/garbage status — is UNKNOWN, never a silent
+    success."""
+    if status == "failed" and error_class == "cancelled":
+        return "CANCELLED"
+    return DISPOSITION_BY_STATUS.get(status, DISPOSITION_UNKNOWN)
+
+
 def node_rec(r, n, byid, memo=None, legacy_memo=None):
     """Return (status, rec): done|partial|failed|pending. Stale (efp mismatch after an
     amend) == pending — its stored result must never be presented as current.
@@ -4763,6 +4818,7 @@ def node_rec(r, n, byid, memo=None, legacy_memo=None):
         if interruption.get("claim") == claim and record_efp_valid(rec, byid, n, memo=memo) \
                 and not _verify_spawn_rec(r, n, byid, rec):
             rec = {**rec, "status": "interrupted", "error_class": "crashed",
+                   "disposition": disposition_of("interrupted"),
                    "interruption": {k: v for k, v in interruption.items() if k != "claim"}}
     if st == "failed" and (rec or {}).get("error_class") == "cancelled":
         return "pending", rec   # stop != failure (#7): a resume re-drives cancelled work
@@ -6039,6 +6095,8 @@ def run_state(r, *, telemetry=True, lock_state=None):
         active = _active_spawns(r, n, byid) if live and st == "pending" and kind(n).spawns is True else []
         nodes[n["id"]] = {"type": n["type"], "status": "running" if active else st, "after": n.get("after", []),
                           "fanout": bool(n.get("fanout")),
+                          "disposition": disposition_of("running" if active else st,
+                                                        (rec or {}).get("error_class")),
                           "stale_of_amend": bool(rec) and st == "pending" and rec.get("status") in ("done", "partial", "failed", "skipped") or None}
         if st in ("done", "partial"):
             receipts = external_effect_receipts(n, rec)
