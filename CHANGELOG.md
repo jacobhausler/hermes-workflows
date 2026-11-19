@@ -2,6 +2,47 @@
 
 ## Unreleased
 
+## 1.4.11 — 2026-11-19
+
+Patch release from 33 merged pull requests since v1.4.10, dominated by
+runner honesty around death: answer-first harvesting adopts
+`<work_dir>/answer.json` at seven death sites (#541), a died-but-harvested
+node now refuses run-level green (#654), gate decisions drain at the wave
+boundary instead of waiting out the agent wave (#661), a lane kill ends the
+whole attributed child tree and proves it on the record (#648), a
+SIGTERM'd runner records its killer (pid/cmd/uid) instead of just its
+death (#679), and re-drive attempts start seeded with the dead attempt's
+artifact inventory (#678). New capability: per-node `max_api_calls` /
+`max_input_tokens` ceilings enforced mid-run with a terminal
+`ceiling_exceeded` class (#657).
+
+- Fix: hybrid human-question + machine-wait gates refuse at submit with
+  the max_seats remedy (#521); the re-drive route guard speaks the door's
+  alias vocabulary (#659); orphaned lane incumbents admit the fresh run
+  instead of deduping forever (#655); the seat-pool read path enforces
+  the admission band (#656); unstamped-owner wakes route through native
+  gateway admission (#646).
+- CI: the ci-parity container ships its job body in-repo and mirrors the
+  gates env end to end (#660, #662, #677); child prompts state the run
+  dir for gateway-served seats (#663); residency fixtures became
+  host-independent, retiring the #649-#652 red family (#658); the
+  graph.lock probe rides through sibling transients (#647); both
+  20-cycle harnesses lost the kill-vs-finish race (#653).
+- Docs/examples wave: one indexed death table (#665), the
+  stall-signature + steer pair (#667), the genericized posture appendix
+  (#668), the state-root handoff law (#666), the honest-partial recipe
+  (#670), dispatch-caps doctrine (#671), the pin-docstring scrub cure
+  (#669), the admission-lap and rubric-repair worked examples (#674,
+  #675), and the human-atom / bead-to-prod starters (#676).
+- Shelf: husk bucket + canonical counters fleet line (hw-0y7, #672), and
+  `library` `check: true` recomputes shelf-row digests against the live
+  shelf (hw-2mb, #673).
+- Tests: direct contract pins batch 7 (`workflow_nodes`,
+  `suite_proof_token_path`, the four #642 residual edges — #645,
+  est-82bzb) and batch 8 (the five `_when_*` parser-family functions,
+  #664, est-4v1fi).
+
+
 ## 1.4.10 — 2026-11-15
 
 Patch release from four merged pull requests since v1.4.9. The lifecycle
