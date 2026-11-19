@@ -73,7 +73,9 @@ the same-error-class window (CASCADE_COALESCE_S = 120 s, the measured fan:
 closed set: `missing_endpoint | http_status | redirect | timeout | transport |
 native_retry | native_<outcome> | notify_prep` (`_wake_deliver` classes every
 miss; `_notice_class_of_error` derives the class for any pre-typing row).
-Every miss ALSO writes an `events.jsonl` `notice.drop` line and a field-loud
+Every miss ALSO writes an `events.jsonl` row named `notice.drop` (subject
+under `notice_event` — never `event=`, which `log()` would spread over the
+row's own event name into a lifecycle duplicate) and a field-loud
 stdout line `WORKFLOW_NOTICE_DROP <run> <event> <class>`, and the finalize
 line carries the LAST recorded class next to the verdict:
 `WORKFLOW_DONE <run> notice_drop=<class>` (E11: a run that could not tell its
