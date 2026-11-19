@@ -84,6 +84,7 @@ graph_fingerprint = wfcommon.graph_fingerprint
 jload = wfcommon.jload
 validate_graph = wfcommon.validate_graph
 node_rec = wfcommon.node_rec
+disposition_of = wfcommon.disposition_of
 gate_answer_valid = wfcommon.gate_answer_valid
 when_true = wfcommon.when_true
 child_metrics = wfcommon.child_metrics
@@ -2919,6 +2920,43 @@ _ITEM_COMMITTED_FACTS = ("done", "partial", "failed", "skipped")
 # (item_records_certified) still byte-checks the claimed completion.
 _ITEM_ADOPTED_RETIRE = "adopted"
 
+# ---------- E17 (bd_2026-11-13-4hc): the fan item-level ledger ----------
+# Shipped layout (this block is the signature; every path below exists on a
+# run that saw the event it names):
+#   <run>/quarantine/<node>[.<index>].jsonl — one durable row per quarantine
+#     event on that (node, item): {ts, node, index, stage, pids, proof}.
+#     stage ∈ {<ev>.tree_kill, <ev>.respawn_reap, <ev>.unprovable,
+#     <ev>.left_live}; proof ∈ {dead, unknown, stuck, unreadable}.
+#   the committed item record (nodes/<id>.<i>.json) carries, at finalize:
+#     disposition       — disposition_of()'s total table (wfcommon, est-25t):
+#                         SUCCEEDED/PARTIAL/FAILED/CANCELLED/SKIPPED/UNKNOWN,
+#                         never an absent field read as success;
+#     quarantine        — {rows_path, rows}: rows_path is run-dir relative
+#                         and the file EXISTS whenever a quarantine happened;
+#   at aggregate certification (item_records_certified) each item record is
+#   additionally stamped with
+#     receipt_vs_parent — {claim_status, output_matches, problem, at}: the
+#                         receipt-vs-parent reconciliation line the wave's T20
+#                         deferred item addressing demanded (receipt checked
+#                         against the aggregate claim, on disk, per item).
+def _quarantine_file(run, node_id, index):
+    name = str(node_id).replace("/", "_").replace("\\", "_")
+    return Path(run) / "quarantine" / (name + (f".{index}" if index is not None else "") + ".jsonl")
+
+def _quarantine_row(run, node_id, index, stage, pids, proof):
+    """Append one durable quarantine row. Observer law (same as telemetry):
+    a ledger write failure suppresses the ledger line, never a verdict."""
+    try:
+        p = _quarantine_file(run, node_id, index)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        with open(p, "a") as f:
+            f.write(json.dumps({"ts": now(), "node": node_id, "index": index,
+                                "stage": stage,
+                                "pids": sorted({p for p in (pids or []) if isinstance(p, int)}),
+                                "proof": proof}) + "\n")
+    except Exception:
+        pass
+
 def commit_item_record(run, node, byid, index, result):
     """Finalize the canonical per-item record with the item's real outcome,
     MERGED over the spawn-time record (spawn evidence retained: spawn_cmd, pid,
@@ -2959,6 +2997,18 @@ def commit_item_record(run, node, byid, index, result):
     if rec_status not in ("failed", "skipped"):
         rec.pop("error", None)
         rec.pop("error_class", None)
+    # E17: the item's terminal disposition rides the committed fact (the ONE
+    # total table, never a locally re-invented vocabulary), and the quarantine
+    # TARGET — the durable row file for this (node, item) — is named only when
+    # it exists, so a reader can always stat what the record points at.
+    rec["disposition"] = disposition_of(rec_status, rec.get("error_class"))
+    _qf = _quarantine_file(run, node.get("id"), index)
+    try:
+        _qrows = sum(1 for l in _qf.read_text(errors="replace").splitlines() if l.strip())
+    except OSError:
+        _qrows = 0
+    if _qrows:
+        rec["quarantine"] = {"rows_path": str(_qf.relative_to(Path(run))), "rows": _qrows}
     # est-rucmf (residual wf#568): the SAME capture-boundary choke save_node
     # applies at its persist edge — redact-then-clip every string leaf at
     # WORKFLOW_OUTPUT_CLIP before the atomic swap, so a fan-out item's
@@ -2989,8 +3039,32 @@ def item_records_certified(run, node, byid, results):
     must equal the aggregate's claimed output — byte-for-byte after stable
     serialization. A missing/uncommitted/diverging record — including a
     committed failure (failed+crashed, failed+cancelled) under a done claim —
-    means the aggregate may NOT commit done with claimed-complete results."""
+    means the aggregate may NOT commit done with claimed-complete results.
+
+    E17: every walk is also the reconciliation ledger — each EXISTING item
+    record is stamped with a receipt_vs_parent line
+    {claim_status, output_matches, problem, at}: the receipt (the item's own
+    committed record) adjudicated against the parent's aggregate claim, durable
+    per item, re-stamped (never re-invented) on every certification pass."""
     problems = []
+    def _stamp(i, rec, claim, problem, matches):
+        """Persist the reconciliation line onto the item's own record (atomic
+        tmp+replace, the commit idiom). Observer law: a stamp failure costs
+        the ledger line, never the verdict — the problems entry already made
+        the refuse decision from the pre-stamp bytes."""
+        try:
+            rec = dict(rec)
+            rec["receipt_vs_parent"] = {
+                "claim_status": (claim or {}).get("status") if isinstance(claim, dict) else None,
+                "output_matches": matches,
+                "problem": (problem[:300] if problem else None),
+                "at": now()}
+            np = run / "nodes" / f"{_node_file(node, i)}.json"
+            tmp = np.with_name(f"{np.name}.{os.getpid()}.tmp")
+            tmp.write_text(json.dumps(rec, ensure_ascii=False, default=str))
+            os.replace(tmp, np)
+        except Exception:
+            pass
     for i, r in enumerate(results):
         rec = jload(run / "nodes" / f"{_node_file(node, i)}.json")
         if not isinstance(rec, dict):
@@ -3007,9 +3081,11 @@ def item_records_certified(run, node, byid, results):
             problems.append({"index": i,
                              "problem": f"record status={rec.get('status')!r} is not a committed fact "
                                         "(spawn-time record never finalized)"})
+            _stamp(i, rec, r, "record status is not a committed fact (spawn-time record never finalized)", None)
             continue
         if not record_efp_valid(rec, byid, node):
             problems.append({"index": i, "problem": "committed record is not efp-valid"})
+            _stamp(i, rec, r, "committed record is not efp-valid", None)
             continue
         if r is not None and r.get("status") in ("done", "partial"):
             # PR #258 zap r4: a committed FAILURE (failed+crashed, failed+
@@ -3026,6 +3102,7 @@ def item_records_certified(run, node, byid, results):
                 problems.append({"index": i,
                                  "problem": f"aggregate claims a {r['status']} item whose committed "
                                             f"record is status={rec_st!r} (incompatible status)"})
+                _stamp(i, rec, r, f"incompatible status: claim {r['status']} vs record {rec_st!r}", None)
                 continue
             want, have = r.get("output"), rec.get("output")
             # est-rucmf parity: the committed record is redact-then-clipped at
@@ -3044,6 +3121,14 @@ def item_records_certified(run, node, byid, results):
                 problems.append({"index": i,
                                  "problem": "aggregate claims a done item whose committed "
                                             "output is missing or diverges from the record"})
+                _stamp(i, rec, r, "claimed output missing or diverges from the committed record", False)
+            else:
+                _stamp(i, rec, r, None, True)
+        else:
+            # a non-done/partial aggregate row (failed/skipped/absent claim):
+            # the record stands as the committed fact; no output adjudication
+            # is owed, and the ledger says so rather than staying silent.
+            _stamp(i, rec, r, None, None)
     return (not problems), problems
 
 # ---------- typed failure classification (facts the RUNNER knows only) ----------
@@ -6881,9 +6966,15 @@ def _isolate_prior(meta, r, ev, ev_kw):
         return None                              # drained naturally mid-check
     kw = dict(ev_kw); kw["pids"] = live; kw["proof"] = proof
     log(run, f"{ev}.tree_kill", **kw)
+    _quarantine_row(run, ev_kw.get("node"), ev_kw.get("index"),
+                    f"{ev}.tree_kill", live, proof)
     if proof == "unknown":
+        _quarantine_row(run, ev_kw.get("node"), ev_kw.get("index"),
+                        f"{ev}.unprovable", live, "unreadable")
         return _proc_unreadable_record(pid, ev_kw.get("node"), r.get("spawn"), r)
     if proof != "dead":
+        _quarantine_row(run, ev_kw.get("node"), ev_kw.get("index"),
+                        f"{ev}.left_live", live, proof)
         return _left_live_record(pid, stuck,
                                  "attempt N+1 must never share a workdir with live "
                                  "attempt-N descendants: failing closed instead of "
@@ -6895,10 +6986,14 @@ def _isolate_prior(meta, r, ev, ev_kw):
     rk["proof"] = proof
     rk["prior_alive"] = [p for p in live if _proc_alive(p)]   # must be [] — proven below
     if rk["prior_alive"]:
+        _quarantine_row(run, ev_kw.get("node"), ev_kw.get("index"),
+                        f"{ev}.left_live", live, "alive-after-reap")
         return _left_live_record(pid, rk["prior_alive"],
                                  "the quarantine reported dead yet /proc still lists live "
                                  "prior-generation pids. ", r)
     log(run, f"{ev}.respawn_reap", **rk)
+    _quarantine_row(run, ev_kw.get("node"), ev_kw.get("index"),
+                    f"{ev}.respawn_reap", live, "dead")
     r["tree_descendants"] = list(live)
     r["tree_proof"] = "dead"
     return None
@@ -6961,7 +7056,11 @@ def _final_quiesce(meta, r, ev, ev_kw):
                                  _proctree_hold_s(meta), _proctree_kill_proof_s(meta))
     kw = dict(ev_kw); kw["pids"] = live; kw["proof"] = proof; kw["final"] = True
     log(run, f"{ev}.tree_kill", **kw)
+    _quarantine_row(run, ev_kw.get("node"), ev_kw.get("index"),
+                    f"{ev}.tree_kill", live, proof)
     if proof == "unknown":
+        _quarantine_row(run, ev_kw.get("node"), ev_kw.get("index"),
+                        f"{ev}.unprovable", live, "unreadable")
         return _proc_unreadable_record(pid, ev_kw.get("node"), r.get("spawn"), r)
     if proof == "":
         # #448: the tree drained between this guard's liveness sample and the
@@ -6973,9 +7072,13 @@ def _final_quiesce(meta, r, ev, ev_kw):
         # the guard itself quoted the live tree as []).
         return r
     if proof != "dead":
+        _quarantine_row(run, ev_kw.get("node"), ev_kw.get("index"),
+                        f"{ev}.left_live", live, proof)
         return _left_live_record(pid, stuck,
                                  "the node may not commit over a still-running process "
                                  "tree (the false-green suite shape). ", r)
+    _quarantine_row(run, ev_kw.get("node"), ev_kw.get("index"),
+                    f"{ev}.respawn_reap", live, "dead")
     r = dict(r)
     r["tree_descendants"] = list(live)
     r["tree_proof"] = "dead"
