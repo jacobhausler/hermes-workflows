@@ -13,9 +13,12 @@ fail-OPEN on read: a store that cannot be read passes the transition through
 
 ## Named data shapes
 
-`StateIdentity` — `sha256(json([skey, efp, attempts]))[:16]`. The committed
+`StateIdentity` — `sha256(json([skey, efp, attempts, rev]))[:16]`. The committed
 record's `attempts` int is the size of the 0..N-1 attempt ladder, so the count
-IS the attempts-set. Computed by `_notice_state_identity` from the key payload
+IS the attempts-set; `rev` is the durable amendment generation (the #610
+amend-re-arm law: a re-notice after a genuine amendment is new state, while
+the same generation under a different reason string is the zero-info re-notice
+the funnel cuts). Computed by `_notice_state_identity` from the key payload
 when present, else from the efp-valid committed record — the same facts
 wake-observe/v2 already exposes, never a fresh guess.
 
@@ -52,10 +55,14 @@ leaves it stale so the retry re-notices.
                "notified": <bool>, "key": "<wake key>"}}
 ```
 
-The leading notice of a cascade is HELD here until the next drain point (wave
-boundary, terminal flush — the same boundary law as the trailing re-checks),
-so the ONE notice names the root AND the members folded so far
+The cascade LEAD is noticed IMMEDIATELY when its commit is observed (the 610
+actionable-transition law: a committed failure wakes the owner while
+independent siblings still run) and opens the record marked notified; a
+delivery miss REOPENS it, and the next boundary drain (wave boundary,
+terminal flush, runner boot — the same boundary law as the trailing
+re-checks) re-notifies it once, naming the root AND the members folded so far
 (`cascade_root`, `cascade_members`, `cascade_member_ids` pointer fields).
+Folded members never fire their own notice: one audit row names the root.
 Fold order: a causal `after`-ancestor with a committed failed record wins over
 the same-error-class window (CASCADE_COALESCE_S = 120 s, the measured fan:
 9 notices over 74 s). Redrives of an already-accounted commit are silent.

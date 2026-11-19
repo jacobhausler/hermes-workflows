@@ -145,6 +145,20 @@ try:
     check("the delta notice renders ONLY the newly-failed node id",
           field(w[-1]["text"], "failed_delta") == ["n2"]
           and field(w[-1]["text"], "failed_set") == ["n1", "n2"], w[-1]["text"][:200])
+    # the #610/B3 amendment law stays whole under the delta law: a genuine
+    # amendment re-arms the delta (one notice, nothing newly-failed); with no
+    # amendment, the same set over any other reason string stays suppressed.
+    wf.log(r, "graph.amended")
+    b = len(POSTS)
+    v = wf.notify(r, "run.failed", key="post-amend re-observe")
+    w = owner_notices(r)
+    check("a genuine amendment re-arms run.failed (one notice, empty delta)",
+          v == "delivered" and len(w) == 3 and len(POSTS) - b == 1
+          and field(w[-1]["text"], "failed_delta") == [], f"{v}")
+    v = wf.notify(r, "run.failed", key="same gen, another reason")
+    check("the re-armed set stays unchanged at the new rev: zero further notices",
+          v == "skipped" and len(owner_notices(r)) == 3
+          and len(audits(r, "failed_set_unchanged")) == 8, f"{v}")
 
     # ---------------- B. state-identity dedupe over a new instance ----------------
     NODES = [{"id": "n3", "type": "agent", "goal": "g"}]
@@ -159,7 +173,7 @@ try:
     check("a fresh node state delivers",
           v == "delivered" and len(owner_notices(r)) == 1, str(v))
     key2 = json.dumps({"node": "n3", "efp": rec["efp"], "skey": rec["skey"],
-                       "attempts": 2, "graph": "f" * 16, "rev": 1},
+                       "attempts": 2, "graph": "f" * 16, "rev": 0},
                       sort_keys=True, separators=(",", ":"))
     v2 = wf.notify(r, "node.action_required", key=key2, node="n3", graph={"nodes": NODES})
     check("the SAME state over a new instance id is suppressed (state_identity_delivered)",

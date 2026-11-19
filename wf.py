@@ -1828,13 +1828,16 @@ def _wake_refire_pending(run, graph=None, now=None, force=False):
 # file lives under the run dir, every write is tmp+os.replace atomic, every
 # read fail-opens to "no claim": a store that cannot be read passes the
 # transition through, it never eats one):
-#   StateIdentity      — sha256[:16] over json [skey, efp, attempts]. A node
-#                        record's `attempts` int is the size of the 0..N-1
-#                        attempt ladder, so the count IS the attempts-set.
+#   StateIdentity      — sha256[:16] over json [skey, efp, attempts, rev]. A
+#                        node record's `attempts` int is the size of the
+#                        0..N-1 attempt ladder, so the count IS the
+#                        attempts-set; rev is the durable amendment generation
+#                        (the #610 amend re-arm law, kept whole under the
+#                        delta law).
 #   FailedSetBaseline  — notices/failed_set.json
 #                        {"state": <current compared state: {"ids": [<sorted
 #                        committed failed node ids>], "efps": {id: efp|null},
-#                        "crash_gen": int|str|null}>, "at": <iso>}
+#                        "rev": int, "crash_gen": int|str|null}>, "at": <iso>}
 #   StateIdentityLedger— notices/state_seen.json {"ids": [<hashes>, newest
 #                        first, capped]}
 #   CascadeRecord      — notices/cascade.json, keyed by root node id:
@@ -1875,9 +1878,14 @@ def _notice_write(p, doc):
 
 def _notice_state_identity(run, key, node=None, graph=None):
     """The state identity of a node-subject transition: a hash over
-    (skey, efp, attempts) — the same committed facts wake-observe/v2 already
-    exposes (E12), never a fresh guess. None (fail-open: unidentifiable is
-    never suppressed) when the facts are absent from both the caller payload
+    (skey, efp, attempts, rev) — the same committed facts wake-observe/v2
+    already exposes (E12), never a fresh guess. REV IS part of the identity:
+    the #610 amend-generation law is a pinned wake-matrix law (an amendment
+    always re-arms the failed node's notice — the operator re-decided the
+    graph, so the notice lives at a generation the first one never saw);
+    the same state without an intervening amendment is the zero-info
+    re-notice E10 exists to cut. None (fail-open: unidentifiable is never
+    suppressed) when the facts are absent from both the caller payload
     and the efp-valid committed record."""
     try:
         payload = None
@@ -1906,7 +1914,9 @@ def _notice_state_identity(run, key, node=None, graph=None):
                         efp_v = rec["efp"]
         if skey is None and efp_v is None and attempts is None:
             return None
-        return hashlib.sha256(json.dumps([skey, efp_v, attempts],
+        rev_v = (payload.get("rev") if payload and type(payload.get("rev")) is int
+                 else _wake_rev(run))
+        return hashlib.sha256(json.dumps([skey, efp_v, attempts, rev_v],
                                          sort_keys=True).encode()).hexdigest()[:16]
     except Exception:
         return None
@@ -1950,10 +1960,12 @@ def _notice_crash_gen(key):
 def _notice_funnel(run, event, key, node, graph):
     """(reason, pointers): reason None = the transition carries a delta and
     may reach the owner; pointers are the delta fields the notice renders.
-    run.failed compares the COMMITTED failed SET WITH PER-NODE EFPS + crash
-    generation (delta law: an unchanged set re-notices zero times, whatever
-    the amendment rev does; a change — new id, moved efp, or a later crash
-    generation — emits one notice rendering the newly-failed node ids).
+    run.failed compares the COMMITTED failed SET WITH PER-NODE EFPS + the
+    amendment rev + crash generation (delta law: with no amend and no new
+    crash, a re-notice of an unchanged set under any reason string is
+    zero-info and re-notices zero times; a change — new id, moved efp, a
+    genuine amendment generation, or a later crash generation — emits one
+    notice rendering the newly-failed node ids).
     node.action_required compares the state identity
     against the delivered ledger (a redrive of one instance was already cut
     by the settled check — this catches the same state over a new instance).
@@ -1967,13 +1979,15 @@ def _notice_funnel(run, event, key, node, graph):
                 return None, {}          # unresolvable: no claim, never a suppression
             ids, efps = st
             # The comparison is over the failed SET (ids + per-node efp) plus
-            # the durable crash generation — NOT the amendment rev. A rev bump
-            # that leaves every failed node's definition where it was is a
-            # zero-info re-notice by law (E10: an unchanged set re-notices
-            # zero times); an amend that MOVES a failed node's definition moves
-            # its efp and re-notices with that id in the delta. The rev would
-            # also make the baseline unreadable across A->B->A amendment folds.
-            cur = {"ids": ids, "efps": efps, "crash_gen": _notice_crash_gen(key)}
+            # the durable amendment generation and crash generation: an amend
+            # RE-DECIDES the run (#610/B3 law — a reverted definition still
+            # lives at a rev the first notice never saw), and a later crash is
+            # a new runner-process death, so both re-arm the delta. With no
+            # amendment and no new crash, a re-notice of the same set — under
+            # any call-site reason string — is zero-info (E10: an unchanged
+            # set re-notices zero times).
+            cur = {"ids": ids, "efps": efps, "rev": _wake_rev(run),
+                   "crash_gen": _notice_crash_gen(key)}
             base = _notice_read(_notice_path(run, "failed_set.json"), {}) or {}
             prev = base.get("state") if isinstance(base.get("state"), dict) else None
             if prev == cur:
