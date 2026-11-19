@@ -78,8 +78,8 @@ delegated subagent; `wait` = OPTIONAL blocking observation, the only revive verb
   stamped owner needs no loop: the wake IS your next turn. Derived, never a guess. Before `amend` or stop, read the failed node's `node_facts`
   (error_class from the closed set; `cancelled` is never a failure) and committed
   outputs. `amend` accepts a WHOLE replacement graph or node-scoped `patch`;
-  `diff` forces amend's dry-run preview. `run`/`amend` `dry_run:true` preview
-  without launching/replacing graphs, but can ping routes and check quota.
+  `diff` forces amend's dry-run preview. A patch touching ONLY efp-inert fields (budgets, widths, route policy, `resume_hint`) annotates a committed node without moving its efp — the result stands, descendants untouched; inert-vs-moving table: [operations §efp field law](references/operations.md#the-efp-field-law-which-fields-move-a-fingerprint-fp_rule_version--2).
+  `run`/`amend` `dry_run:true` preview without launching/replacing graphs, but can ping routes and check quota.
   `stop` is terminal; a runner verdict is graph-bound — its `graph_fingerprint` rides `runner_exit.json`, not `run.json`. Details: [operations](references/operations.md).
 - Lint before launching with `workflow{action:"validate", graph:…}` — the door's
   whole validation, zero writes, no liveness ping.
