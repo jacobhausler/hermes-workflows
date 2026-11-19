@@ -380,6 +380,43 @@ def _prune_lanes(states):
     return removed
 
 
+# ---------- per-generation grant reset (P40) ----------
+
+def _reset_grant_ledger(r):
+    """Zero the persisted respawn grants at a runner-generation boundary.
+
+    A transient ladder saves its spend to `retry-window.json` before sleeping
+    so a killed boot cannot amplify attempts past the node cap (est-9ceqc /
+    est-9qhpf). The same persistence made those grants a lifetime debt: a
+    pre-heal boot's saved attempts met the cap on the NEXT boot and the spawn
+    was refused as lifetime_cap_spent (P40) — genuinely new transient deaths
+    under fixed code inherited the old generation's spend. A grant is earned
+    by the generation that pays the backoff, so the tick zeroes `attempts`
+    before every respawn it performs. The deadline (the pacer) and the
+    attempt log survive: per-generation reset stays paced, never unbounded.
+    Returns the prior {wkey: attempts} when anything changed, else None —
+    a rerun over an already-reset ledger converges to None."""
+    w = _COMMON.jload(Path(r) / GRANTS_NAME)
+    if not isinstance(w, dict) or not w:
+        return None
+    prev = {}
+    for k, e in w.items():
+        a = e.get("attempts") if isinstance(e, dict) else None
+        if type(a) is int and a > 0:
+            prev[k] = a
+            e["attempts"] = 0
+    if not prev:
+        return None
+    p = Path(r) / GRANTS_NAME
+    tmp = p.with_name(f"{p.name}.{os.getpid()}.wd.tmp")
+    try:
+        tmp.write_text(json.dumps(w))
+        os.replace(tmp, p)
+    except OSError:
+        return None
+    return prev
+
+
 def tick(door=None, cj=None):
     """One watchdog tick: census the resolved root, revive dead-runner runs
     (loudly: the owner of a death scene wakes naming pid, lanes, plan), prune
@@ -422,7 +459,10 @@ def tick(door=None, cj=None):
             states[r.name] = st
             if st.get("runner_live") or st.get("status") not in ("pending", "interrupted"):
                 continue
-        door._respawn_runner(r)
+        grants = _reset_grant_ledger(r)               # P40: grants die with their generation
+        door._respawn_runner(r)                       # (before the boot: the fresh runner reads it)
+        if grants:
+            _append_event(r, "watchdog.grant_ledger_reset", grants=grants)
         if pid or lanes:
             wakes.append({"run": r.name, "pid": pid, "lanes": lanes,
                           "wake": _notify_reap(
