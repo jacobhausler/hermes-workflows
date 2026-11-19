@@ -273,7 +273,12 @@ INCLUDE_FILES = (
     "outcome.py",
 )
 INCLUDE_PATTERNS = ("tests/test_*.py", "tests/test_*.mjs", "references/*.md")
-EXECUTABLE_FILES = {"scripts/pack.py", "tests/fake", "tests/fake-b1"}
+EXECUTABLE_FILES = {"scripts/pack.py", "tests/fake", "tests/fake-b1",
+                    # P41: the tick's entrypoint ships with its exec bit —
+                    # _zip_info's 0755 external_attr is what a mode-preserving
+                    # extract restores, so an install/update reinstall cannot
+                    # silently land wf.py as 0644 and revert the ops fix.
+                    "wf.py"}
 # Checkout-only tests stay in repository CI, not the release's test glob.
 SOURCE_ONLY_TESTS = {
     "tests/test_diagram_law.py": "needs diagrams/README.md and the source-only renderer",
