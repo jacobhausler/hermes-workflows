@@ -45,7 +45,12 @@ RUNNER_ENV_CORE = {'HERMES_HOME', 'HERMES_QUIET_TURN_REPORT_FILE', 'HERMES_WRITE
                    'GOLDEN_FAKE', 'FAKE_MODE'}
 SANCTIONED_ENV_DELTA = {'HERMES_WF_RUN_DIR',                        # F1; excluded both sides, counted under F1(1)
                         'HERMES_WF_PROCTREE_SIDECAR', 'HERMES_WF_PROCTREE_SPAWN',  # #61c; excluded both sides
-                        'HERMES_WF_TELEMETRY'}                      # est-wqml6; excluded both sides
+                        'HERMES_WF_TELEMETRY',                      # est-wqml6; excluded both sides
+                        'HERMES_WF_PYTHON'}                         # E14 (bd_2026-11-13-42t); the runner's own
+                                                                    # interpreter, minted at the spawn seam for
+                                                                    # seat-portable fakes. Runner-minted, excluded
+                                                                    # both sides; presence proven by
+                                                                    # tests/test_steer_delivery_truth_42t.py S2
 
 def normalize_fanout_starts(rows):
     """Only commute empty first bakes with independent same-node item starts.
@@ -94,6 +99,15 @@ def normalize(value, paths):
     if isinstance(value, dict):
         if isinstance(value.get('events.jsonl'), list):
             value = dict(value, **{'events.jsonl': normalize_fanout_starts(value['events.jsonl'])})
+        if value.get('event') == 'steer.baked':
+            # E14 (bd_2026-11-13-42t) sanctioned delta: the steer.baked receipt now
+            # NAMES its mechanism (bake-at-spawn, the one guaranteed channel — the
+            # live pull is an opt-in seam proven only by steer.consumed + the cursor
+            # advance) and COUNTS the budget cues drained for that spawn. The frozen
+            # baseline predates the receipt law; presence and shape are proven by
+            # tests/test_steer_delivery_truth_42t.py S1/S2, not by the golden.
+            value = {k: v for k, v in value.items()
+                     if k not in ('drained_cues', 'mechanism')}
         # est-syim (#126) default-on save provenance: provenance.version is the plugin
         # release that stamped the entry — the repo's own plugin.yaml version, bumping
         # every release. Sanctioned delta exactly like run.json `plugin_version`

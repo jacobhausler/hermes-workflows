@@ -3517,6 +3517,11 @@ def _note_turn_tier(run, node_id, report_path):
 # marker file is the claim, so a respawn/re-drive can never inject a second
 # cue. margin is run-level meta (the door's channel, same law as
 # _retry_conf_params); env is NOT a hook (no env hooks in the runner).
+# E14 (bd_2026-11-13-42t): the cue is a message to the spawn that was nearing
+# the cap — the claim stamps which spawn earned it and every LATER spawn
+# generation DRAINS the inbox line (never re-baked into the steer file, never
+# re-fed into the respawn prompt), so a stale 'budget left: N' can never lie
+# against a fresh budget.
 BUDGET_CUE_MARGIN = 5        # run.json meta `budget_cue_margin` overrides
 BUDGET_CUE_POLL_S = 1.0      # counter-read cadence while a capped spawn is live
 
@@ -3528,10 +3533,30 @@ def _budget_cue_margin(meta):
 def _budget_cue_claimed(run, node, index):
     return (Path(run) / "budget_cue" / _node_file(node, index)).is_file()
 
-def _budget_cue_inject(run, node, index, skey, home, max_turns, margin, steer_file=""):
+def _budget_cue_prior_claim(run, node, index, spawn_no):
+    """E14 (bd_2026-11-13-42t): True when the run-level cue claim for this
+    (node,index) was earned by a PRIOR spawn generation — the cue text names
+    THAT spawn's remaining turns, so re-baking it into a fresh spawn lies
+    ('budget left: N' against a full budget). A re-bake drains the cue instead
+    of re-feeding it. A legacy claim with no spawn stamp predates the stamp and
+    counts as seen: the run-level O_EXCL guarantees its generation already
+    received the line (inbox + live bake-append)."""
+    try:
+        raw = json.loads((Path(run) / "budget_cue" / _node_file(node, index))
+                         .read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    seen = raw.get("spawn") if isinstance(raw, dict) else None
+    if not isinstance(seen, int) or isinstance(seen, bool):
+        return True                                  # unstamped claim: some prior generation saw it
+    return seen < spawn_no
+
+def _budget_cue_inject(run, node, index, skey, home, max_turns, margin, steer_file="", spawn_no=0):
     """Returns True when THIS spawn may stop checking the counter: either the
     cue was injected now, or the run-level claim already exists (an earlier
-    generation of this (node,index) earned it — respawn idempotence)."""
+    generation of this (node,index) earned it — respawn idempotence).
+    The claim stamps the EARNING spawn so _steer_bake can tell 'cue belongs to
+    THIS generation' from 'stale cue — drain on respawn' (E14)."""
     if not (isinstance(max_turns, int) and not isinstance(max_turns, bool)
             and max_turns > 0) or not skey:
         return True                                  # uncapped/unobservable: nothing to do
@@ -3558,7 +3583,8 @@ def _budget_cue_inject(run, node, index, skey, home, max_turns, margin, steer_fi
     try:
         with os.fdopen(fd, "w") as f:
             f.write(json.dumps({"node": node["id"], "index": index, "consumed": consumed,
-                                "turns_left": left, "max_turns": max_turns, "at": now()}) + "\n")
+                                "turns_left": left, "max_turns": max_turns,
+                                "spawn": spawn_no, "at": now()}) + "\n")
         with open(run / "inbox.jsonl", "a") as f:   # the ONE steer channel (act_steer's schema)
             f.write(json.dumps({"node": node["id"], "index": index, "text": text,
                                 "budget_cue": True,
@@ -7054,6 +7080,7 @@ def _adopt_child(meta, node, byid, index, child, schema, fo_cancel=None):
     wall = node.get("timeout", meta.get("node_timeout", 900))
     deadline = started_epoch + wall if wall is not None else float("inf")
     timed_out = cancelled = extended = False
+    _adopt_extra_s = 0                       # E24: the ONE adopted grant, if earned
     was_alive = False                      # did WE observe it live in this wait?
     tree_seen = set()                      # #61b B1: recursive watch while it lives
     tree_next_watch = 0.0
@@ -7085,6 +7112,7 @@ def _adopt_child(meta, node, byid, index, child, schema, fo_cancel=None):
                 # moving — est-2ek.1.595); a silent one dies — the cap is total wall.
                 extra_s = round(wall * 0.5) if wall else 0
                 log(run, "node.extended", node=nid, extra_s=extra_s, adopted=True)
+                _adopt_extra_s = extra_s or 1                       # E24: named in the death text
                 deadline += extra_s or 1
                 extended = True
                 continue
@@ -7155,6 +7183,16 @@ def _adopt_child(meta, node, byid, index, child, schema, fo_cancel=None):
         bk = _bank_the_corpse(run, node, index, child.get("attempt"), out)   # #131
         if bk:
             evd["banked"] = bk
+        # E24 (bd_2026-11-13-42t): the adopted death names the same account —
+        # declared wall, the ONE adopted extension grant if it moved, and the
+        # effective wall the reaper killed at.
+        _adopt_acct = {"declared_s": wall,
+                       "baked_s": wall,
+                       "clamp_reasons": [],
+                       "grants": ([{"extra_s": _adopt_extra_s, "basis": "adopted"}]
+                                  if extended else []),
+                       "effective_s": round(deadline - started_epoch, 3)}
+        _adopt_phrase = _wall_truth_phrase(_adopt_acct)
         hv = _harvest_death(out, harvest_schema)
         if hv is None:                            # est-c4wx4: answer-first workdir adopt
             # R1 law applies identically HERE: the re-armed-wall capture is a
@@ -7162,11 +7200,14 @@ def _adopt_child(meta, node, byid, index, child, schema, fo_cancel=None):
             hv = _harvest_workdir(run, node, index, harvest_schema, harvest_anchor, out)
         if hv:
             return {"status": "partial", "error": f"adopted child exceeded its re-armed wall "
-                    f"(answer harvested from {_harvest_source(hv)})", "error_class": "timeout",
-                    "ms": ms, "final": final_reply, **hv, **evd}
+                    f"({_adopt_phrase}; answer harvested from {_harvest_source(hv)})",
+                    "error_class": "timeout",
+                    "ms": ms, "final": final_reply, "wall_account": _adopt_acct,
+                    **hv, **evd}
         return {"status": "failed", "error": f"adopted child exceeded its re-armed wall "
-                f"(timeout, cap from original started={child.get('started')})",
+                f"(timeout, cap from original started={child.get('started')}; {_adopt_phrase})",
                 "error_class": "timeout", "raw": (out or "")[-2000:], "ms": ms,
+                "wall_account": _adopt_acct,
                 "final": final_reply, **evd}
     # est-jam8 (PR #162 deep review, wf162a): an adopted child whose capture is
     # the fast config death must NOT be laundered into done. rc is unobservable
@@ -7422,6 +7463,28 @@ def _omit_policy_flags_if_enabled(cmd, home=None, env=None):
     return out
 
 
+# ---- E24 (bd_2026-11-13-42t): wall truth -----------------------------------
+# NAMED DATA SHAPES:
+#   wall_account = {"declared_s": author's node timeout (or run default),
+#                   "baked_s":    the wall this spawn ACTUALLY got at bake
+#                                 (after resume/park clamps; None = uncapped),
+#                   "clamp_reasons": ["resume_wall" | "park_cap" | ...],
+#                   "grants":     [{"extra_s": int, "basis": "log"|"session"|"adopted"}],
+#                   "effective_s": the wall the kill happened at}
+# One account is built per spawn in run_child; it rides the timeout death
+# record (wall_account) and its prose twin (_wall_truth_phrase) names
+# declared-vs-effective and EVERY grant/clamp that moved the wall — an owner
+# never sees a wall the author didn't write.
+def _wall_truth_phrase(acct):
+    declared, effective = acct.get("declared_s"), acct.get("effective_s")
+    bits = [f"declared {declared}s"]
+    if isinstance(acct.get("baked_s"), (int, float)) and acct.get("clamp_reasons"):
+        bits.append(f"clamped at bake to {acct['baked_s']}s ({'+'.join(acct['clamp_reasons'])})")
+    for g in acct.get("grants") or []:
+        bits.append(f"+{g['extra_s']}s extension grant (basis {g.get('basis', 'log')})")
+    bits.append(f"died at effective {effective}s")
+    return ", ".join(bits)
+
 def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering=None, attempt=0, skey=None,
               inputs="", index=None, resume_preamble="", reasoning_override=None,
               seat_cancel=None, seat_hold=None, seat_admit_lock=None, model_override=None, wall_s=None):
@@ -7580,8 +7643,20 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
         log(run, "steer.bake.error", node=node["id"], error=f"{type(e).__name__}: {e}")
         steer_file, steer_cur, steer_hwm = "", "", 0
     wall = wall_s if wall_s is not None else node.get("timeout", meta.get("node_timeout", 900))
+    # E24: `wall` above is the BAKE starting point; the account keeps the
+    # author's declared number separate from every move made against it.
+    _declared_s = node.get("timeout", meta.get("node_timeout", 900))
+    _clamp_reasons = []
+    if wall_s is not None and wall != _declared_s:
+        _clamp_reasons.append("resume_wall")     # work-metered resume fare (#24)
+    _wall_grants = []
     env = dict(os.environ, HERMES_HOME=str(hermes_home()),
                HERMES_QUIET_TURN_REPORT_FILE=str(report_path),
+               HERMES_WF_PYTHON=sys.executable,   # the fake seat re-imports the door with the
+                                                  # interpreter that actually runs the runner —
+                                                  # a seat-local /usr/bin/python3 too old for the
+                                                  # door's syntax must not silently kill the pull
+                                                  # seam (E14 s38 pull_count; tests/fake honours it)
                HERMES_WF_STEER_FILE=steer_file,
                HERMES_WF_STEER_CURSOR=steer_cur,
                HERMES_WF_STEER_HWM=str(steer_hwm),
@@ -7755,6 +7830,8 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
             _rem = 0.05
         if not isinstance(wall, (int, float)) or wall > _rem:
             wall = _rem
+            if "park_cap" not in _clamp_reasons:     # E24: the park moved this spawn's
+                _clamp_reasons.append("park_cap")    # wall — named at the bake, never silent
     if wall is not None and isinstance(meta.get("retry"), dict):
         env["HERMES_WF_SPAWN_WALL_S"] = str(wall)
     proc = None
@@ -8022,6 +8099,19 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
                 _rem = 0.05
             if not isinstance(wall, (int, float)) or wall > _rem:
                 wall = _rem
+                if "park_cap" not in _clamp_reasons:  # E24 (belt form, same law)
+                    _clamp_reasons.append("park_cap")
+        # E24 (bd_2026-11-13-42t): the declared timeout is honored or clamped
+        # LOUDLY at bake time — an effective wall below the author's number is
+        # a node.timeout_clamped event naming declared-vs-effective and every
+        # reason that moved it (never a silent min()).
+        _baked_s = wall if isinstance(wall, (int, float)) else None
+        if _baked_s is not None and isinstance(_declared_s, (int, float)) \
+                and _baked_s < float(_declared_s) - 1e-9:
+            log(run, "node.timeout_clamped", node=node["id"], spawn=spawn_no,
+                **({} if index is None else {"index": index}),
+                declared_s=_declared_s, effective_s=round(_baked_s, 3),
+                reasons=list(_clamp_reasons) or ["bake"])
         deadline = t0 + wall if wall is not None else float("inf")
         silence_deadline = t0 + first_msg_s if first_msg_s > 0 else None
         tclass, treason = None, ""
@@ -8119,7 +8209,8 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
             if cue_alive and now_s >= cue_next:
                 cue_next = now_s + BUDGET_CUE_POLL_S
                 if _budget_cue_inject(run, node, index, skey, cue_home,
-                                      node.get("max_turns"), cue_margin, steer_file):
+                                      node.get("max_turns"), cue_margin, steer_file,
+                                      spawn_no=spawn_no):
                     cue_alive = False
             if silence_deadline is not None and now_s >= silence_deadline:
                 # #18 + est-g2xx (A): the silence law trusts bytes OR a live
@@ -8144,8 +8235,10 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
                 # the wall (node.extended); the second expiry kills.
                 extended = True
                 extra_s = round(timeout_s * 0.5) or 1
+                _ext_basis = "log" if _log_recent(lp, log_created) else "session"
                 log(run, "node.extended", node=node["id"], extra_s=extra_s,
-                    **({} if _log_recent(lp, log_created) else {"basis": "session"}))
+                    **({} if _ext_basis == "log" else {"basis": _ext_basis}))
+                _wall_grants.append({"extra_s": extra_s, "basis": _ext_basis})   # E24 ledger
                 timeout_s += extra_s
                 deadline += extra_s
                 continue
@@ -8281,12 +8374,22 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
         # retry knob exists (it meters the work-metered resume); a knob-free run's
         # node records stay byte-identical to the frozen capture.
         wallst = {"wall": wall} if isinstance(meta.get("retry"), dict) else {}
+        # E24 (bd_2026-11-13-42t): a death on the wall names declared-vs-
+        # effective and EVERY grant/clamp that moved it — the owner never sees
+        # a wall the author didn't write (the 2250 s death on a 1500 s node).
+        _wall_acct = {"declared_s": _declared_s, "baked_s": _baked_s,
+                      "clamp_reasons": list(_clamp_reasons),
+                      "grants": list(_wall_grants),
+                      "effective_s": timeout_s}
+        _wall_phrase = _wall_truth_phrase(_wall_acct)
         if hv:
             return {"status": "partial", "error": f"timeout after {timeout_s}s "
-                    f"(answer harvested from {_harvest_source(hv)} before the kill)",
-                    "error_class": "timeout", "ms": ms, **wallst, "final": final_reply, **hv, **sk, **evd}
-        return {"status": "failed", "error": f"timeout after {timeout_s}s",
+                    f"({_wall_phrase}; answer harvested from {_harvest_source(hv)} before the kill)",
+                    "error_class": "timeout", "ms": ms, **wallst, "wall_account": _wall_acct,
+                    "final": final_reply, **hv, **sk, **evd}
+        return {"status": "failed", "error": f"timeout after {timeout_s}s ({_wall_phrase})",
                 "error_class": "timeout", "raw": (out or "")[-2000:], "ms": ms, **wallst,
+                "wall_account": _wall_acct,
                 "final": final_reply, **sk, **evd}
     # unsuccessful exit = failure, PERIOD — diagnostic prose on stdout must never
     # be committed as a successful result (fleet-review F: crash-with-prose).
@@ -9412,7 +9515,12 @@ def _harvest_clamp(node, r):
     return c
 
 def drain_inbox(run, consumed):
-    """Return {node_id: [steering texts]} for un-consumed steering lines."""
+    """Return {node_id: [steering texts]} for un-consumed steering lines.
+    E14 (bd_2026-11-13-42t): budget-cue lines are consumed WITHOUT re-feeding
+    the steering prompt — the cue was written against the turns a specific
+    (now possibly dead) spawn had left; quoting it into a later prompt would
+    re-state a number that no longer describes that spawn's budget. The drain
+    is an event fact (budget_cue.drained), never a silent swallow."""
     out = {}
     p = run / "inbox.jsonl"
     if not p.exists():
@@ -9425,6 +9533,10 @@ def drain_inbox(run, consumed):
         except Exception: continue
         if msg.get("cmd") == "kill" or not msg.get("node") or msg.get("text") is None:
             continue
+        if msg.get("budget_cue"):
+            log(run, "budget_cue.drained", node=msg["node"], index=msg.get("index"),
+                reason="respawn_refeed")
+            continue
         out.setdefault(msg["node"], []).append(msg["text"])
     return out
 
@@ -9433,12 +9545,15 @@ def _steer_bake(run, node, index, spawn_no):
     node into a per-spawn file and return (path, cursor_path, hwm). The HWM is
     the inbox line count at bake time: lines appended after this spawn are NOT
     in the file — they reach the node at its NEXT spawn (prompt injection or a
-    fresh bake), never retroactively into a live child. Every spawn re-bakes ALL
-    addressed lines, so a retry/respawn re-delivers what a dead attempt already
-    pulled live (the cursor is per-spawn and starts empty). Baking is pure
-    file-copy — it never marks inbox lines consumed for the runner's own prompt
-    injection; a child that never calls the inbox tool still gets the text at
-    the next spawn, exactly as before B1."""
+    fresh bake), never retroactively into a live child. DELIVERY TRUTH (E14,
+    bd_2026-11-13-42t): bake-at-spawn is the ONE guaranteed channel and the
+    steer.baked receipt says so (mechanism=bake-at-spawn); the live pull is an
+    OPT-IN child seam — it happened exactly when a steer.consumed event and the
+    cursor advance exist, never otherwise. Every spawn re-bakes ALL lines a
+    LATER generation may still act on; the exception is the budget cue: a cue
+    stamped to a prior spawn names THAT generation's remaining turns, so it is
+    DRAINED, not re-baked (drained_cues counts the drain) — a respawn prompt
+    never carries a cue the prior spawn already saw."""
     nf = _node_file(node, index)
     d = run / "steer"
     d.mkdir(parents=True, exist_ok=True)
@@ -9449,7 +9564,8 @@ def _steer_bake(run, node, index, spawn_no):
     except OSError:
         raw = []
     hwm = len(raw)
-    recs = []
+    cue_seen = _budget_cue_prior_claim(run, node, index, spawn_no)
+    recs, drained = [], 0
     for i, line in enumerate(raw):
         if not line.strip():
             continue
@@ -9459,12 +9575,16 @@ def _steer_bake(run, node, index, spawn_no):
             continue
         if msg.get("cmd") == "kill" or msg.get("node") != node["id"] or msg.get("text") is None:
             continue
+        if msg.get("budget_cue") and cue_seen:
+            drained += 1
+            continue
         recs.append({"i": i, "text": msg["text"]})
     tmp = path.with_name(path.name + f".{os.getpid()}.tmp")
     tmp.write_text("\n".join(json.dumps(r) for r in recs) + ("\n" if recs else ""), encoding="utf-8")
     os.replace(tmp, path)   # atomic: the child either sees the full bake or none
     cur.write_text("0", encoding="utf-8")
-    log(run, "steer.baked", node=node["id"], spawn_no=spawn_no, n_lines=len(recs))  # #17
+    log(run, "steer.baked", node=node["id"], spawn_no=spawn_no, n_lines=len(recs),  # #17
+        drained_cues=drained, mechanism="bake-at-spawn")
     return str(path), str(cur), hwm
 
 def skey_for(run, byid, node, index=None):

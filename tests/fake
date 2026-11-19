@@ -1,2 +1,6 @@
 #!/bin/sh
-exec /usr/bin/python3 "$(dirname "$0")/fake_hermes.py" "$@"
+# HERMES_WF_PYTHON (optional; the runner stamps it with its own interpreter):
+# the fake re-imports the plugin door in-process for the steer-pull seam, and
+# a seat-local /usr/bin/python3 older than the door's syntax dies there — the
+# child interpreter must be the one that actually runs wf.py (E14, 42t).
+exec "${HERMES_WF_PYTHON:-/usr/bin/python3}" "$(dirname "$0")/fake_hermes.py" "$@"
