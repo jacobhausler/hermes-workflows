@@ -42,7 +42,7 @@ check("horizon-less account 429 -> quota_exhausted (not transport)",
       ec == "quota_exhausted", f"{ec}/{marker}")
 
 BANNER = ("hermes -z: agent failed: Anthropic credentials are rate-limited for "
-          "claude-fable-5-1; other Claude models remain available (see `hermes auth list`).\n")
+          "example-model-1; other Anthropic models remain available (see `hermes auth list`).\n")
 ec2, _ = wf._classify_rc_output(BANNER)
 check("credential-window 429 stays the transient banner class (ratelimit)",
       ec2 == "ratelimit", ec2)
@@ -112,13 +112,13 @@ check("the run blocks on the parked node", "WORKFLOW_FAILED" in out, out[:80])
 
 # ---------- (3) the named-horizon twin keeps the #24 law, reset now typed ----------
 (HOME / "fake.log").write_text("")
-r2 = mk("qwh25t", [{"id": "a", "type": "agent", "goal": "GO qwh25t", "model": "sol"}])
+r2 = mk("qwh25t", [{"id": "a", "type": "agent", "goal": "GO qwh25t", "model": "m-hz"}])
 drive("qwh25t", "quota")
 rec2 = json.loads((r2 / "nodes" / "a.json").read_text())
 check("named horizon: quota_exhausted{identity, reset='109 hour'} at one attempt",
       rec2.get("error_class") == "quota_exhausted"
       and (rec2.get("quota") or {}).get("reset") == "109 hour"
-      and (rec2.get("quota") or {}).get("identity") == "sol",
+      and (rec2.get("quota") or {}).get("identity") == "m-hz",
       json.dumps(rec2)[:220])
 check("named horizon: still exactly one spawn",
       (HOME / "fake.log").read_text().count("qwh25t") == 1)

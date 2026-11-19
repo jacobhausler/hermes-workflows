@@ -49,7 +49,7 @@ MPATH.write_text("")
 os.utime(MPATH, (ARMED_TS, ARMED_TS))
 
 node = {"id": "review", "type": "agent", "goal": "g",
-        "model": "qwen38-next", "provider": "haus-ubuntu"}
+        "model": "example-model-2", "provider": "example-provider"}
 meta = {"_run": RUN}
 BARE_CMD = ["/bin/hermes", "chat", "--query-file", "/tmp/q", "--oneshot"]
 
@@ -77,10 +77,10 @@ finally:
     os.environ.pop("WF_OMIT_POLICY_FLAGS", None)
 
 # ---------- (2) the substitution denial names its holding artifact ----------
-(RUN / "route_receipts.json").write_text(json.dumps({"review": "haus-ubuntu/qwen38-next"}))
+(RUN / "route_receipts.json").write_text(json.dumps({"review": "example-provider/example-model-2"}))
 os.utime(RUN / "route_receipts.json", (ARMED_TS, ARMED_TS))
 swapped = {"id": "review", "type": "agent", "goal": "g",
-           "model": "gpt-y", "provider": "haus-ubuntu"}
+           "model": "gpt-y", "provider": "example-provider"}
 ref4 = wf._route_substitution_refusal(meta, swapped, 2)
 err4 = (ref4 or {}).get("error", "")
 check("substitution of a receipted route is refused",
@@ -88,7 +88,7 @@ check("substitution of a receipted route is refused",
 check("receipt_artifact_named: absolute route_receipts.json path",
       str(RUN / "route_receipts.json") in err4, err4[:200])
 check("the receipt row and the armed-at mtime are rendered",
-      "2026-11-16T13:36:19+00:00" in err4 and "haus-ubuntu/qwen38-next" in err4,
+      "2026-11-16T13:36:19+00:00" in err4 and "example-provider/example-model-2" in err4,
       err4[:300])
 check("the receipt-deletion escape is surfaced verbatim",
       f"rm {RUN / 'route_receipts.json'}" in err4, err4[-300:])
@@ -97,7 +97,7 @@ check("the receipted route is the ONLY amend target the dialog offers",
 
 # a same-route respawn is not a refusal at all (the hold is a hold, not a lock)
 same = {"id": "review", "type": "agent", "goal": "g",
-        "model": "qwen38-next", "provider": "haus-ubuntu"}
+        "model": "example-model-2", "provider": "example-provider"}
 check("the receipted route respawns unrefused",
       wf._route_substitution_refusal(meta, same, 2) is None)
 
