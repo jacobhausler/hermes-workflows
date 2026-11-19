@@ -3389,6 +3389,11 @@ def _note_turn_tier(run, node_id, report_path):
 # marker file is the claim, so a respawn/re-drive can never inject a second
 # cue. margin is run-level meta (the door's channel, same law as
 # _retry_conf_params); env is NOT a hook (no env hooks in the runner).
+# E14 (bd_2026-11-13-42t): the cue is a message to the spawn that was nearing
+# the cap — the claim stamps which spawn earned it and every LATER spawn
+# generation DRAINS the inbox line (never re-baked into the steer file, never
+# re-fed into the respawn prompt), so a stale 'budget left: N' can never lie
+# against a fresh budget.
 BUDGET_CUE_MARGIN = 5        # run.json meta `budget_cue_margin` overrides
 BUDGET_CUE_POLL_S = 1.0      # counter-read cadence while a capped spawn is live
 
@@ -3400,10 +3405,30 @@ def _budget_cue_margin(meta):
 def _budget_cue_claimed(run, node, index):
     return (Path(run) / "budget_cue" / _node_file(node, index)).is_file()
 
-def _budget_cue_inject(run, node, index, skey, home, max_turns, margin, steer_file=""):
+def _budget_cue_prior_claim(run, node, index, spawn_no):
+    """E14 (bd_2026-11-13-42t): True when the run-level cue claim for this
+    (node,index) was earned by a PRIOR spawn generation — the cue text names
+    THAT spawn's remaining turns, so re-baking it into a fresh spawn lies
+    ('budget left: N' against a full budget). A re-bake drains the cue instead
+    of re-feeding it. A legacy claim with no spawn stamp predates the stamp and
+    counts as seen: the run-level O_EXCL guarantees its generation already
+    received the line (inbox + live bake-append)."""
+    try:
+        raw = json.loads((Path(run) / "budget_cue" / _node_file(node, index))
+                         .read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    seen = raw.get("spawn") if isinstance(raw, dict) else None
+    if not isinstance(seen, int) or isinstance(seen, bool):
+        return True                                  # unstamped claim: some prior generation saw it
+    return seen < spawn_no
+
+def _budget_cue_inject(run, node, index, skey, home, max_turns, margin, steer_file="", spawn_no=0):
     """Returns True when THIS spawn may stop checking the counter: either the
     cue was injected now, or the run-level claim already exists (an earlier
-    generation of this (node,index) earned it — respawn idempotence)."""
+    generation of this (node,index) earned it — respawn idempotence).
+    The claim stamps the EARNING spawn so _steer_bake can tell 'cue belongs to
+    THIS generation' from 'stale cue — drain on respawn' (E14)."""
     if not (isinstance(max_turns, int) and not isinstance(max_turns, bool)
             and max_turns > 0) or not skey:
         return True                                  # uncapped/unobservable: nothing to do
@@ -3430,7 +3455,8 @@ def _budget_cue_inject(run, node, index, skey, home, max_turns, margin, steer_fi
     try:
         with os.fdopen(fd, "w") as f:
             f.write(json.dumps({"node": node["id"], "index": index, "consumed": consumed,
-                                "turns_left": left, "max_turns": max_turns, "at": now()}) + "\n")
+                                "turns_left": left, "max_turns": max_turns,
+                                "spawn": spawn_no, "at": now()}) + "\n")
         with open(run / "inbox.jsonl", "a") as f:   # the ONE steer channel (act_steer's schema)
             f.write(json.dumps({"node": node["id"], "index": index, "text": text,
                                 "budget_cue": True,
@@ -7443,6 +7469,11 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
     wall = wall_s if wall_s is not None else node.get("timeout", meta.get("node_timeout", 900))
     env = dict(os.environ, HERMES_HOME=str(hermes_home()),
                HERMES_QUIET_TURN_REPORT_FILE=str(report_path),
+               HERMES_WF_PYTHON=sys.executable,   # the fake seat re-imports the door with the
+                                                  # interpreter that actually runs the runner —
+                                                  # a seat-local /usr/bin/python3 too old for the
+                                                  # door's syntax must not silently kill the pull
+                                                  # seam (E14 s38 pull_count; tests/fake honours it)
                HERMES_WF_STEER_FILE=steer_file,
                HERMES_WF_STEER_CURSOR=steer_cur,
                HERMES_WF_STEER_HWM=str(steer_hwm),
@@ -7980,7 +8011,8 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
             if cue_alive and now_s >= cue_next:
                 cue_next = now_s + BUDGET_CUE_POLL_S
                 if _budget_cue_inject(run, node, index, skey, cue_home,
-                                      node.get("max_turns"), cue_margin, steer_file):
+                                      node.get("max_turns"), cue_margin, steer_file,
+                                      spawn_no=spawn_no):
                     cue_alive = False
             if silence_deadline is not None and now_s >= silence_deadline:
                 # #18 + est-g2xx (A): the silence law trusts bytes OR a live
@@ -9259,7 +9291,12 @@ def _harvest_clamp(node, r):
     return c
 
 def drain_inbox(run, consumed):
-    """Return {node_id: [steering texts]} for un-consumed steering lines."""
+    """Return {node_id: [steering texts]} for un-consumed steering lines.
+    E14 (bd_2026-11-13-42t): budget-cue lines are consumed WITHOUT re-feeding
+    the steering prompt — the cue was written against the turns a specific
+    (now possibly dead) spawn had left; quoting it into a later prompt would
+    re-state a number that no longer describes that spawn's budget. The drain
+    is an event fact (budget_cue.drained), never a silent swallow."""
     out = {}
     p = run / "inbox.jsonl"
     if not p.exists():
@@ -9272,6 +9309,10 @@ def drain_inbox(run, consumed):
         except Exception: continue
         if msg.get("cmd") == "kill" or not msg.get("node") or msg.get("text") is None:
             continue
+        if msg.get("budget_cue"):
+            log(run, "budget_cue.drained", node=msg["node"], index=msg.get("index"),
+                reason="respawn_refeed")
+            continue
         out.setdefault(msg["node"], []).append(msg["text"])
     return out
 
@@ -9280,12 +9321,15 @@ def _steer_bake(run, node, index, spawn_no):
     node into a per-spawn file and return (path, cursor_path, hwm). The HWM is
     the inbox line count at bake time: lines appended after this spawn are NOT
     in the file — they reach the node at its NEXT spawn (prompt injection or a
-    fresh bake), never retroactively into a live child. Every spawn re-bakes ALL
-    addressed lines, so a retry/respawn re-delivers what a dead attempt already
-    pulled live (the cursor is per-spawn and starts empty). Baking is pure
-    file-copy — it never marks inbox lines consumed for the runner's own prompt
-    injection; a child that never calls the inbox tool still gets the text at
-    the next spawn, exactly as before B1."""
+    fresh bake), never retroactively into a live child. DELIVERY TRUTH (E14,
+    bd_2026-11-13-42t): bake-at-spawn is the ONE guaranteed channel and the
+    steer.baked receipt says so (mechanism=bake-at-spawn); the live pull is an
+    OPT-IN child seam — it happened exactly when a steer.consumed event and the
+    cursor advance exist, never otherwise. Every spawn re-bakes ALL lines a
+    LATER generation may still act on; the exception is the budget cue: a cue
+    stamped to a prior spawn names THAT generation's remaining turns, so it is
+    DRAINED, not re-baked (drained_cues counts the drain) — a respawn prompt
+    never carries a cue the prior spawn already saw."""
     nf = _node_file(node, index)
     d = run / "steer"
     d.mkdir(parents=True, exist_ok=True)
@@ -9296,7 +9340,8 @@ def _steer_bake(run, node, index, spawn_no):
     except OSError:
         raw = []
     hwm = len(raw)
-    recs = []
+    cue_seen = _budget_cue_prior_claim(run, node, index, spawn_no)
+    recs, drained = [], 0
     for i, line in enumerate(raw):
         if not line.strip():
             continue
@@ -9306,12 +9351,16 @@ def _steer_bake(run, node, index, spawn_no):
             continue
         if msg.get("cmd") == "kill" or msg.get("node") != node["id"] or msg.get("text") is None:
             continue
+        if msg.get("budget_cue") and cue_seen:
+            drained += 1
+            continue
         recs.append({"i": i, "text": msg["text"]})
     tmp = path.with_name(path.name + f".{os.getpid()}.tmp")
     tmp.write_text("\n".join(json.dumps(r) for r in recs) + ("\n" if recs else ""), encoding="utf-8")
     os.replace(tmp, path)   # atomic: the child either sees the full bake or none
     cur.write_text("0", encoding="utf-8")
-    log(run, "steer.baked", node=node["id"], spawn_no=spawn_no, n_lines=len(recs))  # #17
+    log(run, "steer.baked", node=node["id"], spawn_no=spawn_no, n_lines=len(recs),  # #17
+        drained_cues=drained, mechanism="bake-at-spawn")
     return str(path), str(cur), hwm
 
 def skey_for(run, byid, node, index=None):
