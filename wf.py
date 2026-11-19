@@ -185,6 +185,29 @@ def _route_receipt_bake(meta, node):
     except OSError:
         pass                                   # receipt best-effort WRITE; the HOLD is strict
 
+def _strip_arm_state(home=None, env=None):
+    """E20: the concrete state an armed creation-override strip leaves behind.
+    Returns (arms, marker_path): arms is a non-empty list naming EVERY arm that
+    fired (the env var with its value; the marker file with its path and its
+    mtime as the armed-at instant). The refusal dialog renders these verbatim —
+    an operator gets the artifact to point at, not est-id lore with a fix menu."""
+    env = os.environ if env is None else env
+    root = Path(home) if home is not None else hermes_home()
+    mpath = root / "workflows" / "omit-policy-flags.on"
+    arms = []
+    ev = env.get("WF_OMIT_POLICY_FLAGS")
+    if (ev or "").strip():
+        arms.append(f"env WF_OMIT_POLICY_FLAGS={ev!r}")
+    if mpath.exists():
+        try:
+            mt = datetime.fromtimestamp(mpath.stat().st_mtime,
+                                         timezone.utc).isoformat(timespec="seconds")
+        except OSError:
+            mt = "unknown"
+        arms.append(f"marker {mpath} (armed at {mt})")
+    return arms, mpath
+
+
 def _budget_refusal(meta, node, byid, index, spawn_no):
     """est-3acn: BEFORE submit — the RunBudget pre-dispatch check at the same
     seam as _route_substitution_refusal (est-2ek.1.641's shape: a refusal that
@@ -330,14 +353,24 @@ def _route_substitution_refusal(meta, node, spawn_no):
     if a in candidates or a.rsplit("/", 1)[-1] in candidates or any(
             wfcommon.route_ids_equal(a, c, wfcommon.route_provider(node, verified)) for c in candidates):
         return None                            # same route: the receipt is not a spawn lock
+    rpath = _route_receipts_path(meta["_run"])
+    try:
+        rmt = datetime.fromtimestamp(rpath.stat().st_mtime,
+                                     timezone.utc).isoformat(timespec="seconds")
+    except OSError:
+        rmt = "unknown"
     return {"status": "failed",
             "error": f"route_substitution_denied: node {node['id']!r} has a proved-alive "
-                     f"receipt for {verified!r} (door-baked at admission); this spawn "
+                     f"receipt for {verified!r} (door-baked at admission, receipt row "
+                     f"{node['id']!r} in {rpath}, file armed at {rmt}); this spawn "
                      f"would bill {ask!r}. A post-admission route substitution is refused "
-                     f"BEFORE submit — never a silent re-billing of another model "
-                     f"(est-2ek.1.641). Amend the node to the route you accept, or "
-                     f"delete the run's {ROUTE_RECEPTS_NAME} only to re-admit through "
-                     f"the door's ping.",
+                     f"BEFORE submit — never a silent re-billing of another model. "
+                     f"Escape, in order of preference: relaunch the run from a strip-free "
+                     f"launcher (the receipt is the old lane's, not the graph's); or "
+                     f"discard this lane's proof: rm {rpath} and the next spawn "
+                     f"re-admits through the door's ping; or amend the node TO the "
+                     f"receipted route {verified!r} — amending to any other pin "
+                     f"re-dies on this same row.",
             "error_class": "route_substitution_denied", "raw": "", "ms": 0,
             "attempts": 1, "spawn": spawn_no}
 
@@ -389,25 +422,39 @@ def _spawn_expressibility_refusal(meta, node, cmd, spawn_no, index=None,
         gaps.append(f"provider {pin_p!r} (--provider)")
     if not gaps:
         return None                             # expressible: launch byte-identical
+    patch_snip = json.dumps({"patch": {"nodes": {node["id"]: {"require_route": False}}}})
     if _omit_policy_flags_armed():
-        why = ("the est-yq2xq creation-override strip is armed (WF_OMIT_POLICY_FLAGS=1 "
-               f"or {hermes_home()}/workflows/omit-policy-flags.on) and consumed the "
-               "flags before Popen" + (", while the node declares no profile to carry "
-               "the route" if not node.get("profile") else ""))
+        arms, mpath = _strip_arm_state()
+        why = ("the creation-override strip is armed by "
+               + " + ".join(arms or ["an unidentified arm"])
+               + " and consumed the flags before Popen"
+               + (", while the node declares no profile to carry the route"
+                  if not node.get("profile") else ""))
+        clears = []
+        if any(a.startswith("env ") for a in arms):
+            clears.append("unset WF_OMIT_POLICY_FLAGS")
+        if mpath.exists():
+            clears.append(f"rm {mpath}")
+        clear_txt = ("Clear the strip (" + " ; ".join(clears) + "), or opt this node "
+                     "into the fallback ladder with the amend " + patch_snip
+                     + " (a graph-wide defaults.require_route:false opts every node in),"
+                     " or point the node at a profile this host resolves.")
     elif not node.get("profile"):
         why = "the node declares no profile (no -p route evidence) and the launch argv " \
               "carries no creation override for the pin"
+        clear_txt = ("Fix: give the node a profile this host resolves (\"profile\": ...), "
+                     "or opt it into the fallback ladder with the amend " + patch_snip + ".")
     else:
         why = "the launch argv does not carry the pin this node declares"
+        clear_txt = ("Fix: carry the pin on the launch argv (a profile, or un-stripped "
+                     "-m/--provider), or opt this node into the fallback ladder with "
+                     "the amend " + patch_snip + ".")
     pin = f"{pin_p}/{pin_m}".strip("/")
     err = (f"route_inexpressible: node {node['id']!r} pins {pin!r} but this host's spawn "
            f"argv CANNOT EXPRESS it: {' and '.join(gaps)} — {why}. The child would serve "
-           f"the seat's default model while the door believes the pin (#483). Refused "
+           f"the seat's default model while the door believes the pin. Refused "
            f"BEFORE the child started (zero attempts) — same posture as the route "
-           f"billing hold, moved earlier. Fix: point the node at a profile this host "
-           f"resolves, lift the omit-policy-flags override so -m/--provider ride, repin "
-           f"a seat this host can express, or accept fallback explicitly with "
-           f"require_route: false ON THAT NODE (a `defaults` flip opts the whole graph in).")
+           f"billing hold, moved earlier. " + clear_txt)
     ev = {"node": node["id"], "error_class": "route_inexpressible",
           "error": err, "pin": pin}
     if index is not None:
