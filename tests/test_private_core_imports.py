@@ -58,9 +58,13 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 FINDING_RE = re.compile(r"^(?P<file>[^:\n]+):(?P<line>\d+) (?P<target>\S+)$")
 
 # (file, target) -> reason the coupling is tolerated. Reasons record the
-# soft guard + observed fallback verified in the #456 probe; the 12 original
+# soft guard + observed fallback verified in the #456 probe; the original
 # rows plus cron_bridge.py (added by #534 after the issue's d003e47 snapshot,
-# which is exactly the drift this probe exists to catch).
+# which is exactly the drift this probe exists to catch). The v0.23.3 re-pin
+# retired two rows: agent.retry_utils:parse_retry_after_seconds and
+# hermes_yaml:safe_load were published into the plugin API
+# (hermes_cli/data/plugin_api.json), so the lint no longer reports them —
+# the import sites are unchanged and keep their guards.
 ALLOW_LIST = {
     # --- agent.reasoning_effort: core's route-effort tables. No public
     # plugin surface covers them (#456 checked _PUBLIC at v0.22.2).
@@ -84,19 +88,12 @@ ALLOW_LIST = {
     ("__init__.py", "agent.auxiliary_client.call_llm"):
         "_import_call_llm raises by design; callers _ping_route_once/_ping_reachable "
         "degrade to liveness: unknown / False",
-    # --- agent.retry_utils: backoff parsing for liveness retries.
-    ("__init__.py", "agent.retry_utils.parse_retry_after_seconds"):
-        "_ping_retry_after: except Exception -> None (caller uses default backoff)",
     # --- toolsets / hermes_cli.plugins: child toolset name validation is an
     # optional garnish; pass-through is the guarded path.
     ("wf.py", "toolsets.validate_toolset"):
         "_filter_child_toolsets: except Exception -> toolset names pass through",
     ("wf.py", "hermes_cli.plugins.get_plugin_toolset_keys_nowait"):
         "_filter_child_toolsets: same guard, same fallback",
-    # --- hermes_yaml: core's YAML policy (round-trip); ruamel/PyYAML are the
-    # guarded fallbacks so the plugin still reads graphs without core.
-    ("wfcommon.py", "hermes_yaml.safe_load"):
-        "_yaml_load: except ImportError -> ruamel, then PyYAML",
     # --- cron.jobs: tick-job lifecycle (landed by #534 after #456's table).
     ("cron_bridge.py", "cron.jobs"):
         "_jobs: except Exception -> None + callable surface check, never a "
