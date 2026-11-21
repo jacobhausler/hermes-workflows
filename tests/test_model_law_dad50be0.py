@@ -83,15 +83,21 @@ with tempfile.TemporaryDirectory(prefix="model-law-") as td:
         (run / "nodes").mkdir(parents=True)
         (run / "gates").mkdir()
         (run / "graph.json").write_text(json.dumps(g))
+        # est-bwqq1 (#699): node_timeout 20 -> 60 and the outer wall 60 -> 120.
+        # Under suite/tenant load the mixed_fake execv boot chain overruns the
+        # fan wall: the node commits a timeout-class result WITHOUT
+        # failed_detail and the KeyError leg (rec["failed_detail"]) dies. The
+        # 60s node budget is ~7x the quiet-chain max; the outer wall keeps its
+        # 2x containment of the node budget.
         (run / "run.json").write_text(json.dumps({"name": "case", "hermes_bin": launcher,
-                                                "node_timeout": 20, "started": "2099-01-01T00:00:00+00:00"}))
+                                                "node_timeout": 60, "started": "2099-01-01T00:00:00+00:00"}))
         argv = home / (run.name + ".argv")
         env = {**os.environ, "HERMES_HOME": td, "WF_RUNS_ROOT": str(home / "workflows"), "FAKE_LOG": str(home / "fake.log"),  # #71 shelf pin
                "FAKE_ARGV_LOG": str(argv)}
         if row:
             env["FAKE_API_CALLS"] = "1"
         p = subprocess.run([sys.executable, str(ROOT / "wf.py"), "run", run.name],
-                           env=env, text=True, capture_output=True, timeout=60)
+                           env=env, text=True, capture_output=True, timeout=120)  # est-bwqq1 (#699): contains the 60s node budget; see run.json note
         assert (run / "nodes" / "worker.json").exists(), p.stdout + p.stderr
         return run, json.loads((run / "nodes" / "worker.json").read_text()), argv.read_text()
 
