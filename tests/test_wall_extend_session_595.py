@@ -80,13 +80,17 @@ check("exactly one node.extended, basis session", len(ext) == 1 and ext[0].get("
 # no sessions row at the deadline, so the kill raced fixture boot instead of
 # testing the frozen-witness path; the doubled wall plus elapsed < 16 keeps
 # the pinned shape (killed AT the wall, not at wall+50% -> extended).
+# est-lg94s (#699): bound 16 -> 20. The wall+50% discrimination is owned by
+# the deterministic no-extension event check above; this number is only a
+# runaway guard, and under the 2026-11-21 concurrent storm arm the measured
+# boot (worst 8.8 s) + the 8 s wall + kill/settle legitimately crosses 16.
 r = mk("w595-frozen", [{"id": "a", "type": "agent", "goal": "SLOW", "timeout": 8}])
 out, elapsed = drive("w595-frozen", FAKE_MODE="session_frozen", FAKE_SESSION_SEC="30")
 ev = events(r)
 rec = json.loads((r / "nodes" / "a.json").read_text())
 check("frozen witnesses -> no extension", not any(e["event"] == "node.extended" for e in ev), ev[-3:])
 check("frozen child dies at the wall as timeout", rec.get("error_class") == "timeout", rec)
-check("killed near the wall, not wall+50%", elapsed < 16, f"elapsed={elapsed:.1f}s")
+check("killed promptly, not after a runaway", elapsed < 20, f"elapsed={elapsed:.1f}s")
 
 # (3) _session_recent unit: only this spawn's own row counts
 home = HOME / "unit"

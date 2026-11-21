@@ -20,7 +20,14 @@ import wf_test_isolation as _iso71_door18; _iso71_door18.install(door)  # #71 r5
 import wfcommon as common
 
 
-def until(pred,seconds=5):
+# est-lg94s (#699): every budget below is an upper bound on a POLL, not an
+# assertion about elapsed time -- polling returns the moment the predicate
+# holds, so widening costs nothing when the machine is idle and removes the
+# only load-critical seam left in the cycle: runner boot measured up to 8.7 s
+# under the 2026-11-21 concurrent-arm storm (old 5 s wall -> 'runner never
+# live'), which is the same class as the hook's wall (see the hook's retime
+# note). 20 s = >2x the measured worst boot.
+def until(pred,seconds=20):
     end=time.monotonic()+seconds
     while time.monotonic()<end:
         if pred():return True
@@ -64,8 +71,8 @@ def main():
                     repeat=door.act_run({'graph':graph,'lane_key':key})
                     assert repeat.get('deduped') and repeat['run_id']==rid,(cycle,repeat)
                     assert not common.runner_alive(r),(cycle,'dedupe spawned runner')
-                    door.act_wait({'run_id':rid,'timeout':1})
-                    assert until(lambda:door.act_status({'lane_key':key})['state']=='done',5),(cycle,'not done')
+                    door.act_wait({'run_id':rid,'timeout':8})
+                    assert until(lambda:door.act_status({'lane_key':key})['state']=='done',20),(cycle,'not done')
                     final=door.act_status({'lane_key':key})
                     assert final['runner_live'] == common.runner_alive(r),(cycle,final)
                     assert not (r/'runner.log').read_text().count('WORKFLOW_BUSY'),(cycle,'busy crash')
