@@ -64,7 +64,14 @@ try:
     wf_test_isolation.install(door)
     res = door.act_amend({"run_id": run.name, "graph": new})
     output = proc.communicate(timeout=30)[0]
-    time.sleep(0.2)
+    # est-bwqq1 (#699): the fixed sleep(0.2) raced the resumed runner — after
+    # communicate() returns, the runner still writes events + runner_exit.json,
+    # and under suite load that landed after the read (FileNotFoundError).
+    # Poll to a 45s deadline; a runner dead before writing fails the next
+    # assertions honestly.
+    deadline = time.monotonic() + 45
+    while time.monotonic() < deadline and not (run / "runner_exit.json").exists():
+        time.sleep(0.05)
     ev = [json.loads(x)["event"] for x in (run / "events.jsonl").read_text().splitlines()]
 
     checks = {

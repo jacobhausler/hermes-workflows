@@ -57,16 +57,17 @@ def events(r):
     return [json.loads(l) for l in (r / "events.jsonl").read_text().splitlines()]
 
 # (1) session row keeps moving past the wall; the spawn log stays at 0 bytes
-# timeout 3->8 / pulse 4->10 (serial#7 @d001953): the fake's 4 s work + interpreter
-# boot under load overran the EXTENDED wall (killed at 5.014 s = timeout 3 + one
-# +2 s extend) — the product extended exactly once as pinned; the fixture budget
-# gave the child <1 s of slack. The survive-window is [wall, 1.5*wall], so both
-# sides scale: timeout 8 => must cross the 8 s base wall (extension fires) and
-# finish under the 12 s extended wall; pulse 10 s + ~0.4 boot = ~10.4 measured at
-# load avg 10 -> 1.5 s top margin, 2.4 s base margin. Contract (1) unchanged:
+# est-bwqq1 (#699) retime (prior serial#7 @d001953: timeout 8 / pulse 10, RED
+# at 8.712s — fake boot storm lag exceeded the 8s wall before ANY sessions row
+# existed, so no extension could fire). The survive band is (T, 1.5T) around
+# the base wall, and for boot lag B in [0.5, 12] (observed worst 8.7) no
+# (T, W) works at T=8: the row lands after the deadline. timeout 8 -> 30,
+# FAKE_SESSION_SEC 10 -> 31: the child finishes at B + 31 + settle, which
+# lands in [31.5, 43] + settle — past the 30s base wall (ONE session-basis
+# extension) and inside the 45s extended wall. Contract (1) unchanged:
 # ONE session-basis extension, child survives the base wall, node commits done.
-r = mk("w595-pulse", [{"id": "a", "type": "agent", "goal": "SLOW", "timeout": 8}])
-out, _ = drive("w595-pulse", FAKE_MODE="session_pulse", FAKE_SESSION_SEC="10")
+r = mk("w595-pulse", [{"id": "a", "type": "agent", "goal": "SLOW", "timeout": 30}])
+out, _ = drive("w595-pulse", FAKE_MODE="session_pulse", FAKE_SESSION_SEC="31")
 ev = events(r)
 ext = [e for e in ev if e["event"] == "node.extended"]
 rec = json.loads((r / "nodes" / "a.json").read_text())
@@ -75,13 +76,17 @@ check("quiet-log child with a moving session row survives the wall and finishes 
 check("exactly one node.extended, basis session", len(ext) == 1 and ext[0].get("basis") == "session", ext)
 
 # (2) session row exists but is frozen; log silent -> killed at the wall
-r = mk("w595-frozen", [{"id": "a", "type": "agent", "goal": "SLOW", "timeout": 2}])
+# est-bwqq1 (#699): timeout 2 -> 8 — a boot storm lag above the 2s wall left
+# no sessions row at the deadline, so the kill raced fixture boot instead of
+# testing the frozen-witness path; the doubled wall plus elapsed < 16 keeps
+# the pinned shape (killed AT the wall, not at wall+50% -> extended).
+r = mk("w595-frozen", [{"id": "a", "type": "agent", "goal": "SLOW", "timeout": 8}])
 out, elapsed = drive("w595-frozen", FAKE_MODE="session_frozen", FAKE_SESSION_SEC="30")
 ev = events(r)
 rec = json.loads((r / "nodes" / "a.json").read_text())
 check("frozen witnesses -> no extension", not any(e["event"] == "node.extended" for e in ev), ev[-3:])
 check("frozen child dies at the wall as timeout", rec.get("error_class") == "timeout", rec)
-check("killed near the wall, not wall+50%", elapsed < 8, f"elapsed={elapsed:.1f}s")
+check("killed near the wall, not wall+50%", elapsed < 16, f"elapsed={elapsed:.1f}s")
 
 # (3) _session_recent unit: only this spawn's own row counts
 home = HOME / "unit"

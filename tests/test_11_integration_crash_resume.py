@@ -1,26 +1,38 @@
 #!/usr/bin/env python3
 """Suite hook for the standalone 20-cycle crash/resume harness."""
+import select
 from pathlib import Path
 import subprocess
 import sys
+import time
 import unittest
 
 ROOT=Path(__file__).resolve().parents[1]
+def run_progress_walled(cmd,idle=60.0,cap=600.0):
+    # est-bwqq1 (#699): flat 120s wall (est-rlfyo retime, quiet n=5 max
+    # 91.04 + ~32%) RED under suite concurrency (nightly serial ci-out-1121)
+    # yet standalone-green. The wall is progress-aware now: the harness
+    # streams one flush=True '"cycle":N' line per cycle, so idle>60s (~13x
+    # the quiet per-cycle pace of ~4.5 s) is a hang, not tenant load; the
+    # 600s hard cap still fails real hangs fast. Every crash/resume/SIGKILL/
+    # dedupe/cycle-count/cleanup assertion unchanged.
+    t0=tlast=time.monotonic();out=[]
+    p=subprocess.Popen(cmd,text=True,stdout=subprocess.PIPE,
+                       stderr=subprocess.STDOUT,bufsize=1)
+    assert p.stdout is not None
+    while True:
+        now=time.monotonic()
+        if now-t0>cap or now-tlast>idle:
+            p.kill();out.append(f'\nWALL idle={now-tlast:.1f}s cap={cap}\n');break
+        if select.select([p.stdout],[],[],max(0.05,min(idle-(now-tlast),cap-(now-t0))))[0]:
+            line=p.stdout.readline()
+            if not line:break
+            out.append(line);tlast=time.monotonic()
+    return p.wait(),''.join(out)
 class CrashResume(unittest.TestCase):
     def test_twenty_real_runner_cycles(self):
-        # est-rlfyo wall retime (was timeout=80; RED at the wall only): 20
-        # cycles x 2 runner cold-spawns each. Quiet serial n=5 per harness at
-        # e55f41f on the CI-pinned interpreter (3.14.9, 72-core estate host,
-        # no competing suite procs, load1 9-19), 2026-10-27: canary walls
-        # 89.03/89.55/90.13/90.39/90.93; sup 85.88/90.03/89.65/90.58/91.04;
-        # all rc=0 with the '20/20' sentinel => timing drift only, same class
-        # as #550 (v0.22.x cold-import floor ~0.43 s/hermes_cli.config spawn,
-        # x40 spawns). 120 = measured max 91.04 + ~32% margin: absorbs CI
-        # shard contention, still fails fast on real hangs; every crash/
-        # resume/SIGKILL/dedupe/cycle-count/cleanup assertion unchanged.
-        p=subprocess.run([sys.executable,str(ROOT/'tests/11-canary.py')],
-                         text=True,capture_output=True,timeout=120)
-        self.assertEqual(p.returncode,0,(p.stdout+'\n'+p.stderr)[-12000:])
-        self.assertIn('20/20 crash/resume',p.stdout)
-        self.assertEqual(sum('"cycle":' in line for line in p.stdout.splitlines()),20)
+        rc,out=run_progress_walled([sys.executable,str(ROOT/'tests/11-canary.py')])
+        self.assertEqual(rc,0,out[-12000:])
+        self.assertIn('20/20 crash/resume',out)
+        self.assertEqual(sum('"cycle":' in line for line in out.splitlines()),20)
 if __name__=='__main__': unittest.main()

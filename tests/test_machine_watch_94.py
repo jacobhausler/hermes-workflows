@@ -28,7 +28,11 @@ def check(root, cmd):
         file.unlink(missing_ok=True)
     else:
         file.write_text(cmd)
-    p = subprocess.run(argv(root), capture_output=True, text=True, timeout=5,
+    # est-bwqq1 (#699): direct-probe wall 5 -> 30. Same class as the cadence
+    # retime in native_engine: under suite-load storms the probe boot exceeds
+    # 5s and the SIGKILL (last_exit=-9) pollutes the transition table; the
+    # table never depends on the wall, and 30s is ~175x measured p90 boot.
+    p = subprocess.run(argv(root), capture_output=True, text=True, timeout=30,
                      env=dict(os.environ, MW_STATE_ROOT=str(root)))
     return p.returncode, (root / 'probe_broken').exists(), p.stderr
 
@@ -119,13 +123,16 @@ print('```json\\n'+json.dumps(out)+'\\n```',flush=True)
     # timeout=min(every, 300), so the old every_s=.15 SIGKILLed the probe
     # before /usr/bin/python3 could even start+run (last_exit=-9; receipts:
     # repo-admin/est-jggzt/mwdiag + mw-cure3.log) — measured probe latency at
-    # load 32: p50=0.153s p90=0.171s, straddling the old budget exactly. The
-    # shipped example graph uses every_s=3.0 and never flakes; the test
-    # override now goes to every_s=1.0 (~5x worst measured), timeout_s=30, and
-    # a 90s join (which must contain the wait plus spawn and settle) and a 75s
-    # two-park loop — and every assertion stands: a gate that never parks
-    # still dies on the same checks, just later.
-    g['nodes'][1]['wait'].update(until_argv=argv(state), every_s=1.0, timeout_s=30)
+    # load 32: p50=0.153s p90=0.171s, straddling the old budget exactly.
+    # est-bwqq1 (#699): the est-jggzt every_s=1.0 override re-straddles the
+    # full-pass storm tail — the nightly serial ledger parked last_exit=-9 != 2,
+    # i.e. SIGKILL still beat the 1.0s budget. The shipped example uses
+    # every_s=3.0 and never flakes, so the override is DROPPED: the executed
+    # cadence is the shipped cadence (~17x measured p90). timeout_s=30 stays,
+    # and with it the 90s join and the 75s two-park loop — every assertion
+    # still stands: a gate that never parks still dies on the same checks,
+    # just later.
+    g['nodes'][1]['wait'].update(until_argv=argv(state), timeout_s=30)
     args = {'graph':g, 'name':'native-machine-watch',
             'run_context':{'watch_name':'test-watch','check_cmd':'true'},
             'lane_key':'example/machine-watch-94'}
