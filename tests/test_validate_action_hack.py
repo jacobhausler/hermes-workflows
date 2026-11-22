@@ -55,7 +55,8 @@ BAD = {"name": "v-bad", "bogus_key": 1, "nodes": [
 r = call(action="validate", graph=BAD)
 check("V2 not ok", r.get("ok") is False, r)
 errs = r.get("errors") or []
-check("V2 error rows shaped", bool(errs) and all({"node", "field", "msg"} >= set(e) for e in errs), r)
+check("V2 error rows shaped (z79: exactly {node, field, msg, example})",
+      bool(errs) and all(set(e) == {"node", "field", "msg", "example"} for e in errs), r)
 check("V2 names both defects",
       any(e["field"] == "bogus_key" for e in errs) and
       any(e.get("node") == "a" and e["field"] == "after" or "nope" in e["msg"] for e in errs), r)

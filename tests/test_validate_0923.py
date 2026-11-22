@@ -183,8 +183,8 @@ r = call(action="run", graph={"name": "x", "nodes": [{"id": "a", "type": "agent"
                                                      {"id": "b", "type": "nope"}]})
 check(r.get("error", "").startswith("graph invalid: node a")
       and isinstance(r.get("errors"), list) and len(r["errors"]) == 2
-      and all(set(e) == {"node", "field", "msg"} for e in r["errors"]),
-      "run returns first-message 'error' + ALL 'errors' together", r)
+      and all(set(e) == {"node", "field", "msg", "example"} for e in r["errors"]),
+      "run returns first-message 'error' + ALL 'errors' together (z79: every row carries `example`)", r)
 r = call(action="run", graph=json.dumps({"name": "x", "nodes": "not-a-list"}))
 check(r.get("error", "").startswith("graph invalid") and isinstance(r.get("errors"), list),
       "door PARSES a string graph and validates it", r)
