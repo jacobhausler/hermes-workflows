@@ -1,0 +1,22 @@
+{
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Why it works",
+      "items": [
+        "Verify re-runs every roster command itself - a lane's ok:true is a claim, not a fact",
+        "Barrier fan-out, no quorum: an unsaid order is NAMED missing, never counted out of existence",
+        "Closeout rides after_partial: the crew closes no greener than the record verify found"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Contract",
+      "items": [
+        "{{nodes}} nodes, {{echoes}} echo, {{fanouts}} fan-out: orders -> crew barrier -> re-run verify -> closeout",
+        "No seeds needed: every order is a stock shell command, so the shape runs as-is on a fresh install",
+        "Derived from this example's bytes by scripts/graph_diagram.py"
+      ]
+    }
+  ]
+}

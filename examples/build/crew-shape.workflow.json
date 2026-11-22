@@ -1,0 +1,81 @@
+{
+  "grammar": "wf/1",
+  "name": "crew-shape",
+  "description": "The canonical crew shape: an ORDERS roster, a fan-out CREW that executes each order, an independent VERIFY seat that re-runs the commands itself and never trusts a lane's word, and one CLOSEOUT terminal. Data shapes, so a reader can check them against the record: the orders echo carries {law, orders: [{id, ask, cmd}]}; each crew child commits {order, evidence, ok}; verify commits {dispatched, agreed, disagreed: [str], missing: [str], rows: [{order, claim, observed, verdict}], verdict}; closeout commits {tally, verdict, honest_statement}. Zero seeds and zero external dependencies: every order is one stock shell command answeringable on any machine, so this runs as-is on a fresh install. The crew fan-out sets NO quorum - a crew whose orders went unsaid is an unfinished crew, and verify must NAME the missing order rather than count the survivors. VERIFY is the muscle: it re-runs every roster command with its own terminal tool, compares what it observes now against the child's committed evidence line, and a claim it cannot reproduce lands as a red row named by order id - evidence-without-command is a failed lane, and an ok:true that verify cannot reproduce outranks the child's own report. The four ordered facts (kernel release, machine arch, kernel name, host name) do not move during one run, so re-execution is a fair recheck; any other subject re-runs under its own volatility contract. closeout opts into the verify harvest (after_partial) so even a damaged verify still prints the crew's state, red, instead of closing greener than the record.",
+  "provenance": {
+    "owner": "hermes-workflows",
+    "source": "hermes-workflows/examples/build/crew-shape.workflow.json"
+  },
+  "nodes": [
+    {
+      "id": "orders",
+      "type": "echo",
+      "output": {
+        "law": "The roster is the master order list: every id must reach closeout as verified, disputed, failed, or NAMED missing - never a silent loss. Each order is answerable by running its cmd EXACTLY as written; keep work idempotent, because an unfinished lane may replay.",
+        "orders": [
+          {"id": "kernel-release", "ask": "Report this machine's kernel release.", "cmd": "uname -r"},
+          {"id": "machine-arch", "ask": "Report this machine's architecture.", "cmd": "uname -m"},
+          {"id": "kernel-name", "ask": "Report this machine's kernel name.", "cmd": "uname -s"},
+          {"id": "host-name", "ask": "Report this machine's host name.", "cmd": "uname -n"}
+        ]
+      }
+    },
+    {
+      "id": "crew",
+      "type": "agent",
+      "after": ["orders"],
+      "shape": "build",
+      "fanout": {
+        "items_from": "orders.orders",
+        "goal": "You are one lane of a work crew executing exactly one order. Order [{id}]: {ask}. Run the command EXACTLY as written, with your terminal tool: {cmd}. Then answer honestly against the contract. Reply with ONLY fenced json {\"order\": \"{id}\", \"evidence\": \"<first line of stdout, verbatim>\", \"ok\": <true|false>} and nothing else. ok means the command ran AND its output answers the order; if the command found nothing to observe, set evidence to what it actually printed (or the empty marker) and ok:false - an honest failed lane is worth more than a fabricated line, and a verify seat will re-run your command from the record and compare.",
+        "schema": {
+          "type": "object",
+          "required": ["order", "evidence", "ok"],
+          "properties": {
+            "order": {"type": "string"},
+            "evidence": {"type": "string"},
+            "ok": {"type": "boolean"}
+          }
+        }
+      }
+    },
+    {
+      "id": "verify",
+      "type": "agent",
+      "after": ["orders", "crew"],
+      "shape": "review",
+      "inputs": ["orders.orders", "crew.all_results"],
+      "schema": {
+        "type": "object",
+        "required": ["dispatched", "agreed", "disagreed", "missing", "rows", "verdict"],
+        "properties": {
+          "dispatched": {"type": "integer"},
+          "agreed": {"type": "integer"},
+          "disagreed": {"type": "array", "items": {"type": "string"}},
+          "missing": {"type": "array", "items": {"type": "string"}},
+          "rows": {"type": "array"},
+          "verdict": {"type": "string"}
+        }
+      },
+      "goal": "You are the crew verify seat: a lane's ok:true is a CLAIM, not a fact, and the crew is honest only if verify re-derives each fact itself and accounts for every roster order - reproduced, disputed, failed, or NAMED missing. Under ## Inputs you have orders.orders (the master roster: id, ask, cmd per entry) and crew.all_results (EVERY dispatched lane answer WITH its status - read the dispatched set FROM this list, do not assume it). For EVERY roster order: re-run its cmd EXACTLY as written with your own terminal tool, then commit a row {order: <id>, claim: <the child's evidence quoted verbatim from the record, or 'no answer'>, observed: <your own first line of stdout, verbatim, or the error line>, verdict: agreed|disputed|missing}: agreed only when the child answered ok:true AND its evidence line equals what you just observed; disputed when a claim exists but you cannot reproduce it (quote both lines); missing when no committed answer carries the id or its status is failed - quote the recorded error. dispatched = the count of entries present in all_results; agreed = the count of agreed rows; disagreed = the ids you could not reproduce; missing = roster ids with no committed answer. verdict is one line that NAMES every disputed or missing order (e.g. 'VERIFIED 3/4: disputed host-name (claim != re-run)'); only a full roster of agreed rows may read as a clean crew. Do not fix, excuse, or re-interpret a lane's work - re-run, compare, then answer once with ONLY that fenced json."
+    },
+    {
+      "id": "closeout",
+      "type": "agent",
+      "after": ["verify"],
+      "after_partial": true,
+      "shape": "review",
+      "inputs": ["verify"],
+      "schema": {
+        "type": "object",
+        "required": ["tally", "verdict", "honest_statement"],
+        "properties": {
+          "tally": {"type": "object"},
+          "verdict": {"type": "string"},
+          "honest_statement": {"type": "string"}
+        }
+      },
+      "goal": "Close the crew out HONESTLY from the committed record. Under ## Inputs you have verify - the independent re-run reconciliation of every order. Copy its dispatched/agreed numbers, its disagreed and missing lists, and its rows VERBATIM (do not recount, soften, or round anything), reprint its verdict line, and write honest_statement: one paragraph stating the crew exactly as verify states it - every disputed and every missing order named by name with its evidence and what the re-run observed; if verify is absent or incomplete, say so plainly and name what is unknown - never close a crew greener than the record it found. Reply with ONLY fenced json {\"tally\": <the verify object copied verbatim>, \"verdict\": \"<the verify verdict copied verbatim>\", \"honest_statement\": \"<the paragraph>\"} and nothing else. Do not explore beyond ## Inputs - report only what is given, then answer once."
+    }
+  ]
+}
