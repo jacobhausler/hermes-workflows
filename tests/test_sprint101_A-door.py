@@ -178,7 +178,7 @@ check("after ref to unknown node is a door error",
       any(x["field"] == "after" and "unknown" in x["msg"] for x in
           V([{"id": "a", "type": "agent", "goal": "x", "after": ["nope"]}])))
 
-# door end-to-end: graph-level defects return errors:[{node,field,msg}] and no run dir
+# door end-to-end: graph-level defects return errors:[{node,field,msg,example}] and no run dir
 root = Path(tmp) / "workflows"
 before = set(p.name for p in root.glob("*")) if root.exists() else set()
 out = door.act_run({"graph": {"name": "bad", "nodes": [

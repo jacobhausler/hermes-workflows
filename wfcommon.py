@@ -1753,8 +1753,104 @@ def _schema_check(schema, field, report):
             _schema_check(schema["items"], f"{field}.items", report)
 
 
+# ---------- bd_2026-11-13-z79: door rejection examples ----------
+# Data shape (the seat-facing rejection contract):
+#   every door rejection payload carries errors:[{node, field, msg, example}]
+#   where `example` is the minimal ACCEPTING fragment for the rule that fired —
+#   structured data (JSON-compatible), never prose. Two producers, one shape:
+#     * RULE_EXAMPLES[rule_id] — the example on the rule's metadata, banked at
+#       the rule site via E(..., example=_door_example(RULE_ID)) with a stable
+#       slug naming the rule.
+#     * stamp_error_examples() — the envelope choke point: every door rejection
+#       returns through a caller that composes it, so rules not yet banked ride
+#       example: None and the KEY stays universal on rejection rows.
+# A fragment is written AT THE SLOT its rule guards, and every banked fragment
+# passes the door itself (golden-pinned in tests/test_door_examples_z79.py —
+# an example that would itself be refused is a worse trap than no example):
+#   unknown_graph_key       whole graph object (top-level keys are closed)
+#   unknown_node_key        one nodes[i] object (per-type keys are closed)
+#   fanout_shape            one node's `fanout` object value
+#   fanout_items_from       one `fanout` value using the dynamic ref
+#   fanout_items_from_head  whole graph object (the law spans producer pair:
+#                           the ref's head must sit in this node's `after`)
+#   gate_cycle              whole graph object (after flows downstream only)
+#   start_spec              one start-verb INPUT, not a graph: the five-line
+#                           YAML teach example bd_2026-11-13-9i1's seam routes
+#                           through this bank — the one string entry, because
+#                           the channel carries the accepting input whatever
+#                           shape that input is.
+# The four classes wave-4B seats actually hit are banked (plus the node-key
+# sibling of the graph-key law); the channel admits every remaining rule with
+# one table row + one kwarg at its site — no envelope change per addition.
+RULE_EXAMPLES = {
+    "unknown_graph_key": {
+        "nodes": [{"id": "study", "type": "agent",
+                   "goal": "read README.md and list the setup steps"}],
+    },
+    "unknown_node_key": {
+        "id": "study", "type": "agent",
+        "goal": "read README.md and list the setup steps",
+    },
+    "fanout_shape": {
+        "items": [{"goal": "check auth.py"}, {"goal": "check db.py"}],
+    },
+    "fanout_items_from": {
+        "items_from": "collect.items", "goal": "review {item}",
+    },
+    "fanout_items_from_head": {
+        "nodes": [
+            {"id": "collect", "type": "agent",
+             "goal": "write the list of files to review"},
+            {"id": "review", "type": "agent", "after": ["collect"],
+             "fanout": {"items_from": "collect.items", "goal": "review {item}"}},
+        ],
+    },
+    "gate_cycle": {
+        "nodes": [
+            {"id": "plan", "type": "agent", "goal": "draft the change plan"},
+            {"id": "approve", "type": "gate", "after": ["plan"],
+             "question": "ship the plan?"},
+            {"id": "build", "type": "agent", "after": ["approve"],
+             "goal": "build the approved plan"},
+        ],
+    },
+    # The #706 seam: the start verb's five-line teach example, spec-compliant
+    # BY CONSTRUCTION (tests/test_start_verb.py round-trips it through
+    # parse_input). Banked here so the door and the start verb teach from
+    # ONE table — wfstart renders it lazily through _door_example.
+    "start_spec": (
+        "name: charter-review\n"
+        "nodes:\n"
+        "  - {id: load, goal: 'Read charter.json and answer with exactly"
+        " {\"items\": [one string per open item]}'}\n"
+        "  - {id: review, goal: 'Review this item and report the finding',"
+        " items_from: load.items, after: [load]}\n"
+        "# shape per node: recon|build|review|publish (defaults to review"
+        " for review-phrased goals)"
+    ),
+}
+
+
+def _door_example(rule_id):
+    """A FRESH copy of the rule's banked example — rejection rows are mutable
+    and json round-trips reach seats, but a direct caller editing a row must
+    never scribble on the table."""
+    import copy
+    return copy.deepcopy(RULE_EXAMPLES[rule_id])
+
+
+def stamp_error_examples(errs):
+    """Give every rejection row the `example` key (None = rule not yet banked).
+    The ONE choke point for the envelope-shape law: call it wherever a door
+    rejection payload is composed, before returning."""
+    for e_ in errs:
+        if isinstance(e_, dict):
+            e_.setdefault("example", None)
+    return errs
+
+
 def validate_graph_errors(nodes, *, admission=False, defaults=None):
-    """Return a LIST of {node, field, msg} — EVERY defect, not the first. Strict ids:
+    """Return a LIST of {node, field, msg[, example]} — EVERY defect, not the first. Strict ids:
     node ids double as filenames.
     #32: accepts a whole graph object too — `{grammar?, nodes:[...]}` — in which case
     the top-level `grammar` tag is checked first (absent = wf/1; unknown = refused,
@@ -1770,8 +1866,11 @@ def validate_graph_errors(nodes, *, admission=False, defaults=None):
         nodes = nodes.get("nodes")
     if isinstance(defaults, dict):   # explicit graph-view passthrough (door callers)
         _wl_defaults = defaults
-    def E(nid, field, msg):
-        errs.append({"node": nid, "field": field, "msg": msg})
+    def E(nid, field, msg, example=None):
+        row = {"node": nid, "field": field, "msg": msg}
+        if example is not None:
+            row["example"] = example
+        errs.append(row)
 
     def schema_check(nid, field, schema):
         # est-j14j3: the law lives in the module-level _schema_check — the ONE
@@ -1825,7 +1924,8 @@ def validate_graph_errors(nodes, *, admission=False, defaults=None):
                     continue
                 if k in ("after_partial", "order_only"):
                     continue  # the dedicated blocks below name the key (echo-meaningless / type)
-                E(nid, k, "unknown key; allowed: " + json.dumps(sorted(_type_keys)))
+                E(nid, k, "unknown key; allowed: " + json.dumps(sorted(_type_keys)),
+                  example=_door_example("unknown_node_key"))
         for a in n.get("after", []):
             if a not in idset:
                 E(nid, "after", f"references unknown 'after': {a}")
@@ -2174,18 +2274,23 @@ def validate_graph_errors(nodes, *, admission=False, defaults=None):
             fo = n.get("fanout")
             if fo is not None:
                 if not isinstance(fo, dict):
-                    E(nid, "fanout", "fanout must be an object")
+                    E(nid, "fanout", "fanout must be an object",
+                      example=_door_example("fanout_shape"))
                 else:
                     for k in sorted(set(fo) - FANOUT_KEYS):
                         E(nid, f"fanout.{k}", "unknown key; allowed: "
-                                              + json.dumps(sorted(FANOUT_KEYS)))
+                                              + json.dumps(sorted(FANOUT_KEYS)),
+                          example=_door_example("fanout_shape"))
                     if fo.get("items") is None and not fo.get("items_from"):
-                        E(nid, "fanout", "fanout needs items or items_from")
+                        E(nid, "fanout", "fanout needs items or items_from",
+                          example=_door_example("fanout_shape"))
                     elif fo.get("items") is None and not isinstance(fo.get("items_from"), str):
                         E(nid, "fanout.items_from", "fanout.items_from must be a "
-                                                    "'<node_id>.<dotted.path>' string")
+                                                    "'<node_id>.<dotted.path>' string",
+                          example=_door_example("fanout_items_from"))
                     if fo.get("items") is not None and not isinstance(fo["items"], list):
-                        E(nid, "fanout.items", "fanout.items must be a list")
+                        E(nid, "fanout.items", "fanout.items must be a list",
+                          example=_door_example("fanout_shape"))
                     # est-37d74 (#453): fanout.precheck_argv — the until_argv law
                     # of gate.wait mirrored verbatim (wait_spec_ok): a fixed argv
                     # list, never a shell string; non-empty list of non-empty
@@ -2207,11 +2312,13 @@ def validate_graph_errors(nodes, *, admission=False, defaults=None):
                     # pruned/skipped must still release and restart.
                     if admission and isinstance(fo.get("items"), list) and not fo["items"]:
                         E(nid, "fanout.items",
-                          "fanout.items must be a non-empty literal or use items_from")
+                          "fanout.items must be a non-empty literal or use items_from",
+                          example=_door_example("fanout_shape"))
                     items = fo.get("items") if isinstance(fo.get("items"), list) else []
                     for i, it in enumerate(items):
                         if isinstance(it, dict) and "goal" in it and not (isinstance(it["goal"], str) and it["goal"].strip()):
-                            E(nid, f"fanout.items[{i}].goal", f"fanout.items[{i}].goal must be a non-empty string (it overrides fanout.goal)")
+                            E(nid, f"fanout.items[{i}].goal", f"fanout.items[{i}].goal must be a non-empty string (it overrides fanout.goal)",
+                              example=_door_example("fanout_shape"))
                     # #59: the goal TEMPLATE is rendered by fmt_goal (re.sub over the
                     # text) and prefixed onto the node goal per item — a truthy
                     # non-str here is the same first-spawn TypeError class as the
@@ -2221,10 +2328,12 @@ def validate_graph_errors(nodes, *, admission=False, defaults=None):
                     # shape (run_child: `fo.get("goal") or node.get("goal")`).
                     if "goal" in fo and not isinstance(fo["goal"], str):
                         E(nid, "fanout.goal", f"fanout.goal {fo['goal']!r} must be a "
-                                              "non-empty string (the item goal template)")
+                                              "non-empty string (the item goal template)",
+                          example=_door_example("fanout_shape"))
                     if items and not (fo.get("goal") or n.get("goal")) \
                             and not all(isinstance(it, dict) and isinstance(it.get("goal"), str) for it in items):
-                        E(nid, "fanout.goal", "fanout needs a goal template or a goal on every item")
+                        E(nid, "fanout.goal", "fanout needs a goal template or a goal on every item",
+                          example=_door_example("fanout_shape"))
                     # (moved above: the template type check sits with the other
                     # fanout checks; this block only reports the missing-goal law)
                     q = fo.get("quorum")
@@ -2262,7 +2371,8 @@ def validate_graph_errors(nodes, *, admission=False, defaults=None):
                             E(nid, "fanout.items_from",
                               f"fanout.items_from ref {fo['items_from']!r} head {head!r} must be an "
                               f"ancestor — a node in this node's `after` list "
-                              f"(its committed output feeds the fan-out)")
+                              f"(its committed output feeds the fan-out)",
+                              example=_door_example("fanout_items_from_head"))
                     fsc = fo.get("schema")
                     if fsc is not None:
                         if not isinstance(fsc, dict):
@@ -2454,7 +2564,8 @@ def validate_graph_errors(nodes, *, admission=False, defaults=None):
                 queue.append(k)
     if seen != len(idset):
         stuck = sorted(i for i in idset if indeg[i] > 0)
-        E(None, "after", f"cycle in graph (nodes still waiting on each other: {stuck})")
+        E(None, "after", f"cycle in graph (nodes still waiting on each other: {stuck})",
+          example=_door_example("gate_cycle"))
     # est-fanout-cell (sys-96dcod): the cell's CROSS-node laws — the pairing is a
     # machine-checked edge, never prose. `from` must name a real fan-out node that
     # is a DIRECT `after` parent of the partner (the same data-edge law as
@@ -3274,8 +3385,11 @@ def structural_graph_errors(graph, extra_keys=()):
     if not isinstance(graph, dict):
         return [{"node": None, "field": "graph", "msg": "graph must be an object"}]
     errs = []
-    def E(field, msg):
-        errs.append({"node": None, "field": field, "msg": msg})
+    def E(field, msg, example=None):
+        row = {"node": None, "field": field, "msg": msg}
+        if example is not None:
+            row["example"] = example
+        errs.append(row)
     if ("nodes" not in graph and "include" not in graph
             and graph.get("old") is not None and graph.get("new") is not None):
         # E25/s36 (est-25t): the one untyped crash of the window was an amend
@@ -3292,7 +3406,8 @@ def structural_graph_errors(graph, extra_keys=()):
     for key in sorted(set(graph) - STRUCTURAL_GRAPH_KEYS - set(extra_keys)):
         # #509: layer hint + reload note + nearest-key on the refusal text;
         # the legacy prefix before the first `;` stays byte-identical.
-        E(key, unknown_graph_key_msg(key, STRUCTURAL_GRAPH_KEYS | set(extra_keys)))
+        E(key, unknown_graph_key_msg(key, STRUCTURAL_GRAPH_KEYS | set(extra_keys)),
+          example=_door_example("unknown_graph_key"))
     # #32: a file may state its dialect; absent = wf/1, unknown = refused.
     errs.extend(grammar_errors(graph))
     # #100: run-level concurrency limits, positive integers only.
@@ -3399,7 +3514,10 @@ def validate_graph_full(graph):
     errs.extend(validate_graph_errors(safe, admission=True,
                                       defaults=graph.get("defaults")))
     errs.extend(_run_ref_scan(graph, safe))
-    return errs
+    # z79: every row of a rejection payload carries `example` (None = rule not
+    # yet banked) — the door and this shared full-graph measurement refuse with
+    # the SAME row shape (PR#84 F-2 parity law extended to the example channel).
+    return stamp_error_examples(errs)
 
 
 def _run_ref_scan(graph, safe_nodes):

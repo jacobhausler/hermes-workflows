@@ -29,9 +29,9 @@ SMART DEFAULTS (v1 — exactly two shapes are synthesized):
     of double-dispatching (idempotent by construction).
 
 REFUSALS (the two misuse paths) carry `example`: the minimal accepting input,
-rendered by this module. When the door-side example channel (bd_2026-11-13-z79,
-structured examples on validation rules) lands, START_EXAMPLE may re-route
-through it; until then this module's static string IS the teach example.
+banked on the door's rule-example channel (bd_2026-11-13-z79, structured
+examples on validation rules) as RULE_EXAMPLES["start_spec"] and rendered
+lazily from there — one bank, one teach example, no second copy to drift.
 
 Stdlib-only besides the door's own `_yaml_load` policy (hermes_yaml / ruamel /
 pyyaml, whichever the seat has); a seat without any YAML loader keeps working
@@ -60,19 +60,31 @@ def _yaml_module():
 SHAPES = ("recon", "build", "review", "publish")
 MAX_SLUG = 40
 
-# The static teach example: five-line YAML, spec-compliant BY CONSTRUCTION
-# (test_start_verb round-trips it through parse_input).
-START_EXAMPLE = (
-    "name: charter-review\n"
-    "nodes:\n"
-    "  - {id: load, goal: 'Read charter.json and answer with exactly {\"items\": [one string per open item]}'}\n"
-    "  - {id: review, goal: 'Review this item and report the finding', items_from: load.items, after: [load]}\n"
-    "# shape per node: recon|build|review|publish (defaults to review for review-phrased goals)"
-)
-PLAIN_EXAMPLE = (
-    'workflow {"action": "start", "goal": "audit the requirements file and report every gap"}\n'
-    "# or the five-line form:\n" + START_EXAMPLE
-)
+# The teach example is DATA on the door's rule-example bank (z79):
+# RULE_EXAMPLES["start_spec"], spec-compliant BY CONSTRUCTION
+# (test_start_verb round-trips it through parse_input). Rendered lazily so
+# the door's path-loaded wfcommon binding (bind_wfcommon) is always honored
+# — a plain module constant here would force an import-time lookup that
+# could land on another plugin's wfcommon.
+def _start_example():
+    return _yaml_module()._door_example("start_spec")
+
+
+def _plain_example():
+    return (
+        'workflow {"action": "start", "goal": "audit the requirements file and report every gap"}\n'
+        "# or the five-line form:\n" + _start_example()
+    )
+
+
+def __getattr__(name):
+    """START_EXAMPLE / PLAIN_EXAMPLE keep resolving for callers (PEP 562),
+    rendered from the bank on access."""
+    if name == "START_EXAMPLE":
+        return _start_example()
+    if name == "PLAIN_EXAMPLE":
+        return _plain_example()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 class Refusal(Exception):
@@ -83,7 +95,7 @@ class Refusal(Exception):
 
 
 def _spec_error(msg):
-    return {"error": f"start: {msg}", "usage": PLAIN_EXAMPLE, "example": START_EXAMPLE}
+    return {"error": f"start: {msg}", "usage": _plain_example(), "example": _start_example()}
 
 
 def _looks_like_spec(text):

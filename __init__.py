@@ -201,6 +201,7 @@ def _model_policy_error(graph):
                          "msg": f"model policy: node {nid} resolves to forbidden model {effective!r}"})
     if not errs:
         return None
+    _common.stamp_error_examples(errs)   # z79: rejection rows carry `example`
     first = errs[0]
     return {"error": f"graph invalid: node {first['node']}: {first['msg']}", "errors": errs}
 
@@ -324,6 +325,11 @@ def _validation_error(graph, run_dir=None):
     errs.extend(admission_ledger_errors(graph, run_dir=run_dir))
     if not errs:
         return None
+    # z79: every rejection row carries `example` (structured accepting fragment
+    # on the rule, or None for a rule not yet banked) — one stamp at the door's
+    # single composition point keeps the key universal without touching every
+    # sub-error helper's own shape pins.
+    _common.stamp_error_examples(errs)
     first = errs[0]
     head = first["msg"] if first["node"] is None else f"node {first['node']}: {first['msg']}"
     # #509(a): every graph_invalid refusal banner names the door's own version;
@@ -855,7 +861,7 @@ WORKFLOW_PARAMS = {
         "action": {
             "type": "string",
             "enum": ["run", "start", "status", "wait", "release", "release_lock", "steer", "inbox", "amend", "diff", "stop", "kill", "redrive", "list", "save", "submit", "library", "doctor_version", "validate"],
-            "description": "run=launch a graph; start=one plain-language goal string OR a five-line yaml spec (name, goal|nodes) in, the smallest synthesized graph dispatched out: smart defaults (provider = the seat's own route, timeout+budgets from the shape census, lane-key <team>/start-<slug> so a double-start dedupes while unfinished), validated through the existing run door; returns run_id + watch (the one status command); misuse refusals carry the accepting example. v1 synthesizes single-node and fixed-fanout-from-a-json-path shapes only — plural prose is not inferred, name items_from per node. wait=OPTIONAL blocking observation (not the default loop: lifecycle transitions wake the owner session on their own — end your turn after run); read state, RESPAWNING an idle runner if work is pending (blocks to the next boundary when one is live; when the lock is PROVEN wedged — Errno 11 with the kernel ledger showing zero holders and the admission lease dead — wait heals it first, the #44 escape hatch); status=read-model of a run (optional seats:true attaches the engine-wide seat-pool occupancy block — cap, live, holders, FIFO queue as a query, read-only); release=answer a held human gate; release_lock=operator hatch for a wedged runner.lock (#44): renames the stranded inode aside under the admission heal-barrier and hands the lane a fresh lock path — REFUSES unless zero live holders are proven (never heals on EACCES or a live holder); steer=queue steering text for a node; inbox=(child-side, cooperative) pull late steering lines baked for THIS spawn — call once at a natural seam; amend=replace the graph (invalidates changed nodes + all downstream by fingerprint), or pass patch to edit a few node fields without resubmitting the whole graph; submitted node text carrying {run.KEY} re-binds from the run's persisted launch binding (run_context_binding) or the amend refuses before any write (est-qohvi); diff=confirm surface: runs the amend door with dry_run FORCED (accepts patch or graph), returns the preview + graph_diff and touches nothing; stop=request stop; kill=node-targeted lane kill (node required): that lane's in-flight children are SIGKILLed, the node finishes failed error_class=killed, siblings and the run keep going; redrive=engine retry-failed-run (#692 slice 1, mode REQUIRED, no default): drop the failed lanes' committed records + the runner verdict, relaunch detached, resume from the preserved completed receipts; mode=same-fingerprint-resume refuses (writes nothing) when a completed receipt's effective fingerprint has drifted — mode=new-fingerprint-rerun re-drives drifted lanes under the efp override rule; the response enumerates re_drive + preserved receipts and consumes any scheduled watchdog redrive.request; list=all runs; save=shelve a graph in the library under a name (from run_id or inline graph); library=list shelved graphs richly (name, description, tags, provenance, path-relative id); optional check:true echoes a digest re-check block — the shelf-vs-author drift verb (est-dv8q4). validate=dry-run the door's validation pipeline (defaults fill + defect collection + model/route policy) with no ping and no writes; returns {ok, errors:[{node,field,msg}], resolved_routes}. run from=<name> replays a shelved graph. submit=quarantine a hand-rolled graph for study (requires why_not_library >=80 chars; never joins the library — the quartermaster's human-gated loop decides); inbox kind=submissions lists them newest-first. doctor_version=read-only version truth for THIS install: {live_version, newest_packaged, source_commit, source_repo, drift} comparing plugin.yaml against the install.json provenance that pack.py stamps at build time (one sidecar schema; a sidecar predating source_repo loads and reads null) \u2014 one read, no network.",
+            "description": "run=launch a graph; start=one plain-language goal string OR a five-line yaml spec (name, goal|nodes) in, the smallest synthesized graph dispatched out: smart defaults (provider = the seat's own route, timeout+budgets from the shape census, lane-key <team>/start-<slug> so a double-start dedupes while unfinished), validated through the existing run door; returns run_id + watch (the one status command); misuse refusals carry the accepting example. v1 synthesizes single-node and fixed-fanout-from-a-json-path shapes only — plural prose is not inferred, name items_from per node. wait=OPTIONAL blocking observation (not the default loop: lifecycle transitions wake the owner session on their own — end your turn after run); read state, RESPAWNING an idle runner if work is pending (blocks to the next boundary when one is live; when the lock is PROVEN wedged — Errno 11 with the kernel ledger showing zero holders and the admission lease dead — wait heals it first, the #44 escape hatch); status=read-model of a run (optional seats:true attaches the engine-wide seat-pool occupancy block — cap, live, holders, FIFO queue as a query, read-only); release=answer a held human gate; release_lock=operator hatch for a wedged runner.lock (#44): renames the stranded inode aside under the admission heal-barrier and hands the lane a fresh lock path — REFUSES unless zero live holders are proven (never heals on EACCES or a live holder); steer=queue steering text for a node; inbox=(child-side, cooperative) pull late steering lines baked for THIS spawn — call once at a natural seam; amend=replace the graph (invalidates changed nodes + all downstream by fingerprint), or pass patch to edit a few node fields without resubmitting the whole graph; submitted node text carrying {run.KEY} re-binds from the run's persisted launch binding (run_context_binding) or the amend refuses before any write (est-qohvi); diff=confirm surface: runs the amend door with dry_run FORCED (accepts patch or graph), returns the preview + graph_diff and touches nothing; stop=request stop; kill=node-targeted lane kill (node required): that lane's in-flight children are SIGKILLed, the node finishes failed error_class=killed, siblings and the run keep going; redrive=engine retry-failed-run (#692 slice 1, mode REQUIRED, no default): drop the failed lanes' committed records + the runner verdict, relaunch detached, resume from the preserved completed receipts; mode=same-fingerprint-resume refuses (writes nothing) when a completed receipt's effective fingerprint has drifted — mode=new-fingerprint-rerun re-drives drifted lanes under the efp override rule; the response enumerates re_drive + preserved receipts and consumes any scheduled watchdog redrive.request; list=all runs; save=shelve a graph in the library under a name (from run_id or inline graph); library=list shelved graphs richly (name, description, tags, provenance, path-relative id); optional check:true echoes a digest re-check block — the shelf-vs-author drift verb (est-dv8q4). validate=dry-run the door's validation pipeline (defaults fill + defect collection + model/route policy) with no ping and no writes; returns {ok, errors:[{node,field,msg,example}], resolved_routes} — every rejection row carries `example`, the minimal accepting fragment for the rule that fired (null when the rule has no banked example). run from=<name> replays a shelved graph. submit=quarantine a hand-rolled graph for study (requires why_not_library >=80 chars; never joins the library — the quartermaster's human-gated loop decides); inbox kind=submissions lists them newest-first. doctor_version=read-only version truth for THIS install: {live_version, newest_packaged, source_commit, source_repo, drift} comparing plugin.yaml against the install.json provenance that pack.py stamps at build time (one sidecar schema; a sidecar predating source_repo loads and reads null) \u2014 one read, no network.",
         },
         "run_id": {"type": "string", "description": "Run id (required for every action except run/list/start)."},
         "goal": {"type": "string", "description": "start only: the ONE input — a plain-language goal string (synthesizes a single agent node riding the seat's own route) OR a five-line yaml spec {name?, goal | nodes:[{id, goal, items_from?, after?, shape?}], shape?} (fixed fan-out: a node with items_from gets fanout:{items_from} verbatim). Refusals return {error, example}. Optional alongside: team (lane-key prefix <team>/start-<slug>), lane_key (explicit override of the derived key), name (overrides the spec/goal-derived run name), dry_run (door gates, nothing written)."},
@@ -908,7 +914,7 @@ WORKFLOW_PARAMS = {
             "included subtree ONLY, `exports` an optional {inner_id: public_name} map. Included nodes land namespaced as `alias__<id>`; parent refs must name an exported public name or a literal alias__id (a bare inner id is refused); a present-but-malformed "
             "include (null, object, empty list) is refused; an included graph's model_policy.forbidden_models unions into the parent (noted in include_notes); the committed graph.json is "
             "the EXPANDED, include-STRIPPED truth (amend edits the expanded form; save shelves the author form with the include key — save(run_id) of a composite run refuses, save the author graph inline). Every guard refusal — unknown library entry, include cycle, alias/id collision, unbound seed, oversized merge — returns the same "
-            "errors:[{node:'include:<alias>', field, msg}] envelope before any write or spawn; non-fatal resolver warnings (e.g. a shared fixed scratch path) echo as include_notes on run/status and run.json records provenance `includes:[{alias, name, source_digest}]`. "
+            "errors:[{node:'include:<alias>', field, msg, example}] envelope before any write or spawn; non-fatal resolver warnings (e.g. a shared fixed scratch path) echo as include_notes on run/status and run.json records provenance `includes:[{alias, name, source_digest}]`. "
             "Full grammar and worked examples: references/grammar.md in the `workflow` skill — read it before authoring your first graph. "
             "Join node: {id, type:'join', after:[ids], keys:{label:'<node_id>.<dotted.path>', ...}, wait:'terminal'|'any'} "
             "— commits a deterministic json object {label: resolved parent output} at the wave boundary with zero tokens "
@@ -916,7 +922,7 @@ WORKFLOW_PARAMS = {
             "to settle and fails the join if any failed; wait:'any' fires once one parent is done/partial and drops the "
             "keys of failed/skipped legs (fan-out-quorum flavour); a key whose committed parent lacks the dotted path "
             "fails the node as an author typo. "
-            "Any key outside these closed sets is rejected at run/amend with errors:[{node, field, msg}] for EVERY defect."
+            "Any key outside these closed sets is rejected at run/amend with errors:[{node, field, msg, example}] for EVERY defect — `example` is the rule's minimal accepting fragment (null when not yet banked), so a refusal is fixable without reading the grammar source."
             ),
         },
         "answer": {"type": "string", "description": "release: the human's answer text (from clarify)."},
@@ -1984,8 +1990,8 @@ def _library_reader():
 
 def _include_error_from_valueerror(e):
     """A resolver ValueError rides the existing door error envelope (the
-    _validation_error shape, __init__.py's errors[{node,field,msg}] + error head).
-    The alias is extracted from the resolver's `include '<alias>': ...` wording so
+    _validation_error shape, __init__.py's errors[{node,field,msg,example}] + error
+    head). The alias is extracted from the resolver's `include '<alias>': ...` wording so
     the row names `include:<alias>` as its node; a bare message still lands in one
     named row rather than an untyped crash."""
     msg = str(e)
@@ -1993,7 +1999,8 @@ def _include_error_from_valueerror(e):
     if msg.startswith("include '") and "':" in msg[9:]:
         node = "include:" + msg[9:msg.index("':")]
     return {"error": f"graph invalid: node {node}: {msg}",
-            "errors": [{"node": node, "field": "include", "msg": msg}]}
+            "errors": [{"node": node, "field": "include", "msg": msg,
+                        "example": None}]}
 
 def _unbound_include_refs(graph, provenance):
     """Fail-closed check for composite runs (live composite-run receipt, 2026-09-30): after include
@@ -2733,7 +2740,7 @@ def act_library(args):
 def act_validate(args):
     """Dry-run the door's validation pipeline WITHOUT liveness ping or any write:
     the same defaults fill, defect collection, and model/route policy run/amend do,
-    in the same order, returning {ok, errors:[{node,field,msg}], resolved_routes}.
+    in the same order, returning {ok, errors:[{node,field,msg,example}], resolved_routes}.
     #85: given run_id, the #85 artifact-admission guard additionally measures the
     declared artifact bytes against that run dir (the same law amend applies)."""
     graph, bad = _input_graph(args)
@@ -2766,14 +2773,15 @@ def act_validate(args):
         graph = _common.apply_graph_defaults(graph)
     except ValueError as e:
         return {"ok": False, "error": f"graph invalid: defaults/shape: {e}",
-                "errors": json.loads(str(e))}
+                "errors": _common.stamp_error_examples(json.loads(str(e)))}
     bad = _profile_error(graph) or _model_policy_error(graph)
     if bad:
         return dict(bad, ok=False)
     err, _models, routes = _resolve_models(graph["nodes"])
     if err:
         return {"ok": False, "error": err,
-                "errors": [{"node": None, "field": "model", "msg": err}]}
+                "errors": [{"node": None, "field": "model", "msg": err,
+                            "example": None}]}
     out = {"ok": True, "errors": [], "resolved_routes": routes,
            "hint": "validated only — nothing pinged or written; run it: workflow run graph=..."}
     # est-vj8m (#256 ask 2), UNION with s12 (#421): shape-p95 budget advisory
@@ -3129,6 +3137,7 @@ def _profile_error(graph):
                                   profiles_dir=_common.profiles_root())
     if not errs:
         return None
+    _common.stamp_error_examples(errs)   # z79: rejection rows carry `example`
     first = errs[0]
     return {"error": f"graph invalid: node {first['node']}: {first['msg']}", "errors": errs}
 

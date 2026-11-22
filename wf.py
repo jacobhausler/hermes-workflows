@@ -13600,6 +13600,12 @@ def _cli_validate(argv):
             if isinstance(e, dict):
                 where = f"node {e['node']}" if e.get("node") else "graph"
                 print(f"  {where}: {e.get('field')}: {e.get('msg')}")
+                # z79: the rule's minimal accepting fragment rides every row;
+                # human mode prints it under the defect so the fix is readable
+                # without --json (the payload always carried it).
+                if e.get("example") is not None:
+                    print("      accepting example: "
+                          + json.dumps(e["example"], ensure_ascii=False))
             else:
                 print(f"  graph: {e}")
     # #479 adversary pin: the warning rows are a HUMAN-channel surface.

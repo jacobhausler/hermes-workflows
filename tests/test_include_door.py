@@ -203,7 +203,9 @@ check("D7 schema description documents include",
       and "alias__<id>" in desc and "include_notes" in desc, desc[:150])
 check("D7 the caps-pin closer is kept verbatim",
       desc.endswith("Any key outside these closed sets is rejected at run/amend with "
-                    "errors:[{node, field, msg}] for EVERY defect."))
+                    "errors:[{node, field, msg, example}] for EVERY defect — `example` "
+                    "is the rule's minimal accepting fragment (null when not yet "
+                    "banked), so a refusal is fixable without reading the grammar source."))
 # F-6 (review): a runtime schema-surface assertion, not an implementation-text/
 # line-width grep. What the schema must guarantee is that the AGENT-VISIBLE surface
 # (the parameter schema itself, whatever its source lines look like) fully names the
@@ -212,7 +214,7 @@ check("D7 the caps-pin closer is kept verbatim",
 check("D7 the runtime graph schema names the whole composite contract",
       all(f in desc for f in ("`include:[{as, use, seeds?, exports?}]`", "alias__<id>",
                               "include-STRIPPED", "save(run_id)", "include_notes",
-                              "errors:[{node:'include:<alias>', field, msg}]")),
+                              "errors:[{node:'include:<alias>', field, msg, example}]")),
       "missing a contract surface in the schema description")
 
 # ---------- D8: provenance + include_notes on a shared-path fixture ------------
