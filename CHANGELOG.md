@@ -2,6 +2,451 @@
 
 ## Unreleased
 
+## 1.4.12 — 2026-11-22
+
+Patch release: 17 merged commits over v1.4.11 (oldest cf577a4,
+2026-11-19), assembled mechanically from `changelog.d/` fragments — the
+first fold by the release train itself (#531 landed after v1.4.11 was
+hand-assembled). The ledger also carried 45 fragments for changes already
+shipped in v1.4.10/v1.4.11; those were retired on this branch without
+re-claim, so the entries below name exactly what v1.4.12 delivers.
+
+- feat(changelog): `changelog.d/` fragments — one file per PR, assembled at release
+  Contributors no longer edit `CHANGELOG.md`; a lane adds `changelog.d/<PR-number>.md`
+  (or `changelog.d/<lane-token>.md` before a number exists) and the release commit folds
+  the directory into `CHANGELOG.md` with `python3 scripts/changelog_assemble.py fold`
+  (verbs: `list` preview, `check` validate, `fold` insert-and-consume; stdlib only, no
+  state file — the fragments themselves are the state, and their deletion is what makes
+  the fold non-repeatable). Why: `CHANGELOG.md` was one hunk every open lane edited, so
+  concurrent PRs conflicted on prose alone — on 2026-10-22 the queue read 12 of 15 open
+  PRs CONFLICTING, `CHANGELOG.md` among the conflicted files in 11 of those 12 and the
+  sole conflict in 8, and one merge at 11:55Z flipped a clean sibling dirty by 11:59Z.
+  Per-PR fragments make the
+  write surface disjoint, which removes that class of conflict instead of mediating it.
+  `CHANGELOG.md` is untouched by this PR, deliberately: it is the demonstration. Pinned
+  by tests/test_changelog_fragments_izi7.py (ordering determinism, the refusals,
+  region-scoped keep-both fold, and the double-post refusal with a mutation self-proof).
+
+- ### Fixed
+  - `tests/test_incident_response_93.py` no longer reds under fork-moment load in
+  the serial nightly: the parked-gate probe wall (`min(every_s, 300)`) sat at
+  0.3s, under the shipped `/usr/bin/python3` probe's cold-start tail on a busy
+  shared host (~1-in-6 spawns were SIGKILLed at the wall, and one face read the
+  incident diagnostic the killed probe left truncated-empty). `every_s` moves to
+  1.2s (~6x the measured max-completed over 105 samples) and the two dependent
+  deadlines scale by the same 4 factor (4.6s / 12s), preserving attempt counts
+  and case shapes. Timing-only: every behavioral assertion intact.
+
+- feat(wf,runner): disposition legibility, wake.jsonl first-class fields, honest error-class ladder
+  ONE total state->disposition table (wfcommon.DISPOSITION_BY_STATUS, documented
+  at the module head): done->SUCCEEDED, partial->PARTIAL, failed->FAILED,
+  failed+cancelled->CANCELLED, skipped->SKIPPED, running/interrupted/registered
+  ->UNKNOWN. Every run_state per-node view carries `disposition`; a torn
+  interruption demotion stamps disposition=unknown explicitly — an absent field
+  is never read as success, and no operator has to guess the state table again.
+  wake.jsonl rows (attempt and suppressed alike) are wake-observe/v2: the
+  dedupe law's own inputs — skey/rev/attempts — are first-class JSON fields,
+  parsed from the caller's transition payload or from the node's own efp-valid
+  record (a stale record contributes honest nulls). The legacy `|x:{...}`
+  double-escaped payload still rides the text for one release, so pre-v2
+  readers keep working; settled-instance dedupe is byte-identical.
+  The error-class ladder tells the truth about deterministic deaths.
+  `_classify_rc_output` classifies from the child's LAST `Error:` line: the
+  update-wall shape (banner head, noise, `Resume retains gateway session
+  policy; creation overrides are unsupported on resume.`) now types
+  `resume_policy` — closed-set member, outside both ladders, one spawn, zero
+  transient draws — and the record quotes the refusal, never the banner.
+  Account-state 429s split from the credential window: quota phrases widen to
+  the billing/quota-cap family and the class emits
+  `quota_exhausted{identity, reset}` — `reset: null` when the provider names no
+  horizon (the absence of a horizon is what proves it is an account state, not
+  a window) — at attempt 1, parking the lane pending on a re-pin instead of
+  legally burning the full attempt cap and 60 minutes of lane. The
+  `ratelimit` banner keeps its bounded park; a bare throttle 429 stays
+  transport, pinned. `fatal_quota` remains a closed-set member for historical
+  records.
+  Route-gate refusals are ONE conversation: `route_inexpressible` under an
+  armed creation-override strip names the arm that fired (env var with its
+  value; marker file with its full path and armed-at mtime), the exact `rm`
+  that lifts the hold, and the amend snippet quoted verbatim ({"patch":
+  {"nodes": {"<id>": {"require_route": false}}}}). `route_substitution_denied`
+  names the holding receipt's absolute path, the row, the file's mtime, and
+  surfaces the deletion escape — discard-the-run first, the estate's
+  re-admission preference. No est-id lore in operator-facing prose.
+  Schema rejections are universal: every `validate()` error carries the
+  violating JSON path AND the rejected value (`_fmt_val`: scalars verbatim,
+  containers as shape, long values truncated), so an error_class=schema
+  node.failed and its typed-correction prompt are self-contained. The s36
+  shape — an amend pointed at a stored {at, old, new} amends-ROW envelope —
+  dies with a named-rule refusal quoting the violated shape rule and the fix
+  (send the row's `new` half) instead of the bare `'NoneType' object is not
+  iterable`, and the ref-scan seam survives a nodes-less input.
+  Tests: tests/test_disposition_table_25t.py, test_wake_first_class_25t.py,
+  test_resume_policy_25t.py, test_quota_horizonless_25t.py,
+  test_route_gate_dialog_25t.py, test_schema_rejection_values_25t.py; equality
+  pins retargeted in test_session_wake_matrix_101, test_fatal_quota_24,
+  test_ratelimit_54, test_error_classes_exhaustive_vb65,
+  test_plugin_asks_164_fallback, and the six validator-pin files.
+
+- **Notice funnel, loud delivery misses, and gate-holds that carry their payload (E10/E11/E13, bd_2026-11-13-mnd)**. Fixed: `run.failed` wakes are now rendered as a DELTA
+  of the committed failed set (ids + per-node efp + amendment rev + crash
+  generation): an unchanged set re-notices zero times — each zero-delta
+  re-try writes one typed `funnel:"suppressed"` audit row to
+  `wake.jsonl` instead of an owner turn. `node.action_required` dedupes by
+  state identity `sha256[skey, efp, attempts-set, rev]` — a genuine
+  amendment re-arms (the #610 amendment-generation law stays whole under
+  the funnel). Same-root cascades
+  coalesce: the leading failure notifies immediately, dependent and
+  same-`error_class` members (120 s window) fold into
+  `notices/cascade.json` with one `cascade_of=<root>` audit row each
+  (measured before: 33 re-notices / 16 zero-info / 9-notice 74 s fan).
+  Loud delivery misses (E11): the admitted runner states the run's
+  notice-route truth at accept (`notice_route.json`, `notice.route` event,
+  `WORKFLOW_NOTICE_ROUTE ... drop_risk=...`); every non-delivered outcome
+  appends a typed row to `notice_drop.json` (class from the closed
+  `error_class` set, now stamped on every `_wake_deliver` branch); the
+  terminal line carries it: `WORKFLOW_DONE <run> notice_drop=<class>`.
+  The orphaned-from-outside shape (owner polling an unwoken finished run)
+  is gone: the miss is named at accept and recorded at drop time.
+  Gate holds carry their payload (E13): `gate.held` notices now render
+  `gate_id`, a diff-first `gate_hold_diff` verdict over
+  question/options/context (per-field `new_hold|changed|unchanged|added|
+  removed` against the previous hold row), `gate_hold_dwell_s` from the
+  hold marker, and the rendered question/options/context (clamped 2000
+  chars) as inert JSON-quoted protocol fields read from the committed
+  graph at the notify point; the ledger row carries `gate` + `gate_fields`
+  digests for machine readers. Operators no longer poll status to learn
+  what a hold asks (cold-seat reproduction: 28/28 missed question_found).
+  Added: `docs/notice-ledger.md` — the named data shapes of the notice
+  ledger (StateIdentity, FailedSetBaseline, StateIdentityLedger,
+  CascadeRecord, NoticeDropRow, NoticeRouteStamp), the fail-open law, and
+  the audit reason codes; plus `tests/test_notice_funnel_mnd.py`,
+  `tests/test_notice_drop_mnd.py`, `tests/test_gate_hold_payload_mnd.py`.
+  Changed: `test_session_wake_matrix_101` / `test_wake_payload_pointers_501`
+  authority pins amended with the E13 ruling: graph prose may ride the
+  notice ONLY inside the quoted pointer segment; the instruction body
+  after the separator stays template-verbatim; bearer and validator-prose
+  bans unchanged.
+
+- ### Added
+  - `status` gains an opt-in `seats:true` flag: an engine-wide seat-pool
+  occupancy block — `{dir, cap, live, free?, holders:[{pid, name?, held_for_s,
+  child_pid?}], queued:[{pid, name?, waited_s}]}` — derived read-only from
+  the ledgers admission itself writes. Liveness authority becomes a query
+  instead of pgrep + log-staleness heuristics: the pool cap (first-admission
+  record), live holders verified by the occupant law (a recycled pid is a
+  stranger), uncertain tickets counted, and the FIFO queue with per-waiter
+  wait times, longest first. The read never prunes and never seeds, so it
+  can only over-report, never void the cap; without the flag every status
+  payload is byte-identical to previous builds.
+
+- ### Fixed
+  - The SIGTERM killer fields (#679) now capture via `sigwaitinfo` instead of signalfd: signalfd4(2) is refused (EBADF) under the
+  kernel 7.0.0 seccomp posture fleet-wide, so the measured fields silently
+  self-skipped on the very hosts the feature was filed for. Same record shape,
+  working capture; the detach harness also stops racing its own fake (real
+  QSLEEP hang, kill after handler install).
+
+- **`redrive` — the engine retry-failed-run (#692 slice 1, est-637e1)**:
+  `action:"redrive"` (beside run/kill/steer) and `wf.py redrive <run_id>
+  --mode=<mode>` take `run_id` + a REQUIRED `mode` with **no silent
+  default** (wake-consumer law): one transaction under the door lock drops
+  the failed lanes' committed records (fan-out DONE items untouched) and
+  the runner verdict, then relaunches detached through the door's ONE
+  respawn bridge — reaper first, so a SIGKILL scene still gets its
+  interruption receipts before the new generation boots.
+  `same-fingerprint-resume` refuses, writing nothing, with
+  `redrive_fingerprint_drift` naming the nodes when a committed
+  done/partial/skipped receipt sits under an effective fingerprint the
+  current graph no longer produces; `new-fingerprint-rerun` re-drives the
+  drifted receipts under the efp override rule (stale == pending, amend's
+  law). The response enumerates both sides of the transaction: `re_drive`
+  and the preserved receipts (`{node, status, at, efp}`,
+  fan-out items by `{node, item, ...}`). A scheduled watchdog
+  `redrive.request` is CONSUMED here (the tick keeps scheduling, the verb
+  consumes — no second scheduler) and the P40 retry-grant ledger zeroes at
+  the generation boundary; `run.redriven` lands on the event record.
+  - `tests/test_redrive_verb_692.py` — 22 checks over the real runner + a
+  stub hermes: mode law, receipt-preservation (byte-identical completed
+  record AND zero new spawns for done lanes), drift refusal/acceptance,
+  continuation consumption, CLI no-default law.
+
+- chore(ci): roll HERMES_PIN v0.23.1 -> v0.23.3 (current stable; two lint rows retired)
+  CI pins the core for reproducible gates; v0.23.3 is current stable. The
+  re-pin probe ran clean at the tag: hook contract PASS, validate 57/57,
+  soft-guard variant green, and every consumed symbol intact. v0.23.3
+  published agent.retry_utils:parse_retry_after_seconds and
+  hermes_yaml:safe_load into the plugin API, so the private-import lint no
+  longer reports them — the two matching allow-list rows retired (v0.22.6
+  session_context precedent). The v0.23.1..v0.23.3 delta was scanned by
+  scripts/pin_delta_check.py (fail-closed gate, first run under it): every
+  finding allowlisted with per-class evidence in
+  docs/pin-delta-v0.23.3-allowlist.txt. No behavioral delta for plugin
+  runtimes beyond the tag bump; the measured requires_hermes floor is
+  unchanged.
+
+- test(runner): suite-concurrency-safe budgets for the canary/runner-spawning family (est-bwqq1)
+  The nightly full-suite serial pass reds on five runner-spawning timing tests
+  that are standalone-green; every red is a FLAT wall or fixed sleep that cannot
+  tell tenant load from a hang (attribution + ledgers in #699). This PR makes the
+  family suite-concurrency-safe without touching the contracts it pins:
+  - the two 20-cycle harness hooks (crash_resume, lane_supervisor) get a
+  progress-aware wall: re-arm 60s per streamed flush=True cycle line, hard cap
+  600s — the harnesses already emit one line per cycle;
+  - machine-watch drops its every_s=1.0 gate override (the per-attempt probe
+  budget min(every,300) re-straddles the measured boot tail; the shipped
+  example cadence every_s=3.0 never flakes) and raises the direct check()
+  probe wall 5 -> 30;
+  - the model-law fan budgets go node_timeout 20 -> 60 and outer wall 60 -> 120
+  (the mixed_fake execv boot chain overran the fan wall under load and the
+  node committed timeout-class WITHOUT failed_detail);
+  - the terminal-handoff fence polls runner_exit.json to a 45s deadline instead
+  of a fixed 0.2s sleep;
+  - the wall-extension fixtures move to a survive band that admits observed boot
+  lag: (1) timeout 8 -> 30 / pulse 10 -> 31, (2) timeout 2 -> 8,
+  elapsed < 8 -> < 16.
+  No shipped-code change: budgets, cadences and waits only.
+
+- test(ci): suite-concurrency-safe poll budgets in the canary/runner harnesses (est-lg94s)
+  Follow-up to #700 on the same class (#699). The six re-timed hooks still spawn
+  the standalone 20-cycle harnesses, and those harnesses carried their own fixed
+  polling walls: until(pred, 5) against runner liveness and completion, and
+  act_wait(timeout=1). The 2026-11-21 concurrent storm arm measured runner cold
+  boots up to 8.7 s, so a 5 s "runner never live" wall is the same load-critical
+  seam #700 removed everywhere else. Every budget below is an upper bound on a
+  POLL (returns the moment the predicate holds), so widening costs nothing on a
+  quiet machine:
+  - tests/11-canary.py, tests/11-lane-supervisor.py: until() default 5 -> 20
+  (>2x the measured worst boot), act_wait timeout 1 -> 8, done-poll 5 -> 20;
+  - the wall-extension frozen-witness leg's outer bound elapsed < 16 -> < 20:
+  the wall+50% discrimination is owned by the deterministic no-extension event
+  check, so this number is only a runaway guard, and boot (worst 8.8 s) + the
+  8 s wall + kill/settle legitimately crosses 16 under storm.
+  No shipped-code change: fixture budgets only. The rest of the original fold
+  (hook-helper rework, per-file comment rewrites) is superseded by the #700
+  merge and dropped in this rebase.
+
+- docs(runtime): close the wave-3 map — six shipped runtime surfaces get a home
+  The runtime doc map promised amendment-applied.json before E18 shipped it and
+  never mapped the disposition table, the wall account, the quarantine layout,
+  the live steer mechanism, or the seats readout (wave-3 s21/s25/s36 doc-gap
+  lines). All six are shipped behavior now — this closes the map, not the code.
+  New docs/runtime/ tree, numbered, cold-seat legible: 00-map answers the six
+  questions up front with citations; 01-quickstart carries the full run-dir
+  layout (including quarantine/, logs/boundary.log,
+  nodes/<id>/amendment-applied.json, side_effects.jsonl); 02-disposition pins
+  the ONE total table and where the field surfaces; 03-incidents accounts wall
+  deaths (wall_account fields, prose twin, adopt path), maps durable
+  quarantine rows (stage/proof vocabularies, item-record stamps, the three
+  quarantines named apart), and the recover readout; 04-amendments separates
+  admission (amends.jsonl, revision = line ordinal = graph_revision) from
+  application evidence (per-node amendment-applied.json, boundary.log,
+  row_torn, idempotent per revision, fail-open); 05-steering states the live
+  mechanism (bake-at-spawn receipts, opt-in pull proven only by
+  steer.consumed + cursor advance, cues drained not re-baked, delivery
+  receipts); 06-seats documents the seats:true read block and the ledger files
+  it derives from. Every claim resolves through a Citations block; pending
+  surfaces carry a ships-in-PR tag rather than a silent promise.
+
+- Runner death is loud and clean through the watchdog tick (bd_2026-11-13-3qo, E23)
+  The tick now REAPs as loudly as it revives: a dead-runner run with a death
+  scene (dead `wf.pid` and/or node records claiming `running`) wakes the OWNER
+  SESSION in the same tick, naming the dead pid, the lost lanes and the
+  re-drive plan, with the row on `wake.jsonl` deduped by the scene tid (one
+  wake per death, never a re-notice). SIGKILLed runners used to record nothing
+  while `act_wait` quietly replaced them.
+  A re-drive the tick cannot perform (wedged-lock heal refusal) is SCHEDULED as
+  a one-shot `redrive.request` continuation carrying its own expiry; the
+  consumer enforces it — past-due is dropped with `watchdog.redrive_expired`
+  and never re-fired from an old receipt (the launchd-treadmill law: a one-shot
+  maintenance continuation without an expiry becomes a perpetual boot tax).
+  Holders-dead pruning: a terminal run over a dead runner loses its `wf.pid`
+  corpse and its `lanes/<stem>.json` claim (under the entry's own lock, so a
+  concurrent relaunch is never clobbered); an unfinished run keeps its claim.
+  Behavior test: tests/test_death_loud_3qo.py (fake cron + wake_native stub in
+  a stable-root copy; asserts observable outcomes only). Idempotent by
+  construction: a rerun converges, refreshes count tries without extending the
+  expiry, and settled scenes deliver once.
+
+- Respawn grant ledger resets per runner generation (bd_2026-11-13-3qo, P40)
+  The transient ladder persists its spend to `retry-window.json` so a killed
+  boot cannot amplify attempts past the node cap — but the same persistence
+  made those grants a LIFETIME debt: the estate's pre-heal boot saved 2 grants,
+  the post-update boot read `attempts >= cap`, refused every spawn as
+  `lifetime_cap_spent`, and genuinely new transient deaths under fixed code were
+  capped by a dead boot's spend (the same ghost-debt shape the 18-day launchd
+  treadmill wore out).
+  The watchdog's revival path is the runner-generation boundary, so it now
+  zeroes `attempts` on every respawn it performs, before the fresh boot can
+  read the file: the new generation grants retries from its own ledger. The
+  deadline (the backoff pacer) and the attempt log survive byte-exact — reset
+  per generation stays paced and evidence-preserving. The boundary is on the
+  event record (`watchdog.grant_ledger_reset`, naming the spent grants) exactly
+  once per boundary that actually spent anything; a rerun converges, an absent
+  or corrupt ledger is never clobbered.
+  Behavior test: tests/test_grant_ledger_generation_3qo.py.
+
+- Steer delivery truth and wall truth (bd_2026-11-13-42t, E14+E24)
+  E14 — the steer.baked receipt now states the ONE guaranteed mechanism
+  (`mechanism: bake-at-spawn`) and COUNTS the budget cues drained for that spawn
+  (`drained_cues: N`). A budget cue is the dying generation's fact: the claim
+  file stamps which spawn earned it, and every LATER spawn DRAINS the inbox line
+  instead of re-baking it into the steer file or re-feeding it into the runner's
+  prompt injection — a stale 'budget left: N' can never lie against a fresh
+  budget. The drain is an event fact (`budget_cue.drained`), never a silent
+  swallow. The live pull stays an OPT-IN child seam: it happened exactly when a
+  `steer.consumed` event and the per-spawn cursor advance exist, never otherwise.
+  The fake seat's child interpreter is now the runner's own (`HERMES_WF_PYTHON`,
+  stamped at the spawn seam) so the pull seam survives on a seat whose
+  `/usr/bin/python3` predates the door's syntax — the reason s38 pull_count
+  scored zero on mac seats while every cursor stayed 0.
+  E24 — the declared node timeout is honored or clamped LOUDLY at bake time. An
+  effective wall below the author's number is a `node.timeout_clamped` event
+  naming declared-vs-effective and every reason that moved it (park_cap /
+  resume_wall / bake), never a silent min(). A death on the wall carries the same
+  account as prose AND structure: the failure text reads `timeout after Xs
+  (declared Ds, clamped at bake to Bs (park_cap), +Es extension grant (basis
+  S), died at effective Xs)` and the record gains a `wall_account` dict. The
+  adopted-child wall death names the same account (the one adopted grant, if it
+  moved the wall). The owner never sees a wall the author didn't write.
+  Behavior tests: tests/test_steer_delivery_truth_42t.py (S1 stale-cue drain on
+  the respawn bake + prompt channel, S2 live pull + cursor + spawn-env stamp) and
+  tests/test_wall_truth_42t.py (W1 grant-moved-the-wall death names
+  declared-vs-effective, W2 parked-respawn clamp event at the bake, W3 the
+  1500+750=2250 evidence phrase) — assert observable outcomes only. Golden
+  sanctioned deltas: `HERMES_WF_PYTHON` env key and the two new `steer.baked`
+  receipt fields are excluded both sides; presence is proven by the behavior
+  test, not the frozen capture. Idempotent: the budget-cue claim is O_EXCL per
+  (node,index) for the life of the run; the drain consumes the line exactly once.
+
+- feat(wf): recovery-state readout, fan item-level ledger, amendment application evidence (E16/E17/E18, bd_2026-11-13-4hc)
+  RECOVERY-STATE READOUT. No command rendered "what effects are durable,
+  which record is torn, what re-drive order is idempotent" on a post-kill
+  run — every SIGKILL/torn-import family scored 0 on applied_set_exact.
+  `wf.py recover <run_id>` answers it in one JSON line, computed from the
+  side-effect journal + node records + graph.json alone (never memory):
+  {applied[], torn[], unprovable[], safe_redrive[]}. applied = journal rows
+  valid under the current graph; torn = physical lines that never fully
+  landed (UNPROVEN, not absent, named by line/bytes/head); unprovable =
+  parsed rows orphaned by node-gone / amended-efp / not-a-row; safe_redrive
+  = unfinished nodes in after-edge topological order with per-node
+  reconcile/fresh modes against the durable effects.
+  FAN ITEM-LEVEL LEDGER. Deferred item addressing became observed demand:
+  #61 tree quarantine now writes durable rows to
+  <run>/quarantine/<node>[.<index>].jsonl ({ts,node,index,stage,pids,proof})
+  at every kill/reap/fail-closed instant, and every finalized item record
+  carries `disposition` (the ONE total table), a `quarantine` target with a
+  path that EXISTS whenever the (node, item) was quarantined, and
+  `receipt_vs_parent` {claim_status, output_matches, problem, at} — each
+  item's receipt adjudicated against the parent aggregate claim, per
+  certification pass, idempotently.
+  AMENDMENT APPLICATION EVIDENCE. The runtime docs promised
+  runs/<run>/nodes/<name>/amendment-applied.json + logs/boundary.log and
+  the plugin wrote none of that. The runner now ships both AT APPLICATION
+  TIME (boot and wave boundary), keyed by the amends.jsonl revision, each
+  naming the from_efp/to_efp movement and the graph.amended/graph.reloaded
+  pair; an unparseable amends line lands an amendment.row_torn boundary row
+  instead of silence. Evidence writes are idempotent per revision and
+  fail-open: an evidence bug can suppress evidence, never an application.
+
+- docs(efp): state the fingerprint field law in prose + name the annotate verb
+  bd_2026-11-13-5su (E22). Engine B died on an undocumented boundary: runtime docs
+  never stated the graph-amendment fingerprint rule, so "which field moves an efp"
+  had to be reverse-engineered from the amends.jsonl base_revision hash chain, and
+  the only change-the-record-keep-the-result path (patch efp-inert fields on a DONE
+  node) existed in code with no named door.
+  operations.md gains "The efp field law" section: the efp construction, where each
+  fingerprint lives (graph.json / node-record _def+fp_rule_version / graph_fingerprint
+  on runner_exit.json / amends.jsonl base_revision rows), when fp_rule_version
+  rotates (membership change only; v1->v2 at b79fa21, budgets excluded), and a table
+  listing every efp-inert field (max_turns, timeout, run_budget, shape, budget,
+  concurrency, item_concurrency, require_route, route_verified,
+  substrate_substituted, resume_hint) vs efp-moving fields, rule fp_rule_version=2.
+  The annotate procedure: `amend` with a node-scoped `patch` over inert fields only —
+  `diff` shows `changed` non-empty with `will_rerun` empty; the commit replays, the
+  ledger row lands, descendants keep their efp. Boundary cases pinned:
+  `max_api_calls`/`max_input_tokens`/node `retry` MOVE; the graph-level knob family
+  is launch-frozen and never reaches def_hash.
+  Membership table verified against wfcommon.def_hash: 11 inert fields no-op under
+  both add- and modify-pass, 29 moving fields all shift def_hash, a 2-node chain
+  keeps the descendant's efp under an inert ancestor annotate and shifts it under a
+  provider re-route, and rule 1 still hashes a pre-b79fa21 record. SKILL.md routes
+  to the section from the amend bullet.
+
+- docs(lanes): anchor the lane-wreckage retrieval surface — bank_patch, worktree paths, corpus harvest
+  bd_2026-11-13-5su (E27). A lane_wreckage hold did its job — the cost was the hold,
+  not confusion — only because the operator already knew where the machinery lives.
+  The refusal row names `bank_patch` and `bank_cmd` verbatim, but no doc said where
+  to read that row, who creates `wip/` (nobody — mkdir it), where a timeout corpse
+  banks, or how the journal replay names its paths. That surface is now written down.
+  operator-playbook.md gains the lane-wreckage bullet naming the bank_patch retrieval
+  path `<run>/wip/<node>.patch` and the playbook route to the new one-page anchor,
+  scripts/lane-recovery.md: named shapes for the offender row
+  ({node, lane, dirty[], bank_patch, bank_cmd}), the lane_recover report
+  ({written, applied, unmatched, skipped, unconfirmed}), and the timeout corpus
+  (work/, stdout_tail.txt, manifest.json with last_written first), then the exact
+  five commands — read the events.jsonl row, bank via patch or the row's own
+  bank_cmd, replay journaled writes with scripts/lane_recover.py, harvest
+  nodes/<id>[.<i>].corpus/, re-drive through the boot rescan — plus the worktree
+  path map (work/<node>[.<i>]/, log_path/prompt_path, stash reflog). All paths
+  verified against wf.py _boot_lane_assert / _bank_the_corpse / child_work_dir and
+  scripts/lane_recover.py's shipped CLI.
+
+- **Reconcile churn: passes are cheap, notices are transitions (bd_2026-11-13-az9)**
+  Problem: a quorum fan-out storm left 4,343 events.jsonl rows and 16
+  provably zero-info owner re-notices on one run. Every re-notice traced to
+  a RECONCILE PASS — the respawn boot scan, the settled-failed re-entry, or
+  a straggler-watchdog re-eval — re-firing on states that had not moved: an
+  unchanged settled run re-logged its block and re-armed the straggler
+  latch because a retry had merely overwritten a launch stamp. The shipped
+  disposition table (#684, total with an explicit UNKNOWN) already says
+  when a run's answer moved; the notify channel ignored it.
+  Change:
+  * wf.py gains the reconcile-pass stamp law at `RECONCILE_STAMP_FILE`:
+  one pass = re-read the run's TOTAL disposition vector + amendment
+  generation, compare against `<run>/reconcile.stamp.json`, write exactly
+  one `run.reconcile` audit row. An unchanged pass (the pass that finds
+  explicit-unknowns is exactly this case) only updates the stamp's
+  touched fields — 0 notices. The first pass after a node transition or
+  an amendment writes exactly ONE `run.reconciled` notice whose identity
+  key carries the diff naming what changed (node old->new / the rev
+  step). A pass with no stamp SEEDS silently; a broken stamp re-seeds,
+  never re-notices. Two consecutive passes converge (idempotent).
+  * The respawn boot scan (`run.respawn_reconcile` site) and the
+  settled-failed boundary are now reconcile passes: an unchanged settled
+  re-entry still EMITS the lifecycle line (spawner contract) but logs no
+  second run.blocked and wakes nobody.
+  * The straggler census splits its latch: the audit identity (full disc,
+  launch stamps included) still writes one `fanout.stragglers` row per
+  cohort state (now with an explicit `noticed` field); the NOTICE
+  identity is the cohort's disposition shape — the first trip alarms, an
+  open set merely SHRINKING (stragglers landing) or a retry re-stamp
+  refreshes silently, and only a GROWN/RE-SHAPED open set or a
+  rolled-back done count re-alarms. The s34 storm geometry now costs
+  <= 2 owner notices.
+  * New registered wake event `run.reconciled` (template table stays the
+  only author of owner prose; the diff rides the transition pointer like
+  #501's pointers).
+  Test: tests/test_reconcile_pass_az9.py — seed, unchanged-settled (0
+  notices / one audit row), convergence, transition notice, amendment
+  notice, UNKNOWN re-paint honesty, and the s34 storm fixture re-run (<= 2
+  owner notices, zero new notices on re-drive).
+
+- fix(tick): the tick launcher is interpreter-pinned and survives install/update
+  The watchdog tick's baked shim now execs the absolute bundled python
+  (override: `WF_TICK_PYTHON`) with `wf.py` as an argument, so a plugin
+  install/update can no longer silently revert the tick: `wf.py`'s exec
+  bit is irrelevant (the interpreter reads it) and its
+  `#!/usr/bin/env python3` shebang is never resolved (macOS ships 3.9.6
+  there; the plugin is >=3.10 syntax — P41's tick rc=1). `wf.py` also
+  ships with its exec bit (`EXECUTABLE_FILES`, so the ZIP lands it 0755
+  and git checkouts keep it). A re-arm over a running tick, and the new
+  post-update self-check (`python3 cron_bridge.py selfcheck` → `TICK
+  SELFCHECK rc=0 …`), re-bake the launcher only on drift — a rerun
+  converges and never clobbers a settled one. docs/registered-jobs.md
+  ships beside the code with the one-line operator rule-out for
+  "Gateway draining".
+  Tests: tests/test_tick_pinned_launcher_p41.py.
 ## 1.4.11 — 2026-11-19
 
 Patch release from 33 merged pull requests since v1.4.10, dominated by
