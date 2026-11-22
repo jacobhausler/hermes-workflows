@@ -1,0 +1,22 @@
+{
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Why it works",
+      "items": [
+        "Blindness by position: seats are fan-out children of the same wave and never see each other's answers",
+        "The adjudicator counts voices FROM review.all_results - a silent seat becomes a NAMED missing row, never unanimity",
+        "The report rides after_partial: a damaged adjudication still prints, red, instead of darkening the run"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Contract",
+      "items": [
+        "{{nodes}} nodes, {{echoes}} echo, {{fanouts}} fan-out: docket -> blind review barrier (no quorum) -> adjudicate -> report",
+        "No seeds needed: the claims under review ride inside the docket, so the shape runs as-is on a fresh install",
+        "Derived from this example's bytes by scripts/graph_diagram.py"
+      ]
+    }
+  ]
+}

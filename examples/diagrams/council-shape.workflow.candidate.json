@@ -1,0 +1,125 @@
+{
+  "cards": [
+    {
+      "dot": "cyan",
+      "items": [
+        "Blindness by position: seats are fan-out children of the same wave and never see each other's answers",
+        "The adjudicator counts voices FROM review.all_results - a silent seat becomes a NAMED missing row, never unanimity",
+        "The report rides after_partial: a damaged adjudication still prints, red, instead of darkening the run"
+      ],
+      "title": "Why it works"
+    },
+    {
+      "dot": "rose",
+      "items": [
+        "4 nodes, 1 echo, 1 fan-out: docket -> blind review barrier (no quorum) -> adjudicate -> report",
+        "No seeds needed: the claims under review ride inside the docket, so the shape runs as-is on a fresh install",
+        "Derived from this example's bytes by scripts/graph_diagram.py"
+      ],
+      "title": "Contract"
+    }
+  ],
+  "diagram_type": "workflow",
+  "edges": [
+    {
+      "from": "docket",
+      "id": "docket-review",
+      "to": "review",
+      "variant": "default"
+    },
+    {
+      "from": "docket",
+      "id": "docket-adjudicate",
+      "to": "adjudicate",
+      "variant": "default"
+    },
+    {
+      "from": "review",
+      "id": "review-adjudicate",
+      "to": "adjudicate",
+      "variant": "default"
+    },
+    {
+      "from": "adjudicate",
+      "id": "adjudicate-report",
+      "to": "report",
+      "variant": "default"
+    }
+  ],
+  "lanes": [
+    {
+      "id": "work",
+      "label": "Agents",
+      "variant": "normal"
+    },
+    {
+      "id": "room",
+      "label": "Deterministic",
+      "variant": "normal"
+    }
+  ],
+  "meta": {
+    "output": "examples/diagrams/council-shape.html",
+    "quality_profile": "standard",
+    "subtitle": "The canonical council shape: a fan-out REVIEW over a fixed item list, one ADJUDICATE barrier that reconciles e",
+    "title": "council-shape"
+  },
+  "nodes": [
+    {
+      "col": 0,
+      "id": "docket",
+      "label": "Docket",
+      "lane": "room",
+      "type": "messagebus",
+      "width": 104
+    },
+    {
+      "col": 1,
+      "id": "review",
+      "label": "Review",
+      "lane": "work",
+      "tag": "fan-out N",
+      "type": "backend",
+      "width": 104
+    },
+    {
+      "col": 2,
+      "id": "adjudicate",
+      "label": "Adjudicate",
+      "lane": "work",
+      "sublabel": "you are the council",
+      "type": "backend",
+      "width": 104
+    },
+    {
+      "col": 3,
+      "id": "report",
+      "label": "Report",
+      "lane": "work",
+      "sublabel": "publish the council",
+      "type": "backend",
+      "width": 104
+    }
+  ],
+  "phases": [
+    {
+      "fromCol": 0,
+      "id": "roots",
+      "label": "entry",
+      "toCol": 0
+    },
+    {
+      "fromCol": 1,
+      "id": "mid",
+      "label": "hand-offs",
+      "toCol": 2
+    },
+    {
+      "fromCol": 3,
+      "id": "out",
+      "label": "terminus",
+      "toCol": 3
+    }
+  ],
+  "schema_version": 2
+}

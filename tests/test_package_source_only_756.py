@@ -11,6 +11,9 @@ ROOT = Path(__file__).resolve().parents[1]
 SOURCE_ONLY_TESTS = {
     "tests/test_diagram_law.py", "tests/test_example_census_fanout.py",
     "tests/test_example_issue_to_pr.py", "tests/test_example_release_lifecycle.py",
+    # #704 suite-arrival: same shape as the example-test siblings — loads the
+    # source-only publish auditor for its scrub pattern.
+    "tests/test_examples.py",
     "tests/test_lane_recover_8edcc9bf.py", "tests/test_example_exchange_run.py",
     # merge-assist queue (est-0izi7): changelog.d pin, source-only scripts/changelog_assemble.py
     "tests/test_changelog_fragments_izi7.py",

@@ -1,5 +1,14 @@
 # Workflow examples
 
+**First run in three steps:**
+
+1. **Write the goal.** One plain sentence naming the outcome you want — that
+   text is the whole input; you never author a graph to get started.
+2. **`workflows start "<goal>"`.** The door validates, synthesizes the smallest
+   graph that satisfies the goal, and dispatches it; the answer is a `run_id`.
+3. **`workflows status <run_id>`.** Watch the run; a held gate surfaces here
+   with the command that releases it.
+
 Batteries-included [`wf/1`](../references/grammar.md) graphs you can run with the
 seeds declared in their descriptions (`workflow run graph_path=...`), fork as a starting point, or shelve into your
 library (`workflow save graph_path=... name=...`). Each file's top-level
@@ -42,6 +51,7 @@ repo docs tree; the runtime zip ships maps and graphs, not art.
 | [`quorum-probe.workflow.json`](build/quorum-probe.workflow.json) | raced probe ‖ reconciled barrier | The speed/coverage contrast in one run: `quorum` cancels stragglers (report them honestly); the no-quorum barrier reconciles survivors against a master catalog. |
 | [`rubric-repair.workflow.json`](build/rubric-repair.workflow.json) | author → blind rubric → one repair → re-score → stop rule | The smallest honest admission pipeline: the rubric seat re-reads the record AS COMMITTED, exactly one repair round exists, a second disagreement is the stop rule (never another loop), and the disposition node fires on its one live dependency whichever path the gates took. |
 | [`admission-lap.workflow.json`](build/admission-lap.workflow.json) | typed params + door-time seams | The worked launch contract: `pin`/`tune` slots, a `where` depth-ladder that removes the peer seat at launch time, a `by` verb-family patch on the report's context — and one refusal naming every missing/unknown/undomain binding before any write. |
+| [`crew-shape.workflow.json`](build/crew-shape.workflow.json) | orders → crew barrier → re-run verify → closeout | The canonical crew shape: a barrier fan-out executes one stock command per order, and the verify seat re-runs every command ITSELF — evidence-without-command is a failed lane, an unreproducible `ok:true` outranks the lane's own claim, and every unsaid order is NAMED, never counted out. |
 
 ## review/ — independent judgment
 
@@ -50,6 +60,7 @@ repo docs tree; the runtime zip ships maps and graphs, not art.
 | [`blind-council.workflow.json`](review/blind-council.workflow.json) | blind seats → synthesis | Independent review: seats never see each other, synthesis must carry a verify-list; seats pin capability *classes*, not vendor models. |
 | [`portable-review.workflow.json`](review/portable-review.workflow.json) | recon → 2-way fan-out → synth | A review that runs on any estate with no host vocabulary in its goals. Seeded run: `run_context` `target_dir` = the directory to review (every node spawns in an empty per-node work dir, so the target must be named). |
 | [`escalation-ladder.workflow.json`](review/escalation-ladder.workflow.json) | builder → verifier → branch | Verify-then-branch: a fresh verifier outranks the builder's claim; verified lands behind a human gate, failed escalates the *whole packet* to a human hold. `after_partial` keeps a partially-dead verifier from darkening the packet. |
+| [`council-shape.workflow.json`](review/council-shape.workflow.json) | docket → blind review barrier → adjudicate → report | The canonical council shape: seats are fan-out children that never see each other, the adjudicator counts voices FROM the record, and no quorum means every silent seat surfaces in `missing[]` — a straggler dropped quietly is a broken council, not a unanimous one. |
 
 ## release/ — the SDLC back half
 

@@ -1,0 +1,81 @@
+{
+  "grammar": "wf/1",
+  "name": "council-shape",
+  "description": "The canonical council shape: a fan-out REVIEW over a fixed item list, one ADJUDICATE barrier that reconciles every answer against the roster, and one REPORT terminal. Data shapes, so a reader can check them against the record: the docket echo carries {question, items: [{id, claim, ask}]}; each review seat answers {item, verdict: sound|flawed, findings: [str]} per item; adjudicate commits {dispatched, adjudicated, missing: [str], rows: [{item, verdict, findings}], dissent: [str], verdict}; report commits {verdict, dissent, honest_statement}. Zero seeds and zero external dependencies: the claims under review ride inside the docket, so this runs as-is on a fresh install. Blindness is by position: review seats are fan-out children of the same wave and never see each other's answers; adjudicate reads ONLY review.all_results plus the roster, so the count of voices comes from the record, never from prose. No quorum: a council that loses a seat must NAME the missing seat, so adjudicate lists every docket id with no committed answer in missing[] and the report prints them - a silent straggler is a broken council, not a quiet one. dissent[] holds every item whose committed verdicts disagree across seats; consensus is not verification, so the report carries the dissent list even when it is empty. The report node opts into the tally's harvest (after_partial) so a damaged adjudication still prints, red, instead of darkening the run.",
+  "provenance": {
+    "owner": "hermes-workflows",
+    "source": "hermes-workflows/examples/review/council-shape.workflow.json"
+  },
+  "nodes": [
+    {
+      "id": "docket",
+      "type": "echo",
+      "output": {
+        "question": "Should this pack ship as-is?",
+        "law": "The docket is the master item list: every id in items must reach the report as adjudicated, failed, or NAMED missing - never a silent loss. The three claims below are deliberately ordinary so the shape, not the subject, is what gets studied.",
+        "items": [
+          {"id": "c-1", "question": "Should this pack ship as-is?", "claim": "A review seat that has seen another seat's findings is no longer independent, so council seats must never share a context window.", "ask": "Attack the claim as if you were the dissenter: name the strongest concrete counter-example, or call it sound and say what would change your mind."},
+          {"id": "c-2", "question": "Should this pack ship as-is?", "claim": "A tally computed from prose summaries is as trustworthy as the summaries themselves.", "ask": "Attack the claim as if you were the dissenter: name the strongest concrete counter-example, or call it sound and say what would change your mind."},
+          {"id": "c-3", "question": "Should this pack ship as-is?", "claim": "A council whose straggler seats are silently dropped should be reported as unanimous.", "ask": "Attack the claim as if you were the dissenter: name the strongest concrete counter-example, or call it sound and say what would change your mind."}
+        ]
+      }
+    },
+    {
+      "id": "review",
+      "type": "agent",
+      "after": ["docket"],
+      "shape": "review",
+      "fanout": {
+        "items_from": "docket.items",
+        "goal": "You are one blind seat on a review council; other seats are answering the same claim right now and you will never see their answers. The council question is: {question}. Your assigned claim [{id}]: {claim}. Your ask: {ask}. Answer honestly against the contract. Reply with ONLY fenced json {\"item\": \"{id}\", \"verdict\": \"sound|flawed\", \"findings\": [\"<one string per finding>\"]} and nothing else. verdict 'sound' means you could not construct a real counter-argument after honestly trying; 'flawed' means you named one - findings then carries it. findings must be non-empty either way: even a sound verdict owes the reason. The adjudicator reads your fields from the record, so never pad, never hedge.",
+        "schema": {
+          "type": "object",
+          "required": ["item", "verdict", "findings"],
+          "properties": {
+            "item": {"type": "string"},
+            "verdict": {"type": "string", "enum": ["sound", "flawed"]},
+            "findings": {"type": "array", "items": {"type": "string"}, "minItems": 1}
+          }
+        }
+      }
+    },
+    {
+      "id": "adjudicate",
+      "type": "agent",
+      "after": ["docket", "review"],
+      "shape": "review",
+      "inputs": ["docket.items", "docket.question", "review.all_results"],
+      "schema": {
+        "type": "object",
+        "required": ["dispatched", "adjudicated", "missing", "rows", "dissent", "verdict"],
+        "properties": {
+          "dispatched": {"type": "integer"},
+          "adjudicated": {"type": "integer"},
+          "missing": {"type": "array", "items": {"type": "string"}},
+          "rows": {"type": "array"},
+          "dissent": {"type": "array", "items": {"type": "string"}},
+          "verdict": {"type": "string"}
+        }
+      },
+      "goal": "You are the council adjudicator: the council is honest only if every docket id is accounted for - adjudicated, failed, or NAMED missing - and every count is computed from the record, never from prose. Under ## Inputs you have docket.items (the master roster: id, claim, ask per entry), docket.question (the question the council answers), and review.all_results (EVERY dispatched seat answer WITH its status - read the dispatched set FROM this list, do not assume it). For each roster id, gather every committed seat answer that carries that item id and reconcile: rows gets one entry per roster item {item: <id>, verdict: <sound|flawed when all committed answers agree; 'dissent' when they do not>, findings: [all findings, quoted verbatim from the records]}; an id with no committed answer gets verdict 'missing' and the recorded error quoted, never a dropped row. dispatched = the count of entries present in all_results; adjudicated = the count with status done or partial; missing = every roster id with no committed answer, named verbatim; dissent = every roster id whose seat verdicts disagree. verdict answers the council question in one line that NAMES every dissenting or missing id (e.g. 'ship-with-caveats: dissent on c-2; c-3 seat missing'); only a full roster of agreeing sound rows may read as unanimous. Do not run commands and do not re-judge beyond ## Inputs - reconcile only what the record gives, then answer once with ONLY that fenced json."
+    },
+    {
+      "id": "report",
+      "type": "agent",
+      "after": ["adjudicate"],
+      "after_partial": true,
+      "shape": "review",
+      "inputs": ["adjudicate"],
+      "schema": {
+        "type": "object",
+        "required": ["verdict", "dissent", "honest_statement"],
+        "properties": {
+          "verdict": {"type": "string"},
+          "dissent": {"type": "array", "items": {"type": "string"}},
+          "honest_statement": {"type": "string"}
+        }
+      },
+      "goal": "Publish the council result HONESTLY from the committed record. Under ## Inputs you have adjudicate - the machine reconciliation of every seat answer. Copy its verdict line and its dissent list VERBATIM (do not recount, soften, or round anything), and write honest_statement: one paragraph stating the council exactly as adjudicate states it - every dissenting id and every missing id named by name with its recorded evidence; if adjudicate is absent or incomplete, say so plainly and name what is unknown - never upgrade an unfinished council into a unanimous one. Reply with ONLY fenced json {\"verdict\": \"<the adjudicate verdict copied verbatim>\", \"dissent\": <the adjudicate dissent list copied verbatim>, \"honest_statement\": \"<the paragraph>\"} and nothing else. Do not explore beyond ## Inputs - report only what is given, then answer once."
+    }
+  ]
+}

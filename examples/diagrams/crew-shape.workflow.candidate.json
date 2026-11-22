@@ -1,0 +1,125 @@
+{
+  "cards": [
+    {
+      "dot": "cyan",
+      "items": [
+        "Verify re-runs every roster command itself - a lane's ok:true is a claim, not a fact",
+        "Barrier fan-out, no quorum: an unsaid order is NAMED missing, never counted out of existence",
+        "Closeout rides after_partial: the crew closes no greener than the record verify found"
+      ],
+      "title": "Why it works"
+    },
+    {
+      "dot": "rose",
+      "items": [
+        "4 nodes, 1 echo, 1 fan-out: orders -> crew barrier -> re-run verify -> closeout",
+        "No seeds needed: every order is a stock shell command, so the shape runs as-is on a fresh install",
+        "Derived from this example's bytes by scripts/graph_diagram.py"
+      ],
+      "title": "Contract"
+    }
+  ],
+  "diagram_type": "workflow",
+  "edges": [
+    {
+      "from": "orders",
+      "id": "orders-crew",
+      "to": "crew",
+      "variant": "default"
+    },
+    {
+      "from": "orders",
+      "id": "orders-verify",
+      "to": "verify",
+      "variant": "default"
+    },
+    {
+      "from": "crew",
+      "id": "crew-verify",
+      "to": "verify",
+      "variant": "default"
+    },
+    {
+      "from": "verify",
+      "id": "verify-closeout",
+      "to": "closeout",
+      "variant": "default"
+    }
+  ],
+  "lanes": [
+    {
+      "id": "work",
+      "label": "Agents",
+      "variant": "normal"
+    },
+    {
+      "id": "room",
+      "label": "Deterministic",
+      "variant": "normal"
+    }
+  ],
+  "meta": {
+    "output": "examples/diagrams/crew-shape.html",
+    "quality_profile": "standard",
+    "subtitle": "The canonical crew shape: an ORDERS roster, a fan-out CREW that executes each order, an independent VERIFY sea",
+    "title": "crew-shape"
+  },
+  "nodes": [
+    {
+      "col": 0,
+      "id": "orders",
+      "label": "Orders",
+      "lane": "room",
+      "type": "messagebus",
+      "width": 104
+    },
+    {
+      "col": 1,
+      "id": "crew",
+      "label": "Crew",
+      "lane": "work",
+      "tag": "fan-out N",
+      "type": "backend",
+      "width": 104
+    },
+    {
+      "col": 2,
+      "id": "verify",
+      "label": "Verify",
+      "lane": "work",
+      "sublabel": "you are the crew",
+      "type": "backend",
+      "width": 104
+    },
+    {
+      "col": 3,
+      "id": "closeout",
+      "label": "Closeout",
+      "lane": "work",
+      "sublabel": "close the crew out",
+      "type": "backend",
+      "width": 104
+    }
+  ],
+  "phases": [
+    {
+      "fromCol": 0,
+      "id": "roots",
+      "label": "entry",
+      "toCol": 0
+    },
+    {
+      "fromCol": 1,
+      "id": "mid",
+      "label": "hand-offs",
+      "toCol": 2
+    },
+    {
+      "fromCol": 3,
+      "id": "out",
+      "label": "terminus",
+      "toCol": 3
+    }
+  ],
+  "schema_version": 2
+}
