@@ -287,6 +287,11 @@ EXECUTABLE_FILES = {"scripts/pack.py", "tests/fake", "tests/fake-b1",
 SOURCE_ONLY_TESTS = {
     "tests/test_diagram_law.py": "needs diagrams/README.md and the source-only renderer",
     "tests/test_example_census_fanout.py": "imports source-only scripts/make_public.py",
+    # #704: the example-shape pin spec-loads the source-only publish auditor to reuse
+    # its merged scrub pattern (a mirror would drift) — same shape as the two
+    # example-test siblings above, and the two new graphs are repo examples, not
+    # ZIP members, so the gate has nothing to check at an unpacked root.
+    "tests/test_examples.py": "imports source-only scripts/make_public.py",
     "tests/test_example_issue_to_pr.py": "imports source-only scripts/make_public.py",
     "tests/test_example_release_lifecycle.py": "imports source-only scripts/make_public.py",
     "tests/test_lane_recover_8edcc9bf.py": "executes source-only scripts/lane_recover.py",
