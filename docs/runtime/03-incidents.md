@@ -1,5 +1,14 @@
 # Incidents: dead lanes, walls, quarantine, recovery
 
+Lane died? One command and one record answer it: `workflow {action:"status",
+run_id:"<run>"}` → `failed_nodes[]` rows `{id, error, error_class}`, and the
+committed record `nodes/<id>.json` → `node_facts` (`error_class`, `final`,
+`log_path`, attempts) — a wall death rides the same record as `wall_account`
+(§"How a wall death is accounted"). Full recovery readout — what is durable,
+what is torn, what re-drive is safe: `wf.py recover <run_id>` →
+`{applied, torn, unprovable, safe_redrive}` (§"Post-kill recovery"). The
+details below.
+
 ## How a wall death is accounted (E24, merged #687)
 
 A `timeout` death never shows you a wall you didn't write. One account is

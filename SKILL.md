@@ -9,6 +9,16 @@ metadata:
 
 # Workflow authoring (1.4.12)
 
+## What you call (first screen)
+
+- **Launch:** `workflow{action:"run", graph:<object>}` (or `graph_path`, `from:"<library-name>"`) → `run_id`; END YOUR TURN — `gate.held`/`run.done`/`run.failed`/`run.partial` wakes return you.
+- **Read:** `workflow{action:"status", run_id:<id>}` → `next` (do what it says), per-node `disposition`, `failed_nodes[].error_class`; `wait` blocks inline and is the only revive verb.
+- **Gate:** `workflow{action:"release", run_id, gate_id, answer}` answers a held human gate.
+- **Re-plan:** `workflow{action:"amend", graph|patch}` replaces the plan mid-run; `diff` is the forced dry-run preview.
+- **Pre-check:** `workflow{action:"validate", graph:<object>}` — the door's whole validation, zero writes, no liveness ping; CLI: `python3 wf.py validate <graph.json>`.
+
+Start in 3: (1) `validate` the graph; (2) `run` it and end your turn; (3) act on the wake (`wake.jsonl` is the ledger). Smallest graph: `{ "name": "check", "nodes": [{"id":"inspect","type":"agent","goal":"Inspect the specified target. Return one fenced JSON object."}] }`.
+
 Requires Hermes Agent v2026.9.21 or newer (package >=0.21.4). A Desktop gate answer
 reaches the run owner's chat via the composer SDK; on older builds it may only insert
 draft text — type the resume line in the owner chat yourself. Before disabling the
@@ -22,14 +32,6 @@ The registered tool ID is `workflow` (toolset `workflows`). If the host exposes 
 searchable deferred catalog, describe/call its exact returned ID. If no available
 entry or discovery capability exists, report that boundary; do not guess aliases,
 launch a replacement or mutate configuration.
-
-## Smallest working graph
-
-Build `{ "name": "check", "nodes": [{"id":"inspect","type":"agent","goal":"Inspect the
-specified target. Return one fenced JSON object."}] }`. Submit with
-`workflow{action:"run", graph:<object>}` and END YOUR TURN — the runner is separate and
-transitions (`gate.held`/`run.done`/`run.failed`/`run.partial`) wake this session like a
-delegated subagent; `wait` = OPTIONAL blocking observation, the only revive verb (`wake.jsonl`).
 
 ## Authoring rules
 
@@ -81,8 +83,6 @@ delegated subagent; `wait` = OPTIONAL blocking observation, the only revive verb
   `diff` forces amend's dry-run preview. A patch touching ONLY efp-inert fields (budgets, widths, route policy, `resume_hint`) annotates a committed node without moving its efp — the result stands, descendants untouched; inert-vs-moving table: [operations §efp field law](references/operations.md#the-efp-field-law-which-fields-move-a-fingerprint-fp_rule_version--2).
   `run`/`amend` `dry_run:true` preview without launching/replacing graphs, but can ping routes and check quota.
   `stop` is terminal; a runner verdict is graph-bound — its `graph_fingerprint` rides `runner_exit.json`, not `run.json`. Details: [operations](references/operations.md).
-- Lint before launching with `workflow{action:"validate", graph:…}` — the door's
-  whole validation, zero writes, no liveness ping.
 - Optional recipes: `library` lists; `run` with `from:<name>` replays; `save` explicitly shelves reusable graphs and always stamps provenance.
   The save source shapes the row: `save(run_id)` shelves the run's baked `graph.json` — defaults/shape budgets concrete, arg-channel launch widths stripped (`knobs_stripped` names them; author-written widths stay), `source: null` unless passed —
   so its `source_digest` (sha256 over the canonical `nodes`, budgets included) never equals the author file's digest; a `graph`/`graph_path` save

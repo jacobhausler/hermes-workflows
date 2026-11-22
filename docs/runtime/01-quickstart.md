@@ -1,10 +1,12 @@
 # Quickstart: one run, its directory, its read model
 
-`workflow {action:"run", graph:{...}}` returns a `run_id`. The door writes the
-run directory and a detached runner owns it; you observe with `status` /
-`wait` and the lifecycle wakes (`wake.jsonl` is the wake ledger). Verbs and
-payload semantics: `references/operations.md`. This page is only the on-disk
-map — what exists, and when it appears.
+`workflow {action:"run", graph:{...}}` returns a `run_id`. The run's whole
+world is `$HERMES_HOME/workflows/<run_id>/` (§"The run directory"); its state
+answers come from `workflow {action:"status", run_id:"<run>"}` (§"Reading a
+run"). The door writes the run directory and a detached runner owns it; you
+observe with `status` / `wait` and the lifecycle wakes (`wake.jsonl` is the
+wake ledger). Verbs and payload semantics: `references/operations.md`. This
+page is only the on-disk map — what exists, and when it appears.
 
 ## The run directory
 
