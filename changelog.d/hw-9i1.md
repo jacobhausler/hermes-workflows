@@ -19,7 +19,11 @@ lands, that static string is the teach example.
 
 No door/validation file is touched. Tests: tests/test_start_verb.py (7
 behavior checks at the tool seam, spawn stubbed; the README action row is
-pinned by the existing docs-surface drift law). The registration hunk makes
-wfstart.py part of the executed dispatch surface, so both surface-pinning
-fixtures — the drift law's mutated-door copy set and test_pr_tag_audit's
-fixture tree — learn the new file (one line each, no door logic touched).
+pinned by the existing docs-surface drift law). The registration makes
+wfstart.py part of the executed dispatch surface and a bind-time import, so
+every surface-pinning fixture copy set and the pack manifest learn the file:
+tests/test_docs_surface_drift.py, tests/test_pr_tag_audit.py,
+tests/test_terminal_handoff_boundary_r19.py, scripts/pack.py INCLUDE_FILES
+(one line each — the est-4vnq finding-4 law: an unshipped bind-time module
+dies at import on every install, and test_packaging stayed green while
+CI's copied-plugin test went red, so the manifest line is load-bearing).
