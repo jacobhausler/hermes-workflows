@@ -156,7 +156,9 @@ def _normalize_nodes(raw):
 
 def parse_input(raw):
     """raw (str | None) -> (StartSpec | None, refusal-payload | None).
-    Exactly one return is None. Refusal payloads carry the example."""
+    Plain-surface misuses return the refusal payload; spec-content violations
+    raise Refusal. parse_start is the TOTAL entry: it renders both halves the
+    same way, so callers never branch on which half fired."""
     if not isinstance(raw, str) or not raw.strip():
         return None, _spec_error(
             "needs one plain-language goal string OR a five-line yaml spec; got nothing")
