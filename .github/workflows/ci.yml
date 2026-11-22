@@ -167,6 +167,15 @@ jobs:
           done
           python3 scripts/suite.py . ci-out --merge $dirs
 
+      - name: Runtime docs dead-reference lint (docs/runtime)
+        # bd_2026-11-13-7m0: extract every shell command, door action, run-dir
+        # path, JSON field shape and citation from docs/runtime/**/*.md, execute
+        # them against a fixture run in a temp state dir (tests/fake children +
+        # the door in-process, the repo's own test idiom) and fail on dead verb,
+        # dead path, drifted field, dead env, dead symbol — each violation names
+        # doc file:line. tools/docs_lint.py carries the data shapes and taxonomy.
+        run: python3 tools/docs_lint.py
+
       - name: "PR-tag doc audit (CONTRIBUTING: stale open-PR tags block)"
         # The `(open PR #NN)` tags in README/CONTRIBUTING/CHANGELOG/references
         # name PRs in the PARENT repo (upstream numbering); resolving them
