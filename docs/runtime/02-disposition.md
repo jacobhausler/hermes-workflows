@@ -1,6 +1,9 @@
 # The disposition table (E15, merged #684)
 
-A node record's `status` is the raw engine value (lowercase, as committed).
+"What does this status mean?" is answered one field away in the read model:
+`workflow {action:"status", run_id:"<run>"}` → each node entry carries
+`disposition` beside `status`, from the single table `wfcommon.DISPOSITION_BY_STATUS`
+(map below). A node record's `status` is the raw engine value (lowercase, as committed).
 Its **`disposition`** is the terminal answer an operator may state as known.
 One total table maps every status value the engine ever writes — a reader never
 guesses whether `done` is terminal or what a torn `running` means, and an
