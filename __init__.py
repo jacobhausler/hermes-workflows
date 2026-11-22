@@ -38,6 +38,15 @@ _gi_spec = importlib.util.spec_from_file_location("_hermes_workflows_gate_index"
 assert _gi_spec is not None and _gi_spec.loader is not None
 _gate_index = importlib.util.module_from_spec(_gi_spec)
 _gi_spec.loader.exec_module(_gate_index)
+
+# bd_2026-11-13-9i1: the `start` verb's synthesizer — bound by path like its
+# siblings, and handed this door's own wfcommon so one YAML policy serves both.
+_ws_spec = importlib.util.spec_from_file_location("_hermes_workflows_wfstart",
+                                                  Path(__file__).resolve().parent / "wfstart.py")
+assert _ws_spec is not None and _ws_spec.loader is not None
+_wfstart = importlib.util.module_from_spec(_ws_spec)
+_ws_spec.loader.exec_module(_wfstart)
+_wfstart.bind_wfcommon(_common)
 # PR-4: orphan-held awareness — advisory session-lifecycle observers (docs/orphan-held.md).
 _ow_spec = importlib.util.spec_from_file_location("_hermes_workflows_orphan_watch",
                                                   Path(__file__).resolve().parent / "orphan_watch.py")
@@ -845,10 +854,11 @@ WORKFLOW_PARAMS = {
     "properties": {
         "action": {
             "type": "string",
-            "enum": ["run", "status", "wait", "release", "release_lock", "steer", "inbox", "amend", "diff", "stop", "kill", "redrive", "list", "save", "submit", "library", "doctor_version", "validate"],
-            "description": "run=launch a graph; wait=OPTIONAL blocking observation (not the default loop: lifecycle transitions wake the owner session on their own — end your turn after run); read state, RESPAWNING an idle runner if work is pending (blocks to the next boundary when one is live; when the lock is PROVEN wedged — Errno 11 with the kernel ledger showing zero holders and the admission lease dead — wait heals it first, the #44 escape hatch); status=read-model of a run (optional seats:true attaches the engine-wide seat-pool occupancy block — cap, live, holders, FIFO queue as a query, read-only); release=answer a held human gate; release_lock=operator hatch for a wedged runner.lock (#44): renames the stranded inode aside under the admission heal-barrier and hands the lane a fresh lock path — REFUSES unless zero live holders are proven (never heals on EACCES or a live holder); steer=queue steering text for a node; inbox=(child-side, cooperative) pull late steering lines baked for THIS spawn — call once at a natural seam; amend=replace the graph (invalidates changed nodes + all downstream by fingerprint), or pass patch to edit a few node fields without resubmitting the whole graph; submitted node text carrying {run.KEY} re-binds from the run's persisted launch binding (run_context_binding) or the amend refuses before any write (est-qohvi); diff=confirm surface: runs the amend door with dry_run FORCED (accepts patch or graph), returns the preview + graph_diff and touches nothing; stop=request stop; kill=node-targeted lane kill (node required): that lane's in-flight children are SIGKILLed, the node finishes failed error_class=killed, siblings and the run keep going; redrive=engine retry-failed-run (#692 slice 1, mode REQUIRED, no default): drop the failed lanes' committed records + the runner verdict, relaunch detached, resume from the preserved completed receipts; mode=same-fingerprint-resume refuses (writes nothing) when a completed receipt's effective fingerprint has drifted — mode=new-fingerprint-rerun re-drives drifted lanes under the efp override rule; the response enumerates re_drive + preserved receipts and consumes any scheduled watchdog redrive.request; list=all runs; save=shelve a graph in the library under a name (from run_id or inline graph); library=list shelved graphs richly (name, description, tags, provenance, path-relative id); optional check:true echoes a digest re-check block — the shelf-vs-author drift verb (est-dv8q4). validate=dry-run the door's validation pipeline (defaults fill + defect collection + model/route policy) with no ping and no writes; returns {ok, errors:[{node,field,msg}], resolved_routes}. run from=<name> replays a shelved graph. submit=quarantine a hand-rolled graph for study (requires why_not_library >=80 chars; never joins the library — the quartermaster's human-gated loop decides); inbox kind=submissions lists them newest-first. doctor_version=read-only version truth for THIS install: {live_version, newest_packaged, source_commit, source_repo, drift} comparing plugin.yaml against the install.json provenance that pack.py stamps at build time (one sidecar schema; a sidecar predating source_repo loads and reads null) \u2014 one read, no network.",
+            "enum": ["run", "start", "status", "wait", "release", "release_lock", "steer", "inbox", "amend", "diff", "stop", "kill", "redrive", "list", "save", "submit", "library", "doctor_version", "validate"],
+            "description": "run=launch a graph; start=one plain-language goal string OR a five-line yaml spec (name, goal|nodes) in, the smallest synthesized graph dispatched out: smart defaults (provider = the seat's own route, timeout+budgets from the shape census, lane-key <team>/start-<slug> so a double-start dedupes while unfinished), validated through the existing run door; returns run_id + watch (the one status command); misuse refusals carry the accepting example. v1 synthesizes single-node and fixed-fanout-from-a-json-path shapes only — plural prose is not inferred, name items_from per node. wait=OPTIONAL blocking observation (not the default loop: lifecycle transitions wake the owner session on their own — end your turn after run); read state, RESPAWNING an idle runner if work is pending (blocks to the next boundary when one is live; when the lock is PROVEN wedged — Errno 11 with the kernel ledger showing zero holders and the admission lease dead — wait heals it first, the #44 escape hatch); status=read-model of a run (optional seats:true attaches the engine-wide seat-pool occupancy block — cap, live, holders, FIFO queue as a query, read-only); release=answer a held human gate; release_lock=operator hatch for a wedged runner.lock (#44): renames the stranded inode aside under the admission heal-barrier and hands the lane a fresh lock path — REFUSES unless zero live holders are proven (never heals on EACCES or a live holder); steer=queue steering text for a node; inbox=(child-side, cooperative) pull late steering lines baked for THIS spawn — call once at a natural seam; amend=replace the graph (invalidates changed nodes + all downstream by fingerprint), or pass patch to edit a few node fields without resubmitting the whole graph; submitted node text carrying {run.KEY} re-binds from the run's persisted launch binding (run_context_binding) or the amend refuses before any write (est-qohvi); diff=confirm surface: runs the amend door with dry_run FORCED (accepts patch or graph), returns the preview + graph_diff and touches nothing; stop=request stop; kill=node-targeted lane kill (node required): that lane's in-flight children are SIGKILLed, the node finishes failed error_class=killed, siblings and the run keep going; redrive=engine retry-failed-run (#692 slice 1, mode REQUIRED, no default): drop the failed lanes' committed records + the runner verdict, relaunch detached, resume from the preserved completed receipts; mode=same-fingerprint-resume refuses (writes nothing) when a completed receipt's effective fingerprint has drifted — mode=new-fingerprint-rerun re-drives drifted lanes under the efp override rule; the response enumerates re_drive + preserved receipts and consumes any scheduled watchdog redrive.request; list=all runs; save=shelve a graph in the library under a name (from run_id or inline graph); library=list shelved graphs richly (name, description, tags, provenance, path-relative id); optional check:true echoes a digest re-check block — the shelf-vs-author drift verb (est-dv8q4). validate=dry-run the door's validation pipeline (defaults fill + defect collection + model/route policy) with no ping and no writes; returns {ok, errors:[{node,field,msg}], resolved_routes}. run from=<name> replays a shelved graph. submit=quarantine a hand-rolled graph for study (requires why_not_library >=80 chars; never joins the library — the quartermaster's human-gated loop decides); inbox kind=submissions lists them newest-first. doctor_version=read-only version truth for THIS install: {live_version, newest_packaged, source_commit, source_repo, drift} comparing plugin.yaml against the install.json provenance that pack.py stamps at build time (one sidecar schema; a sidecar predating source_repo loads and reads null) \u2014 one read, no network.",
         },
-        "run_id": {"type": "string", "description": "Run id (required for every action except run/list)."},
+        "run_id": {"type": "string", "description": "Run id (required for every action except run/list/start)."},
+        "goal": {"type": "string", "description": "start only: the ONE input — a plain-language goal string (synthesizes a single agent node riding the seat's own route) OR a five-line yaml spec {name?, goal | nodes:[{id, goal, items_from?, after?, shape?}], shape?} (fixed fan-out: a node with items_from gets fanout:{items_from} verbatim). Refusals return {error, example}. Optional alongside: team (lane-key prefix <team>/start-<slug>), lane_key (explicit override of the derived key), name (overrides the spec/goal-derived run name), dry_run (door gates, nothing written)."},
         "name": {"type": "string", "description": "run: overrides graph.name (default workflow); save: library name overrides graph.name (lowercase, [-_.]); library: return one entry with refs-derived required params and an instantiate command. amend: set graph.name in the replacement graph; omitting it retains the run name."},
         "from": {"type": "string", "description": "run: library graph name to replay (instead of graph or graph_path)."},
         "retry_backoff": {"type": "array", "items": {"type": "number"}, "description": "run only: two non-negative seconds [first, second] replacing the transient ladder's retry schedule (default: exponential, 2 s base, 30 s ceiling; est-9ceqc persists the backoff deadline + attempt count per node so a restart honors the window). The runner reads them from run.json meta; the node-level `retry` key caps attempts."},
@@ -3430,6 +3440,35 @@ def _arm_from_launch(out):
         pass
 
 
+def act_start(args):
+    """start: prose or five-line yaml in, dispatched run out (bd_2026-11-13-9i1).
+
+    Thin by design: the synthesizer (wfstart.py) owns every default, the run
+    door owns every gate. This function only (1) parses+synthesizes, (2) hands
+    the graph to act_run — so the full existing admission pipeline (door
+    validation, defaults/shape-census bake, policy, route resolve, lane
+    dedup, durability proof, detached spawn) applies verbatim — and (3) stamps
+    the one watch command onto the launch receipt.
+    """
+    spec, refusal = _wfstart.parse_start(args.get("goal"))
+    if refusal:
+        return refusal
+    graph = _wfstart.synthesize(spec)
+    if args.get("name"):
+        graph["name"] = args["name"]
+    team = args.get("team")
+    lane_key = args.get("lane_key") or _wfstart.lane_key(graph["name"], team)
+    run_args = {"graph": graph, "lane_key": lane_key}
+    if team is not None:
+        run_args["team"] = team
+    if args.get("dry_run"):
+        run_args["dry_run"] = True
+    out = act_run(run_args)
+    if out.get("run_id"):
+        out["watch"] = f'workflow{{action:"status",run_id:{out["run_id"]}}}'
+    return out
+
+
 def act_run(args):
     graph, bad = _input_graph(args, library=True)
     if bad:
@@ -5334,7 +5373,7 @@ def act_doctor_version(args):
             "drift": bool(packaged is not None and live is not None and packaged != live)}
 
 
-ACTIONS = {"run": act_run, "status": act_status, "wait": act_wait, "release": act_release,
+ACTIONS = {"run": act_run, "start": act_start, "status": act_status, "wait": act_wait, "release": act_release,
            "release_lock": act_release_lock,
            "steer": act_steer, "inbox": act_inbox, "amend": act_amend, "diff": act_diff, "stop": act_stop, "kill": act_kill, "redrive": act_redrive, "list": act_list,
            "save": act_save, "submit": act_submit, "library": act_library,
