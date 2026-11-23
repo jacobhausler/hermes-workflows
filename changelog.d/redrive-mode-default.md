@@ -17,3 +17,13 @@ is self-policing — the refusal costs one typed round-trip and zero writes,
 which is the same worst case the no-default law had. Wake-consumer law #692
 is amended, not repealed: what remains mandatory is the decision that SPENDS
 tokens, never the safe resume.
+
+## Companion doc-truth fix (same audit)
+
+The door schema text, grammar.md and operations.md all still described the
+pre-census default "timeout 900 s" — but since sprint101 #11 the door bakes
+the shape presets into every unset agent node (no shape = DEFAULT_SHAPE=build
+→ 65 turns / 1500 s; probe: `apply_graph_defaults` on a bare node). The 900 s
+floor now reaches only hand-edited run dirs that skipped the door bake. The
+docs now say what the code does; agents stop authoring `timeout: 900` to
+"restore" a default that is no longer the floor they read.
