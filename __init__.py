@@ -4081,7 +4081,11 @@ def act_status(args):
                                                                      # #133: the wall meter rides identically —
                                                                      # {elapsed_s, wall_s, p95_s, meter}, absent
                                                                      # when nothing grounds it
-                                                                     "progress", "wall", "clocks", "item_counts") if kk in v}
+                                                                     # #709: the frozen-strip drop list rides
+                                                                     # identically — [[flag, value], ...], absent
+                                                                     # when the node's spawns dropped nothing
+                                                                     "progress", "wall", "clocks", "item_counts",
+                                                                     "frozen_strip") if kk in v}
                                            for k, v in st["nodes"].items()},
            "done": st["done"], "skipped": st["skipped"], "total": st["total"],
            # Optional desktop presentation; plain status remains sufficient.

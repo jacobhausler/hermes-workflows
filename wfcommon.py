@@ -6216,6 +6216,25 @@ def run_state(r, *, telemetry=True, lock_state=None):
     except (OSError, UnicodeError):
         events_text = ""
     outputs, states, nodes, recs = {}, {}, {}, {}
+    # #709 loud strip: dispatch.warn{kind:frozen_route_strip} rows collected per
+    # node (union of [flag, value] pairs across the node's spawns, first-seen
+    # order, deterministic). Honest absence: a node whose spawns dropped nothing
+    # never gains the key. One pass over the events text the read already holds.
+    frozen_stripped = {}
+    for _ln in events_text.splitlines():
+        if '"dispatch.warn"' not in _ln:
+            continue                     # substring prefilter: only rows that can matter
+        try:
+            _ev = json.loads(_ln)
+        except ValueError:
+            continue
+        if not isinstance(_ev, dict) or _ev.get("event") != "dispatch.warn" \
+                or _ev.get("kind") != "frozen_route_strip" or not _ev.get("node"):
+            continue
+        _seen = frozen_stripped.setdefault(_ev["node"], [])
+        for _pair in _ev.get("stripped") or []:
+            if _pair not in _seen:
+                _seen.append(_pair)
     for n in graph["nodes"]:
         st, rec = node_rec(r, n, byid, fp_memo, legacy_memo)
         states[n["id"]] = st; recs[n["id"]] = rec
@@ -6231,6 +6250,11 @@ def run_state(r, *, telemetry=True, lock_state=None):
                           "disposition": disposition_of("running" if active else st,
                                                         (rec or {}).get("error_class")),
                           "stale_of_amend": bool(rec) and st == "pending" and rec.get("status") in ("done", "partial", "failed", "skipped") or None}
+        if frozen_stripped.get(n["id"]):
+            # #709: the pairs this node DECLARED and the funnel dropped. The
+            # key rides every spawn state — a done node's author still must
+            # see that their cap/override never reached the child.
+            nodes[n["id"]]["frozen_strip"] = frozen_stripped[n["id"]]
         if st in ("done", "partial"):
             receipts = external_effect_receipts(n, rec)
             if receipts:
@@ -7414,9 +7438,20 @@ def run_explain(out):
     heartbeat verdicts, blocked_by words, parked markers). Terminal runs have
     nothing to explain — None, never an empty slogan."""
     status = out.get("status")
-    if status in ("done", "failed", "stopped"):
-        return None
     nodes = out.get("nodes") or {}
+    # #709 loud strip: one clause naming every node whose declared creation
+    # overrides the spawn funnel dropped (frozen_strip rides the payload from
+    # run_state — composed ONLY from fields already present, #127 law).
+    # Terminal runs NOW explain the strip: a done run that silently dropped the
+    # author's cap is the exact landmine this clause retires. No strips, no
+    # key — nothing changes for every run that never declared a frozen flag.
+    stripped = [(nid, v["frozen_strip"]) for nid, v in sorted(nodes.items())
+                if v.get("frozen_strip")]
+    stripped_note = ("stripped " + ", ".join(
+        f"{nid} ({', '.join(str(p[0]) for p in pairs)})" for nid, pairs in stripped)
+        if stripped else None)
+    if status in ("done", "failed", "stopped"):
+        return stripped_note
     running, stalled, pending, parked, blocked_names = 0, [], 0, 0, []
     for nid, v in nodes.items():
         st = v.get("status")
@@ -7445,6 +7480,8 @@ def run_explain(out):
         parts.append(p)
     if parked:
         parts.append(f"{parked} parked")
+    if stripped_note:
+        parts.append(stripped_note)
     if not parts:
         return f"{status}: no running work"
     return f"{status}: " + ", ".join(parts)

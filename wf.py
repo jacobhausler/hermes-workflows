@@ -400,6 +400,13 @@ def _spawn_expressibility_refusal(meta, node, cmd, spawn_no, index=None,
         rq = bool(pin_m)                        # #25: default-true on an authored model pin
     if not rq:
         return None                             # the author accepted fallback: legacy path
+    if node.get("profile") and "-p" in cmd:
+        # #709: the profile face is the ONLY surviving expressible route under
+        # the unconditional strip (the builder rides -p whenever the node
+        # declares one, byte-identical through the funnel). A profile-carried
+        # pin is EXPRESSIBLE; the served-route truth stays policed downstream
+        # by _profile_evidence + the route billing hold, exactly as designed.
+        return None
     def carried(flag, want):                    # does the LAUNCH argv actually bear the pin?
         if flag not in cmd:
             return False
@@ -8671,13 +8678,19 @@ _FROZEN_ROUTE_FLAGS = ("--max-turns", "--run-budget", "--reasoning",
                        "-t", "-m", "--provider")
 
 
-def _strip_frozen_route_flags(cmd):
+def _strip_frozen_route_flags(cmd, dropped=None):
     """Drop creation-override PAIRS from an agent-child argv (always on; see
     the block comment). Each flag consumes exactly its own value token, which
-    is how the argv builder above materializes them."""
+    is how the argv builder above materializes them. #709 review: the drop is
+    LOUD — pass a `dropped` list to collect the removed [flag, value] pairs in
+    argv order; the caller journals them as a dispatch.warn event. Silent
+    removal of an author-declared field is the landmine this whole branch
+    retires, so every real-spawn call site MUST pass the collector."""
     out, i = [], 0
     while i < len(cmd):
         if cmd[i] in _FROZEN_ROUTE_FLAGS:
+            if dropped is not None:
+                dropped.append(cmd[i:i + 2])
             i += 2
             continue
         out.append(cmd[i])
@@ -8844,7 +8857,14 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
     # the seat default and die post-work at the _route_hold billing gate;
     # refuse typed BEFORE the child starts instead. Every expressible pin
     # returns None here and spawns byte-identical.
-    cmd = _strip_frozen_route_flags(cmd)   # #709: the funnel truth, pre-door, pre-Popen
+    _stripped_pairs = []
+    cmd = _strip_frozen_route_flags(cmd, _stripped_pairs)   # #709: the funnel truth, pre-door, pre-Popen
+    if _stripped_pairs:
+        # LOUD by law: dropping an author-declared field without a journal
+        # entry is exactly the marker-class landmine #709 retires. One
+        # dispatch.warn per spawn that dropped anything, naming every pair.
+        log(run, "dispatch.warn", node=node["id"], spawn=spawn_no,
+            kind="frozen_route_strip", stripped=_stripped_pairs)
     _rx = _spawn_expressibility_refusal(meta, node, cmd, spawn_no, index=index,
                                         model_override=model_override)
     if _rx is not None:
