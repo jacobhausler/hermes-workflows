@@ -195,29 +195,6 @@ def _route_receipt_bake(meta, node):
     except OSError:
         pass                                   # receipt best-effort WRITE; the HOLD is strict
 
-def _strip_arm_state(home=None, env=None):
-    """E20: the concrete state an armed creation-override strip leaves behind.
-    Returns (arms, marker_path): arms is a non-empty list naming EVERY arm that
-    fired (the env var with its value; the marker file with its path and its
-    mtime as the armed-at instant). The refusal dialog renders these verbatim —
-    an operator gets the artifact to point at, not est-id lore with a fix menu."""
-    env = os.environ if env is None else env
-    root = Path(home) if home is not None else hermes_home()
-    mpath = root / "workflows" / "omit-policy-flags.on"
-    arms = []
-    ev = env.get("WF_OMIT_POLICY_FLAGS")
-    if (ev or "").strip():
-        arms.append(f"env WF_OMIT_POLICY_FLAGS={ev!r}")
-    if mpath.exists():
-        try:
-            mt = datetime.fromtimestamp(mpath.stat().st_mtime,
-                                         timezone.utc).isoformat(timespec="seconds")
-        except OSError:
-            mt = "unknown"
-        arms.append(f"marker {mpath} (armed at {mt})")
-    return arms, mpath
-
-
 def _budget_refusal(meta, node, byid, index, spawn_no):
     """est-3acn: BEFORE submit — the RunBudget pre-dispatch check at the same
     seam as _route_substitution_refusal (est-2ek.1.641's shape: a refusal that
@@ -399,7 +376,7 @@ def _spawn_expressibility_refusal(meta, node, cmd, spawn_no, index=None,
     an authored model pin) — an author who accepted fallback (require_route:
     false) rides the seat default UNREFUSED, exactly the est-yq2xq design
     intent; a node that pins nothing is auto-route by contract. The truth is
-    read off the FINAL argv (after `_omit_policy_flags_if_enabled`), so every
+    read off the FINAL argv as built, so every
     expressible pin — profile-carried or override-surfacing — is behavior-
     preserved byte-identically. The refusal never touches the seat (zero
     attempts) and logs dispatch.refused like the budget gate beside it."""
@@ -433,30 +410,14 @@ def _spawn_expressibility_refusal(meta, node, cmd, spawn_no, index=None,
     if not gaps:
         return None                             # expressible: launch byte-identical
     patch_snip = json.dumps({"patch": {"nodes": {node["id"]: {"require_route": False}}}})
-    if _omit_policy_flags_armed():
-        arms, mpath = _strip_arm_state()
-        why = ("the creation-override strip is armed by "
-               + " + ".join(arms or ["an unidentified arm"])
-               + " and consumed the flags before Popen"
-               + (", while the node declares no profile to carry the route"
-                  if not node.get("profile") else ""))
-        clears = []
-        if any(a.startswith("env ") for a in arms):
-            clears.append("unset WF_OMIT_POLICY_FLAGS")
-        if mpath.exists():
-            clears.append(f"rm {mpath}")
-        clear_txt = ("Clear the strip (" + " ; ".join(clears) + "), or opt this node "
-                     "into the fallback ladder with the amend " + patch_snip
-                     + " (a graph-wide defaults.require_route:false opts every node in),"
-                     " or point the node at a profile this host resolves.")
-    elif not node.get("profile"):
+    if not node.get("profile"):
         why = "the node declares no profile (no -p route evidence) and the launch argv " \
               "carries no creation override for the pin"
         clear_txt = ("Fix: give the node a profile this host resolves (\"profile\": ...), "
                      "or opt it into the fallback ladder with the amend " + patch_snip + ".")
     else:
         why = "the launch argv does not carry the pin this node declares"
-        clear_txt = ("Fix: carry the pin on the launch argv (a profile, or un-stripped "
+        clear_txt = ("Fix: carry the pin on the launch argv (a profile, or an explicit "
                      "-m/--provider), or opt this node into the fallback ladder with "
                      "the amend " + patch_snip + ".")
     pin = f"{pin_p}/{pin_m}".strip("/")
@@ -8553,59 +8514,6 @@ def _stale_spawn_refusal(run, node, byid):
             "ms": 0}
 
 
-# est-yq2xq frozen-route creation-override strip (marker-gated). The gateway's
-# frozen-route resume policy (hermes_cli/gateway_chat.py::check_resume_policy)
-# refuses creation overrides under `--continue <skey> --create-if-missing`: the
-# session is created WITHOUT the CLI creation flags, so every flag this spawn
-# then requests "differs from this session's launch" and the child dies rc=2
-# ("Resume retains gateway session policy; creation overrides are unsupported
-# on resume") — even on brand-new skeys; whole waves die (est-yq2xq class).
-# While this strip is ACTIVE the spawn omits every such flag pair and children
-# ride SEAT DEFAULTS: per-node model/provider pinning, reasoning effort,
-# toolsets, turn caps and run budgets are UNAVAILABLE while on (a pinned lane
-# silently runs the seat's default model). Enable with env WF_OMIT_POLICY_FLAGS=1
-# or the marker file <hermes_home>/workflows/omit-policy-flags.on. TURN OFF:
-# unset the env and delete the marker — argv returns byte-identical to stock.
-# The structural fix belongs in the gateway (session.create must freeze the
-# creation flags on the create-if-missing shape); until then this keeps waves
-# alive on affected seats instead of a per-install monkey-patch that every
-# plugin update wipes.
-_FROZEN_ROUTE_FLAGS = ("--max-turns", "--run-budget", "--reasoning",
-                       "-t", "-m", "--provider")
-
-
-def _omit_policy_flags_armed(home=None, env=None):
-    """est-yq2xq's enable law as ONE predicate (#483): the strip is armed when
-    env WF_OMIT_POLICY_FLAGS=1 or the marker file
-    <hermes_home>/workflows/omit-policy-flags.on exists. Consulted by the
-    strip itself AND by the spawn-time expressibility refusal, whose message
-    names the armed override — a second spelling of this condition is the
-    drift. `home`/`env` are test seams."""
-    env = os.environ if env is None else env
-    if env.get("WF_OMIT_POLICY_FLAGS") == "1":
-        return True
-    root = Path(home) if home is not None else hermes_home()
-    return (root / "workflows" / "omit-policy-flags.on").exists()
-
-
-def _omit_policy_flags_if_enabled(cmd, home=None, env=None):
-    """Strip frozen-route creation-override flag PAIRS from a child spawn argv
-    (est-yq2xq). Enabled when env WF_OMIT_POLICY_FLAGS=1 or the marker file
-    <hermes_home>/workflows/omit-policy-flags.on exists; otherwise returns the
-    argv byte-identical. Each flag consumes its own value token — exactly how
-    the argv builder materializes them above. `home`/`env` are test seams."""
-    if not _omit_policy_flags_armed(home, env):
-        return list(cmd)
-    out, i = [], 0
-    while i < len(cmd):
-        if cmd[i] in _FROZEN_ROUTE_FLAGS:
-            i += 2
-            continue
-        out.append(cmd[i])
-        i += 1
-    return out
-
-
 # ---- E24 (bd_2026-11-13-42t): wall truth -----------------------------------
 # NAMED DATA SHAPES:
 #   wall_account = {"declared_s": author's node timeout (or run default),
@@ -8759,12 +8667,6 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
     if node.get("run_budget"): cmd += ["--run-budget", str(node["run_budget"])]
     # est-yq2xq: on seats whose gateway freezes the route at session create, the
     # creation-override pairs above make every child die rc=2 (see
-    # _omit_policy_flags_if_enabled). While env WF_OMIT_POLICY_FLAGS=1 or
-    # <hermes_home>/workflows/omit-policy-flags.on is on, they are stripped and
-    # children ride seat defaults — per-node model pinning is UNAVAILABLE while
-    # on. Turn off: unset the env, delete the marker (byte-identical stock argv
-    # returns). Absent both, this line changes nothing.
-    cmd = _omit_policy_flags_if_enabled(cmd)
     # #483: the same seam, one question later — can the launch argv carry this
     # node's pinned route at all? If neither face can (no profile evidence, and
     # -m/--provider absent or strip-consumed), the spawn would silently serve
