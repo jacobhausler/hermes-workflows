@@ -737,7 +737,12 @@ def profile_errors(nodes, launcher=None, profiles_dir=None):
     `<profiles_dir>/<name>/workflow_team.json` exists and its `accept_from` list contains
     `launcher` ("default" is a legal launcher name). DELEGATION, NOT ISOLATION: consent is
     TARGET-owned — the target profile lists who may launch it; the launcher identity is
-    resolved from the door's own HERMES_HOME (never a graph arg) via launcher_profile()."""
+    resolved from the door's own HERMES_HOME (never a graph arg) via launcher_profile().
+    A cleanly-consented target whose config.yaml claims a model (`model.default`) but
+    names no provider, while the NODE declares none either, is refused with rule slug
+    `profile_route_incomplete` and the fix-shape example on the row: the profile file is
+    the sole route source for a provider-less node, and a half-written route dies at
+    connection start (papercut 2026-11-23)."""
     launcher = launcher if launcher is not None else launcher_profile()
     profiles_dir = Path(profiles_dir) if profiles_dir is not None else profiles_root()
     errs = []
@@ -772,11 +777,63 @@ def profile_errors(nodes, launcher=None, profiles_dir=None):
         if not isinstance(accept_from, list):
             E(nid, f"profile {prof!r}: workflow_team.json needs an 'accept_from' list of "
                    f"launcher profile names; launcher {launcher!r} is not accepted")
-        elif launcher not in accept_from:
+            continue
+        if launcher not in accept_from:
             E(nid, f"profile {prof!r} does not accept launcher {launcher!r}: its "
                    f"workflow_team.json accept_from is {json.dumps(accept_from)} "
                    "(the TARGET profile must list its launcher — delegation, not isolation)")
+            continue
+        # PROFILE-CARRIED ROUTE COMPLETENESS (papercut 2026-11-23: a seat whose
+        # config.yaml carried only `model: {default: ...}` died at connection
+        # start with `invalid_params` — a half-written route. The spawn argv
+        # carries --provider only when the NODE declares one (wf.py builds it
+        # from node["provider"]), so for a provider-less node the profile file
+        # is the SOLE route source and must make it complete. A config that
+        # claims a model without naming a provider is refused pre-spawn with
+        # the fix-shape example on the row; an explicit `provider: auto` is a
+        # documented choice and passes — the door refuses missing decisions,
+        # never express ones.)
+        if not (isinstance(n.get("provider"), str) and n["provider"].strip()):
+            try:
+                cfg = _yaml_load((ph / "config.yaml").read_text(encoding="utf-8"))
+            except Exception:
+                cfg = None                      # unparseable: this rule stays silent
+            decl, explicit = _model_route_claim(cfg)
+            if decl and not explicit:
+                errs.append({"node": nid, "field": "profile",
+                             "msg": f"profile {prof!r} carries a route without a provider: "
+                                    f"{ph / 'config.yaml'} declares {decl!r} but no "
+                                    f"'model.provider', and node {nid!r} declares none — "
+                                    "the spawn would die at connection start",
+                             "example": _door_example("profile_route_incomplete")})
     return errs
+
+
+def _model_route_claim(cfg):
+    """(declared-model-or-None, provider-explicit) from a profile config.yaml.
+    Shape follows core's documented `model:` block: a mapping whose route key
+    is `default` (or the alias key `model`) plus `provider`; a bare
+    `provider/model` or `provider:model` string carries the provider itself.
+    Only a NAMED, non-empty provider counts as explicit — auto is a decision,
+    absence is a hole. Non-dict / model-less configs make no claim: (None, True)."""
+    if not isinstance(cfg, dict):
+        return None, True
+    m = cfg.get("model")
+    if m is None:
+        return None, True
+    if isinstance(m, str):
+        if not m.strip():
+            return None, True
+        if "/" in m or ":" in m:
+            return m.strip(), True
+        return m.strip(), False
+    if not isinstance(m, dict):
+        return None, True
+    decl = m.get("default") or m.get("model")
+    if not (isinstance(decl, str) and decl.strip()):
+        return None, True
+    prov = m.get("provider")
+    return decl.strip(), bool(isinstance(prov, str) and prov.strip())
 
 def requires_errors(nodes, parents=None):
     """1.1 (RATIFY F4) structural validation of `requires` on agent/gate nodes, called by
@@ -1774,6 +1831,10 @@ def _schema_check(schema, field, report):
 #   fanout_items_from_head  whole graph object (the law spans producer pair:
 #                           the ref's head must sit in this node's `after`)
 #   gate_cycle              whole graph object (after flows downstream only)
+#   profile_route_incomplete one profile config.yaml OBJECT (the whole file's
+#                           shape; the one non-graph fragment — the rule guards
+#                           the target's route stanza; golden: fed to
+#                           profile_errors in tests/test_profile_route_guard_pcg.py)
 #   start_spec              one start-verb INPUT, not a graph: the five-line
 #                           YAML teach example bd_2026-11-13-9i1's seam routes
 #                           through this bank — the one string entry, because
@@ -1813,6 +1874,16 @@ RULE_EXAMPLES = {
             {"id": "build", "type": "agent", "after": ["approve"],
              "goal": "build the approved plan"},
         ],
+    },
+    # Papercut 2026-11-23: the fix shape for a profile-carried route is BOTH
+    # halves in the TARGET's config.yaml — a model default and its provider,
+    # side by side (the model name is a placeholder: shipped examples must
+    # not carry estate model aliases, scripts/scrub-list.txt). The ONLY
+    # non-graph fragment in the bank: the rule guards the profile FILE, so
+    # the golden test feeds this dict to profile_errors as the fixture's
+    # config, not to the graph door (tests/test_profile_route_guard_pcg.py).
+    "profile_route_incomplete": {
+        "model": {"default": "my-codex-model", "provider": "openai-codex"},
     },
     # The #706 seam: the start verb's five-line teach example, spec-compliant
     # BY CONSTRUCTION (tests/test_start_verb.py round-trips it through
