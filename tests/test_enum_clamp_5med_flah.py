@@ -115,12 +115,24 @@ def events(run):
 def record(run, nid):
     return json.loads((run / "nodes" / f"{nid}.json").read_text())
 
+def stripped_pairs(run, flag=None):
+    """#709: the durable journal of what the builder ASKED and the funnel
+    DROPPED — per spawn, in event order. This is the observation channel that
+    replaced argv transit (the pair never rides the child argv)."""
+    out = []
+    for e in events(run):
+        if e.get("event") == "dispatch.warn" and e.get("kind") == "frozen_route_strip":
+            out.extend(e.get("stripped") or [])
+    return [p for p in out if flag is None or p[0] == flag]
+
 # ---------- (b) e2e resolve-time clamp: lane table (reasoning_lanes) narrower than declared ----------
 if HOME.exists(): shutil.rmtree(HOME)
 HOME.mkdir(parents=True); RUNS.mkdir(parents=True)
 argv_log = HOME / "argv-lane.log"
 r = mk("flah-lane", [{"id": "a", "type": "agent", "goal": "GO lane",
-                      "model": "relay-m1", "provider": "relay", "reasoning": "high"}],
+                      "model": "relay-m1", "provider": "relay", "reasoning": "high",
+                      "require_route": False}],   # #709: -m/--provider strip at the funnel; the
+                                                  # pin feeds the lane table (def), never the argv
        {"reasoning_lanes": {"relay": ["xhigh", "medium", "low"]}})
 p = drive(r, {"FAKE_ARGV_LOG": str(argv_log), "FAKE_MODE": ""})
 rec = record(r, "a")
@@ -129,9 +141,13 @@ check("e2e resolve: node DONE (never a permfail death)", rec.get("status") == "d
       f"{rec.get('status')}/{rec.get('error')}")
 check("e2e resolve: ONE spawn — clamp happened before the first Popen, no gate-400 round-trip",
       len(argv_lines) == 1, f"{len(argv_lines)} spawns: {argv_lines}")
-check("e2e resolve: --reasoning high became --reasoning medium on the child argv",
-      argv_lines and "--reasoning medium" in argv_lines[0]
-      and "--reasoning high" not in argv_lines[0], str(argv_lines))
+# #709 truth: the clamped pair NEVER rides the child argv — the funnel strips
+# it. The clamp (high -> medium) is pinned by the node.clamped events below and
+# by the JOURNALED drop: the builder appended exactly --reasoning medium and the
+# dispatch.warn names it (argv transit itself is unit-covered, E2b).
+check("e2e resolve: the clamped medium is journaled; --reasoning rides NO child argv",
+      argv_lines and "--reasoning" not in argv_lines[0] and "medium" not in argv_lines[0]
+      and stripped_pairs(r, "--reasoning") == [["--reasoning", "medium"]], str(argv_lines))
 cl = [e for e in events(r) if e.get("event") == "node.clamped"]
 check("e2e resolve: exactly ONE warning event", len(cl) == 1, str(cl))
 if cl:
@@ -147,15 +163,18 @@ if cl:
 # ---------- (c) e2e escape hatch: the SERVER names the vocabulary, one re-drive ----------
 argv_log2 = HOME / "argv-gate.log"
 r2 = mk("flah-gate", [{"id": "a", "type": "agent", "goal": "GO gate",
-                       "model": "relay-m1", "reasoning": "high"}])
+                       "model": "relay-m1", "reasoning": "high", "require_route": False}])
 p2 = drive(r2, {"FAKE_ARGV_LOG": str(argv_log2), "FAKE_MODE": "reasoning_gate400",
-                "FAKE_SUPPORTED_EFFORTS": "xhigh,medium,low", "FAKE_REJECT_EFFORT": "high"})
+                "FAKE_SUPPORTED_EFFORTS": "xhigh,medium,low", "FAKE_REJECT_EFFORT": "high",
+                "FAKE_NOARGV_GATE": "1", "FAKE_ATTEMPT_DIR": str(HOME / "att-gate")})
 rec2 = record(r2, "a")
 lines2 = argv_log2.read_text().splitlines() if argv_log2.exists() else []
 check("e2e gate400: node DONE — the enum-gate 400 was survived, not a permfail",
       rec2.get("status") == "done", f"{rec2.get('status')}/{rec2.get('error')} {rec2.get('error_class')}")
-check("e2e gate400: attempt 1 asked high (honest first try), attempt 2 asked medium",
-      len(lines2) == 2 and "--reasoning high" in lines2[0] and "--reasoning medium" in lines2[1],
+check("e2e gate400: attempt 1 asked high (honest first try), attempt 2 asked medium — "
+      "on the JOURNAL, never the argv (#709)",
+      len(lines2) == 2 and all("--reasoning" not in l for l in lines2)
+      and stripped_pairs(r2, "--reasoning") == [["--reasoning", "high"], ["--reasoning", "medium"]],
       str(lines2))
 check("e2e gate400: exactly ONE re-drive (no loop)", len(lines2) == 2, str(lines2))
 cl2 = [e for e in events(r2) if e.get("event") == "node.clamped"]
@@ -188,18 +207,22 @@ check("plain provider_400 stays permfail (no enum words: no re-drive)",
 # Fixed code passes the server's word through: spawn 2 asks medium and lives.
 argv_log7 = HOME / "argv-stale-table.log"
 r7 = mk("flah-stale", [{"id": "a", "type": "agent", "goal": "GO stale",
-                        "model": "relay-m1", "provider": "relay", "reasoning": "high"}],
+                        "model": "relay-m1", "provider": "relay", "reasoning": "high",
+                        "require_route": False}],
        {"reasoning_lanes": {"relay": ["high"]}})   # STALE: contradicts the server
 p7 = drive(r7, {"FAKE_ARGV_LOG": str(argv_log7), "FAKE_MODE": "reasoning_gate400",
-                "FAKE_SUPPORTED_EFFORTS": "medium,low", "FAKE_REJECT_EFFORT": "high"})
+                "FAKE_SUPPORTED_EFFORTS": "medium,low", "FAKE_REJECT_EFFORT": "high",
+                "FAKE_NOARGV_GATE": "1", "FAKE_ATTEMPT_DIR": str(HOME / "att-stale")})
 rec7 = record(r7, "a")
 lines7 = argv_log7.read_text().splitlines() if argv_log7.exists() else []
 check("B1 e2e: server override survives the stale table — node DONE, not provider_400",
       rec7.get("status") == "done",
       f"{rec7.get('status')}/{rec7.get('error_class')} argv={lines7}")
-check("B1 e2e: spawn 2 asked the SERVER'S medium, never the table's high again",
-      len(lines7) == 2 and "--reasoning medium" in lines7[1]
-      and "--reasoning high" not in lines7[1], str(lines7))
+check("B1 e2e: spawn 2 asked the SERVER'S medium, never the table's high again "
+      "(journal ask-order, stripped argv, #709)",
+      len(lines7) == 2 and all("--reasoning" not in l for l in lines7)
+      and stripped_pairs(r7, "--reasoning") == [["--reasoning", "high"], ["--reasoning", "medium"]],
+      str(lines7))
 check("B1 e2e: the gate400 record tells the truth (requested high -> clamped medium)",
       (rec7.get("reasoning_gate400") or {}).get("clamped") == "medium"
       and (rec7.get("reasoning_gate400") or {}).get("requested") == "high",
@@ -222,10 +245,11 @@ gc_pids = HOME / "gc-b3.pids"
 gc_pids.unlink(missing_ok=True)
 argv_log8 = HOME / "argv-gate-gc.log"
 r8 = mk("flah-gate-gc", [{"id": "a", "type": "agent", "goal": "GO gate gc",
-                           "model": "relay-m1", "reasoning": "high"}])
+                           "model": "relay-m1", "reasoning": "high", "require_route": False}])
 p8 = drive(r8, {"FAKE_ARGV_LOG": str(argv_log8), "FAKE_MODE": "reasoning_gate400",
                 "FAKE_SUPPORTED_EFFORTS": "xhigh,medium,low", "FAKE_REJECT_EFFORT": "high",
-                "FAKE_GC": "1", "FAKE_GC_PIDS": str(gc_pids)})
+                "FAKE_GC": "1", "FAKE_GC_PIDS": str(gc_pids),
+                "FAKE_NOARGV_GATE": "1", "FAKE_ATTEMPT_DIR": str(HOME / "att-gate-gc")})
 rec8 = record(r8, "a")
 lines8 = argv_log8.read_text().splitlines() if argv_log8.exists() else []
 ev8 = events(r8)
@@ -273,7 +297,7 @@ from wf import _left_live_record as _llr, _proc_unreadable_record as _pur
 
 argv_log9 = HOME / "argv-gate-iso.log"
 r9 = mk("flah-gate-iso", [{"id": "a", "type": "agent", "goal": "GO gate iso",
-                           "model": "relay-m1", "reasoning": "high"}])
+                            "model": "relay-m1", "reasoning": "high", "require_route": False}])
 # The fault must exist INSIDE the runner and fire ONLY for /proc reads issued
 # from _isolate_prior's own call stack (the committee's dependency-fault method):
 # every other /proc channel (admission liveness, run_state) keeps reading truth.
@@ -286,10 +310,18 @@ r9 = mk("flah-gate-iso", [{"id": "a", "type": "agent", "goal": "GO gate iso",
     "            raise PermissionError('fault: proc denied in _isolate_prior')\n"
     "    return _real(p)\n"
     "os.listdir=_u\n")
+# #709: the funnel strips -t off every spawn, so the argv-keyed gate can never
+# fire here — the gate keys on the ATTEMPT (attempt 1 answers the vocabulary
+# 400), exactly the relay's real behavior: it rejects the value it is served,
+# and after the strip the value it is served is the runner's ask as journaled
+# (dispatch.warn), not an argv pair. The typed fail-closed path under test is
+# unchanged: attempt 1 dies the 400, the re-drive's _isolate_prior hits the
+# injected /proc fault, spawn 2 never happens.
 _env9 = dict(os.environ, HERMES_HOME=str(HOME), WF_RUNS_ROOT=str(RUNS),
              FAKE_LOG=str(HOME / "fake-gate-iso.log"),
              FAKE_ARGV_LOG=str(argv_log9), FAKE_MODE="reasoning_gate400",
              FAKE_SUPPORTED_EFFORTS="xhigh,medium,low", FAKE_REJECT_EFFORT="high",
+             FAKE_NOARGV_GATE="1", FAKE_ATTEMPT_DIR=str(HOME / "att-gate-iso"),
              PYTHONPATH=str(HOME) + os.pathsep + os.environ.get("PYTHONPATH", ""))
 p9 = _sp.run([sys.executable, str(BUILD.parent / "wf.py"), "run", str(r9)],
              env=_env9, capture_output=True, timeout=180, text=True)
@@ -333,15 +365,16 @@ check("B3-fail unit: _proc_unreadable_record carries attempts_log forward",
 # server names it; a test-seam override may NEVER write the cache.
 argv_log10 = HOME / "argv-outer-ladder.log"
 r10 = mk("flah-outer", [{"id": "a", "type": "agent", "goal": "GO outer",
-                         "model": "relay-m1", "provider": "relay", "reasoning": "high"}],
+                         "model": "relay-m1", "provider": "relay", "reasoning": "high",
+                         "require_route": False}],
         {"reasoning_lanes": {"relay": ["high"]}})   # STALE: contradicts the server
 p10 = drive(r10, {"FAKE_ARGV_LOG": str(argv_log10), "FAKE_MODE": "reasoning_gate400",
                   "FAKE_SUPPORTED_EFFORTS": "medium,low", "FAKE_REJECT_EFFORT": "high",
-                  "FAKE_GATE_THEN_TRANSPORT": "1", "FAKE_API_CALLS": "0"})
+                  "FAKE_GATE_THEN_TRANSPORT": "1", "FAKE_API_CALLS": "0",
+                  "FAKE_NOARGV_GATE": "1", "FAKE_ATTEMPT_DIR": str(HOME / "att-outer")})
 rec10 = record(r10, "a")
 lines10 = argv_log10.read_text().splitlines() if argv_log10.exists() else []
-_asks10 = [(l.split("--reasoning")[1].split()[0] if "--reasoning" in l else "")
-           for l in lines10]
+_asks10 = [v for f, v in stripped_pairs(r10, "--reasoning")]   # #709: the journal, not argv
 check("B1-crossed e2e: the honest first ask was high, the server answered medium, and the "
       "OUTER ladder respawns kept asking medium (high NEVER re-asks)",
       len(lines10) >= 3 and _asks10[0] == "high"
@@ -391,18 +424,24 @@ def toolsets_run(run_id, toolsets_value, argv_log_path):
 
 if CORE:
     r4, p4, rec4, lines4 = toolsets_run("flah-ts-none", ["none"], HOME / "argv-ts-none.log")
-    check("e2e toolsets: -t none is a CLEAN no-op (flag omitted), child DONE",
+    # #709: the 'none' sentinel means the builder NEVER appends -t — there is
+    # nothing for the funnel to strip, so the run carries NO dispatch.warn.
+    # Clean no-op = flag absent from argv AND no journaled drop.
+    check("e2e toolsets: -t none is a CLEAN no-op (never appended, nothing stripped), child DONE",
           rec4.get("status") == "done" and lines4 and " -t " not in (" " + lines4[0] + " ")
-          and not lines4[0].endswith("-t"), f"{rec4.get('status')} argv={lines4}")
+          and not lines4[0].endswith("-t") and stripped_pairs(r4) == [],
+          f"{rec4.get('status')} argv={lines4}")
     cl4 = [e for e in events(r4) if e.get("event") == "node.clamped"]
     check("e2e toolsets: ONE warning naming requested 'none'",
           len(cl4) == 1 and cl4[0].get("kind") == "toolsets"
           and cl4[0].get("requested") == "none", str(cl4))
 
     r5, _, rec5, lines5 = toolsets_run("flah-ts-mixed", ["web", "bogus"], HOME / "argv-ts-mixed.log")
-    check("e2e toolsets: mixed list keeps the valid name, drops the bogus one",
-          rec5.get("status") == "done" and lines5 and "-t web" in lines5[0]
-          and "bogus" not in lines5[0], f"{rec5.get('status')} argv={lines5}")
+    check("e2e toolsets: mixed list keeps the valid name, drops the bogus one — the "
+          "KEPT pair rides the journal as [[-t,web]], bogus appears nowhere (#709)",
+          rec5.get("status") == "done" and lines5 and "-t" not in lines5[0].split()
+          and "bogus" not in lines5[0] and stripped_pairs(r5) == [["-t", "web"]],
+          f"{rec5.get('status')} argv={lines5}")
     cl5 = [e for e in events(r5) if e.get("event") == "node.clamped"]
     check("e2e toolsets: ONE warning names requested 'web,bogus' -> kept 'web'",
           len(cl5) == 1 and cl5[0].get("requested") == "web,bogus"
@@ -412,8 +451,10 @@ if CORE:
     # gate400 hatch (no table invented): fake rejects what core's widest table
     # DOES contain but a narrow relay would not (FAKE_REJECT_EFFORT drives it).
     r6, _, rec6, lines6 = toolsets_run("flah-ts-none-ok", ["web"], HOME / "argv-ts-ok.log")
-    check("e2e toolsets: all-valid list passes through byte-identical (-t web)",
-          rec6.get("status") == "done" and lines6 and "-t web" in lines6[0], str(lines6))
+    check("e2e toolsets: all-valid list is appended VERBATIM by the builder — journaled "
+          "byte-identical as [[-t,web]], stripped off the child argv (#709)",
+          rec6.get("status") == "done" and lines6 and "-t" not in lines6[0].split()
+          and stripped_pairs(r6) == [["-t", "web"]], str(lines6))
     check("e2e toolsets: all-valid list logs NO clamp",
           not [e for e in events(r6) if e.get("event") == "node.clamped"], "")
 
@@ -454,8 +495,16 @@ else:
     # runner passes names through (warn+continue is core's job on the chat path)
     # and never hard-fails the spawn.
     r4, _, rec4, lines4 = toolsets_run("flah-ts-none", ["none"], HOME / "argv-ts-none.log")
-    check("no-core: unknown toolset passes through and the child still runs",
-          rec4.get("status") == "done" and lines4 and "-t none" in lines4[0],
+    # #709 truth (measured on Linux, no-core seated): the 'none' sentinel is
+    # consumed at the BUILDER — a node.clamped kind=toolsets event names the
+    # author's explicit 'no selection' — so -t never reaches the funnel, and a
+    # dispatch.warn here would be a lie (nothing was stripped).
+    check("no-core: unknown toolset passes through the builder and the child still runs "
+          "(sentinel clamped at the builder, no -t on argv, no dispatch.warn — #709)",
+          rec4.get("status") == "done" and lines4 and "-t" not in lines4[0].split()
+          and not stripped_pairs(r4)
+          and any(e.get("event") == "node.clamped" and e.get("kind") == "toolsets"
+                  for e in events(r4)),
           f"{rec4.get('status')} argv={lines4}")
 
 print("DONE enum_clamp_5med_flah", "OK" if ok else "FAIL")

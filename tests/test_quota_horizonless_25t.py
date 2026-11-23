@@ -89,7 +89,7 @@ def drive(run_id, mode):
                           env=env, capture_output=True, text=True, timeout=120).stdout.strip()
 
 (HOME / "fake.log").write_text("")
-r = mk("qh25t", [{"id": "a", "type": "agent", "goal": "GO qh25t", "model": "gpt-x"}])
+r = mk("qh25t", [{"id": "a", "type": "agent", "goal": "GO qh25t", "model": "gpt-x", "require_route": False}])
 out = drive("qh25t", "quota_horizonless")
 rec = json.loads((r / "nodes" / "a.json").read_text())
 events = [json.loads(l) for l in (r / "events.jsonl").read_text().splitlines() if l.strip()]
@@ -112,7 +112,7 @@ check("the run blocks on the parked node", "WORKFLOW_FAILED" in out, out[:80])
 
 # ---------- (3) the named-horizon twin keeps the #24 law, reset now typed ----------
 (HOME / "fake.log").write_text("")
-r2 = mk("qwh25t", [{"id": "a", "type": "agent", "goal": "GO qwh25t", "model": "m-hz"}])
+r2 = mk("qwh25t", [{"id": "a", "type": "agent", "goal": "GO qwh25t", "model": "m-hz", "require_route": False}])
 drive("qwh25t", "quota")
 rec2 = json.loads((r2 / "nodes" / "a.json").read_text())
 check("named horizon: quota_exhausted{identity, reset='109 hour'} at one attempt",

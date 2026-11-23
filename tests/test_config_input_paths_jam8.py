@@ -83,7 +83,7 @@ shutil.rmtree(HOME, ignore_errors=True); HOME.mkdir(parents=True); RUNS.mkdir()
 SCHEMA = {"type": "object", "required": ["diagnostic"],
           "properties": {"diagnostic": {"type": "string"}}}
 r = mk("jam8-fenced", [{"id": "a", "type": "agent", "goal": "cfg JAM8-FENCED",
-                        "model": "turbo-a", "provider": "nope", "schema": SCHEMA}],
+                        "model": "turbo-a", "provider": "nope", "require_route": False, "schema": SCHEMA}],
        retry_backoff=[0.05, 0.1])
 out = wf_run("jam8-fenced", {"FAKE_MODE": "cfgtypos", "FAKE_CFG_FENCED": "1",
                              "FAKE_API_CALLS": "0"})
@@ -105,7 +105,7 @@ check("T8c the death keeps its EVIDENCE: raw capture names the provider failure"
 # that dies late rc!=0 with a valid fence stays partial (control below).
 (HOME / "fake.log").write_text("")
 r = mk("jam8-slow-fenced", [{"id": "a", "type": "agent", "goal": "cfg JAM8-SLOWF",
-                             "model": "turbo-a", "provider": "nope", "schema": SCHEMA}],
+                             "model": "turbo-a", "provider": "nope", "require_route": False, "schema": SCHEMA}],
        retry_backoff=[0.05, 0.1])
 # est-f6a4i: window-relative slow (window + 0.5s), not a fixed 1.5s — a fixed
 # sleep overlaps the estate host's loaded spawn floor (~3.0s) and would land the

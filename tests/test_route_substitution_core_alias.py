@@ -73,8 +73,10 @@ STUB.write_text(
     "a = sys.argv[1:]\n"
     "m = a[a.index('-m') + 1] if '-m' in a else 'seat-default'\n"
     "p = a[a.index('--provider') + 1] if '--provider' in a else ''\n"
+    "prof = a[a.index('-p') + 1] if '-p' in a else ''\n"
+    "# #709: -m/--provider strip at the funnel; a profile-routed child bills @<profile>\n"
     "with open(os.environ['HERMES_WF_LEDGER'], 'a') as f:\n"
-    "    f.write(p + '/' + m + '\\n')\n"
+    "    f.write(p + '/' + m + ('@' + prof if prof else '') + '\\n')\n"
     "print('```json\\n{\"result\": \"ok\"}\\n```')\n"
 )
 STUB.chmod(0o755)
@@ -119,7 +121,9 @@ check("setup: the profile seat map reads the alias",
 # The door's bake: proved-alive receipts naming the RESOLVED TARGET.
 (RUN / "route_receipts.json").write_text(json.dumps({"work": TARGET, "workp": TARGET}))
 node = {"id": "work", "type": "agent", "goal": "do the work",
-        "provider": "example-provider", "model": ALIAS}
+        "provider": "example-provider", "model": ALIAS,
+        "require_route": False}   # #709: the alias pair strips at the funnel; the
+                                  # guard below polices the DEF, the child bills seat-default
 d_node = {"id": "workp", "type": "agent", "goal": "do the work",
           "model": ALIAS, "profile": "alt"}
 (RUN / "graph.json").write_text(json.dumps({"name": "rcalias", "nodes": [node, d_node]}))
@@ -138,8 +142,11 @@ r1 = wf.run_child(meta, node, {"work": node}, "do the work", "", None,
 check("A2 core-direct-alias respawn runs to done, no typed denial",
       r1.get("status") == "done" and r1.get("error_class") != "route_substitution_denied",
       r1)
-check("A2 the alias billed again (the door would resolve it again)",
-      attempts_for("example-provider/" + ALIAS) == 1,
+# #709: the alias never rides the child argv on a strip host — the stub bills
+# the seat default it served; the alias-resolution contract lives in the door's
+# guard (A1/D1/B/C/E judge the DEF, never argv).
+check("A2 the alias spawn billed again (seat-default served; door still resolves the DEF)",
+      attempts_for("/seat-default") == 1,
       LEDGER.read_text() if LEDGER.exists() else "<no ledger>")
 
 # ---- D (RED on base): profile-routed node, alias lives in the PROFILE seat ---
@@ -154,8 +161,9 @@ r4 = wf.run_child(meta, d_node, {"workp": d_node}, "do the work", "", None,
 check("D2 profile-routed respawn runs to done — RED on base",
       r4.get("status") == "done" and r4.get("error_class") != "route_substitution_denied",
       r4)
-check("D2 the profile alias billed again",
-      attempts_for("/" + ALIAS) == 1,
+check("D2 the profile-routed spawn billed with the PROFILE riding argv "
+      "(the -p face is the expressible route under #709)",
+      attempts_for("/seat-default@alt") == 1,
       LEDGER.read_text() if LEDGER.exists() else "<no ledger>")
 
 # ---- B (green before AND after): a genuinely different model stays DENIED ---

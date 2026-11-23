@@ -54,13 +54,12 @@ meta = {"_run": RUN}
 BARE_CMD = ["/bin/hermes", "chat", "--query-file", "/tmp/q", "--oneshot"]
 
 ref = wf._spawn_expressibility_refusal(meta, node, list(BARE_CMD), 1)
-check("strip-armed pinned spawn refuses before submit",
+check("pinned spawn refuses before submit (marker presence irrelevant)",
       ref and ref.get("error_class") == "route_inexpressible", str(ref)[:120])
 err = (ref or {}).get("error", "")
-check("names the marker arm that fired, by PATH", str(MPATH) in err, err[:200])
-check("renders the armed-at mtime (ISO of the marker's stat)",
-      "2026-11-16T13:36:19+00:00" in err, err[:300])
-check("renders the exact strip-lifting rm", f"rm {MPATH}" in err, err[:300])
+check("#709: the dead marker is INERT — error names no arms, no mtime, no rm",
+      "omit-policy-flags.on" not in err and "WF_OMIT_POLICY_FLAGS" not in err
+      and "2026-11-16" not in err, err[:300])
 check("renders the amend snippet that clears the hold",
       '{"patch": {"nodes": {"review": {"require_route": false}}}}' in err, err[-300:])
 check("one conversation, no est-id lore", "est-" not in err and "#483" not in err, err[:200])
@@ -70,9 +69,8 @@ check("rerun converges: the identical dialog, no drift", ref2 == ref)
 os.environ["WF_OMIT_POLICY_FLAGS"] = "1"
 try:
     ref3 = wf._spawn_expressibility_refusal(meta, node, list(BARE_CMD), 1) or {}
-    check("env arm named with its value",
-          "env WF_OMIT_POLICY_FLAGS='1'" in ref3.get("error", "")
-          and "unset WF_OMIT_POLICY_FLAGS" in ref3.get("error", ""), str(ref3)[:300])
+    check("#709: the env arm is inert too — identical refusal, no drift",
+          ref3 == ref, str(ref3)[:300])
 finally:
     os.environ.pop("WF_OMIT_POLICY_FLAGS", None)
 

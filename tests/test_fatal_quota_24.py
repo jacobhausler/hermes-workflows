@@ -63,7 +63,7 @@ def mk(run_id, nodes):
 
 env = dict(os.environ, HERMES_HOME=str(HOME), FAKE_LOG=str(LOG),
            FAKE_MODE="quota", WF_QUOTA_CACHE=str(HOME / "quota-cache.json"))
-node = [{"id": "a", "type": "agent", "goal": "GO", "model": "sol"}]
+node = [{"id": "a", "type": "agent", "goal": "GO", "model": "sol", "require_route": False}]
 r = mk("fq-e2e", node)
 for line in open(FAKE): pass  # noop; fake reads env at spawn
 subprocess.run([sys.executable, str(BUILD.parent / "wf.py"), "run", str(r)],

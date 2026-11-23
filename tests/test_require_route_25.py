@@ -129,8 +129,15 @@ check("defaults.require_route must be boolean",
       "error" in out and "boolean" in json.dumps(out), out)
 
 # ---- 8. alive pin: launches + bakes route_verified into graph.json -------------------
+# #709: the creation-override face (-m/--provider) strips at the spawn funnel on
+# every host, so an alive-proved pin expresses itself through the PROFILE face.
+# The door's profile law applies: the seat dir + consent file must exist.
 set_ping({})
-out = door.act_run({"graph": pinned_graph()})
+_prof = Path(os.environ["HERMES_HOME"]) / "profiles" / "rr25"
+_prof.mkdir(parents=True, exist_ok=True)
+(_prof / "config.yaml").write_text("model:\n  default: fake-default\n")
+(_prof / "workflow_team.json").write_text(json.dumps({"accept_from": ["default"]}))
+out = door.act_run({"graph": pinned_graph(profile="rr25")})
 rid = out.get("run_id")
 check("alive pin launches", bool(rid), out)
 if rid:

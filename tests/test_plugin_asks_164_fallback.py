@@ -22,9 +22,12 @@ once per declared model IN ORDER. Gates, tested here:
     node.fallback events, the seeded verdict commits untouched (est-ja41
     refusal-is-final). A rung death may only RAISE `attempts` against the
     merged ledger, never re-break the record-vs-ledger agreement.
-Engine-driven with the fake hermes (FAKE_MODE=fallback_ladder): a child whose -m
-is not $FAKE_OK_MODEL dies with the transport marker and 0 api calls (the Q4
-replay-safe shape); the ok model answers with a fenced json block, exit 0.
+Engine-driven with the fake hermes (FAKE_MODE=fallback_ladder): since #709 the
+funnel strips the rung's -m before Popen, so the gate keys on the spawn's
+ATTEMPT (FAKE_ANSWER_AT=N: the N-th spawn answers with a fenced json block,
+earlier ones die the transport marker + 0 api calls — the Q4 replay-safe
+shape). The rung order each spawn rode is asserted from the run's durable
+dispatch.warn journal (events.jsonl), not from argv.
 """
 import importlib.util
 import json
@@ -85,13 +88,20 @@ def wf(run_id, extra_env=None):
     return p.stdout.strip()
 
 def argv_models(argv_log):
-    """The -m value the fake was spawned with, one entry per child spawn."""
+    """Spawn counter: one line per child spawn (FAKE_ARGV_LOG)."""
     if not argv_log.exists():
         return []
+    return [l for l in argv_log.read_text().splitlines() if l.strip()]
+
+
+def rung_sequence(r):
+    """#709 truth: the -m value EACH spawn rode, read from the run's durable
+    dispatch.warn journal — the funnel strips the pair before Popen, so the
+    journal (not argv) is the permanent record of rung order."""
     out = []
-    for line in argv_log.read_text().splitlines():
-        parts = line.split()
-        out.append(parts[parts.index("-m") + 1] if "-m" in parts else None)
+    for e in events(r):
+        if e.get("event") == "dispatch.warn" and e.get("kind") == "frozen_route_strip":
+            out.append(next((v for f, v in e.get("stripped") or [] if f == "-m"), None))
     return out
 
 def events(r):
@@ -115,17 +125,19 @@ RUNS.mkdir()
 #      the second rung answers, the node commits done on that route ----
 r = mk("asks164-fallback", [{
     "id": "a", "type": "agent", "goal": "GO asks164",
-    "model": "m0", "fallback_models": ["m1", "m2"],
+    "model": "m0", "fallback_models": ["m1", "m2"], "require_route": False,
 }])
 argv_log = BUILD / "argv_164_fallback.log"
 argv_log.unlink(missing_ok=True)
 out = wf("asks164-fallback", {"FAKE_MODE": "fallback_ladder", "FAKE_API_CALLS": "0",
-                              "FAKE_OK_MODEL": "m2", "FAKE_ARGV_LOG": str(argv_log)})
-models = argv_models(argv_log)
+                              "FAKE_ANSWER_AT": "5", "FAKE_ATTEMPT_DIR": str(HOME / "att-1"),
+                              "FAKE_ARGV_LOG": str(argv_log)})
+models = rung_sequence(r)
 rec = json.loads((r / "nodes" / "a.json").read_text())
 check("(1) run lands done (fallback rung answered)", "WORKFLOW_DONE" in out, out)
-check("(1) fallback_models tried IN ORDER after the same-model ladder",
-      models == ["m0", "m0", "m0", "m1", "m2"], f"spawned -m sequence: {models}")
+check("(1) fallback_models tried IN ORDER after the same-model ladder (journaled rung order, #709)",
+      models == ["m0", "m0", "m0", "m1", "m2"] and len(argv_models(argv_log)) == 5,
+      f"journaled rung sequence: {models} spawns={len(argv_models(argv_log))}")
 check("(1) committed record is done on the answering rung",
       rec.get("status") == "done" and rec.get("fallback_model_used") == "m2",
       json.dumps({k: rec.get(k) for k in ("status", "error_class", "fallback_model_used")}))
@@ -136,40 +148,44 @@ check("(1) one node.fallback event per rung, named",
 # ---- (2) first rung answers -> the second is NEVER spawned ----
 r2 = mk("asks164-first", [{
     "id": "a", "type": "agent", "goal": "GO asks164-first",
-    "model": "m0", "fallback_models": ["m1", "m2"],
+    "model": "m0", "fallback_models": ["m1", "m2"], "require_route": False,
 }])
 argv_log2 = BUILD / "argv_164_first.log"
 argv_log2.unlink(missing_ok=True)
 out2 = wf("asks164-first", {"FAKE_MODE": "fallback_ladder", "FAKE_API_CALLS": "0",
-                            "FAKE_OK_MODEL": "m1", "FAKE_ARGV_LOG": str(argv_log2)})
-models2 = argv_models(argv_log2)
+                            "FAKE_ANSWER_AT": "4", "FAKE_ATTEMPT_DIR": str(HOME / "att-2"),
+                            "FAKE_ARGV_LOG": str(argv_log2)})
+models2 = rung_sequence(r2)
 check("(2) first answering rung stops the ladder",
-      models2 == ["m0", "m0", "m0", "m1"] and "WORKFLOW_DONE" in out2, f"sequence: {models2}")
+      models2 == ["m0", "m0", "m0", "m1"] and len(argv_models(argv_log2)) == 4
+      and "WORKFLOW_DONE" in out2, f"sequence: {models2}")
 
 # ---- (3) other error classes NEVER fall back: a quota-class 429 (reset
 # ---- horizon) is terminal at ONE attempt, zero fallback spawns ----
 r3 = mk("asks164-quota", [{
     "id": "a", "type": "agent", "goal": "GO asks164-quota",
-    "model": "m0", "fallback_models": ["m1"],
+    "model": "m0", "fallback_models": ["m1"], "require_route": False,
 }])
 argv_log3 = BUILD / "argv_164_quota.log"
 argv_log3.unlink(missing_ok=True)
 out3 = wf("asks164-quota", {"FAKE_MODE": "quota", "FAKE_ARGV_LOG": str(argv_log3)})
-models3 = argv_models(argv_log3)
+models3 = rung_sequence(r3)
 rec3 = json.loads((r3 / "nodes" / "a.json").read_text())
 check("(3) quota 429 stays one-attempt quota_exhausted — no fallback spawn",
-      models3 == ["m0"] and rec3.get("error_class") == "quota_exhausted",
+      models3 == ["m0"] and len(argv_models(argv_log3)) == 1
+      and rec3.get("error_class") == "quota_exhausted",
       f"spawned {models3}, class {rec3.get('error_class')}")
 
 # ---- (4) no fallback_models key: byte-identical old ladder — same model
 # ---- thrice, transport_exhausted, run blocked, ZERO extra spawns ----
 r4 = mk("asks164-plain", [{"id": "a", "type": "agent", "goal": "GO asks164-plain",
-                          "model": "m0"}])
+                          "model": "m0", "require_route": False}])
 argv_log4 = BUILD / "argv_164_plain.log"
 argv_log4.unlink(missing_ok=True)
 out4 = wf("asks164-plain", {"FAKE_MODE": "fallback_ladder", "FAKE_API_CALLS": "0",
-                           "FAKE_OK_MODEL": "zzz", "FAKE_ARGV_LOG": str(argv_log4)})
-models4 = argv_models(argv_log4)
+                           "FAKE_ANSWER_AT": "99", "FAKE_ATTEMPT_DIR": str(HOME / "att-4"),
+                           "FAKE_ARGV_LOG": str(argv_log4)})
+models4 = rung_sequence(r4)
 rec4 = json.loads((r4 / "nodes" / "a.json").read_text())
 check("(4) absent key = old behavior: 3 spawns all m0, transport_exhausted",
       models4 == ["m0", "m0", "m0"] and rec4.get("error_class") == "transport_exhausted"
@@ -220,7 +236,7 @@ import time as _t7
 import threading as _th7
 r7 = mk("asks164-spent", [{
     "id": "a", "type": "agent", "goal": "GO asks164-spent",
-    "model": "m0", "fallback_models": ["m1", "m2"],
+    "model": "m0", "fallback_models": ["m1", "m2"], "require_route": False,
 }])
 (r7 / "retry-window.json").write_text(json.dumps(
     {"a": {"deadline": _t7.time() - 1.0, "attempts": 2,
@@ -230,7 +246,7 @@ argv_log7 = BUILD / "argv_164_spent.log"
 argv_log7.unlink(missing_ok=True)
 out7 = wf("asks164-spent", {"FAKE_MODE": "fallback_ladder", "FAKE_API_CALLS": "0",
                             "FAKE_OK_MODEL": "zzz", "FAKE_ARGV_LOG": str(argv_log7)})
-models7 = argv_models(argv_log7)
+models7 = rung_sequence(r7)
 rec7 = json.loads((r7 / "nodes" / "a.json").read_text())
 check("(7) spent-cap boot spawns NOTHING — the refusal bypasses the ladder",
       models7 == [], f"spawned {models7}")

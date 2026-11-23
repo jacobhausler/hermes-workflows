@@ -11,6 +11,18 @@
           "skey": "wf:<RUN>:a:58925192.<NONCE>"
         },
         {
+          "event": "dispatch.warn",
+          "kind": "frozen_route_strip",
+          "node": "a",
+          "spawn": 0,
+          "stripped": [
+            [
+              "--max-turns",
+              "65"
+            ]
+          ]
+        },
+        {
           "event": "steer.baked",
           "n_lines": 0,
           "node": "a",
@@ -24,6 +36,18 @@
           "event": "node.started",
           "node": "b",
           "skey": "wf:<RUN>:b:00ec9693.<NONCE>"
+        },
+        {
+          "event": "dispatch.warn",
+          "kind": "frozen_route_strip",
+          "node": "b",
+          "spawn": 0,
+          "stripped": [
+            [
+              "--max-turns",
+              "65"
+            ]
+          ]
         },
         {
           "event": "steer.baked",
@@ -87,9 +111,7 @@
           "workflow",
           "--continue",
           "wf:<RUN>:a:58925192.<NONCE>#a<ATTEMPT>",
-          "--create-if-missing",
-          "--max-turns",
-          "65"
+          "--create-if-missing"
         ],
         "status": "done"
       },
@@ -118,9 +140,7 @@
           "workflow",
           "--continue",
           "wf:<RUN>:b:00ec9693.<NONCE>#a<ATTEMPT>",
-          "--create-if-missing",
-          "--max-turns",
-          "65"
+          "--create-if-missing"
         ],
         "status": "done"
       },
@@ -174,9 +194,7 @@
           "workflow",
           "--continue",
           "wf:<RUN>:a:58925192.<NONCE>#a<ATTEMPT>",
-          "--create-if-missing",
-          "--max-turns",
-          "65"
+          "--create-if-missing"
         ],
         "env_keys": [
           "GOLDEN_FAKE",
@@ -206,9 +224,7 @@
           "workflow",
           "--continue",
           "wf:<RUN>:b:00ec9693.<NONCE>#a<ATTEMPT>",
-          "--create-if-missing",
-          "--max-turns",
-          "65"
+          "--create-if-missing"
         ],
         "env_keys": [
           "GOLDEN_FAKE",
@@ -231,6 +247,7 @@
     "status": {
       "card": "::workflow{id=\"<RUN>\"}",
       "done": 2,
+      "explain": "stripped a (--max-turns), b (--max-turns)",
       "failed_nodes": [],
       "graph_revision": "0:<REV>",
       "name": "dag",
@@ -238,6 +255,12 @@
       "nodes": {
         "a": {
           "fanout": false,
+          "frozen_strip": [
+            [
+              "--max-turns",
+              "65"
+            ]
+          ],
           "output": {
             "result": "ok"
           },
@@ -246,6 +269,12 @@
         },
         "b": {
           "fanout": false,
+          "frozen_strip": [
+            [
+              "--max-turns",
+              "65"
+            ]
+          ],
           "output": {
             "goal": "continue {a.result}",
             "result": "ok"
@@ -271,6 +300,7 @@
     "wait": {
       "card": "::workflow{id=\"<RUN>\"}",
       "done": 2,
+      "explain": "stripped a (--max-turns), b (--max-turns)",
       "failed_nodes": [],
       "graph_revision": "0:<REV>",
       "name": "dag",
@@ -278,6 +308,12 @@
       "nodes": {
         "a": {
           "fanout": false,
+          "frozen_strip": [
+            [
+              "--max-turns",
+              "65"
+            ]
+          ],
           "output": {
             "result": "ok"
           },
@@ -286,6 +322,12 @@
         },
         "b": {
           "fanout": false,
+          "frozen_strip": [
+            [
+              "--max-turns",
+              "65"
+            ]
+          ],
           "output": {
             "goal": "continue {a.result}",
             "result": "ok"
@@ -314,6 +356,18 @@
           "event": "node.started",
           "node": "a",
           "skey": "wf:<RUN>:a:9292dbef.<NONCE>"
+        },
+        {
+          "event": "dispatch.warn",
+          "kind": "frozen_route_strip",
+          "node": "a",
+          "spawn": 0,
+          "stripped": [
+            [
+              "--max-turns",
+              "65"
+            ]
+          ]
         },
         {
           "event": "steer.baked",
@@ -377,9 +431,7 @@
           "workflow",
           "--continue",
           "wf:<RUN>:a:9292dbef.<NONCE>#a<ATTEMPT>",
-          "--create-if-missing",
-          "--max-turns",
-          "65"
+          "--create-if-missing"
         ],
         "status": "done"
       },
@@ -460,9 +512,7 @@
           "workflow",
           "--continue",
           "wf:<RUN>:a:9292dbef.<NONCE>#a<ATTEMPT>",
-          "--create-if-missing",
-          "--max-turns",
-          "65"
+          "--create-if-missing"
         ],
         "env_keys": [
           "GOLDEN_FAKE",
@@ -485,6 +535,7 @@
     "status": {
       "card": "::workflow{id=\"<RUN>\"}",
       "done": 1,
+      "explain": "stripped a (--max-turns)",
       "failed_nodes": [],
       "graph_revision": "0:<REV>",
       "name": "echo",
@@ -492,6 +543,12 @@
       "nodes": {
         "a": {
           "fanout": false,
+          "frozen_strip": [
+            [
+              "--max-turns",
+              "65"
+            ]
+          ],
           "output": {
             "message": "echo"
           },
@@ -516,6 +573,7 @@
     "wait": {
       "card": "::workflow{id=\"<RUN>\"}",
       "done": 1,
+      "explain": "stripped a (--max-turns)",
       "failed_nodes": [],
       "graph_revision": "0:<REV>",
       "name": "echo",
@@ -523,6 +581,12 @@
       "nodes": {
         "a": {
           "fanout": false,
+          "frozen_strip": [
+            [
+              "--max-turns",
+              "65"
+            ]
+          ],
           "output": {
             "message": "echo"
           },
@@ -550,6 +614,18 @@
           "event": "node.started",
           "node": "a",
           "skey": "wf:<RUN>:a:16ad2965.<NONCE>"
+        },
+        {
+          "event": "dispatch.warn",
+          "kind": "frozen_route_strip",
+          "node": "a",
+          "spawn": 0,
+          "stripped": [
+            [
+              "--max-turns",
+              "65"
+            ]
+          ]
         },
         {
           "event": "steer.baked",
@@ -601,6 +677,42 @@
           "n_lines": 0,
           "node": "b",
           "spawn_no": 0
+        },
+        {
+          "event": "dispatch.warn",
+          "kind": "frozen_route_strip",
+          "node": "b",
+          "spawn": 0,
+          "stripped": [
+            [
+              "--max-turns",
+              "65"
+            ]
+          ]
+        },
+        {
+          "event": "dispatch.warn",
+          "kind": "frozen_route_strip",
+          "node": "b",
+          "spawn": 0,
+          "stripped": [
+            [
+              "--max-turns",
+              "65"
+            ]
+          ]
+        },
+        {
+          "event": "dispatch.warn",
+          "kind": "frozen_route_strip",
+          "node": "b",
+          "spawn": 0,
+          "stripped": [
+            [
+              "--max-turns",
+              "65"
+            ]
+          ]
         },
         {
           "attempts": 1,
@@ -715,9 +827,7 @@
           "workflow",
           "--continue",
           "wf:<RUN>:a:16ad2965.<NONCE>#a<ATTEMPT>",
-          "--create-if-missing",
-          "--max-turns",
-          "65"
+          "--create-if-missing"
         ],
         "status": "done"
       },
@@ -752,9 +862,7 @@
           "workflow",
           "--continue",
           "wf:<RUN>:b:0:5db8f3ee.<NONCE>#a<ATTEMPT>",
-          "--create-if-missing",
-          "--max-turns",
-          "65"
+          "--create-if-missing"
         ],
         "status": "done"
       },
@@ -789,9 +897,7 @@
           "workflow",
           "--continue",
           "wf:<RUN>:b:1:5db8f3ee.<NONCE>#a<ATTEMPT>",
-          "--create-if-missing",
-          "--max-turns",
-          "65"
+          "--create-if-missing"
         ],
         "status": "done"
       },
@@ -826,9 +932,7 @@
           "workflow",
           "--continue",
           "wf:<RUN>:b:2:5db8f3ee.<NONCE>#a<ATTEMPT>",
-          "--create-if-missing",
-          "--max-turns",
-          "65"
+          "--create-if-missing"
         ],
         "status": "done"
       },
@@ -862,9 +966,7 @@
                 "workflow",
                 "--continue",
                 "wf:<RUN>:b:0:5db8f3ee.<NONCE>#a<ATTEMPT>",
-                "--create-if-missing",
-                "--max-turns",
-                "65"
+                "--create-if-missing"
               ],
               "status": "done"
             },
@@ -893,9 +995,7 @@
                 "workflow",
                 "--continue",
                 "wf:<RUN>:b:1:5db8f3ee.<NONCE>#a<ATTEMPT>",
-                "--create-if-missing",
-                "--max-turns",
-                "65"
+                "--create-if-missing"
               ],
               "status": "done"
             },
@@ -924,9 +1024,7 @@
                 "workflow",
                 "--continue",
                 "wf:<RUN>:b:2:5db8f3ee.<NONCE>#a<ATTEMPT>",
-                "--create-if-missing",
-                "--max-turns",
-                "65"
+                "--create-if-missing"
               ],
               "status": "done"
             }
@@ -1010,9 +1108,7 @@
           "workflow",
           "--continue",
           "wf:<RUN>:a:16ad2965.<NONCE>#a<ATTEMPT>",
-          "--create-if-missing",
-          "--max-turns",
-          "65"
+          "--create-if-missing"
         ],
         "env_keys": [
           "GOLDEN_FAKE",
@@ -1042,9 +1138,7 @@
           "workflow",
           "--continue",
           "wf:<RUN>:b:0:5db8f3ee.<NONCE>#a<ATTEMPT>",
-          "--create-if-missing",
-          "--max-turns",
-          "65"
+          "--create-if-missing"
         ],
         "env_keys": [
           "GOLDEN_FAKE",
@@ -1074,9 +1168,7 @@
           "workflow",
           "--continue",
           "wf:<RUN>:b:1:5db8f3ee.<NONCE>#a<ATTEMPT>",
-          "--create-if-missing",
-          "--max-turns",
-          "65"
+          "--create-if-missing"
         ],
         "env_keys": [
           "GOLDEN_FAKE",
@@ -1106,9 +1198,7 @@
           "workflow",
           "--continue",
           "wf:<RUN>:b:2:5db8f3ee.<NONCE>#a<ATTEMPT>",
-          "--create-if-missing",
-          "--max-turns",
-          "65"
+          "--create-if-missing"
         ],
         "env_keys": [
           "GOLDEN_FAKE",
@@ -1131,6 +1221,7 @@
     "status": {
       "card": "::workflow{id=\"<RUN>\"}",
       "done": 2,
+      "explain": "stripped a (--max-turns), b (--max-turns)",
       "failed_nodes": [],
       "graph_revision": "0:<REV>",
       "name": "fanout-quorum",
@@ -1138,6 +1229,12 @@
       "nodes": {
         "a": {
           "fanout": false,
+          "frozen_strip": [
+            [
+              "--max-turns",
+              "65"
+            ]
+          ],
           "output": {
             "result": [
               "a",
@@ -1150,6 +1247,12 @@
         },
         "b": {
           "fanout": true,
+          "frozen_strip": [
+            [
+              "--max-turns",
+              "65"
+            ]
+          ],
           "output": {
             "all_results": [
               {
@@ -1177,9 +1280,7 @@
                   "workflow",
                   "--continue",
                   "wf:<RUN>:b:0:5db8f3ee.<NONCE>#a<ATTEMPT>",
-                  "--create-if-missing",
-                  "--max-turns",
-                  "65"
+                  "--create-if-missing"
                 ],
                 "status": "done"
               },
@@ -1208,9 +1309,7 @@
                   "workflow",
                   "--continue",
                   "wf:<RUN>:b:1:5db8f3ee.<NONCE>#a<ATTEMPT>",
-                  "--create-if-missing",
-                  "--max-turns",
-                  "65"
+                  "--create-if-missing"
                 ],
                 "status": "done"
               },
@@ -1239,9 +1338,7 @@
                   "workflow",
                   "--continue",
                   "wf:<RUN>:b:2:5db8f3ee.<NONCE>#a<ATTEMPT>",
-                  "--create-if-missing",
-                  "--max-turns",
-                  "65"
+                  "--create-if-missing"
                 ],
                 "status": "done"
               }
@@ -1285,6 +1382,7 @@
     "wait": {
       "card": "::workflow{id=\"<RUN>\"}",
       "done": 2,
+      "explain": "stripped a (--max-turns), b (--max-turns)",
       "failed_nodes": [],
       "graph_revision": "0:<REV>",
       "name": "fanout-quorum",
@@ -1292,6 +1390,12 @@
       "nodes": {
         "a": {
           "fanout": false,
+          "frozen_strip": [
+            [
+              "--max-turns",
+              "65"
+            ]
+          ],
           "output": {
             "result": [
               "a",
@@ -1304,6 +1408,12 @@
         },
         "b": {
           "fanout": true,
+          "frozen_strip": [
+            [
+              "--max-turns",
+              "65"
+            ]
+          ],
           "output": {
             "all_results": [
               {
@@ -1331,9 +1441,7 @@
                   "workflow",
                   "--continue",
                   "wf:<RUN>:b:0:5db8f3ee.<NONCE>#a<ATTEMPT>",
-                  "--create-if-missing",
-                  "--max-turns",
-                  "65"
+                  "--create-if-missing"
                 ],
                 "status": "done"
               },
@@ -1362,9 +1470,7 @@
                   "workflow",
                   "--continue",
                   "wf:<RUN>:b:1:5db8f3ee.<NONCE>#a<ATTEMPT>",
-                  "--create-if-missing",
-                  "--max-turns",
-                  "65"
+                  "--create-if-missing"
                 ],
                 "status": "done"
               },
@@ -1393,9 +1499,7 @@
                   "workflow",
                   "--continue",
                   "wf:<RUN>:b:2:5db8f3ee.<NONCE>#a<ATTEMPT>",
-                  "--create-if-missing",
-                  "--max-turns",
-                  "65"
+                  "--create-if-missing"
                 ],
                 "status": "done"
               }
@@ -1442,6 +1546,18 @@
           "event": "node.started",
           "node": "review",
           "skey": "wf:<RUN>:review:64c334ca.<NONCE>"
+        },
+        {
+          "event": "dispatch.warn",
+          "kind": "frozen_route_strip",
+          "node": "review",
+          "spawn": 0,
+          "stripped": [
+            [
+              "--max-turns",
+              "65"
+            ]
+          ]
         },
         {
           "event": "steer.baked",
@@ -1500,9 +1616,7 @@
           "workflow",
           "--continue",
           "wf:<RUN>:review:64c334ca.<NONCE>#a<ATTEMPT>",
-          "--create-if-missing",
-          "--max-turns",
-          "65"
+          "--create-if-missing"
         ],
         "status": "done"
       },
@@ -1619,9 +1733,7 @@
           "workflow",
           "--continue",
           "wf:<RUN>:review:64c334ca.<NONCE>#a<ATTEMPT>",
-          "--create-if-missing",
-          "--max-turns",
-          "65"
+          "--create-if-missing"
         ],
         "env_keys": [
           "GOLDEN_FAKE",
@@ -1644,6 +1756,7 @@
     "status": {
       "card": "::workflow{id=\"<RUN>\"}",
       "done": 1,
+      "explain": "stripped review (--max-turns)",
       "failed_nodes": [],
       "graph_revision": "0:<REV>",
       "name": "ra-review-golden",
@@ -1651,6 +1764,12 @@
       "nodes": {
         "review": {
           "fanout": false,
+          "frozen_strip": [
+            [
+              "--max-turns",
+              "65"
+            ]
+          ],
           "output": {
             "goal": "Review this change and report the findings.",
             "result": "ok"
@@ -1676,6 +1795,7 @@
     "wait": {
       "card": "::workflow{id=\"<RUN>\"}",
       "done": 1,
+      "explain": "stripped review (--max-turns)",
       "failed_nodes": [],
       "graph_revision": "0:<REV>",
       "name": "ra-review-golden",
@@ -1683,6 +1803,12 @@
       "nodes": {
         "review": {
           "fanout": false,
+          "frozen_strip": [
+            [
+              "--max-turns",
+              "65"
+            ]
+          ],
           "output": {
             "goal": "Review this change and report the findings.",
             "result": "ok"
@@ -1711,6 +1837,18 @@
           "event": "node.started",
           "node": "a",
           "skey": "wf:<RUN>:a:dc04c6dd.<NONCE>"
+        },
+        {
+          "event": "dispatch.warn",
+          "kind": "frozen_route_strip",
+          "node": "a",
+          "spawn": 0,
+          "stripped": [
+            [
+              "--max-turns",
+              "65"
+            ]
+          ]
         },
         {
           "event": "steer.baked",
@@ -1782,9 +1920,7 @@
           "workflow",
           "--continue",
           "wf:<RUN>:a:dc04c6dd.<NONCE>#a<ATTEMPT>",
-          "--create-if-missing",
-          "--max-turns",
-          "65"
+          "--create-if-missing"
         ],
         "status": "partial"
       },
@@ -1874,9 +2010,7 @@
           "workflow",
           "--continue",
           "wf:<RUN>:a:dc04c6dd.<NONCE>#a<ATTEMPT>",
-          "--create-if-missing",
-          "--max-turns",
-          "65"
+          "--create-if-missing"
         ],
         "env_keys": [
           "FAKE_MODE",
@@ -1900,6 +2034,7 @@
     "status": {
       "card": "::workflow{id=\"<RUN>\"}",
       "done": 1,
+      "explain": "stripped a (--max-turns)",
       "failed_nodes": [],
       "graph_revision": "0:<REV>",
       "name": "retry-partial",
@@ -1908,6 +2043,12 @@
         "a": {
           "error": "child exited rc=1 (answer harvested from stdout)",
           "fanout": false,
+          "frozen_strip": [
+            [
+              "--max-turns",
+              "65"
+            ]
+          ],
           "harvest": {
             "declared_status": null
           },
@@ -1951,6 +2092,7 @@
     "wait": {
       "card": "::workflow{id=\"<RUN>\"}",
       "done": 1,
+      "explain": "stripped a (--max-turns)",
       "failed_nodes": [],
       "graph_revision": "0:<REV>",
       "name": "retry-partial",
@@ -1959,6 +2101,12 @@
         "a": {
           "error": "child exited rc=1 (answer harvested from stdout)",
           "fanout": false,
+          "frozen_strip": [
+            [
+              "--max-turns",
+              "65"
+            ]
+          ],
           "harvest": {
             "declared_status": null
           },
@@ -2005,6 +2153,18 @@
           "event": "node.started",
           "node": "a",
           "skey": "wf:<RUN>:a:aa995d04.<NONCE>"
+        },
+        {
+          "event": "dispatch.warn",
+          "kind": "frozen_route_strip",
+          "node": "a",
+          "spawn": 0,
+          "stripped": [
+            [
+              "--max-turns",
+              "65"
+            ]
+          ]
         },
         {
           "event": "steer.baked",
@@ -2097,9 +2257,7 @@
           "workflow",
           "--continue",
           "wf:<RUN>:a:aa995d04.<NONCE>#a<ATTEMPT>",
-          "--create-if-missing",
-          "--max-turns",
-          "65"
+          "--create-if-missing"
         ],
         "status": "done"
       },
@@ -2190,9 +2348,7 @@
           "workflow",
           "--continue",
           "wf:<RUN>:a:aa995d04.<NONCE>#a<ATTEMPT>",
-          "--create-if-missing",
-          "--max-turns",
-          "65"
+          "--create-if-missing"
         ],
         "env_keys": [
           "GOLDEN_FAKE",
@@ -2215,6 +2371,7 @@
     "status": {
       "card": "::workflow{id=\"<RUN>\"}",
       "done": 3,
+      "explain": "stripped a (--max-turns)",
       "failed_nodes": [],
       "graph_revision": "0:<REV>",
       "name": "when-prune",
@@ -2222,6 +2379,12 @@
       "nodes": {
         "a": {
           "fanout": false,
+          "frozen_strip": [
+            [
+              "--max-turns",
+              "65"
+            ]
+          ],
           "output": {
             "go": false
           },
@@ -2256,6 +2419,7 @@
     "wait": {
       "card": "::workflow{id=\"<RUN>\"}",
       "done": 3,
+      "explain": "stripped a (--max-turns)",
       "failed_nodes": [],
       "graph_revision": "0:<REV>",
       "name": "when-prune",
@@ -2263,6 +2427,12 @@
       "nodes": {
         "a": {
           "fanout": false,
+          "frozen_strip": [
+            [
+              "--max-turns",
+              "65"
+            ]
+          ],
           "output": {
             "go": false
           },

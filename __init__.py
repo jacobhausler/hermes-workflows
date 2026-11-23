@@ -4081,7 +4081,11 @@ def act_status(args):
                                                                      # #133: the wall meter rides identically —
                                                                      # {elapsed_s, wall_s, p95_s, meter}, absent
                                                                      # when nothing grounds it
-                                                                     "progress", "wall", "clocks", "item_counts") if kk in v}
+                                                                     # #709: the frozen-strip drop list rides
+                                                                     # identically — [[flag, value], ...], absent
+                                                                     # when the node's spawns dropped nothing
+                                                                     "progress", "wall", "clocks", "item_counts",
+                                                                     "frozen_strip") if kk in v}
                                            for k, v in st["nodes"].items()},
            "done": st["done"], "skipped": st["skipped"], "total": st["total"],
            # Optional desktop presentation; plain status remains sufficient.
@@ -5262,6 +5266,29 @@ def act_redrive(args):
         if mode == "new-fingerprint-rerun":
             re_drive += drifted                   # staleness law re-runs them; bytes stay cold
         for p in deletes:
+            # ui2-round4: archive the discarded generation BEFORE the unlink —
+            # one durable line per dropped record in
+            # nodes/<stem>.redrive-history.jsonl; the re-driven commit folds
+            # it into attempts_log (wf._fold_redrive_history), so the new
+            # receipt shows CURRENT-attempt metrics with the attempt history
+            # intact. Fail-open: a lost archive line never blocks a redrive.
+            try:
+                _old = jload(p) or {}
+                if isinstance(_old, dict) and _old:
+                    _hst = {"attempt": _old.get("attempts"),
+                            "error_class": _old.get("error_class"),
+                            "status": _old.get("status"),
+                            "at": (_old.get("committed_at") or _old.get("started")
+                                   or datetime.now(timezone.utc).isoformat(
+                                       timespec="seconds")),
+                            "archived_efp": _old.get("efp"),
+                            "redriven": True}
+                    if isinstance(_old.get("metrics"), dict):
+                        _hst["metrics"] = _old["metrics"]
+                    with open(r / "nodes" / f"{p.stem}.redrive-history.jsonl", "a") as _hf:
+                        _hf.write(json.dumps(_hst, ensure_ascii=False) + "\n")
+            except Exception:
+                pass
             try:
                 p.unlink()
             except FileNotFoundError:

@@ -120,7 +120,18 @@ p = subprocess.run([sys.executable, str(ROOT / "wf.py"), "run", "asksD-honor"],
                    capture_output=True, text=True, timeout=120)
 rec = json.loads((r / "nodes" / "a.json").read_text())
 line = argv_log.read_text().splitlines()[0] if argv_log.exists() else ""
-check("(3) honored: child spawns with -t terminal", "-t terminal" in line, line[:200])
+# #709 truth: the honored list is filtered and appended by the BUILDER (unit-
+# covered in test_enum_clamp_5med_flah / test_spawn_expressibility_483 E2b); on
+# a strip host the -t pair never reaches the CHILD — the spawn is plain chat
+# plumbing and the drop is journaled LOUD (dispatch.warn names the exact pair).
+check("(3) honored: child spawns (chat plumbing, no crash) — the -t pair is stripped at the funnel (#709)",
+      "-t" not in line.split() and "terminal" not in line and "chat --query-file" in line,
+      line[:200])
+_ts_evts = [json.loads(l) for l in (r / "events.jsonl").read_text().splitlines()]
+check("(3) the -t terminal drop is journaled: dispatch.warn names the exact pair",
+      any(e.get("event") == "dispatch.warn" and e.get("kind") == "frozen_route_strip"
+          and e.get("node") == "a" and e.get("stripped") == [["-t", "terminal"]]
+          for e in _ts_evts), json.dumps(_ts_evts)[-200:])
 check("(3) node commits done (no PathLike/TypeError death)",
       rec.get("status") == "done",
       json.dumps({k: rec.get(k) for k in ("status", "error_class", "error")})[:300])

@@ -195,29 +195,6 @@ def _route_receipt_bake(meta, node):
     except OSError:
         pass                                   # receipt best-effort WRITE; the HOLD is strict
 
-def _strip_arm_state(home=None, env=None):
-    """E20: the concrete state an armed creation-override strip leaves behind.
-    Returns (arms, marker_path): arms is a non-empty list naming EVERY arm that
-    fired (the env var with its value; the marker file with its path and its
-    mtime as the armed-at instant). The refusal dialog renders these verbatim —
-    an operator gets the artifact to point at, not est-id lore with a fix menu."""
-    env = os.environ if env is None else env
-    root = Path(home) if home is not None else hermes_home()
-    mpath = root / "workflows" / "omit-policy-flags.on"
-    arms = []
-    ev = env.get("WF_OMIT_POLICY_FLAGS")
-    if (ev or "").strip():
-        arms.append(f"env WF_OMIT_POLICY_FLAGS={ev!r}")
-    if mpath.exists():
-        try:
-            mt = datetime.fromtimestamp(mpath.stat().st_mtime,
-                                         timezone.utc).isoformat(timespec="seconds")
-        except OSError:
-            mt = "unknown"
-        arms.append(f"marker {mpath} (armed at {mt})")
-    return arms, mpath
-
-
 def _budget_refusal(meta, node, byid, index, spawn_no):
     """est-3acn: BEFORE submit — the RunBudget pre-dispatch check at the same
     seam as _route_substitution_refusal (est-2ek.1.641's shape: a refusal that
@@ -399,10 +376,13 @@ def _spawn_expressibility_refusal(meta, node, cmd, spawn_no, index=None,
     an authored model pin) — an author who accepted fallback (require_route:
     false) rides the seat default UNREFUSED, exactly the est-yq2xq design
     intent; a node that pins nothing is auto-route by contract. The truth is
-    read off the FINAL argv (after `_omit_policy_flags_if_enabled`), so every
+    read off the FINAL argv as built, so every
     expressible pin — profile-carried or override-surfacing — is behavior-
     preserved byte-identically. The refusal never touches the seat (zero
     attempts) and logs dispatch.refused like the budget gate beside it."""
+    # The truth is the FINAL argv (est-yq2xq, #709): creation overrides cannot
+    # survive the spawn funnel, so the door must judge the stripped form.
+    cmd = _strip_frozen_route_flags(cmd)
     run = meta.get("_run")
     pin_p = str(node.get("provider") or "")
     pin_m = str(node.get("model") or "")
@@ -420,6 +400,13 @@ def _spawn_expressibility_refusal(meta, node, cmd, spawn_no, index=None,
         rq = bool(pin_m)                        # #25: default-true on an authored model pin
     if not rq:
         return None                             # the author accepted fallback: legacy path
+    if node.get("profile") and "-p" in cmd:
+        # #709: the profile face is the ONLY surviving expressible route under
+        # the unconditional strip (the builder rides -p whenever the node
+        # declares one, byte-identical through the funnel). A profile-carried
+        # pin is EXPRESSIBLE; the served-route truth stays policed downstream
+        # by _profile_evidence + the route billing hold, exactly as designed.
+        return None
     def carried(flag, want):                    # does the LAUNCH argv actually bear the pin?
         if flag not in cmd:
             return False
@@ -433,30 +420,14 @@ def _spawn_expressibility_refusal(meta, node, cmd, spawn_no, index=None,
     if not gaps:
         return None                             # expressible: launch byte-identical
     patch_snip = json.dumps({"patch": {"nodes": {node["id"]: {"require_route": False}}}})
-    if _omit_policy_flags_armed():
-        arms, mpath = _strip_arm_state()
-        why = ("the creation-override strip is armed by "
-               + " + ".join(arms or ["an unidentified arm"])
-               + " and consumed the flags before Popen"
-               + (", while the node declares no profile to carry the route"
-                  if not node.get("profile") else ""))
-        clears = []
-        if any(a.startswith("env ") for a in arms):
-            clears.append("unset WF_OMIT_POLICY_FLAGS")
-        if mpath.exists():
-            clears.append(f"rm {mpath}")
-        clear_txt = ("Clear the strip (" + " ; ".join(clears) + "), or opt this node "
-                     "into the fallback ladder with the amend " + patch_snip
-                     + " (a graph-wide defaults.require_route:false opts every node in),"
-                     " or point the node at a profile this host resolves.")
-    elif not node.get("profile"):
+    if not node.get("profile"):
         why = "the node declares no profile (no -p route evidence) and the launch argv " \
               "carries no creation override for the pin"
         clear_txt = ("Fix: give the node a profile this host resolves (\"profile\": ...), "
                      "or opt it into the fallback ladder with the amend " + patch_snip + ".")
     else:
         why = "the launch argv does not carry the pin this node declares"
-        clear_txt = ("Fix: carry the pin on the launch argv (a profile, or un-stripped "
+        clear_txt = ("Fix: carry the pin on the launch argv (a profile, or an explicit "
                      "-m/--provider), or opt this node into the fallback ladder with "
                      "the amend " + patch_snip + ".")
     pin = f"{pin_p}/{pin_m}".strip("/")
@@ -586,6 +557,124 @@ def _lane_gate(run, node, r):
     return r
 
 
+# ---------- ui2-round4: durable per-node metrics receipt ----------
+# The closed metrics column set committed into every nodes/<id>[.<i>].json
+# record (mesh fix; DESIGN.md (B) "Receipt metrics columns" is the read-side
+# spec). A key is NEVER omitted at a commit site: where the child reported
+# nothing the value is an explicit null, so the dashboard's em-dash path is
+# driven by the committed receipt itself, not by a reader's guess.
+METRICS_KEYS = ("tokens_in", "tokens_out", "api_calls", "tool_calls",
+                "served_model", "model_source")
+
+
+def _model_attribution(node, graph, result):
+    # served_model -> model_source precedence (owner-chosen, ui2-round4):
+    #   node pin > run meta > billing.
+    # The metrics column names the model the first attribution channel that
+    # carries it, and the receipt records WHICH channel that was:
+    #   "node_pin" — the node def carries an explicit `model` pin (the author
+    #     named this lane's seat);
+    #   "run_meta" — no pin, but the run's baked graph defaults carry a model
+    #     (graph.json `defaults.model` — the door's run meta chose every lane);
+    #   "billing"  — neither names it; the state.db sessions join
+    #     (served_model / served_billing_provider) is the only evidence;
+    #   null       — no channel names a model: explicit null, never a guess.
+    # The raw measurement never disappears: the record's top-level
+    # served_model / served_billing_provider / billed_models keys stay the
+    # state.db truth exactly as _stamp_served committed it.
+    pin = (node or {}).get("model")
+    if isinstance(pin, str) and pin:
+        return pin, "node_pin"
+    defaults = graph.get("defaults") if isinstance(graph, dict) else None
+    run_meta = defaults.get("model") if isinstance(defaults, dict) else None
+    if isinstance(run_meta, str) and run_meta:
+        return run_meta, "run_meta"
+    if result.get("served_model") or result.get("served_billing_provider"):
+        return result.get("served_model"), "billing"
+    return None, None
+
+
+def _metrics_block(node, graph, result, billing=None):
+    """The closed 6-key metrics receipt for ONE child result, built from the
+    evidence folded at the settle seam. Counter precedence: the child's own
+    telemetry sidecar first (its self-report), then the state.db billing join
+    (the runner's measurement of the same child), then an explicit null — a
+    child that reported through neither channel reads null, never a fabricated
+    zero (R2 law). Re-commit rebuilds the block from the CURRENT attempt
+    (update, never duplicate); the dict-merge keeps any other metrics fields
+    already riding the record (e.g. effect_receipts)."""
+    b = billing if isinstance(billing, dict) else {}
+    tele = (result.get("telemetry")
+            if isinstance(result.get("telemetry"), dict) else {})
+
+    def _pick(tkey, bkey):
+        v = tele.get(tkey)
+        return b.get(bkey) if v is None else v
+    _served, _source = _model_attribution(node, graph, result)
+    block = {
+        "tokens_in": _pick("input_tokens", "tokens_in"),
+        "tokens_out": _pick("output_tokens", "tokens_out"),
+        "api_calls": _pick("api_calls", "api_calls"),
+        "tool_calls": _pick("tool_calls", "tool_calls"),
+        "served_model": _served,
+        "model_source": _source,
+    }
+    prior = result.get("metrics")
+    return {**prior, **block} if isinstance(prior, dict) else block
+
+
+def _ensure_metrics_block(rec):
+    """Commit-site guarantee: a committed receipt always carries every metrics
+    column. Absent keys become explicit nulls (the em-dash path); existing
+    values (a child report, effect_receipts) merge through untouched, so
+    rerunning a commit UPDATES the block and never duplicates it."""
+    m = rec.get("metrics")
+    m = dict(m) if isinstance(m, dict) else {}
+    for k in METRICS_KEYS:
+        if k not in m:
+            m[k] = None
+    rec["metrics"] = m
+    return rec
+
+
+def _fold_redrive_history(rec, run, stem):
+    """ui2-round4: a redriven lane keeps its dead generations in the receipt.
+    The door's redrive verb (#692) archives every discarded committed record as
+    ONE line in nodes/<stem>.redrive-history.jsonl before unlinking it; the
+    re-driven commit folds those lines into attempts_log. The fold is
+    idempotent — an archived line is matched on its `at` stamp, so a re-run
+    commit re-folds without duplicating — while the metrics block itself still
+    reflects the CURRENT attempt only."""
+    try:
+        lines = (Path(run) / "nodes" / f"{stem}.redrive-history.jsonl") \
+            .read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return rec
+    archived = []
+    for line in lines:
+        try:
+            e = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(e, dict):
+            archived.append(e)
+    if not archived:
+        return rec
+    al = rec.get("attempts_log")
+    al = list(al) if isinstance(al, list) else []
+    seen = {e.get("at") for e in al if isinstance(e, dict) and e.get("at")}
+    grew = False
+    for e in archived:
+        if e.get("at") in seen:
+            continue
+        al.append(e)
+        seen.add(e.get("at"))
+        grew = True
+    if grew:
+        rec["attempts_log"] = al
+    return rec
+
+
 def _stamp_served(meta, result, node=None):
     """Commit actual child seat truth, never the requested alias. No row means unknown."""
     # est-wqml6: settle-time child telemetry join by the spawn env key,
@@ -599,6 +688,11 @@ def _stamp_served(meta, result, node=None):
         _td = None
     if _td:
         result["telemetry"] = _td
+    # ui2-round4: the durable metrics receipt is stamped at the settle seam —
+    # first from the child's own sidecar (so even the early refusals below
+    # commit the six keys), then refreshed once the billing join is read.
+    _ui2g = jload(meta["_run"] / "graph.json") or {}
+    result["metrics"] = _metrics_block(node, _ui2g, result)
     # #116: engine substitution stamp validation at the commit (verified against
     # the estate config at bake/commit time). A stamp whose `to` is NOT a declared
     # rung — a forged node_def edit through a hand-edited graph.json — fails closed
@@ -623,7 +717,8 @@ def _stamp_served(meta, result, node=None):
     metric = child_metrics(meta["_run"].name, _route_home(result)).get(skey, {}) if skey else {}
     result["served_model"] = metric.get("model")
     result["served_billing_provider"] = metric.get("billing_provider")
-    policy = (jload(meta["_run"] / "graph.json") or {}).get("model_policy") or {}
+    result["metrics"] = _metrics_block(node, _ui2g, result, metric)   # ui2-round4
+    policy = _ui2g.get("model_policy") or {}
     seat_floor = seat_forbidden_models()
     # Invalid seat policy is never silently an empty ban. The submit door rejects it;
     # a changed config mid-run fails closed here.
@@ -3111,6 +3206,12 @@ def ready_stamp(run):
 
 def save_node(run, node, byid, rec):
     rec = _clip_record(dict(rec))   # persist choke: redact-then-clip (est-x92v7)
+    # ui2-round4: every commit site (normal, retry-resume, redrive, amend)
+    # lands the closed metrics receipt here — redrive history folds into
+    # attempts_log first, then the six keys are ensured (explicit nulls where
+    # nothing reported; re-commit updates, never duplicates).
+    _fold_redrive_history(rec, run, node["id"])
+    _ensure_metrics_block(rec)
     rec["efp"] = efp(byid, node)
     rec["fp_rule_version"] = FP_RULE_VERSION
     p = run / "nodes" / f"{node['id']}.json"
@@ -3238,11 +3339,15 @@ def _effect_gate(run, node, rec):
     if external:
         rec = dict(rec, metrics={**rec.get("metrics", {}), "effect_receipts": external})
     if failures:
+        # ui2-round4: the demote rebuild keeps the metrics block whenever one
+        # rides the record (not only when external receipts exist) — a
+        # proven-fail still owes the reader the counters it actually measured.
+        _ui2m = rec.get("metrics") if isinstance(rec.get("metrics"), dict) else None
         rec = {"status": "failed",
                "error": "effect_receipt_unproven: " + "; ".join(failures),
                "error_class": "effect_receipt",
                "effect_receipts": proven,
-               **({"metrics": rec["metrics"]} if external else {}),
+               **({"metrics": _ui2m} if _ui2m else {}),
                "output": rec.get("output"), "ms": rec.get("ms")}
     return rec
 
@@ -3890,10 +3995,17 @@ def commit_item_record(run, node, byid, index, result):
               "tree_descendants", "tree_pids", "tree_proof",   # est-2lcp8: the kill-seam
                                                                  # descendant proof rides the
                                                                  # canonical item record
-              "final", "banked", "telemetry"):   # est-wqml6: child telemetry rides the commit
+              "final", "banked", "telemetry",
+              "metrics"):   # ui2-round4: the durable metrics receipt rides the
+                            # commit like the other per-item facts
         v = result.get(k)
         if v is not None:
             rec[k] = v
+    # ui2-round4: the item's canonical record is a commit site too — fold any
+    # archived redrive generations, then close the metrics block (explicit
+    # nulls where the child reported nothing, never omitted keys).
+    _fold_redrive_history(rec, run, _node_file(node, index))
+    _ensure_metrics_block(rec)
     if rec_status not in ("failed", "skipped"):
         rec.pop("error", None)
         rec.pop("error_class", None)
@@ -8553,52 +8665,32 @@ def _stale_spawn_refusal(run, node, byid):
             "ms": 0}
 
 
-# est-yq2xq frozen-route creation-override strip (marker-gated). The gateway's
-# frozen-route resume policy (hermes_cli/gateway_chat.py::check_resume_policy)
-# refuses creation overrides under `--continue <skey> --create-if-missing`: the
-# session is created WITHOUT the CLI creation flags, so every flag this spawn
-# then requests "differs from this session's launch" and the child dies rc=2
-# ("Resume retains gateway session policy; creation overrides are unsupported
-# on resume") — even on brand-new skeys; whole waves die (est-yq2xq class).
-# While this strip is ACTIVE the spawn omits every such flag pair and children
-# ride SEAT DEFAULTS: per-node model/provider pinning, reasoning effort,
-# toolsets, turn caps and run budgets are UNAVAILABLE while on (a pinned lane
-# silently runs the seat's default model). Enable with env WF_OMIT_POLICY_FLAGS=1
-# or the marker file <hermes_home>/workflows/omit-policy-flags.on. TURN OFF:
-# unset the env and delete the marker — argv returns byte-identical to stock.
-# The structural fix belongs in the gateway (session.create must freeze the
-# creation flags on the create-if-missing shape); until then this keeps waves
-# alive on affected seats instead of a per-install monkey-patch that every
-# plugin update wipes.
+# est-yq2xq, unconditional since #709: the gateway's frozen-route resume policy
+# (hermes_cli/gateway_chat.py::check_resume_policy) refuses creation overrides on
+# the --continue <skey> --create-if-missing shape, EVEN on brand-new skeys
+# (Oct 24 nightly forensics; repro exhibit hermes-agent#28). While the gateway
+# ships no session.create flag-freeze, the spawn CANNOT express these flags: the
+# builder drops each pair below. Profiles (-p) are not creation overrides and
+# survive — that is the supported route mechanism. A leftover
+# omit-policy-flags.on marker file is inert; the marker is dead (owner order
+# 2026-11-22).
 _FROZEN_ROUTE_FLAGS = ("--max-turns", "--run-budget", "--reasoning",
                        "-t", "-m", "--provider")
 
 
-def _omit_policy_flags_armed(home=None, env=None):
-    """est-yq2xq's enable law as ONE predicate (#483): the strip is armed when
-    env WF_OMIT_POLICY_FLAGS=1 or the marker file
-    <hermes_home>/workflows/omit-policy-flags.on exists. Consulted by the
-    strip itself AND by the spawn-time expressibility refusal, whose message
-    names the armed override — a second spelling of this condition is the
-    drift. `home`/`env` are test seams."""
-    env = os.environ if env is None else env
-    if env.get("WF_OMIT_POLICY_FLAGS") == "1":
-        return True
-    root = Path(home) if home is not None else hermes_home()
-    return (root / "workflows" / "omit-policy-flags.on").exists()
-
-
-def _omit_policy_flags_if_enabled(cmd, home=None, env=None):
-    """Strip frozen-route creation-override flag PAIRS from a child spawn argv
-    (est-yq2xq). Enabled when env WF_OMIT_POLICY_FLAGS=1 or the marker file
-    <hermes_home>/workflows/omit-policy-flags.on exists; otherwise returns the
-    argv byte-identical. Each flag consumes its own value token — exactly how
-    the argv builder materializes them above. `home`/`env` are test seams."""
-    if not _omit_policy_flags_armed(home, env):
-        return list(cmd)
+def _strip_frozen_route_flags(cmd, dropped=None):
+    """Drop creation-override PAIRS from an agent-child argv (always on; see
+    the block comment). Each flag consumes exactly its own value token, which
+    is how the argv builder above materializes them. #709 review: the drop is
+    LOUD — pass a `dropped` list to collect the removed [flag, value] pairs in
+    argv order; the caller journals them as a dispatch.warn event. Silent
+    removal of an author-declared field is the landmine this whole branch
+    retires, so every real-spawn call site MUST pass the collector."""
     out, i = [], 0
     while i < len(cmd):
         if cmd[i] in _FROZEN_ROUTE_FLAGS:
+            if dropped is not None:
+                dropped.append(cmd[i:i + 2])
             i += 2
             continue
         out.append(cmd[i])
@@ -8759,18 +8851,20 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
     if node.get("run_budget"): cmd += ["--run-budget", str(node["run_budget"])]
     # est-yq2xq: on seats whose gateway freezes the route at session create, the
     # creation-override pairs above make every child die rc=2 (see
-    # _omit_policy_flags_if_enabled). While env WF_OMIT_POLICY_FLAGS=1 or
-    # <hermes_home>/workflows/omit-policy-flags.on is on, they are stripped and
-    # children ride seat defaults — per-node model pinning is UNAVAILABLE while
-    # on. Turn off: unset the env, delete the marker (byte-identical stock argv
-    # returns). Absent both, this line changes nothing.
-    cmd = _omit_policy_flags_if_enabled(cmd)
     # #483: the same seam, one question later — can the launch argv carry this
     # node's pinned route at all? If neither face can (no profile evidence, and
     # -m/--provider absent or strip-consumed), the spawn would silently serve
     # the seat default and die post-work at the _route_hold billing gate;
     # refuse typed BEFORE the child starts instead. Every expressible pin
     # returns None here and spawns byte-identical.
+    _stripped_pairs = []
+    cmd = _strip_frozen_route_flags(cmd, _stripped_pairs)   # #709: the funnel truth, pre-door, pre-Popen
+    if _stripped_pairs:
+        # LOUD by law: dropping an author-declared field without a journal
+        # entry is exactly the marker-class landmine #709 retires. One
+        # dispatch.warn per spawn that dropped anything, naming every pair.
+        log(run, "dispatch.warn", node=node["id"], spawn=spawn_no,
+            kind="frozen_route_strip", stripped=_stripped_pairs)
     _rx = _spawn_expressibility_refusal(meta, node, cmd, spawn_no, index=index,
                                         model_override=model_override)
     if _rx is not None:

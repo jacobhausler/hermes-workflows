@@ -71,7 +71,7 @@ HOME.mkdir(parents=True); RUNS.mkdir()
 # FAKE_MODE=early prints one line, flushes, then keeps cooking — the record and
 # the log must be observable mid-run.
 r = mk("q1-live", [{"id": "live", "type": "agent", "goal": "LIVE q1-live",
-                    "model": "sol", "toolsets": "web"}])
+                    "model": "sol", "require_route": False, "toolsets": "web"}])
 argv_log = HOME / "argv_q1.log"; pid_log = HOME / "pid_q1.log"
 env = dict(os.environ, HERMES_HOME=str(HOME), WF_RUNS_ROOT=str(RUNS), FAKE_LOG=str(HOME / "fake.log"),
            FAKE_MODE="early", FAKE_EARLY_SLEEP="4",
@@ -79,14 +79,23 @@ env = dict(os.environ, HERMES_HOME=str(HOME), WF_RUNS_ROOT=str(RUNS), FAKE_LOG=s
 proc = subprocess.Popen([sys.executable, str(BUILD / "wf.py"), "run", "q1-live"],
                         env=env, stdout=subprocess.PIPE, text=True)
 live = None
-deadline = time.time() + 30
+# #709 CI flake: the window bounds WHEN the running+pid face must appear, not any
+# behavior — a loaded ubuntu shard pays the full interpreter boot + door import
+# before the first write lands, and 30s lost that race (first re-run green,
+# second red, same tree). 90s is the suite's own per-file ceiling minus slack.
+deadline = time.time() + 90
 while time.time() < deadline:
     p = r / "nodes" / "live.json"
     if p.exists():
         try:
-            live = json.loads(p.read_text())
-            if live.get("status") == "running":
-                break
+            _cand = json.loads(p.read_text())
+            if _cand.get("status") == "running":
+                # est-w95h7: the spawn record is written TWICE — pid=None before
+                # the exec, pid=proven after. Q1 asserts the LIVE-CHILD face, so
+                # wait for the pid-bearing write (the child sleeps 4s; it lands).
+                live = _cand
+                if live.get("pid") is not None:
+                    break
         except Exception:
             pass
     time.sleep(0.05)
@@ -107,9 +116,19 @@ sc = (live or {}).get("spawn_cmd") or []
 check("Q1 spawn_cmd: --query-file names the durable prompt file in the run dir",
       "--query-file" in sc and sc[sc.index("--query-file") + 1].startswith(str(r / "logs"))
       and sc[sc.index("--query-file") + 1].endswith(".prompt.md")
-      and "--oneshot" in sc and "-m" in sc and sc[sc.index("-m") + 1] == "sol"
-      and "-t" in sc and sc[sc.index("-t") + 1] == "web"
-      and "<prompt>" not in sc and not any("/tmp" in a for a in sc), json.dumps(sc)[:220])
+      and "--oneshot" in sc and "<prompt>" not in sc and not any("/tmp" in a for a in sc),
+      json.dumps(sc)[:220])
+# #709 truth: the declared -m/-t pairs never reach the child (funnel strip); the
+# record proves the drop is LOUD — a dispatch.warn on this spawn names both.
+check("Q1 the declared -m/-t pairs are NOT on the spawn_cmd (funnel strip, #709)",
+      "-m" not in sc and "-t" not in sc and "sol" not in sc and "web" not in sc,
+      json.dumps(sc)[:220])
+check("Q1 dispatch.warn names exactly the dropped pairs",
+      any(e.get("event") == "dispatch.warn" and e.get("kind") == "frozen_route_strip"
+          and e.get("node") == "live"
+          and e.get("stripped") == [["-m", "sol"], ["-t", "web"]]
+          for e in (json.loads(l) for l in (r / "events.jsonl").read_text().splitlines())),
+      json.dumps(sc)[:220])
 check("Q1 the durable prompt file exists and spawn_cmd leaks no tmp path",
       live and Path(sc[sc.index("--query-file") + 1]).exists()
       and not any("/tmp" in a for a in sc), json.dumps(sc)[:160])

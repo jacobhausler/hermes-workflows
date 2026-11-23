@@ -1,0 +1,5 @@
+- est-yq2xq omit-policy-flags strip REMOVED (owner order 2026-11-22): agent-built (v1.4.0),
+  agent-armed, Oct 24 forensics already convicted it; the 'gpt-exhausted week' provenance
+  was a confabulation. Gateway creation-flags fix has landed (titled-create probe passes).
+  A hidden marker silently rewriting pin semantics is the mandatory-decision-surface
+  anti-pattern itself. Pins are plain from here: provider+model or resolvable alias.

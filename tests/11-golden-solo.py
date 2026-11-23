@@ -75,14 +75,22 @@ def normalize_fanout_starts(rows):
             if row.get('node') != first.get('node') or not (
                 row.get('event') == 'item.started' or
                 (row.get('event') == 'steer.baked' and row.get('spawn_no') == 0
-                 and row.get('n_lines') == 0)):
+                 and row.get('n_lines') == 0) or
+                # #709: the frozen-strip dispatch.warn is a spawn-time fact with
+                # no steering payload — it may sit anywhere inside the commutable
+                # window; it is re-emitted canonically below (deterministic sort).
+                (row.get('event') == 'dispatch.warn'
+                 and row.get('kind') == 'frozen_route_strip')):
                 break
             j += 1
         batch = rows[i:j]
         balance = 0
         causal = True
         for row in batch:
-            balance += 1 if row['event'] == 'item.started' else -1
+            if row['event'] == 'item.started':
+                balance += 1
+            elif row['event'] == 'steer.baked':
+                balance -= 1
             causal = causal and balance >= 0
         if not causal:
             result.extend(batch)  # never hide a bake with no preceding start
@@ -91,6 +99,9 @@ def normalize_fanout_starts(rows):
         result.extend(sorted((r for r in batch if r['event'] == 'item.started'),
                              key=lambda r: r.get('index', -1)))
         result.extend(r for r in batch if r['event'] == 'steer.baked')
+        result.extend(sorted((r for r in batch if r.get('event') == 'dispatch.warn'),
+                             key=lambda r: (r.get('spawn', -1),
+                                            json.dumps(r.get('stripped'), sort_keys=True))))
         i = j
     return result
 
@@ -141,6 +152,12 @@ def normalize(value, paths):
                                         # the est-2ek.1.765 fanout law COMMITTED the per-item records,
                                         # so their commit moment rides the record — volatile, like every
                                         # other wall clock in this set)
+                 'metrics',             # ui2-round4: the durable metrics receipt — sanctioned delta
+                                        # like 'accounting'/'clocks': the frozen v1.0.15 baseline
+                                        # predates the receipt law, and the VALUE is volatile (sidecar
+                                        # counters, billing joins); the PRESENCE + closed key set are
+                                        # proven by tests/test_node_metrics_receipt_r4.py, not the
+                                        # golden.
                  'plugin_version',      # ra-plan#125-1/2 (est-ciin): unconditional provenance stamp —
                                         # sanctioned delta like `started`: its VALUE is the repo's own
                                         # plugin.yaml version (bumps every release), so pinning it would
@@ -222,7 +239,13 @@ def capture(root, after_save=None):
                     or k.startswith('HERMES_UI_SESSION_')]:
             env.pop(key, None)
         _reset_session_context()
-        paths = [(str(Path(__file__).resolve().parents[1]),'<REPO>'),(str(root),'<REPO>'), (str(td),'<TEMP>')]
+        # #709: fold the RESOLVED temp root too. door resolves HERMES_HOME, so on
+        # a macOS seat whose TMPDIR lives under the /var->/private/tmp symlink the
+        # run tree is /private<TEMP>; mapping the resolved form as well keeps the
+        # capture byte-identical to the Linux-CI /tmp (non-symlink) truth so the
+        # frozen golden is portable across workstations and CI (no stray /private).
+        paths = [(str(Path(__file__).resolve().parents[1]),'<REPO>'),(str(root),'<REPO>'),
+                 (str(td.resolve()),'<TEMP>'),(str(td),'<TEMP>')]
         # The child runs retain their original seat-default identity (no launch_root).
         # Shield them from an inherited core-home override without altering HERMES_HOME.
         with patch.dict(os.environ, env, clear=True), _core_home(home):
