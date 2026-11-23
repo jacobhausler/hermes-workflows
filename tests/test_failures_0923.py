@@ -79,14 +79,23 @@ env = dict(os.environ, HERMES_HOME=str(HOME), WF_RUNS_ROOT=str(RUNS), FAKE_LOG=s
 proc = subprocess.Popen([sys.executable, str(BUILD / "wf.py"), "run", "q1-live"],
                         env=env, stdout=subprocess.PIPE, text=True)
 live = None
-deadline = time.time() + 30
+# #709 CI flake: the window bounds WHEN the running+pid face must appear, not any
+# behavior — a loaded ubuntu shard pays the full interpreter boot + door import
+# before the first write lands, and 30s lost that race (first re-run green,
+# second red, same tree). 90s is the suite's own per-file ceiling minus slack.
+deadline = time.time() + 90
 while time.time() < deadline:
     p = r / "nodes" / "live.json"
     if p.exists():
         try:
-            live = json.loads(p.read_text())
-            if live.get("status") == "running":
-                break
+            _cand = json.loads(p.read_text())
+            if _cand.get("status") == "running":
+                # est-w95h7: the spawn record is written TWICE — pid=None before
+                # the exec, pid=proven after. Q1 asserts the LIVE-CHILD face, so
+                # wait for the pid-bearing write (the child sleeps 4s; it lands).
+                live = _cand
+                if live.get("pid") is not None:
+                    break
         except Exception:
             pass
     time.sleep(0.05)
