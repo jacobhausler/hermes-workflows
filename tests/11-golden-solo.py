@@ -141,6 +141,12 @@ def normalize(value, paths):
                                         # the est-2ek.1.765 fanout law COMMITTED the per-item records,
                                         # so their commit moment rides the record — volatile, like every
                                         # other wall clock in this set)
+                 'metrics',             # ui2-round4: the durable metrics receipt — sanctioned delta
+                                        # like 'accounting'/'clocks': the frozen v1.0.15 baseline
+                                        # predates the receipt law, and the VALUE is volatile (sidecar
+                                        # counters, billing joins); the PRESENCE + closed key set are
+                                        # proven by tests/test_node_metrics_receipt_r4.py, not the
+                                        # golden.
                  'plugin_version',      # ra-plan#125-1/2 (est-ciin): unconditional provenance stamp —
                                         # sanctioned delta like `started`: its VALUE is the repo's own
                                         # plugin.yaml version (bumps every release), so pinning it would

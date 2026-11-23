@@ -6732,6 +6732,12 @@ def node_facts(r, nid, index=None):
     # byte-identical pre-telemetry shape (append-only, like the profile pair).
     if isinstance(rec.get("telemetry"), dict) and rec["telemetry"]:
         facts["telemetry"] = rec["telemetry"]
+    # ui2-round4: the durable metrics receipt (closed key set, committed at
+    # every commit edge), appended like the telemetry fact — a pre-fix record
+    # without the block keeps its byte-identical shape (absent, never
+    # fabricated). A committed all-null block rides as-is: the em-dash path.
+    if isinstance(rec.get("metrics"), dict) and rec["metrics"]:
+        facts["metrics"] = rec["metrics"]
     pf = precondition_facts(rec)
     if pf:
         facts["fact"] = pf

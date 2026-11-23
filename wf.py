@@ -550,6 +550,124 @@ def _lane_gate(run, node, r):
     return r
 
 
+# ---------- ui2-round4: durable per-node metrics receipt ----------
+# The closed metrics column set committed into every nodes/<id>[.<i>].json
+# record (mesh fix; DESIGN.md (B) "Receipt metrics columns" is the read-side
+# spec). A key is NEVER omitted at a commit site: where the child reported
+# nothing the value is an explicit null, so the dashboard's em-dash path is
+# driven by the committed receipt itself, not by a reader's guess.
+METRICS_KEYS = ("tokens_in", "tokens_out", "api_calls", "tool_calls",
+                "served_model", "model_source")
+
+
+def _model_attribution(node, graph, result):
+    # served_model -> model_source precedence (owner-chosen, ui2-round4):
+    #   node pin > run meta > billing.
+    # The metrics column names the model the first attribution channel that
+    # carries it, and the receipt records WHICH channel that was:
+    #   "node_pin" — the node def carries an explicit `model` pin (the author
+    #     named this lane's seat);
+    #   "run_meta" — no pin, but the run's baked graph defaults carry a model
+    #     (graph.json `defaults.model` — the door's run meta chose every lane);
+    #   "billing"  — neither names it; the state.db sessions join
+    #     (served_model / served_billing_provider) is the only evidence;
+    #   null       — no channel names a model: explicit null, never a guess.
+    # The raw measurement never disappears: the record's top-level
+    # served_model / served_billing_provider / billed_models keys stay the
+    # state.db truth exactly as _stamp_served committed it.
+    pin = (node or {}).get("model")
+    if isinstance(pin, str) and pin:
+        return pin, "node_pin"
+    defaults = graph.get("defaults") if isinstance(graph, dict) else None
+    run_meta = defaults.get("model") if isinstance(defaults, dict) else None
+    if isinstance(run_meta, str) and run_meta:
+        return run_meta, "run_meta"
+    if result.get("served_model") or result.get("served_billing_provider"):
+        return result.get("served_model"), "billing"
+    return None, None
+
+
+def _metrics_block(node, graph, result, billing=None):
+    """The closed 6-key metrics receipt for ONE child result, built from the
+    evidence folded at the settle seam. Counter precedence: the child's own
+    telemetry sidecar first (its self-report), then the state.db billing join
+    (the runner's measurement of the same child), then an explicit null — a
+    child that reported through neither channel reads null, never a fabricated
+    zero (R2 law). Re-commit rebuilds the block from the CURRENT attempt
+    (update, never duplicate); the dict-merge keeps any other metrics fields
+    already riding the record (e.g. effect_receipts)."""
+    b = billing if isinstance(billing, dict) else {}
+    tele = (result.get("telemetry")
+            if isinstance(result.get("telemetry"), dict) else {})
+
+    def _pick(tkey, bkey):
+        v = tele.get(tkey)
+        return b.get(bkey) if v is None else v
+    _served, _source = _model_attribution(node, graph, result)
+    block = {
+        "tokens_in": _pick("input_tokens", "tokens_in"),
+        "tokens_out": _pick("output_tokens", "tokens_out"),
+        "api_calls": _pick("api_calls", "api_calls"),
+        "tool_calls": _pick("tool_calls", "tool_calls"),
+        "served_model": _served,
+        "model_source": _source,
+    }
+    prior = result.get("metrics")
+    return {**prior, **block} if isinstance(prior, dict) else block
+
+
+def _ensure_metrics_block(rec):
+    """Commit-site guarantee: a committed receipt always carries every metrics
+    column. Absent keys become explicit nulls (the em-dash path); existing
+    values (a child report, effect_receipts) merge through untouched, so
+    rerunning a commit UPDATES the block and never duplicates it."""
+    m = rec.get("metrics")
+    m = dict(m) if isinstance(m, dict) else {}
+    for k in METRICS_KEYS:
+        if k not in m:
+            m[k] = None
+    rec["metrics"] = m
+    return rec
+
+
+def _fold_redrive_history(rec, run, stem):
+    """ui2-round4: a redriven lane keeps its dead generations in the receipt.
+    The door's redrive verb (#692) archives every discarded committed record as
+    ONE line in nodes/<stem>.redrive-history.jsonl before unlinking it; the
+    re-driven commit folds those lines into attempts_log. The fold is
+    idempotent — an archived line is matched on its `at` stamp, so a re-run
+    commit re-folds without duplicating — while the metrics block itself still
+    reflects the CURRENT attempt only."""
+    try:
+        lines = (Path(run) / "nodes" / f"{stem}.redrive-history.jsonl") \
+            .read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return rec
+    archived = []
+    for line in lines:
+        try:
+            e = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(e, dict):
+            archived.append(e)
+    if not archived:
+        return rec
+    al = rec.get("attempts_log")
+    al = list(al) if isinstance(al, list) else []
+    seen = {e.get("at") for e in al if isinstance(e, dict) and e.get("at")}
+    grew = False
+    for e in archived:
+        if e.get("at") in seen:
+            continue
+        al.append(e)
+        seen.add(e.get("at"))
+        grew = True
+    if grew:
+        rec["attempts_log"] = al
+    return rec
+
+
 def _stamp_served(meta, result, node=None):
     """Commit actual child seat truth, never the requested alias. No row means unknown."""
     # est-wqml6: settle-time child telemetry join by the spawn env key,
@@ -563,6 +681,11 @@ def _stamp_served(meta, result, node=None):
         _td = None
     if _td:
         result["telemetry"] = _td
+    # ui2-round4: the durable metrics receipt is stamped at the settle seam —
+    # first from the child's own sidecar (so even the early refusals below
+    # commit the six keys), then refreshed once the billing join is read.
+    _ui2g = jload(meta["_run"] / "graph.json") or {}
+    result["metrics"] = _metrics_block(node, _ui2g, result)
     # #116: engine substitution stamp validation at the commit (verified against
     # the estate config at bake/commit time). A stamp whose `to` is NOT a declared
     # rung — a forged node_def edit through a hand-edited graph.json — fails closed
@@ -587,7 +710,8 @@ def _stamp_served(meta, result, node=None):
     metric = child_metrics(meta["_run"].name, _route_home(result)).get(skey, {}) if skey else {}
     result["served_model"] = metric.get("model")
     result["served_billing_provider"] = metric.get("billing_provider")
-    policy = (jload(meta["_run"] / "graph.json") or {}).get("model_policy") or {}
+    result["metrics"] = _metrics_block(node, _ui2g, result, metric)   # ui2-round4
+    policy = _ui2g.get("model_policy") or {}
     seat_floor = seat_forbidden_models()
     # Invalid seat policy is never silently an empty ban. The submit door rejects it;
     # a changed config mid-run fails closed here.
@@ -3075,6 +3199,12 @@ def ready_stamp(run):
 
 def save_node(run, node, byid, rec):
     rec = _clip_record(dict(rec))   # persist choke: redact-then-clip (est-x92v7)
+    # ui2-round4: every commit site (normal, retry-resume, redrive, amend)
+    # lands the closed metrics receipt here — redrive history folds into
+    # attempts_log first, then the six keys are ensured (explicit nulls where
+    # nothing reported; re-commit updates, never duplicates).
+    _fold_redrive_history(rec, run, node["id"])
+    _ensure_metrics_block(rec)
     rec["efp"] = efp(byid, node)
     rec["fp_rule_version"] = FP_RULE_VERSION
     p = run / "nodes" / f"{node['id']}.json"
@@ -3202,11 +3332,15 @@ def _effect_gate(run, node, rec):
     if external:
         rec = dict(rec, metrics={**rec.get("metrics", {}), "effect_receipts": external})
     if failures:
+        # ui2-round4: the demote rebuild keeps the metrics block whenever one
+        # rides the record (not only when external receipts exist) — a
+        # proven-fail still owes the reader the counters it actually measured.
+        _ui2m = rec.get("metrics") if isinstance(rec.get("metrics"), dict) else None
         rec = {"status": "failed",
                "error": "effect_receipt_unproven: " + "; ".join(failures),
                "error_class": "effect_receipt",
                "effect_receipts": proven,
-               **({"metrics": rec["metrics"]} if external else {}),
+               **({"metrics": _ui2m} if _ui2m else {}),
                "output": rec.get("output"), "ms": rec.get("ms")}
     return rec
 
@@ -3854,10 +3988,17 @@ def commit_item_record(run, node, byid, index, result):
               "tree_descendants", "tree_pids", "tree_proof",   # est-2lcp8: the kill-seam
                                                                  # descendant proof rides the
                                                                  # canonical item record
-              "final", "banked", "telemetry"):   # est-wqml6: child telemetry rides the commit
+              "final", "banked", "telemetry",
+              "metrics"):   # ui2-round4: the durable metrics receipt rides the
+                            # commit like the other per-item facts
         v = result.get(k)
         if v is not None:
             rec[k] = v
+    # ui2-round4: the item's canonical record is a commit site too — fold any
+    # archived redrive generations, then close the metrics block (explicit
+    # nulls where the child reported nothing, never omitted keys).
+    _fold_redrive_history(rec, run, _node_file(node, index))
+    _ensure_metrics_block(rec)
     if rec_status not in ("failed", "skipped"):
         rec.pop("error", None)
         rec.pop("error_class", None)

@@ -50,9 +50,16 @@ if "TELEMETRY-EMIT" in q and os.environ.get("HERMES_WF_TELEMETRY") and os.enviro
     _td = os.path.join(os.environ["HERMES_WF_RUN_DIR"], "telemetry")
     os.makedirs(_td, exist_ok=True)
     _tp = os.path.join(_td, _tk + ".json")
+    # ui2-round4: FAKE_TELEMETRY="api,tool,in,out" overrides the counters so a
+    # redrive test can distinguish attempts; default bytes stay est-wqml6's.
+    _tagg = {"api_calls": 3, "tool_calls": 2, "input_tokens": 100,
+             "output_tokens": 40, "total_tokens": 140}
+    if os.environ.get("FAKE_TELEMETRY"):
+        _ta, _tt, _ti, _to = (int(x) for x in os.environ["FAKE_TELEMETRY"].split(","))
+        _tagg = {"api_calls": _ta, "tool_calls": _tt, "input_tokens": _ti,
+                 "output_tokens": _to, "total_tokens": _ti + _to}
     with open(_tp + ".tmp", "w") as _tf:
-        json.dump({"api_calls": 3, "tool_calls": 2, "input_tokens": 100,
-                   "output_tokens": 40, "total_tokens": 140}, _tf)
+        json.dump(_tagg, _tf)
     os.replace(_tp + ".tmp", _tp)
 # HW-CEIL: CEILING-EMIT [API=<n>] [SLEEP=<s>] [STEP=<s>] — the runaway-child
 # shape: rewrite the sidecar PER EVENT with api_calls climbing to <n> (the real
