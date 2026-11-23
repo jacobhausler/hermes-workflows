@@ -239,7 +239,13 @@ def capture(root, after_save=None):
                     or k.startswith('HERMES_UI_SESSION_')]:
             env.pop(key, None)
         _reset_session_context()
-        paths = [(str(Path(__file__).resolve().parents[1]),'<REPO>'),(str(root),'<REPO>'), (str(td),'<TEMP>')]
+        # #709: fold the RESOLVED temp root too. door resolves HERMES_HOME, so on
+        # a macOS seat whose TMPDIR lives under the /var->/private/tmp symlink the
+        # run tree is /private<TEMP>; mapping the resolved form as well keeps the
+        # capture byte-identical to the Linux-CI /tmp (non-symlink) truth so the
+        # frozen golden is portable across workstations and CI (no stray /private).
+        paths = [(str(Path(__file__).resolve().parents[1]),'<REPO>'),(str(root),'<REPO>'),
+                 (str(td.resolve()),'<TEMP>'),(str(td),'<TEMP>')]
         # The child runs retain their original seat-default identity (no launch_root).
         # Shield them from an inherited core-home override without altering HERMES_HOME.
         with patch.dict(os.environ, env, clear=True), _core_home(home):
