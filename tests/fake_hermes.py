@@ -244,7 +244,31 @@ if _FAKE_MODE == "reasoning_gate400":
     _sup = [s.strip() for s in os.environ.get("FAKE_SUPPORTED_EFFORTS", "xhigh,medium,low").split(",") if s.strip()]
     _rej = os.environ.get("FAKE_REJECT_EFFORT", "").strip()
     _got = args[args.index("--reasoning") + 1] if "--reasoning" in args else ""
-    if _got:
+    if not _got and os.environ.get("FAKE_NOARGV_GATE"):
+        # #709: the funnel strips --reasoning off every spawn argv — the relay
+        # never SEES the asked value. With FAKE_NOARGV_GATE the gate keys on the
+        # spawn's attempt instead (attempt 1 rejects with the vocabulary 400;
+        # attempt 2 accepts, carrying the transport twin when
+        # FAKE_GATE_THEN_TRANSPORT; attempts 3+ accept). What the runner ASKED
+        # is journaled durably in the run's dispatch.warn stripped pairs — the
+        # permanent observation channel that replaces argv transit.
+        _c = 0
+        if os.environ.get("FAKE_ATTEMPT_DIR"):
+            os.makedirs(os.environ["FAKE_ATTEMPT_DIR"], exist_ok=True)
+            _p = os.path.join(os.environ["FAKE_ATTEMPT_DIR"], "attempts")
+            _c = int(open(_p).read()) if os.path.exists(_p) else 0
+            open(_p, "w").write(str(_c + 1))
+        _c += 1
+        if _c == 1:
+            print("hermes -z: agent failed: Error code: 400 - {{'error': {{'message': "
+                  "\"Unsupported type: {g}. Supported types are {s}\", 'type': 'invalid_request_error'}}}}"
+                  .format(g=_rej or "high", s=", ".join(_sup)))
+            sys.exit(1)
+        if _c == 2 and os.environ.get("FAKE_GATE_THEN_TRANSPORT"):
+            print("Warning: Unknown toolsets: bogus")
+            print("hermes -z: agent failed: openai.APIConnectionError. Connection error.")
+            sys.exit(2)
+    elif _got:
         _hit = bool(_got) and _got.lower() not in [s.lower() for s in _sup] if _rej == "" or _rej == "*" \
             else _got == _rej
         if _hit:
@@ -274,6 +298,23 @@ if _FAKE_MODE == "provider400":    # 400 with inherited CLI advice lines that mu
     sys.exit(2)
 if _FAKE_MODE == "fallback_ladder":      # est-2ek.1.164: transport death on any -m that is not $FAKE_OK_MODEL
     _m = args[args.index("-m") + 1] if "-m" in args else None
+    if _m is None and os.environ.get("FAKE_ANSWER_AT"):
+        # #709: the funnel strips the rung's -m before Popen — the child never
+        # sees which model it was asked to ride. The gate keys on the SPAWN'S
+        # ATTEMPT instead: the FAKE_ANSWER_AT-th spawn answers, earlier ones die
+        # the transport shape (0 api calls). The rung each spawn rode is the
+        # durable record's dispatch.warn stripped pair (events.jsonl), not argv.
+        _c = 0
+        if os.environ.get("FAKE_ATTEMPT_DIR"):
+            os.makedirs(os.environ["FAKE_ATTEMPT_DIR"], exist_ok=True)
+            _p = os.path.join(os.environ["FAKE_ATTEMPT_DIR"], "attempts")
+            _c = int(open(_p).read()) if os.path.exists(_p) else 0
+            open(_p, "w").write(str(_c + 1))
+        if _c + 1 == int(os.environ["FAKE_ANSWER_AT"]):
+            print("```json\n" + json.dumps({"result": "answered on the answering attempt"}) + "\n```")
+            sys.exit(0)
+        print("hermes -z: agent failed: openai.APIConnectionError. Connection error.")
+        sys.exit(2)
     if _m == os.environ.get("FAKE_OK_MODEL"):
         print("```json\n" + json.dumps({"result": "answered on " + str(_m)}) + "\n```")
         sys.exit(0)

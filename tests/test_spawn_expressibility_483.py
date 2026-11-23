@@ -10,11 +10,11 @@ baselines):
   A the profile-less bare spawn: pin declared, no profile evidence (no -p);
   B the marker-stripped pin: the est-yq2xq omit override (env or marker file)
     consumes -m/--provider before Popen.
-And every EXPRESSIBLE pin must ride byte-identically: the same node on an
-un-armed host spawns with its -m/--provider intact (the working path this gate
-must not touch), require_route: false (node or graph defaults) still rides the
-seat default unrefused (est-yq2xq's whole point), and an unpinned node is
-auto-route by contract.
+Since #709 the strip is UNCONDITIONAL (the marker is dead): no spawn argv can
+carry -m/--provider on any host, so the only expressible pin faces are the
+PROFILE face (-p survives — the supported route mechanism) and the
+require_route: false opt-out (est-yq2xq's whole point). An unpinned node is
+auto-route by contract; every drop is journaled (dispatch.warn, E2b2/funnel).
 
 Law pinned:
   E1  marker armed + provider/model pin, no profile: typed refusal, ZERO
@@ -32,10 +32,11 @@ Law pinned:
       provider + gap").
   E6  marker armed + NO pin at all: runs (nothing pinned, nothing held).
   E7  the typed class is a member of the closed ERROR_CLASSES set.
-  E8  marker armed + PROFILE-carried pin (the estate shape: `-p` rides the
-      argv, the strip consumes `-m`/`--provider`): profile evidence does NOT
-      express the pin — refused typed, ZERO attempts, and the why-clause
-      names the armed strip, not a missing profile.
+  E8  PROFILE-carried pin (the estate shape, #709 truth): the profile face IS
+      the expressible route — the child spawns on `-p`, the pin pair strips
+      LOUD (dispatch.warn names it), and the billing hold stays the downstream
+      gate. (The 72c2543 pass briefly pinned the opposite law; core_alias D2
+      and the substrate suite contradict it — truth wins.)
 
 Harness: the repo's own in-process run_child harness with a recording seat
 stub (test_alias_receipt_respawn_318 shape), stdlib only, no network. The
@@ -65,13 +66,13 @@ STUB.write_text(
     "a = sys.argv[1:]\n"
     "m = a[a.index('-m') + 1] if '-m' in a else 'seat-default'\n"
     "p = a[a.index('--provider') + 1] if '--provider' in a else ''\n"
-    "with open(os.environ['WF483_LEDGER'], 'a') as f:\n"
+    "with open(os.environ['HERMES_WF_483_LEDGER'], 'a') as f:\n"  # HERMES_WF_ prefix survives the profile-spawn env scrub
     "    f.write(p + '/' + m + '\\n')\n"
     "print('```json\\n{\"result\": \"ok\"}\\n```')\n"
 )
 STUB.chmod(0o755)
 LEDGER = HOME / "attempts.ledger"
-os.environ["WF483_LEDGER"] = str(LEDGER)
+os.environ["HERMES_WF_483_LEDGER"] = str(LEDGER)
 os.environ["HERMES_HOME"] = str(HOME)
 os.environ["WF_RUNS_ROOT"] = str(RUNS)
 os.environ.pop("WF_OMIT_POLICY_FLAGS", None)   # the marker is the only actor here
@@ -159,6 +160,19 @@ check("E2b every frozen pair dropped with its value token",
 check("E2b everything else byte-intact in order",
       stripped == ["hermes", "-p", "zap", "chat", "--query-file", "/tmp/-m",
                    "--oneshot", "extra"], stripped)
+# ---- E2b2 (#709 review): the drop is LOUD — the collector form names exactly
+# the pairs removed, in argv order, and its output is byte-identical to the
+# silent form. This is the unit contract behind every dispatch.warn row: the
+# funnel (run_child) passes a collector and journals it per spawn (e2e witnesses:
+# test_failures_0923 Q1, test_turn_accounting_contract_lw1eh, test_routing_routes).
+_dropped = []
+_stripped2 = wf._strip_frozen_route_flags(sample, _dropped)
+check("E2b2 collector names exactly the dropped pairs, flag+value, argv order",
+      _dropped == [["--max-turns", "9"], ["--run-budget", "5"],
+                   ["--reasoning", "high"], ["-t", "web"],
+                   ["-m", "some-model"], ["--provider", "some-prov"]], _dropped)
+check("E2b2 collector form byte-identical to the silent form",
+      _stripped2 == stripped, _stripped2)
 
 # ---- E3: armed + require_route:false on the node -> est-yq2xq legacy path ---
 LEDGER.write_text("")
@@ -200,29 +214,31 @@ check("E6 armed + no pin at all: runs unchanged (auto-route is the ask)",
 check("E7 route_inexpressible is in ERROR_CLASSES",
       "route_inexpressible" in wf.ERROR_CLASSES)
 
-# ---- E8: armed + PROFILE-carried pin (estate shape) -> profile is not the pin
-# `-p zap` rides the argv (it is not a frozen-route pair), the strip still
-# consumes -m/--provider, and the door must NOT read profile presence as
-# expressibility: the estate's real lanes all carry both profile and pin.
+# ---- E8 (#709 TRUTH, rewrote the E8 law the 72c2543 pass left in): a
+# PROFILE-carried pin IS expressible. `-p zap` rides the argv and survives the
+# strip — the strip block's own law: "Profiles (-p) are not creation overrides
+# and survive — that is the supported route mechanism." The pin pair still dies
+# at the funnel, LOUD (dispatch.warn names it); the served-route truth stays
+# policed downstream by the route billing hold, the est-yq2xq legacy posture.
+# What may NEVER happen again is E1: a bare, profile-less pin silently serving
+# the seat default.
 LEDGER.write_text("")
+(HOME / "profiles" / "zap").mkdir(parents=True, exist_ok=True)
+(HOME / "profiles" / "zap" / "config.yaml").write_text("model:\n  default: zap-default\n")
 armed(True)
 n8 = node("zapleg", profile="zap", provider=PROV, model=MODEL)
 r8 = wf.run_child(META(RUN_A), n8, {"zapleg": n8}, "do the work", "", None,
                   skey="wf:ex483a:zapleg")
-check("E8 armed + profile-carried pin: refused, typed, ZERO attempts",
-      r8.get("status") == "failed"
-      and r8.get("error_class") == "route_inexpressible"
-      and ledger_lines() == [] and r8.get("ms") == 0, (r8, ledger_lines()))
-err8 = r8.get("error", "")
-check("E8 the error names the pin and the expressibility gap",
-      PROV in err8 and MODEL in err8 and "cannot express" in err8.lower()
-      and "require_route" in err8, err8)
-check("E8 the why-clause does NOT blame a missing profile (the profile rode; the pin did not)",
-      "while the node declares no profile" not in err8, err8)
-ev8 = [e for e in events(RUN_A) if e.get("event") == "dispatch.refused"
-       and e.get("node") == "zapleg"]
-check("E8 one dispatch.refused event for the profile-carried leg",
-      len(ev8) == 1 and ev8[0].get("error_class") == "route_inexpressible", ev8)
+check("E8 profile-carried pin spawns on the profile face: done, seat stub billed",
+      r8.get("status") == "done" and ledger_lines() == ["/seat-default"], (r8, ledger_lines()))
+_ev8w = [e for e in events(RUN_A) if e.get("event") == "dispatch.warn"
+         and e.get("kind") == "frozen_route_strip" and e.get("node") == "zapleg"]
+check("E8 the pin pair drop is journaled LOUD, naming exactly -m and --provider",
+      len(_ev8w) == 1 and _ev8w[0].get("stripped") == [["-m", MODEL], ["--provider", PROV]],
+      _ev8w)
+check("E8 the profile-carried leg is NOT refused (no dispatch.refused for this node)",
+      not [e for e in events(RUN_A) if e.get("event") == "dispatch.refused"
+           and e.get("node") == "zapleg"], events(RUN_A)[-3:])
 
 print(f"{'FAILED' if not ok else 'OK'}: spawn-expressibility #483 suite")
 sys.exit(1 if not ok else 0)

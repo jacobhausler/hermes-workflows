@@ -56,8 +56,10 @@ STUB.write_text(
     "a = sys.argv[1:]\n"
     "m = a[a.index('-m') + 1] if '-m' in a else 'seat-default'\n"
     "p = a[a.index('--provider') + 1] if '--provider' in a else ''\n"
+    "prof = a[a.index('-p') + 1] if '-p' in a else ''\n"
+    "# #709: -m/--provider strip at the funnel; a profile-routed child bills @<profile>\n"
     "with open(os.environ['WFAR_LEDGER'], 'a') as f:\n"
-    "    f.write(p + '/' + m + '\\n')\n"
+    "    f.write(p + '/' + m + ('@' + prof if prof else '') + '\\n')\n"
     "print('```json\\n{\"result\": \"ok\"}\\n```')\n"
 )
 STUB.chmod(0o755)
@@ -78,6 +80,8 @@ ALIAS, TARGET = "bigseat", "example-provider/example-model-1"
 
 node = {"id": "work", "type": "agent", "goal": "do the work",
         "model": ALIAS,                              # the house contract: def keeps the alias
+        "require_route": False,                      # #709: the alias pair strips at the funnel;
+                                                     # the receipt guard polices the DEF
         "route_verified": TARGET}                     # the #318 door bake: the TARGET the ping proved
 (RUN / "graph.json").write_text(json.dumps({"name": "ralias", "nodes": [node]}))
 
@@ -100,8 +104,16 @@ check("A1 the durable receipt names the TARGET the door proved (#318 bake shape)
       (RUN / "route_receipts.json").is_file()
       and json.loads((RUN / "route_receipts.json").read_text()).get("work") == TARGET,
       (RUN / "route_receipts.json").read_text() if (RUN / "route_receipts.json").exists() else "missing")
-check("A1 the seat stub billed the alias exactly once",
-      attempts_for("/" + ALIAS) == 1, LEDGER.read_text() if LEDGER.exists() else "<no ledger>")
+# #709: the alias rides NO child argv on a strip host — the stub bills the seat
+# default it served and the def-side alias/receipt machinery is what this file
+# actually guards (A2/B/C/D). The drop is journaled LOUD.
+check("A1 the seat stub billed exactly one spawn (alias stripped off argv — #709)",
+      attempts_for("/seat-default") == 1, LEDGER.read_text() if LEDGER.exists() else "<no ledger>")
+check("A1 the alias drop is journaled: dispatch.warn names the exact pair",
+      any(e.get("event") == "dispatch.warn" and e.get("kind") == "frozen_route_strip"
+          and e.get("stripped") == [["-m", ALIAS]]
+          for e in (json.loads(l) for l in (RUN / "events.jsonl").read_text().splitlines())),
+      (RUN / "events.jsonl").read_text()[-300:] if (RUN / "events.jsonl").exists() else "no events")
 
 # ---- A2: the SAME-alias respawn (ladder retry / resume) is NOT refused ----------
 # RED at cc088db: ask='bigseat' is held against receipt 'example-provider/example-model-1'
@@ -112,8 +124,8 @@ r2 = wf.run_child(meta, node, {"work": node}, "do the work", "", None,
 check("A2 same-alias respawn is NOT refused (receipt != alias lock) — RED at head",
       r2.get("status") == "done" and r2.get("error_class") != "route_substitution_denied",
       r2)
-check("A2 the same-alias respawn billed the alias again (2 total)",
-      attempts_for("/" + ALIAS) == 2, LEDGER.read_text())
+check("A2 the same-alias respawn billed again (2 total spawns)",
+      attempts_for("/seat-default") == 2, LEDGER.read_text())
 
 # ---- B: alias-to-OTHER-route substitution stays DENIED (widening guard) ---------
 b_node = dict(node, model="otherseat")
@@ -141,8 +153,10 @@ d_node = dict(node, provider="example-provider", model="example-model-1")
 (RUN / "graph.json").write_text(json.dumps({"name": "ralias", "nodes": [d_node]}))
 r5 = wf.run_child(meta, d_node, {"work": d_node}, "do the work", "", None,
                   skey="wf:ralias:work#5")
-check("D spawn at the literal verified TARGET: NOT refused (full-route identity)",
-      r5.get("status") == "done" and attempts_for("example-provider/example-model-1") == 1,
+check("D spawn at the literal verified TARGET: NOT refused (full-route identity; "
+      "#709: the pair strips, the DEF is what the guard compares)",
+      r5.get("status") == "done" and r5.get("error_class") != "route_substitution_denied"
+      and attempts_for("/seat-default") == 1,
       r5)
 
 shutil.rmtree(HOME, ignore_errors=True)

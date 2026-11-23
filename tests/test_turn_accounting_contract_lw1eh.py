@@ -8,9 +8,11 @@ finished cleanly. This test pins the whole chain deterministically with the
 fake hermes (FAKE_MODE=budget_lane burns exactly one api_call per turn through
 the state.db row the read model already joins):
 
-  (1) spawn contract: the author's cap rides the child CLI as `--max-turns <cap>`
-      (FAKE_ARGV_LOG line per spawn), and the child's consumed api_calls reach
-      that cap before anything else kills it (wall untouched, generous timeout);
+  (1) spawn contract (#709 truth): the author's cap is DECLARED on the node, the
+      funnel strips the pair off every spawn argv (loud dispatch.warn names it;
+      the builder-to-argv transit is unit-covered in test_spawn_expressibility_483
+      E2b), and the child's consumed api_calls still reach that cap before
+      anything else kills it (wall untouched, generous timeout);
   (2) typed death: node record failed + error_class cap_exhausted + the error
       names the turn budget and the cap; door stop_reason.class carries it; the
       run clock says phase=expired / exhaustion_reason=turn_cap;
@@ -99,9 +101,22 @@ wf("lw1eh-cap", BUILD / "argv_lw1eh_cap.log", BUILD / "fake_lw1eh_cap.log",
 argv_lines = [l for l in (BUILD / "argv_lw1eh_cap.log").read_text().splitlines() if l.strip()]
 check("(1) the capped lane really ran twice (one bounded re-drive, no more)",
       len(argv_lines) == 2, f"{len(argv_lines)} spawn lines")
-check("(1) every spawn carried the author cap as --max-turns <cap>",
-      all(f"--max-turns {CAP}" in l for l in argv_lines), json.dumps(argv_lines)[:300])
-
+# #709 truth-rewrite: the author cap NEVER rides the child argv — the spawn
+# funnel strips --max-turns unconditionally (gateway frozen-route resume policy).
+# The drop is LOUD: one dispatch.warn per spawn names the exact pair, and the
+# cap TRANSIT itself is covered at the unit level (builder + pair-drop in
+# tests/test_spawn_expressibility_483.py E2b). What stays asserted here is the
+# BEHAVIOR the cap exists for: (2)-(4) below.
+check("(1) the cap pair is NOT on any spawn argv (funnel strip, #709)",
+      all("--max-turns" not in l for l in argv_lines), json.dumps(argv_lines)[:300])
+_warns = [e for e in events(r) if e.get("event") == "dispatch.warn"
+          and e.get("kind") == "frozen_route_strip"]
+check("(1) every drop is journaled: one dispatch.warn per spawn naming the exact pair",
+      len(_warns) == 2 and all(w.get("node") == "a" and w.get("stripped") == [["--max-turns", str(CAP)]]
+                              for w in _warns), json.dumps(_warns))
+check("(1) the spawn line is the plain chat plumbing",
+      all("chat --query-file" in l and "--create-if-missing" in l for l in argv_lines),
+      json.dumps(argv_lines)[:300])
 rec = json.loads((r / "nodes" / "a.json").read_text())
 # ---- (2) the death is typed, and the counter that tripped it is api_calls ----
 check("(2) the capped lane died typed cap_exhausted (failed, not a clean finish)",

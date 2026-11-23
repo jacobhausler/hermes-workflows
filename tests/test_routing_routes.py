@@ -1,5 +1,6 @@
 """Deterministic regressions for explicit workflow provider/model routing."""
 import importlib.util
+import json
 import os
 import sys
 import tempfile
@@ -75,7 +76,11 @@ with tempfile.TemporaryDirectory(prefix=".routing-test-", dir=HERE) as tmp:
     run = Path(tmp) / "run"
     (run / "nodes").mkdir(parents=True)
     node = {"id": "child", "type": "agent", "goal": "route", "model": "gpt-6-luna",
-            "provider": "openai-codex"}
+            "provider": "openai-codex",
+            # #709: the funnel strips both pairs before Popen — the split-ness
+            # under test is proven by the JOURNALED pairs below (two distinct
+            # flags, never the joined "provider/model" token), not by argv.
+            "require_route": False}
     captured = []
 
     class FakeProcess:
@@ -102,8 +107,14 @@ with tempfile.TemporaryDirectory(prefix=".routing-test-", dir=HERE) as tmp:
         child = engine.run_child(meta, node, {"child": node}, "route", "", None)
     assert child["status"] == "done", child
     argv = captured[0][0]
-    assert argv[argv.index("-m") + 1] == "gpt-6-luna", argv
-    assert argv[argv.index("--provider") + 1] == "openai-codex", argv
-    assert "openai-codex/gpt-6-luna" not in argv, argv
+    # #709 truth: the pairs never ride the child argv (funnel strip, pre-Popen);
+    # what the builder appended — SPLIT into -m and --provider, never the joined
+    # "provider/model" token — is durable in the run's dispatch.warn journal.
+    assert "-m" not in argv and "--provider" not in argv and "gpt-6-luna" not in argv, argv
+    _ev = [json.loads(l) for l in (run / "events.jsonl").read_text().splitlines()]
+    _stripped = [p for e in _ev if e.get("event") == "dispatch.warn"
+                 and e.get("kind") == "frozen_route_strip" for p in e.get("stripped") or []]
+    assert _stripped == [["-m", "gpt-6-luna"], ["--provider", "openai-codex"]], _stripped
+    assert "openai-codex/gpt-6-luna" not in [v for _, v in _stripped], _stripped
 
 print("ALL PASS")

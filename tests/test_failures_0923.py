@@ -71,7 +71,7 @@ HOME.mkdir(parents=True); RUNS.mkdir()
 # FAKE_MODE=early prints one line, flushes, then keeps cooking — the record and
 # the log must be observable mid-run.
 r = mk("q1-live", [{"id": "live", "type": "agent", "goal": "LIVE q1-live",
-                    "model": "sol", "toolsets": "web"}])
+                    "model": "sol", "require_route": False, "toolsets": "web"}])
 argv_log = HOME / "argv_q1.log"; pid_log = HOME / "pid_q1.log"
 env = dict(os.environ, HERMES_HOME=str(HOME), WF_RUNS_ROOT=str(RUNS), FAKE_LOG=str(HOME / "fake.log"),
            FAKE_MODE="early", FAKE_EARLY_SLEEP="4",
@@ -107,9 +107,19 @@ sc = (live or {}).get("spawn_cmd") or []
 check("Q1 spawn_cmd: --query-file names the durable prompt file in the run dir",
       "--query-file" in sc and sc[sc.index("--query-file") + 1].startswith(str(r / "logs"))
       and sc[sc.index("--query-file") + 1].endswith(".prompt.md")
-      and "--oneshot" in sc and "-m" in sc and sc[sc.index("-m") + 1] == "sol"
-      and "-t" in sc and sc[sc.index("-t") + 1] == "web"
-      and "<prompt>" not in sc and not any("/tmp" in a for a in sc), json.dumps(sc)[:220])
+      and "--oneshot" in sc and "<prompt>" not in sc and not any("/tmp" in a for a in sc),
+      json.dumps(sc)[:220])
+# #709 truth: the declared -m/-t pairs never reach the child (funnel strip); the
+# record proves the drop is LOUD — a dispatch.warn on this spawn names both.
+check("Q1 the declared -m/-t pairs are NOT on the spawn_cmd (funnel strip, #709)",
+      "-m" not in sc and "-t" not in sc and "sol" not in sc and "web" not in sc,
+      json.dumps(sc)[:220])
+check("Q1 dispatch.warn names exactly the dropped pairs",
+      any(e.get("event") == "dispatch.warn" and e.get("kind") == "frozen_route_strip"
+          and e.get("node") == "live"
+          and e.get("stripped") == [["-m", "sol"], ["-t", "web"]]
+          for e in (json.loads(l) for l in (r / "events.jsonl").read_text().splitlines())),
+      json.dumps(sc)[:220])
 check("Q1 the durable prompt file exists and spawn_cmd leaks no tmp path",
       live and Path(sc[sc.index("--query-file") + 1]).exists()
       and not any("/tmp" in a for a in sc), json.dumps(sc)[:160])

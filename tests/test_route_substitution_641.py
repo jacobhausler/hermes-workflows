@@ -54,8 +54,10 @@ STUB.write_text(
     "a = sys.argv[1:]\n"
     "m = a[a.index('-m') + 1] if '-m' in a else 'seat-default'\n"
     "p = a[a.index('--provider') + 1] if '--provider' in a else ''\n"
+    "prof = a[a.index('-p') + 1] if '-p' in a else ''\n"
+    "# #709: -m/--provider strip at the funnel; a profile-routed child bills @<profile>\n"
     "with open(os.environ['WF641_LEDGER'], 'a') as f:\n"
-    "    f.write(p + '/' + m + '\\n')\n"
+    "    f.write(p + '/' + m + ('@' + prof if prof else '') + '\\n')\n"
     "print('```json\\n{\"result\": \"ok\"}\\n```')\n"
 )
 STUB.chmod(0o755)
@@ -65,6 +67,8 @@ PIN_P, PIN_M, SUB_P, SUB_M = "openai", "m-pinned", "other-seat", "claude-opus"
 
 node = {"id": "work", "type": "agent", "goal": "do the work",
         "provider": PIN_P, "model": PIN_M,
+        "require_route": False,                   # #709: creation overrides strip at the funnel;
+                                                  # the receipt guard polices the DEF, not argv
         "route_verified": f"{PIN_P}/{PIN_M}"}     # the door's proved-alive bake
 (RUN / "graph.json").write_text(json.dumps({"name": "r641", "nodes": [node]}))
 
@@ -86,9 +90,17 @@ r1 = wf.run_child(meta, node, {"work": node}, "do the work", "", None,
                   skey="wf:r641:work")
 check("B1 pinned spawn under the receipt: runs normally",
       r1.get("status") == "done", r1)
-check("B1 the seat stub billed the PINNED route exactly once",
-      attempts_for(f"{PIN_P}/{PIN_M}") == 1 and attempts_for(f"{SUB_P}/{SUB_M}") == 0,
+# #709: on a strip host the pin never rides the child argv — the stub bills the
+# seat default; the PIN itself is journaled as a dispatch.warn and policed by
+# the receipt guard on the DEF (B2/B3/B6 below). Exactly one spawn happened.
+check("B1 the seat stub billed exactly one spawn (pin stripped, journaled — #709)",
+      attempts_for("/seat-default") == 1 and attempts_for(f"{SUB_P}/{SUB_M}") == 0,
       LEDGER.read_text() if LEDGER.exists() else "<no ledger>")
+check("B1 the pin drop is journaled: dispatch.warn names -m and --provider",
+      any(e.get("event") == "dispatch.warn" and e.get("kind") == "frozen_route_strip"
+          and e.get("stripped") == [["-m", PIN_M], ["--provider", PIN_P]]
+          for e in (json.loads(l) for l in (RUN / "events.jsonl").read_text().splitlines())),
+      (RUN / "events.jsonl").read_text()[-300:] if (RUN / "events.jsonl").exists() else "no events")
 check("B1 the proved-alive receipt is durable in the run dir (route_receipts.json)",
       (RUN / "route_receipts.json").is_file()
       and json.loads((RUN / "route_receipts.json").read_text()).get("work")
@@ -116,21 +128,21 @@ check("B2 the refusal is loud in events.jsonl",
 r3 = wf.run_child(meta, node, {"work": node}, "do the work", "", None,
                   skey="wf:r641:work#2")
 check("B3 same-route respawn is NOT denied (receipt != spawn lock)",
-      r3.get("status") == "done" and attempts_for(f"{PIN_P}/{PIN_M}") == 2,
+      r3.get("status") == "done" and attempts_for("/seat-default") == 2,
       r3)
 
 # ---- B4: no receipt, no new gate (byte-identical legacy behavior) ------------
 RUN2 = RUNS / "r641b"
 (RUN2 / "nodes").mkdir(parents=True); (RUN2 / "gates").mkdir()
 free_node = {"id": "work", "type": "agent", "goal": "do the work",
-             "provider": SUB_P, "model": SUB_M}
+             "provider": SUB_P, "model": SUB_M, "require_route": False}
 (RUN2 / "graph.json").write_text(json.dumps({"name": "r641b", "nodes": [free_node]}))
 meta2 = dict(meta, _run=RUN2, _spawn_n={}, _procs={}, _procs_lock=threading.Lock(),
              _stop=threading.Event())
 LEDGER.write_text("")                      # fresh ledger: this run bills in isolation
 r4 = wf.run_child(meta2, free_node, {"work": free_node}, "do the work", "", None)
 check("B4 lane with no proved-alive receipt: first spawn is never held (fail-open on absence)",
-      r4.get("status") == "done" and attempts_for(f"{SUB_P}/{SUB_M}") == 1,
+      r4.get("status") == "done" and attempts_for("/seat-default") == 1,
       r4)
 
 # ---- B5: typed class in the closed set ---------------------------------------
@@ -144,7 +156,7 @@ r5 = wf.run_child(meta, rc_node, {"work": rc_node}, "do the work", "", None,
 check("B6 require_route:false + substitution under a live receipt: still DENIED",
       r5.get("status") == "failed"
       and r5.get("error_class") == "route_substitution_denied"
-      and attempts_for(f"{SUB_P}/{SUB_M}") == 1,   # still only B4's, never this one
+      and attempts_for("/seat-default") == 1,   # still only B4's, never this one
       r5)
 
 shutil.rmtree(HOME, ignore_errors=True)

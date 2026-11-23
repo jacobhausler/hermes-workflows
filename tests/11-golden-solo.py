@@ -75,14 +75,22 @@ def normalize_fanout_starts(rows):
             if row.get('node') != first.get('node') or not (
                 row.get('event') == 'item.started' or
                 (row.get('event') == 'steer.baked' and row.get('spawn_no') == 0
-                 and row.get('n_lines') == 0)):
+                 and row.get('n_lines') == 0) or
+                # #709: the frozen-strip dispatch.warn is a spawn-time fact with
+                # no steering payload — it may sit anywhere inside the commutable
+                # window; it is re-emitted canonically below (deterministic sort).
+                (row.get('event') == 'dispatch.warn'
+                 and row.get('kind') == 'frozen_route_strip')):
                 break
             j += 1
         batch = rows[i:j]
         balance = 0
         causal = True
         for row in batch:
-            balance += 1 if row['event'] == 'item.started' else -1
+            if row['event'] == 'item.started':
+                balance += 1
+            elif row['event'] == 'steer.baked':
+                balance -= 1
             causal = causal and balance >= 0
         if not causal:
             result.extend(batch)  # never hide a bake with no preceding start
@@ -91,6 +99,9 @@ def normalize_fanout_starts(rows):
         result.extend(sorted((r for r in batch if r['event'] == 'item.started'),
                              key=lambda r: r.get('index', -1)))
         result.extend(r for r in batch if r['event'] == 'steer.baked')
+        result.extend(sorted((r for r in batch if r.get('event') == 'dispatch.warn'),
+                             key=lambda r: (r.get('spawn', -1),
+                                            json.dumps(r.get('stripped'), sort_keys=True))))
         i = j
     return result
 

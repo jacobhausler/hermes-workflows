@@ -130,7 +130,15 @@ write_substrate_config("model:\n  default: seat-default\nworkflows:\n  confidenc
                        "    - openai/turbo-a\n")
 set_ping(alive((SUB_P, SUB_M)))
 n_before = len(_spawned)
-out = door.act_run({"graph": pinned_graph()})
+# #709: the creation-override face strips at the spawn funnel, so the alive pin
+# and its substituted substrate express themselves through the PROFILE face (the
+# door's profile law: seat dir + consent file). The substitution machinery is
+# def/record/prompt-level throughout — argv never carried the route anyway.
+_prof = Path(os.environ["HERMES_HOME"]) / "profiles" / "cs116"
+_prof.mkdir(parents=True, exist_ok=True)
+(_prof / "config.yaml").write_text("model:\n  default: fake-default\n")
+(_prof / "workflow_team.json").write_text(json.dumps({"accept_from": ["default"]}))
+out = door.act_run({"graph": pinned_graph(profile="cs116")})
 rid = out.get("run_id")
 check("(b1) config + dead pin: LAUNCHES (declared substrate serves)", bool(rid), out)
 if rid:

@@ -93,7 +93,8 @@ shutil.rmtree(HOME, ignore_errors=True)
 HOME.mkdir(parents=True); RUNS.mkdir()
 (HOME / "fake.log").write_text("")
 
-r = mk("tmuu-fast", [{"id": "a", "type": "agent", "goal": "cfg TMUU-FAST", "model": "turbo-a", "provider": "nope"}],
+r = mk("tmuu-fast", [{"id": "a", "type": "agent", "goal": "cfg TMUU-FAST", "model": "turbo-a", "provider": "nope",
+       "require_route": False}],
        retry_backoff=[0.05, 0.1])
 out = wf_run("tmuu-fast", {"FAKE_MODE": "cfgtypos", "FAKE_API_CALLS": "0"})
 rec = rec_of(r, "a")
@@ -112,6 +113,12 @@ check("error names the fix (provider pin) and the marker survives",
 check("failed event carries the typed class",
       any(e.get("event") == "node.failed" and e.get("error_class") == "config_input"
           for e in events(r)), "no typed node.failed")
+# #709: the pin pairs never rode the child argv (require_route:false — the author
+# accepted the seat route); the funnel dropped them LOUD — the strip names both.
+check("the pin drop is journaled: dispatch.warn names -m and --provider",
+      any(e.get("event") == "dispatch.warn" and e.get("kind") == "frozen_route_strip"
+          and e.get("stripped") == [["-m", "turbo-a"], ["--provider", "nope"]]
+          for e in events(r)), json.dumps(events(r))[-400:])
 check("fast wall actually inside the window (fake dies ~0.1s)",
       isinstance(rec.get("ms"), int) and rec["ms"] < wf._CONFIG_INPUT_WINDOW_MS, str(rec.get("ms")))
 
@@ -135,8 +142,8 @@ check("both ladders pass a config_input verdict through: zero respawns, budget i
 # Run-level corroboration: a second config node in the same run also gets exactly
 # one spawn (a respawn-burn would show as extra spawns / retry events / attempts_log).
 (HOME / "fake.log").write_text("")
-r = mk("tmuu-budget", [{"id": "cfg", "type": "agent", "goal": "cfg TMUU-BCFG", "model": "turbo-a", "provider": "nope"},
-                       {"id": "cfg2", "type": "agent", "goal": "cfg TMUU-BCFG2", "model": "turbo-a", "provider": "nope"}])
+r = mk("tmuu-budget", [{"id": "cfg", "type": "agent", "goal": "cfg TMUU-BCFG", "model": "turbo-a", "provider": "nope", "require_route": False},
+                       {"id": "cfg2", "type": "agent", "goal": "cfg TMUU-BCFG2", "model": "turbo-a", "provider": "nope", "require_route": False}])
 out = wf_run("tmuu-budget", {"FAKE_MODE": "cfgtypos", "FAKE_API_CALLS": "0"})
 recs = (rec_of(r, "cfg"), rec_of(r, "cfg2"))
 ev_txt = (r / "events.jsonl").read_text()
@@ -150,7 +157,7 @@ check("two config deaths: one spawn each, typed, zero ladder events",
 
 # blocked descendant never spawns behind the config death
 (HOME / "fake.log").write_text("")
-r = mk("tmuu-budget2", [{"id": "cfg", "type": "agent", "goal": "cfg TMUU-C2", "model": "turbo-a", "provider": "nope"},
+r = mk("tmuu-budget2", [{"id": "cfg", "type": "agent", "goal": "cfg TMUU-C2", "model": "turbo-a", "provider": "nope", "require_route": False},
                         {"id": "tr", "type": "agent", "goal": "tr TMUU-T2", "after": ["cfg"]}])
 out = wf_run("tmuu-budget2", {"FAKE_MODE": "cfgtypos", "FAKE_API_CALLS": "0"})
 check("blocked descendant never spawns behind the config death",
@@ -171,7 +178,7 @@ check("control: transport ladder still spends its full 2 respawns (3 spawns)",
 
 # ---------- (d) the slow twin keeps the existing classification ----------
 (HOME / "fake.log").write_text("")
-r = mk("tmuu-slow", [{"id": "a", "type": "agent", "goal": "cfg TMUU-SLOW", "model": "turbo-a", "provider": "nope"}],
+r = mk("tmuu-slow", [{"id": "a", "type": "agent", "goal": "cfg TMUU-SLOW", "model": "turbo-a", "provider": "nope", "require_route": False}],
        retry_backoff=[0.05, 0.1])
 # est-f6a4i: window-relative slow (window + 0.5s), not a fixed 1.5s — a fixed
 # sleep overlaps the estate host's loaded spawn floor (~3.0s) and would land the
