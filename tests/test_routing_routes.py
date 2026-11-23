@@ -82,22 +82,42 @@ with tempfile.TemporaryDirectory(prefix=".routing-test-", dir=HERE) as tmp:
             # flags, never the joined "provider/model" token), not by argv.
             "require_route": False}
     captured = []
+    import subprocess as _spx
+    _dummy = _spx.Popen([sys.executable, "-c", "pass"], start_new_session=True)
+    _dummy.wait(timeout=30)   # a REAL dead child: /proc gone, killpg ESRCH
+    _dummy_pid = _dummy.pid   # own group leader, killable exactly like the truth
 
     class FakeProcess:
-        pid = os.getpid()
+        # #709 darwin red-to-truth: pid must NOT be the test's own pid — darwin's
+        # tree-proof channel KILLs the child's group at settle (killpg, each real
+        # child is its own group leader via start_new_session), so a fake that
+        # hands back os.getpid() SIGKILLs the process running the assertions.
+        # A real, already-reaped pid is killable and census-invisible on BOTH
+        # platforms — the happy path stays the happy path.
+        # Call-aware too: on darwin run_child's aux probes ride the same patched
+        # Popen (stdout=PIPE), so the fake answers quietly unless THIS call
+        # carries a real log file — the child entry is then picked by its file
+        # stdout, not by capture order.
+        pid = _dummy_pid
         returncode = 0
 
+        def __init__(self, argv, kwargs):
+            self.argv = argv
+            self.kwargs = kwargs
+            captured.append((argv, kwargs))
+
         def communicate(self, timeout=None):
-            captured[0][1]["stdout"].write('```json\n{"routed": true}\n```\n')
-            captured[0][1]["stdout"].flush()
+            so = self.kwargs.get("stdout")
+            if hasattr(so, "write"):
+                so.write('```json\n{"routed": true}\n```\n')
+                so.flush()
 
         def poll(self):            # the runner polls (#18 liveness) instead of blocking
             self.communicate()
             return self.returncode
 
     def fake_popen(argv, **kwargs):
-        captured.append((argv, kwargs))
-        return FakeProcess()
+        return FakeProcess(argv, kwargs)
 
     meta = {
         "_run": run, "hermes_bin": "not-executed", "_procs": {},
@@ -106,7 +126,9 @@ with tempfile.TemporaryDirectory(prefix=".routing-test-", dir=HERE) as tmp:
     with patch.object(engine.subprocess, "Popen", fake_popen):
         child = engine.run_child(meta, node, {"child": node}, "route", "", None)
     assert child["status"] == "done", child
-    argv = captured[0][0]
+    _kids = [c for c in captured if hasattr(c[1].get("stdout"), "write")]
+    assert _kids, captured
+    argv = _kids[0][0]
     # #709 truth: the pairs never ride the child argv (funnel strip, pre-Popen);
     # what the builder appended — SPLIT into -m and --provider, never the joined
     # "provider/model" token — is durable in the run's dispatch.warn journal.
