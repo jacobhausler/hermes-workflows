@@ -39,10 +39,14 @@ def call(**a):
     return json.loads(door.handle(a))
 
 def author():
+    # #709: the funnel strips -m off every spawn, so a pinned node with no
+    # profile is route_inexpressible and dies at the door BEFORE the runner
+    # settles — this test's subject is the LAUNCH path (dry vs real), not
+    # routing: the authors opt into the fallback ladder explicitly.
     return {"name": "run-dry-probe", "nodes": [
-        {"id": "recon", "type": "agent", "goal": "r", "model": "manager"},
-        {"id": "check", "type": "agent", "goal": "c", "model": "manager", "after": ["recon"]},
-        {"id": "impl",  "type": "agent", "goal": "i", "model": "worker",  "after": ["check"]}]}
+        {"id": "recon", "type": "agent", "goal": "r", "model": "manager", "require_route": False},
+        {"id": "check", "type": "agent", "goal": "c", "model": "manager", "after": ["recon"], "require_route": False},
+        {"id": "impl",  "type": "agent", "goal": "i", "model": "worker",  "after": ["check"], "require_route": False}]}
 
 def run_dirs():
     root = door.runs_root()
