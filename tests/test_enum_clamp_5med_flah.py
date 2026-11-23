@@ -495,10 +495,16 @@ else:
     # runner passes names through (warn+continue is core's job on the chat path)
     # and never hard-fails the spawn.
     r4, _, rec4, lines4 = toolsets_run("flah-ts-none", ["none"], HOME / "argv-ts-none.log")
+    # #709 truth (measured on Linux, no-core seated): the 'none' sentinel is
+    # consumed at the BUILDER — a node.clamped kind=toolsets event names the
+    # author's explicit 'no selection' — so -t never reaches the funnel, and a
+    # dispatch.warn here would be a lie (nothing was stripped).
     check("no-core: unknown toolset passes through the builder and the child still runs "
-          "(pair journaled, argv stripped — #709)",
+          "(sentinel clamped at the builder, no -t on argv, no dispatch.warn — #709)",
           rec4.get("status") == "done" and lines4 and "-t" not in lines4[0].split()
-          and stripped_pairs(r4) == [["-t", "none"]],
+          and not stripped_pairs(r4)
+          and any(e.get("event") == "node.clamped" and e.get("kind") == "toolsets"
+                  for e in events(r4)),
           f"{rec4.get('status')} argv={lines4}")
 
 print("DONE enum_clamp_5med_flah", "OK" if ok else "FAIL")
