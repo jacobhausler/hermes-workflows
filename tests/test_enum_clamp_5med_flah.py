@@ -310,10 +310,18 @@ r9 = mk("flah-gate-iso", [{"id": "a", "type": "agent", "goal": "GO gate iso",
     "            raise PermissionError('fault: proc denied in _isolate_prior')\n"
     "    return _real(p)\n"
     "os.listdir=_u\n")
+# #709: the funnel strips -t off every spawn, so the argv-keyed gate can never
+# fire here — the gate keys on the ATTEMPT (attempt 1 answers the vocabulary
+# 400), exactly the relay's real behavior: it rejects the value it is served,
+# and after the strip the value it is served is the runner's ask as journaled
+# (dispatch.warn), not an argv pair. The typed fail-closed path under test is
+# unchanged: attempt 1 dies the 400, the re-drive's _isolate_prior hits the
+# injected /proc fault, spawn 2 never happens.
 _env9 = dict(os.environ, HERMES_HOME=str(HOME), WF_RUNS_ROOT=str(RUNS),
              FAKE_LOG=str(HOME / "fake-gate-iso.log"),
              FAKE_ARGV_LOG=str(argv_log9), FAKE_MODE="reasoning_gate400",
              FAKE_SUPPORTED_EFFORTS="xhigh,medium,low", FAKE_REJECT_EFFORT="high",
+             FAKE_NOARGV_GATE="1", FAKE_ATTEMPT_DIR=str(HOME / "att-gate-iso"),
              PYTHONPATH=str(HOME) + os.pathsep + os.environ.get("PYTHONPATH", ""))
 p9 = _sp.run([sys.executable, str(BUILD.parent / "wf.py"), "run", str(r9)],
              env=_env9, capture_output=True, timeout=180, text=True)

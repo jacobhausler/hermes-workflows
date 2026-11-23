@@ -71,7 +71,18 @@ r = call(action="run", graph=author())
 rid = r.get("run_id")
 check("normal run (no dry_run) still launches", bool(rid), json.dumps(r)[:300])
 rdir = door.runs_root() / (rid or "_none")
-check("normal run writes run dir + spawns runner", (rdir / "graph.json").exists() and (rdir / "wf.pid").exists(),
+# #709 truth: the sole wf.pid writer is the ADMITTED RUNNER (#8 review law —
+# the door never stamps); the stamp lands when the runner wins the flock, which
+# is ASYNC to the door returning: the door's ready pipe is capped at
+# _READY_WAIT_S and a busy shard lane can lose that race without losing the
+# run. The old synchronous check only ever won by accident of import timing.
+# Observe the stamp instead of assuming the door wrote it.
+for _ in range(60):                      # <=15 s: bounded wait for the self-stamp
+    if (rdir / "wf.pid").exists():
+        break
+    time.sleep(0.25)
+check("normal run writes run dir + spawns runner (the runner self-stamps wf.pid)",
+      (rdir / "graph.json").exists() and (rdir / "wf.pid").exists(),
       str(sorted(p.name for p in rdir.iterdir())) if rdir.exists() else "missing")
 if rid:
     (rdir / "stop.request").write_text("test-teardown")
