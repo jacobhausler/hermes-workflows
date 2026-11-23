@@ -861,7 +861,7 @@ WORKFLOW_PARAMS = {
         "action": {
             "type": "string",
             "enum": ["run", "start", "status", "wait", "release", "release_lock", "steer", "inbox", "amend", "diff", "stop", "kill", "redrive", "list", "save", "submit", "library", "doctor_version", "validate"],
-            "description": "run=launch a graph; start=one plain-language goal string OR a five-line yaml spec (name, goal|nodes) in, the smallest synthesized graph dispatched out: smart defaults (provider = the seat's own route, timeout+budgets from the shape census, lane-key <team>/start-<slug> so a double-start dedupes while unfinished), validated through the existing run door; returns run_id + watch (the one status command); misuse refusals carry the accepting example. v1 synthesizes single-node and fixed-fanout-from-a-json-path shapes only — plural prose is not inferred, name items_from per node. wait=OPTIONAL blocking observation (not the default loop: lifecycle transitions wake the owner session on their own — end your turn after run); read state, RESPAWNING an idle runner if work is pending (blocks to the next boundary when one is live; when the lock is PROVEN wedged — Errno 11 with the kernel ledger showing zero holders and the admission lease dead — wait heals it first, the #44 escape hatch); status=read-model of a run (optional seats:true attaches the engine-wide seat-pool occupancy block — cap, live, holders, FIFO queue as a query, read-only); release=answer a held human gate; release_lock=operator hatch for a wedged runner.lock (#44): renames the stranded inode aside under the admission heal-barrier and hands the lane a fresh lock path — REFUSES unless zero live holders are proven (never heals on EACCES or a live holder); steer=queue steering text for a node; inbox=(child-side, cooperative) pull late steering lines baked for THIS spawn — call once at a natural seam; amend=replace the graph (invalidates changed nodes + all downstream by fingerprint), or pass patch to edit a few node fields without resubmitting the whole graph; submitted node text carrying {run.KEY} re-binds from the run's persisted launch binding (run_context_binding) or the amend refuses before any write (est-qohvi); diff=confirm surface: runs the amend door with dry_run FORCED (accepts patch or graph), returns the preview + graph_diff and touches nothing; stop=request stop; kill=node-targeted lane kill (node required): that lane's in-flight children are SIGKILLed, the node finishes failed error_class=killed, siblings and the run keep going; redrive=engine retry-failed-run (#692 slice 1, mode REQUIRED, no default): drop the failed lanes' committed records + the runner verdict, relaunch detached, resume from the preserved completed receipts; mode=same-fingerprint-resume refuses (writes nothing) when a completed receipt's effective fingerprint has drifted — mode=new-fingerprint-rerun re-drives drifted lanes under the efp override rule; the response enumerates re_drive + preserved receipts and consumes any scheduled watchdog redrive.request; list=all runs; save=shelve a graph in the library under a name (from run_id or inline graph); library=list shelved graphs richly (name, description, tags, provenance, path-relative id); optional check:true echoes a digest re-check block — the shelf-vs-author drift verb (est-dv8q4). validate=dry-run the door's validation pipeline (defaults fill + defect collection + model/route policy) with no ping and no writes; returns {ok, errors:[{node,field,msg,example}], resolved_routes} — every rejection row carries `example`, the minimal accepting fragment for the rule that fired (null when the rule has no banked example). run from=<name> replays a shelved graph. submit=quarantine a hand-rolled graph for study (requires why_not_library >=80 chars; never joins the library — the quartermaster's human-gated loop decides); inbox kind=submissions lists them newest-first. doctor_version=read-only version truth for THIS install: {live_version, newest_packaged, source_commit, source_repo, drift} comparing plugin.yaml against the install.json provenance that pack.py stamps at build time (one sidecar schema; a sidecar predating source_repo loads and reads null) \u2014 one read, no network.",
+            "description": "run=launch a graph; start=one plain-language goal string OR a five-line yaml spec (name, goal|nodes) in, the smallest synthesized graph dispatched out: smart defaults (provider = the seat's own route, timeout+budgets from the shape census, lane-key <team>/start-<slug> so a double-start dedupes while unfinished), validated through the existing run door; returns run_id + watch (the one status command); misuse refusals carry the accepting example. v1 synthesizes single-node and fixed-fanout-from-a-json-path shapes only — plural prose is not inferred, name items_from per node. wait=OPTIONAL blocking observation (not the default loop: lifecycle transitions wake the owner session on their own — end your turn after run); read state, RESPAWNING an idle runner if work is pending (blocks to the next boundary when one is live; when the lock is PROVEN wedged — Errno 11 with the kernel ledger showing zero holders and the admission lease dead — wait heals it first, the #44 escape hatch); status=read-model of a run (optional seats:true attaches the engine-wide seat-pool occupancy block — cap, live, holders, FIFO queue as a query, read-only); release=answer a held human gate; release_lock=operator hatch for a wedged runner.lock (#44): renames the stranded inode aside under the admission heal-barrier and hands the lane a fresh lock path — REFUSES unless zero live holders are proven (never heals on EACCES or a live holder); steer=queue steering text for a node; inbox=(child-side, cooperative) pull late steering lines baked for THIS spawn — call once at a natural seam; amend=replace the graph (invalidates changed nodes + all downstream by fingerprint), or pass patch to edit a few node fields without resubmitting the whole graph; submitted node text carrying {run.KEY} re-binds from the run's persisted launch binding (run_context_binding) or the amend refuses before any write (est-qohvi); diff=confirm surface: runs the amend door with dry_run FORCED (accepts patch or graph), returns the preview + graph_diff and touches nothing; stop=request stop; kill=node-targeted lane kill (node required): that lane's in-flight children are SIGKILLed, the node finishes failed error_class=killed, siblings and the run keep going; redrive=engine retry-failed-run (#692 slice 1; mode OPTIONAL — omitted = same-fingerprint-resume, the safe refusing side; the token-spending new-fingerprint-rerun stays explicit): drop the failed lanes' committed records + the runner verdict, relaunch detached, resume from the preserved completed receipts; mode=same-fingerprint-resume refuses (writes nothing) when a completed receipt's effective fingerprint has drifted — mode=new-fingerprint-rerun re-drives drifted lanes under the efp override rule; the response enumerates re_drive + preserved receipts and consumes any scheduled watchdog redrive.request; list=all runs; save=shelve a graph in the library under a name (from run_id or inline graph); library=list shelved graphs richly (name, description, tags, provenance, path-relative id); optional check:true echoes a digest re-check block — the shelf-vs-author drift verb (est-dv8q4). validate=dry-run the door's validation pipeline (defaults fill + defect collection + model/route policy) with no ping and no writes; returns {ok, errors:[{node,field,msg,example}], resolved_routes} — every rejection row carries `example`, the minimal accepting fragment for the rule that fired (null when the rule has no banked example). run from=<name> replays a shelved graph. submit=quarantine a hand-rolled graph for study (requires why_not_library >=80 chars; never joins the library — the quartermaster's human-gated loop decides); inbox kind=submissions lists them newest-first. doctor_version=read-only version truth for THIS install: {live_version, newest_packaged, source_commit, source_repo, drift} comparing plugin.yaml against the install.json provenance that pack.py stamps at build time (one sidecar schema; a sidecar predating source_repo loads and reads null) \u2014 one read, no network.",
         },
         "run_id": {"type": "string", "description": "Run id (required for every action except run/list/start)."},
         "goal": {"type": "string", "description": "start only: the ONE input — a plain-language goal string (synthesizes a single agent node riding the seat's own route) OR a five-line yaml spec {name?, goal | nodes:[{id, goal, items_from?, after?, shape?}], shape?} (fixed fan-out: a node with items_from gets fanout:{items_from} verbatim). Refusals return {error, example}. Optional alongside: team (lane-key prefix <team>/start-<slug>), lane_key (explicit override of the derived key), name (overrides the spec/goal-derived run name), dry_run (door gates, nothing written)."},
@@ -928,7 +928,7 @@ WORKFLOW_PARAMS = {
         "answer": {"type": "string", "description": "release: the human's answer text (from clarify)."},
         "graph_revision": {"type": "string", "description": "amend/steer/release: optional CAS token — the run's current graph revision (from run/status/amend). A token that differs from the head is refused with {error:'graph_revision_stale', yours, head} and NOTHING is written (no graph.json, no amends row, no restart.request, no inbox line, no gate answer). Absent = last-writer-wins (today's behavior). amend echoes the new head as graph_revision."},
         "gate_id": {"type": "string", "description": "release: gate node id."},
-        "mode": {"type": "string", "enum": ["same-fingerprint-resume", "new-fingerprint-rerun"], "description": "redrive: REQUIRED mode, there is NO silent default (wake-consumer law #692). same-fingerprint-resume re-drives only the failed lanes and REFUSES with redrive_fingerprint_drift, naming the nodes, when a committed done/partial/skipped receipt sits under an effective fingerprint the current graph no longer produces — the resume is promised only where the receipts are current truth. new-fingerprint-rerun accepts the drift: drifted receipts re-run under the efp override rule (stale == pending, amend's law) and only still-valid receipts are preserved."},
+        "mode": {"type": "string", "enum": ["same-fingerprint-resume", "new-fingerprint-rerun"], "description": "redrive: OPTIONAL mode — an omitted mode DEFAULTS to same-fingerprint-resume (the safe side: it re-drives only the failed lanes and REFUSES with redrive_fingerprint_drift, naming the nodes and writing NOTHING, when a committed done/partial/skipped receipt sits under an effective fingerprint the current graph no longer produces — the resume is promised only where the receipts are current truth; the refusal names the other mode). The response echoes the applied mode and stamps mode_defaulted when the key was absent; an unknown mode keeps the closed-set refusal (wake-consumer law #692 as amended: what stays explicit-only is the token-spending rerun, never the safe resume). new-fingerprint-rerun accepts the drift: drifted receipts re-run under the efp override rule (stale == pending, amend's law) and only still-valid receipts are preserved."},
         "node": {"type": "string", "description": "steer/kill: target node id (steer: a pending node picks it up at spawn; a LIVE child pulls it at its next seam via its own inbox call — the prompt is never rewritten. kill: see action=kill)."},
         "text": {"type": "string", "description": "steer: the steering message."},
         "cmd": {"type": "string", "enum": ["kill"], "description": "steer: cmd=kill = node-targeted lane kill (node required): that lane's in-flight children are SIGKILLed and the node finishes failed with error_class=killed; sibling nodes and the run keep going. Never queues steering text."},
@@ -5171,15 +5171,18 @@ def act_redrive(args):
     the two known failure modes: a silent re-run of completed nodes from
     scratch, and an unexplained refusal under creation-override drift.
 
-    Mode law (wake-consumer law, binding; NO silent default): mode in
-    {same-fingerprint-resume, new-fingerprint-rerun}. same-fingerprint-resume
-    REFUSES (writing nothing) when a committed done/partial/skipped receipt
-    sits under an effective fingerprint the current graph no longer produces —
-    the resume is only promised where the receipts are still current truth;
-    the refusal names the drifted nodes and the mode that owns them.
-    new-fingerprint-rerun accepts the drift: drifted receipts re-run under the
-    efp override rule (stale == pending, amend's law verbatim) and only the
-    still-valid receipts stand as preserved.
+    Mode law (wake-consumer law as amended by the 2026-11-23 defaults audit):
+    mode in {same-fingerprint-resume, new-fingerprint-rerun}; an OMITTED mode
+    defaults to same-fingerprint-resume. same-fingerprint-resume REFUSES
+    (writing nothing) when a committed done/partial/skipped receipt sits under
+    an effective fingerprint the current graph no longer produces — the resume
+    is only promised where the receipts are still current truth; the refusal
+    names the drifted nodes and the mode that owns them. The default is the
+    safe side of the fork: a wrong guess costs the typed refusal, never a
+    silent re-run. new-fingerprint-rerun — the mode that SPENDS tokens
+    re-running drifted receipts — accepts the drift: drifted receipts re-run
+    under the efp override rule (stale == pending, amend's law verbatim) and
+    only the still-valid receipts stand as preserved. It stays explicit-only.
 
     The response enumerates both sides of the transaction: which nodes re-run
     and which completed-work receipts the resume preserves (receipts before
@@ -5188,12 +5191,28 @@ def act_redrive(args):
     scheduler. The respawn goes through the door's ONE bridge (reaper then
     spawn), so a SIGKILL scene still gets its interruption receipts before
     the new generation boots, and the retry-grant ledger is zeroed at this
-    runner-generation boundary exactly as the tick zeroes it (P40)."""
+    runner-generation boundary exactly as the tick zeroes it (P40).
+
+    Mode law (defaults audit 2026-11-23, amending #692's no-default clause):
+    an OMITTED mode lands on same-fingerprint-resume — the safe side of the
+    fork. Production evidence: 10 of 10 redrives over the 2026-11-21/23 run
+    shelf chose same-fingerprint-resume; the failure #692 guarded against (a
+    silent re-run of drifted completed receipts) is exactly the case the
+    default REFUSES with redrive_fingerprint_drift, writing nothing — a wrong
+    guess costs one typed round-trip, never a wrong write. The token-spending
+    mode (new-fingerprint-rerun, which re-drives drifted receipts) therefore
+    stays explicit-only. An UNKNOWN mode keeps the closed-set refusal. The
+    response echoes the applied mode and stamps mode_defaulted when the key
+    was absent."""
     mode = args.get("mode")
+    mode_defaulted = mode is None
+    if mode_defaulted:
+        mode = "same-fingerprint-resume"
     if mode not in _REDRIVE_MODES:
         return {"ok": False, "field": "mode", "error_type": "redrive_mode_required",
-                "error": f"redrive needs an explicit mode — one of {list(_REDRIVE_MODES)}, "
-                         "there is no default (wake-consumer law #692)"}
+                "error": f"redrive mode {mode!r} invalid — one of {list(_REDRIVE_MODES)}; "
+                         "omitting mode defaults to same-fingerprint-resume (the rerun mode "
+                         "is explicit-only, wake-consumer law #692 as amended)"}
     r = run_dir(args.get("run_id"))
     if not (r / "graph.json").exists():
         return {"error": "unknown run_id"}
@@ -5319,6 +5338,7 @@ def act_redrive(args):
     st = run_state(r) or {}
     return {"ok": True, "action": "redrive", "run_id": (st.get("run_id") or r.name),
             "mode": mode, "re_drive": re_drive, "preserved": preserved,
+            "mode_defaulted": True if mode_defaulted else None,
             "runner_status": st.get("status"),
             "scheduled_redrive": "consumed" if consumed_request else None,
             "grant_ledger_reset": grants or None,
