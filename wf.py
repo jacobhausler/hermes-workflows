@@ -380,6 +380,9 @@ def _spawn_expressibility_refusal(meta, node, cmd, spawn_no, index=None,
     expressible pin — profile-carried or override-surfacing — is behavior-
     preserved byte-identically. The refusal never touches the seat (zero
     attempts) and logs dispatch.refused like the budget gate beside it."""
+    # The truth is the FINAL argv (est-yq2xq, #709): creation overrides cannot
+    # survive the spawn funnel, so the door must judge the stripped form.
+    cmd = _strip_frozen_route_flags(cmd)
     run = meta.get("_run")
     pin_p = str(node.get("provider") or "")
     pin_m = str(node.get("model") or "")
@@ -8514,6 +8517,33 @@ def _stale_spawn_refusal(run, node, byid):
             "ms": 0}
 
 
+# est-yq2xq, unconditional since #709: the gateway's frozen-route resume policy
+# (hermes_cli/gateway_chat.py::check_resume_policy) refuses creation overrides on
+# the --continue <skey> --create-if-missing shape, EVEN on brand-new skeys
+# (Oct 24 nightly forensics; repro exhibit hermes-agent#28). While the gateway
+# ships no session.create flag-freeze, the spawn CANNOT express these flags: the
+# builder drops each pair below. Profiles (-p) are not creation overrides and
+# survive — that is the supported route mechanism. A leftover
+# omit-policy-flags.on marker file is inert; the marker is dead (owner order
+# 2026-11-22).
+_FROZEN_ROUTE_FLAGS = ("--max-turns", "--run-budget", "--reasoning",
+                       "-t", "-m", "--provider")
+
+
+def _strip_frozen_route_flags(cmd):
+    """Drop creation-override PAIRS from an agent-child argv (always on; see
+    the block comment). Each flag consumes exactly its own value token, which
+    is how the argv builder above materializes them."""
+    out, i = [], 0
+    while i < len(cmd):
+        if cmd[i] in _FROZEN_ROUTE_FLAGS:
+            i += 2
+            continue
+        out.append(cmd[i])
+        i += 1
+    return out
+
+
 # ---- E24 (bd_2026-11-13-42t): wall truth -----------------------------------
 # NAMED DATA SHAPES:
 #   wall_account = {"declared_s": author's node timeout (or run default),
@@ -8673,6 +8703,7 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
     # the seat default and die post-work at the _route_hold billing gate;
     # refuse typed BEFORE the child starts instead. Every expressible pin
     # returns None here and spawns byte-identical.
+    cmd = _strip_frozen_route_flags(cmd)   # #709: the funnel truth, pre-door, pre-Popen
     _rx = _spawn_expressibility_refusal(meta, node, cmd, spawn_no, index=index,
                                         model_override=model_override)
     if _rx is not None:

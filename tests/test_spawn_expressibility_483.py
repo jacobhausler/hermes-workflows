@@ -123,25 +123,42 @@ check("E1 ZERO attempts against the seat (refusal is pre-Popen, pre-seat)",
 err1 = r1.get("error", "")
 check("E1 the error names the node, the provider and the model",
       "pinned" in err1 and PROV in err1 and MODEL in err1, err1)
-check("E1 the error names the gap (omit strip armed) and the opt-out",
-      "omit" in err1.lower() and "require_route" in err1, err1)
+check("E1 the error names the gap and the require_route opt-out",
+      "cannot express" in err1.lower() and "require_route" in err1, err1)
 ev1 = [e for e in events(RUN_A) if e.get("event") == "dispatch.refused"]
 check("E1 one dispatch.refused event carrying the typed class",
       len(ev1) == 1 and ev1[0].get("error_class") == "route_inexpressible"
       and ev1[0].get("node") == "pinned", ev1)
 
-# ---- E2: the SAME node on an un-armed host runs with the pin expressed ------
+# ---- E2: the marker is DEAD (#709, owner order): a leftover marker file
+# changes NOTHING - the same pinned lane refuses identically (strip is
+# unconditional; the old "un-armed host runs expressible" world is gone).
 LEDGER.write_text("")
-armed(False)
+armed(True)
 r2 = wf.run_child(META(RUN_A), n1, {"pinned": n1}, "do the work", "", None,
                   skey="wf:ex483a:pinned#2")
-check("E2 un-armed host: same pinned lane RUNS (expressible path intact)",
-      r2.get("status") == "done", r2)
-check("E2 the seat stub billed the pinned route verbatim",
-      ledger_lines() == [f"{PROV}/{MODEL}"], ledger_lines())
-check("E2 no further refusal event was logged",
+check("E2 leftover marker inert: same pinned lane refuses identically",
+      r2.get("status") == "failed" and r2.get("error_class") == "route_inexpressible", r2)
+check("E2 the seat stub billed NOTHING (refusal stays pre-Popen)",
+      ledger_lines() == [], ledger_lines())
+check("E2 exactly one MORE refusal event, no new class",
       len([e for e in events(RUN_A) if e.get("event") == "dispatch.refused"
-           and e.get("error_class") == "route_inexpressible"]) == 1, events(RUN_A)[-2:])
+           and e.get("error_class") == "route_inexpressible"]) == 2, events(RUN_A)[-2:])
+
+# ---- E2b: the pair-drop is exact (every frozen flag loses its value token;
+# everything else rides byte-intact) - the behavior law for #709.
+sample = ["hermes", "-p", "zap", "chat", "--query-file", "/tmp/-m", "--oneshot",
+          "--max-turns", "9", "--run-budget", "5", "--reasoning", "high",
+          "-t", "web", "-m", "some-model", "--provider", "some-prov", "extra"]
+stripped = wf._strip_frozen_route_flags(sample)
+check("E2b every frozen pair dropped with its value token",
+      all(f not in stripped for f in ("--max-turns", "--run-budget",
+                                      "--reasoning", "-t", "-m", "--provider"))
+      and all(v not in stripped for v in ("9", "5", "high", "web",
+                                          "some-model", "some-prov")), stripped)
+check("E2b everything else byte-intact in order",
+      stripped == ["hermes", "-p", "zap", "chat", "--query-file", "/tmp/-m",
+                   "--oneshot", "extra"], stripped)
 
 # ---- E3: armed + require_route:false on the node -> est-yq2xq legacy path ---
 LEDGER.write_text("")
@@ -149,7 +166,7 @@ armed(True)
 n3 = node("optout", provider=PROV, model=MODEL, require_route=False)
 r3 = wf.run_child(META(RUN_A), n3, {"optout": n3}, "do the work", "", None,
                   skey="wf:ex483a:optout")
-check("E3 armed + explicit require_route:false: runs, rides the seat default",
+check("E3 opt-out rides the seat default (strip is unconditional)",
       r3.get("status") == "done" and ledger_lines() == ["/seat-default"], (r3, ledger_lines()))
 
 # ---- E4: armed + graph defaults require_route:false -> precedence honored ---
@@ -157,7 +174,7 @@ LEDGER.write_text("")
 n4 = node("graphopt", provider=PROV, model=MODEL)
 r4 = wf.run_child(META(RUN_B), n4, {"graphopt": n4}, "do the work", "", None,
                   skey="wf:ex483b:graphopt")
-check("E4 armed + graph-defaults opt-out: runs (door #25 precedence verbatim)",
+check("E4 graph-defaults opt-out runs (door #25 precedence verbatim)",
       r4.get("status") == "done" and ledger_lines() == ["/seat-default"], (r4, ledger_lines()))
 
 # ---- E5: provider-only pin, explicit require_route -> refusal names provider
@@ -197,8 +214,8 @@ check("E8 armed + profile-carried pin: refused, typed, ZERO attempts",
       and r8.get("error_class") == "route_inexpressible"
       and ledger_lines() == [] and r8.get("ms") == 0, (r8, ledger_lines()))
 err8 = r8.get("error", "")
-check("E8 the error names the pin and the armed-strip gap",
-      PROV in err8 and MODEL in err8 and "omit" in err8.lower()
+check("E8 the error names the pin and the expressibility gap",
+      PROV in err8 and MODEL in err8 and "cannot express" in err8.lower()
       and "require_route" in err8, err8)
 check("E8 the why-clause does NOT blame a missing profile (the profile rode; the pin did not)",
       "while the node declares no profile" not in err8, err8)
