@@ -181,6 +181,14 @@ function locateJS(needle, { exact = false, nth = null, ci = false, region = null
   })()`;
 }
 
+// Rect probe on the upstream region-aware locator (gate case bd_2026-11-13-qri):
+// same deepest-leaf rule, returns the bounding rect (null when not on the
+// rendered page) for clip-sized shots.
+async function rectOf(cdp, needle, opts = {}) {
+  const pt = await cdp.evl(locateJS(needle, opts));
+  return pt && !pt.err ? pt.rect : null;
+}
+
 // Trusted input (real pipeline, per skill): moved -> pressed -> released at
 // the element's rect center.
 async function trustedClick(cdp, needle, opts = {}) {
@@ -664,6 +672,121 @@ async function main() {
       }
     }
     shots.push({ surface: 'pane_workflows', state: 'run detail, held gate question', ...(await shoot(cdp, A.outDir, '02-pane-run-detail.png')) });
+
+    // -- gate modal (bd_2026-11-13-qri): ONE decision surface, real trusted
+    // click, REAL pending (the answer POST is held at Fetch interception so
+    // the 'Saving answer…' frame is painted truthfully, not staged), durable
+    // saved receipt, and the toast's 'View exact gate' jump proven from a
+    // different route. kill_runner_after_hold: the isolated runner dies at the
+    // hold BEFORE the answer, so the events ledger must stay byte-identical
+    // afterwards — "nothing restarted" verified for THIS tested runner only.
+    if (surfacesWanted.has('gate_modal')) {
+      const gateDef = (engSeed.graph.nodes || []).find(n => n.type === 'gate');
+      if (!gateDef) die(EX.preflight, 'gate case seed graph carries no gate node');
+      const runDir = path.join(B.runs, runId);
+      const shaFile = f => crypto.createHash('sha256').update(fs.readFileSync(f)).digest('hex');
+      const eventsBefore = shaFile(path.join(runDir, 'events.jsonl'));
+      if (engSeed.kill_runner_after_hold) {
+        try {
+          const pid = parseInt(fs.readFileSync(path.join(runDir, 'wf.pid'), 'utf8').trim(), 10);
+          if (pid) process.kill(pid, 'SIGKILL');
+        } catch { /* already gone: the tested shape is a dead runner */ }
+      }
+      // 07: the held frame — verbatim question, declared requester, options.
+      await waitText(cdp, gateDef.question, 20_000);
+      const heldCell = await rectOf(cdp, gateDef.question);
+      if (!heldCell) die(EX.capture, 'held gate cell never rendered on the record page');
+      shots.push({ surface: 'gate_modal', state: 'held: question, requester, option buttons',
+        ...(await shoot(cdp, A.outDir, '07-gate-held.png', heldCell)) });
+      // Hold the ONE answer POST mid-flight, then trusted-click the option.
+      await cdp.send('Fetch.enable', { patterns: [{ urlPattern: '*/gate', requestMethod: 'POST' }] });
+      const paused = new Promise((resolve, reject) => {
+        const t = setTimeout(() => reject(new Error('answer POST never paused')), 15_000);
+        cdp.ws.addEventListener('message', e => {
+          let m; try { m = JSON.parse(e.data); } catch { return; }
+          if (m.method === 'Fetch.requestPaused') { clearTimeout(t); resolve(m.params.requestId); }
+        }, { once: false });
+      });
+      await trustedClick(cdp, gateDef.options[0], { exact: true });
+      const requestId = await paused;
+      await waitText(cdp, 'Saving answer…', 5_000);
+      shots.push({ surface: 'gate_modal', state: 'pending: POST held at Fetch interception, options disabled (duplicate prevention)',
+        ...(await shoot(cdp, A.outDir, '08-gate-pending.png', await rectOf(cdp, 'Saving answer…'))) });
+      await cdp.send('Fetch.continueRequest', { requestId });
+      await cdp.send('Fetch.disable');
+      // 09: the durable saved receipt (recorded answer, scoped copy).
+      await waitText(cdp, 'Answer saved', 20_000);
+      const receipt = await cdp.evl(`(() => {
+        const el = document.querySelector('[data-gate-receipt]');
+        if (!el) return null;
+        const r = el.getBoundingClientRect();
+        return { x: r.x, y: r.y, width: r.width, height: r.height };
+      })()`);
+      if (!receipt) die(EX.capture, 'saved receipt surface [data-gate-receipt] absent after the answer');
+      shots.push({ surface: 'gate_modal', state: 'saved: Answer saved receipt, exact answer, nothing-restarted scope note',
+        ...(await shoot(cdp, A.outDir, '09-gate-saved.png', receipt)) });
+      // 10: the toast — same ledger line, View exact gate action.
+      await waitText(cdp, 'View exact gate', 15_000);
+      const toast = await rectOf(cdp, '◇ Held ·', {});
+      shots.push({ surface: 'gate_modal', state: 'success toast: held glyph + requester + run / gate, action View exact gate',
+        ...(await shoot(cdp, A.outDir, '10-gate-toast.png', toast)) });
+      // Identity proof: leave the record entirely, then take the toast's (or
+      // the receipt's) View exact gate — the route must return to THIS run's
+      // gate cell showing the durable receipt, never a bare list.
+      await trustedClick(cdp, 'SESSIONS', { exact: true });
+      let view = toast && await cdp.evl(`(() => {
+        const btns = [...document.querySelectorAll('button')].filter(b =>
+          (b.innerText || '').trim() === 'View exact gate');
+        const b = btns[btns.length - 1];
+        if (!b) return null;
+        const r = b.getBoundingClientRect();
+        return r.width > 0 ? { x: r.x + r.width / 2, y: r.y + r.height / 2 } : null;
+      })()`);
+      if (view) {
+        for (const t of ['mouseMoved', 'mousePressed', 'mouseReleased'])
+          await cdp.send('Input.dispatchMouseEvent', { type: t, x: view.x, y: view.y,
+            button: t === 'mouseMoved' ? undefined : 'left', clickCount: 1,
+            buttons: t === 'mouseReleased' ? 0 : 1 });
+      } else {
+        await trustedClick(cdp, 'WORKFLOWS', { exact: true });
+        await trustedClick(cdp, runName, { region: paneRegion });
+        view = await cdp.evl(`(() => {
+          const btns = [...document.querySelectorAll('button')].filter(b =>
+            (b.innerText || '').trim() === 'View exact gate');
+          const b = btns[0];
+          if (!b) return null;
+          const r = b.getBoundingClientRect();
+          return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+        })()`);
+        if (view) for (const t of ['mouseMoved', 'mousePressed', 'mouseReleased'])
+          await cdp.send('Input.dispatchMouseEvent', { type: t, x: view.x, y: view.y,
+            button: t === 'mouseMoved' ? undefined : 'left', clickCount: 1,
+            buttons: t === 'mouseReleased' ? 0 : 1 });
+      }
+      if (!view) die(EX.capture, 'no View exact gate control remained to click');
+      await waitText(cdp, gateDef.question, 20_000);
+      const back = await cdp.evl(`!!document.querySelector('[data-gate-receipt]')`);
+      if (!back) die(EX.capture, 'View exact gate did not land on the exact gate receipt');
+      // Read back the recorded bytes: exact answer, _ui provenance, and the
+      // untouched event ledger — the answer was RECORD-only on this path.
+      const gatesRec = JSON.parse(fs.readFileSync(
+        path.join(runDir, 'gates', `${gateDef.id}.json`), 'utf8'));
+      const identityLine = {
+        run_id: runId, gate_id: gateDef.id, answer: gatesRec.answer,
+        _ui: gatesRec._ui === true,
+        events_sha_before: eventsBefore, events_sha_after: shaFile(path.join(runDir, 'events.jsonl')),
+        gate_node_committed: fs.existsSync(path.join(runDir, 'nodes', `${gateDef.id}.json`))
+      };
+      if (gatesRec.answer !== gateDef.options[0] || gatesRec._ui !== true)
+        die(EX.capture, `answer read-back mismatch: ${JSON.stringify(identityLine)}`);
+      if (identityLine.events_sha_before !== identityLine.events_sha_after)
+        die(EX.capture, 'events ledger MOVED on the answer path — nothing-restarted claim false for this seed');
+      if (identityLine.gate_node_committed)
+        die(EX.capture, 'the killed runner consumed the answer — the seed is no longer isolated');
+      identity.gate_answer = identityLine;
+      shots.push({ surface: 'gate_modal', state: 'after View exact gate: exact receipt re-rendered from the read model',
+        ...(await shoot(cdp, A.outDir, '11-gate-after-view.png', await rectOf(cdp, gateDef.question))) });
+    }
 
     // 03/04 directive card: seed one real assistant turn, open its session,
     // find the plugin's card (its 'Open in Workflows' action is the stable

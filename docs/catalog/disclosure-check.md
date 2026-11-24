@@ -133,18 +133,21 @@ No other clause needed correction.
 > closed with an informational toast; no document composer lookup and no
 > private composer event.
 
-- Verified: `nudgeOwner` (`desktop/plugin.js:749-772`) resolves the run
-  owner's `session_id`, calls SDK `host.composer.submit(sid, text)`, falls
-  back to SDK `host.composer.insertText(sid, text)`, and otherwise returns
-  `no-sdk`/`no-owner`/`unavailable` — each mapped to an informative
-  `host.notify` toast telling the user to type the resume line manually
-  (`desktop/plugin.js:775-790`).
-- Matches the upstream SDK contract (`apps/desktop/src/sdk/composer.ts`
-  `composerHost.submit(sessionId, text): boolean` visible/fail-closed;
-  `insertText(sessionId, text, {mode?}): Promise<boolean>`).
-- Grep-verified at audit time: zero `document.`, zero `querySelectorAll`
-  outside the component's own `el` subtree (`desktop/plugin.js:914,925`),
-  zero `window.dispatchEvent`, zero `hermes:composer-submit`, zero
-  `localStorage` writes, in the gate path.
-- Behavior test: `tests/test_composer_owner.mjs` (submit → drafted fallback →
-  fail-closed, all branches).
+- RETIRED (bd_2026-11-13-qri, owner doctrine "never nudgeOwner"): the
+  composer submit/insertText chain and its five toast variants were deleted
+  with no compat shim. The gate answer is now recorded through the same
+  `_release_core(ui=True)` path and the surface becomes a durable receipt
+  with a `View exact gate` toast/receipt action that only selects the run's
+  record (no hydration, no submit, no resume). The audit above stands as the
+  historical record of the shipped-then-retired contract.
+- Grep-verified at audit time (historical): zero `document.`, zero
+  `querySelectorAll` outside the component's own `el` subtree
+  (`desktop/plugin.js:914,925` at audit time), zero `window.dispatchEvent`,
+  zero `hermes:composer-submit`, zero `localStorage` writes, in the gate
+  path.
+- Behavior test (current): `tests/test_composer_owner.mjs` — the host spy
+  proves zero composer submit/insert/openSession calls across held,
+  no-options, pending, saved, and ok:false-as-error flows; same-run
+  exact-gate View identity and focus restoration included. API-door leg:
+  `tests/test_gate_answer_flows_00e46adb.py` (invalidate-before-read,
+  `_ui:true` read-back, duplicate/stale refusal, zero resume events).
