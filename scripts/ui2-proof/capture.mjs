@@ -803,6 +803,37 @@ async function main() {
       const fixture = (c.seeds || []).find(s => s.kind === 'engine_seed' && s.method === 'fixture_census');
       if (!fixture) die(EX.preflight, `case ${A.caseName} has no fixture_census seed`);
       const COUNT = Number(fixture.count) || 133;
+      // Scope probe (field-proven #12: hermes:api 403 profile_scope_mismatch
+      // survived the satellite home + self-link). Talk to the fork directly
+      // and record which selector it accepts, BEFORE the frame walk needs it:
+      // unscoped, ?profile=proofhome, and /p/proofhome/api/... prefixed.
+      try {
+        const st = JSON.parse(fs.readFileSync(path.join(B.home, 'gateway_state.json'), 'utf8'));
+        const port = st.api_port || st.port || null;
+        const tokPath = path.join(B.home, 'gateway_api_token');
+        const tok = fs.existsSync(tokPath) ? fs.readFileSync(tokPath, 'utf8').trim() : null;
+        const base = port ? `http://127.0.0.1:${port}` : null;
+        const hits = {};
+        if (base) {
+          const hdr = tok ? { authorization: `Bearer ${tok}` } : {};
+          for (const [k, u] of Object.entries({
+            unscoped: `${base}/api/plugins/hermes-workflows/runs?offset=0&limit=2`,
+            named: `${base}/api/plugins/hermes-workflows/runs?offset=0&limit=2&profile=${B.profileName}`,
+            prefixed: `${base}/p/${B.profileName}/api/plugins/hermes-workflows/runs?offset=0&limit=2`,
+            profiles: `${base}/api/profiles`,
+          })) {
+            try {
+              const r = await fetch(u, { headers: hdr });
+              const t = await r.text();
+              hits[k] = { status: r.status, body: t.slice(0, 140) };
+            } catch (e) { hits[k] = { err: String(e.message).slice(0, 120) }; }
+          }
+        }
+        identity.gateway_scope_probe = { port, has_token: !!tok, hits,
+                                         state_pid: st.pid, state_home: st.hermes_home };
+        fs.writeFileSync(path.join(A.outDir, 'logs', 'scope-probe.json'),
+                         JSON.stringify(identity.gateway_scope_probe, null, 2) + '\n');
+      } catch (e) { identity.gateway_scope_probe = { err: String(e).slice(0, 200) }; }
       try {
         // 01 LOADING: stall every /runs page, then open the pane — the one
         // honest costume for a census not yet answered.
