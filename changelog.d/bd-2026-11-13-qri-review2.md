@@ -31,7 +31,7 @@ the receipt prefix — the frame is the contract, verified on the real
 renderer (SETUP.md updated; tests/test_composer_owner.mjs gains the
 same-mount refetch case the reviewer's reproduction demanded).
 
-## Bench-home law (field-proven, this bead's capture attempt)
+Bench-home law (field-proven, this bead's capture attempts):
 
 `_hermes_root_of` forces the default hermes root to the native
 `~/.hermes` whenever `HERMES_HOME` lives under it, so a bench provisioned

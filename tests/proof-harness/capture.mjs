@@ -1586,10 +1586,36 @@ async function main() {
         ...(await shoot(cdp, A.outDir, '09-gate-saved.png', receipt)) });
       // 10: the toast — same ledger line, View exact gate action. The toast IS
       // the receipt (review-2 Q2): answer saved, exact answer, requester,
-      // run / gate, server time — and the View exact gate closure.
+      // run / gate, server time — and the View exact gate closure. Locate it
+      // STRUCTURALLY (the toast's own View button -> its container): host
+      // notify may restyle the message (the literal '◇ ' needle missed —
+      // field-proven), and 'the toast carries the receipt' is the assertion.
       await waitText(cdp, 'View exact gate', 15_000);
-      const toast = await rectOf(cdp, '◇ Answer saved ·', {});
-      if (!toast) die(EX.capture, 'success toast does not carry the Answer saved + answer receipt line');
+      let toast = null;
+      const tT0 = Date.now();
+      while (Date.now() - tT0 < 10_000 && !toast) {
+        toast = await cdp.evl(`(() => {
+          const btns = [...document.querySelectorAll('button')].filter(b =>
+            (b.innerText || '').trim() === 'View exact gate');
+          const b = btns[btns.length - 1];
+          if (!b) return null;
+          let n = b;
+          for (let i = 0; i < 7 && n.parentElement; i++) {
+            n = n.parentElement;
+            if ((n.innerText || '').includes('Answer saved')) break;
+          }
+          const txt = (n.innerText || '');
+          if (!txt.includes('Answer saved')) return null;
+          const r = n.getBoundingClientRect();
+          return { x: r.x, y: r.y, width: r.width, height: r.height, text: txt };
+        })()`);
+        if (!toast) await sleep(400);
+      }
+      if (!toast) die(EX.capture, 'toast with View exact gate does not carry an Answer saved receipt line');
+      const toastTxt = String(toast.text);
+      if (!/Answer saved[\s\S]*Approve review/.test(toastTxt) || !/\d{4}-\d{2}-\d{2}T/.test(toastTxt))
+        die(EX.capture, `toast receipt line lacks the exact answer or the stamped time: ${JSON.stringify(toastTxt.slice(0, 200))}`);
+      delete toast.text;
       shots.push({ surface: 'gate_modal', state: 'success toast: answer saved + exact answer + requester + run / gate + stamped time, action View exact gate',
         ...(await shoot(cdp, A.outDir, '10-gate-toast.png', toast)) });
       // Identity proof: leave the record entirely, then take the toast's (or
