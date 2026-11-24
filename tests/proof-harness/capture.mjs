@@ -138,6 +138,12 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 export const VOLATILE_MASKS = [
   [/\b\d{8}-\d{6}-[A-Za-z0-9._-]+\b/g, '<RUN-ID>'],
   [/\brun\s+(?:\d+\s*(?:s|sec|secs?|m|min|mins?|h|hr|hrs?|d|day|days)?)(?:\s+\d+\s*(?:s|sec|secs?|m|min|mins?|h|hr|hrs?|d|day|days))?/gi, '<RUN-CLOCK>'],
+  // Field-proven (slice B set-1, bd_2026-11-13-xow): the gate cell wears its
+  // own held-elapsed chip ('held 1m 42s', review-2's 'held 26h 33m'), which
+  // ticks between two independent captures minutes apart — pure clock, not
+  // content. A unit suffix is REQUIRED so the bare status word 'held' and
+  // 'held · 1/3 terminal' never mask.
+  [/\bheld\s+\d+\s*(?:s|sec|secs?|m|min|mins?|h|hr|hrs?|d|day|days)(?:\s+\d+\s*(?:s|sec|secs?|m|min|mins?|h|hr|hrs?|d|day|days))?/gi, '<HELD-CLOCK>'],
   [/\b(?:now|just now|\d+\s*(?:s|sec|secs?|m|min|mins?|h|hr|hrs?|hour|hours?|d|day|days?)\s*ago)\b/gi, '<REL-TIME>'],
   [/\b\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}[^,\s]*)?\b/g, '<DATE>'],
   // field-proven (first paired run, detail column): owner/session tokens are
