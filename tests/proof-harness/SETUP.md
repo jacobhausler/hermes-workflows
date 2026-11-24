@@ -58,6 +58,32 @@ provider later" button (pane poll + before the held frame). The green-era
 (0f602c5) option remains valid; `identity.app.commit` pins which app every
 proof ran against.
 
+## The motion-core case (bd_2026-11-13-32i)
+
+`--case motion-core` walks the ONE motion allocator on the REAL renderer:
+the seeded held gate's attention claim (phase derived from the run's
+`gate.held` ledger row, never the mount), a 12-transition flood that
+preempts it into an instrumented static spill (amber base + opacity 1),
+release + route-away REMOUNT re-admission retaining the timestamp phase,
+the 0/30/60/90ms insertion reservation ladder inside N=12, consume-once
+one-shot settle, and the reduced flip on both halves (the plugin's
+`prefers-reduced-motion: no-preference` media rule goes unmatched and the
+card's border samples byte-still across a real 900ms gap; `setReduced`
+zeroes active AND reserved). Instrumentation rides the plugin's own
+`__wfMotion` bench seam sampled per step into `logs/motion-schedule.json`;
+admissions/denials counters certify the budget — the PNGs only show the
+states. Entry point: `node scripts/ui2-proof/capture.mjs --case
+motion-core --out "$PROOF_DIR/motion-core"`.
+
+**Bench interpreter law (field-proven bd-32i, first capture exit 6):** the
+app repo's `./hermes` shim is `#!/usr/bin/env python3`, so the electron
+main's gateway ensure imports the plugin door under WHATEVER `python3` the
+launching PATH resolves FIRST. A macOS system 3.9 dies on the door's
+PEP-604 annotations (`TypeError: unsupported operand type(s) for |`) and
+the renderer never gets past pane attach. Launch the driver with a
+python ≥ 3.10 first on PATH (e.g.
+`PATH="~/.hermes/tools/python-3.14.9+20261021-darwin-arm64/bin:$PATH"`).
+
 ## Reproducibility law (slice A)
 
 Every run writes an IMMUTABLE capture set. `manifest.json.captures[]` pins
