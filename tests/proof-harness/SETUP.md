@@ -29,27 +29,36 @@ run ids, config-before/after, teardown survivors).
 `--case coverage` proves the full-census fetch states on the REAL surface: a
 fixture census of 133 read-model rows (seed_fixture.py — rows read
 `interrupted`, never TERMINAL, so the pane's own 4 s poll loop drives the
-error frames) plus frames for loading (every /runs page stalled at the CDP
-Fetch edge), answered-empty (roots named), full census all-loaded, the
+error frames) plus frames for loading (fork SIGSTOPped at the edge before the
+activation reload), answered-empty (roots named), full census all-loaded, the
 deepest counted row past the first-100 ceiling + its record page, refetch
-failure with the cached census kept (clickable stale chip), retry re-walk
-(census grew while the edge was failing), and partial fetch (page-2 fulfill
-short: `loaded 100 of 134` while the summary stays global), CAP TRUNCATION
-(every page a full synthetic window without any total — the clip at the
-30-page cap shows as `first 100 loaded — more exist (page cap)`; the
-`truncated` fact rides the payload, never inferred from a missing number),
-PENDING (counted 237 with zero loaded rows renders `Runs pending…`, never
-the `No runs` costume; total 237 is a synthetic edge answer, the bench
-counts 134), and PENDING RECOVERY (a trusted click on the re-walk button
-brings the real all-loaded census back). Synthetic frame provenance is
-recorded under `identity.coverage.{cap_frame,pending_frame}`. The mock only
-lies at the network edge — renderer, plugin, react-query loop and backend
-stay the actual code. A UDS scope probe against the fork is recorded to
-`logs/scope-probe.json` before the walk (field-proven #12 lesson). This case
-does NOT use the close/reconnect reload dance: it arms the mock BEFORE the
-activation reload and keeps the session (Fetch survives the reload),
-re-arming at every reconnect site. Run on loaded boxes with
-`--paint-budget 300` and non-default ports (`--cdp-port 9594
+failure with the cached census kept (fork SIGKILLed; clickable stale chip),
+retry re-walk (census grew while the gateway was dead), and partial fetch
+(server-side short-page knob: `loaded 100 of 134` while the summary stays
+global), CAP TRUNCATION (every page a full synthetic window without any
+total — the clip at the 30-page cap shows as `first 100 loaded — more exist
+(page cap)`; the `truncated` fact rides the payload, never inferred from a
+missing number), PENDING (counted 237 with zero loaded rows renders
+`Runs pending…`, never the `No runs` costume; total 237 is a synthetic edge
+answer, the bench counts 134), and PENDING RECOVERY (a trusted click on the
+re-walk button brings the real all-loaded census back). Synthetic frame
+provenance is recorded under `identity.coverage.{cap_frame,pending_frame}`.
+**The transport edge is the FORK, not the CDP Fetch domain:** the
+plugin's REST rides the app's IPC bridge (preload `hermes:api`,
+field-proven 2026-11-24), so `Fetch.requestPaused` never fires for plugin
+requests — the loading costume is a SIGSTOPped fork, the error costume a
+SIGKILLed one, and the partial-fetch costume is served by the route itself
+via `WF_PROOF_SHORT_PAGES_FILE` (exported by the launcher before boot — the
+fork inherits the driver env; the file's integer is an offset floor; absent
+or garbage content = no knob, fail-closed; pinned by W7 of
+`tests/test_census_pages_full_yjp.py`). The mock stays mounted rule-less for
+future app generations that may move REST onto HTTP. A UDS scope probe
+against the fork is recorded to `logs/scope-probe.json` before the walk
+(field-proven #12 lesson). This case does NOT use the close/reconnect reload
+dance: it arms the mock BEFORE the activation reload and keeps the session
+(Fetch survives the reload), re-arming at every reconnect site. Run on loaded
+boxes with `--paint-budget 300` and non-default ports (`--cdp-port 9594
+>>>>>>> 4ea14308 (test(proof-harness): coverage case drives the fork edge; server-side short-page knob)
 --renderer-port 5394`) when a sibling bench owns 9394/5194.
 
 **App generation (2026-11-24, amended by field evidence):** the b9b36c9-era
