@@ -1,16 +1,16 @@
 {
-  "ts": "2026-11-24T16:31:59.229Z",
+  "ts": "2026-11-24T17:06:02.303Z",
   "case": "gate",
   "plugin": {
     "candidate": "~/code/wf-pr-20261124/qri3/desktop/plugin.js",
     "sha256": "ae149734e4ba167e84c45ba119677ed593e5a615c9e9ad9f57a0d3b98b3f3f76",
-    "staged": "/private/var/folders/k8/hhg058vd7553r8nfjs8vpss00000gn/T/qri-proof21/gate/bench/home/desktop-plugins/hermes-workflows/plugin.js",
+    "staged": "/private/var/folders/k8/hhg058vd7553r8nfjs8vpss00000gn/T/qri-proof26/gate/bench/home/desktop-plugins/hermes-workflows/plugin.js",
     "staged_sha256": "ae149734e4ba167e84c45ba119677ed593e5a615c9e9ad9f57a0d3b98b3f3f76",
     "staged_sha256_after_load": "ae149734e4ba167e84c45ba119677ed593e5a615c9e9ad9f57a0d3b98b3f3f76"
   },
   "app": {
     "repo": "~/code/hermes-agent-proof-qri6",
-    "hermes_version": "Hermes Agent v0.23.2+2659.g0f602c5.dirty (2026.9.24) · stable · local 0f602c5f6f18\nInstall directory: ~/code/hermes-agent-proof-qri6\nInstall method: git\nPython: 3.14.9\nOpenAI SDK: 2.54.0\nUpdate available — run 'hermes update'",
+    "hermes_version": "Hermes Agent v0.23.3+984.g0f602c5 (2026.9.24) · stable · local 0f602c5f6f18\nInstall directory: ~/code/hermes-agent-proof-qri6\nInstall method: git\nPython: 3.14.9\nOpenAI SDK: 2.54.0\nUpdate available — run 'hermes update'",
     "commit": "0f602c5f6f18615632535251d62a2db74ce93b69",
     "dirty_entries": 1,
     "package_version": "0.0.0",
@@ -28,30 +28,30 @@
       "config.yaml"
     ],
     "plugins_symlink": "~/code/wf-pr-20261124/qri3",
-    "profile": "ui2bench-c137777b",
-    "locks": "/private/var/folders/k8/hhg058vd7553r8nfjs8vpss00000gn/T/qri-proof21/gate/bench/locks",
+    "profile": "ui2bench-8f47db05",
+    "locks": "/private/var/folders/k8/hhg058vd7553r8nfjs8vpss00000gn/T/qri-proof26/gate/bench/locks",
     "pre_ensure": "ok"
   },
   "seeds": {
     "held_gate_run": {
       "kind": "engine_seed",
-      "run_id": "20261124-103423-ui2-proof-gate",
+      "run_id": "20261124-110709-ui2-proof-gate",
       "graph_sha256": "325debf66509feaed3d73c05b4368ee471460af79a4b3f6bccb54418b0714c85"
     }
   },
   "config_touched": {
     "plugins.entries.hermes-workflows.settings.runs_root": {
       "before": "~/.hermes/workflows/20261123-204418-estate-bead-crew/work/beadworker.1/proof/gate10/bench/runs",
-      "after": "/private/var/folders/k8/hhg058vd7553r8nfjs8vpss00000gn/T/qri-proof21/gate/bench/runs",
-      "scope": "bench profile ui2bench-c137777b (isolated — shared config untouched)"
+      "after": "/private/var/folders/k8/hhg058vd7553r8nfjs8vpss00000gn/T/qri-proof26/gate/bench/runs",
+      "scope": "bench profile ui2bench-8f47db05 (isolated — shared config untouched)"
     },
     "plugins.entries.hermes-workflows.settings.tray": {
       "before": true,
       "after": true,
-      "scope": "bench profile ui2bench-c137777b (isolated — shared config untouched)"
+      "scope": "bench profile ui2bench-8f47db05 (isolated — shared config untouched)"
     }
   },
-  "candidate_head": "1bc7cdbc43678aec69a8b217c98209f06c85d3b7",
+  "candidate_head": "2cfc9af85e2c6edd97fbc83f35006434508c6c2e",
   "merge_base_origin_main": "c94874af6863bad531ef97ed0b115aca7554e0da",
   "registry": {
     "routes": [
@@ -94,38 +94,22 @@
   },
   "api_attachment": {
     "via": "registry + live seeded run row rendered through the plugin API route",
-    "run_id": "20261124-103423-ui2-proof-gate"
+    "run_id": "20261124-110709-ui2-proof-gate"
   },
   "gate_answer": {
-    "run_id": "20261124-103423-ui2-proof-gate",
+    "run_id": "20261124-110709-ui2-proof-gate",
     "gate_id": "review",
     "answer": "Approve review",
     "_ui": true,
-    "events_sha_before": "888628f1315d7ad1bbbb4b0c6cc58f30b648fc10898105e12817541de9425c23",
-    "events_sha_after": "888628f1315d7ad1bbbb4b0c6cc58f30b648fc10898105e12817541de9425c23",
+    "events_sha_before": "1388a134d49f7bd36502b162f9c087aa4609d5173ead1fd5724466a392514581",
+    "events_sha_after": "1388a134d49f7bd36502b162f9c087aa4609d5173ead1fd5724466a392514581",
     "gate_node_committed": false
   },
   "renderer_probe": {
     "script_srcs": 2
   },
   "teardown": {
-    "survivors": [
-      {
-        "pid": 15270,
-        "needle": "/private/var/folders/k8/hhg058vd7553r8nfjs8vpss00000gn/T/qri-proof21/gate/bench/userdata",
-        "line": "~/code/hermes-agent-proof-qri6/node_modules/.pnpm/electron@44.10.2_supports-color@10.2.2/node_modules/electron/dist/Electron.app/Contents/Frameworks/Electron Helper.app/Contents/MacO"
-      },
-      {
-        "pid": 15271,
-        "needle": "/private/var/folders/k8/hhg058vd7553r8nfjs8vpss00000gn/T/qri-proof21/gate/bench/userdata",
-        "line": "~/code/hermes-agent-proof-qri6/node_modules/.pnpm/electron@44.10.2_supports-color@10.2.2/node_modules/electron/dist/Electron.app/Contents/Frameworks/Electron Helper.app/Contents/MacO"
-      },
-      {
-        "pid": 15285,
-        "needle": "/private/var/folders/k8/hhg058vd7553r8nfjs8vpss00000gn/T/qri-proof21/gate/bench/userdata",
-        "line": "~/code/hermes-agent-proof-qri6/node_modules/.pnpm/electron@44.10.2_supports-color@10.2.2/node_modules/electron/dist/Electron.app/Contents/Frameworks/Electron Helper (Renderer).app/Co"
-      }
-    ],
+    "survivors": [],
     "revert_failures": []
   }
 }

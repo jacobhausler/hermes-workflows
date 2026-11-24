@@ -1,130 +1,130 @@
 {
- "app": {
-  "commit": "0f602c5f6f18615632535251d62a2db74ce93b69",
-  "dirty_entries": 1,
-  "electronVersion": "unknown",
-  "electron_package_version": "44.10.2",
-  "hermes_version": "Hermes Agent v0.23.2+2659.g0f602c5.dirty (2026.9.24) \u00b7 stable \u00b7 local 0f602c5f6f18\nInstall directory: ~/code/hermes-agent-proof-qri6\nInstall method: git\nPython: 3.14.9\nOpenAI SDK: 2.54.0\nUpdate available \u2014 run 'hermes update'",
-  "package_version": "0.0.0",
-  "repo": "~/code/hermes-agent-proof-qri6"
- },
- "candidate": {
-  "merge_base_origin_main": "c94874af6863bad531ef97ed0b115aca7554e0da",
-  "plugin": "desktop/plugin.js",
-  "plugin_sha256": "ae149734e4ba167e84c45ba119677ed593e5a615c9e9ad9f57a0d3b98b3f3f76",
-  "repo_head": "1bc7cdbc43678aec69a8b217c98209f06c85d3b7"
- },
- "captures": [
-  {
-   "bytes": 297682,
-   "clip": "viewport",
-   "content_file": "contents/01-pane-runs.txt",
-   "content_sha256": "4d326dc7ef98f83b31f4e7c9b2c4a671491f277f2f6f77e0f8b5bf76b19a5791",
-   "file": "captures/01-pane-runs.png",
-   "reviewed": true,
-   "sha256": "9bae4dd097284a64f9fcc7dd098ef98e26b0fa82a921fe29dd2432ad8f84451b",
-   "state": "runs list, seeded held-gate run",
-   "surface": "pane_workflows"
+  "schema": "proof-harness/1",
+  "run_ts": "2026-11-24T17:06:02.303Z",
+  "case": "gate",
+  "only": null,
+  "surfaces": [
+    "gate_modal",
+    "pane_workflows"
+  ],
+  "candidate": {
+    "plugin": "desktop/plugin.js",
+    "plugin_sha256": "ae149734e4ba167e84c45ba119677ed593e5a615c9e9ad9f57a0d3b98b3f3f76",
+    "repo_head": "2cfc9af85e2c6edd97fbc83f35006434508c6c2e",
+    "merge_base_origin_main": "c94874af6863bad531ef97ed0b115aca7554e0da"
   },
-  {
-   "bytes": 239027,
-   "clip": "viewport",
-   "content_file": "contents/02-pane-run-detail.txt",
-   "content_sha256": "61bcd0f451ee1683cbe76739c5294b6c00bcbcc9d5b06f15958d3b282f19bc03",
-   "file": "captures/02-pane-run-detail.png",
-   "reviewed": true,
-   "sha256": "df319dadbf6eb44baca920abb4f207409c4bf8074e05bfed5db74bc2bff903ce",
-   "state": "run detail, held gate question",
-   "surface": "pane_workflows"
+  "app": {
+    "repo": "~/code/hermes-agent-proof-qri6",
+    "hermes_version": "Hermes Agent v0.23.3+984.g0f602c5 (2026.9.24) · stable · local 0f602c5f6f18\nInstall directory: ~/code/hermes-agent-proof-qri6\nInstall method: git\nPython: 3.14.9\nOpenAI SDK: 2.54.0\nUpdate available — run 'hermes update'",
+    "commit": "0f602c5f6f18615632535251d62a2db74ce93b69",
+    "dirty_entries": 1,
+    "package_version": "0.0.0",
+    "electronVersion": "unknown",
+    "electron_package_version": "44.10.2"
   },
-  {
-   "bytes": 4919,
-   "clip": "element",
-   "content_file": null,
-   "content_sha256": null,
-   "file": "captures/07-gate-held.png",
-   "reviewed": true,
-   "sha256": "1b37b6977dd401eef37f6929479d346e80f6e7bd5d7177e481428d2b11eb4009",
-   "state": "held: question, requester, option buttons",
-   "surface": "gate_modal"
+  "seeds": {
+    "held_gate_run": {
+      "kind": "engine_seed",
+      "run_id": "20261124-110709-ui2-proof-gate",
+      "graph_sha256": "325debf66509feaed3d73c05b4368ee471460af79a4b3f6bccb54418b0714c85"
+    }
   },
-  {
-   "bytes": 11575,
-   "clip": "element",
-   "content_file": null,
-   "content_sha256": null,
-   "file": "captures/08b-gate-error.png",
-   "reviewed": true,
-   "sha256": "c27dc996610b16491b2c1f1ad36987a949120017bd2dc97868d64d6bc9fa236b",
-   "state": "error: real fail-once door answer -> inline failure + retryable options, no receipt",
-   "surface": "gate_modal"
+  "captures": [
+    {
+      "surface": "pane_workflows",
+      "state": "runs list, seeded held-gate run",
+      "file": "captures/01-pane-runs.png",
+      "bytes": 294254,
+      "sha256": "becdf9f3deba1739b764923f36be5906cbcf64cadbe105a75d8551eaa63cb4ed",
+      "clip": "viewport",
+      "content_file": "contents/01-pane-runs.txt",
+      "content_sha256": "4d326dc7ef98f83b31f4e7c9b2c4a671491f277f2f6f77e0f8b5bf76b19a5791",
+      "reviewed": false
+    },
+    {
+      "surface": "pane_workflows",
+      "state": "run detail, held gate question",
+      "file": "captures/02-pane-run-detail.png",
+      "bytes": 269767,
+      "sha256": "d99be2c3d6600cd16e873fca3a95cb0e3b04b85436f3fb499c44d61f1c293f54",
+      "clip": "viewport",
+      "content_file": "contents/02-pane-run-detail.txt",
+      "content_sha256": "61bcd0f451ee1683cbe76739c5294b6c00bcbcc9d5b06f15958d3b282f19bc03",
+      "reviewed": false
+    },
+    {
+      "surface": "gate_modal",
+      "state": "held: question, requester, option buttons",
+      "file": "captures/07-gate-held.png",
+      "bytes": 25390,
+      "sha256": "d015f7f4eef23b62025f43f196927d94f3c8c774373acf50f1071a7a9dfe2d62",
+      "clip": "element",
+      "content_file": null,
+      "content_sha256": null,
+      "reviewed": false
+    },
+    {
+      "surface": "gate_modal",
+      "state": "error: real fail-once door answer -> inline failure + retryable options, no receipt",
+      "file": "captures/08b-gate-error.png",
+      "bytes": 11575,
+      "sha256": "c27dc996610b16491b2c1f1ad36987a949120017bd2dc97868d64d6bc9fa236b",
+      "clip": "element",
+      "content_file": null,
+      "content_sha256": null,
+      "reviewed": false
+    },
+    {
+      "surface": "gate_modal",
+      "state": "pending: response in-flight on the door bench delay, options disabled (duplicate prevention)",
+      "file": "captures/08-gate-pending.png",
+      "bytes": 4139,
+      "sha256": "6656c947d257d1459822d288d3968f1186cd15e58cc6c1fbb36cd1505c7abcdc",
+      "clip": "element",
+      "content_file": null,
+      "content_sha256": null,
+      "reviewed": false
+    },
+    {
+      "surface": "gate_modal",
+      "state": "success toast: answer saved + exact answer + requester + run / gate + stamped time, action View exact gate",
+      "file": "captures/10-gate-toast.png",
+      "bytes": 26857,
+      "sha256": "34d8dae54942528397367cc32c87043d06d941518dd532044e524a8670ab1e9a",
+      "clip": "element",
+      "content_file": null,
+      "content_sha256": null,
+      "reviewed": false
+    },
+    {
+      "surface": "gate_modal",
+      "state": "saved: Answer saved receipt, exact answer, door-stamped Answered time, nothing-restarted scope note",
+      "file": "captures/09-gate-saved.png",
+      "bytes": 76774,
+      "sha256": "3dc94e7d9f6e864692fd18e445cbc0018d42324311c20890c0b16e065b76afb7",
+      "clip": "element",
+      "content_file": null,
+      "content_sha256": null,
+      "reviewed": false
+    },
+    {
+      "surface": "gate_modal",
+      "state": "after View exact gate: exact receipt re-rendered from the read model",
+      "file": "captures/11-gate-after-view.png",
+      "bytes": 90054,
+      "sha256": "85c54e27394bc36e8837760348c832480429b80d76a99a45b03950502ba795cf",
+      "clip": "element",
+      "content_file": null,
+      "content_sha256": null,
+      "reviewed": false
+    }
+  ],
+  "repro": {
+    "content_sha256_by_file": {
+      "captures/01-pane-runs.png": "4d326dc7ef98f83b31f4e7c9b2c4a671491f277f2f6f77e0f8b5bf76b19a5791",
+      "captures/02-pane-run-detail.png": "61bcd0f451ee1683cbe76739c5294b6c00bcbcc9d5b06f15958d3b282f19bc03"
+    },
+    "combined_sha256": "300555a7d519adc6bf1b049764733a0a5a6cfc66a1e51795a4a91f3b46649d7e"
   },
-  {
-   "bytes": 4139,
-   "clip": "element",
-   "content_file": null,
-   "content_sha256": null,
-   "file": "captures/08-gate-pending.png",
-   "reviewed": true,
-   "sha256": "6656c947d257d1459822d288d3968f1186cd15e58cc6c1fbb36cd1505c7abcdc",
-   "state": "pending: response in-flight on the door bench delay, options disabled (duplicate prevention)",
-   "surface": "gate_modal"
-  },
-  {
-   "bytes": 79827,
-   "clip": "element",
-   "content_file": null,
-   "content_sha256": null,
-   "file": "captures/09-gate-saved.png",
-   "reviewed": true,
-   "sha256": "b8d16e1e2bf9e1a3e1006118ff5bc4d4e2f868e2b6f557477b53a711122320fc",
-   "state": "saved: Answer saved receipt, exact answer, door-stamped Answered time, nothing-restarted scope note",
-   "surface": "gate_modal"
-  },
-  {
-   "bytes": 74690,
-   "clip": "element",
-   "content_file": null,
-   "content_sha256": null,
-   "file": "captures/10-gate-toast.png",
-   "reviewed": true,
-   "sha256": "0c098ee9c45cb1e51fe7b8890334b21190dddab5df09ca7ef3d3cf2ae23a793d",
-   "state": "success toast: answer saved + exact answer + requester + run / gate + stamped time, action View exact gate",
-   "surface": "gate_modal"
-  },
-  {
-   "bytes": 6982,
-   "clip": "element",
-   "content_file": null,
-   "content_sha256": null,
-   "file": "captures/11-gate-after-view.png",
-   "reviewed": true,
-   "sha256": "600b22a3690adc6ad0a1193ebda078872c55895d6b0a0d75e752349da9966a32",
-   "state": "after View exact gate: exact receipt re-rendered from the read model",
-   "surface": "gate_modal"
-  }
- ],
- "case": "gate",
- "only": null,
- "repro": {
-  "combined_sha256": "300555a7d519adc6bf1b049764733a0a5a6cfc66a1e51795a4a91f3b46649d7e",
-  "content_sha256_by_file": {
-   "captures/01-pane-runs.png": "4d326dc7ef98f83b31f4e7c9b2c4a671491f277f2f6f77e0f8b5bf76b19a5791",
-   "captures/02-pane-run-detail.png": "61bcd0f451ee1683cbe76739c5294b6c00bcbcc9d5b06f15958d3b282f19bc03"
-  }
- },
- "review_note": "reviewed:false means THIS tool run only proved PNG magic+size; visual review (vision_analyze per hermes-workflows-ui-qa) is mandatory before any layout claim",
- "run_ts": "2026-11-24T16:31:59.229Z",
- "schema": "proof-harness/1",
- "seeds": {
-  "held_gate_run": {
-   "graph_sha256": "325debf66509feaed3d73c05b4368ee471460af79a4b3f6bccb54418b0714c85",
-   "kind": "engine_seed",
-   "run_id": "20261124-103423-ui2-proof-gate"
-  }
- },
- "surfaces": [
-  "gate_modal",
-  "pane_workflows"
- ]
+  "review_note": "reviewed:false means THIS tool run only proved PNG magic+size; visual review (vision_analyze per hermes-workflows-ui-qa) is mandatory before any layout claim"
 }
