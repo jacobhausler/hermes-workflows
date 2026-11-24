@@ -237,12 +237,25 @@ async function connectCdp(port, rendererPort, timeoutMs = 90_000) {
       const m = JSON.parse(e.data);
       if (m.id && pend.has(m.id)) { pend.get(m.id)(m); pend.delete(m.id); }
     };
+    // A dropped socket must REJECT its in-flight calls, not leave them hung:
+    // the navigation-class message lets send()'s reattach loop decide.
+    ws.onclose = () => {
+      const gone = { error: { code: -32001, message: 'WebSocket is not open: target closed' } };
+      const waiting = [...pend.entries()];
+      pend.clear();
+      for (const [, settle] of waiting) settle(gone);
+    };
   };
   bind();
-  const rawSend = (method, params = {}) => new Promise(res => {
+  // Field-proven (pair run, try3): throwing INSIDE the resolve callback
+  // escapes through the event dispatcher as an uncaughtException — the
+  // process dies and send()'s catch never sees the -32000. Reject instead;
+  // the navigation-retry law below then actually governs the outcome.
+  const rawSend = (method, params = {}) => new Promise((res, rej) => {
     const i = ++id;
-    pend.set(i, m => { if (m.error) throw new Error(`${method}: ${JSON.stringify(m.error).slice(0, 300)}`); res(m.result); });
-    ws.send(JSON.stringify({ id: i, method, params }));
+    pend.set(i, m => { if (m.error) rej(new Error(`${method}: ${JSON.stringify(m.error).slice(0, 300)}`)); else res(m.result); });
+    try { ws.send(JSON.stringify({ id: i, method, params })); }
+    catch (e) { pend.delete(i); rej(new Error(`${method}: ${String(e?.message || e)}`)); }
   });
   // Field-proven (pair run, try2/3): the renderer can full-reload under us
   // (vite reload / app-init navigation) exactly between attach and eval —
@@ -256,7 +269,9 @@ async function connectCdp(port, rendererPort, timeoutMs = 90_000) {
     if (!page) throw new Error('reattach: no page target yet');
     const nws = new WebSocket(page.webSocketDebuggerUrl);
     await new Promise((res, rej) => { nws.onopen = res; nws.onerror = rej; });
-    try { ws.close(); } catch { /* already dead */ }
+    // Detach the dying socket's handlers BEFORE close: its async onclose must
+    // not fire against the shared pend map after the new socket started using it.
+    try { ws.onmessage = ws.onclose = null; ws.close(); } catch { /* already dead */ }
     ws = nws;
     pend.clear();
     bind();
@@ -842,13 +857,13 @@ async function main() {
     };
     const rT0 = Date.now();
     while (Date.now() - rT0 < probeBudgetMs) {
-      registry = await cdp.evl(`(async () => {
+      registry = await evlPoll(`(async () => {
         const mod = await import('/src/contrib/registry.ts');
         const reg = mod.registry;
         const names = area => { try { return (reg.getArea(area) || []).map(e => e.id ?? e.name ?? String(e)) } catch { return [] } };
         return { routes: names('routes'), panes: names('panes'),
                  directives: names('transcript.directives'), composer: names('composer.underside') };
-      })()`);
+      })()`, { routes: [], panes: [], directives: [], composer: [] });
       try {
         records = await cdp.evl(`(async () => {
           const m = await import('/src/contrib/plugins-store.ts');
