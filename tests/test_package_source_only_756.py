@@ -37,6 +37,8 @@ SOURCE_ONLY_TESTS = {
     "tests/test_scrub_nul_readme_580.py", "tests/test_scrub_surface_1w0hoy.py",
     # hw-0y7 (PR #672): same shape — runs the source-only estate census script
     "tests/test_shelf_census_husk_hw0y7.py",
+    # bd_2026-11-13-l62: same shape — executes the source-only ui2-proof driver
+    "tests/test_ui2_proof_driver.mjs",
 }
 # A shipped test that loads/executes `<root> / "scripts" / "<file>"` needs that file in the ZIP.
 SCRIPT_REF = re.compile(r'(?:ROOT|BUILD)\s*/\s*"scripts"\s*/\s*"([^"]+)"|ROOT\s*/\s*"scripts/([^"]+)"')
