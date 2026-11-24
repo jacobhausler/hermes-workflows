@@ -624,7 +624,6 @@ async function main() {
     // occlusion-tested) is the attachment proof that survives overlays.
     const paneRegion = { xMin: 440, yMin: 40, bottomMargin: 90 };
     await waitConnected(cdp);
-    await trustedClick(cdp, 'workflows', { exact: true, ci: true });
     {
       const wT0 = Date.now();
       for (;;) {
@@ -632,9 +631,15 @@ async function main() {
         if (!hit.err) break;
         if (Date.now() - wT0 > 45_000) {
           try { await shoot(cdp, A.outDir, '00-diagnostic-pane.png'); } catch { /* best effort */ }
-          die(EX.api, `seeded run row never rendered IN THE PANE COLUMN (${JSON.stringify(hit.err)}${hit.over ? ` over ${JSON.stringify(hit.over)}` : ''}) — diagnostic shot in captures/ if present`);
+          const loc = await cdp.evl('location.pathname').catch(() => 'unknown');
+          die(EX.api, `seeded run row never rendered IN THE PANE COLUMN (${JSON.stringify(hit.err)}${hit.over ? ` over ${JSON.stringify(hit.over)}` : ''}; pathname=${JSON.stringify(loc)}) — diagnostic shot in captures/ if present`);
         }
-        await sleep(600);
+        // Route-restore race (field-proven: diagnostic shows the app restored
+        // the chat view AFTER the tab click — SESSIONS active, hero rendered):
+        // re-click the sidebar WORKFLOWS tab every poll until the pane column
+        // itself carries the seeded row.
+        try { await trustedClick(cdp, 'workflows', { exact: true, ci: true }); } catch { /* tab not painted yet */ }
+        await sleep(1200);
       }
     }
     identity.api_attachment = { via: 'registry + live seeded run row rendered through the plugin API route', run_id: runId };
