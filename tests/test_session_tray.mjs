@@ -266,6 +266,8 @@ assert.match(src, /trayExpanded && trayRef\.current && trayRef\.current\.contain
   'click-away excludes clicks inside the open tray (trayRef contains check)')
 assert.match(src, /\$trayOpen\.set\(null\) \}, \[pairKey\]/,
   'sid-change collapses the tray (in-memory atom reset on pairKey change)')
+assert.match(src, /\$railOpen\.set\(null\) \}, \[pairKey\]/,
+  'session reset clears the rail expansion too (in-memory atom, pairKey effect)')
 assert.match(src, /window\.addEventListener\('click', onDocClick\)/,
   'click-away rides the single window-level listener (no DOM-node listeners)')
 // #230 spec 5 (feature-detect idiom, corrected on harvest): the issue body's
@@ -323,6 +325,53 @@ assert.match(src, /composerAreas\?\.tray \?\? composerAreas\?\.underside \?\? co
   const thick = mirror.RunTrayRunRow({ run: mk('b1', 'running', 'S1', { nodes_done: 2, nodes_total: 5 }), band: 'building', open: false })
   assert.ok(thick, 'mirror RunTrayRunRow renders a real body')
   assert.match(textOf(thick), /2\/5/, 'mirror thick row shows node progress')
+
+  // -- W3 mirror acceptance (bd_2026-11-13-3gh) ---------------------------------
+  // (i) THE SHARED COMPARATOR, tie law included: held keep INPUT order, the
+  // rest started-desc, EQUAL started keeps input order, an unparseable
+  // started sorts LAST — the mirror may not fork the tie law.
+  const tieLedger = [
+    mk('h1', 'held', 'S1', { started: '2026-10-05T03:40:00Z' }),
+    mk('h2', 'held', 'S1', { started: '2026-10-05T03:41:00Z' }), // held input order — not started-desc
+    mk('e1', 'running', 'S1', { started: '2026-10-05T04:00:00Z' }),
+    mk('e2', 'running', 'S1', { started: '2026-10-05T04:00:00Z' }), // equal: input order
+    mk('e3', 'running', 'S1', { started: 'not-a-date' }),           // unparseable: LAST
+  ]
+  assert.deepEqual(mirror.trayLiveModel(tieLedger).map(r => r.id),
+    mod.trayLiveModel(mod.trayScoping(tieLedger, 'S1')).map(r => r.id),
+    'mirror and plugin agree on the tie law ledger (shared liveOrder)')
+  assert.deepEqual(mirror.trayLiveModel(tieLedger).map(r => r.id), ['h1', 'h2', 'e1', 'e2', 'e3'],
+    'the comparator itself: held input order, started desc, equal=input order, unparseable last')
+  assert.equal(typeof mirror.liveOrder, 'function', 'the mirror carries the shared comparator')
+
+  // (ii) INJECTED ADAPTER DISTINGUISHABLE: the mirror renders a caller-
+  // injected gateSlot verbatim and NEVER shadows it with its fallback;
+  // without an injection it renders the question + option fallback itself.
+  const heldRun = mk('h1', 'held', 'S1', { held_gate: { id: 'go', question: 'Ship the cut?', options: ['ship', 'hold'] } })
+  const SENTINEL = { type: 'div', props: { children: 'INJECTED-GATE-ADAPTER' }, key: 'sentinel' }
+  const injected = mirror.RunTrayRunRow({ run: heldRun, gateSlot: SENTINEL })
+  const iTxt = textOf(injected)
+  assert.ok(iTxt.includes('INJECTED-GATE-ADAPTER'), 'the injected adapter renders through the gate cell')
+  assert.ok(!iTxt.includes('Ship the cut?'), 'the fallback question never appears beside an injected adapter (never shadowed)')
+  const fallback = mirror.RunTrayRunRow({ run: heldRun })
+  const fTxt = textOf(fallback)
+  assert.ok(fTxt.includes('Ship the cut?') && fTxt.includes('ship') && fTxt.includes('hold'),
+    'without an injection the mirror renders its own question + option buttons (real body)')
+
+  // (iii) ring + real-ratio parity with plugin.js (same strings, same absence).
+  const ringProps = { run: mk('b1', 'running', 'S1', { nodes_done: 2, nodes_total: 5 }), open: true }
+  const mRing = mirror.RunTrayRunRow(ringProps)
+  const pRing = mod.RunTrayRunRow(ringProps)
+  assert.equal(mRing.props.style.boxShadow, pRing.props.style.boxShadow,
+    'mirror ring == plugin ring (same per-status color-mix formula on the same tone string)')
+  assert.ok(String(mRing.props.style.boxShadow).includes('var(--ui-accent)') && String(mRing.props.style.boxShadow).includes('color-mix'),
+    'the ring is the running tone, mixed — per-status selected ring on the mirror too')
+  assert.equal(mirror.RunTrayRunRow({ ...ringProps, open: false }).props.style.boxShadow, undefined,
+    'unopened mirror row carries no ring')
+  const noRatio = mirror.RunTrayRunRow({ run: mk('b2', 'running', 'S1') })
+  assert.equal(findBy(noRatio, n => n.key === 'bar').length, 0, 'mirror renders NO bar without a real ratio (absent is not 0%)')
+  assert.ok(!textOf(noRatio).includes('0%'), 'mirror never fabricates a 0% ratio')
+  assert.ok(textOf(noRatio).includes('?'), 'mirror x/y reads ? when counts are absent')
 }
 
 // -- 9. review #233 (zap @7e1cce8): blank-sid root parity + rail release surface -----

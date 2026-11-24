@@ -55,7 +55,7 @@ export const Badge = 'Badge', Button = 'Button', cn = (...a) => a.filter(Boolean
 export const Codicon = 'Codicon', EmptyState = 'EmptyState', ScrollArea = 'ScrollArea'
 export const StatusDot = 'StatusDot', PanelListRow = 'PanelListRow', PanelPill = 'PanelPill'
 export const PanelSectionLabel = 'PanelSectionLabel'
-export const host = { state: { focusedSessionId: atom(''), focusedStoredSessionId: atom('') }, navigate: () => {}, notify: () => {} }
+export const host = { state: { focusedSessionId: atom(''), focusedStoredSessionId: atom('') }, navigate: p => { (globalThis.__stubNav ||= []).push(p) }, notify: () => {} }
 export const ROUTES_AREA = 'routes', PANES_AREA = 'panes', TRANSCRIPT_DIRECTIVE_AREA = 'transcript.directives'
 export const COMPOSER_AREAS = { top: 'composer.top' }
 export const Tip = 'Tip'
@@ -341,6 +341,124 @@ assert.match(src, /trayExpanded && trayRef\.current && trayRef\.current\.contain
   'click-away excludes clicks inside the open tray (trayRef contains check)')
 assert.match(src, /window\.addEventListener\('click', onDocClick\)/,
   'click-away rides the single window-level listener (no DOM-node listeners)')
+
+// -- 10. W3 collection + accordion acceptance (bd_2026-11-13-3gh) -------------------
+// Per-status SELECTED RING (never a fixed accent), REAL RATIO ONLY (absent
+// is not 0%), cap-3 +N BEHAVIOUR (the affordance reaches the uncapped pane
+// index), SEPARATE Open-in-pane (row click toggles, open button navigates),
+// SINGLE ACCORDION (one opened row, one MiniGraph), the clean-finished fold
+// boundary SPECIMENS (six flat, seven folded, seventeen all reachable,
+// failures/attention excluded from the finished count) — all driven through
+// the REAL SessionStrip over fake ledgers (behavior, not source text).
+{
+  const sdkMod = await import(pathToFileURL(sdkPath).href)
+  sdkMod.host.state.focusedSessionId.set('S1')
+  sdkMod.host.state.focusedStoredSessionId.set('')
+  const trayLedger = [
+    mk('h1', 'held', 'S1', { started: '2026-10-05T03:50:00Z', nodes_done: 1, nodes_total: 3,
+      held_gate: { id: 'go', question: 'Ship?', options: ['ship', 'hold'] } }),
+    mk('b1', 'running', 'S1', { started: '2026-10-05T04:01:00Z', nodes_done: 2, nodes_total: 5 }),
+    mk('b2', 'running', 'S1', { started: '2026-10-05T04:02:00Z' }), // NO counts: ratio absent
+  ]
+  globalThis.__stubRuns = trayLedger
+  globalThis.__stubDetail = { id: 'b1', name: 'b1', status: 'running', nodes: { a: { status: 'done' } } }
+
+  // (a) per-status selected ring + (b) real-ratio-only bar, on the OPEN row.
+  globalThis.__stubOverrides = new Map([[mod.$trayOpen, { expanded: true, openRun: 'b1' }], [mod.$trayGate, true]])
+  let tree = SessionStrip()
+  const rowOf = (t, id) => findBy(t, n => n.key === `rr-${id}`)[0]
+  const b1 = rowOf(tree, 'b1')
+  assert.ok(b1 && String(b1.props.style.boxShadow || '').includes('var(--ui-accent)'),
+    'the accordion-open RUNNING row rings in the running tone (per-status, not a fixed accent)')
+  assert.equal(rowOf(tree, 'b2').props.style.boxShadow, undefined,
+    'an unselected row carries NO ring')
+  assert.equal(findBy(tree, n => n.key === 'bar').length, 2,
+    'rows WITHOUT a real ratio render NO progress bar (absent is not 0%): h1+b1 only')
+  assert.ok(!findBy(tree, n => n.key === 'bar').some(n => n.props.style.width === '0%'),
+    'no fabricated 0% width survives anywhere in the tray rows')
+  assert.ok(textOf(tree).includes('?'), 'the absent ratio reads ? in x/y (honest absence)')
+  globalThis.__stubOverrides.set(mod.$trayOpen, { expanded: true, openRun: 'h1' })
+  tree = SessionStrip()
+  assert.ok(String(rowOf(tree, 'h1').props.style.boxShadow || '').includes('var(--ui-warning'),
+    'the held row rings in the HELD tone — the ring follows the row status, differing from the running ring')
+
+  // (c) separate Open-in-pane: the row click toggles the accordion, the open
+  // button navigates to the pane and NEVER toggles the accordion.
+  globalThis.__stubOverrides.set(mod.$trayOpen, { expanded: true, openRun: null })
+  tree = SessionStrip()
+  globalThis.__stubNav = []
+  const b1Row = rowOf(tree, 'b1')
+  const openInB1 = findBy(b1Row, n => n.key === 'open')[0]
+  const trayBefore = JSON.stringify(mod.$trayOpen.get())
+  openInB1.props.onClick({ stopPropagation: () => {} })
+  assert.deepEqual(globalThis.__stubNav, ['/workflows'], 'open ↗ escalates to the pane (separate intent)')
+  assert.equal(JSON.stringify(mod.$trayOpen.get()), trayBefore,
+    'open ↗ does NOT toggle the accordion — the two controls are separate')
+  b1Row.props.onClick({ stopPropagation: () => {} })
+  assert.equal(mod.$trayOpen.get().openRun, 'b1', 'the ROW click is what accordion-opens the row')
+
+  // (d) single accordion: two live rows, one opened — exactly ONE shared
+  // RunGraphPanel/MiniGraph mount, fed by the opened run only.
+  globalThis.__stubOverrides.set(mod.$trayOpen, { expanded: true, openRun: 'b1' })
+  const panels = findBy(SessionStrip(), n => typeof n.type === 'function' && n.type.name === 'RunGraphPanel')
+  assert.equal(panels.length, 1, 'one opened row -> exactly one shared RunGraphPanel')
+  assert.equal(globalThis.__stubLastRunId, 'b1', 'the shared panel is fed the opened run')
+
+  // (e) cap-3 +N reaches the uncapped index: with 5 live owned runs the
+  // rail caps at 3 pills and the +N affordance OPENS THE PANE (the full
+  // index), it never silently drops the overflow.
+  globalThis.__stubOverrides = new Map([[mod.$trayGate, false]])
+  globalThis.__stubRuns = [1, 2, 3, 4, 5].map(i => mk(`m${i}`, 'running', 'S1', { started: `2026-10-05T04:0${i}:00Z` }))
+  tree = SessionStrip()
+  const overflowBtn = findBy(tree, n => n.key === 'overflow')[0]
+  assert.ok(overflowBtn && /\+2 more/.test(textOf(overflowBtn)), 'cap-3 rail shows +2 more over 5 live runs')
+  globalThis.__stubNav = []
+  overflowBtn.props.onClick({ stopPropagation: () => {} })
+  assert.deepEqual(globalThis.__stubNav, ['/workflows'],
+    'the +N affordance navigates to the pane that lists EVERY live run uncapped')
+
+  // (f) terminal eviction = no tray DOM at all when zero rows live.
+  globalThis.__stubRuns = [mk('d1', 'done', 'S1'), mk('f1', 'failed', 'S1'), mk('s1', 'stopped', 'S1')]
+  globalThis.__stubOverrides = new Map([[mod.$trayGate, true]])
+  tree = SessionStrip()
+  assert.ok(tree, 'the strip still renders its collection for a terminal-owned ledger')
+  assert.equal(findBy(tree, n => typeof n.type === 'function' && n.type.name === 'RunTrayRow').length, 0,
+    'terminal-only ledger -> ZERO tray DOM (the slim row is not rendered at all)')
+  assert.ok(!textOf(tree).includes('running workflows'), 'no slim row text survives eviction')
+
+  // (g) clean-finished fold specimens: SIX lie flat (no fold chrome), SEVEN
+  // fold (six visible + ▸ 7 finished), SEVENTEEN all reachable when the fold
+  // opens — and failures/attention are explicit rows EXCLUDED from the
+  // finished count.
+  const doneRow = i => mk(`d${i}`, 'done', 'S1', { updated: `2026-10-05T03:${String(i).padStart(2, '0')}:00Z` })
+  const sixLedger = [...Array(6)].map((_, i) => doneRow(i + 1))
+  globalThis.__stubRuns = sixLedger
+  tree = SessionStrip()
+  assert.ok(tree, 'six owned finished still render the strip')
+  assert.equal(findBy(tree, n => String(n.key).startsWith('cr-')).length, 6, 'SIX clean rows visible')
+  assert.ok(!/\d+ finished/.test(textOf(tree)), 'no fold chrome at exactly six (strictly greater than folds)')
+  assert.equal(findBy(tree, n => n.key === 'fold-toggle').length, 0, 'the fold toggle does not exist at six')
+  globalThis.__stubRuns = [...sixLedger, doneRow(7)]
+  tree = SessionStrip()
+  assert.equal(findBy(tree, n => String(n.key).startsWith('cr-')).length, 6, 'SEVEN finished -> six visible (the seventh is folded)')
+  assert.ok(/▸ 7 finished/.test(textOf(tree)), 'the fold label names the true clean count 7')
+  findBy(tree, n => n.key === 'fold-toggle')[0].props.onClick()
+  tree = SessionStrip()
+  assert.equal(findBy(tree, n => String(n.key).startsWith('cr-')).length, 7, 'the collapsed-then-expanded fold reveals the seventh row')
+  const seventeen = [...Array(17)].map((_, i) => doneRow(i + 1))
+  globalThis.__stubRuns = [...seventeen,
+    mk('atf1', 'failed', 'S1', { updated: '2026-10-05T04:20:00Z' }),
+    mk('atf2', 'stopped', 'S1', { updated: '2026-10-05T04:21:00Z' })]
+  tree = SessionStrip()
+  const txt17 = textOf(tree)
+  assert.ok(/▾ 17 finished/.test(txt17), 'SEVENTEEN finished: the label counts the CLEAN ledger (attention excluded — 17, not 19)')
+  assert.equal(findBy(tree, n => String(n.key).startsWith('cr-')).length, 19,
+    'expanded fold lists every counted row (17 finished) AND every attention row (2) — none hidden, none capped')
+  assert.ok(/atf1 · failed ·/.test(txt17) && /atf2 · stopped ·/.test(txt17),
+    'attention rows are explicit with their status word')
+  globalThis.__stubOverrides.set(mod.$stripFold, null)
+  globalThis.__stubOverrides = null
+}
 
 rmSync(tmp, { recursive: true, force: true })
 console.log('ALL PASS test_run_tray (trayScoping, trayRunModel running-only ledger + splitRuns order parity, visibility zero->false, toggleTray, slim collapsed row contract, SessionStrip mount/hide, collapse laws)')
