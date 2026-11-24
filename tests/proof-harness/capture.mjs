@@ -1436,6 +1436,52 @@ async function main() {
         await waitText(cdp, `loaded 100 of ${COUNT + 1}`, 25_000);
         shots.push({ surface: 'pane_workflows', state: 'page-2 flake: loaded < total shown honestly',
                      ...(await shoot(cdp, A.outDir, '08-coverage-partial-fetch.png', null, await stableColumnText(paneRegion))) });
+
+        // 09 CAP TRUNCATION (ASTRA REVIEW-2 F1, follow-on PR): fulfill EVERY
+        // /runs page with a full synthetic window and NO total at all — the
+        // walk can never cover, the hard page cap (RUNS_MAX_PAGES=30) clips
+        // it, and the fetcher records truncated:true. The disclosure must be
+        // VISIBLE even though no numeric total implies it (the reviewer's
+        // UNKNOWN_CAP probe rendered 'runs unknown' + 3000 rows and nothing
+        // else). SYNTHETIC read-model rows, driver-built at the network edge —
+        // not historical, not a live-engine verdict.
+        const capRows = Array.from({ length: 100 }, (_, i) => ({
+          id: `20990101-9${String(i).padStart(5, '0')}-cap`, name: `cap row ${i}`,
+          status: 'interrupted', updated: '2099-01-01T00:00:00+00:00' }));
+        armRules([{ urlPattern: '*workflows/runs*', action: 'fulfill',
+                     body: JSON.stringify({ runs: capRows }) }]);
+        await waitText(cdp, 'more exist (page cap)', 30_000);
+        identity.coverage.cap_frame = {
+          synthetic: 'driver-built fulfill body: one full 100-row page repeated (dedup keeps 100 unique), no total — the walk clips at the 30-page cap',
+          disclosure: 'first 100 loaded — more exist (page cap)' };
+        shots.push({ surface: 'pane_workflows', state: 'unknown-total cap clip disclosed (truncated, no total)',
+                     ...(await shoot(cdp, A.outDir, '09-coverage-cap-truncated.png', null, await stableColumnText(paneRegion))) });
+
+        // 10 PENDING (ASTRA REVIEW-2 F4): a POSITIVE counted census with ZERO
+        // loaded rows must never wear the 'No runs' costume — the honest
+        // frame is 'Runs pending…' + counted-vs-loaded facts + a re-walk
+        // button. total 237 is synthetic (the bench counts COUNT+1); the
+        // renderer, plugin and react-query loop are the real ones.
+        armRules([{ urlPattern: '*workflows/runs*', action: 'fulfill',
+                     body: JSON.stringify({ runs: [], total: 237, counts: { running: 0 } }) }]);
+        await waitText(cdp, 'Runs pending', 30_000);
+        if (await cdp.evl(`document.body.innerText.includes('No runs')`))
+          die(EX.api, 'counted-positive loaded-zero still renders No runs — F4 costume leak');
+        identity.coverage.pending_frame = {
+          synthetic: 'driver-built fulfill body: counted total 237 vs zero loaded rows (bench actually counts ' + (COUNT + 1) + ')' };
+        shots.push({ surface: 'pane_workflows', state: 'counted-positive, loaded-zero: Runs pending, never No runs',
+                     ...(await shoot(cdp, A.outDir, '10-coverage-pending.png', null, await stableColumnText(paneRegion))) });
+
+        // 11 RE-WALK from pending: the button invalidates the runs key; with
+        // the edge released the REAL census answers again — recovery under the
+        // same law as frame 07, proving the pending frame is not a dead end.
+        armRules([]);
+        await trustedClick(cdp, 're-walk census — retry');
+        await waitText(cdp, `runs ${COUNT + 1} ·`, 25_000);
+        if (await cdp.evl(`(() => { const t = document.body.innerText; return t.includes('Runs pending') || /loaded \\d+ of/.test(t); })()`))
+          die(EX.api, 'pending re-walk did not fully recover to the real all-loaded census');
+        shots.push({ surface: 'pane_workflows', state: 'pending re-walk recovered the real census',
+                     ...(await shoot(cdp, A.outDir, '11-coverage-pending-recovered.png', null, await stableColumnText(paneRegion))) });
         await mock.off();
       } finally { await mock.off(); }
     } else {
