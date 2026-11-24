@@ -239,9 +239,13 @@ const baseDef = extra => ({ id: 'a', type: 'agent', goal: 'do work', model: 'm',
   // Stacked fan-out ItemCard: title already carries the row error (RATIFY:
   // tooltip shows the error string it already shows for failed nodes).
   assert.ok(/title:\s*row\.error\s*\|\|\s*row\.goal\s*\|\|\s*undefined/.test(src), 'ItemCard title = row.error (failed-node error string already surfaced)')
-  // NodePanel left column: the error <pre> renders facts.error verbatim —
-  // including `precondition unmet: fix.pr_url`. No new field is needed.
-  assert.ok(/pre\('error',\s*facts\s*&&\s*facts\.error\s*!==\s*UNKNOWN\s*\?\s*facts\.error\s*:\s*shown\.error/.test(nodePanelSrc), 'NodePanel error pre reads facts.error/shown.error verbatim')
+  // NodePanel left column: the error <pre> renders the record's error verbatim
+  // — including `precondition unmet: fix.pr_url`. No new field is needed.
+  // (2.0, bd_2026-11-13-jtf: the expression gained a fan-pick owner guard —
+  // facts.error/shown.error still ride verbatim; the render assert below is the
+  // behavior proof, this pin only named the old spelling.)
+  assert.ok(/pre\('error',/.test(nodePanelSrc) && /ownError|facts\.error\s*!==\s*UNKNOWN/.test(nodePanelSrc),
+    'NodePanel error pre renders the record error verbatim (sentinel-hidden)')
   $selNodeHolder.v = { runId: 'r1', nodeId: 'review' }
   panelTab = null
   const cur = makeNodePanel(nodePanelSrc)

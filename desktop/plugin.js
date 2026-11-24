@@ -2847,6 +2847,13 @@ function NodePanel({ detail }) {
       : null,
     shown.parked ? sect('parked', box('text-xs text-(--ui-text-secondary)', factText(shown.parked))) : null,
     pre('error', ownError != null && ownError !== UNKNOWN ? ownError : null, cancelledClass ? undefined : EDGE_TONE.failed),
+    // 2.0 (bd_2026-11-13-jtf, coverage row 129): the attempt count is a fact
+    // like any other — a zero-spawn death reads `attempts 0` (the real zero
+    // the record carries), never hidden and never a painted placeholder. An
+    // absent count stays hidden (WF-03), so this is not an every-row zero.
+    factKnown(facts?.attempts ?? shown.attempts)
+      ? sect('attempts', box('text-xs text-(--ui-text-secondary)', String(facts?.attempts ?? shown.attempts)))
+      : null,
     // est-zmpx8 (the #584 residual): the refusal stamp — the machine-readable class
     // of a REFUSAL (wf.py `_window_spent_record` → wfcommon.FACT_KEYS `refusal`) —
     // renders verbatim beside the death facts. Same WF-03 discipline as error_class

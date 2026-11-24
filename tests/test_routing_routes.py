@@ -139,4 +139,66 @@ with tempfile.TemporaryDirectory(prefix=".routing-test-", dir=HERE) as tmp:
     assert _stripped == [["-m", "gpt-6-luna"], ["--provider", "openai-codex"]], _stripped
     assert "openai-codex/gpt-6-luna" not in [v for _, v in _stripped], _stripped
 
+    # ------------------------------------------------------------------
+    # 2.0 (bd_2026-11-13-jtf): the ONE tail route's bounds — containment,
+    # the 16 KiB window, and attempt/index as ids. The client never sends a
+    # path; the path comes ONLY from the record and must stay inside
+    # <run>/logs; out-of-range params are a 404, never a best guess.
+    # ------------------------------------------------------------------
+    spec = importlib.util.spec_from_file_location("tail_test_api", BUILD / "dashboard" / "plugin_api.py")
+    api = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(api)
+    assert api.LOG_TAIL == 16384, "the ONE tail cap is the ratified constant"
+    js = (BUILD / "desktop" / "plugin.js").read_text()
+    assert "const TAIL_BYTES = 16384" in js, "client and server mirror the same ratified constant"
+
+    run2 = Path(tmp) / "tailrun"
+    logs = run2 / "logs"
+    (run2 / "nodes").mkdir(parents=True)
+    logs.mkdir()
+    def rec(nid_obj, name):
+        (run2 / "nodes" / f"{name}.json").write_text(json.dumps(nid_obj))
+    big = "HEAD-MARKER\n" + ("p" * (20 * 1024)) + "\nEND-BYTES"
+    (logs / "f.1.a2.log").write_text(big)
+    (logs / "f.1.a1.log").write_text("ATTEMPT-1")
+    (logs / "f.1.a0.log").write_text("ATTEMPT-0")
+    (logs / "f.1.a2.prompt.md").write_text("PROMPT-BODY")
+    (logs / "a.a1.log").write_text("PLAIN-LOG")
+    (run2 / "outside.log").write_text("OUTSIDE-LOGS")
+    rec({"status": "done",
+         "log_path": str(logs / "f.1.a2.log"), "prompt_path": str(logs / "f.1.a2.prompt.md")}, "f.1")
+    rec({"status": "done", "log_path": str(logs / "a.a1.log")}, "a")
+    rec({"status": "done", "log_path": str(run2 / "outside.log")}, "esc1")          # sibling of logs/
+    rec({"status": "done", "log_path": str(logs / ".." / "outside.log")}, "esc2")   # textual escape
+    rec({"status": "done"}, "nolog")                                                # no fact at all
+
+    tail = api._node_log_tail
+    # window: the last 16384 bytes, seeked — the head aged out, the end rides.
+    out = tail(run2, "f", index=1, attempt=None, kind="log", tail=16384)
+    assert out and out["bytes"] == 16384 and out["size"] == len(big.encode()), out
+    assert out["content"].endswith("END-BYTES") and "HEAD-MARKER" not in out["content"], \
+        "the tail is a bounded window, never a whole-file read"
+    assert out["node"] == "f.1" and out["id"] == run2.name, "the response echoes ids, not paths"
+    # attempt bounds: the record's own .a2 by default; siblings by number; a
+    # negative class is refused outright; a missing sibling is a 404.
+    assert tail(run2, "f", 1, 1, "log", 16384)["content"] == "ATTEMPT-1"
+    assert tail(run2, "f", 1, 0, "log", 16384)["content"] == "ATTEMPT-0", "attempt 0 is a real sibling, not a sentinel"
+    assert tail(run2, "f", 1, -1, "log", 16384) is None, "attempt < 0 is out of bounds"
+    assert tail(run2, "f", 1, 5, "log", 16384) is None, "an unnumbered attempt is a 404, never a guess"
+    # index bounds: the item record is addressed by index; unknown index = no record.
+    assert tail(run2, "f", 7, None, "log", 16384) is None, "an index with no record is a 404"
+    assert tail(run2, "a", None, None, "log", 16384)["content"] == "PLAIN-LOG"
+    assert tail(run2, "nolog", None, None, "log", 16384) is None, "a record without log_path honestly has no tail"
+    # containment: the record may name a path, but only inside <run>/logs survives.
+    assert tail(run2, "esc1", None, None, "log", 16384) is None, "a path outside logs/ is refused"
+    assert tail(run2, "esc2", None, None, "log", 16384) is None, "a textual ../ escape is refused after resolve"
+    # kinds and malformed params: only log|prompt, only integers.
+    assert tail(run2, "f", 1, None, "prompt", 16384)["content"] == "PROMPT-BODY"
+    assert tail(run2, "f", 1, None, "sh", 16384) is None
+    assert tail(run2, "f", 1, None, "log", 0) is None and tail(run2, "f", 1, None, "log", 16385) is None, \
+        "tail is bounded to (0, 16384]"
+    assert tail(run2, "f", 1, None, "log", 64)["bytes"] == 64, "a sub-window tail is honored exactly"
+    assert tail(run2, "f", 1, "x", "log", 16384) is None, "a non-numeric attempt is refused"
+    assert tail(run2, "../f", None, None, "log", 16384) is None, "the node id must match ID_OK — ids, never paths"
+
 print("ALL PASS")
