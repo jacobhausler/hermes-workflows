@@ -31,7 +31,9 @@
 // Environment knobs: UI2_PROOF_APP_REPO (hermes-agent checkout),
 // UI2_PROOF_HERMES_BIN (hermes CLI), UI2_PROOF_HOME (real Hermes home,
 // default ~/.hermes). Bench knobs: --cdp-port, --renderer-port, --keep,
-// --no-prebuild, --plan.
+// --no-prebuild, --plan, --paint-budget S (first-paint budget; raise on a
+// loaded box — field-proven: load avg 45 during a crew wave starves the
+// 60 s default and the run dies exit 5 while healthy).
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -45,11 +47,12 @@ const MANIFEST = path.join(HERE, 'cases.json');
 
 const USAGE = `usage: node scripts/ui2-proof/capture.mjs --case CASE --out DIR
        [--app-repo PATH] [--plugin PATH] [--cdp-port N] [--renderer-port N]
-       [--hermes-bin PATH] [--plan] [--keep] [--no-prebuild]
+       [--hermes-bin PATH] [--plan] [--keep] [--no-prebuild] [--paint-budget S]
 cases: see scripts/ui2-proof/cases.json (setup: scripts/ui2-proof/SETUP.md)`;
 
 function parseArgs(argv) {
-  const a = { cdpPort: 9394, rendererPort: 5194, prebuild: true, plan: false, keep: false };
+  const a = { cdpPort: 9394, rendererPort: 5194, prebuild: true, plan: false, keep: false,
+              paintBudgetMs: 60_000 };
   for (let i = 0; i < argv.length; i++) {
     const take = () => {
       const v = argv[++i];
@@ -63,6 +66,7 @@ function parseArgs(argv) {
       case '--plugin': a.plugin = path.resolve(take()); break;
       case '--cdp-port': a.cdpPort = Number(take()); break;
       case '--renderer-port': a.rendererPort = Number(take()); break;
+      case '--paint-budget': a.paintBudgetMs = Number(take()) * 1000; break;
       case '--hermes-bin': a.hermesBin = take(); break;
       case '--plan': a.plan = true; break;
       case '--keep': a.keep = true; break;
@@ -559,7 +563,7 @@ async function main() {
       for (;;) {
         try { await waitPainted(cdp, 6_000); break; }
         catch (e) {
-          if (Date.now() - pT0 > 60_000) {
+          if (Date.now() - pT0 > A.paintBudgetMs) {
             try {
               const list = await (await fetch(`http://127.0.0.1:${A.cdpPort}/json`)).json();
               fs.writeFileSync(path.join(A.outDir, 'logs', 'targets-on-fail.json'),
@@ -701,7 +705,7 @@ async function main() {
       cdp.ws.close();
       await sleep(2000);
       cdp = await connectCdp(A.cdpPort, A.rendererPort, 60_000);
-      await waitPainted(cdp);
+      await waitPainted(cdp, A.paintBudgetMs);
       await trustedClick(cdp, 'sessions', { exact: true, ci: true });
       // Row titles are summarized (never the raw ask); in a fresh bench home
       // the ONLY session is the seeded echo — click the topmost row-shaped
