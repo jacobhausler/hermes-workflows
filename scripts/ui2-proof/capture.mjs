@@ -525,6 +525,22 @@ async function main() {
   // IS the profile, so the entry is a self-link.
   fs.mkdirSync(path.join(B.home, 'profiles'), { recursive: true });
   fs.symlinkSync('..', path.join(B.home, 'profiles', B.profileName));
+  // Hermetic default root: the app and its CLI children resolve the DEFAULT
+  // home via expanduser('~/.hermes') — with the owner's gateway live, the app
+  // attaches THAT gateway (a real plugin, a foreign runs_root, and
+  // profile_scope_mismatch for our satellite scope — field-proven #12/#15:
+  // the copied gateway_state pid is the owner app's, no bench fork ever
+  // existed). Boot the app with HOME=<fakehome> so host discovery, the
+  // profiles root, and every shared-state read land inside the bench.
+  B.fakehome = path.join(A.outDir, 'bench', 'fakehome');
+  const fakeRoot = path.join(B.fakehome, '.hermes');
+  fs.mkdirSync(path.join(fakeRoot, 'profiles'), { recursive: true });
+  fs.symlinkSync(B.home, path.join(fakeRoot, 'profiles', B.profileName));
+  for (const f of ['auth.json', 'config.yaml']) {
+    const mine = path.join(B.home, f);
+    if (fs.existsSync(mine)) fs.copyFileSync(mine, path.join(fakeRoot, f));
+  }
+  identity.bench.fakehome = fakeRoot;
   fs.writeFileSync(path.join(A.outDir, '.ui2-proof-owned'), `${identity.ts} capture.mjs --case ${A.caseName}\n`);
 
   // Stage the CANDIDATE into the bench home's desktop-plugins root — the app
@@ -603,7 +619,8 @@ async function main() {
     const electronEnv = { ...process.env,
       HERMES_DESKTOP_DEV_SERVER: `http://127.0.0.1:${A.rendererPort}`,
       HERMES_DESKTOP_CDP_PORT: String(A.cdpPort),
-      HERMES_HOME: B.appHome };
+      HERMES_HOME: B.appHome,
+      HOME: B.fakehome };
     sup.start('electron', path.join(desktop, 'node_modules', '.bin', 'electron'),
       ['.', `--user-data-dir=${B.userdata}`, '--profile', B.profileName],
       { cwd: desktop, env: electronEnv });
@@ -614,11 +631,19 @@ async function main() {
     // tray settings-gate is a bootstrap read, so the mid-run reload below
     // re-runs plugin registration with the setting in place.
     {
+      // Wait for a FORK-authored record: one whose hermes_home is NOT the
+      // copied host record's (hermes_home == the user's real ~/.hermes means
+      // "copied, or attached-to-host" — the vacuous-pass trap of #12/#15).
+      const forkedHere = () => {
+        try {
+          const j = JSON.parse(fs.readFileSync(path.join(B.home, 'gateway_state.json'), 'utf8'));
+          return j.hermes_home === B.home && j.gateway_state === 'running';
+        } catch { return false; }
+      };
       const gT0 = Date.now();
-      while (!fs.existsSync(path.join(B.home, 'gateway_state.json')) && Date.now() - gT0 < 90_000)
-        await sleep(500);
-      if (!fs.existsSync(path.join(B.home, 'gateway_state.json')))
-        die(EX.boot, 'bench backend never registered gateway_state.json (see logs/electron.log)');
+      while (!forkedHere() && Date.now() - gT0 < 90_000) await sleep(500);
+      if (!forkedHere())
+        die(EX.boot, 'bench backend never forked its own gateway (see logs/electron.log + gateway-stdio.log; the copied host record never left)');
     }
     for (const [key, value] of [['plugins.entries.hermes-workflows.settings.runs_root', B.runs],
                                 ['plugins.entries.hermes-workflows.settings.tray', true],
