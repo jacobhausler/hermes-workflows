@@ -80,6 +80,49 @@
           "note": "Byte-for-byte fixture law: pinned by digest at implementation time; the driver must refuse to capture it if the on-disk run.json no longer matches."
         }
       ]
+    },
+    "graph": {
+      "description": "RC ch4 graph grammar on the shared expansion mounts (bd_2026-11-13-33h): the pinned wave6-council shelf snapshot, one engine-seeded quorum fan (exact ENDED census through the real door + zero-token fake children), and one CLEARLY SYNTHETIC MF1 run (done parent, raw partial + cancelled child rows — stamped with real wfcommon efp so the read model says done for the right reason). Frames: pane GraphView + fan expansion, one assistant turn echoing all three directives, child projection (10 identities / 14 routes / 28 echoes MEASURED on the rendered svg, crossings a count of THIS geometry only), threshold ladder on engine records, MF1 item detail, phone metrics 390x844@2, sparse 2560x1440.",
+      "capture": "graph",
+      "surfaces": ["directive_card", "pane_workflows"],
+      "seeds": [
+        {
+          "name": "threshold_fan",
+          "kind": "engine_seed",
+          "method": "door_run",
+          "wait_held_s": 0,
+          "child_binary": "tests/fake_hermes.py",
+          "note": "quorum-1 fan-out over three items (one CRASHME) — the engine's own item records carry the ended census the strip must show verbatim; no gate, so the held-proof is skipped (wait_held_s 0). Children are the repo's zero-token fake CLI via a shell wrapper.",
+          "graph": {
+            "name": "ui2-graph-thr",
+            "nodes": [
+              { "id": "prep", "type": "echo", "output": { "msg": "seeded" } },
+              { "id": "work", "type": "agent", "after": ["prep"],
+                "fanout": { "quorum": 1, "goal": "probe {index}",
+                            "items": [{ "goal": "CRASHME now" }, { "goal": "fine task" }, { "goal": "other task" }] } },
+              { "id": "tail", "type": "echo", "after": ["work"], "output": { "msg": "done" } }
+            ]
+          }
+        },
+        {
+          "name": "directive_card_echo",
+          "kind": "engine_seed",
+          "method": "oneshot_echo",
+          "note": "ONE real assistant turn echoing ::workflow for all three runs (cards render only from assistant-role text). model/provider null rides the seat default (documented in SETUP.md).",
+          "model": null,
+          "provider": null
+        }
+      ],
+      "historical_snapshots": [
+        {
+          "name": "wave6_council",
+          "kind": "historical_snapshot",
+          "run_id": "20261122-121032-wave6-council",
+          "fixture": "/Users/jacobhausler/research/hermes-workflows-rust-ax/2026-11-13/ui2/synthesis/fixtures-real/20261122-121032-wave6-council.json",
+          "run_json_sha256": "8ad015ceb58e0dd8e61d017a279e654c5c33bd70ffcbfcbf159b4e7ae5139922",
+          "note": "pinned shelf fixture — sha256 of the fixture FILE itself (the materialized run.json comes FROM it); read-only, never relaunched, refusal-on-mismatch enforced by seed_graph.py. The original file is never touched: byte-for-byte preservation holds."
+        }
+      ]
     }
   }
 }

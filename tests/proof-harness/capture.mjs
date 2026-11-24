@@ -541,6 +541,71 @@ function unsetConfig(hermesBin, key, env, profile = null) {
   } catch { /* best-effort revert */ }
 }
 
+// RC ch4 graph-grammar measurement: pick the widest route-group svg and read
+// its projected identity counts + STRICT crossings off the RENDERED geometry
+// (bezier-sampled polylines; edges sharing an endpoint can never count as a
+// crossing). The crossing number is a count of THIS geometry — never a
+// transplanted constant.
+async function measureGraphSvg(cdp, minGroups) {
+  const m = await cdp.evl(`(() => {
+    const svg = [...document.querySelectorAll('svg')]
+      .filter(s => s.querySelectorAll('g').length >= ${minGroups})
+      .sort((a, b) => b.querySelectorAll('g').length - a.querySelectorAll('g').length)[0]
+    if (!svg) return { err: 'no svg with >= ${minGroups} route groups' }
+    const gs = [...svg.querySelectorAll('g')]
+    const flat = d => {
+      const t = d.match(/[A-Za-z]|-?\\d+(?:\\.\\d+)?(?:e[+-]?\\d+)?/g), out = []
+      let i = 0, x = 0, y = 0
+      while (i < t.length) {
+        const op = t[i++], ax = x, ay = y
+        if (op === 'M') { x = +t[i++]; y = +t[i++]; out.push([x, y]); continue }
+        if (op === 'C') {
+          const bx = +t[i++], by = +t[i++], cx = +t[i++], cy = +t[i++]; x = +t[i++]; y = +t[i++]
+          for (let j = 1; j <= 200; j++) { const s = j / 200, u = 1 - s
+            out.push([u*u*u*ax + 3*u*u*s*bx + 3*u*s*s*cx + s*s*s*x, u*u*u*ay + 3*u*u*s*by + 3*u*s*s*cy + s*s*s*y]) }
+          continue
+        }
+        if (op === 'H') x = +t[i++]; else if (op === 'V') y = +t[i++]; else if (op === 'L') { x = +t[i++]; y = +t[i++] }
+        else break
+        for (let j = 1; j <= 200; j++) out.push([ax + (x - ax) * j / 200, ay + (y - ay) * j / 200])
+      }
+      return out
+    }
+    const seg = (p1, p2, p3, p4) => {
+      const d = (p2[0]-p1[0])*(p4[1]-p3[1]) - (p2[1]-p1[1])*(p4[0]-p3[0]); if (!d) return false
+      const t = ((p3[0]-p1[0])*(p4[1]-p3[1]) - (p3[1]-p1[1])*(p4[0]-p3[0])) / d
+      const u = ((p3[0]-p1[0])*(p2[1]-p1[1]) - (p3[1]-p1[1])*(p2[0]-p1[0])) / d
+      return t > 0 && t < 1 && u > 0 && u < 1
+    }
+    const curves = gs.map(g => ({ pts: flat(g.querySelector('path').getAttribute('d')) }))
+    const ends = gs.map(g => {
+      const m2 = (g.querySelector('title')?.textContent || '').match(/^([^ ]+) → ([^ ]+)/)
+      return m2 ? { a: m2[1], b: m2[2] } : {}
+    })
+    let crossings = 0
+    const pairs = []
+    for (let i = 0; i < curves.length; i++) for (let j = i + 1; j < curves.length; j++) {
+      if (ends[i].a === ends[j].a || ends[i].a === ends[j].b ||
+          ends[i].b === ends[j].a || ends[i].b === ends[j].b) continue
+      let hit = false
+      for (let p = 0; p + 1 < curves[i].pts.length && !hit; p++)
+        for (let q = 0; q + 1 < curves[j].pts.length && !hit; q++)
+          if (seg(curves[i].pts[p], curves[i].pts[p+1], curves[j].pts[q], curves[j].pts[q+1])) hit = true
+      if (hit) { crossings++; pairs.push([i, j]) }
+    }
+    return {
+      routeGroups: gs.length,
+      echoCircles: svg.querySelectorAll('circle').length,
+      edgeTitles: gs.filter(g => g.querySelector('title')).length,
+      crossings, pairs,
+      projectedPills: [...document.querySelectorAll('[data-node]')].map(e => e.dataset.node),
+      geometry: { innerWidth, innerHeight, dpr: devicePixelRatio },
+    }
+  })()`)
+  if (m && m.err) die(EX.api, `graph svg measurement failed: ${m.err}`)
+  return m
+}
+
 async function main() {
   const A = parseArgs(process.argv.slice(2));
   const manifest = JSON.parse(fs.readFileSync(MANIFEST, 'utf8'));
@@ -660,7 +725,14 @@ async function main() {
   // <userData>/active-profile.json, so the whole backend is bench-local:
   // the estate gateway is untouched and no trusted input ever lands in the
   // shared config again.
-  const BENCH_PROFILE = 'ui2bench';
+  // The profile REGISTRY enforces single use of a name across homes (hermes-agent
+  // fe9a4b58ec): concurrent benches that all pin 'ui2bench' 403 every native call
+  // as profile_scope_mismatch except the first holder (field-proven 2026-11-24
+  // crew wave — three parallel captures, one green). The name must be unique per
+  // bench home: derive it from the owned --out dir, sanitized to the CLI's
+  // profile-name law, hash-suffixed for stable length.
+  const BENCH_PROFILE = 'ui2bench-' + crypto.createHash('sha1').update(A.outDir)
+    .digest('hex').slice(0, 8);
   const B = { root: A.outDir, home: path.join(A.outDir, 'bench', 'home'),
               profile: path.join(A.outDir, 'bench', 'home', 'profiles', BENCH_PROFILE),
               locks: path.join(A.outDir, 'bench', 'locks'),
@@ -829,16 +901,48 @@ async function main() {
       }
     }
     if (!py) die(EX.preflight, 'no >=3.10 interpreter found for the door (set UI2_PROOF_PYTHON)');
+    // A case may run its door children through the repo's zero-token fake CLI
+    // (tests/fake_hermes.py): not +x, so wrap it with the discovered python.
+    let childBin = hermesAbs;
+    if (engSeed.child_binary) {
+      const wrapper = path.join(A.outDir, 'seed', 'fake-hermes.sh');
+      fs.writeFileSync(wrapper, `#!/bin/sh\nexec ${py} ${path.join(REPO, engSeed.child_binary)} "$@"\n`);
+      fs.chmodSync(wrapper, 0o755);
+      childBin = wrapper;
+    }
     try {
       runId = execFileSync(py, [path.join(HERE, 'seed_run.py'),
-        '--repo', REPO, '--runs-root', B.runs, '--graph-file', graphFile],
+        '--repo', REPO, '--runs-root', B.runs, '--graph-file', graphFile,
+        '--wait-held-s', String(engSeed.wait_held_s ?? 25)],
         { encoding: 'utf8', timeout: 60_000,
-          env: { ...process.env, WF_RUNS_ROOT: B.runs, HERMES_WF_HERMES_BIN: hermesAbs, HERMES_HOME: B.home, HERMES_GATEWAY_LOCK_DIR: B.locks } }).trim();
+          env: { ...process.env, WF_RUNS_ROOT: B.runs, HERMES_WF_HERMES_BIN: childBin, HERMES_HOME: B.home, HERMES_GATEWAY_LOCK_DIR: B.locks } }).trim();
     } catch (e) {
       die(EX.api, `engine seed launch failed (seed_run.py): ${String(e.stderr || e.message).slice(0, 400)}`);
     }
     identity.seeds.held_gate_run = { kind: 'engine_seed', run_id: runId, graph_sha256: sha256(graphFile) };
     seededRuns.push(runId);
+
+    // Graph case (bd 33h): materialize the pinned shelf snapshot + the MF1
+    // synthetic trio beside the engine seed, then wait for the engine seed to
+    // TERMINATE through the shared read model — the strip frames must show an
+    // exact ENDED census, never a mid-flight count.
+    let graphIds = null;
+    if (A.caseName === 'graph') {
+      const snap = (c.historical_snapshots || [])[0];
+      if (!snap) die(EX.preflight, 'graph case pins no historical_snapshot');
+      let seeded;
+      try {
+        seeded = JSON.parse(execFileSync(py, [path.join(HERE, 'seed_graph.py'),
+          '--repo', REPO, '--runs-root', B.runs, '--fixture', snap.fixture,
+          '--fixture-sha256', snap.run_json_sha256, '--wait-run', runId],
+          { encoding: 'utf8', timeout: 150_000,
+            env: { ...process.env, HERMES_HOME: B.home } }).trim().split('\n').pop());
+      } catch (e) {
+        die(EX.api, `graph fixture seed failed (seed_graph.py): ${String(e.stderr || e.message).slice(0, 400)}`);
+      }
+      graphIds = { council: seeded.council_run_id, mf1: seeded.mf1_run_id, thr: runId };
+      identity.seeds.graph_fixtures = seeded;
+    }
 
     // -- CDP attach; enable decision; reload (skill gotcha wall) ------------
     let cdp = await connectCdp(A.cdpPort, A.rendererPort);
@@ -946,7 +1050,12 @@ async function main() {
     // Checked API attachment (2): the seeded run row can ONLY come from
     // GET /api/plugins/hermes-workflows/ — proven by its rendering. Rows
     // render the run NAME (the id rides card/directive text, not every row).
+    // Rows render the run NAME (the id rides card/directive text, not every
+    // row). Graph case: the pane proof centers on the PINNED shelf snapshot —
+    // its row can only render from GET /runs too, and it is the fixture whose
+    // projection arithmetic (10/14/28) the case measures.
     const runName = engSeed.graph.name
+    const paneRowNeedle = graphIds ? 'wave6-council' : runName
     // The pane column only becomes real once the splash clears (field-proven:
     // global innerText/clicks pass on DOM UNDER a CONNECTING overlay). The
     // seeded row can only come from GET /api/plugins/hermes-workflows/ —
@@ -957,7 +1066,7 @@ async function main() {
     {
       let wT0 = Date.now();
       for (;;) {
-        const hit = await evlPoll(locateJS(runName, { region: paneRegion }), { err: 'reconnecting' });
+        const hit = await evlPoll(locateJS(paneRowNeedle, { region: paneRegion }), { err: 'reconnecting' });
         if (!hit.err) break;
         if (Date.now() - wT0 > probeBudgetMs) {
           try { await shoot(cdp, A.outDir, '00-diagnostic-pane.png'); } catch { /* best effort */ }
@@ -1017,9 +1126,39 @@ async function main() {
     // 01/02 pane: runs list, then the held-gate run detail. The captured
     // CONTENT of each viewport shot is the pane column's painted text (same
     // region predicate as the locators), volatile-masked into contents/.
-    shots.push({ surface: 'pane_workflows', state: 'runs list, seeded held-gate run',
+    shots.push({ surface: 'pane_workflows',
+      state: graphIds ? 'runs list: engine-seeded fan + pinned snapshot + synthetic MF1' : 'runs list, seeded held-gate run',
       ...(await shoot(cdp, A.outDir, '01-pane-runs.png', null, await stableColumnText(paneRegion))) });
-    await trustedClick(cdp, runName, { region: paneRegion });
+    await trustedClick(cdp, paneRowNeedle, { region: paneRegion });
+    if (graphIds) {
+      // 02 the pinned council's GraphView; 03 its fans expanded: projected
+      // child pills (critics.0..5), footer attempt ticks, no ghost rings.
+      {
+        const gT0 = Date.now();
+        let painted = false;
+        while (!painted && Date.now() - gT0 < 30_000) {
+          painted = await cdp.evl(`(() => { const s = [...document.querySelectorAll('svg')]
+            .filter(x => x.querySelectorAll('path').length >= 3); return s.length > 0 })()`);
+          if (!painted) await sleep(500);
+        }
+        if (!painted) die(EX.api, 'council detail GraphView never painted route paths in the pane');
+      }
+      shots.push({ surface: 'pane_workflows', state: 'council GraphView (pinned shelf fixture, no fan interaction)',
+        ...(await shoot(cdp, A.outDir, '02-pane-council-graphview.png', null, await stableColumnText(paneRegion))) });
+      const toggled = await cdp.evl(`(() => {
+        const btn = [...document.querySelectorAll('button[aria-label]')].find(b => /fan-out items/i.test(b.getAttribute('aria-label') || ''));
+        if (!btn) return null;
+        const r = btn.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 } })()`);
+      if (!toggled) die(EX.api, 'no fan-out expand toggle on the page canvas');
+      for (const t of ['mouseMoved', 'mousePressed', 'mouseReleased'])
+        await cdp.send('Input.dispatchMouseEvent', { type: t, x: toggled.x, y: toggled.y,
+          button: t === 'mouseMoved' ? undefined : 'left', clickCount: 1, buttons: t === 'mouseReleased' ? 0 : 1 });
+      await sleep(1300);
+      shots.push({ surface: 'pane_workflows', state: 'council fans expanded on the page canvas (ItemCards + footer ticks)',
+        ...(await shoot(cdp, A.outDir, '03-pane-council-expanded.png', null, await stableColumnText(paneRegion))) });
+      identity.graph_measurement = { page: await measureGraphSvg(cdp, 14) };
+      identity.graph_measurement.page.projected_pills = identity.graph_measurement.page.projectedPills.filter(n => /^critics\.\d+$/.test(n));
+    } else {
     // The gate question must render IN THE DETAIL VIEW: the expanded tray run
     // card shows the same question text (field-proven: shot 02 was 'Loading…'
     // while the question wait passed on the tray card).
@@ -1041,6 +1180,7 @@ async function main() {
     }
     shots.push({ surface: 'pane_workflows', state: 'run detail, held gate question',
       ...(await shoot(cdp, A.outDir, '02-pane-run-detail.png', null, await stableColumnText(paneRegion))) });
+    }
 
     // -- gate modal (bd_2026-11-13-qri): ONE decision surface, real trusted
     // click, REAL pending (the answer POST is held at Fetch interception so
@@ -1183,7 +1323,12 @@ async function main() {
     const cardSeed = (c.seeds || []).find(s => s.kind === 'engine_seed' && s.method === 'oneshot_echo');
     if (cardSeed && surfacesWanted.has('directive_card')) {
       const ask = path.join(A.outDir, 'seed', 'ask.txt');
-      fs.writeFileSync(ask, `Echo this line verbatim and nothing else:\n::workflow{id="${runId}"}\n`);
+      // The graph case echoes ALL THREE run ids in one assistant turn — one
+      // session, three cards, the same shared grammar on each mount.
+      fs.writeFileSync(ask, graphIds
+        ? `Echo these lines verbatim and nothing else:\n` +
+          [graphIds.council, graphIds.thr, graphIds.mf1].map(i => `::workflow{id="${i}"}`).join('\n') + '\n'
+        : `Echo this line verbatim and nothing else:\n::workflow{id="${runId}"}\n`);
       // --source desktop: the app's session list shows titled, desktop-sourced
       // sessions; a bare --oneshot stores source=oneshot WITHOUT a title and
       // the list filters it out (field-proven: state.db source columns).
@@ -1315,46 +1460,181 @@ async function main() {
       }
       // Directive cards render COLLAPSED (the expanded card header carries
       // the Open-in-Workflows action — plugin.js:552-554, skill: expansion is
-      // in-memory only). Click the collapsed directive pill, then locate.
-      try {
-        await trustedClick(cdp, 'workflow…');
-      } catch { /* fall through to the button wait — a pre-expanded card also passes */ }
-      let openBtnSeen = false;
-      const bT0 = Date.now();
-      while (!openBtnSeen && Date.now() - bT0 < 12_000) {
-        openBtnSeen = await cdp.evl(`!!document.querySelector('button[title="Open in Workflows"],button[aria-label="Open in Workflows"]')`);
-        if (!openBtnSeen) await sleep(500);
-      }
-      // Card = the innermost ancestor of the plugin's Open-in-Workflows button
-      // that still holds exactly ONE such button (walk stops before the list).
-      const card = await cdp.evl(`(() => {
-        const CARD_BTN = 'button[title="Open in Workflows"],button[aria-label="Open in Workflows"]';
-        const btns = [...document.querySelectorAll(CARD_BTN)];
-        for (const b of btns) {
-          let n = b, last = null;
-          for (let i = 0; i < 8 && n; i++) {
-            if (n.querySelectorAll(CARD_BTN).length > 1) break;
-            last = n; n = n.parentElement;
-          }
-          if (!last) continue;
-          const host = last.closest('div') ?? last;
-          const cardText = (host.innerText || '') + (host.parentElement?.innerText || '');
-          if (!cardText.includes(${JSON.stringify(runId)}) && !cardText.includes(${JSON.stringify(runName)})) continue;
-          host.scrollIntoView({ block: 'center' });
-          const r = host.getBoundingClientRect();
-          if (r.width > 40 && r.height > 20)
-            return { x: r.x, y: r.y, width: r.width, height: r.height, text: host.innerText || '' };
+      // in-memory only). Click collapsed directive pills (up to 3 rounds),
+      // then locate the wanted card. The graph case's ask echoes three
+      // directives; the wanted card is the PINNED council one (its id is
+      // first in the echo), so early rounds may open the other two first —
+      // the loop only exits when the wanted card itself is up.
+      const cardIdWant = graphIds ? graphIds.council : runId;
+      let card = null;
+      for (let expand = 0; expand < 3 && !card; expand++) {
+        try {
+          await trustedClick(cdp, 'workflow…');
+        } catch { /* fall through to the button wait — a pre-expanded card also passes */ }
+        let openBtnSeen = false;
+        const bT0 = Date.now();
+        while (!openBtnSeen && Date.now() - bT0 < 12_000) {
+          openBtnSeen = await cdp.evl(`!!document.querySelector('button[title="Open in Workflows"],button[aria-label="Open in Workflows"]')`);
+          if (!openBtnSeen) await sleep(500);
         }
-        return null;
-      })()`, rowHit);
+        // Card = the innermost ancestor of the plugin's Open-in-Workflows button
+        // that still holds exactly ONE such button (walk stops before the list).
+        card = await cdp.evl(`(() => {
+          const CARD_BTN = 'button[title="Open in Workflows"],button[aria-label="Open in Workflows"]';
+          const btns = [...document.querySelectorAll(CARD_BTN)];
+          for (const b of btns) {
+            let n = b, last = null;
+            for (let i = 0; i < 8 && n; i++) {
+              if (n.querySelectorAll(CARD_BTN).length > 1) break;
+              last = n; n = n.parentElement;
+            }
+            if (!last) continue;
+            const host = last.closest('div') ?? last;
+            const cardText = (host.innerText || '') + (host.parentElement?.innerText || '');
+            if (!cardText.includes(${JSON.stringify(cardIdWant)}) && !cardText.includes(${JSON.stringify(runName)})) continue;
+            host.scrollIntoView({ block: 'center' });
+            const r = host.getBoundingClientRect();
+            if (r.width > 40 && r.height > 20)
+              return { x: r.x, y: r.y, width: r.width, height: r.height, text: host.innerText || '' };
+          }
+          return null;
+        })()`, rowHit);
+        if (!card) await sleep(700);
+      }
       if (!card) die(EX.api, 'directive card not rendered for the seeded run (Open in Workflows hook absent)');
       // The card's own innerText is the reproducible content of BOTH card
       // shots (the crop proves pixels, the text layer proves content; the
       // surrounding chat prose is LLM output and deliberately NOT hashed).
-      shots.push({ surface: 'directive_card', state: 'in-chat card for seeded held-gate run',
+      shots.push({ surface: 'directive_card',
+        state: graphIds ? 'in-chat card for the pinned council run' : 'in-chat card for seeded held-gate run',
         ...(await shoot(cdp, A.outDir, '04-directive-card.png', card, card.text)) });
       shots.push({ surface: 'directive_card', state: 'full viewport with card',
         ...(await shoot(cdp, A.outDir, '03-directive-card-full.png', null, card.text)) });
+      if (A.caseName === 'graph') {
+        // 05-09: the SAME shared grammar on every expansion mount — pill →
+        // MiniGraph → fan expansion → child projection, threshold ladder and
+        // MF1 raw rows in-chat, then phone and sparse-2560 geometry.
+        const graphClickXY = async (x, y) => {
+          for (const t of ['mouseMoved', 'mousePressed', 'mouseReleased'])
+            await cdp.send('Input.dispatchMouseEvent', { type: t, x, y,
+              button: t === 'mouseMoved' ? undefined : 'left', clickCount: 1, buttons: t === 'mouseReleased' ? 0 : 1 });
+          await sleep(1400);
+        };
+        const cardPillClick = async (node) => {
+          const hit = await cdp.evl(`(() => { const el = document.querySelector('[data-node="${node}"]');
+            if (!el) return null; el.scrollIntoView({ block: 'center' });
+            const r = el.getBoundingClientRect(); return r.width > 0 ? { x: r.x + r.width / 2, y: r.y + r.height / 2 } : null })()`);
+          if (!hit) die(EX.api, `graph card pill [data-node=${node}] never rendered`);
+          await graphClickXY(hit.x, hit.y);
+        };
+        const stripTexts = () => cdp.evl(`(() => [...document.querySelectorAll('span,div')]
+          .map(e => (e.innerText || '').trim())
+          .filter(t => /terminal|results|cancelled|partial|failed|aggregate/i.test(t) && t.length < 200 && t.length > 0)
+          .slice(0, 40))()`);
+        const tickCount = () => cdp.evl(`(() => [...document.querySelectorAll('span')].filter(s => {
+          const st = s.getAttribute('style') || ''; return st.includes('width: 3px') && st.includes('height: 3px') }).length)()`);
+
+        // (a) council card fans -> CHILD PROJECTION on the MiniGraph mount.
+        await cardPillClick('critics');
+        const cardM = await measureGraphSvg(cdp, 14);
+        const pills = cardM.projectedPills.filter(n => /^critics\\.\\d+$/.test(n));
+        // The pinned law (unit-tested in test_edge_routing.mjs): this fixture
+        // projects 10 identities / 14 dependencies / 28 echoes — two echoes
+        // per route. Refuse the frame if the RENDERED graph disagrees.
+        if (cardM.routeGroups !== 14 || cardM.echoCircles !== 28 || pills.length !== 6)
+          die(EX.api, `council card projection diverged from the pinned law: groups=${cardM.routeGroups} echoes=${cardM.echoCircles} pills=${pills.length}`);
+        identity.graph_measurement.card = { ...cardM, projectedPills: undefined, projected_pills: pills };
+        shots.push({ surface: 'directive_card',
+          state: `council card projection: 14 routes, 28 echoes, 6 child pills; ${cardM.crossings} strict crossings MEASURED at ${cardM.geometry.innerWidth}x${cardM.geometry.innerHeight}@${cardM.geometry.dpr}`,
+          ...(await shoot(cdp, A.outDir, '05-card-council-projected.png')) });
+
+        // (b) the engine-seeded threshold run: exact ENDED census on the
+        //     strip — the DOM copy must equal the engine's own rows.
+        await trustedClick(cdp, 'workflow…').catch(() => {});
+        await cardPillClick('work');
+        const thrRec = JSON.parse(fs.readFileSync(path.join(B.runs, runId, 'nodes', 'work.json'), 'utf8'));
+        const rows = (thrRec.output || {}).all_results || [];
+        const counts = { total: rows.length, done: 0, failed: 0, running: 0, skipped: 0, stopped: 0, pending: 0, terminal: 0, cancelled: 0, partial: 0 };
+        for (const r of rows) {
+          const s = (r.error_class === 'cancelled' || r.error_class === 'cancel') ? 'cancelled' : r.status;
+          counts[s] = (counts[s] || 0) + 1;
+          if (['done', 'failed', 'skipped', 'stopped', 'cancelled', 'partial'].includes(s)) counts.terminal++;
+        }
+        const expected = `${counts.terminal}/${counts.total} terminal${counts.cancelled ? ` \u00b7${counts.cancelled} cancelled` : ''}${counts.partial ? ` \u00b7${counts.partial} partial` : ''}${counts.running ? ` \u00b7${counts.running}\u25b6` : ''}${counts.failed ? `, ${counts.failed} failed` : ''}`;
+        const thrTexts = await stripTexts();
+        const thrSeen = thrTexts.some(t => t.includes(expected));
+        identity.graph_measurement.threshold_strip = { engine_status: thrRec.status, rows: counts, expected_summary: expected,
+                                                       summary_seen_in_dom: thrSeen, texts: thrTexts };
+        if (!thrSeen) die(EX.api, `threshold strip never showed the engine's exact ended census (${JSON.stringify(expected)})`);
+        shots.push({ surface: 'directive_card',
+          state: `threshold ladder on engine records: exact ended census ${expected}, no fabricated intermediate`,
+          ...(await shoot(cdp, A.outDir, '06-card-threshold-census.png')) });
+
+        // (c) MF1 (clearly synthetic): raw child partial + cancelled survive
+        //     under a done parent — no parent-metric borrowing, cancelled
+        //     separated from failed, attempt ticks replace ghost rings.
+        await trustedClick(cdp, 'workflow…').catch(() => {});
+        await cardPillClick('fan');
+        const mf1Ticks = await tickCount();
+        const mf1Texts = await stripTexts();
+        if (!mf1Texts.some(t => t.includes('3/3 terminal') && t.includes('cancelled') && t.includes('partial')))
+          die(EX.api, `MF1 strip census wrong (expected 3/3 terminal + cancelled + partial buckets): ${JSON.stringify(mf1Texts).slice(0, 300)}`);
+        await graphClickXY(...await (async () => {
+          const hit = await cdp.evl(`(() => { const el = [...document.querySelectorAll('button,div')]
+            .filter(n => (n.innerText || '').trim() === 'b');
+            if (!el.length) return null; el[0].scrollIntoView({ block: 'center' });
+            const r = el[0].getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 } })()`);
+          if (!hit) die(EX.api, 'MF1 item chip "b" (raw partial row) never rendered');
+          return [hit.x, hit.y];
+        })());
+        const detailText = await cdp.evl(`document.body.innerText`);
+        if (!detailText.includes('partial') || !detailText.includes('cap_exhausted'))
+          die(EX.api, 'MF1 item detail lost the child RAW status/error_class (partial/cap_exhausted absent)');
+        if (!detailText.includes('fanout aggregate'))
+          die(EX.api, 'MF1 parent aggregate label absent — projection law requires the parent keeps the fanout aggregate');
+        identity.graph_measurement.mf1 = { tick_spans: mf1Ticks, strip_texts: mf1Texts, detail_has_raw: true };
+        shots.push({ surface: 'directive_card',
+          state: 'MF1 (synthetic): child raw partial + cancelled under done parent; footer attempt ticks, ghost rings retired',
+          ...(await shoot(cdp, A.outDir, '07-card-mf1-partial-item.png')) });
+
+        // (d) phone viewport (device metrics override on the REAL renderer).
+        await cdp.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
+        await sleep(1600);
+        {
+          const seen = await cdp.evl(`(() => { const el = document.querySelector('[data-node="critics"]'); if (el) el.scrollIntoView({ block: 'center' }); return !!el })()`);
+          if (!seen) die(EX.api, 'council MiniGraph pill absent at phone metrics');
+        }
+        shots.push({ surface: 'directive_card', state: 'council card at phone metrics 390x844@2 (real renderer, device override)',
+          ...(await shoot(cdp, A.outDir, '08-phone-council-card.png')) });
+        await cdp.send('Emulation.clearDeviceMetricsOverride', {});
+        await sleep(800);
+
+        // (e) sparse 2560 window: bounds first, honest fallback to metrics.
+        {
+          let method = 'window-bounds';
+          try {
+            const { windowId } = await cdp.send('Browser.getWindowForTarget', {});
+            await cdp.send('Browser.setWindowBounds', { windowId, bounds: { width: 2560, height: 1440 } });
+            await sleep(1800);
+            const iw = await cdp.evl('innerWidth');
+            if (!(iw >= 2500)) {
+              await cdp.send('Emulation.setDeviceMetricsOverride', { width: 2560, height: 1440, deviceScaleFactor: 1, mobile: false });
+              await sleep(1600);
+              method = 'device-metrics-override (window bounds clamped)';
+            }
+          } catch {
+            await cdp.send('Emulation.setDeviceMetricsOverride', { width: 2560, height: 1440, deviceScaleFactor: 1, mobile: false });
+            await sleep(1600);
+            method = 'device-metrics-override (setWindowBounds refused)';
+          }
+          const geo = await cdp.evl(`({ innerWidth, innerHeight })`);
+          const wide = await measureGraphSvg(cdp, 14).catch(() => null);
+          identity.graph_measurement.sparse_2560 = { method, geometry: geo, page: wide };
+          shots.push({ surface: 'directive_card',
+            state: `sparse 2560x1440 (${method}): ${wide ? `${wide.crossings} strict crossings measured at this geometry` : 'graph off-screen'}`,
+            ...(await shoot(cdp, A.outDir, '09-2560-council-card.png')) });
+        }
+      }
     }
 
     // 05 tray: settings-gated slim row in the composer underside
