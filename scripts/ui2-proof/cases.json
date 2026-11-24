@@ -1,0 +1,56 @@
+{
+  "note": "Case manifest for scripts/ui2-proof/capture.mjs. Every seed entry names its kind explicitly: 'engine_seed' = state this driver launches live through the plugin door (zero-token graphs; one real assistant turn for the card echo); 'historical_snapshot' = a pinned, already-committed run/session fixture read via the door's legacy-launch-root fallback (read-only, never relaunched). Adding a case ADDS A NEW TEST: a case naming a surface outside surfaces_registry fails exit 3 ('new test, not implemented') — the driver never fabricates an existing command. Baseline never captures synthesis/index.html or any file-openable RC: surfaces come from the real app renderer only.",
+  "surfaces_registry": ["directive_card", "pane_workflows", "tray_row"],
+  "cases": {
+    "baseline": {
+      "description": "Real-app proof of the three live surfaces of the actual React/SDK renderer: the ::workflow directive card in the message stream, the WORKFLOWS pane (run list + held-gate run detail), and the settings-gated live-run tray row. All state is engine-seeded into an isolated test runs root; nothing here is a CHATFRAME reconstruction.",
+      "surfaces": ["directive_card", "pane_workflows", "tray_row"],
+      "seeds": [
+        {
+          "name": "held_gate_run",
+          "kind": "engine_seed",
+          "method": "door_run",
+          "note": "echo+gate+echo graph — full gate UI (held pill, record, release nudge) at zero tokens; the proven lookbook shape (run 20261122-113636-lookbook-canvas-held). The tray_row seed relaunches THIS SAME graph with WF_OWNER_SESSION=<one-shot session id>: the composer strip renders only the focused chat's owned runs (ownedRuns law, plugin.js:728), so a blank-owner run is pane-only. Both runs are stopped through the door at teardown.",
+          "graph": {
+            "name": "ui2-proof-held",
+            "nodes": [
+              { "id": "say", "type": "echo", "output": { "msg": "seeded" } },
+              {
+                "id": "hold",
+                "type": "gate",
+                "after": ["say"],
+                "question": "UI2 proof: release this held gate after capture?",
+                "options": ["release", "stop"]
+              },
+              { "id": "tail", "type": "echo", "after": ["hold"], "output": { "msg": "released" } }
+            ]
+          }
+        },
+        {
+          "name": "directive_card_echo",
+          "kind": "engine_seed",
+          "method": "oneshot_echo",
+          "note": "Cards render ONLY from assistant-role text (SKILL hermes-workflows-ui-qa): one `hermes chat --oneshot -Q` turn whose answer is the directive verbatim. model/provider null rides the seat default (documented in SETUP.md).",
+          "model": null,
+          "provider": null
+        }
+      ],
+      "historical_snapshots": []
+    },
+    "held-gate-snapshot-example": {
+      "description": "DOCUMENTED SHAPE, not yet implemented: later beads pin an existing committed run (e.g. 20261122-113636-lookbook-canvas-held) by id + run.json sha256 and capture it via the launch-root fallback WITHOUT launching anything. Implemented when its surfaces are wired — until then it fails exit 3 like any new test.",
+      "implemented": false,
+      "surfaces": ["pane_workflows"],
+      "seeds": [],
+      "historical_snapshots": [
+        {
+          "name": "lookbook_canvas_held",
+          "kind": "historical_snapshot",
+          "run_id": "20261122-113636-lookbook-canvas-held",
+          "run_json_sha256": "UNPINNED-REPLACE-WHEN-IMPLEMENTED",
+          "note": "Byte-for-byte fixture law: pinned by digest at implementation time; the driver must refuse to capture it if the on-disk run.json no longer matches."
+        }
+      ]
+    }
+  }
+}

@@ -322,6 +322,10 @@ SOURCE_ONLY_TESTS = {
     "tests/test_scrub_surface_1w0hoy.py": "executes source-only scripts/make_public.py (surface audit pin, est-iypbd)",
     # hw-0y7 (PR #672): the husk-bucket law pin runs the source-only estate census
     "tests/test_shelf_census_husk_hw0y7.py": "runs source-only scripts/shelf-census.py (hw-0y7 husk-bucket law)",
+    # bd_2026-11-13-l62: the ui2-proof failure-semantics spec executes the
+    # source-only scripts/ui2-proof/capture.mjs driver (est-4vnq finding-4
+    # shape: a shipped test that runs an unpackaged helper dies at an unpacked root).
+    "tests/test_ui2_proof_driver.mjs": "executes source-only scripts/ui2-proof/capture.mjs (real-app proof driver)",
 }
 
 # Source-only SCRIPTS: repository/estate CI tooling that never travels in the
