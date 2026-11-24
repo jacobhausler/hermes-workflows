@@ -942,11 +942,13 @@ export function MiniGraph({ detail }) {
 
 // -- 1b. composer session strip (composer.underside, fallback composer.top) -----
 // The runs of the FOCUSED chat at its composer. Pure core (ownedRuns,
-// splitRuns, railModel, pillModel) so node can test the model without a DOM;
-// the O3 pane reuses ownedRuns for its "this chat" tag. Live runs render as one
-// horizontal PillRail row, one pill expanding to a MiniGraph node-strip above
-// the rail; terminal runs keep the fold. Fold/rail state is an in-memory
-// plugin atom — never localStorage.
+// liveOrder, splitRuns, collectionModel, railModel, pillModel) so node can
+// test the model without a DOM; the O3 pane reuses ownedRuns for its "this
+// chat" tag. Live runs render as one horizontal PillRail row, one pill
+// expanding to a MiniGraph node-strip above the rail; the terminal half is
+// the attention-first collection (failed/stopped explicit; clean finished
+// folds ONLY past six, full counted list reachable). Fold/rail state is an
+// in-memory plugin atom — never localStorage.
 
 const $stripFold = atom(null) // focused sid while its terminal fold is expanded
 // Which pill is expanded into the mini node-strip ABOVE the rail (#22 item 4):
@@ -1436,8 +1438,12 @@ function trayElapsed(r) {
   return start ? fmtDur(Math.max(0, Date.now() - start)) : ''
 }
 
+/** Mini progress bar width from the read model's counts: a REAL ratio or
+ *  null — an absent count is never fabricated as 0% (no-fabrication law;
+ *  FINAL.md rail/tray rows: "No invented progress fill when ratio is
+ *  unavailable"). The x/y chip beside the bar carries the absence as '?'. */
 const trayBarPct = r => (r?.nodes_done != null && r?.nodes_total != null && r.nodes_total > 0)
-  ? `${Math.floor((r.nodes_done / r.nodes_total) * 100)}%` : '0%'
+  ? `${Math.floor((r.nodes_done / r.nodes_total) * 100)}%` : null
 
 /** Per-run chip (design row anatomy). lane_key and token totals have NO
  *  read-model surface today (the door's lane ledger and per-run token rollup
@@ -1464,8 +1470,12 @@ export function RunTrayRunRow({ run, open, onToggleRow, onOpenPane }) {
       display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.6875rem',
       padding: '3px 8px', cursor: 'pointer', borderRadius: 6,
       // Every row reads its own NODE_TONE border — the colour lives HERE,
-      // not on the slim collapsed row.
-      border: `1px solid ${tone.borderColor}`
+      // not on the slim collapsed row. The SELECTED (accordion-open) row
+      // gains the ring in the SAME per-status tone as the pill's open ring
+      // (FINAL.md: "Make rail selected ring follow the supplied status tone"
+      // — the ring is the run's status colour, never a fixed accent).
+      border: `1px solid ${tone.borderColor}`,
+      boxShadow: open ? `inset 0 0 0 1px color-mix(in srgb, ${tone.color} 55%, transparent)` : undefined
     },
     onClick: e => { e?.stopPropagation?.(); onToggleRow?.(r.id) },
     children: [
@@ -1474,12 +1484,13 @@ export function RunTrayRunRow({ run, open, onToggleRow, onOpenPane }) {
       r.lane_key ? jsx('span', { style: { opacity: 0.7 }, children: r.lane_key }, 'lane') : null,
       // Node dots are MiniGraph's visual language at row density; the x/y
       // count rides the read model's counts, '?' when absent — never 0/N.
-      // The mini bar (key 'bar') beside it SPEAKS the ratio as its width.
+      // The mini bar (key 'bar') beside it SPEAKS the ratio as its width —
+      // and renders ONLY when a real ratio exists (absent is not 0%).
       jsx('span', { style: { fontVariantNumeric: 'tabular-nums', opacity: 0.8 }, children: pillProgress(r) }, 'xy'),
-      jsx('span', {
+      trayBarPct(r) ? jsx('span', {
         'aria-hidden': true,
         style: { width: trayBarPct(r), minWidth: 24, height: 4, borderRadius: 2, background: tone.color, opacity: 0.6 }
-      }, 'bar'),
+      }, 'bar') : null,
       current ? jsx('span', { style: { opacity: 0.7 }, children: `→ ${current}` }, 'current') : null,
       trayElapsed(r) ? jsx('span', { style: { opacity: 0.6 }, children: trayElapsed(r) }, 'elapsed') : null,
       (ti != null || to != null)
@@ -1501,23 +1512,6 @@ export function RunTrayRunRow({ run, open, onToggleRow, onOpenPane }) {
   }, `rr-${r.id}`)
 }
 
-/** Accordion body: the SHARED MiniGraph (#28 visual language, same
- *  runQuery-fed pattern as RailPanel) for the one opened row only. Its own
- *  component so the runQuery hook runs only while a row is open. */
-function TrayPanel({ runId }) {
-  const { data } = useQuery(runQuery(runId))
-  if (!data) return null
-  return jsx('div', {
-    style: {
-      maxWidth: '100%', maxHeight: 160, overflowY: 'auto',
-      border: '1px solid var(--ui-stroke-secondary)', borderRadius: 8,
-      background: 'var(--ui-sidebar-surface-background, var(--card))',
-      padding: '4px 6px'
-    },
-    children: jsx(MiniGraph, { detail: data })
-  }, 'tray-panel')
-}
-
 /** The tray family root — collapsed RunTrayRow + drop-down RunTrayRunRow
  *  list (max ~40% viewport, internal scroll). #230 RUNNING-ONLY: the ledger
  *  is trayRunModel (status ∉ TERMINAL), so zero live rows renders NOTHING
@@ -1525,7 +1519,9 @@ function TrayPanel({ runId }) {
  *  run UNCONDITIONALLY (the parent SessionStrip owns the hook order; this
  *  component's hooks never sit behind a return). The collapse affordances
  *  ride SessionStrip's wiring (Esc onKeyDown, click-away via trayRef); row
- *  handlers stopPropagation so tray clicks never look like click-away. */
+ *  handlers stopPropagation so tray clicks never look like click-away. The
+ *  accordion body is the ONE shared RunGraphPanel (F2 fold law): at most one
+ *  row is open, and its MiniGraph belongs to the graph lane. */
 export function RunTray({ runs, sid, trayOpen, trayRef, onToggleHeader, onToggleRow, onOpenPane, trayEnabled }) {
   // sid blank = the mount owner pre-scoped under the focus-degraded law
   // (SessionStrip): trust the given live set (running-only still applies).
@@ -1563,7 +1559,7 @@ export function RunTray({ runs, sid, trayOpen, trayRef, onToggleHeader, onToggle
                   run: r.run, open: openRun === r.id,
                   onToggleRow, onOpenPane
                 }, `rrc-${r.id}`),
-                openRun === r.id ? jsx(TrayPanel, { runId: r.id }, `tp-${r.id}`) : null
+                openRun === r.id ? jsx(RunGraphPanel, { runId: r.id }, `tp-${r.id}`) : null
               ])
             })
           }, 'drop')
@@ -1635,9 +1631,28 @@ export function SessionStrip() {
     return () => window.removeEventListener('click', onDocClick)
   }, [expanded, trayExpanded])
   if (!pairKey || !owned.length) return null
-  const { active, terminalFold, terminalTotal } = splitRuns(owned)
   const openRun = id => { $selRun.set(id); host.navigate('/workflows') }
   const folded = foldOpen !== pairKey
+  // W3 collection (INCHAT:111-112 — attention-first, no hidden failures):
+  // attention rows (failed/stopped) are ALWAYS explicit rows and never fold;
+  // the clean-finished ledger lies FLAT while it is ≤ CLEAN_FOLD_MAX (six
+  // rows visible, no fold chrome) and the fold engages ONLY past six — the
+  // collapsed fold shows the first six and ▸/▾ N finished names the TRUE
+  // clean count (failures partitioned out before the label is computed),
+  // and expanding lists EVERY counted row. The superseded cap-5 terminal
+  // fold and its '+K more' pane-redirect branch are deleted with no compat
+  // shim: the full counted list is reachable IN the strip.
+  const { attention, finished, finishedTotal, finishedFolded } = collectionModel(owned)
+  const finishedShown = finishedFolded && folded ? finished.slice(0, CLEAN_FOLD_MAX) : finished
+  const collectionRow = (r, toneColor) => jsx('button', {
+    type: 'button', className: 'text-left text-[0.6875rem] text-(--ui-text-tertiary)',
+    // Attention rows carry their own NODE_TONE colour (the ONE tone table) —
+    // the word alone says what happened, the tone says WHERE to look first.
+    style: { cursor: 'pointer', background: 'none', border: 'none', padding: 0,
+             ...(toneColor ? { color: toneColor } : null) },
+    onClick: () => openRun(r.id),
+    children: `${r.name || r.id} · ${runStatusLabel(r)} · ${ago(r.updated) || 'unknown'}`
+  }, `cr-${r.id}`)
   return jsxs('div', {
     ref: railRef,
     className: 'flex flex-col gap-0.5 border-b border-(--ui-stroke-secondary) px-3 py-1',
@@ -1650,8 +1665,10 @@ export function SessionStrip() {
     onKeyDown: e => { if (e.key === 'Escape') { if (trayExpanded) $trayOpen.set(null); else if (expanded) $railOpen.set(null) } },
     children: [
       // Expanded panel sits ABOVE the pills: the strip stacks bottom-anchored
-      // (composer.underside grows upward over the thread).
-      expanded ? jsx(RailPanel, { runId: expanded }, expanded) : null,
+      // (composer.underside grows upward over the thread). ONE shared
+      // RunGraphPanel feeds BOTH the rail expansion and the tray accordion
+      // (F2 fold law; the per-surface twins are deleted).
+      expanded ? jsx(RunGraphPanel, { runId: expanded }, expanded) : null,
       // Live set: one horizontal pill rail. Pass the UNCAPPED owned set —
       // railModel filters TERMINAL and caps at 3 itself, so the +N overflow
       // stays visible (passing splitRuns' capped `active` pinned overflow to 0
@@ -1679,40 +1696,26 @@ export function SessionStrip() {
         suppressGates: trayExpanded && trayShouldShow(trayRunModel(trayScoping(owned, pairKey)), trayGate),
         onPill: id => $railOpen.set(toggleRail(railOpen, pairKey, id)),
       }),
-      terminalTotal
+      // Attention first: every failed/stopped run is an explicit row, always
+      // rendered, never folded — a failure that hides is a failure nobody
+      // sees (INCHAT:111). Rows deep-link the pane record (same intent as the
+      // finished rows), never a re-execution.
+      ...attention.map(r => collectionRow(r, (NODE_TONE[runStatusOf(r)] || NODE_TONE.pending).color)),
+      // The clean-finished fold chrome exists ONLY past six (INCHAT:136
+      // --wf-fold-min-clean, strictly greater than). WF-05 glyph law rides
+      // the toggle: ▸ collapsed, ▾ expanded — one glyph, one truth.
+      finishedFolded
         ? jsxs('button', {
-            type: 'button', className: 'text-[0.6875rem] text-(--ui-text-tertiary)',
+            type: 'button',
+            className: 'text-[0.6875rem] text-(--ui-text-tertiary)',
             style: { cursor: 'pointer', background: 'none', border: 'none', padding: 0, textAlign: 'left' },
             onClick: () => $stripFold.set(folded ? pairKey : null),
-            // WF-05 (QA 2026-10-27): the chevron answers the CURRENT state —
-            // ▸ points right while collapsed, ▾ opens downward when expanded
-            // (the fold's own disclosure vocabulary, one glyph one truth).
-            children: [`${folded ? '▸' : '▾'} ${terminalTotal} finished`]
-          })
+            children: [`${folded ? '▸' : '▾'} ${finishedTotal} finished`]
+          }, 'fold-toggle')
         : null,
-      !folded
-        ? box(
-            'flex flex-col gap-0.5 pl-3',
-            ...terminalFold.map(r => jsx('button', {
-              type: 'button', className: 'text-left text-[0.6875rem] text-(--ui-text-tertiary)',
-              style: { cursor: 'pointer', background: 'none', border: 'none', padding: 0 },
-              onClick: () => openRun(r.id),
-              children: `${r.name || r.id} · ${runStatusLabel(r)} · ${ago(r.updated) || 'unknown'}`
-            }, r.id)),
-            // WF-04 (QA 2026-10-27): the fold lists at most 5 but the label
-            // counts ALL N — the hidden rows keep an explicit affordance to
-            // the pane that lists every one (label N, rendered K used to
-            // silently lose N−K finished runs).
-            terminalTotal > terminalFold.length
-              ? jsx('button', {
-                  type: 'button', className: 'text-left text-[0.6875rem] text-(--ui-text-tertiary)',
-                  title: 'Open the Workflows pane — every finished run is listed there',
-                  style: { cursor: 'pointer', background: 'none', border: 'none', padding: 0 },
-                  onClick: () => host.navigate('/workflows'),
-                  children: `+${terminalTotal - terminalFold.length} more`
-                }, 'fold-more')
-              : null
-          )
+      finishedShown.length
+        ? box('flex flex-col gap-0.5 pl-3',
+            ...finishedShown.map(r => collectionRow(r, null)))
         : null
     ]
   })
@@ -2919,7 +2922,7 @@ export function WorkflowsPage() {
                 // a state-keyed accent GRADIENT bar (runHeaderModel, same
                 // tone table as everything else) over the run name / state /
                 // elapsed: the tab reads ALIVE while the run lives and CALM
-                // once terminal, like RailPanel's measured bar.
+                // once terminal, like RunGraphPanel's/MiniGraph's measured bar.
                 jsx(PolishStyles, {}),
                 jsx('span', {
                   'aria-hidden': true,

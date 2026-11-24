@@ -18,12 +18,25 @@
  *     numeral + label, muted secondary text (CSS var), 1px low-contrast
  *     border, ~4-6px above the composer. Theme-safe inline styles only.
  *   - expanded: one THICK row per RUNNING run — status chip, name + lane_key,
- *     x/y + mini progress bar ('?' when absent, never 0/0), current node,
- *     gate-question snippet when held, elapsed, token chip. Ordering is THE
- *     SAME comparator as splitRuns: held first, then the rest by started desc
- *     (asserted as trayLiveModel order == splitRuns active order on one
- *     shared ledger). Row click accordion-expands the shared MiniGraph;
- *     `open ↗` escalates to the pane; click-away collapses; Esc collapses.
+ *     x/y, current node, gate-question snippet when held, elapsed, token
+ *     chip. The mini progress bar renders ONLY under a REAL ratio ('?' in
+ *     x/y when absent — absent is NOT 0%, no invented progress fill). The
+ *     accordion-OPENED row gains a selection ring in its OWN status tone
+ *     (per-status, never a fixed accent). Ordering is THE shared comparator
+ *     liveOrder (held first in input order, then the rest by started desc,
+ *     documented tie law; asserted as trayLiveModel order == splitRuns
+ *     active order on one shared ledger). Row click accordion-expands the
+ *     shared RunGraphPanel/MiniGraph for THAT run (the superseded per-surface
+ *     TrayPanel twin is deleted, no compat shim); the gate cell renders the
+ *     INJECTED gateSlot adapter when the caller passes one (plugin.js injects
+ *     its real GateActions; the mirror falls back to question + option
+ *     buttons — the injected adapter is distinguishable and never shadowed
+ *     by the fallback); `open ↗` escalates to the pane and is SEPARATE from
+ *     the row's accordion click; click-away collapses; Esc collapses. The
+ *     terminal half of the collection lives in SessionStrip's
+ *     attention-first fold (collectionModel: failed/stopped always explicit;
+ *     clean finished folds only past six — six visible, seven folded, full
+ *     counted list reachable; failures never counted into 'finished').
  *
  * MIRROR LAWS (this file):
  *  - Bodies are REAL (#230 acceptance section 8): importing this module never
@@ -68,13 +81,18 @@ function fmtDur(ms) {
   return m < 60 ? (s % 60 ? `${m}m ${s % 60}s` : `${m}m`) : `${Math.floor(m / 60)}h ${m % 60}m`
 }
 const kfmt = n => n == null ? '' : n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e4 ? `${Math.round(n / 1e3)}k` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}k` : String(n)
-// Same tone vocabulary as plugin.js NODE_TONE (the ONE tone table); the
-// mirror carries the fields the tray rows read, so the row colours are the
-// theme-safe CSS vars the plugin rows use.
+// Same tone vocabulary as plugin.js NODE_TONE (the ONE tone table, EDGE_TONE
+// colors verbatim — the mirror may no longer fork palette strings: the row
+// border, chip colour and the SELECTED ring all read these values, and the
+// parity test compares the ring FORMULA per implementation).
 const NODE_TONE = {
-  running: { color: 'var(--ui-accent-primary, var(--ui-text-secondary))', borderColor: 'var(--ui-stroke-secondary)' },
-  held: { color: 'var(--ui-warning-primary, var(--ui-text-secondary))', borderColor: 'var(--ui-stroke-secondary)' },
-  pending: { color: 'var(--ui-text-tertiary)', borderColor: 'var(--ui-stroke-secondary)' },
+  running: { color: 'var(--ui-accent)', borderColor: 'var(--ui-accent)' },
+  held: { color: 'var(--ui-warning, var(--ui-accent))', borderColor: 'var(--ui-warning, var(--ui-accent))' },
+  pending: { color: 'var(--ui-stroke-secondary)', borderColor: 'var(--ui-stroke-secondary)' },
+  done: { color: 'var(--ui-success, var(--ui-accent))', borderColor: 'var(--ui-success, var(--ui-accent))' },
+  failed: { color: 'var(--ui-danger, var(--ui-text-tertiary))', borderColor: 'color-mix(in srgb, var(--ui-danger, var(--ui-text-tertiary)) 70%, transparent)' },
+  stopped: { color: 'var(--ui-text-tertiary)', borderColor: 'var(--ui-text-tertiary)' },
+  skipped: { color: 'var(--ui-text-tertiary)', borderColor: 'var(--ui-text-tertiary)' },
 }
 
 /**
@@ -92,16 +110,32 @@ export function trayScoping(runs, sid) {
   })
 }
 
-/** RUNNING-ONLY ledger: rows = runs whose status ∉ TERMINAL (terminal runs
- *  LEAVE: no ack ledger, no 60 s recap); order = the splitRuns comparator
- *  (held first, then the rest by started desc), uncapped (every live run
- *  listed); null/empty ledgers are clean empties, never a throw. */
-export function trayRunModel(runs) {
+/** THE shared live comparator — mirrored verbatim from plugin.js liveOrder
+ *  (AGENTS 4c.12 collapse-to-one: held rows keep their INPUT order; every
+ *  other live run sorts by started DESC). Documented tie law: Array#sort is
+ *  stable in every shipping engine, so EQUAL (or both-unparseable) `started`
+ *  keeps input order, and an absent/unparseable started sorts LAST. */
+export function liveOrder(runs) {
   const live = (runs || []).filter(r => r && !TERMINAL.has(runStatusOf(r)))
-  const held = live.filter(r => runStatusOf(r) === 'held')
-  const rest = live.filter(r => runStatusOf(r) !== 'held')
-    .sort((a, b) => parseTime(b.started) - parseTime(a.started))
-  return { rows: [...held, ...rest].map(r => ({ id: r.id, status: runStatusOf(r), run: r })) }
+  const held = live.filter(r => r.status === 'held')
+  const rest = live.filter(r => r.status !== 'held')
+    .sort((a, b) => {
+      const ta = parseTime(a.started), tb = parseTime(b.started)
+      if (!Number.isFinite(ta) && !Number.isFinite(tb)) return 0 // equal/unparseable: input order (stable sort)
+      if (!Number.isFinite(ta)) return 1                         // unparseable started sorts last
+      if (!Number.isFinite(tb)) return -1
+      return tb - ta                                             // started desc; ties keep input order
+    })
+  return [...held, ...rest]
+}
+
+/** RUNNING-ONLY ledger: rows = runs whose status ∉ TERMINAL (terminal runs
+ *  LEAVE: no ack ledger, no 60 s recap); order = THE shared comparator
+ *  (liveOrder — held first in input order, then the rest by started desc,
+ *  documented tie law), uncapped (every live run listed); null/empty ledgers
+ *  are clean empties, never a throw. */
+export function trayRunModel(runs) {
+  return { rows: liveOrder(runs).map(r => ({ id: r.id, status: runStatusOf(r), run: r })) }
 }
 
 /** #22-parity alias — the ledger model, one name per the mirror contract. */
@@ -231,8 +265,11 @@ function trayElapsed(r) {
   return start ? fmtDur(Math.max(0, Date.now() - start)) : ''
 }
 
+/** Mini progress bar width from the read model's counts — a REAL ratio or
+ *  null (mirrors plugin.js: an absent count is never fabricated as 0%; the
+ *  x/y chip beside the bar carries the absence as '?'). */
 const trayBarPct = r => (r?.nodes_done != null && r?.nodes_total != null && r.nodes_total > 0)
-  ? `${Math.floor((r.nodes_done / r.nodes_total) * 100)}%` : '0%'
+  ? `${Math.floor((r.nodes_done / r.nodes_total) * 100)}%` : null
 
 /** One expanded THICK row for a single RUNNING run: status chip, name +
  *  lane_key, x/y + mini progress bar (key 'bar', width = the ratio), current
@@ -256,8 +293,11 @@ export function RunTrayRunRow({ run, open, band, onToggleRow, onOpenPane, gateSl
       display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.6875rem',
       padding: '3px 8px', cursor: 'pointer', borderRadius: 6,
       // Every row reads its own tone border — colour lives HERE, not on the
-      // slim collapsed row.
-      border: `1px solid ${tone.borderColor}`
+      // slim collapsed row. The SELECTED (accordion-open) row gains the ring
+      // in its OWN status tone (per-status, never a fixed accent — same
+      // color-mix formula as plugin.js RunTrayRunRow).
+      border: `1px solid ${tone.borderColor}`,
+      boxShadow: open ? `inset 0 0 0 1px color-mix(in srgb, ${tone.color} 55%, transparent)` : undefined
     },
     onClick: e => { e?.stopPropagation?.(); onToggleRow?.(r.id) },
     children: [
@@ -265,12 +305,13 @@ export function RunTrayRunRow({ run, open, band, onToggleRow, onOpenPane, gateSl
       jsx('span', { style: { fontWeight: 600 }, children: r.name || r.id || 'workflow' }, 'name'),
       r.lane_key ? jsx('span', { style: { opacity: 0.7 }, children: r.lane_key }, 'lane') : null,
       // x/y rides the read model's counts, '?' when absent — never 0/N; the
-      // mini bar beside it SPEAKS the ratio (key 'bar', width = pct).
+      // mini bar beside it SPEAKS the ratio (key 'bar', width = pct) and
+      // renders ONLY when a real ratio exists (absent is not 0%).
       jsx('span', { style: { fontVariantNumeric: 'tabular-nums', opacity: 0.8 }, children: pillProgress(r) }, 'xy'),
-      jsx('span', {
+      trayBarPct(r) ? jsx('span', {
         'aria-hidden': true,
         style: { width: trayBarPct(r), minWidth: 24, height: 4, borderRadius: 2, background: tone.color, opacity: 0.6 }
-      }, 'bar'),
+      }, 'bar') : null,
       current ? jsx('span', { style: { opacity: 0.7 }, children: `→ ${current}` }, 'current') : null,
       trayElapsed(r) ? jsx('span', { style: { opacity: 0.6 }, children: trayElapsed(r) }, 'elapsed') : null,
       (ti != null || to != null)

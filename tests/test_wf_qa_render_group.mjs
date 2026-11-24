@@ -234,31 +234,29 @@ const sdkMod = await import(pathToFileURL(sdkPath).href)
   assert.ok(t2.includes('crashed'), 'WF-03: a real error_class renders verbatim')
 }
 
-// ====================== WF-04/WF-05 the terminal fold ============================
+// ============ WF-04/WF-05 the clean-finished fold (W3 collection law) ============
 {
   const mk = (id, i) => ({ id, name: id, status: 'done', owner: { session_id: 'S1' }, started: `2026-09-26T04:0${i}:00Z`, updated: `2026-09-26T04:0${i}:00Z` })
   const many = [...Array(7)].map((_, i) => mk(`t${i}`, i))
-  const s = mod.splitRuns(many)
-  assert.equal(s.terminalTotal, 7, 'the fold label reports the true terminal count')
+  const cm = mod.collectionModel(many)
+  assert.equal(cm.finishedTotal, 7, 'the fold label reports the true CLEAN finished count')
   sdkMod.host.state.focusedSessionId.set('S1')
   sdkMod.ledger.list = { runs: many, total: 7, counts: { running: 0 } }
   const strip = mod.SessionStrip()
   const txt = texts(strip).join('|')
   assert.ok(/▸ 7 finished/.test(txt), `WF-05: collapsed reads ▸ + the true count: ${txt.slice(0, 120)}`)
+  const foldRows = walk(strip).filter(n => n.type === 'button' && /· (Finished|failed|stopped) ·/.test(texts(n).join('')))
+  assert.equal(foldRows.length, 6, 'seven clean finished, six visible — the fold engages past six')
   const foldBtn = walk(strip).find(n => n.type === 'button' && texts(n).join('').includes('finished'))
   assert.ok(foldBtn, 'the fold toggle exists')
   foldBtn.props.onClick() // $stripFold.set(pairKey) on the writable stub atom
   const openStrip = mod.SessionStrip()
   const open = texts(openStrip).join('|')
   assert.ok(/▾ 7 finished/.test(open), `WF-05: expanded flips the chevron to ▾: ${open.slice(0, 120)}`)
-  const foldRows = walk(openStrip).filter(n => n.type === 'button' && /· (Finished|failed|stopped) ·/.test(texts(n).join('')))
-  const shown = foldRows.length
-  assert.ok(shown > 0 && shown < 7, `the fold lists ${shown} of 7 rows`)
+  const openRows = walk(openStrip).filter(n => n.type === 'button' && /· (Finished|failed|stopped) ·/.test(texts(n).join('')))
+  assert.equal(openRows.length, 7, 'the expanded fold lists EVERY counted row — full counted list reachable IN the strip')
   const overflow = walk(openStrip).find(n => n.type === 'button' && /\+\s*\d+\s+more/.test(texts(n).join('')))
-  assert.ok(overflow, `WF-04: the missing ${7 - shown} rows keep a "+N more" affordance`)
-  assert.equal(texts(overflow).join(''), `+${7 - shown} more`, 'the affordance counts EXACTLY the hidden rows')
-  overflow.props.onClick()
-  assert.deepEqual(sdkMod.navigations, ['/workflows'], 'the affordance opens the pane where every run is listed')
+  assert.ok(!overflow, 'the superseded cap-5 "+K more" pane-redirect branch is deleted with no compat shim')
 }
 
 // ============================ WF-06 labeled clocks ==============================

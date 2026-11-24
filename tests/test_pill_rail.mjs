@@ -234,8 +234,12 @@ const render = n => (typeof n.type === 'function' ? n.type(n.props) : n)
     assert.ok(/\+2\s*more/.test(textOf(strip5)),
       'strip with 5 live runs keeps the +N more → Workflows affordance (F1)')
   }
-  // terminal fold unchanged: the finished line is still the strip's own
-  assert.ok(textOf(strip).includes('1 finished'), 'terminal fold unchanged in the strip')
+  // W3 collection law: ONE clean finished run lies FLAT (the fold engages
+  // only past six) — the row itself is explicit, and NO 'N finished' count
+  // label exists at ≤ CLEAN_FOLD_MAX (the superseded terminal fold that
+  // counted every terminal status into its label is deleted).
+  assert.ok(textOf(strip).includes('Finished'), 'the single clean finished run renders as an explicit flat row')
+  assert.ok(!/\d+ finished/.test(textOf(strip)), 'no fold count label at ≤ six (fold engages only past six)')
   // and no live rows duplicated outside the rail
   assert.equal(findBy(strip, n => typeof n.type === 'function' && n.type.name === 'PillRail').length, 1)
 }
