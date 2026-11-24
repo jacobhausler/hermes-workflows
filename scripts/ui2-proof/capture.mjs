@@ -494,7 +494,14 @@ async function main() {
               home: path.join(A.outDir, 'bench', 'profiles', 'proofhome'),
               userdata: path.join(A.outDir, 'bench', 'userdata'),
               runs: path.join(A.outDir, 'bench', 'runs'),
-              plugins: path.join(A.outDir, 'bench', 'profiles', 'proofhome', 'desktop-plugins', 'hermes-workflows') };
+              // The app's default-profile root is the PARENT of `profiles`
+              // (electron-main migrateProfileScoped hoists every
+              // profiles/<p>/desktop-plugins entry onto it — field-proven by
+              // bd_2026-11-13-yjp run #8, which found the staged candidate
+              // moved to bench/desktop-plugins with its package marker).
+              // Staging directly on the resting place keeps the after-load
+              // sha guard honest: the bytes the app serves ARE the candidate.
+              plugins: path.join(A.outDir, 'bench', 'desktop-plugins', 'hermes-workflows') };
   for (const d of [B.home, B.userdata, B.runs, B.plugins,
                    path.join(A.outDir, 'captures'), path.join(A.outDir, 'logs'), path.join(A.outDir, 'seed')])
     fs.mkdirSync(d, { recursive: true });
