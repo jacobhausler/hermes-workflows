@@ -513,6 +513,15 @@ async function main() {
   for (const d of [B.appHome, B.home, B.userdata, B.runs, B.plugins,
                    path.join(A.outDir, 'captures'), path.join(A.outDir, 'logs'), path.join(A.outDir, 'seed')])
     fs.mkdirSync(d, { recursive: true });
+  // Self-resolve the profile name INSIDE the fork's own profiles root: the
+  // app scopes every hermes:api call with profile=proofhome, and the gateway's
+  // _check_profile_scope resolves the name via <its root>/profiles/<name>
+  // (web_server_profiles._resolve_profile_dir); an unresolvable name 403s
+  // profile_scope_mismatch (field-proven bd_2026-11-13-yjp run #11: the pane
+  // mounted honest — 'runs unknown' + the unreachable RETRY branch). The fork
+  // IS the profile, so the entry is a self-link.
+  fs.mkdirSync(path.join(B.home, 'profiles'), { recursive: true });
+  fs.symlinkSync('..', path.join(B.home, 'profiles', B.profileName));
   fs.writeFileSync(path.join(A.outDir, '.ui2-proof-owned'), `${identity.ts} capture.mjs --case ${A.caseName}\n`);
 
   // Stage the CANDIDATE into the bench home's desktop-plugins root — the app
