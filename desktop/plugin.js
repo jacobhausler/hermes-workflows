@@ -643,56 +643,69 @@ function DirectiveCard({ id }) {
   return jsx(DirectiveBody, { id })
 }
 
-// Two compact rows; absent metrics stay absent, never displayed as zero.
-// WF-06 (QA 2026-10-27): the header elapsed is the RUN clock — the word rides
-// the value so the same run's node-card and timeline clocks (different
-// sources) can never be mistaken for it.
-// WF-09: a zero cost is the seat-billed truth, not a dollar figure — never
-// 'COST $0.0000'; activity at zero reads 'COST included' (SKILL.md: report
-// metrics, not dollars; subscription routes report 'included').
-const inlineHeader = (data, elapsed) => {
-  const m = data.metrics
-  const first = [data.name || data.id, runStatusLabel(data), nodesCount(data)]
-  // WF-06 law holds: this elapsed is the RUN clock and says so — the word
-  // keeps it distinct from node-card and timeline child clocks.
-  if (elapsed != null) first.push(`run ${fmtDur(elapsed)}`)
-  const second = []
-  if (m) {
-    // FINAL numeric laws: token volume is 2sf (IN/OUT), counts are exact safe
-    // integers (API/TOOL) — a count is never abbreviated, never rounded.
-    if (m.tokens_in != null) second.push(`IN ${tokenMag(m.tokens_in)}`)
-    if (m.tokens_out != null) second.push(`OUT ${tokenMag(m.tokens_out)}`)
-    if (m.api_calls != null) second.push(`API ${exactCount(m.api_calls)}`)
-    if (m.tool_calls != null) second.push(`TOOL ${exactCount(m.tool_calls)}`)
-    if (m.cost > 0) second.push(`COST ${usd(m.cost)}`)
-    else if (m.cost === 0 && hasRecordedActivity(m)) second.push('COST included')
-    // Running-with-live always answers both cells: an unknown activity stamp
-    // reads IDLE —, never silence and never 0 (FINAL running-unknown row:
-    // LIVE — / IDLE —).
-    if (m.live > 0 && data.status === 'running') {
-      second.push(`LIVE ${exactCount(m.live)}`)
-      second.push(idleCell(idleS(m)))
-    }
-  }
-  return [first, second]
-}
-
-// The collapsed-pill model, pure so node can test it without a DOM: one
-// line for a transcript card, expanded in place by local useState (never
-// localStorage, never tracking whether the agent emitted the card).
-// stale=true is the CACHED-directive state: a refetch failure over last-good
-// data reads Disconnected · last known <status> and never infers liveness.
-export function pillModel(run, stale = false) {
+// RC in-chat card model (INCHAT §1/§2, bd_2026-11-13-1bm), pure so node can
+// test it without a DOM. It answers the pill's TWO semantic baselines and the
+// expanded word row from ONE record — the pill and the expansion can never
+// disagree because they read the same call. Laws it carries forward:
+//  - Census (baseline 2): exact completed/total node count (numerator is
+//    SUCCESSFUL completion — an ended run is not a successful one), the failed
+//    count explicit and separate whenever the node records answer it, the run
+//    WALL clock labelled (WF-06: 'run <dur>', never a bare duration), and the
+//    notices cell honestly dashed while the read model carries no notice
+//    stream (absent evidence is `— notices`, never a silent omission or 0).
+//    Absent counts ride the em-dash, a recorded zero stays 0 (no-fabrication).
+//  - WF-06/WF-09 survive verbatim in words: 'COST included' at zero with
+//    recorded activity, never '$0.0000'; tokens 2sf, counts exact safe
+//    integers; a live running row always answers LIVE/IDLE, the IDLE cell
+//    never silent, never 0 (FINAL running-unknown row).
+//  - stale=true is the CACHED-directive state: a refetch failure over
+//    last-good data reads Disconnected · last known <status> and never
+//    infers liveness (Cached directive 04).
+//  - #48: the card speaks the ONE tone table — its tone entry IS NODE_TONE's
+//    (parity is a law; a forked palette is the bug class).
+export function cardModel(run, stale = false) {
+  const m = run?.metrics || null
   const start = parseTime(run?.started)
   const end = TERMINAL.has(run?.status) ? parseTime(run?.updated) : Date.now()
-  const bits = [run?.name || run?.id || 'workflow', runStatusLabel(run, stale), nodesCount(run)]
-  const elapsed = start && end > start ? end - start : null
-  // WF-06: the pill's elapsed is the RUN clock — the word rides the value so
-  // node-card and timeline child clocks can never be mistaken for it.
-  if (elapsed != null) bits.push(`run ${fmtDur(elapsed)}`)
-  // #48: the pill speaks the ONE tone table — its tone entry IS NODE_TONE's
-  // (parity is a law; a forked palette is the bug class).
-  return { collapsedLine: bits.join(' · '), expanded: false, tone: NODE_TONE[run?.status] || NODE_TONE.pending }
+  const wallMs = start && end > start ? end - start : null
+  const records = run?.nodes && typeof run.nodes === 'object' ? Object.values(run.nodes) : null
+  const census = [
+    `${countCell(run?.nodes_done, '—')}/${countCell(run?.nodes_total, '—')} nodes`,
+    // The failed bucket is exact-integer and explicit; it shows whenever the
+    // records answer it — a reassuring fraction must never hide a failure
+    // behind it, so a known zero is allowed to sit visible in the census.
+    records ? `! ${exactCount(records.filter(n => n && n.status === 'failed').length)} failed` : null,
+    wallMs != null ? `◷ run ${fmtDur(wallMs)}` : null,
+    '— notices'
+  ].filter(x => x != null)
+  // Word-labelled run-level metrics (INCHAT §2 item 2): unavailable fields
+  // ride the dash — the row says what a cell IS, never abbreviates it into
+  // ambiguity. An absent rollup is its own honest sentence, not a row of
+  // invented zeros.
+  const metrics = m
+    ? [
+        `Model ${m.model ?? '—'}`,
+        `Input tokens ${tokenMag(m.tokens_in)}`,
+        `Output tokens ${tokenMag(m.tokens_out)}`,
+        `API calls ${exactCount(m.api_calls)}`,
+        `Tool calls ${exactCount(m.tool_calls)}`,
+        m.cost > 0 ? `COST ${usd(m.cost)}`
+          : m.cost === 0 && hasRecordedActivity(m) ? 'COST included' : null
+      ].filter(x => x != null)
+    : ['Metrics not recorded']
+  // Running-with-live always answers both cells: an unknown activity stamp
+  // reads IDLE —, never silence and never 0 (FINAL running-unknown row).
+  if (m && m.live > 0 && run?.status === 'running') {
+    metrics.push(`LIVE ${exactCount(m.live)}`, idleCell(idleS(m)))
+  }
+  return {
+    name: run?.name || run?.id || 'workflow',
+    statusWord: runStatusLabel(run, stale),
+    tone: NODE_TONE[run?.status] || NODE_TONE.pending,
+    census, metrics,
+    elapsedLabel: wallMs != null ? fmtDur(wallMs) : null,
+    expanded: false
+  }
 }
 
 function DirectiveBody({ id }) {
@@ -701,6 +714,7 @@ function DirectiveBody({ id }) {
   const fanOpen = useValue($fanOpen)
   const fanItem = useValue($fanItem)
   const [open, setOpen] = useState(false)
+  const bodyId = useId() // stable aria-controls target for the disclosure
   // idle seconds on live chips / item vitals move between the 4 s refetches
   useTick(!!data && data.status === 'running')
   const frame = {
@@ -724,59 +738,75 @@ function DirectiveBody({ id }) {
     return jsx('span', { style: frame, className: 'text-xs text-(--ui-text-tertiary)', children: 'workflow…' })
   }
   const openRun = e => { if (e) e.stopPropagation(); $selRun.set(data.id); host.navigate('/workflows') }
-  // Cached directive 04: data still wins over a refetch failure, but the pill
+  // Cached directive 04: data still wins over a refetch failure, but the card
   // says Disconnected · last known — last-good is retained, present liveness
   // is never inferred from it.
-  const pill = pillModel(data, !!error)
-  // Collapsed (the default): one line + ▾ toggles expand in place, ↗ opens
-  // /workflows explicitly. One click cannot both, so the whole-card navigate
-  // onClick is gone — no role=link, the card body is inert chrome.
-  if (!open) {
-    return jsxs('span', {
-      style: { ...frame, flexDirection: 'row', alignItems: 'center', gap: 6, cursor: 'pointer' },
-      role: 'button',
-      title: 'Expand',
-      onClick: () => setOpen(true),
-      children: [
-        jsx(Dot, { status: data.status }),
-        jsx('span', { className: 'text-xs text-(--ui-text-secondary)', children: pill.collapsedLine }),
-        jsx('span', { className: 'text-xs text-(--ui-text-tertiary)', children: '▾' }),
-        jsx('button', { type: 'button', title: 'Open in Workflows', className: 'text-xs text-(--ui-text-tertiary)',
-          style: { cursor: 'pointer' }, onClick: openRun, children: '↗' })
-      ]
-    })
-  }
-  const start = parseTime(data.started)
-  const end = TERMINAL.has(data.status) ? parseTime(data.updated) : Date.now()
-  const nodes = data.graph?.nodes || []
-  // RC ch4 (same-run identities): one selector law for the fan open/pick
-  // guards — a fanOpen/fanItem from ANOTHER run can never drive this card.
+  const cm = cardModel(data, !!error)
   const openDef = fanOpenFor(data, fanOpen)
+  const nodes = data.graph?.nodes || []
   const rows = openDef ? fanItems(openDef, (data.nodes || {})[openDef.id], data.events) : null
   const picked = fanPickedRow(data, openDef, fanItem, rows)
-  const headerRows = inlineHeader(data, start ? end - start : null)
-  return jsxs('span', {
+  // RC pill (INCHAT §1): the container is NOT a click surface — the 1.4-era
+  // role=button whole-pill click (with ↗ nested inside it) is retired. The
+  // disclosure and `Open full view ↗` are native sibling buttons: one click,
+  // one effect, no invalid button-in-button nesting. The identity row renders
+  // for BOTH states and never remounts on the toggle, so focus stays on the
+  // disclosure across expand/collapse (aria-expanded rides the same props
+  // object; aria-controls points at the mounted body region).
+  const btn = { cursor: 'pointer', border: '1px solid var(--ui-stroke-secondary)', borderRadius: 6,
+    background: 'transparent', color: 'var(--ui-text-tertiary)', fontSize: 11, lineHeight: 1, padding: '4px 7px' }
+  const toggle = () => setOpen(o => !o)
+  return jsxs('div', {
     style: frame,
+    'data-wf-directive': id,
     children: [
-      jsxs('span', {
-        style: { display: 'flex', flexDirection: 'column', gap: 2, maxWidth: '100%' },
+      jsxs('div', {
+        key: 'identity',
+        style: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '2px 8px', minWidth: 0 },
         children: [
-          jsxs('span', { style: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '2px 8px' },
-            className: 'text-xs text-(--ui-text-secondary)',
-            children: [jsx(Dot, { status: data.status }), ...headerRows[0].map((text, i) => jsx('span', {
-              className: i === 0 ? 'font-medium' : 'text-(--ui-text-tertiary)', children: text
-            }, i)),
-            jsx('button', { type: 'button', title: 'Collapse', 'aria-label': 'Collapse',
-              style: { marginLeft: 'auto', cursor: 'pointer', opacity: 0.8 }, onClick: () => setOpen(false), children: '▾' }),
-            jsx('button', { type: 'button', title: 'Open in Workflows', 'aria-label': 'Open in Workflows',
-              style: { cursor: 'pointer', opacity: 0.8 }, onClick: openRun, children: '↗' })] }),
-          headerRows[1].length ? jsx('span', { style: { display: 'flex', flexWrap: 'wrap', gap: '2px 8px', fontSize: 10, fontVariantNumeric: 'tabular-nums' },
-            className: 'text-(--ui-text-tertiary)',
-            children: headerRows[1].map((text, i) => jsx('span', { children: text }, i)) }) : null
+          jsx(Dot, { status: data.status }),
+          jsx('span', { className: 'text-xs font-medium text-(--ui-text-secondary)', children: cm.name }),
+          jsx('span', { className: 'text-xs text-(--ui-text-tertiary)', children: cm.statusWord }),
+          jsxs('span', {
+            style: { marginLeft: 'auto', display: 'inline-flex', gap: 4 },
+            children: [
+              jsx('button', {
+                type: 'button', 'data-wf-expand': '', onClick: toggle,
+                'aria-expanded': open, 'aria-controls': bodyId,
+                'aria-label': open ? 'Collapse workflow card' : 'Expand workflow card',
+                title: open ? 'Collapse' : 'Expand', style: btn,
+                children: open ? '▾ Collapse' : '▸ Expand'
+              }, 'expand'),
+              jsx('button', {
+                type: 'button', 'data-wf-open': '', onClick: openRun,
+                'aria-label': 'Open full view', title: 'Open full view', style: btn,
+                children: 'Open full view ↗'
+              }, 'open')
+            ]
+          }, 'actions')
         ]
       }),
-      nodes.length ? jsx(MiniGraph, { detail: data }) : null,
-      rows ? jsx(FanStrip, { runId: data.id, def: openDef, rows, picked }) : null
+      jsx('div', {
+        key: 'census',
+        style: { display: 'flex', flexWrap: 'wrap', gap: '2px 8px', fontSize: 10, fontVariantNumeric: 'tabular-nums' },
+        className: 'text-(--ui-text-tertiary)',
+        children: cm.census.map((text, i) => jsx('span', { children: text }, i))
+      }),
+      open ? jsxs('div', {
+        key: 'body',
+        id: bodyId,
+        style: { display: 'flex', flexDirection: 'column', gap: 6, borderTop: '1px solid var(--ui-stroke-secondary)',
+          paddingTop: 6, maxWidth: '100%' },
+        children: [
+          jsx('div', {
+            style: { display: 'flex', flexWrap: 'wrap', gap: '2px 8px', fontSize: 11, fontVariantNumeric: 'tabular-nums' },
+            className: 'text-(--ui-text-tertiary)',
+            children: cm.metrics.map((text, i) => jsx('span', { children: text }, i))
+          }, 'metrics'),
+          nodes.length ? jsx(MiniGraph, { detail: data }) : null,
+          rows ? jsx(FanStrip, { runId: data.id, def: openDef, rows, picked }) : null
+        ]
+      }) : null
     ]
   })
 }
@@ -942,7 +972,7 @@ export function MiniGraph({ detail }) {
 
 // -- 1b. composer session strip (composer.underside, fallback composer.top) -----
 // The runs of the FOCUSED chat at its composer. Pure core (ownedRuns,
-// splitRuns, railModel, pillModel) so node can test the model without a DOM;
+// splitRuns, railModel) so node can test the model without a DOM;
 // the O3 pane reuses ownedRuns for its "this chat" tag. Live runs render as one
 // horizontal PillRail row, one pill expanding to a MiniGraph node-strip above
 // the rail; terminal runs keep the fold. Fold/rail state is an in-memory
@@ -1114,7 +1144,7 @@ export function railModel(ownedRunsList) {
 }
 
 export function Pill({ run, sid, open, onToggle, suppressGates }) {
-  // #48 F3 (deep review): the ACTUAL Pill (not just pillModel) borders itself
+  // #48 F3 (deep review): the ACTUAL Pill (not just the card model) borders itself
   // from the ONE tone table — border colour and the open ring both read the
   // run's NODE_TONE entry at render time; a table perturbation moves them.
   const tone = NODE_TONE[run?.status] || NODE_TONE.pending
@@ -1937,8 +1967,9 @@ const EDGE_TONE = {
 // sit above the palette (TDZ). The words are the run_state meter vocab verbatim.
 const METER_TONE = { 'on-track': EDGE_TONE.running, 'near-wall': EDGE_TONE.held, 'over-p95': EDGE_TONE.failed }
 
-// ONE tone vocabulary for every reader (issue #48): the rail pill (pillModel),
-// the canvas NodeCard, the mini-DAG pill, the edges and the timeline all read
+// ONE tone vocabulary for every reader (issue #48): the transcript card
+// (cardModel), the rail pill, the canvas NodeCard, the mini-DAG pill, the
+// edges and the timeline all read
 // this table — colours come from EDGE_TONE (the single literal palette), so a
 // forked palette is impossible by construction. state x intensity ->
 // {color, borderColor, shadow, pulseMs, calm, ui, gate, breathe}.
