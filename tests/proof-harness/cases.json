@@ -80,6 +80,47 @@
       ],
       "historical_snapshots": []
     },
+    "tray": {
+      "description": "bd_2026-11-13-3gh real-app proof of the W3 collection chrome boundaries: settings.tray UNSET fails closed (live owned run, always-on rail renders, NO slim row — default OFF), then the post-register settings write + reload exposes the collapsed slim row; trusted expand shows the THICK live rows (per-status ring on the opened row, real-ratio bar only, separate open ↗); one row click mounts the ONE shared accordion (MiniGraph node words in the composer lane); owned fixture ledgers (seed_tray.py, REAL wfcommon.efp verdicts) prove the collection boundaries IN THE STRIP — six clean rows flat with no fold chrome, seven folded (six visible + '▸ 7 finished'), the toggle reveals EVERY counted row (no +K more branch), the seventeen specimen with attention rows (failed/stopped fixtures + the door-stopped live run) excluded from the finished label; terminal eviction: the door stop empties the tray to NO DOM. Directive-card and pane frames ride the same bench as proven focus plumbing.",
+      "surfaces": ["directive_card", "pane_workflows", "tray_row"],
+      "seeds": [
+        {
+          "name": "held_gate_run",
+          "kind": "engine_seed",
+          "method": "door_run",
+          "note": "zero-token echo+gate+echo graph (the proven lookbook shape); the tray launch relaunches THIS SAME graph with WF_OWNER_SESSION=<one-shot session id> (ownedRuns law), and the case stops that owned run through the door to capture terminal eviction.",
+          "graph": {
+            "name": "ui2-proof-tray",
+            "nodes": [
+              { "id": "say", "type": "echo", "output": { "msg": "seeded" } },
+              {
+                "id": "hold",
+                "type": "gate",
+                "after": ["say"],
+                "question": "UI2 proof (tray): release this held gate after capture?",
+                "options": ["release", "stop"]
+              },
+              { "id": "tail", "type": "echo", "after": ["hold"], "output": { "msg": "released" } }
+            ]
+          }
+        },
+        {
+          "name": "directive_card_echo",
+          "kind": "engine_seed",
+          "method": "oneshot_echo",
+          "note": "one real assistant turn (seat default) — the owned chat the strip renders for; the driver focuses its session row (the same plumbing the baseline tray capture uses).",
+          "model": null,
+          "provider": null
+        },
+        {
+          "name": "collection_fixtures",
+          "kind": "engine_seed",
+          "method": "tray_fixtures",
+          "note": "owned fixture rows via seed_tray.py (done 6, then +1, then +10; one failed; the door stop yields the second attention row). REAL efp stamps — run_state says done/failed/stopped for the right reason; no door launch, no tokens."
+        }
+      ],
+      "historical_snapshots": []
+    },
     "held-gate-snapshot-example": {
       "description": "DOCUMENTED SHAPE, not yet implemented: later beads pin an existing committed run (e.g. 20261122-113636-lookbook-canvas-held) by id + run.json sha256 and capture it via the launch-root fallback WITHOUT launching anything. Implemented when its surfaces are wired — until then it fails exit 3 like any new test.",
       "implemented": false,

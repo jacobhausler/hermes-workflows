@@ -995,7 +995,13 @@ async function main() {
         die(EX.boot, 'bench backend never registered gateway_state.json (see logs/electron.log)');
     }
     for (const [key, value] of [['plugins.entries.hermes-workflows.settings.runs_root', B.runs],
-                                ['plugins.entries.hermes-workflows.settings.tray', true]]) {
+                                // The tray case captures DEFAULT-OFF first
+                                // (key unset => tray hidden with a live owned
+                                // run) and writes the opt-in mid-case, then
+                                // reloads — $trayGate is a bootstrap read.
+                                ...(A.caseName === 'tray'
+                                  ? []
+                                  : [['plugins.entries.hermes-workflows.settings.tray', true]])]) {
       // A sibling bench mid-source-update makes EVERY CLI call exit transiently;
       // retry the read/write pair together so `before` and `after` stay coherent.
       const before = retryCli(() => {
@@ -2134,9 +2140,13 @@ async function main() {
       identity.seeds.tray_run = { kind: 'engine_seed', run_id: trayRunId, owner_stamped: traySid,
         graph_sha256: sha256(graphFile) };
       let tray = null;
-      const tT0 = Date.now();
-      while (!tray && Date.now() - tT0 < 45_000) {
-        tray = await cdp.evl(`(() => {
+      const isTrayCase = A.caseName === 'tray';
+      const clickXY = async (x, y) => {
+        await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y });
+        await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', clickCount: 1, buttons: 1 });
+        await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', clickCount: 1, buttons: 0 });
+      };
+      const probeTray = () => cdp.evl(`(() => {
           const els = [...document.querySelectorAll('div,span,button')].filter(n =>
             /\\d+ running workflows/.test((n.innerText || '').trim()) && n.getBoundingClientRect().height > 0);
           const leaf = els.find(h => !els.some(o => o !== h && h.contains(o))) ?? els[0];
@@ -2145,6 +2155,48 @@ async function main() {
           const r = leaf.getBoundingClientRect();
           return { x: r.x, y: r.y, width: r.width, height: r.height };
         })()`);
+      if (isTrayCase) {
+        // DEFAULT-OFF fail-closed: settings.tray UNSET while an owned run
+        // lives and the strip renders its rail — the slim row must NOT
+        // appear across a full refresh window (two 4 s list cycles + margin).
+        const tOff = Date.now();
+        for (;;) {
+          if (await probeTray()) {
+            await shoot(cdp, A.outDir, '00-diagnostic-tray-off-leak.png').catch(() => {});
+            die(EX.api, `tray rendered with settings.tray UNSET (default-OFF violated) — run ${trayRunId} owned by ${traySid}`);
+          }
+          if (Date.now() - tOff > 15_000) break;
+          await sleep(2000);
+        }
+        shots.push({ surface: 'tray_row',
+          state: 'settings.tray UNSET: owned live run, always-on rail renders, NO slim row (default OFF, fail-closed)',
+          ...(await shoot(cdp, A.outDir, '10-tray-settings-off.png')) });
+        // Opt-in AFTER the fork registered (pre-boot writes are normalized
+        // away); $trayGate is a bootstrap read — the reload re-runs plugin
+        // registration with the setting in place.
+        const tKey = 'plugins.entries.hermes-workflows.settings.tray';
+        const tBefore = retryCli(() => {
+          const b = readConfigValue(hermesBin, tKey, benchEnv, BENCH_PROFILE);
+          writeConfig(hermesBin, [tKey, 'true'], benchEnv, BENCH_PROFILE);
+          return b;
+        });
+        identity.config_touched[tKey] = { before: tBefore, after: true,
+          scope: `bench profile ${BENCH_PROFILE} (mid-case flip — the tray case proves BOTH states)` };
+        touched.push(tKey);
+        await cdp.send('Page.reload', { ignoreCache: true });
+        cdp.ws.close();
+        await sleep(2000);
+        cdp = await connectCdp(A.cdpPort, A.rendererPort, 60_000);
+        await waitPainted(cdp, A.paintBudgetMs);
+        await waitConnected(cdp, probeBudgetMs);
+        try { await trustedClick(cdp, 'sessions', { exact: true, ci: true }); } catch { /* route already there */ }
+        const rh = identity.seeds.directive_card_echo.session_row_hit;
+        if (!rh) die(EX.api, 'session_row_hit unrecorded — cannot refocus the owned chat after the settings reload');
+        await clickXY(rh.x, rh.y);
+      }
+      const tT0 = Date.now();
+      while (!tray && Date.now() - tT0 < 45_000) {
+        tray = await probeTray();
         if (!tray) await sleep(1500);
       }
       if (!tray) {
@@ -2154,6 +2206,135 @@ async function main() {
       }
       shots.push({ surface: 'tray_row', state: 'slim live-run tray row, owner-stamped live run', ...(await shoot(cdp, A.outDir, '05-tray-row.png', tray)) });
       shots.push({ surface: 'tray_row', state: 'full viewport with tray', ...(await shoot(cdp, A.outDir, '06-tray-full.png')) });
+
+      if (isTrayCase) {
+        // ---- W3 boundary walk (bd_2026-11-13-3gh): every state the strip
+        // and tray render, IN THE REAL CHAT, one trusted input per state.
+        // (1) trusted-expand the slim row -> THICK live rows (open ↗ a
+        // SEPARATE control; the live run's x/y + real-ratio bar ride the
+        // engine record: say committed -> 1/3, no invented fill).
+        await clickXY(tray.x + 20, tray.y + tray.height / 2);
+        await sleep(1500);
+        const rowProbe = await cdp.evl(`(() => {
+          const rows = [...document.querySelectorAll('div')].filter(n =>
+            (n.innerText || '').includes('open ↗') && (n.innerText || '').includes('ui2-proof-tray'));
+          const leaf = rows.sort((a, b) => a.innerText.length - b.innerText.length)[0];
+          if (!leaf) return null;
+          leaf.scrollIntoView({ block: 'center' });
+          const r = leaf.getBoundingClientRect();
+          return { x: r.x, y: r.y, width: r.width, height: r.height };
+        })()`);
+        if (!rowProbe) die(EX.api, 'expanded tray never rendered the THICK live row (open ↗ + run name)');
+        shots.push({ surface: 'tray_row',
+          state: 'expanded slim row: THICK live row, open ↗ separate, real 1/3 ratio bar (no invented fill)',
+          ...(await shoot(cdp, A.outDir, '11-tray-expanded.png', rowProbe)) });
+        // (2) row click on the LEFT end (the open ↗ button sits right and
+        // must NOT get this click) -> the ONE shared accordion.
+        await clickXY(rowProbe.x + 30, rowProbe.y + rowProbe.height / 2);
+        await sleep(1500);
+        const mini = await cdp.evl(`(() => {
+          const svgs = [...document.querySelectorAll('svg')].filter(s => {
+            const r = s.getBoundingClientRect();
+            return r.width > 60 && r.y > window.innerHeight * 0.55;
+          });
+          return { n: svgs.length, tail: /tail/.test(document.body.innerText),
+            panel: svgs.length ? (({ x, y, width, height }) => ({ x, y, width, height }))(svgs[0].getBoundingClientRect()) : null };
+        })()`);
+        if (!mini || mini.n !== 1 || !mini.tail)
+          die(EX.api, `single shared accordion not proven: ${JSON.stringify(mini)} (MiniGraph node word 'tail' must render exactly once in the composer lane)`);
+        shots.push({ surface: 'tray_row',
+          state: 'row click -> ONE shared accordion (MiniGraph for the clicked run)',
+          ...(await shoot(cdp, A.outDir, '12-tray-accordion.png', mini.panel)) });
+        // (3) clean-finished boundaries via owned fixture ledgers (seed_tray
+        // .py — REAL efp verdicts; the strip's own poll cycle surfaces them).
+        const seedTrayFixtures = (args) => {
+          try {
+            return JSON.parse(execFileSync(py, [path.join(HERE, 'seed_tray.py'),
+              '--repo', REPO, '--runs-root', B.runs, '--owner-sid', traySid, ...args],
+              { encoding: 'utf8', timeout: 120_000, env: { ...process.env, HERMES_HOME: B.home } }).trim().split('\n').pop());
+          } catch (e) {
+            die(EX.api, `seed_tray.py failed: ${String(e.stderr || e.message).slice(0, 300)}`);
+          }
+        };
+        const foldProbe = () => cdp.evl(`(() => {
+          const t = document.body.innerText;
+          const m = t.match(/([\\u25b8\\u25be])\\s*(\\d+) finished/);
+          return { label: m ? (m[1] + ' ' + m[2]) : null,
+            finishedRows: (t.match(/\\u00b7 Finished \\u00b7/g) || []).length,
+            attentionRows: (t.match(/\\u00b7 (?:failed|stopped) \\u00b7/g) || []).length };
+        })()`);
+        const pollFold = async (pred, ms, why) => {
+          const t0 = Date.now();
+          for (;;) {
+            const f = await foldProbe();
+            if (pred(f)) return f;
+            if (Date.now() - t0 > ms) die(EX.api, `collection fold predicate unmet after ${ms} ms (${why}): ${JSON.stringify(f)}`);
+            await sleep(1500);
+          }
+        };
+        const clickGlyph = async (needleSrc) => {
+          const pt = await cdp.evl(`(() => {
+            const els = [...document.querySelectorAll('button')].filter(n =>
+              new RegExp(${JSON.stringify(needleSrc)}).test((n.innerText || '').trim()));
+            const leaf = els[0];
+            if (!leaf) return null;
+            leaf.scrollIntoView({ block: 'center' });
+            const r = leaf.getBoundingClientRect();
+            return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+          })()`);
+          if (!pt) die(EX.api, `fold control ${needleSrc} never found`);
+          await clickXY(pt.x, pt.y);
+        };
+        identity.seeds.collection_fixtures = [];
+        identity.seeds.collection_fixtures.push(seedTrayFixtures(['--done', '6']));
+        await pollFold(f => f.finishedRows === 6 && f.label === null, 30_000,
+          'SIX clean finished must lie FLAT with no fold chrome');
+        shots.push({ surface: 'pane_workflows',
+          state: 'collection: six clean finished rows flat, no fold chrome (INCHAT:136 boundary)',
+          ...(await shoot(cdp, A.outDir, '13-collection-six-flat.png')) });
+        identity.seeds.collection_fixtures.push(seedTrayFixtures(['--done', '1', '--start', '6']));
+        await pollFold(f => f.label === '\u25b8 7' && f.finishedRows === 6, 30_000,
+          'SEVEN clean finished must fold: six visible + \u25b8 7 finished');
+        shots.push({ surface: 'pane_workflows',
+          state: "collection: seven folded — six visible, label counts the true clean 7 (no '+K more' branch exists)",
+          ...(await shoot(cdp, A.outDir, '14-collection-seven-folded.png')) });
+        await clickGlyph('^[\\u25b8]\\s*7\\s*finished$');
+        await pollFold(f => f.label === '\u25be 7' && f.finishedRows === 7, 30_000,
+          'expanded fold must list EVERY counted row (the seventh appears IN the strip)');
+        shots.push({ surface: 'pane_workflows',
+          state: 'collection expanded: the seventh row appears IN the strip (full counted list reachable)',
+          ...(await shoot(cdp, A.outDir, '15-collection-seven-open.png')) });
+        identity.seeds.collection_fixtures.push(seedTrayFixtures(['--done', '10', '--failed', '1', '--start', '7']));
+        await pollFold(f => f.label === '\u25be 17' && f.finishedRows === 17 && f.attentionRows >= 1, 30_000,
+          'SEVENTEEN all reachable (fold stays open across the seed) + the failed fixture renders as attention');
+        shots.push({ surface: 'pane_workflows',
+          state: 'collection: seventeen counted rows all reachable; attention (failed) explicit, EXCLUDED from the finished 17',
+          ...(await shoot(cdp, A.outDir, '16-collection-seventeen.png')) });
+        // (4) terminal eviction: stop the live run through the SAME door ->
+        // the tray empties to NO DOM and the run joins attention (never the
+        // finished count).
+        try {
+          execFileSync(py, [path.join(HERE, 'seed_run.py'), '--repo', REPO, '--runs-root', B.runs,
+            '--stop', trayRunId],
+            { encoding: 'utf8', timeout: 60_000,
+              env: { ...process.env, WF_RUNS_ROOT: B.runs, HERMES_WF_HERMES_BIN: hermesAbs,
+                     HERMES_HOME: B.home, HERMES_GATEWAY_LOCK_DIR: B.locks } });
+        } catch (e) {
+          die(EX.api, `tray-case door stop failed: ${String(e.stderr || e.message).slice(0, 300)}`);
+        }
+        const tEv = Date.now();
+        for (;;) {
+          if (!(await probeTray())) break;
+          if (Date.now() - tEv > 45_000)
+            die(EX.api, `terminal eviction failed: slim row still renders after the door stop of ${trayRunId}`);
+          await sleep(1500);
+        }
+        await pollFold(f => f.attentionRows >= 2 && f.label === '\u25be 17', 30_000,
+          'after the stop: attention = failed fixture + stopped live run, finished label STILL 17 (attention excluded)');
+        shots.push({ surface: 'tray_row',
+          state: 'terminal eviction: door-stopped owned run -> tray gone (zero rows = no DOM); stopped row is attention, finished label unchanged',
+          ...(await shoot(cdp, A.outDir, '17-tray-evicted.png')) });
+      }
     }
 
     identity.renderer_probe = await cdp.evl(`(() => {

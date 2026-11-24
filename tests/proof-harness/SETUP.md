@@ -7,13 +7,26 @@ file-openable RC or a JSX-to-DOM fake, as production proof.
 Interface (the contract later beads use — slice A, bd_2026-11-13-iqf):
 
 ```sh
-node tests/proof-harness/capture.mjs [--case CASE] [--only directive,pane,tray] [--out DIR]
+node scripts/ui2-proof/capture.mjs [--case CASE] [--only directive,pane,tray] [--out DIR]
+# equivalent: node tests/proof-harness/capture.mjs ... (same engine, same law)
 ```
 
 `--case` defaults to `baseline`; `--only` INTERSECTS the case's surfaces
 (short tokens or full surface names; an unknown token exits 2, an
 intersection that selects nothing exits 2 — never a green no-op); `--out`
 defaults to `captured/run-<ts>` under this directory.
+
+The **tray** case (bd_2026-11-13-3gh) proves the W3 collection chrome
+boundaries on the real renderer, in ONE bench session: settings.tray UNSET
+fails closed (no slim row over a live owned run), the post-register opt-in
++ reload exposes it; trusted expand/collapse walks the THICK rows (per-status
+ring, real-ratio-only bar, separate open ↗), the ONE shared accordion
+(MiniGraph node words in the composer lane), the clean-finished fold
+boundaries via owned fixtures materialized by `seed_tray.py` (REAL
+`wfcommon.efp` verdicts: six flat with no fold chrome, seven folded +
+toggle-open to every counted row, seventeen all reachable with attention
+rows excluded from the label), and terminal eviction via a door stop
+(zero rows = no tray DOM). Run it with `--case tray`.
 
 `--out DIR` is driver-owned scratch (ownership marker `.ui2-proof-owned`;
 a pre-existing DIR without the marker is refused, and a stale marked DIR is
