@@ -24,6 +24,38 @@ Evidence lands at `DIR/captures/*.png` (0444), `DIR/contents/*.txt` (0444),
 plugin sha256, repo head + merge-base pinning "current merged head", seeded
 run ids, config-before/after, teardown survivors).
 
+## The coverage case (bd_2026-11-13-yjp)
+
+`--case coverage` proves the full-census fetch states on the REAL surface: a
+fixture census of 133 read-model rows (seed_fixture.py — rows read
+`interrupted`, never TERMINAL, so the pane's own 4 s poll loop drives the
+error frames) plus frames for loading (every /runs page stalled at the CDP
+Fetch edge), answered-empty (roots named), full census all-loaded, the
+deepest counted row past the first-100 ceiling + its record page, refetch
+failure with the cached census kept (clickable stale chip), retry re-walk
+(census grew while the edge was failing), and partial fetch (page-2 fulfill
+short: `loaded 100 of 134` while the summary stays global). The mock only
+lies at the network edge — renderer, plugin, react-query loop and backend
+stay the actual code. A UDS scope probe against the fork is recorded to
+`logs/scope-probe.json` before the walk (field-proven #12 lesson). This case
+does NOT use the close/reconnect reload dance: it arms the mock BEFORE the
+activation reload and keeps the session (Fetch survives the reload),
+re-arming at every reconnect site. Run on loaded boxes with
+`--paint-budget 300` and non-default ports (`--cdp-port 9594
+--renderer-port 5394`) when a sibling bench owns 9394/5194.
+
+**App generation (2026-11-24):** the CURRENT desktop app (b9b36c9) ensures its
+local gateway as the DEFAULT profile of HERMES_HOME, so a satellite-profile
+bench fork answers hermes:api with 403 profile_scope_mismatch and the host
+record wedges (exit-75 churn) — and a standalone default fork cannot coexist
+with a live estate gateway ("the host gateway still serves profile
+'default'"). Until the app honors the profile pin again, run the bench with
+`--app-repo` at a green-era checkout (0f602c5 proven) — provision it with
+`pnpm@<packageManager> install --frozen-lockfile` (a REAL install; sharing the
+live checkout's node_modules by symlink mixes HEAD workspace packages with the
+older src and main.tsx fails to load). The app commit is pinned in
+`identity.app.commit`, so every proof says which app it ran against.
+
 ## Reproducibility law (slice A)
 
 Every run writes an IMMUTABLE capture set. `manifest.json.captures[]` pins
