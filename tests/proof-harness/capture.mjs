@@ -904,13 +904,22 @@ async function main() {
       await sleep(2000);
       cdp = await connectCdp(A.cdpPort, A.rendererPort, 60_000);
       await waitPainted(cdp, A.paintBudgetMs);
+      // Field-proven (set-1c): Page.reload can land the renderer's IPC
+      // bootstrap mid gateway-ticket refresh ('Invalid gateway ticket
+      // response' in renderer.log); the SESSIONS list stays empty through
+      // that retry window, so the attach probe must be waited here — the
+      // old hardcoded 20s row window lost it under crew load.
+      await waitConnected(cdp, probeBudgetMs);
       await trustedClick(cdp, 'sessions', { exact: true, ci: true });
       // Row titles are summarized (never the raw ask); in a fresh bench home
       // the ONLY session is the seeded echo — click the topmost row-shaped
       // element in the sidebar column (title + relative-time pattern).
       let rowHit = null;
-      const rowT0 = Date.now();
-      while (!rowHit && Date.now() - rowT0 < 20_000) {
+      let rowT0 = Date.now();
+      let rowReloads = 0;
+      while (!rowHit) {
+        const modalUp2 = await cdp.evl(`document.body.innerText.includes("couldn't start")`).catch(() => false);
+        if (modalUp2) { try { await trustedClick(cdp, 'Retry', { exact: true, ci: true }); } catch { /* between frames */ } }
         rowHit = await cdp.evl(`(async () => {
           const cand = [...document.querySelectorAll('div,li,button,a')]
             .map(n => ({ n, t: (n.innerText || '').trim() }))
@@ -935,7 +944,11 @@ async function main() {
         })()`);
         if (!rowHit) await sleep(750);
       }
-      if (!rowHit) die(EX.api, 'seeded one-shot session row not found in the SESSIONS list');
+      if (!rowHit) {
+        try { await shoot(cdp, A.outDir, '00-diagnostic-sessions.png'); } catch { /* best effort */ }
+        const sb = await cdp.evl(`document.body.innerText.slice(0, 900)`).catch(() => '');
+        die(EX.api, `seeded one-shot session row not found in the SESSIONS list — diagnostic shot + body text in ${JSON.stringify(sb).slice(0, 900)}`);
+      }
       identity.seeds.directive_card_echo.session_row_hit = rowHit;
       {
         // Click + assert, re-located on failure: a title-summary refresh can
