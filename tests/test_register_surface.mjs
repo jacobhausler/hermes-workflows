@@ -166,7 +166,14 @@ const sdkMod = A.stub
 {
   const i = src.indexOf('function WorkflowsPane()')
   assert.ok(i >= 0, 'WorkflowsPane exists')
-  const paneSrc = src.slice(i, i + 800)
+  // bd_2026-11-13-yjp grew the pane head (qc/retry/stale chip) — the window is
+  // now measured to the function end (brace match), not a fixed 800 chars.
+  let depth = 0, end = src.indexOf('{', i + 'function WorkflowsPane()'.length)
+  for (; end < src.length; end++) {
+    if (src[end] === '{') depth++
+    else if (src[end] === '}' && --depth === 0) { end++; break }
+  }
+  const paneSrc = src.slice(i, end)
   assert.match(paneSrc, /host\?\.state\?\.focusedSessionId/, 'pane reads host.state.focusedSessionId')
   assert.match(paneSrc, /host\?\.state\?\.focusedStoredSessionId/, 'pane reads host.state.focusedStoredSessionId')
 }

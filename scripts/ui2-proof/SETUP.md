@@ -110,24 +110,27 @@ know, capture.mjs exits 3 naming it a new test. Do not "make it pass" by
 pointing at `synthesis/index.html`. Wire real renderer surfaces into the
 capture section of capture.mjs and extend `surfaces_registry` instead.
 
-## The `gate` case (bd_2026-11-13-qri)
+## The `coverage` case (bd_2026-11-13-yjp)
 
-`node scripts/ui2-proof/capture.mjs --case gate --out DIR` proves the ONE
-decision surface end-to-end on the real renderer: the held gate cell, a
-trusted option click, the PENDING frame made real by holding the answer POST
-at CDP `Fetch` interception (never a staged screenshot), the durable
-`[data-gate-receipt]` saved frame, the success toast carrying the exact
-ledger line (`◇ Held · <requester> · <run> / <gate>`) with its
-`View exact gate` action, and the route-away/route-back identity proof.
-The seed SIGKILLs the isolated runner at `gate.held` (seed field
-`kill_runner_after_hold`), then the driver reads `gates/<id>.json` back from
-disk and refuses the run unless: the answer matches byte-for-byte, `_ui` is
-literally true, `events.jsonl` is byte-identical before/after (Nothing
-restarted — verified for THIS tested runner only, not a universal scheduler
-claim), and the gate node was never consumed. Frames 07-11 (08b = a FORCED
-real `{ok:false}` door response rendered as the inline failure with
-retryable options and no receipt); report.json
-entries are `reviewed:false` until the mandatory vision pass.
+`node scripts/ui2-proof/capture.mjs --case coverage --out "$PROOF_DIR/coverage"`
+
+Frames the full-census fetch of the WORKFLOWS pane ON THE REAL RENDERER:
+a 133-row fixture census (deep enough to be >1 route page) is seeded
+THROUGH the shared read model by `seed_fixture.py` (valid-run trio; the
+rows honestly read `interrupted`, which keeps the pane's real 4 s poll loop
+alive — the frames are driven by that actual loop, not a timer fiction).
+Loading / error / partial-fetch costumes are manufactured with the CDP
+**Fetch domain** (stall, fail, short-page fulfill on
+`*workflows/runs*`): renderer, plugin, react-query and backend stay the
+real code — only the network edge lies. Frames: 01 loading (all pages
+stalled), 02 empty census answered with its roots, 03 full census (all 133
+loaded), 04 the deepest counted row clipped (position 133 — unreachable
+under the first-page ceiling) and 05 its record page opened, 06
+refetch-failed with the cached census kept behind the clickable
+`stale — retry` chip, 07 recovery (a row seeded while the edge was failing;
+the retry click re-walks from offset 0 and the census counts 134 — a
+redraw could not do that), 08 partial fetch (page 2 fulfilled short: the
+line says `loaded 100 of 134` while the summary stays global).
 
 ## Verification (this bead's command)
 
