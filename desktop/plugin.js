@@ -46,8 +46,9 @@ async function api(path, opts) {
 let ctxRest = async () => { throw new Error('workflows backend unavailable') }
 
 // Plugin-local selection state (write .set() in handlers, useValue in leaves).
-const $selRun = atom(null)
-const $selNode = atom(null)
+// Exported for behavior tests (gate view-action identity — test_composer_owner.mjs).
+export const $selRun = atom(null)
+export const $selNode = atom(null)
 
 // -- helpers -------------------------------------------------------------------
 
@@ -1497,67 +1498,144 @@ export function SessionStrip() {
 
 // -- 2. page /workflows ---------------------------------------------------------
 
-/** Ask the agent to resume in the run's OWNER session, never the active chat.
- *  The SDK submit is a visible user turn; older apps can only insert a draft
- *  for the user to send. An absent owner or composer fails closed. */
-export async function nudgeOwner(owner, text) {
-  const sid = owner?.session_id
-  if (!sid) return 'no-owner'
-  try {
-    if (typeof host.openSession === 'function') {
-      await host.openSession(sid, { awaitHydration: true, expectHistory: true, intent: 'plugin' })
+/** The gate surface's requester line: the requester the GRAPH declares
+ *  (gate context), else the recorded origin via originLabel — never a
+ *  fabricated name, never the viewer's own chat. Pure, node-testable. */
+export function gateRequester(gate, owner) {
+  const ctx = gate && gate.context
+  if (typeof ctx === 'string' && ctx.trim()) return ctx.trim()
+  return `@${originLabel(owner, null)}`
+}
+
+/** Toast/ledger jump to the EXACT gate of the SAME run the answer rode:
+ *  identity is the one the click carried (runId + gateId closure), never the
+ *  viewer's current selection, and the route only selects the record page.
+ *  No session hydration, no composer, no resume. Pure, node-testable. */
+export function gateViewAction(runId, gateId) {
+  return {
+    label: 'View exact gate',
+    onClick: () => {
+      $selRun.set(runId)
+      $selNode.set({ runId, nodeId: gateId })
+      host.navigate('/workflows')
     }
-    if (typeof host.composer?.submit === 'function') {
-      return await host.composer.submit(sid, text) ? 'submitted' : 'unavailable'
-    }
-    if (typeof host.composer?.insertText === 'function') {
-      return await host.composer.insertText(sid, text) ? 'drafted' : 'unavailable'
-    }
-    return 'no-sdk'
-  } catch (e) {
-    console.warn('[hermes-workflows] owner composer unavailable', e)
-    return 'unavailable'
   }
 }
 
-function GateActions({ runId, gate, owner }) {
+/** Hold age from the event ledger: gate.held -> answer `at` (receipt, a fixed
+ *  number) or -> this render (held surface, a captured age, never a fake
+ *  ticking clock). Either end absent -> null: honest absence. */
+function gateDwell(gate, answered, events) {
+  const held = (events || []).find(e => e && e.event === 'gate.held' && e.node === gate.id)
+  const t0 = held ? parseTime(held.ts) : null
+  if (!t0) return null
+  const tEnd = answered && answered.at ? parseTime(answered.at) : null
+  return fmtDur(Math.max(0, (tEnd || Date.now()) - t0))
+}
+
+/** The read model's answer record for a gate cell: the full view's `gates`
+ *  block (an answer that survived invalidate-then-read but has not been
+ *  consumed yet), else a released gate's committed node output. Neither ->
+ *  null: honest absence, never a fabricated receipt. Pure, node-testable. */
+export function gateAnswerFor(detail, def, st) {
+  const gs = detail && detail.gates
+  if (gs && Object.prototype.hasOwnProperty.call(gs, String(def.id))) {
+    const g = gs[String(def.id)]   // own-property only (est-wk7l): a node id
+    if (g && typeof g === 'object' && 'answer' in g) return g  // like 'toString' never resolves via the prototype
+  }
+  const out = st && st.status === 'done' ? st.output : null
+  return out && typeof out === 'object' && 'answer' in out ? out : null
+}
+
+/** The one decision surface for a held human gate (UI-2 RC, gate-answer-flow):
+ *  verbatim question, declared requester, every recorded option; a click
+ *  POSTs the SAME answer path the tool uses (_release_core(ui=True)) and the
+ *  surface becomes a durable receipt. The submit/draft/resume-toast chain is
+ *  RETIRED (no compat shim): an answer records gates/<id>.json with `_ui`
+ *  provenance, never touches a composer, and never resumes — the owning
+ *  agent drives the runner. An {ok:false} door answer is an ERROR, not a
+ *  successful mutation (api() throws; the options stay retryable). */
+export function GateActions({ runId, gate, owner, answered, events }) {
   const qc = useQueryClient()
+  const [recorded, setRecorded] = useState(null) // {answer} — this write, pre-refetch
+  const [failed, setFailed] = useState(null)
+  const receiptRef = useRef(null)
   const mut = useMutation({
     mutationFn: answer => api(`/runs/${runId}/gate`, { method: 'POST', body: { gate_id: gate.id, answer } }),
-    onSuccess: async (_res, answer) => {
+    onSuccess: (_res, answer) => {
+      setFailed(null)
+      setRecorded({ answer })
+      // Invalidate before reading: the refetch re-projects the census and the
+      // read-model gates block, so the receipt survives on recorded bytes.
       qc.invalidateQueries({ queryKey: Q })
-      const how = await nudgeOwner(owner,
-        `Workflow gate answered in the UI: run ${runId}, gate "${gate.id}" → "${answer}". ` +
-        `You own this run — resume it now (workflow wait run_id=${runId}).`
-      )
-      const msg = {
-        submitted: 'Gate answered — a visible resume turn was sent to the owner chat',
-        drafted: `Gate answered — resume text inserted in the owner chat; press Enter there to resume run ${runId}`,
-        'no-owner': `Gate answered — this run has no recorded owner; type "workflow wait run_id=${runId}" in the owner chat`,
-        'no-sdk': `Gate answered — this Desktop version cannot send or insert a resume turn; type "workflow wait run_id=${runId}" in the owner chat`,
-        unavailable: `Gate answered — owner composer unavailable; type "workflow wait run_id=${runId}" in the owner chat`
-      }[how]
-      host.notify({ kind: how === 'submitted' ? 'success' : 'info', message: msg })
+      host.notify({
+        kind: 'success',
+        message: `◇ Held · ${gateRequester(gate, owner)} · ${runId} / ${gate.id}`,
+        action: gateViewAction(runId, gate.id)
+      })
     },
-    onError: err => host.notify({ kind: 'error', message: `Gate answer failed: ${err?.message || err}` })
+    onError: err => {
+      setFailed(String(err?.message || err))
+      host.notify({ kind: 'error', message: `Gate answer failed: ${err?.message || err}` })
+    }
   })
-  if (!gate.options?.length) return null
+  // Hooks above follow the hook law; the state returns below are hooks-first.
+  const saved = recorded ? recorded.answer : answered && answered.answer !== undefined ? answered.answer : undefined
+  const savedSrc = recorded || answered
+  useEffect(() => {
+    // Focus restoration: when the option buttons are replaced by the receipt,
+    // keyboard focus lands ON the receipt instead of falling to the body.
+    if (saved !== undefined && receiptRef.current && typeof receiptRef.current.focus === 'function') {
+      receiptRef.current.focus()
+    }
+  }, [saved !== undefined])
+  const head = [
+    gate.question ? box('text-[0.6875rem] leading-snug text-(--ui-text-secondary)', gate.question) : null,
+    box('text-[0.6875rem] text-(--ui-text-tertiary)', `requester: ${gateRequester(gate, owner)}`)
+  ]
+  if (saved !== undefined) {
+    const dwell = gateDwell(gate, savedSrc, events)
+    return jsxs('div', {
+      ref: receiptRef, tabIndex: -1, 'data-gate-receipt': gate.id || '',
+      className: 'flex flex-col border-t border-(--ui-stroke-secondary)',
+      style: { gap: 4, padding: '6px 8px 8px', outline: 'none' },
+      children: [
+        ...head,
+        box('text-[0.6875rem] text-(--ui-success, var(--ui-text-secondary))', 'Answer saved · nothing will be sent on this path.'),
+        box('text-[0.6875rem] font-mono text-(--ui-text-secondary)', String(saved)),
+        dwell ? box('text-[0.6875rem] tabular-nums text-(--ui-text-tertiary)', `held ${dwell}`) : null,
+        box('text-[0.6875rem] text-(--ui-text-tertiary)',
+          'Nothing restarted. The UI answer path records only — verified against the tested isolated runner; a live scheduler may consume the answer when it next checks.'),
+        jsx(Button, {
+          size: 'xs', variant: 'outline', className: 'w-full justify-start text-[0.6875rem]',
+          onClick: gateViewAction(runId, gate.id).onClick, children: 'View exact gate'
+        }, 'view-gate')
+      ]
+    })
+  }
+  const opts = (gate.options || []).map(opt =>
+    jsx(
+      Button,
+      { size: 'xs', variant: 'outline', className: 'w-full justify-start text-[0.6875rem]', disabled: mut.isPending, onClick: () => mut.mutate(opt), children: opt },
+      opt
+    )
+  )
   return jsxs('div', {
     className: 'flex flex-col border-t border-(--ui-stroke-secondary)',
     style: { gap: 4, padding: '6px 8px 8px' },
     children: [
-    gate.question ? box('text-[0.6875rem] leading-snug text-(--ui-text-secondary)', gate.question) : null,
-    ...gate.options.map(opt =>
-      jsx(
-        Button,
-        { size: 'xs', variant: 'outline', className: 'w-full justify-start text-[0.6875rem]', disabled: mut.isPending, onClick: () => mut.mutate(opt), children: opt },
-        opt
-      )
-    )
-  ] })
+      ...head,
+      ...opts,
+      mut.isPending ? box('text-[0.6875rem] text-(--ui-text-tertiary)', 'Saving answer…') : null,
+      failed ? box('text-[0.6875rem] text-(--ui-danger, var(--ui-text-secondary))', `Gate answer failed · ${failed}`) : null,
+      // Fail-closed on an options-less hold: the reason shows, no buttons are
+      // invented, and the hold never renders as a silent nothing.
+      opts.length ? null : box('text-[0.6875rem] text-(--ui-text-tertiary)', 'No answer options recorded.')
+    ]
+  })
 }
 
-export function NodeCard({ runId, def, st, gate, selected, owner, events, hovered = false }) {
+export function NodeCard({ runId, def, st, gate, selected, owner, events, answered = null, hovered = false }) {
   const isGate = def.type === 'gate'
   const liveGate = gate && gate.id === def.id ? gate : null
   // A live held gate outranks the read model's raw 'pending' node status.
@@ -1639,7 +1717,16 @@ export function NodeCard({ runId, def, st, gate, selected, owner, events, hovere
           },
           'head'
         ),
-        isGate && status === 'held' ? jsx(GateActions, { runId, gate: liveGate || { id: def.id }, owner }) : null
+        // The gate cell lives with the card (one release surface per held
+        // run). A recorded answer keeps the cell mounted as the durable
+        // receipt: question + requester + answer provenance, no option
+        // buttons — a historical seed is never re-answerable.
+        isGate && (status === 'held' || answered)
+          ? jsx(GateActions, {
+              runId, owner, events, answered,
+              gate: Object.assign({ id: def.id, question: def.question, options: def.options, context: def.context }, liveGate || {})
+            })
+          : null
       ]
     },
     def.id
@@ -2186,6 +2273,7 @@ export function GraphView({ detail }) {
           onMouseLeave: () => setHoverId(h => (h === def.id ? null : h)),
           children: jsx(NodeCard, {
             runId: detail.id, def, st, gate: detail.gate, owner: detail.owner, events: detail.events,
+            answered: def.type === 'gate' ? gateAnswerFor(detail, def, st) : null,
             hovered: hoverId === def.id,
             selected: sel?.runId === detail.id && sel?.nodeId === def.id
           })
