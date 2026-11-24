@@ -1888,17 +1888,33 @@ export function NodeCard({ runId, def, st, gate, selected, owner, events, answer
   const m = st?.metrics || null
   // #48: every visual decision reads the ONE tone table. Running glows (soft
   // accent shadow + the live-dot pulse from Dot); held-at-gate nags with a
-  // slow border pulse; waiting breathes on the dashed outline; terminal
-  // states are calm and FLAT (no shadow, no animation — the calm law), with
-  // failed keeping a loud static red tint on its border.
+  // slow border pulse; terminal states are calm and FLAT (no shadow, no
+  // animation — the calm law), with failed keeping a loud static red tint on
+  // its border. Ship 2.0 (bd_2026-11-13-32i): every animation this card may
+  // run is admitted by the ONE motion allocator (W4) — a denied or preempted
+  // effect renders its truthful static state IMMEDIATELY (spill, never a
+  // hidden queue). The pending breathe stays the incumbent #48 animation
+  // until the W5 binding wave applies DESIGN Round 10 ("pending -> None").
   const tone = NODE_TONE[status] || NODE_TONE.pending
-  const animation = tone.calm || status === 'running'
-    ? undefined
+  // Attention motion goes through the ONE allocator (W4): a denied or
+  // preempted claim renders the constant amber border — the static
+  // equivalent — immediately, never a queued retry. Phase rides the gate's
+  // own hold event timestamp (spelling-tolerant), so redraws and remounts
+  // cannot restart it; an absent/future/invalid time claims no recency cue.
+  const heldAt = liveGate ? parseTime(liveGate.held_at ?? liveGate.heldAt ?? liveGate.at ?? liveGate.held) : 0
+  const motionAnim = tone.calm || status === 'running' ? null
     : status === 'held' && tone.gate
-      ? `${tone.gate.name} ${tone.pulseMs}ms ease-in-out infinite`
+      ? { spec: tone.gate, anim: 'var(--dur-attention) var(--ease-breathe)',
+          claim: MOTION.claim({ id: `attention:${runId}:${def.id}`, cls: 'attention', ts: heldAt || null, durToken: '--dur-attention' }) }
       : tone.breathe
-        ? `${tone.breathe.name} ${tone.pulseMs}ms ease-in-out infinite`
-        : undefined
+        ? { spec: tone.breathe, anim: `${tone.pulseMs}ms ease-in-out`,
+            // The incumbent pending breathe keeps its table period until the
+            // W5 binding wave retires it (DESIGN Round 10: pending -> None).
+            claim: MOTION.claim({ id: `attention:${runId}:${def.id}:breathe`, cls: 'attention', ts: null, durMs: tone.pulseMs }) }
+        : null
+  const animation = motionAnim && motionAnim.claim.admitted
+    ? `${motionAnim.spec.name} ${motionAnim.anim} infinite`
+    : undefined
   const glow = hovered ? (tone.shadowHover || tone.shadow) : tone.shadow
   return jsxs(
     'div',
@@ -1918,7 +1934,19 @@ export function NodeCard({ runId, def, st, gate, selected, owner, events, answer
           : glow || undefined,
         transform: hovered && !tone.calm ? 'translateY(-1px)' : undefined,
         transition: 'transform 120ms ease, box-shadow 160ms ease, border-color 160ms ease',
-        animation
+        animation,
+        // Timestamp-aligned phase (DESIGN Round 10): the offset derives from
+        // the ORIGINAL hold event, so redraws and remounts cannot restart it.
+        animationDelay: motionAnim && motionAnim.claim.admitted ? `${motionAnim.claim.phaseMs}ms` : undefined,
+        // Admission instrumentation (bd_2026-11-13-32i): the allocator's
+        // verdict per effect ID — the real-app proof driver reads these off
+        // the ACTUAL renderer; invisible in screenshots, never user copy.
+        'data-motion': motionAnim
+          ? motionAnim.claim.admitted
+            ? `admitted:${motionAnim.claim.reserved ? 'reserved' : 'active'}`
+            : `spill:${motionAnim.claim.reason}`
+          : 'none',
+        'data-motion-id': motionAnim ? `attention:${runId}:${def.id}` : undefined
       },
       children: [
         jsxs(
@@ -2004,8 +2032,221 @@ const METER_TONE = { 'on-track': EDGE_TONE.running, 'near-wall': EDGE_TONE.held,
 // state (done/failed/stopped/skipped) is calm: pulseMs null && shadow null —
 // terminal states stop every animation. failed stays LOUD through its static
 // red borderColor tint, not a glow.
+// ── ui2 W4 motion allocator (bd_2026-11-13-32i) ─────────────────────────────
+// DESIGN Round 10 ("motion is data"): ONE global animator budget across the
+// graph AND its associated collection — active + reserved <= 12 at every
+// claim, release and settle, counting targets/effects, never CSS declarations.
+// Priority: transition > attention > running glyph > edge; ties order by
+// event timestamp (newer event outranks an older one for a contended slot),
+// then by the stable effect ID. A rejected or preempted effect spills to its
+// truthful STATIC state immediately — never a hidden queue; a timer cannot
+// evade the cap. Recurrent effects re-admitted to the budget retain the
+// ORIGINAL event timestamp as their phase, so redraws and remounts cannot
+// restart or shift them. Failure/done/insertion/fold settle one-shots are
+// consumed once per event identity, never once per render (only a labelled
+// replay resets consumption — replayReset below is that seam). Insertion is
+// the only effect allowed to delay, at most 30ms between arrivals and at most
+// 90ms in total, and every delay RESERVES its slot inside the same N=12 pool.
+// The fifteen dur/ease tokens below are the whole registered timing
+// vocabulary (the DESIGN Round 10 token table, verbatim values); the
+// consolidated sheet emits them once and the content-digest href versions
+// that emission.
+export const MOTION_TOKENS = {
+  '--dur-pulse-fresh': '2000ms',
+  '--dur-pulse-quiet': '4000ms',
+  '--dur-flow': '1200ms',
+  '--dur-attention': '4000ms',
+  '--dur-failed': '320ms',
+  '--dur-done': '240ms',
+  '--dur-insert': '240ms',
+  '--dur-collapse': '240ms',
+  '--dur-expand': '0ms',
+  '--dur-progress': '0ms',
+  '--ease-breathe': 'cubic-bezier(.4,0,.6,1)',
+  '--ease-flow': 'linear',
+  '--ease-settle': 'cubic-bezier(.16,1,.3,1)',
+  '--ease-step': 'steps(1,end)',
+  '--ease-expand': 'linear'
+}
+export const MOTION_PRIORITY = ['transition', 'attention', 'glyph', 'edge']
+export const MOTION_CAP = 12
+export const MOTION_INSERT_GAP_MS = 30
+export const MOTION_INSERT_TOTAL_MS = 90
+
+function motionTokenMs (token) {
+  const v = Object.prototype.hasOwnProperty.call(MOTION_TOKENS, token) ? MOTION_TOKENS[token] : null
+  const m = typeof v === 'string' && /^(\d+)ms$/.exec(v)
+  return m ? Number(m[1]) : null
+}
+
+// createMotionAllocator: the pure pool (injectable clock for behavior tests).
+// MOTION below is the ONE global instance — graph and collection share it
+// (FINAL.md: do not instantiate one allocator per lane).
+export function createMotionAllocator ({
+  cap = MOTION_CAP, insertGapMs = MOTION_INSERT_GAP_MS, insertTotalMs = MOTION_INSERT_TOTAL_MS,
+  clock = null, staleSweeps = 3
+} = {}) {
+  const nowFn = clock || (() => Date.now())
+  const holders = new Map() // id -> {id, cls, ts, durMs, phaseMs, once, key, arriveAt, until, gen, lastSweep}
+  const consumed = new Set() // one-shot event identities already granted their single animator
+  const consumedFifo = []
+  let reduced = false
+  let sweeps = 0
+  let genSeq = 1
+  const counters = { admitted: 0, denied: 0, preempted: 0, released: 0, consumedDenied: 0 }
+
+  const rank = cls => MOTION_PRIORITY.indexOf(cls)
+  // Slot-order key: (class rank, newest event first, stable id). A claim
+  // admits into free space, or by ranking STRICTLY below the current weakest
+  // holder (preemption of a lower class — or, inside the same class, of the
+  // older event; the id is the deterministic final tie).
+  const keyOf = h => [rank(h.cls), -h.ts, h.id]
+  const below = (a, b) => {
+    for (let i = 0; i < 3; i++) {
+      if (a[i] < b[i]) return true
+      if (a[i] > b[i]) return false
+    }
+    return false
+  }
+  const validTs = ts => typeof ts === 'number' && Number.isFinite(ts) && ts <= nowFn()
+  // Original-timestamp phase: the cycle offset at time `at` derived from the
+  // event's own timestamp — a negative animation-delay. A missing, invalid or
+  // FUTURE timestamp is unknown (DESIGN Round 10): it claims no recency cue,
+  // so the cycle opens at its head (phase 0) instead of fabricating one.
+  const phaseFor = (ts, dur, at) =>
+    (!Number.isFinite(ts) || !(dur > 0)) ? 0 : -((((at - ts) % dur) + dur) % dur)
+  const consume = key => {
+    if (consumed.has(key)) return
+    consumed.add(key)
+    consumedFifo.push(key)
+    while (consumedFifo.length > 512) consumed.delete(consumedFifo.shift())
+  }
+  function sweep () {
+    sweeps++
+    const now = nowFn()
+    for (const [id, h] of holders) {
+      // one-shots and reservations expire at their settle instant; infinite
+      // holders expire when they stop being re-claimed (unmount/route-away)
+      // — the stale cancellation law: nobody may hold a slot from off-screen.
+      if (h.until != null ? h.until <= now : sweeps - h.lastSweep > staleSweeps) {
+        holders.delete(id)
+        if (h.key) consume(h.key)
+        counters.released++
+      }
+    }
+  }
+  function claim (req) {
+    sweep()
+    const { id, cls, ts = null, durToken = null, durMs = null, once = false, eventKey = null, delayMs = 0 } = req || {}
+    const reject = reason => { counters.denied++; return { admitted: false, reason, spill: 'static', phaseMs: 0 } }
+    if (typeof id !== 'string' || !id || rank(cls) < 0) return { admitted: false, reason: 'invalid', spill: 'static', phaseMs: 0 }
+    if (reduced) return reject('reduced')
+    const dur = durMs != null ? durMs : motionTokenMs(durToken)
+    if (dur == null) return reject('unregistered')
+    const known = validTs(ts)
+    // A registered 0ms duration IS the static state (expand/progress): admit
+    // with no slot, so zero-duration vocabulary never occupies animators.
+    if (dur === 0) return { admitted: true, zeroDuration: true, phaseMs: 0, delayMs: 0, token: null, unknownTs: !known }
+    const d = Math.max(0, Number(delayMs) || 0)
+    const cur = holders.get(id)
+    if (cur) {
+      cur.lastSweep = sweeps
+      cur.phaseMs = phaseFor(known ? ts : Number.NaN, dur, nowFn() + d)
+      return { admitted: true, idempotent: true, phaseMs: cur.phaseMs, delayMs: d, token: { id, gen: cur.gen }, unknownTs: !known }
+    }
+    const key = once ? (eventKey || `${id}@${known ? ts : nowFn()}`) : null
+    if (once && consumed.has(key)) { counters.consumedDenied++; return reject('consumed') }
+    const h = {
+      id, cls, ts: known ? ts : 0, durMs: dur, once, key, gen: genSeq++, lastSweep: sweeps,
+      phaseMs: phaseFor(known ? ts : Number.NaN, dur, nowFn() + d),
+      arriveAt: d > 0 ? nowFn() + d : null,
+      until: (once || d > 0) ? nowFn() + d + dur : null
+    }
+    const admit = () => {
+      if (h.key) consume(h.key)
+      holders.set(id, h)
+      counters.admitted++
+      return { admitted: true, phaseMs: h.phaseMs, delayMs: d, token: { id, gen: h.gen }, unknownTs: !known, reserved: h.arriveAt != null }
+    }
+    if (holders.size < cap) return admit()
+    let victim = null
+    for (const hh of holders.values()) if (!victim || below(keyOf(victim), keyOf(hh))) victim = hh
+    if (below(keyOf(h), keyOf(victim))) {
+      holders.delete(victim.id)
+      if (victim.key) consume(victim.key)
+      counters.preempted++
+      return admit()
+    }
+    return reject('cap') // immediate static spill — the cap never queues
+  }
+  function release (tok) {
+    if (!tok || typeof tok.id !== 'string') return false
+    const h = holders.get(tok.id)
+    // Stale cancellation: a release from an old generation (unmount of a view
+    // that a newer claim already re-took) must never evict the live holder.
+    if (!h || (tok.gen != null && h.gen !== tok.gen)) return false
+    holders.delete(tok.id)
+    if (h.key) consume(h.key)
+    counters.released++
+    return true
+  }
+  // planInsertion: the ONLY delayed-effect scheduler. Gaps between admitted
+  // arrivals are insertGapMs (<=30ms), the total ladder is capped at
+  // insertTotalMs (<=90ms), and every delay reserves its slot NOW inside the
+  // N=12 pool. Excess arrivals spill to static rather than extend a queue —
+  // identity and status are already on screen, the tween is decoration.
+  function planInsertion (ids, { ts = null, cls = 'transition' } = {}) {
+    sweep()
+    const out = []
+    let n = 0
+    for (const id of [...ids].sort()) {
+      const delay = n * insertGapMs
+      if (delay > insertTotalMs) { out.push({ id, delayMs: null, admitted: false, reason: 'over-schedule' }); continue }
+      const r = claim({ id, cls, ts, delayMs: delay })
+      if (r.admitted) { out.push({ id, delayMs: delay, admitted: true }); n++ }
+      else out.push({ id, delayMs: null, admitted: false, reason: r.reason })
+    }
+    return out
+  }
+  // Running-glyph recency (DESIGN matrix: <=5s fresh, >5s quiet, unknown is
+  // unknown): returns the registered token to use, never an invented period.
+  function recencyToken ({ ts = null, alive = false } = {}) {
+    if (!alive || !validTs(ts)) return { token: null, unknown: true }
+    return { token: nowFn() - ts <= 5000 ? '--dur-pulse-fresh' : '--dur-pulse-quiet', unknown: false }
+  }
+  function setReduced (v) {
+    reduced = !!v
+    // The reduced flip zeroes effects AND reservations at once: no paused,
+    // half-faded frames — every target sits in its truthful static state at
+    // full opacity (the renderers' spill path is exactly that state).
+    if (reduced) { counters.released += holders.size; holders.clear() }
+    return reduced
+  }
+  function replayReset () { consumed.clear(); consumedFifo.length = 0 }
+  function stats () {
+    sweep()
+    const now = nowFn()
+    let active = 0, reserved = 0
+    const held = []
+    for (const h of [...holders.values()].sort((a, b) => (a.id < b.id ? -1 : 1))) {
+      if (h.arriveAt != null && h.arriveAt > now) reserved++
+      else active++
+      held.push({ id: h.id, cls: h.cls, ts: h.ts, phaseMs: h.phaseMs, durMs: h.durMs, gen: h.gen, reserved: h.arriveAt != null && h.arriveAt > now })
+    }
+    return { active, reserved, total: holders.size, cap, reduced, counters: { ...counters }, holders: held }
+  }
+  return { claim, release, planInsertion, recencyToken, setReduced, replayReset, stats }
+}
+export const MOTION = createMotionAllocator()
+// The one bench seam the real-app proof driver uses to walk a controlled
+// labelled event schedule and read instrumented admissions off the ACTUAL
+// renderer. The only global the plugin ever assigns; never read by the UI.
+globalThis.__wfMotion = MOTION
+
 const GATE_PULSE = {
-  name: 'wf-gate-nag', durMs: 1600,
+  // The held-gate nag period is the registered --dur-attention token (4000ms),
+  // not a second source (W4: no unregistered durations on new motion).
+  name: 'wf-gate-nag', durMs: 4000,
   keyframes: '@keyframes wf-gate-nag {\n  0%, 100% { border-color: var(--ui-warning, var(--ui-accent)); }\n  50% { border-color: color-mix(in srgb, var(--ui-warning, var(--ui-accent)) 30%, transparent); }\n}'
 }
 const BREATHE = {
@@ -2029,18 +2270,36 @@ NODE_TONE.waiting = NODE_TONE.pending
 // entry as skipped (stop != failure, the #7 law; a resume re-drives it).
 NODE_TONE.cancelled = NODE_TONE.skipped
 
-// Hoisted animation CSS (#48): ONE <style>, injected once by PolishStyles,
-// deduped by React 19 via the stable href — BUMP THE NUMBER per CSS edit.
-// Pulse keyframes sit behind prefers-reduced-motion: no-preference so the
-// animations simply never resolve for users who ask for calm.
-export const STYLE_HREF = 'hermes-workflows.3.css'
-const POLISH_CSS =
-  `@media (prefers-reduced-motion: no-preference) {\n${GATE_PULSE.keyframes}\n${BREATHE.keyframes}\n}`
+// Hoisted animation CSS (#48, retooled by bd_2026-11-13-32i): ONE <style>,
+// injected once by PolishStyles, deduped by React 19 via a stable href. The
+// href is a CONTENT digest (FNV-1a/64 over the full emitted bytes), replacing
+// the hand-bumped version counter: every lane's edit auto-versions the
+// emission — the digest is of the exact children string the single injector
+// mounts, never a lane fragment — and it stays a plain JS computation, so
+// single-file SDK packaging is untouched. Pulse keyframes sit behind
+// prefers-reduced-motion: no-preference so the animations simply never
+// resolve for users who ask for calm.
+function fnv1a64 (text) {
+  let h = 0xcbf29ce484222325n
+  const PRIME = 0x100000001b3n
+  const MASK = 0xffffffffffffffffn
+  for (let i = 0; i < text.length; i++) {
+    h = (h ^ BigInt(text.charCodeAt(i))) * PRIME & MASK
+  }
+  return h.toString(16).padStart(16, '0')
+}
+// The consolidated token block: the fifteen registered dur/ease tokens are
+// the only motion vocabulary the plugin ships (DESIGN Round 10 table).
+const MOTION_TOKEN_CSS = `:root {\n${Object.keys(MOTION_TOKENS).map(k => `  ${k}: ${MOTION_TOKENS[k]};`).join('\n')}\n}`
+export const MOTION_CSS = `${MOTION_TOKEN_CSS}\n@media (prefers-reduced-motion: no-preference) {\n${GATE_PULSE.keyframes}\n${BREATHE.keyframes}\n}`
+export function styleHrefFor (css) { return `hermes-workflows.${fnv1a64(css)}.css` }
+export const STYLE_HREF = styleHrefFor(MOTION_CSS)
 
 // The single hoisted style injector (the ONLY style-element call in the file).
-// Styles only plugin-owned @keyframes — never global page chrome.
+// Styles only plugin-owned @keyframes and custom properties — never global
+// page chrome.
 export function PolishStyles() {
-  return jsx('style', { 'data-plugin': ID, href: STYLE_HREF, children: POLISH_CSS })
+  return jsx('style', { 'data-plugin': ID, href: STYLE_HREF, children: MOTION_CSS })
 }
 
 /** Pure edge-flow decision (exported so node can pin the truth table):
