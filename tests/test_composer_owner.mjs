@@ -164,9 +164,10 @@ export const Fragment = 'Fragment'
 
   // -- 4. mutation identity: ONE POST, body names gate + exact answer ----------
   {
-    globalThis.__postResult = { ok: true }
+    globalThis.__postResult = { ok: true, at: '2026-11-23T03:00:00+00:00' }
     const res = await globalThis.__mut.mutationFn('Approve review')
-    assert.deepEqual(res, { ok: true }, 'ok:true resolves the mutation')
+    assert.deepEqual(res, { ok: true, at: '2026-11-23T03:00:00+00:00' },
+      'ok:true resolves with the durable receipt timestamp the door stamped')
     const post = globalThis.__rest.at(-1)
     assert.deepEqual(post, ['/runs/R1/gate', 'POST', { gate_id: 'review', answer: 'Approve review' }],
       'the write carries the SAME-run gate identity and the exact answer')
@@ -176,12 +177,13 @@ export const Fragment = 'Fragment'
   {
     globalThis.__notifs.length = 0
     globalThis.__receiptRef.current = { focus: () => { globalThis.__calls.push(['focus-receipt']) } }
-    globalThis.__mut.onSuccess({ ok: true }, 'Approve review')
+    globalThis.__mut.onSuccess({ ok: true, at: '2026-11-23T03:00:00+00:00' }, 'Approve review')
     assert.ok(globalThis.__invalidations >= 1, 'the census is invalidated before any re-read')
     const notif = globalThis.__notifs.find(n => n.kind === 'success')
     assert.ok(notif, 'a success receipt toast fires')
-    assert.equal(notif.message, '◇ Held · Isolated review workflow · R1 / review',
-      'the toast mirrors the ledger line: held glyph, requester, run / gate')
+    assert.equal(notif.message,
+      '◇ Answer saved · Approve review · Isolated review workflow · R1 / review · 2026-11-23T03:00:00+00:00',
+      'the toast IS the receipt: answer saved, exact answer, requester, run / gate, server-stamped time (Q2)')
     assert.equal(notif.action.label, 'View exact gate', 'the toast action is the exact-gate jump')
     $selRun.set('OTHER') // viewer was somewhere else — the click must re-point identity
     $selNode.set(null)
@@ -194,6 +196,42 @@ export const Fragment = 'Fragment'
     const tLocal = render({ runId: 'R1', gate: GATE, owner: OWNER, events: [] })
     assert.ok(textOf(tLocal).includes('Answer saved · nothing will be sent on this path.'),
       'the receipt renders in place from this write, before any refetch lands')
+    assert.ok(textOf(tLocal).includes('Answered · 2026-11-23T03:00:00+00:00'),
+      'the pre-refetch receipt already carries the DOOR-stamped time, not a client clock')
+  }
+
+  // -- 5a. SAME-MOUNT refetch (review-2 Q1): the durable record outranks the
+  //     local write state; the dwell freezes at the server `at`, never at
+  //     "current time". No remount here — the bug lived exactly there.
+  {
+    const HELD = [{ event: 'gate.held', node: 'review', ts: '2026-11-23T02:55:00+00:00' }]
+    const t = render({ runId: 'R1', gate: GATE, owner: OWNER,
+      answered: { answer: 'Approve review', at: '2026-11-23T03:00:00+00:00', _ui: true },
+      events: HELD })
+    const text = textOf(t)
+    assert.ok(text.includes('held 5m'),
+      'same-mount refetch: dwell is the FIXED recorded age (5m), not now-minus-held (Q1)')
+    assert.ok(text.includes('Answered · 2026-11-23T03:00:00+00:00'),
+      'the durable server timestamp renders once the read model carries it')
+    // Durable truth outranks the optimistic local record: if the read model
+    // shows a different answer (amend + re-answer beat our paint), the
+    // receipt shows the SERVER answer, not what this click optimistically held.
+    const tConflict = render({ runId: 'R1', gate: GATE, owner: OWNER,
+      answered: { answer: 'Keep for revision', at: '2026-11-23T04:00:00+00:00', _ui: true },
+      events: HELD })
+    const ctext = textOf(tConflict)
+    assert.ok(ctext.includes('Keep for revision') && !ctext.includes('Approve review'),
+      'a refetched durable answer outranks the pre-refetch local record — only the server answer renders')
+    assert.ok(ctext.includes('held 1h 5m'), 'dwell re-anchors to the durable at (1h 5m)')
+    // Honest unknown: a receipt with no timestamp says so, never a silent drop.
+    remount()
+    globalThis.__mut.onSuccess({ ok: true }, 'Approve review') // older door: no at
+    const tUnknown = render({ runId: 'R1', gate: GATE, owner: OWNER, events: [] })
+    assert.ok(textOf(tUnknown).includes('Answered · time not recorded'),
+      'absent timestamp renders as honest unknown')
+    assert.ok(globalThis.__notifs.at(-1).message ===
+      '◇ Answer saved · Approve review · Isolated review workflow · R1 / review',
+      'a receipt toast without a server time honestly omits the time')
   }
 
   // -- 5b. saved receipt renders from the READ MODEL (survives the refetch) ---

@@ -1727,20 +1727,25 @@ export function gateAnswerFor(detail, def, st) {
  *  successful mutation (api() throws; the options stay retryable). */
 export function GateActions({ runId, gate, owner, answered, events }) {
   const qc = useQueryClient()
-  const [recorded, setRecorded] = useState(null) // {answer} — this write, pre-refetch
+  const [recorded, setRecorded] = useState(null) // {answer, at} — this write, pre-refetch
   const [failed, setFailed] = useState(null)
   const receiptRef = useRef(null)
   const mut = useMutation({
     mutationFn: answer => api(`/runs/${runId}/gate`, { method: 'POST', body: { gate_id: gate.id, answer } }),
-    onSuccess: (_res, answer) => {
+    onSuccess: (res, answer) => {
       setFailed(null)
-      setRecorded({ answer })
+      // The door's success response carries the server-stamped `at` (receipt
+      // contract): the local record keeps the DURABLE timestamp, so a
+      // same-mounted component never renders a client-clock guess for when
+      // its own answer was written.
+      setRecorded({ answer, at: typeof res?.at === 'string' ? res.at : null })
       // Invalidate before reading: the refetch re-projects the census and the
       // read-model gates block, so the receipt survives on recorded bytes.
       qc.invalidateQueries({ queryKey: Q })
       host.notify({
         kind: 'success',
-        message: `◇ Held · ${gateRequester(gate, owner)} · ${runId} / ${gate.id}`,
+        message: `◇ Answer saved · ${answer} · ${gateRequester(gate, owner)} · ${runId} / ${gate.id}` +
+          (typeof res?.at === 'string' ? ` · ${res.at}` : ''),
         action: gateViewAction(runId, gate.id)
       })
     },
@@ -1750,8 +1755,11 @@ export function GateActions({ runId, gate, owner, answered, events }) {
     }
   })
   // Hooks above follow the hook law; the state returns below are hooks-first.
-  const saved = recorded ? recorded.answer : answered && answered.answer !== undefined ? answered.answer : undefined
-  const savedSrc = recorded || answered
+  // The durable read-model record OUTRANKS the local write state once it
+  // arrives (review-2 Q1): `answered` carries the server `at`, so the dwell
+  // freezes at the recorded answer time instead of shadowing to current time.
+  const savedSrc = answered && answered.answer !== undefined ? answered : recorded
+  const saved = savedSrc && savedSrc.answer !== undefined ? savedSrc.answer : undefined
   useEffect(() => {
     // Focus restoration: when the option buttons are replaced by the receipt,
     // keyboard focus lands ON the receipt instead of falling to the body.
@@ -1773,6 +1781,11 @@ export function GateActions({ runId, gate, owner, answered, events }) {
         ...head,
         box('text-[0.6875rem] text-(--ui-success, var(--ui-text-secondary))', 'Answer saved · nothing will be sent on this path.'),
         box('text-[0.6875rem] font-mono text-(--ui-text-secondary)', String(saved)),
+        // who/WHAT/WHEN: the recorded answer time is rendered (review-2 Q1) —
+        // the durable server `at` once the read model carries it, and an
+        // honest unknown when a record has no timestamp, never a silent drop.
+        box('text-[0.6875rem] tabular-nums text-(--ui-text-tertiary)',
+          `Answered · ${savedSrc && savedSrc.at ? String(savedSrc.at) : 'time not recorded'}`),
         dwell ? box('text-[0.6875rem] tabular-nums text-(--ui-text-tertiary)', `held ${dwell}`) : null,
         box('text-[0.6875rem] text-(--ui-text-tertiary)',
           'Nothing restarted. The UI answer path records only — verified against the tested isolated runner; a live scheduler may consume the answer when it next checks.'),

@@ -1548,12 +1548,23 @@ async function main() {
         return { x: r.x, y: r.y, width: r.width, height: r.height };
       })()`);
       if (!receipt) die(EX.capture, 'saved receipt surface [data-gate-receipt] absent after the answer');
-      shots.push({ surface: 'gate_modal', state: 'saved: Answer saved receipt, exact answer, nothing-restarted scope note',
+      // Receipt time contract (review-2 Q1/Q2): the rendered receipt carries
+      // the door-stamped Answered timestamp — who/WHAT/WHEN, not a bare word.
+      const receiptText = await cdp.evl(`(() => {
+        const el = document.querySelector('[data-gate-receipt]');
+        return el ? (el.innerText || '') : '';
+      })()`);
+      if (!/Answered · \d{4}-\d{2}-\d{2}T/.test(receiptText))
+        die(EX.capture, `saved receipt lacks the door-stamped Answered time: ${JSON.stringify(receiptText)}`);
+      shots.push({ surface: 'gate_modal', state: 'saved: Answer saved receipt, exact answer, door-stamped Answered time, nothing-restarted scope note',
         ...(await shoot(cdp, A.outDir, '09-gate-saved.png', receipt)) });
-      // 10: the toast — same ledger line, View exact gate action.
+      // 10: the toast — same ledger line, View exact gate action. The toast IS
+      // the receipt (review-2 Q2): answer saved, exact answer, requester,
+      // run / gate, server time — and the View exact gate closure.
       await waitText(cdp, 'View exact gate', 15_000);
-      const toast = await rectOf(cdp, '◇ Held ·', {});
-      shots.push({ surface: 'gate_modal', state: 'success toast: held glyph + requester + run / gate, action View exact gate',
+      const toast = await rectOf(cdp, '◇ Answer saved ·', {});
+      if (!toast) die(EX.capture, 'success toast does not carry the Answer saved + answer receipt line');
+      shots.push({ surface: 'gate_modal', state: 'success toast: answer saved + exact answer + requester + run / gate + stamped time, action View exact gate',
         ...(await shoot(cdp, A.outDir, '10-gate-toast.png', toast)) });
       // Identity proof: leave the record entirely, then take the toast's (or
       // the receipt's) View exact gate — the route must return to THIS run's

@@ -38,7 +38,7 @@
       "historical_snapshots": []
     },
     "gate": {
-      "description": "bd_2026-11-13-qri real-app proof of the ONE decision surface: held gate cell (verbatim question, declared requester, options) -> trusted click -> REAL pending frame (the answer POST held at CDP Fetch interception) -> durable Answer-saved receipt -> success toast with View exact gate -> route-away/route-back identity proof -> gates/<id>.json read-back (_ui:true, exact answer, events ledger byte-identical: nothing restarted for this tested isolated runner).",
+      "description": "bd_2026-11-13-qri real-app proof of the ONE decision surface: held gate cell (verbatim question, declared requester, options) -> trusted click -> REAL pending frame (the answer POST held at CDP Fetch interception) -> durable Answer-saved receipt carrying the door-stamped Answered time -> success toast that IS the receipt (Answer saved + exact answer + requester + run / gate + server time) with View exact gate -> route-away/route-back identity proof -> gates/<id>.json read-back (_ui:true, exact answer, events ledger byte-identical: nothing restarted for this tested isolated runner).",
       "surfaces": ["pane_workflows", "gate_modal"],
       "seeds": [
         {

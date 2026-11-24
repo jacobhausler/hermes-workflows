@@ -189,8 +189,10 @@ capture section of capture.mjs and extend `surfaces_registry` instead.
 decision surface end-to-end on the real renderer: the held gate cell, a
 trusted option click, the PENDING frame made real by holding the answer POST
 at CDP `Fetch` interception (never a staged screenshot), the durable
-`[data-gate-receipt]` saved frame, the success toast carrying the exact
-ledger line (`◇ Held · <requester> · <run> / <gate>`) with its
+`[data-gate-receipt]` saved frame asserting the door-stamped
+`Answered · <ISO time>` line, the success toast that IS the receipt
+(`◇ Answer saved · <answer> · <requester> · <run> / <gate> · <ISO time>`,
+review-2 Q2) with its
 `View exact gate` action, and the route-away/route-back identity proof.
 The seed SIGKILLs the isolated runner at `gate.held` (seed field
 `kill_runner_after_hold`), then the driver reads `gates/<id>.json` back from

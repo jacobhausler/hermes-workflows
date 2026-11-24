@@ -182,8 +182,10 @@ check("gates" not in v, "unanswered gate: no receipt block (honest absence)")
 # TTL window must reflect it (proof the route invalidates BEFORE the read).
 api.list_runs()
 res = asyncio.run(api.release_gate("gate.ui", {"gate_id": "review", "answer": UI_ANSWER}))
-check(res == {"ok": True}, "UI door: release returns ok", str(res))
 rec = json.loads((uir / "gates" / "review.json").read_text())
+check(res.get("ok") is True and res.get("at") == rec["at"],
+      "UI door: release returns ok + the DURABLE receipt timestamp (response at == record at)",
+      str(res))
 check(rec["answer"] == UI_ANSWER, "the exact answer reads back from the record")
 check(rec.get("_ui") is True, "the UI write stamps _ui provenance")
 check("_def" in rec and rec.get("fp_rule_version") == wfcommon.FP_RULE_VERSION,
@@ -208,7 +210,8 @@ rec["answer"] = "stale seed"
 rec["_def"] = "0000000000000000000000000000000000000000000000000000000000000000"
 (uir / "gates" / "review.json").write_text(json.dumps(rec))
 res = asyncio.run(api.release_gate("gate.ui", {"gate_id": "review", "answer": UI_ANSWER}))
-check(res == {"ok": True}, "a stale (amend-invalidated) answer is overwritable", str(res))
+check(res.get("ok") is True and res.get("at") == json.loads((uir / "gates" / "review.json").read_text())["at"],
+      "a stale (amend-invalidated) answer is overwritable, re-stamped with a fresh receipt time", str(res))
 
 # backend error classes: unknown run + stopped run, both ok:false, never ok:true.
 res = asyncio.run(api.release_gate("nope-not-here", {"gate_id": "review", "answer": "x"}))
