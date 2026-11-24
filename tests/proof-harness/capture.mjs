@@ -1470,6 +1470,17 @@ async function main() {
         // locateJS already reports the covering text: 'occluded over
         // CONNECTING' is direct splash evidence; re-wait attach on it too.
         const occludedBySplash = hit.err === 'occluded' && /connecting/i.test(String(hit.over || ''));
+        // Onboarding wedge (field-proven 2026-11-24): a provider-less bench
+        // boots into the onboarding wizard ("Let's get you setup… Connect a
+        // model provider"), which occludes the pane rows forever. Dismiss it
+        // with its own honest button (a plain click — dismissal is not
+        // evidence; the ANSWER click stays trusted).
+        if (hit.err === 'occluded' && /get you setup|provider/i.test(String(hit.over || ''))) {
+          await cdp.evl(`(() => { const b = [...document.querySelectorAll('button')]
+              .find(b => (b.innerText||'').includes('choose a provider later'));
+            if (b) b.click(); return !!b; })()`).catch(() => false);
+          await sleep(500);
+        }
         if (underSplash || occludedBySplash) {
           try { await waitConnected(cdp, 15_000); wT0 = Date.now() - probeBudgetMs + 30_000; } catch { /* loop budget decides */ }
           // Splash persistence (field-proven 2026-11-24, crew load): the
@@ -1576,6 +1587,11 @@ async function main() {
         } catch { /* already gone: the tested shape is a dead runner */ }
       }
       // 07: the held frame — verbatim question, declared requester, options.
+      // One pre-dismiss of the onboarding wizard (same honest button): the
+      // held frame must not wear it and waitText would match UNDER it.
+      await cdp.evl(`(() => { const b = [...document.querySelectorAll('button')]
+          .find(b => (b.innerText||'').includes('choose a provider later'));
+        if (b) b.click(); return !!b; })()`).catch(() => false);
       await waitText(cdp, gateDef.question, 20_000);
       const heldCell = await rectOf(cdp, gateDef.question);
       if (!heldCell) die(EX.capture, 'held gate cell never rendered on the record page');
