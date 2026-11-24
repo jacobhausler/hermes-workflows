@@ -294,8 +294,13 @@ async function pollPaneFor(cdp, paneRegion, needle, shotName, why) {
   await trustedClick(cdp, 'workflows', { exact: true, ci: true });
   const t0 = Date.now();
   let last = null;
+  // Region-free on the real surface: the pane column is the LEFT column under
+  // the tab strip (vision-proven); the paneRegion x>=440 filter belongs to the
+  // detail view. Occlusion truth + exact match keep the hit honest. (The
+  // needle texts here are census-state strings unique on the page.)
+  void paneRegion;
   for (;;) {
-    last = await cdp.evl(locateJS(needle, { exact: true, region: paneRegion }));
+    last = await cdp.evl(locateJS(needle, { exact: true }));
     if (!last.err) return;
     if (Date.now() - t0 > 45_000) break;
     try { await trustedClick(cdp, 'workflows', { exact: true, ci: true }); } catch { /* tab not painted yet */ }
@@ -644,6 +649,18 @@ async function main() {
       while (!forkedHere() && Date.now() - gT0 < 90_000) await sleep(500);
       if (!forkedHere())
         die(EX.boot, 'bench backend never forked its own gateway (see logs/electron.log + gateway-stdio.log; the copied host record never left)');
+      // The app attaches the gateway at the DEFAULT root's well-known socket.
+      // In the hermetic home that root is fakehome/.hermes and the launched
+      // profile home is bench/profiles/proofhome — mirror the fork's socket
+      // (and pid/lock identity files) to every root the app may dial, so a
+      // 403-vs-refused distinction is decided by the gateway, not by miss.
+      for (const [i, dst] of [[path.join(B.fakehome, '.hermes', 'gateway.sock'), 0],
+                              [path.join(B.appHome, 'gateway.sock'), 1]].entries()) {
+        const sT0 = Date.now();
+        while (!fs.existsSync(path.join(B.home, 'gateway.sock')) && Date.now() - sT0 < 15_000) await sleep(400);
+        try { fs.symlinkSync(path.join(B.home, 'gateway.sock'), dst); } catch { /* raced or real */ }
+        void i; void dst;
+      }
     }
     for (const [key, value] of [['plugins.entries.hermes-workflows.settings.runs_root', B.runs],
                                 ['plugins.entries.hermes-workflows.settings.tray', true],
