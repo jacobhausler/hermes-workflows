@@ -1,0 +1,16 @@
+@local-<HEX-ID>
+<RUN-CLOCK>
+gate held
+say
+review
+held
+UI2 proof: record this answer?
+requester: Isolated review workflow
+Approve review
+Keep for revision
+tail
+pending
+timeline
+<1s
+review
+Runtime not ready
