@@ -32,10 +32,12 @@ const sha256 = buf => crypto.createHash('sha256').update(buf).digest('hex')
     'run 5m 54s', '20261123-205616-ui2-proof-held', '1 min ago', 'now',
     '2026-11-23T21:00:00', 'runs 1 · running 0 · held 1 · failed 0',
     'UI2 proof: release this held gate after capture?',
+    '@local-40efe64dac6ddd336cd2fc986bfab43033b4bea13f4539bc5a7df5f1b7d3ee06', '<1s>',
   ].join('\n')
   const masked = maskVolatile(sample)
   for (const gone of ['20261123-205616-ui2-proof-held', 'run 46s', '5m 54s',
-                      '1 min ago', '2026-11-23T21:00:00']) {
+                      '1 min ago', '2026-11-23T21:00:00',
+                      '40efe64dac6ddd336cd2fc986bfab43033b4bea13f4539bc5a7df5f1b7d3ee06', '<1s>']) {
     assert.ok(!masked.includes(gone), `volatile token survived the mask: ${gone}`)
   }
   for (const kept of ['1/3 terminal', 'runs 1 · running 0 · held 1 · failed 0',
@@ -43,8 +45,9 @@ const sha256 = buf => crypto.createHash('sha256').update(buf).digest('hex')
     assert.ok(masked.includes(kept), `stable content was destroyed by the mask: ${kept}`)
   }
   assert.ok(masked.includes('<RUN-ID>') && masked.includes('<RUN-CLOCK>')
-    && masked.includes('<REL-TIME>') && masked.includes('<DATE>'),
-  'all four volatile classes must actually fire on the sample (mask is not a no-op)')
+    && masked.includes('<REL-TIME>') && masked.includes('<DATE>')
+    && masked.includes('<HEX-ID>') && masked.includes('<ELAPSED>'),
+  'all six volatile classes must actually fire on the sample (mask is not a no-op)')
   console.log('PASS mask law: volatile classes masked, stable prose kept')
 }
 

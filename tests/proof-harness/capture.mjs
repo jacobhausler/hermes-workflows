@@ -127,6 +127,11 @@ export const VOLATILE_MASKS = [
   [/\brun\s+(?:\d+\s*(?:s|sec|secs?|m|min|mins?|h|hr|hrs?|d|day|days)?)(?:\s+\d+\s*(?:s|sec|secs?|m|min|mins?|h|hr|hrs?|d|day|days))?/gi, '<RUN-CLOCK>'],
   [/\b(?:now|just now|\d+\s*(?:s|sec|secs?|m|min|mins?|h|hr|hrs?|hour|hours?|d|day|days?)\s*ago)\b/gi, '<REL-TIME>'],
   [/\b\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}[^,\s]*)?\b/g, '<DATE>'],
+  // field-proven (first paired run, detail column): owner/session tokens are
+  // '@local-<hex>' — the hex is per-run — and the timeline renders elapsed
+  // chips as '<1s>'/'<46s>' which tick between runs.
+  [/\b[0-9a-f]{40,}\b/g, '<HEX-ID>'],
+  [/<\d+\s*(?:s|sec|secs?|m|min|mins?|h|hr|hrs?|d|day|days)>/gi, '<ELAPSED>'],
 ];
 export function maskVolatile(text) {
   let t = String(text);
@@ -298,10 +303,14 @@ async function waitConnected(cdp, ms = 90_000) {
     const clear = await cdp.evl(`(() => {
       const el = document.elementFromPoint(Math.floor(innerWidth/2), Math.floor(innerHeight/2));
       const t = ((el && (el.innerText || el.textContent)) || '').trim().toLowerCase();
-      return t.length > 0 && !t.includes('connecting') && !t.includes('loading');
+      // The boot-failure modal replaces the splash center; treat it as NOT
+      // connected (field-proven: 'Hermes couldn't start' while the backend
+      // installs deps) — waiting beats clicking blind through it.
+      const modal = document.body.innerText.includes("couldn't start");
+      return !modal && t.length > 0 && !t.includes('connecting') && !t.includes('loading');
     })()`);
     if (clear) return Date.now() - t0;
-    if (Date.now() - t0 > ms) die(EX.api, 'app never attached to its backend: viewport center still shows the CONNECTING splash');
+    if (Date.now() - t0 > ms) die(EX.api, 'app never attached to its backend: viewport center still shows the CONNECTING splash or the boot-failure modal');
     await sleep(600);
   }
 }
@@ -617,6 +626,21 @@ async function main() {
     }
     if (!up) die(EX.boot, `dev renderer never served http://127.0.0.1:${A.rendererPort}/ (see logs/renderer.log)`);
 
+    // -- pre-ensure the bench fork BEFORE the app boots ----------------------
+    // A fresh profile bootstraps its backend (plugin deps via uv) on first
+    // ensure; a fresh boot's "Installing Python dependencies" phase outruns
+    // the app's own boot modal deadline (field-proven: "Hermes couldn't
+    // start" while uv installs under crew load). The CLI ensure pays that
+    // cost here, under OUR paint budget, so electron attaches to a live
+    // gateway on its first request. Idempotent once warm.
+    try {
+      execFileSync(hermesBin, ['--profile', BENCH_PROFILE, 'gateway', 'ensure', '--json'],
+        { encoding: 'utf8', timeout: A.paintBudgetMs + 30_000, maxBuffer: 8 * 1024 * 1024, env: benchEnv });
+      identity.bench.pre_ensure = 'ok';
+    } catch (e) {
+      identity.bench.pre_ensure = `best-effort failed: ${String(e.stderr || e.message).slice(0, 200)}`;
+    }
+
     // -- prebuild the electron main (skill bench recipe), then boot ---------
     if (A.prebuild) {
       execFileSync(path.join(desktop, 'node_modules', '.bin', 'tsc'),
@@ -742,8 +766,13 @@ async function main() {
     // surfaces registered on the REAL renderer (skill probe). Bounded poll:
     // activation follows the fs-watch push + bundle import and can lag boot.
     let registry = { routes: [], panes: [], directives: [], composer: [] }, records = {};
+    // A cold bench profile bootstraps backend deps on first ensure; every
+    // attach probe must outlast that install, so the probe budgets ride the
+    // paint knob (default 60 s keeps CI-era benches honest; loaded boxes pass
+    // --paint-budget 300 and wait accordingly).
+    const probeBudgetMs = Math.max(45_000, A.paintBudgetMs);
     const rT0 = Date.now();
-    while (Date.now() - rT0 < 45_000) {
+    while (Date.now() - rT0 < probeBudgetMs) {
       registry = await cdp.evl(`(async () => {
         const mod = await import('/src/contrib/registry.ts');
         const reg = mod.registry;
@@ -787,17 +816,22 @@ async function main() {
     // requiring it INSIDE the pane column (x >= 440, above the tray strip,
     // occlusion-tested) is the attachment proof that survives overlays.
     const paneRegion = { xMin: 440, yMin: 40, bottomMargin: 90 };
-    await waitConnected(cdp);
+    await waitConnected(cdp, probeBudgetMs);
     {
       const wT0 = Date.now();
       for (;;) {
         const hit = await cdp.evl(locateJS(runName, { region: paneRegion }));
         if (!hit.err) break;
-        if (Date.now() - wT0 > 45_000) {
+        if (Date.now() - wT0 > probeBudgetMs) {
           try { await shoot(cdp, A.outDir, '00-diagnostic-pane.png'); } catch { /* best effort */ }
           const loc = await cdp.evl('location.pathname').catch(() => 'unknown');
           die(EX.api, `seeded run row never rendered IN THE PANE COLUMN (${JSON.stringify(hit.err)}${hit.over ? ` over ${JSON.stringify(hit.over)}` : ''}; pathname=${JSON.stringify(loc)}) — diagnostic shot in captures/ if present`);
         }
+        // Boot-modal recovery (field-proven): a backend still starting puts
+        // the "Hermes couldn't start" modal over the chrome; dismiss it by
+        // clicking Retry and keep polling within the probe budget.
+        const modalUp = await cdp.evl(`document.body.innerText.includes("couldn't start")`).catch(() => false);
+        if (modalUp) { try { await trustedClick(cdp, 'Retry', { exact: true, ci: true }); } catch { /* modal between frames */ } }
         // Route-restore race (field-proven: diagnostic shows the app restored
         // the chat view AFTER the tab click — SESSIONS active, hero rendered):
         // re-click the sidebar WORKFLOWS tab every poll until the pane column
