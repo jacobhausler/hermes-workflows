@@ -935,9 +935,38 @@ async function main() {
     // ticket response' storm in logs/electron.log, exit 6 with no pane). The
     // app-repo copy therefore serves BOTH halves in the green era — and the
     // b9b36c9-era app still cannot bench at all (SETUP.md App generation note).
+    // App SOURCE rung law (field-proven 2026-11-24, qri-proof20): a bare
+    // green-era app-copy checkout has no .venv, so the app's dev source rung
+    // (isHermesSourceRoot + findPythonForRoot) finds no interpreter and the
+    // resolution answer becomes 'bootstrap-needed' — the renderer wedges on
+    // the 'Set up Hermes Desktop' first-run choice modal forever (exit 6).
+    // Name the door interpreter explicitly: the same >=3.10 python the door
+    // and the engine seeds run under.
+    if (!py) {
+      try {
+        const shimAbs = hermesBin.startsWith('/') ? hermesBin
+          : execFileSync('/usr/bin/which', [hermesBin], { encoding: 'utf8' }).trim();
+        const shim = fs.readFileSync(shimAbs, 'utf8').slice(0, 4000);
+        const m = shim.match(/^exec\s+(\S*python\S*)\b/m);
+        if (m && fs.existsSync(m[1])) py = m[1];
+      } catch { /* shim unreadable — the door-time probe still runs */ }
+    }
+    if (!py) {
+      for (const cand of ['python3', 'python3.14', 'python3.12', 'python3.10']) {
+        try {
+          execFileSync(cand, ['-c', 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)']);
+          py = cand; break;
+        } catch { /* too old or absent */ }
+      }
+    }
+    let pyAbs = py;
+    if (py && !py.includes('/')) {
+      try { pyAbs = execFileSync('/usr/bin/which', [py], { encoding: 'utf8' }).trim() || py; } catch { /* stays a name */ }
+    }
     const electronEnv = { ...process.env,
       HERMES_DESKTOP_DEV_SERVER: `http://127.0.0.1:${A.rendererPort}`,
       HERMES_DESKTOP_CDP_PORT: String(A.cdpPort),
+      ...(pyAbs ? { HERMES_DESKTOP_PYTHON: pyAbs } : {}),
       HERMES_HOME: B.home, HERMES_GATEWAY_LOCK_DIR: B.locks,
       ...(A.caseName === 'gate' ? { UI2_PROOF_GATE_FAIL_ONCE: '1',
         UI2_PROOF_GATE_POST_DELAY_MS: '2500' } : {}) };
@@ -1562,6 +1591,44 @@ async function main() {
           .find(b => (b.innerText||'').trim() === ${JSON.stringify(gateDef.options[0])});
         return !!b && !b.disabled; })()`))
         die(EX.capture, 'options stayed enabled while the answer POST was in flight — duplicate prevention missing');
+      // 10 (shot FIRST — the notification is the shortest-lived surface):
+      // the success toast IS the receipt (review-2 Q2). Locate it by the
+      // RUN/GATE identity only the ledger line carries: the receipt card
+      // renders question/requester/answer/time but never the run id, so a
+      // container whose text includes `<runId> / <gateId>` is the toast and
+      // not the card (a structural 'Answer saved' walk alone matched the
+      // card — field-proven, qri-proof21 frame 10).
+      await waitText(cdp, 'View exact gate', 15_000);
+      const ledgerNeedle = runId + ' / ' + gateDef.id;
+      let toast = null;
+      const tT0 = Date.now();
+      while (Date.now() - tT0 < 10_000 && !toast) {
+        toast = await cdp.evl(`(() => {
+          const btns = [...document.querySelectorAll('button')].filter(b =>
+            (b.innerText || '').trim() === 'View exact gate');
+          for (const b of btns) {
+            let n = b;
+            for (let i = 0; i < 7 && n.parentElement; i++) {
+              n = n.parentElement;
+              if ((n.innerText || '').includes(${JSON.stringify(ledgerNeedle)})) break;
+            }
+            const txt = (n.innerText || '');
+            if (!txt.includes(${JSON.stringify(ledgerNeedle)})) continue;
+            if (!txt.includes('Answer saved') || !txt.includes('Approve review')
+                || !/\\d{4}-\\d{2}-\\d{2}T/.test(txt)) return null;
+            const r = n.getBoundingClientRect();
+            if (r.width === 0 || r.height === 0) continue;
+            return { x: r.x, y: r.y, width: r.width, height: r.height, text: txt };
+          }
+          return null;
+        })()`);
+        if (!toast) await sleep(300);
+      }
+      if (!toast)
+        die(EX.capture, 'no notification element carries the run / gate ledger line (toast absent or located on the receipt card)');
+      delete toast.text;
+      shots.push({ surface: 'gate_modal', state: 'success toast: answer saved + exact answer + requester + run / gate + stamped time, action View exact gate',
+        ...(await shoot(cdp, A.outDir, '10-gate-toast.png', toast)) });
       // 09: the durable saved receipt (recorded answer, scoped copy).
       await waitText(cdp, 'Answer saved', 20_000);
       const receipt = await cdp.evl(`(() => {
@@ -1581,40 +1648,6 @@ async function main() {
         die(EX.capture, `saved receipt lacks the door-stamped Answered time: ${JSON.stringify(receiptText)}`);
       shots.push({ surface: 'gate_modal', state: 'saved: Answer saved receipt, exact answer, door-stamped Answered time, nothing-restarted scope note',
         ...(await shoot(cdp, A.outDir, '09-gate-saved.png', receipt)) });
-      // 10: the toast — same ledger line, View exact gate action. The toast IS
-      // the receipt (review-2 Q2): answer saved, exact answer, requester,
-      // run / gate, server time — and the View exact gate closure. Locate it
-      // STRUCTURALLY (the toast's own View button -> its container): host
-      // notify may restyle the message (the literal '◇ ' needle missed —
-      // field-proven), and 'the toast carries the receipt' is the assertion.
-      await waitText(cdp, 'View exact gate', 15_000);
-      let toast = null;
-      const tT0 = Date.now();
-      while (Date.now() - tT0 < 10_000 && !toast) {
-        toast = await cdp.evl(`(() => {
-          const btns = [...document.querySelectorAll('button')].filter(b =>
-            (b.innerText || '').trim() === 'View exact gate');
-          const b = btns[btns.length - 1];
-          if (!b) return null;
-          let n = b;
-          for (let i = 0; i < 7 && n.parentElement; i++) {
-            n = n.parentElement;
-            if ((n.innerText || '').includes('Answer saved')) break;
-          }
-          const txt = (n.innerText || '');
-          if (!txt.includes('Answer saved')) return null;
-          const r = n.getBoundingClientRect();
-          return { x: r.x, y: r.y, width: r.width, height: r.height, text: txt };
-        })()`);
-        if (!toast) await sleep(400);
-      }
-      if (!toast) die(EX.capture, 'toast with View exact gate does not carry an Answer saved receipt line');
-      const toastTxt = String(toast.text);
-      if (!/Answer saved[\s\S]*Approve review/.test(toastTxt) || !/\d{4}-\d{2}-\d{2}T/.test(toastTxt))
-        die(EX.capture, `toast receipt line lacks the exact answer or the stamped time: ${JSON.stringify(toastTxt.slice(0, 200))}`);
-      delete toast.text;
-      shots.push({ surface: 'gate_modal', state: 'success toast: answer saved + exact answer + requester + run / gate + stamped time, action View exact gate',
-        ...(await shoot(cdp, A.outDir, '10-gate-toast.png', toast)) });
       // Identity proof: leave the record entirely, then take the toast's (or
       // the receipt's) View exact gate — the route must return to THIS run's
       // gate cell showing the durable receipt, never a bare list.
