@@ -1,0 +1,166 @@
+{
+  "ok": true,
+  "case": "baseline",
+  "identity": {
+    "ts": "2026-11-24T05:25:57.921Z",
+    "case": "baseline",
+    "plugin": {
+      "candidate": "/Users/jacobhausler/code/wf-pr-20261123/desktop/plugin.js",
+      "sha256": "b677dae8fbcc96a1223c0194f8434d719b6c59343d394b2313d7f83820bae4ab",
+      "staged": "/Users/jacobhausler/code/wf-pr-20261123/tests/proof-harness/captured/bd_2026-11-13-iqf/set-1/bench/home/desktop-plugins/hermes-workflows/plugin.js",
+      "staged_sha256": "b677dae8fbcc96a1223c0194f8434d719b6c59343d394b2313d7f83820bae4ab",
+      "staged_sha256_after_load": "b677dae8fbcc96a1223c0194f8434d719b6c59343d394b2313d7f83820bae4ab"
+    },
+    "app": {
+      "repo": "/Users/jacobhausler/.hermes/hermes-agent",
+      "hermes_version": "Hermes Agent v0.23.2+2659.g0f602c5 (2026.9.24) · stable · local 0f602c5f6f18\nInstall directory: /Users/jacobhausler/.hermes/hermes-agent\nInstall method: git\nPython: 3.14.9\nOpenAI SDK: 2.54.0\nUp to date",
+      "commit": "0f602c5f6f18615632535251d62a2db74ce93b69",
+      "dirty_entries": 1,
+      "package_version": "0.0.0",
+      "electronVersion": "unknown",
+      "electron_package_version": "44.10.2"
+    },
+    "bench": {
+      "ports": {
+        "cdp": 9914,
+        "renderer": 5914
+      },
+      "discovery_copied": [
+        "spawn-ledger.json",
+        "auth.json",
+        "config.yaml"
+      ],
+      "plugins_symlink": "/Users/jacobhausler/code/wf-pr-20261123",
+      "profile": "ui2bench",
+      "locks": "/Users/jacobhausler/code/wf-pr-20261123/tests/proof-harness/captured/bd_2026-11-13-iqf/set-1/bench/locks",
+      "pre_ensure": "ok"
+    },
+    "seeds": {
+      "held_gate_run": {
+        "kind": "engine_seed",
+        "run_id": "20261123-232626-ui2-proof-held",
+        "graph_sha256": "a6c5a5113e426ee6745c585997f1eab0d1da0bd9a89933a9dd3d01209434aac7"
+      },
+      "directive_card_echo": {
+        "kind": "engine_seed",
+        "method": "oneshot_echo",
+        "ask_sha256": "8917235ebe9a0c5214621f666ba27921be72c962b9fe11e53c2b698ce9925015",
+        "stdout_sha256": "778ce7d0aaeaa43c89026a8ce6b1c5f12f0adbe9481299872c65cfad5953521b",
+        "session_id": "local-4c7cfb7866fc47d6de855ddbb0bdf671912d95f1ef420f83c45717f2723926a9",
+        "model": "seat-default",
+        "session_row_hit": {
+          "x": 126,
+          "y": 370,
+          "t": "Echo workflow ID\nnow"
+        }
+      }
+    },
+    "config_touched": {
+      "plugins.entries.hermes-workflows.settings.runs_root": {
+        "before": "/Users/jacobhausler/.hermes/workflows/20261123-204418-estate-bead-crew/work/beadworker.1/proof/gate10/bench/runs",
+        "after": "/Users/jacobhausler/code/wf-pr-20261123/tests/proof-harness/captured/bd_2026-11-13-iqf/set-1/bench/runs",
+        "scope": "bench profile ui2bench (isolated — shared config untouched)"
+      },
+      "plugins.entries.hermes-workflows.settings.tray": {
+        "before": true,
+        "after": true,
+        "scope": "bench profile ui2bench (isolated — shared config untouched)"
+      }
+    },
+    "candidate_head": "50e02a046162250b1dfea5c9d7b8f6c1f3111dfd",
+    "merge_base_origin_main": "ad5f110dad3fbdf2f271ec477f642ff5f80300bf",
+    "registry": {
+      "routes": [
+        "hermes-workflows:page"
+      ],
+      "panes": [
+        "sessions",
+        "workspace",
+        "terminal",
+        "files",
+        "review",
+        "hermes-bots:pane",
+        "hermes-workflows:pane"
+      ],
+      "directives": [
+        "transcript.preview",
+        "hermes-workflows:directive"
+      ],
+      "composer": [
+        "hermes-workflows:session-strip"
+      ]
+    },
+    "plugin_records": {
+      "hermes-bots": {
+        "error": null,
+        "active": false
+      },
+      "kanban": {
+        "error": null,
+        "active": false
+      },
+      "radio": {
+        "error": null,
+        "active": false
+      },
+      "hermes-workflows": {
+        "error": null,
+        "active": false
+      }
+    },
+    "api_attachment": {
+      "via": "registry + live seeded run row rendered through the plugin API route",
+      "run_id": "20261123-232626-ui2-proof-held"
+    },
+    "renderer_probe": {
+      "script_srcs": 2
+    }
+  },
+  "shots": [
+    {
+      "surface": "pane_workflows",
+      "state": "runs list, seeded held-gate run",
+      "file": "captures/01-pane-runs.png",
+      "bytes": 305228,
+      "sha256": "82291aff841c9e8317843d438b7dba3b5109d9423c6b5b8e44fa7ed6d88de5c0",
+      "clip": "viewport",
+      "reviewed": false,
+      "content_file": "contents/01-pane-runs.txt",
+      "content_sha256": "1e4a910be9f8afa087b969b365363723ceda93ed574348f02985a67084fb5c4a"
+    },
+    {
+      "surface": "pane_workflows",
+      "state": "run detail, held gate question",
+      "file": "captures/02-pane-run-detail.png",
+      "bytes": 274634,
+      "sha256": "260bc62379951f6c4e2d36e01f895d6070e65fc2eb76d8164b1ec6770d600dd3",
+      "clip": "viewport",
+      "reviewed": false,
+      "content_file": "contents/02-pane-run-detail.txt",
+      "content_sha256": "72b725639ca4639db6c512076ff100549e8814de77fdda188f9af6c809800f14"
+    },
+    {
+      "surface": "directive_card",
+      "state": "in-chat card for seeded held-gate run",
+      "file": "captures/04-directive-card.png",
+      "bytes": 47003,
+      "sha256": "fe15351c38348b49d29027222cd0a133866ad200ad6d7cd4fb93826abca117ad",
+      "clip": "element",
+      "reviewed": false,
+      "content_file": "contents/04-directive-card.txt",
+      "content_sha256": "49b42e22a36447c616de45259e89ba95ccea910d835c27a13c472e539e6c7acf"
+    },
+    {
+      "surface": "directive_card",
+      "state": "full viewport with card",
+      "file": "captures/03-directive-card-full.png",
+      "bytes": 228280,
+      "sha256": "56b179a715c5d14cf22722a4bf1a73a52eb1c133cd77a069802ab4141ee437ed",
+      "clip": "viewport",
+      "reviewed": false,
+      "content_file": "contents/03-directive-card-full.txt",
+      "content_sha256": "49b42e22a36447c616de45259e89ba95ccea910d835c27a13c472e539e6c7acf"
+    }
+  ],
+  "review_note": "reviewed:false means THIS tool run only proved PNG magic+size; visual review (vision_analyze per hermes-workflows-ui-qa) is mandatory before any layout claim"
+}

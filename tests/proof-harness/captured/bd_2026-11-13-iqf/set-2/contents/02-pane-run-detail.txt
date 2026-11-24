@@ -1,0 +1,16 @@
+@local-<HEX-ID>
+<RUN-CLOCK>
+gate held
+say
+hold
+held
+UI2 proof: release this held gate after capture?
+requester: @local-<HEX-ID>
+release
+stop
+tail
+pending
+timeline
+<1s
+hold
+Runtime not ready

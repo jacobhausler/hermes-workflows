@@ -1,0 +1,4 @@
+# Default --out scratch (timestamped run dirs) is NOT the evidence; the
+# committed proof sets are the explicit set-* directories.
+run-*/
+*.stale-*/

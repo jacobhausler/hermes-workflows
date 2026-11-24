@@ -325,7 +325,10 @@ SOURCE_ONLY_TESTS = {
     # bd_2026-11-13-l62: the ui2-proof failure-semantics spec executes the
     # source-only scripts/ui2-proof/capture.mjs driver (est-4vnq finding-4
     # shape: a shipped test that runs an unpackaged helper dies at an unpacked root).
-    "tests/test_ui2_proof_driver.mjs": "executes source-only scripts/ui2-proof/capture.mjs (real-app proof driver)",
+    "tests/test_ui2_proof_driver.mjs": "executes source-only tests/proof-harness/capture.mjs (real-app proof driver)",
+    # bd_2026-11-13-iqf (slice A): the double-run spec reads the committed capture sets under
+    # tests/proof-harness/captured/ and imports the source-only driver — same est-4vnq finding-4 shape.
+    "tests/test_proof_harness_repro.mjs": "executes source-only tests/proof-harness/capture.mjs and reads tests/proof-harness/captured/ sets",
 }
 
 # Source-only SCRIPTS: repository/estate CI tooling that never travels in the

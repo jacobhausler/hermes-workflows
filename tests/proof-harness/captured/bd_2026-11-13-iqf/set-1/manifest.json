@@ -1,0 +1,104 @@
+{
+  "schema": "proof-harness/1",
+  "run_ts": "2026-11-24T05:25:57.921Z",
+  "case": "baseline",
+  "only": [
+    "directive_card",
+    "pane_workflows"
+  ],
+  "surfaces": [
+    "directive_card",
+    "pane_workflows"
+  ],
+  "candidate": {
+    "plugin": "desktop/plugin.js",
+    "plugin_sha256": "b677dae8fbcc96a1223c0194f8434d719b6c59343d394b2313d7f83820bae4ab",
+    "repo_head": "50e02a046162250b1dfea5c9d7b8f6c1f3111dfd",
+    "merge_base_origin_main": "ad5f110dad3fbdf2f271ec477f642ff5f80300bf"
+  },
+  "app": {
+    "repo": "/Users/jacobhausler/.hermes/hermes-agent",
+    "hermes_version": "Hermes Agent v0.23.2+2659.g0f602c5 (2026.9.24) · stable · local 0f602c5f6f18\nInstall directory: /Users/jacobhausler/.hermes/hermes-agent\nInstall method: git\nPython: 3.14.9\nOpenAI SDK: 2.54.0\nUp to date",
+    "commit": "0f602c5f6f18615632535251d62a2db74ce93b69",
+    "dirty_entries": 1,
+    "package_version": "0.0.0",
+    "electronVersion": "unknown",
+    "electron_package_version": "44.10.2"
+  },
+  "seeds": {
+    "held_gate_run": {
+      "kind": "engine_seed",
+      "run_id": "20261123-232626-ui2-proof-held",
+      "graph_sha256": "a6c5a5113e426ee6745c585997f1eab0d1da0bd9a89933a9dd3d01209434aac7"
+    },
+    "directive_card_echo": {
+      "kind": "engine_seed",
+      "method": "oneshot_echo",
+      "ask_sha256": "8917235ebe9a0c5214621f666ba27921be72c962b9fe11e53c2b698ce9925015",
+      "stdout_sha256": "778ce7d0aaeaa43c89026a8ce6b1c5f12f0adbe9481299872c65cfad5953521b",
+      "session_id": "local-4c7cfb7866fc47d6de855ddbb0bdf671912d95f1ef420f83c45717f2723926a9",
+      "model": "seat-default",
+      "session_row_hit": {
+        "x": 126,
+        "y": 370,
+        "t": "Echo workflow ID\nnow"
+      }
+    }
+  },
+  "captures": [
+    {
+      "surface": "pane_workflows",
+      "state": "runs list, seeded held-gate run",
+      "file": "captures/01-pane-runs.png",
+      "bytes": 305228,
+      "sha256": "82291aff841c9e8317843d438b7dba3b5109d9423c6b5b8e44fa7ed6d88de5c0",
+      "clip": "viewport",
+      "content_file": "contents/01-pane-runs.txt",
+      "content_sha256": "1e4a910be9f8afa087b969b365363723ceda93ed574348f02985a67084fb5c4a",
+      "reviewed": false
+    },
+    {
+      "surface": "pane_workflows",
+      "state": "run detail, held gate question",
+      "file": "captures/02-pane-run-detail.png",
+      "bytes": 274634,
+      "sha256": "260bc62379951f6c4e2d36e01f895d6070e65fc2eb76d8164b1ec6770d600dd3",
+      "clip": "viewport",
+      "content_file": "contents/02-pane-run-detail.txt",
+      "content_sha256": "72b725639ca4639db6c512076ff100549e8814de77fdda188f9af6c809800f14",
+      "reviewed": false
+    },
+    {
+      "surface": "directive_card",
+      "state": "in-chat card for seeded held-gate run",
+      "file": "captures/04-directive-card.png",
+      "bytes": 47003,
+      "sha256": "fe15351c38348b49d29027222cd0a133866ad200ad6d7cd4fb93826abca117ad",
+      "clip": "element",
+      "content_file": "contents/04-directive-card.txt",
+      "content_sha256": "49b42e22a36447c616de45259e89ba95ccea910d835c27a13c472e539e6c7acf",
+      "reviewed": false
+    },
+    {
+      "surface": "directive_card",
+      "state": "full viewport with card",
+      "file": "captures/03-directive-card-full.png",
+      "bytes": 228280,
+      "sha256": "56b179a715c5d14cf22722a4bf1a73a52eb1c133cd77a069802ab4141ee437ed",
+      "clip": "viewport",
+      "content_file": "contents/03-directive-card-full.txt",
+      "content_sha256": "49b42e22a36447c616de45259e89ba95ccea910d835c27a13c472e539e6c7acf",
+      "reviewed": false
+    }
+  ],
+  "repro": {
+    "content_sha256_by_file": {
+      "captures/01-pane-runs.png": "1e4a910be9f8afa087b969b365363723ceda93ed574348f02985a67084fb5c4a",
+      "captures/02-pane-run-detail.png": "72b725639ca4639db6c512076ff100549e8814de77fdda188f9af6c809800f14",
+      "captures/04-directive-card.png": "49b42e22a36447c616de45259e89ba95ccea910d835c27a13c472e539e6c7acf",
+      "captures/03-directive-card-full.png": "49b42e22a36447c616de45259e89ba95ccea910d835c27a13c472e539e6c7acf"
+    },
+    "combined_sha256": "af1cf6bb4af4cdf6da8746e802db9d586374f87db4cfad026ef5c0ae68b6b4fb"
+  },
+  "review_note": "reviewed:false means THIS tool run only proved PNG magic+size; visual review (vision_analyze per hermes-workflows-ui-qa) is mandatory before any layout claim"
+}

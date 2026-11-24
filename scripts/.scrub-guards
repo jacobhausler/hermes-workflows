@@ -223,3 +223,26 @@ regex:^\s*CHANNEL:\s*"[0-9]{17,20}"\s*$
 # exact token in a NUL-prefixed .md; neutralizing it would pin nothing. Same
 # fixture-identity GUARD class as tests/test_scrub_yml_166b.py (file-scope).
 tests/test_scrub_nul_readme_580.py
+
+# ---- Captured real-app evidence (bd_2026-11-13-iqf slice A) ----
+# The committed capture pair is BYTE-IMMUTABLE proof (manifest sha256-pinned):
+# editing captured bytes to satisfy the audit would rewrite the proof itself.
+# The pane-column content layers legitimately NAME the seat model (the composer
+# chip renders it) and the provenance dumps pin the capturing host's absolute
+# paths. Guards scoped to the evidence tree only; future runs redact ~ at
+# write time (capture.mjs provenance serialization law), the content-layer
+# chip stays guarded by the immutability law.
+tests/proof-harness/captured/bd_2026-11-13-iqf/set-1/contents/01-pane-runs.txt
+tests/proof-harness/captured/bd_2026-11-13-iqf/set-1/contents/02-pane-run-detail.txt
+tests/proof-harness/captured/bd_2026-11-13-iqf/set-1/contents/03-directive-card-full.txt
+tests/proof-harness/captured/bd_2026-11-13-iqf/set-1/contents/04-directive-card.txt
+tests/proof-harness/captured/bd_2026-11-13-iqf/set-1/identity.json
+tests/proof-harness/captured/bd_2026-11-13-iqf/set-1/report.json
+tests/proof-harness/captured/bd_2026-11-13-iqf/set-1/manifest.json
+tests/proof-harness/captured/bd_2026-11-13-iqf/set-2/contents/01-pane-runs.txt
+tests/proof-harness/captured/bd_2026-11-13-iqf/set-2/contents/02-pane-run-detail.txt
+tests/proof-harness/captured/bd_2026-11-13-iqf/set-2/contents/03-directive-card-full.txt
+tests/proof-harness/captured/bd_2026-11-13-iqf/set-2/contents/04-directive-card.txt
+tests/proof-harness/captured/bd_2026-11-13-iqf/set-2/identity.json
+tests/proof-harness/captured/bd_2026-11-13-iqf/set-2/report.json
+tests/proof-harness/captured/bd_2026-11-13-iqf/set-2/manifest.json
