@@ -1598,8 +1598,23 @@ async function main() {
       };
       // The held card is on screen (frame 02): its claim must ALREADY be in
       // the pool with a nonzero, timestamp-derived phase — a mount-anchored
-      // animation would report delay 0.
+      // animation would report delay 0. The canvas paints AFTER the gate
+      // question text (runQuery lands later than the list cell — the field-
+      // proven 'Loading…' lesson), so wait for the card first.
       const cardSel = `[data-motion-id="attention:${runId}:hold"]`;
+      {
+        const cT0 = Date.now();
+        let up = false;
+        while (!up && Date.now() - cT0 < 40_000) {
+          up = await cdp.evl(`!!document.querySelector(${JSON.stringify(cardSel)})`);
+          if (!up) await sleep(750);
+        }
+        if (!up) {
+          try { await shoot(cdp, A.outDir, '00-diagnostic-nocard.png'); } catch { /* best effort */ }
+          const names = await cdp.evl(`[...document.querySelectorAll('[data-motion]')].map(e => e.dataset.motionId ?? e.dataset.motion)`)
+          die(EX.api, `the held gate NodeCard never painted (data-motion elements seen: ${JSON.stringify(names)}) — diagnostic shot in captures/`)
+        }
+      }
       const seen0 = await step('held-card claim admitted (seeded gate hold)', () => cdp.evl(`(() => {
         const el = document.querySelector(${JSON.stringify(cardSel)});
         if (!el) return null;
