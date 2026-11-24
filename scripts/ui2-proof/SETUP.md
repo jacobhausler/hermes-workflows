@@ -124,7 +124,9 @@ The seed SIGKILLs the isolated runner at `gate.held` (seed field
 disk and refuses the run unless: the answer matches byte-for-byte, `_ui` is
 literally true, `events.jsonl` is byte-identical before/after (Nothing
 restarted — verified for THIS tested runner only, not a universal scheduler
-claim), and the gate node was never consumed. Frames 07-11; report.json
+claim), and the gate node was never consumed. Frames 07-11 (08b = a FORCED
+real `{ok:false}` door response rendered as the inline failure with
+retryable options and no receipt); report.json
 entries are `reviewed:false` until the mandatory vision pass.
 
 ## Verification (this bead's command)
