@@ -240,6 +240,38 @@ retryable options and no receipt); report.json
 entries are `reviewed:false` until the mandatory vision pass.
 
 
+## The `navigation` case (bd_2026-11-13-cj2)
+
+`node scripts/ui2-proof/capture.mjs --case navigation --out DIR` (the shim
+forwards to this driver — the landed file is tests/proof-harness/capture.mjs;
+the shim exists because work orders name the scripts/ui2-proof path) proves
+the stored-session navigation adapter on the REAL renderer with ZERO model
+tokens for the linked sessions:
+
+* seeds — one `door_run` engine seed (say → 2-item fan of zero-token fake
+  children → hold). The children run through `tests/fake_hermes.py` under
+  `child_env` FAKE_SESSION_STORED=1 + FAKE_SESSION_MESSAGES=1: they register
+  STORED-SHAPE session rows (`local-` + sha256(title), source `local`) with
+  two readable message rows each in the BENCH state.db. `owner_echo`: the
+  real one-shot is launched FIRST and the door launch is stamped on-behalf of
+  it (WF_OWNER_SESSION + HERMES_UI_SESSION_ID — the tray seed's law), so the
+  header's recorded owner is a real desktop session;
+* frames — 20 record page (NodePanel `recorded chat` + header `owner chat`,
+  both on ids the driver reads back FROM the bench state.db), 21 the link
+  cell (full id + copy), 22 destination (transcript content identity), 23
+  back-restored (same selection, focus on the launching link), 24 EXPIRED —
+  rows deleted at the source, pane renders `Session unavailable`, the route
+  never moved (zero navigation calls), 25 ROTATION — rows re-inserted under
+  fresh ids, the link re-arms on the FRESH id and opens exactly that session,
+  26 the owner round trip, 27 full viewport;
+* the read-only law is asserted, not claimed: per-session message counts are
+  identical before/after the whole walk, the run's events.jsonl is
+  byte-identical (nothing resumed or restarted), and the gate node stays
+  unconsumed for teardown.
+
+Expired and rotated re-renders ride the PANE'S OWN 4 s poll loop (the run
+stays live at its held gate) — no mock, no reload dance.
+
 ## Verification (slice A command)
 
 ```sh

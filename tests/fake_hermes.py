@@ -7,7 +7,7 @@ Behavior markers inside the prompt:
   otherwise       -> returns {"result": "ok", "goal": <first line>}
 Every invocation appends one line to $FAKE_LOG so tests can count spawns.
 """
-import sys, os, json, time
+import sys, os, json, time, hashlib
 
 args = sys.argv[1:]
 _FAKE_HOME = os.environ.get("HERMES_HOME") or os.path.join(os.path.dirname(os.path.abspath(__file__)), ".tmp-fake-home")
@@ -166,11 +166,35 @@ def _fake_state_row(n):
               "cache_read_tokens int, reasoning_tokens int, api_call_count int, tool_call_count int, estimated_cost_usd real, "
               "last_activity_at real, last_activity_description text, ended_at real, started_at real)")
     t = time.time()
-    c.execute("insert or replace into sessions values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-              ("f-" + title, title, "fake", "fake-provider", 0, 0, 0, 0, int(n), 0, 0.0, t, "", t, t))
+    if os.environ.get("FAKE_SESSION_STORED"):
+        # ui2-proof navigation case (bd_2026-11-13-cj2): write the row through
+        # EXPLICIT columns (the real gateway schema is wider than this fake's;
+        # a positional 15-value insert only matches the fake-created table)
+        # and register the id in the DESKTOP STORED shape — 'local-' + a
+        # deterministic sha256 of the title (same id every re-run of the same
+        # graph, matching the estate-measured stored-session shape). With
+        # FAKE_SESSION_MESSAGES=1 the session also gets one user + one
+        # assistant row, so the opened destination carries readable content.
+        sid = "local-" + hashlib.sha256(title.encode("utf-8")).hexdigest()
+        c.execute("insert or replace into sessions (id, title, model, billing_provider, input_tokens, output_tokens,"
+                  " cache_read_tokens, reasoning_tokens, api_call_count, tool_call_count, estimated_cost_usd,"
+                  " last_activity_at, last_activity_description, ended_at, started_at, source)"
+                  " values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                  (sid, title, "fake", "fake-provider", 0, 0, 0, 0, int(n), 0, 0.0, t, "ui2-proof", t, t, "local"))
+        if os.environ.get("FAKE_SESSION_MESSAGES"):
+            c.execute("create table if not exists messages (id integer primary key autoincrement, session_id text,"
+                      " role text not null, content text, timestamp real not null)")
+            c.execute("delete from messages where session_id=?", (sid,))   # idempotent re-run
+            c.execute("insert into messages (session_id, role, content, timestamp) values (?,?,?,?)",
+                      (sid, "user", "UI2-PROOF-CJ2 recorded question line", t))
+            c.execute("insert into messages (session_id, role, content, timestamp) values (?,?,?,?)",
+                      (sid, "assistant", '{"result": "ui2-proof-cj2 recorded answer"}', t))
+    else:
+        c.execute("insert or replace into sessions values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                  ("f-" + title, title, "fake", "fake-provider", 0, 0, 0, 0, int(n), 0, 0.0, t, "", t, t))
     c.commit(); c.close()
-if os.environ.get("FAKE_API_CALLS"):
-    _fake_state_row(os.environ["FAKE_API_CALLS"])
+if os.environ.get("FAKE_API_CALLS") or os.environ.get("FAKE_SESSION_STORED"):
+    _fake_state_row(os.environ.get("FAKE_API_CALLS") or 3)
 _FAKE_MODE = os.environ.get("FAKE_MODE")
 if _FAKE_MODE == "transition_latch":
     import importlib.util as _iu

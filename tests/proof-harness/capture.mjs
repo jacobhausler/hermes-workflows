@@ -1048,12 +1048,50 @@ async function main() {
     if (!py) die(EX.preflight, 'no >=3.10 interpreter found for the door (set UI2_PROOF_PYTHON)');
     // A case may run its door children through the repo's zero-token fake CLI
     // (tests/fake_hermes.py): not +x, so wrap it with the discovered python.
+    // child_env (bd cj2): per-seed env the wrapper exports before exec — the
+    // navigation case uses it to make the fake register stored-shape session
+    // rows (FAKE_SESSION_STORED/FAKE_SESSION_MESSAGES) instead of f-* rows.
     let childBin = hermesAbs;
     if (engSeed?.child_binary) {
+      const envSet = Object.entries(engSeed.child_env || {})
+        .map(([k, v]) => `${k}=${JSON.stringify(String(v))} `).join('');
       const wrapper = path.join(A.outDir, 'seed', 'fake-hermes.sh');
-      fs.writeFileSync(wrapper, `#!/bin/sh\nexec ${py} ${path.join(REPO, engSeed.child_binary)} "$@"\n`);
+      fs.writeFileSync(wrapper, `#!/bin/sh\n${envSet}exec ${py} ${path.join(REPO, engSeed.child_binary)} "$@"\n`);
       fs.chmodSync(wrapper, 0o755);
       childBin = wrapper;
+    }
+    // owner_echo (bd cj2, navigation case): the RECORDED owner must exist
+    // BEFORE the door launch, so the one-shot echo runs here and its session
+    // id — parsed from the one-shot's own output, never a fixture edit — rides
+    // the launch env through the door's on-behalf stamp (owner.session_id +
+    // owner.ui_session_id in run.json, the same WF_OWNER_SESSION law the tray
+    // seed proved).
+    const launchOwnerEcho = (od) => {
+      const ask = path.join(A.outDir, 'seed', 'owner-echo.txt');
+      fs.writeFileSync(ask, od.owner_echo_text
+        || 'Echo this line verbatim and nothing else:\nUI2-PROOF-CJ2 owner launch receipt\n');
+      const chatArgs = ['--profile', BENCH_PROFILE, 'chat', '--query-file', ask, '--oneshot', '-Q', '--source', 'desktop'];
+      if (od.model) chatArgs.push('-m', od.model);
+      if (od.provider) chatArgs.push('--provider', od.provider);
+      const r = spawnSync(hermesAbs, chatArgs, {
+        encoding: 'utf8', timeout: 240_000, maxBuffer: 32 * 1024 * 1024, env: benchEnv });
+      if (r.error || r.status !== 0)
+        die(EX.api, `owner echo seed failed (hermes chat oneshot): ${String(r.stderr || r.error?.message).slice(0, 300)}`);
+      fs.writeFileSync(path.join(A.outDir, 'seed', 'oneshot-output.txt'),
+        (r.stdout || '') + '\n--- stderr ---\n' + (r.stderr || ''));
+      const sidMatch = `${r.stderr || ''}\n${r.stdout || ''}`.match(/session_id:\s*(\S+)/);
+      identity.seeds.directive_card_echo = { kind: 'engine_seed', method: 'oneshot_echo',
+        ask_sha256: sha256(ask), stdout_sha256: crypto.createHash('sha256').update(r.stdout || '').digest('hex'),
+        session_id: sidMatch ? sidMatch[1] : null,
+        model: od.model || 'seat-default' };
+      if (!sidMatch) die(EX.api, 'owner echo printed no session_id — recorded-owner law needs the id from its own output');
+      return sidMatch[1];
+    };
+    let navOwnerSid = null;
+    if (engSeed?.owner_echo) {
+      const od = (c.seeds || []).find(s => s.name === engSeed.owner_echo);
+      if (!od) die(EX.preflight, `owner_echo names no seed: ${engSeed.owner_echo}`);
+      navOwnerSid = launchOwnerEcho(od);
     }
     if (engSeed) try {
       runId = execFileSync(py, [path.join(HERE, 'seed_run.py'),
@@ -1062,15 +1100,20 @@ async function main() {
         // pill/tray/pane prove the instance-label-first title law.
         ...(engSeed.lane_key ? ['--lane-key', String(engSeed.lane_key)] : []),
         '--wait-held-s', String(engSeed.wait_held_s ?? 25)],
-        { encoding: 'utf8', timeout: 60_000,
-          env: { ...process.env, WF_RUNS_ROOT: B.runs, HERMES_WF_HERMES_BIN: childBin, HERMES_HOME: B.home, HERMES_GATEWAY_LOCK_DIR: B.locks } }).trim();
+        // The seed's own hold budget bounds the CLI wait (bd cj2: the nav
+        // seed's gate holds only AFTER its fan runs — 120 s, not 25).
+        { encoding: 'utf8', timeout: ((engSeed.wait_held_s ?? 25) + 30) * 1000,
+          env: { ...process.env, WF_RUNS_ROOT: B.runs, HERMES_WF_HERMES_BIN: childBin, HERMES_HOME: B.home, HERMES_GATEWAY_LOCK_DIR: B.locks,
+                 ...(navOwnerSid ? { WF_OWNER_SESSION: navOwnerSid, HERMES_UI_SESSION_ID: navOwnerSid } : {}) } }).trim();
     } catch (e) {
       die(EX.api, `engine seed launch failed (seed_run.py): ${String(e.stderr || e.message).slice(0, 400)}`);
     }
     if (runId) {
       identity.seeds.held_gate_run = { kind: 'engine_seed', run_id: runId, graph_sha256: sha256(graphFile),
                                        // l8i: the manifest names the label the captured frames must show.
-                                       ...(engSeed.lane_key ? { lane_key: String(engSeed.lane_key) } : {}) };
+                                       ...(engSeed.lane_key ? { lane_key: String(engSeed.lane_key) } : {}),
+        // cj2: the navigation walk reads the recorded owner id back from here.
+        ...(navOwnerSid ? { owner_session_id: navOwnerSid } : {}) };
       seededRuns.push(runId);
     }
     // Fixture census (coverage case): rows materialized THROUGH the shared
@@ -1560,10 +1603,14 @@ async function main() {
     // card shows the same question text (field-proven: shot 02 was 'Loading…'
     // while the question wait passed on the tray card).
     {
+      // The gate node by TYPE, not position (bd cj2: the navigation seed's
+      // gate is not nodes[1]; baseline/gate keep the identical needle).
+      const gateQ = (engSeed.graph.nodes.find(n => n.type === 'gate') || {}).question;
       const qT0 = Date.now();
       let qRetryT0 = Date.now();
       for (;;) {
-        const hit = await evlPoll(locateJS(engSeed.graph.nodes[1].question, { region: paneRegion }), { err: 'reconnecting' });
+        if (!gateQ) break;
+        const hit = await evlPoll(locateJS(gateQ, { region: paneRegion }), { err: 'reconnecting' });
         if (!hit.err) break;
         try { if (await retryGateIfModal(cdp)) qRetryT0 = Date.now(); } catch { /* eval transient */ }
         // die only when the wall AND the post-Retry reload grace are both past
@@ -2169,6 +2216,153 @@ async function main() {
       }
       shots.push({ surface: 'tray_row', state: 'slim live-run tray row, owner-stamped live run', ...(await shoot(cdp, A.outDir, '05-tray-row.png', tray)) });
       shots.push({ surface: 'tray_row', state: 'full viewport with tray', ...(await shoot(cdp, A.outDir, '06-tray-full.png')) });
+    }
+
+    // -- navigation (bd_2026-11-13-cj2): read-only stored-session routes on
+    // the record page. Every expected ID is read back from the BENCH state.db
+    // (the source of truth this proof may cite); the DOM is only ever asked
+    // what it SHOWS and compared against that. The pane's own 4 s poll loop
+    // drives the expired/rotation re-renders — no mock, no reload dance, and
+    // the run stays parked at its held gate until teardown stops it.
+    if (A.caseName === 'navigation') {
+      const runDir = path.join(B.runs, runId);
+      const db = path.join(B.home, 'state.db');
+      const dbJson = (sql, args = []) => JSON.parse(execFileSync(py, ['-c',
+        'import sqlite3,sys,json\nc=sqlite3.connect(sys.argv[1])\nprint(json.dumps(c.execute(sys.argv[2], list(sys.argv[3:])).fetchall()))',
+        db, sql, ...args], { encoding: 'utf8' }));
+      const dbRun = (sql, args = []) => execFileSync(py, ['-c',
+        'import sqlite3,sys\nc=sqlite3.connect(sys.argv[1])\nc.execute(sys.argv[2], list(sys.argv[3:]));c.commit()',
+        db, sql, ...args]);
+      const shaFile = f => crypto.createHash('sha256').update(fs.readFileSync(f)).digest('hex');
+      const ownerSid = identity.seeds.directive_card_echo?.session_id;
+      if (!ownerSid) die(EX.preflight, 'navigation needs the recorded owner one-shot session');
+      const rows0 = dbJson(
+        'select id, title, source, started_at, ended_at, model, billing_provider, input_tokens, output_tokens,' +
+        ' cache_read_tokens, reasoning_tokens, api_call_count, tool_call_count, estimated_cost_usd,' +
+        ' last_activity_at, last_activity_description from sessions where title like ? order by title, started_at, rowid',
+        [`wf:${runId}:work:%`]);
+      if (rows0.length !== 2) die(EX.api, `navigation children registered ${rows0.length} session rows, expected 2`);
+      if (!rows0.every(r => /^local-[0-9a-f]{64}$/.test(r[0]) && r[2] === 'local'))
+        die(EX.api, `navigation child rows are not stored-shape local rows: ${JSON.stringify(rows0.map(r => [r[0], r[2]]))}`);
+      const msgCount = sid => dbJson('select count(*) from messages where session_id=?', [sid])[0][0];
+      if (!rows0.every(r => msgCount(r[0]) === 2)) die(EX.api, 'navigation child sessions carry no readable message rows');
+      const expectedIds = rows0.map(r => r[0]);                    // title order = the fold's order
+      const latestId = expectedIds[expectedIds.length - 1];
+      const countsBefore = Object.fromEntries(expectedIds.concat(ownerSid).map(id => [id, msgCount(id)]));
+      const eventsBefore = shaFile(path.join(runDir, 'events.jsonl'));
+      const linkTitle = () => cdp.evl(`(() => { const b=[...document.querySelectorAll('button')]
+          .find(b => (b.innerText||'').trim() === 'open recorded chat'); return b ? b.getAttribute('title') : null })()`);
+      // The NodePanel section is open iff the 'recorded chat' label renders —
+      // the pill click TOGGLES selection, so re-click only while the panel is
+      // closed (blind re-clicks would deselect it mid-walk).
+      const panelOpen = () => cdp.evl(`(document.body.innerText||'').includes('recorded chat')`).catch(() => false);
+      const gotoDetail = async () => {
+        const t0 = Date.now();
+        for (;;) {
+          if (!(await panelOpen())) {
+            try { await trustedClick(cdp, 'work', { exact: true, region: paneRegion }); } catch { /* repaint */ }
+            await sleep(600);
+            continue;
+          }
+          const t = await linkTitle().catch(() => null);
+          if (t) return t;
+          if (Date.now() - t0 > 30_000) die(EX.api, 'the work pill never armed the NodePanel recorded-chat link');
+          await sleep(1000);
+        }
+      };
+      const t = await gotoDetail();
+      if (t !== latestId) die(EX.capture, `the link rides ${t} — expected the newest recorded id ${latestId}`);
+      const ownerTitle = await cdp.evl(`(() => { const b=[...document.querySelectorAll('button')]
+          .find(b => (b.innerText||'').trim() === 'owner chat'); return b ? b.getAttribute('title') : null })()`);
+      if (ownerTitle !== ownerSid) die(EX.capture, `the owner link rides ${JSON.stringify(ownerTitle)} — expected the recorded owner ${ownerSid}`);
+      shots.push({ surface: 'stored_session_link',
+        state: 'record page: NodePanel recorded-chat link + header owner-chat link, both on the RECORDED ids',
+        ...(await shoot(cdp, A.outDir, '20-nav-record-detail.png', null, await stableColumnText(paneRegion))) });
+      const cellRect = await rectOf(cdp, 'open recorded chat');
+      shots.push({ surface: 'stored_session_link', state: 'the NodePanel link cell (label, full recorded id, copy affordance)',
+        ...(await shoot(cdp, A.outDir, '21-nav-recorded-chat-cell.png', cellRect)) });
+      // Trusted click -> the recorded destination (content identity: only the
+      // seeded fake session carries the recorded line).
+      await trustedClick(cdp, 'open recorded chat', { exact: true });
+      await waitText(cdp, 'UI2-PROOF-CJ2 recorded question line', 25_000);
+      const dest = await cdp.evl(`decodeURIComponent(location.href)`);
+      if (!dest.includes(latestId)) die(EX.capture, `destination ${JSON.stringify(dest)} is not the recorded id`);
+      shots.push({ surface: 'stored_session_link', state: 'destination: the recorded child session opened on its own stored id (transcript content identity)',
+        ...(await shoot(cdp, A.outDir, '22-nav-destination.png', null, await cdp.evl(columnTextJS(paneRegion)))) });
+      // Back restores the record page, the SAME selection, and re-focuses the
+      // launching link exactly once (the plugin-owned one-shot token).
+      await cdp.evl(`history.back()`);
+      await waitText(cdp, 'open recorded chat', 25_000);
+      const backHash = await cdp.evl(`location.href`);
+      if (!/workflows/.test(backHash)) die(EX.capture, `Back did not restore the record page (hash ${JSON.stringify(backHash)})`);
+      const focusLabel = await cdp.evl(`(document.activeElement && (document.activeElement.innerText || document.activeElement.tagName || '').trim()) || 'none'`);
+      if (!String(focusLabel).includes('open recorded chat'))
+        die(EX.capture, `Back restored the page but focus landed on ${JSON.stringify(focusLabel)}, not the launching link`);
+      shots.push({ surface: 'stored_session_link', state: 'back: record page restored, same node selected, focus on the launching link',
+        ...(await shoot(cdp, A.outDir, '23-nav-back-restored.png', await rectOf(cdp, 'open recorded chat'))) });
+      // EXPIRY: delete the rows AT THE SOURCE. The link re-renders
+      // 'Session unavailable' on the pane's own poll; no navigation happened
+      // and none was attempted (the hash never moved, the composer stayed shut).
+      dbRun('delete from messages where session_id in (select id from sessions where title like ?)', [`wf:${runId}:work:%`]);
+      dbRun('delete from sessions where title like ?', [`wf:${runId}:work:%`]);
+      await waitText(cdp, 'Session unavailable', 30_000);
+      if (await linkTitle().catch(() => null)) die(EX.capture, 'the link stayed armed after its row expired at the source');
+      const expHash = await cdp.evl(`location.href`);
+      if (!/workflows/.test(expHash)) die(EX.capture, `the expired row triggered a navigation (${expHash})`);
+      shots.push({ surface: 'stored_session_link', state: 'expired row at the source: Session unavailable, zero navigation, id never faked',
+        ...(await shoot(cdp, A.outDir, '24-nav-expired.png', await rectOf(cdp, 'Session unavailable'))) });
+      // ROTATION: the same node records a NEW session (the read model re-joins
+      // the row; the link must follow the fresh id — never the cached first).
+      const ROT0 = 'local-' + 'e'.repeat(64), ROT1 = 'local-' + 'f'.repeat(64);
+      const NOW = Date.now() / 1000;
+      rows0.forEach((r, i) => dbRun(
+        'insert into sessions (id, title, source, started_at, ended_at, model, billing_provider, input_tokens,' +
+        ' output_tokens, cache_read_tokens, reasoning_tokens, api_call_count, tool_call_count, estimated_cost_usd,' +
+        ' last_activity_at, last_activity_description, hidden) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0)',
+        [i === 0 ? ROT0 : ROT1, ...r.slice(1, 16)]));
+      [ROT0, ROT1].forEach(id => {
+        dbRun('insert into messages (session_id, role, content, timestamp) values (?, ?, ?, ?)',
+          [id, 'user', 'UI2-PROOF-CJ2 recorded question line', NOW]);
+        dbRun('insert into messages (session_id, role, content, timestamp) values (?, ?, ?, ?)',
+          [id, 'assistant', '{"result": "ui2-proof-cj2 recorded answer"}', NOW]);
+      });
+      const t2 = await gotoDetail();
+      if (t2 !== ROT1) die(EX.capture, `after rotation the link rides ${t2}, expected the fresh ${ROT1}`);
+      await trustedClick(cdp, 'open recorded chat', { exact: true });
+      await waitText(cdp, 'UI2-PROOF-CJ2 recorded question line', 25_000);
+      const dest2 = await cdp.evl(`decodeURIComponent(location.href)`);
+      if (!dest2.includes(ROT1)) die(EX.capture, `rotated destination ${JSON.stringify(dest2)} is not the fresh recorded id`);
+      shots.push({ surface: 'stored_session_link', state: 'rotation: the link re-armed on the FRESH id and opens exactly that session',
+        ...(await shoot(cdp, A.outDir, '25-nav-rotated.png')) });
+      await cdp.evl(`history.back()`);
+      await waitText(cdp, 'open recorded chat', 25_000);
+      // Owner round trip: the header link opens the RECORDED owner session —
+      // the launch receipt's inverse — and Back returns. (The behavior test
+      // pins the gate cross-surface stale-selection law on the same page.)
+      await trustedClick(cdp, 'owner chat', { exact: true });
+      await waitText(cdp, 'UI2-PROOF-CJ2 owner launch receipt', 25_000);
+      const dest3 = await cdp.evl(`decodeURIComponent(location.href)`);
+      if (!dest3.includes(ownerSid)) die(EX.capture, `owner destination ${JSON.stringify(dest3)} is not the recorded owner`);
+      shots.push({ surface: 'stored_session_link', state: 'owner round trip: the recorded owner session opened at its launch receipt',
+        ...(await shoot(cdp, A.outDir, '26-nav-owner-destination.png')) });
+      await cdp.evl(`history.back()`);
+      await waitText(cdp, 'open recorded chat', 25_000);
+      // Read-only law: every seeded message row survives the whole walk
+      // count-verified, and the recorded run's event ledger never moved —
+      // viewing sent no message, resumed nothing, restarted no runner.
+      const countsAfter = Object.fromEntries(expectedIds.concat([ROT0, ROT1, ownerSid]).map(id => [id, msgCount(id)]));
+      for (const id of Object.keys(countsBefore))
+        if (countsAfter[id] !== countsBefore[id]) die(EX.capture, `session ${id} GREW messages during read-only viewing`);
+      const eventsAfter = shaFile(path.join(runDir, 'events.jsonl'));
+      if (eventsBefore !== eventsAfter) die(EX.capture, 'the event ledger moved during navigation — a resume/restart slipped in');
+      if (fs.existsSync(path.join(runDir, 'nodes', 'hold.json'))) die(EX.capture, 'the gate node was consumed by the viewing walk');
+      identity.navigation = { run_id: runId, owner_session_id: ownerSid,
+        recorded_ids: expectedIds, rotated_ids: [ROT0, ROT1],
+        msg_counts_before: countsBefore, msg_counts_after: countsAfter,
+        events_sha_before: eventsBefore, events_sha_after: eventsAfter,
+        focus_restore_label: focusLabel };
+      shots.push({ surface: 'stored_session_link', state: 'full viewport: record page intact after the whole read-only walk',
+        ...(await shoot(cdp, A.outDir, '27-nav-full.png', null, await stableColumnText(paneRegion))) });
     }
 
     identity.renderer_probe = await cdp.evl(`(() => {
