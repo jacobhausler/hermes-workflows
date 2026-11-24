@@ -1436,6 +1436,33 @@ async function main() {
         await waitText(cdp, `loaded 100 of ${COUNT + 1}`, 25_000);
         shots.push({ surface: 'pane_workflows', state: 'page-2 flake: loaded < total shown honestly',
                      ...(await shoot(cdp, A.outDir, '08-coverage-partial-fetch.png', null, await stableColumnText(paneRegion))) });
+
+        // 09 PENDING (#717 review F4 follow-on): a census that COUNTS rows but
+        // renders none — the walk is answered-incomplete, so the honest
+        // costume is 'Census incomplete' with a retry, NEVER the 'No runs'
+        // lie (the empty costume may only cover an answered-empty census).
+        armRules([{ urlPattern: '*workflows/runs*', action: 'fulfill',
+                     body: JSON.stringify({ runs: [], total: COUNT + 1, counts: { running: 0 } }) }]);
+        await waitText(cdp, 'Census incomplete', 25_000);
+        if (await cdp.evl(`document.body.innerText.includes('No runs')`))
+          die(EX.api, 'incomplete zero rows wore the empty costume — F4 regressed on the real surface');
+        shots.push({ surface: 'pane_workflows', state: 'counted-but-uncovered zero rows: pending costume, never No runs',
+                     ...(await shoot(cdp, A.outDir, '09-coverage-pending-incomplete.png', null, await stableColumnText(paneRegion))) });
+
+        // 10 CAP DISCLOSURE (#717 review F1 follow-on): a page stream with NO
+        // total that never ends — the walk stops at the hard 30-page cap and
+        // the 'runs unknown' line must CARRY the truncation fact (the
+        // reviewer's UNKNOWN_CAP probe, run against the live transport). The
+        // pending retry button performs the invalidation, so the re-walk is
+        // the pane's own, not a timer hope.
+        armRules([{ urlPattern: '*workflows/runs*', action: 'fulfill', body: JSON.stringify({
+          runs: Array.from({ length: 100 }, (_, k) => ({
+            id: `20990102-${100000 + k}-capd`, name: `capd-${String(k).padStart(3, '0')}`,
+            status: 'interrupted', updated: '2099-01-02T00:00:00+00:00' })) }) }]);
+        await trustedClick(cdp, 'census incomplete');
+        await waitText(cdp, 'truncated — page cap', 25_000);
+        shots.push({ surface: 'pane_workflows', state: 'never-ending total-less stream hits the page cap: truncation disclosed on the unknown-total line',
+                     ...(await shoot(cdp, A.outDir, '10-coverage-cap-truncated.png', null, await stableColumnText(paneRegion))) });
         await mock.off();
       } finally { await mock.off(); }
     } else {
