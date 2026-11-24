@@ -100,8 +100,13 @@ const isBusy = status => status === 'running'
 const runningCount = data => data?.counts?.running ?? (data?.runs || []).filter(r => isBusy(r.status)).length
 // WF-03 (QA 2026-10-27): an absent status reads an em-dash, never the raw
 // sentinel word — 'unknown' on the screen reads like a broken sensor.
-const statusLabel = s => s || '—'
-const nodesCount = r => `${r.nodes_done ?? 0}/${r.nodes_total ?? '?'} terminal`
+// Ship 2.0 (FINAL lifecycle table): the table IS the public-label law. Every
+// raw status keeps its exact word (cancelled stays its own neutral word, never
+// folded into failed); only successful done is relabelled to Finished.
+const statusLabel = s => !s ? '—' : s === 'done' ? 'Finished' : s
+// Census: an absent count keeps the '?' sentinel, never a fabricated 0 —
+// painting absence as zero is the bug class (FINAL sparse specimen).
+const nodesCount = r => `${countCell(r?.nodes_done, '?')}/${countCell(r?.nodes_total, '?')} terminal`
 
 // Fan-out expansion state: which fan-out node is fanned open, and which item is
 // picked. Keyed per run so cards for different runs never share an open state.
@@ -212,17 +217,85 @@ const fanSummary = c => `${c.terminal}/${c.total} terminal${c.skipped ? ` ·${c.
 // Backend joins each child's state.db sessions row (title = wf:<run>:<node>[:<i>]:<efp8>)
 // into node.metrics / node.item_metrics / run.metrics. Liveness is deterministic: while a
 // child cooks, api_calls/tool_calls rise and last_activity moves; flat + old = stalling.
-const kfmt = n => n == null ? '' : n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e4 ? `${Math.round(n / 1e3)}k` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}k` : String(n)
+//
+// -- shared lifecycle + numeric view model (ship 2.0, ui2 FINAL lifecycle table) --
+// The public-label and number laws live in this ONE block so every production
+// surface reads the same words and digits. Laws:
+//  - Exact raw statuses: no word folds into another; cancelled keeps its own
+//    neutral word and tone (the #7 law). Only successful done is relabelled, to
+//    the table's Finished; an absent status stays the WF-03 em-dash.
+//  - Inactivity: an activity stamp <=5 s is fresh, >5 s is quiet, and a
+//    missing/invalid/future stamp is activity-unknown — stored `running` alone
+//    is not proof of life: nothing pulses off it and no cell may claim 0.
+//  - Counts (API/TOOL, attempts, memberships): exact safe nonnegative integers;
+//    invalid, fractional or beyond-safe counts read a dash, never rounded.
+//  - Token volume: two significant figures (999999 -> 1.0M, 17739101 -> 18M);
+//    an actual zero stays 0; null/empty/nonfinite is a dash, never a 0.
+//  - Cost (WF-09): a positive below the 4-dp render floor reads '<$0.0001',
+//    never '$0.0000'; zero dollars reads COST included ONLY with recorded
+//    activity; an unpriced or invalid cost shows nothing.
+// BEGIN shared-view-model
+const FRESH_ACTIVITY_S = 5
+const ACTIVITY_WORD = {
+  fresh: 'Running · fresh activity',
+  quiet: 'Running · quiet, alive',
+  unknown: 'Running · activity unknown'
+}
+const activityLaw = idle => idle == null ? 'unknown' : idle <= FRESH_ACTIVITY_S ? 'fresh' : 'quiet'
+const activityLabel = idle => ACTIVITY_WORD[activityLaw(idle)]
+const capLabel = s => { const w = statusLabel(s); return w.charAt(0).toUpperCase() + w.slice(1) }
+// Cached directive 04: a refetch failure over last-good data never infers
+// present liveness — the word names the disconnect and keeps the last-known
+// status verbatim.
+const staleLabel = lastKnown => `Disconnected · last known ${capLabel(lastKnown)}`
+// The run-scoped public state word: activity-qualified running, the table's
+// Finished, every other raw status its exact word.
+const runStatusLabel = (run, stale = false) => stale ? staleLabel(run?.status)
+  : run?.status === 'running' ? activityLabel(idleS(run?.metrics))
+  : statusLabel(run?.status)
+const countCell = (n, fallback) => Number.isSafeInteger(n) && n >= 0 ? String(n) : fallback
+const exactCount = n => countCell(n, '—')
+function tokenMag(n) {
+  if (typeof n !== 'number' || !Number.isFinite(n) || n < 0) return '—'
+  if (n < 1e3) return String(n)
+  const r = Number(n.toPrecision(2))
+  const [v, unit] = r >= 1e9 ? [r / 1e9, 'B'] : r >= 1e6 ? [r / 1e6, 'M'] : [r / 1e3, 'k']
+  return `${v >= 10 ? v.toFixed(0) : v.toFixed(1)}${unit}`
+}
+// kfmt keeps its name at every token cell and now IS the 2sf law; count
+// cells moved to exactCount, so a count is never abbreviated again.
+const kfmt = tokenMag
 // WF-09 (QA 2026-10-27): a positive estimate must never render as '$0.0000' —
 // a sub-cent number floors to '<$0.0001'; zero is only reached through the
 // callers' truthy guards (seat-billed routes report cost 0 → 'included', no
-// dollar figure at all).
-const usd = v => v >= 1 ? `$${v.toFixed(2)}` : v >= 0.01 ? `$${v.toFixed(3)}` : v > 0 ? (v < 0.00005 ? '<$0.0001' : `$${v.toFixed(4)}`) : '—'
-const idleS = m => m && m.last_activity ? Math.max(0, Math.round(Date.now() / 1000 - m.last_activity)) : null
-// 0–30 s = cooking (accent), 30–90 s = watch (warning), >90 s = stalled (danger)
+// dollar figure at all). An invalid/non-numeric cost is absence, not $0.
+const usd = v => typeof v === 'number' && Number.isFinite(v) && v > 0
+  ? (v >= 1 ? `$${v.toFixed(2)}` : v >= 0.01 ? `$${v.toFixed(3)}` : v < 0.00005 ? '<$0.0001' : `$${v.toFixed(4)}`)
+  : '—'
+const hasRecordedActivity = m => (m?.api_calls ?? 0) > 0 || (m?.tokens_in ?? 0) > 0 || (m?.tokens_out ?? 0) > 0
+// An absent, zero-sentinel, non-numeric or FUTURE last_activity is unknown
+// activity — a future stamp means the record and this clock disagree, and the
+// honest read is the dash, never a fabricated fresh.
+const idleS = m => {
+  const la = m && m.last_activity
+  if (typeof la !== 'number' || !Number.isFinite(la) || la <= 0) return null
+  const s = Math.round(Date.now() / 1000 - la)
+  return s >= 0 ? s : null
+}
+const idleCell = idle => idle != null ? `IDLE ${idle}s` : 'IDLE —'
+// 0–30 s = cooking (accent), 30–90 s = watch (warning), >90 s = stalled (danger).
+// Exactly 30 s is warning and exactly 90 s danger — the registered idle-tone
+// scale, separate from the <=5 s freshness cutoff above.
 const idleTone = s => s == null ? EDGE_TONE.pending : s < 30 ? EDGE_TONE.running : s < 90 ? EDGE_TONE.held : EDGE_TONE.failed
+// END shared-view-model
 
 /** One dense line: `1.2k▸86 · 3⚡ · 4🔧 [· $0.012]`; live adds a heartbeat `● 4s`.
+ *  Ship 2.0 (FINAL lifecycle table): the heartbeat pulses on KNOWN activity —
+ *  fresh (<=5 s) or quiet (>5 s) alike, glyph-only — and a running child with
+ *  no valid activity stamp reads an em-dash with nothing pulsing: stored
+ *  `running` alone is not proof of life. Counts are exact safe integers; token
+ *  volume rides the 2sf law; zero cost reads COST included only with recorded
+ *  activity (never '$0.0000' — WF-09).
  *  #133: live also carries the wall meter word — `● 4s · near-wall` — the read
  *  model's {elapsed_s, wall_s, p95_s, meter} for a running node. Absent stays
  *  absent (never invented); the words are the run_state vocabulary verbatim. */
@@ -231,19 +304,22 @@ function Vitals({ m, live, size, cost, wall }) {
   const fs = size === 'xs' ? 10 : 11
   const sep = jsx('span', { style: { opacity: 0.45 }, children: '·' })
   const parts = []
-  if (m.tokens_in != null || m.tokens_out != null) parts.push(jsx('span', { title: `${m.tokens_in ?? 0} in ▸ ${m.tokens_out ?? 0} out${m.cache_read ? ` (${kfmt(m.cache_read)} cached)` : ''}`, children: `${kfmt(m.tokens_in ?? 0)}▸${kfmt(m.tokens_out ?? 0)}` }))
-  if (m.api_calls != null) parts.push(jsx('span', { title: 'api calls', children: `${m.api_calls}⚡` }))
-  if (m.tool_calls != null) parts.push(jsx('span', { title: 'tool calls', children: `${m.tool_calls}🔧` }))
-  if (cost && m.cost) parts.push(jsx('span', { title: 'estimated cost', children: usd(m.cost) }))
-  if (m.attempts > 1) parts.push(jsx('span', { title: 'schema/parse retry', children: `↻${m.attempts}` }))
+  if (m.tokens_in != null || m.tokens_out != null) parts.push(jsx('span', { title: `${m.tokens_in ?? '—'} in ▸ ${m.tokens_out ?? '—'} out${m.cache_read ? ` (${kfmt(m.cache_read)} cached)` : ''}`, children: `${kfmt(m.tokens_in)}▸${kfmt(m.tokens_out)}` }))
+  if (m.api_calls != null) parts.push(jsx('span', { title: 'api calls', children: `${exactCount(m.api_calls)}⚡` }))
+  if (m.tool_calls != null) parts.push(jsx('span', { title: 'tool calls', children: `${exactCount(m.tool_calls)}🔧` }))
+  if (cost) {
+    if (m.cost > 0) parts.push(jsx('span', { title: 'estimated cost', children: usd(m.cost) }))
+    else if (m.cost === 0 && hasRecordedActivity(m)) parts.push(jsx('span', { title: 'zero cost with recorded activity — seat-billed', children: 'COST included' }))
+  }
+  if (m.attempts > 1) parts.push(jsx('span', { title: 'schema/parse retry', children: `↻${exactCount(m.attempts)}` }))
   const s = live ? idleS(m) : null
   const beat = live
     ? jsxs('span', {
         title: m.last_desc ? `last: ${m.last_desc}` : 'seconds since the child last did something',
         style: { display: 'inline-flex', alignItems: 'center', gap: 3, color: idleTone(s), fontVariantNumeric: 'tabular-nums' },
         children: [
-          jsx('span', { className: s != null && s < 30 ? 'animate-pulse' : '', style: { display: 'inline-block', width: 6, height: 6, borderRadius: 999, background: idleTone(s) } }),
-          jsx('span', { children: s == null ? 'live' : `${s}s` })
+          jsx('span', { className: s != null ? 'animate-pulse' : '', style: { display: 'inline-block', width: 6, height: 6, borderRadius: 999, background: idleTone(s) } }),
+          jsx('span', { children: s == null ? '—' : `${s}s` })
         ]
       })
     : null
@@ -339,7 +415,7 @@ function ItemChips({ runId, nodeId, rows, picked, size }) {
         },
         children: [jsx(Dot, { status: r.status }), jsx('span', { children: r.label }),
           r.status === 'running' && m
-            ? jsx('span', { style: { color: idleTone(idle), opacity: 0.9 }, children: `${calls != null ? calls : '?'}⚡${idle != null ? ` ${idle}s` : ''}` })
+            ? jsx('span', { style: { color: idleTone(idle), opacity: 0.9 }, children: `${countCell(calls, '?')}⚡${idle != null ? ` ${idle}s` : ''}` })
             : outTok != null ? jsx('span', { style: { opacity: 0.6 }, children: kfmt(outTok) }) : null]
       }, r.index)
     })
@@ -451,19 +527,26 @@ function DirectiveCard({ id }) {
 // metrics, not dollars; subscription routes report 'included').
 const inlineHeader = (data, elapsed) => {
   const m = data.metrics
-  const first = [data.name || data.id, data.status, nodesCount(data)]
+  const first = [data.name || data.id, runStatusLabel(data), nodesCount(data)]
+  // WF-06 law holds: this elapsed is the RUN clock and says so — the word
+  // keeps it distinct from node-card and timeline child clocks.
   if (elapsed != null) first.push(`run ${fmtDur(elapsed)}`)
   const second = []
   if (m) {
-    for (const [key, label] of [['tokens_in', 'IN'], ['tokens_out', 'OUT'], ['api_calls', 'API'], ['tool_calls', 'TOOL']]) {
-      if (m[key] != null) second.push(`${label} ${kfmt(m[key])}`)
-    }
+    // FINAL numeric laws: token volume is 2sf (IN/OUT), counts are exact safe
+    // integers (API/TOOL) — a count is never abbreviated, never rounded.
+    if (m.tokens_in != null) second.push(`IN ${tokenMag(m.tokens_in)}`)
+    if (m.tokens_out != null) second.push(`OUT ${tokenMag(m.tokens_out)}`)
+    if (m.api_calls != null) second.push(`API ${exactCount(m.api_calls)}`)
+    if (m.tool_calls != null) second.push(`TOOL ${exactCount(m.tool_calls)}`)
     if (m.cost > 0) second.push(`COST ${usd(m.cost)}`)
-    else if (m.cost === 0 && ((m.api_calls ?? 0) > 0 || (m.tokens_in ?? 0) > 0 || (m.tokens_out ?? 0) > 0)) second.push('COST included')
+    else if (m.cost === 0 && hasRecordedActivity(m)) second.push('COST included')
+    // Running-with-live always answers both cells: an unknown activity stamp
+    // reads IDLE —, never silence and never 0 (FINAL running-unknown row:
+    // LIVE — / IDLE —).
     if (m.live > 0 && data.status === 'running') {
-      second.push(`LIVE ${m.live}`)
-      const idle = idleS(m)
-      if (idle != null) second.push(`IDLE ${idle}s`)
+      second.push(`LIVE ${exactCount(m.live)}`)
+      second.push(idleCell(idleS(m)))
     }
   }
   return [first, second]
@@ -472,12 +555,16 @@ const inlineHeader = (data, elapsed) => {
 // The collapsed-pill model, pure so node can test it without a DOM: one
 // line for a transcript card, expanded in place by local useState (never
 // localStorage, never tracking whether the agent emitted the card).
-export function pillModel(run) {
+// stale=true is the CACHED-directive state: a refetch failure over last-good
+// data reads Disconnected · last known <status> and never infers liveness.
+export function pillModel(run, stale = false) {
   const start = parseTime(run?.started)
   const end = TERMINAL.has(run?.status) ? parseTime(run?.updated) : Date.now()
-  const bits = [run?.name || run?.id || 'workflow', statusLabel(run?.status), nodesCount(run)]
+  const bits = [run?.name || run?.id || 'workflow', runStatusLabel(run, stale), nodesCount(run)]
   const elapsed = start && end > start ? end - start : null
-  if (elapsed != null) bits.push(fmtDur(elapsed))
+  // WF-06: the pill's elapsed is the RUN clock — the word rides the value so
+  // node-card and timeline child clocks can never be mistaken for it.
+  if (elapsed != null) bits.push(`run ${fmtDur(elapsed)}`)
   // #48: the pill speaks the ONE tone table — its tone entry IS NODE_TONE's
   // (parity is a law; a forked palette is the bug class).
   return { collapsedLine: bits.join(' · '), expanded: false, tone: NODE_TONE[run?.status] || NODE_TONE.pending }
@@ -512,7 +599,10 @@ function DirectiveBody({ id }) {
     return jsx('span', { style: frame, className: 'text-xs text-(--ui-text-tertiary)', children: 'workflow…' })
   }
   const openRun = e => { if (e) e.stopPropagation(); $selRun.set(data.id); host.navigate('/workflows') }
-  const pill = pillModel(data)
+  // Cached directive 04: data still wins over a refetch failure, but the pill
+  // says Disconnected · last known — last-good is retained, present liveness
+  // is never inferred from it.
+  const pill = pillModel(data, !!error)
   // Collapsed (the default): one line + ▾ toggles expand in place, ↗ opens
   // /workflows explicitly. One click cannot both, so the whole-card navigate
   // onClick is gone — no role=link, the card body is inert chrome.
@@ -825,9 +915,10 @@ export function safeProfileLabel(map, sessionId) {
 
 // Compact progress for the rail pills: `${nodes_done}/${nodes_total}`, and
 // '?' whenever either count is absent — an absent count is never fabricated
-// as 0/N the way nodesCount() does for terminal rows.
+// as '?' when either count is absent — the same honest sentinel as
+// nodesCount(); a known zero still reads 0 (no-fabrication law).
 const pillProgress = r =>
-  (r?.nodes_done != null && r?.nodes_total != null) ? `${r.nodes_done}/${r.nodes_total}` : '?'
+  (r?.nodes_done != null && r?.nodes_total != null) ? `${countCell(r.nodes_done, '?')}/${countCell(r.nodes_total, '?')}` : '?'
 
 /** Rail model over one chat's owned runs: the LIVE set folded into pills —
  *  held first, then running by started desc, capped at 3 (the same policy as
@@ -843,7 +934,7 @@ export function railModel(ownedRunsList) {
     pills: active.slice(0, 3).map(r => ({
       id: r.id,
       label: r.name || r.id || 'workflow',
-      status: statusLabel(r.status),
+      status: runStatusLabel(r),
       progress: pillProgress(r),
       held: r.status === 'held',
     })),
@@ -1383,7 +1474,7 @@ export function SessionStrip() {
               type: 'button', className: 'text-left text-[0.6875rem] text-(--ui-text-tertiary)',
               style: { cursor: 'pointer', background: 'none', border: 'none', padding: 0 },
               onClick: () => openRun(r.id),
-              children: `${r.name || r.id} · ${statusLabel(r.status)} · ${ago(r.updated) || 'unknown'}`
+              children: `${r.name || r.id} · ${runStatusLabel(r)} · ${ago(r.updated) || 'unknown'}`
             }, r.id)),
             // WF-04 (QA 2026-10-27): the fold lists at most 5 but the label
             // counts ALL N — the hidden rows keep an explicit affordance to
@@ -2501,7 +2592,7 @@ export function WorkflowsPage() {
                   'flex items-center gap-2 border-b border-(--ui-stroke-secondary) px-4 py-2',
                   jsx(Dot, { status: d.status }),
                   box('text-sm font-medium', d.name || d.id),
-                  box('text-xs text-(--ui-text-tertiary)', statusLabel(d.status)),
+                  box('text-xs text-(--ui-text-tertiary)', runStatusLabel(d)),
                   // Agent-first (2026-10-03): the record page names the launching
                   // agent next to the state — the same fact the pane row shows,
                   // honest 'unknown' included (deep review #156 A2 — one law,
@@ -2555,7 +2646,7 @@ function PaneRow({ run, thisChat }) {
     const start = parseTime(run.started)
     const elapsed = start ? fmtDur(Date.now() - start) : ''
     const idle = run.metrics ? idleS(run.metrics) : null
-    fact = [`${nodesCount(run)}`, elapsed, idle != null ? `IDLE ${idle}s` : null].filter(Boolean).join(' · ')
+    fact = [`${nodesCount(run)}`, elapsed, idleCell(idle)].filter(Boolean).join(' · ')
   } else fact = ago(run.updated)
   return jsx(PanelListRow, {
     active: false,

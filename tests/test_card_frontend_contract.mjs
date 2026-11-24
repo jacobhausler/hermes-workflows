@@ -158,8 +158,11 @@ try {
   assert.equal(plugin.includes("title: 'Terminal fan-out items'"), true)
   const nodesCountStart = plugin.indexOf('const nodesCount =')
   const nodesCountSource = plugin.slice(nodesCountStart, plugin.indexOf('\n', nodesCountStart))
-  const nodesCount = new Function(nodesCountSource + '; return nodesCount')()
+  const countCellSource = plugin.slice(plugin.indexOf('const countCell ='), plugin.indexOf('\n', plugin.indexOf('const countCell =')))
+  const nodesCount = new Function(countCellSource + '\n' + nodesCountSource + ';\nreturn nodesCount')()
   assert.equal(nodesCount({ nodes_done: 3, nodes_total: 5 }), '3/5 terminal')
+  assert.equal(nodesCount({ nodes_total: 5 }), '?/5 terminal', 'an absent done-count reads the sentinel, never a fabricated 0')
+  assert.equal(nodesCount({ nodes_done: 0, nodes_total: 5 }), '0/5 terminal', 'an actual zero stays 0 (honest absent/zero split)')
 } finally {
   rmSync(temp, { recursive: true, force: true })
 }

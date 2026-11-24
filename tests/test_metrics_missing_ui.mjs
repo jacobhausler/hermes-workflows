@@ -25,8 +25,9 @@ const texts = node => walk(node).flatMap(n => typeof n === 'string' ? [n] : type
 const $fanItem = { set() {} }
 const EDGE_TONE = { done: 'D', failed: 'F', running: 'R', held: 'H', skipped: 'S', pending: 'P' }
 const idleS = m => (m && m.last_activity ? 5 : null)
-const { ItemChips } = new Function('jsx', 'jsxs', '$fanItem', 'Dot', 'EDGE_TONE', 'idleTone', 'idleS', 'kfmt',
-  `${grab('ItemChips')}; return { ItemChips }`)(jsx, jsxs, $fanItem, 'Dot', EDGE_TONE, () => 'TONE', idleS, String)
+const { ItemChips } = new Function('jsx', 'jsxs', '$fanItem', 'Dot', 'EDGE_TONE', 'idleTone', 'idleS', 'kfmt', 'countCell',
+  `${grab('ItemChips')}; return { ItemChips }`)(jsx, jsxs, $fanItem, 'Dot', EDGE_TONE, () => 'TONE', idleS, String,
+  (n, fb) => Number.isSafeInteger(n) && n >= 0 ? String(n) : fb)
 {
   let reads = 0
   const row = { index: 0, status: 'running', label: 'a', goal: 'g' }
@@ -121,12 +122,13 @@ const { ItemChips } = new Function('jsx', 'jsxs', '$fanItem', 'Dot', 'EDGE_TONE'
   assert.ok(oend > oi, 'originLabel body located')
   const originLabel = new Function(`${src.slice(oi, oend + 2).replace('export function', 'function')}; return originLabel`)()
   const { WorkflowsPage } = new Function('useQuery', 'useValue', '$selRun', 'listQuery', 'runQuery', 'box', 'Dot', 'statusLabel',
-    'Vitals', 'Badge', 'GraphView', 'Drawer', 'Timeline', 'EmptyState', 'ScrollArea', 'RunRow', 'Fragment', 'jsx', 'jsxs', 'runHeaderModel', 'PolishStyles', 'originLabel',
+    'Vitals', 'Badge', 'GraphView', 'Drawer', 'Timeline', 'EmptyState', 'ScrollArea', 'RunRow', 'Fragment', 'jsx', 'jsxs', 'runHeaderModel', 'PolishStyles', 'originLabel', 'runStatusLabel',
     `${grab('WorkflowsPage')}; return { WorkflowsPage }`)(
     q => (q.queryKey?.[2] === 'run' ? { data: detail } : { data: { runs: [{ id: 'r1', status: 'running' }] } }),
     () => null, { get() { return null }, set() {} }, () => ({ queryKey: ['x', 'runs'] }), id => ({ queryKey: ['x', 'run', id] }),
     (t, ...k) => jsx('div', { children: k }), 'Dot', s => s, 'Vitals', 'Badge', 'GraphView', 'Drawer', 'Timeline',
-    'EmptyState', 'ScrollArea', 'RunRow', 'Fragment', jsx, jsxs, runHeaderModel, 'PolishStyles', originLabel)
+    'EmptyState', 'ScrollArea', 'RunRow', 'Fragment', jsx, jsxs, runHeaderModel, 'PolishStyles', originLabel,
+    r => (r && r.status) || '—')
   const nodes0 = walk(WorkflowsPage())
   // Deep review #156 A2 flip: "originator on every row" is the law — an
   // unattributable run shows the honest word, never silence and never a

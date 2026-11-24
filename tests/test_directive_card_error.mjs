@@ -40,7 +40,7 @@ function render(queryState) {
     () => {},
     init => [typeof init === 'function' ? init() : init, () => {}],
     () => jsx('dot', {}),
-    () => ({ collapsedLine: 'run · done · 2/2', tone: {} }),
+    (run, stale) => ({ collapsedLine: `run · done · 2/2${stale ? ' · DISCONNECTED' : ''}`, tone: {} }),
     { navigate: () => {} },
     { set: () => {} },
     ['hermes-workflows'],
@@ -59,7 +59,16 @@ function render(queryState) {
   const text = JSON.stringify(out)
   assert.ok(!text.includes('workflow…'), 'cached data must not render the loading branch')
   assert.ok(!/"workflow \(wf-1\)"/.test(text), 'cached data must not render the error dead-text branch')
-  assert.ok(text.includes('run · done · 2/2'), 'pill collapsed line renders despite the refetch error')
+  assert.ok(text.includes('run · done · 2/2 · DISCONNECTED'),
+    'cached data over a refetch error renders the pill in the DISCONNECTED state (Cached directive 04: last-good is kept, liveness never inferred)')
+}
+
+// 1b) clean fetch (no error) -> the same pill WITHOUT the stale word.
+{
+  const { out } = render({ data: { id: 'wf-1', status: 'done' }, error: null, isFetching: false })
+  const text = JSON.stringify(out)
+  assert.ok(text.includes('run · done · 2/2'), 'clean pill renders')
+  assert.ok(!text.includes('DISCONNECTED'), 'no disconnect word without a fetch error')
 }
 
 // 2) no data ever + error -> clickable RETRY button carrying the id.
