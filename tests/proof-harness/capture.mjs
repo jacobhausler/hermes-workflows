@@ -951,12 +951,26 @@ async function main() {
     }
     identity.api_attachment = { via: 'registry + live seeded run row rendered through the plugin API route', run_id: runId };
     const shots = [];
+    // Field-proven (pair regen try2): route-restore can re-mount the chat
+    // empty-state over the pane column exactly between the question hit and
+    // the content read — everything painted is then intro-copy + clocks, and
+    // the masked content layer lands trivial. Poll the column text until the
+    // MASKED layer is non-trivial (shoot's own threshold) before shooting.
+    const stableColumnText = async (region, budgetMs = 25_000) => {
+      const t0 = Date.now();
+      for (;;) {
+        const txt = await cdp.evl(columnTextJS(region));
+        const masked = maskVolatile(txt, CAPTURE_LITERALS).replace(/\n+/g, '');
+        if (masked.length >= 40 || Date.now() - t0 > budgetMs) return txt; // shoot() decides the death
+        await sleep(1000);
+      }
+    };
 
     // 01/02 pane: runs list, then the held-gate run detail. The captured
     // CONTENT of each viewport shot is the pane column's painted text (same
     // region predicate as the locators), volatile-masked into contents/.
     shots.push({ surface: 'pane_workflows', state: 'runs list, seeded held-gate run',
-      ...(await shoot(cdp, A.outDir, '01-pane-runs.png', null, await cdp.evl(columnTextJS(paneRegion)))) });
+      ...(await shoot(cdp, A.outDir, '01-pane-runs.png', null, await stableColumnText(paneRegion))) });
     await trustedClick(cdp, runName, { region: paneRegion });
     // The gate question must render IN THE DETAIL VIEW: the expanded tray run
     // card shows the same question text (field-proven: shot 02 was 'Loading…'
@@ -974,7 +988,7 @@ async function main() {
       }
     }
     shots.push({ surface: 'pane_workflows', state: 'run detail, held gate question',
-      ...(await shoot(cdp, A.outDir, '02-pane-run-detail.png', null, await cdp.evl(columnTextJS(paneRegion)))) });
+      ...(await shoot(cdp, A.outDir, '02-pane-run-detail.png', null, await stableColumnText(paneRegion))) });
 
     // 03/04 directive card: seed one real assistant turn, open its session,
     // find the plugin's card (its 'Open in Workflows' action is the stable
