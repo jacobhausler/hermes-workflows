@@ -9,8 +9,8 @@ supervisors.json
 # noise; only the committed set-1/set-2 pair is evidence.
 *.stale-*
 probe/
-run-*.log
-PAIR-STATUS
+run-*.log*
+PAIR-STATUS*
 run-pair.sh
 probe*/
 .ui2-proof-owned

@@ -1,0 +1,11 @@
+THE REST · 1
+UI2 proof: release this held gate after capture?
+HERMES AGENT
+HERMES AGENT
+<INTRO-COPY>
+Scroll to bottom
+Qwen38 Next
+Med
+UI2 proof: release this held gate after capture?
+requester: @local-<HEX-ID>
+Runtime not ready
