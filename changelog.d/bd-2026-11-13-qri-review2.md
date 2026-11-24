@@ -51,10 +51,15 @@ The driver now dies at preflight (exit 4) with the law spelled out when
   exit 6). Instead it names the SOURCE-rung interpreter directly
   (`HERMES_DESKTOP_PYTHON` = the door python): a bare green-era app copy has
   no `.venv`, and without it the answer is `bootstrap-needed` -> the 'Set up
-  Hermes Desktop' first-run modal wedge. The gate case shots the success
-  toast BEFORE the receipt and locates it by the `<run> / <gate>` ledger
-  line the card never renders. SETUP.md documents the app-copy,
-  app-generation and source-rung laws.
+  Hermes Desktop' first-run modal wedge. The pin era (qri-proof18, b9b36c9
+  app) booted a healthy gateway but churned ensure (exit 7, superseded-start
+  storm); the source rung (qri-proof21) completed the full pane+gate walk.
+  The gate case shots the success toast BEFORE the receipt and locates it by
+  the `<run> / <gate>` ledger line the card never renders. The pane poll also
+  dismisses the provider-less onboarding wizard and reloads once on a
+  persistent CONNECTING splash; CDP attaches with `Page.bringToFront` so an
+  occluded window can never mask paint truth with a black frame. SETUP.md
+  documents the app-copy, app-generation and source-rung laws.
 
 - door: bench-only proof knobs on POST /runs/{id}/gate —
   UI2_PROOF_GATE_FAIL_ONCE (first armed answer is a typed ok:false before any

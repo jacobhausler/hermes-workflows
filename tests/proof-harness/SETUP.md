@@ -44,17 +44,19 @@ re-arming at every reconnect site. Run on loaded boxes with
 `--paint-budget 300` and non-default ports (`--cdp-port 9594
 --renderer-port 5394`) when a sibling bench owns 9394/5194.
 
-**App generation (2026-11-24):** the CURRENT desktop app (b9b36c9) ensures its
-local gateway as the DEFAULT profile of HERMES_HOME, so a satellite-profile
-bench fork answers hermes:api with 403 profile_scope_mismatch and the host
-record wedges (exit-75 churn) — and a standalone default fork cannot coexist
-with a live estate gateway ("the host gateway still serves profile
-'default'"). Until the app honors the profile pin again, run the bench with
-`--app-repo` at a green-era checkout (0f602c5 proven) — provision it with
-`pnpm@<packageManager> install --frozen-lockfile` (a REAL install; sharing the
-live checkout's node_modules by symlink mixes HEAD workspace packages with the
-older src and main.tsx fails to load). The app commit is pinned in
-`identity.app.commit`, so every proof says which app it ran against.
+**App generation (2026-11-24, amended by field evidence):** the b9b36c9-era
+desktop app CAN bench, with two laws: (1) the bench-home corollary (outside
+the native root — the 403 `profile_scope_mismatch` the first b9b36c9 runs saw
+was that re-parenting, not the app), and (2) the backend pin
+`HERMES_DESKTOP_HERMES` (absolute preflight CLI) — without it the app resolves
+its backend at `$HERMES_HOME/hermes-agent`, finds nothing, and halts on the
+bootstrap first-run setup choice (de-pinned qri-proof18 re-proved the halt).
+With the pin, the full gate capture walked held→error→pending→saved on
+qri-proof12 against `identity.app.commit` b9b36c9. A provider-less bench boots
+into the onboarding wizard; the driver dismisses it via its own "choose a
+provider later" button (pane poll + before the held frame). The green-era
+(0f602c5) option remains valid; `identity.app.commit` pins which app every
+proof ran against.
 
 ## Reproducibility law (slice A)
 
