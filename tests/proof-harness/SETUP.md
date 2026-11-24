@@ -96,14 +96,19 @@ recomputes the combined hash from disk, and pins the mask with samples.
    ("Failed to fetch dynamically imported module /src/main.tsx", exit 5, and
    registry-probe hangs with no frame). Provision it with a frozen pnpm
    install (PATH pnpm may be a broken corepack shim — `node
-   ~/.cache/node/corepack/v1/pnpm/<v>/bin/pnpm.mjs` works). The BACKEND is
-   always the primary, fully provisioned install: the driver passes it as
-   `HERMES_DESKTOP_HERMES`, because the app since b9b36c9 otherwise resolves
-   its backend at `$HERMES_HOME/hermes-agent` — which a bench home never has
-   — and halts on the bootstrap first-run setup choice (no plugin, no frame).
-   A bare worktree copy can never serve as backend: its launcher passes
-   `--version` but dies inside ensure (no committed dependency env).
-   The bench also needs disk headroom: a full Data volume surfaces as
+   ~/.cache/node/corepack/v1/pnpm/<v>/bin/pnpm.mjs` works). The BACKEND of a
+   dev boot is the app-repo checkout's own SOURCE_REPO python (the dev rung
+   precedes PATH and `HERMES_DESKTOP_HERMES` in the app's resolution ladder),
+   so one dedicated GREEN-ERA (0f602c5-proven) checkout serves both halves.
+   Do NOT pin `HERMES_DESKTOP_HERMES` on a bench boot: field-proven (four bench
+   homes, bd_2026-11-13-qri) the override re-parents the app's ensure to the
+   DEFAULT profile — a root fork spawns at the bench home, the pre-ensured
+   satellite goes orphan, every named-profile ticket answers `bootstrap binding
+   rejected`, and the renderer wedges on the first-run setup modal (exit 6).
+   The b9b36c9-era app cannot bench at all (App generation note above); a bare
+   worktree copy can never serve as the primary-install backend either (its
+   launcher passes `--version` but dies inside ensure, no committed dependency
+   env). The bench also needs disk headroom: a full Data volume surfaces as
    gateway-ensure timeouts and `unable to open database file`, not ENOSPC.
 
 ## Bench profile law (field-proven 2026-11-24, bd_2026-11-13-iqf)

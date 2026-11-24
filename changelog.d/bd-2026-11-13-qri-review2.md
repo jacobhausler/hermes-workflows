@@ -44,11 +44,13 @@ The driver now dies at preflight (exit 4) with the law spelled out when
 `--out` lands under the native home; provision at the repo's
 `captured/` or a TMPDIR path and copy the finished set to the ledger.
 
-- proof-harness: pass `HERMES_DESKTOP_HERMES` (the preflight CLI, absolute)
-  to the electron boot — the app since b9b36c9 resolves its
-  backend at `$HERMES_HOME/hermes-agent`, which a bench home never has, and
-  otherwise halts on the bootstrap first-run setup choice (no plugin, no
-  frame). SETUP.md documents the dedicated-app-copy provisioning law.
+- proof-harness: the bench electron boot does NOT pass
+  `HERMES_DESKTOP_HERMES` — field-proven on four bench homes that the override
+  re-parents the app's ensure to the DEFAULT profile (root fork, orphan
+  satellite, `bootstrap binding rejected` ticket storm, first-run modal wedge,
+  exit 6). The dev SOURCE_REPO rung pins the backend deterministically for the
+  dedicated green-era app copy, which serves both halves. SETUP.md documents
+  the app-copy and app-generation laws.
 
 - door: bench-only proof knobs on POST /runs/{id}/gate —
   UI2_PROOF_GATE_FAIL_ONCE (first armed answer is a typed ok:false before any

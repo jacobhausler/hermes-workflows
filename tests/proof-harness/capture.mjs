@@ -924,23 +924,20 @@ async function main() {
       execFileSync(process.execPath, ['scripts/bundle-electron-main.mjs', '--dev'],
         { cwd: desktop, stdio: 'ignore', timeout: 120_000 });
     }
-    // First-run-gate law (field-proven 2026-11-24, app b9b36c9): the desktop
-    // resolves its backend as join(HERMES_HOME,'hermes-agent') — the bench
-    // home — and when that install is absent it HALTS on the bootstrap
-    // first-run setup choice, so the plugin never mounts and every capture
-    // dies unpainted/modal. Pass HERMES_DESKTOP_HERMES = the preflight
-    // hermesBin (resolved to an absolute path): the app's backend is then
-    // deterministic. It must be a FULLY PROVISIONED install — a bare
-    // worktree copy's launcher passes --version but dies inside ensure with
-    // ModuleNotFoundError (no committed dependency env for a foreign
-    // HERMES_HOME), so the app-repo copy serves RENDERER isolation only.
-    const resolvedHermes = hermesBin.startsWith('/') ? hermesBin
-      : (() => { try { return execFileSync('/usr/bin/env', ['which', hermesBin],
-          { encoding: 'utf8' }).trim(); } catch { return hermesBin; } })();
+    // App-generation law (field-proven 2026-11-24, bd_2026-11-13-qri, four
+    // bench homes): do NOT pass HERMES_DESKTOP_HERMES. In the dev boot the
+    // renderer checkout's SOURCE_REPO backend already pins the CLI deterministically
+    // (dev rung precedes the override), and the override re-parents the app's
+    // ensure to the DEFAULT profile: the boot spawns a root fork at the bench
+    // home while the satellite fork from pre-ensure goes orphan, the multiplexer
+    // answers every named-profile ticket with `bootstrap binding rejected`, and
+    // the renderer sits on the first-run setup modal forever ('Invalid gateway
+    // ticket response' storm in logs/electron.log, exit 6 with no pane). The
+    // app-repo copy therefore serves BOTH halves in the green era — and the
+    // b9b36c9-era app still cannot bench at all (SETUP.md App generation note).
     const electronEnv = { ...process.env,
       HERMES_DESKTOP_DEV_SERVER: `http://127.0.0.1:${A.rendererPort}`,
       HERMES_DESKTOP_CDP_PORT: String(A.cdpPort),
-      HERMES_DESKTOP_HERMES: resolvedHermes,
       HERMES_HOME: B.home, HERMES_GATEWAY_LOCK_DIR: B.locks,
       ...(A.caseName === 'gate' ? { UI2_PROOF_GATE_FAIL_ONCE: '1',
         UI2_PROOF_GATE_POST_DELAY_MS: '2500' } : {}) };
