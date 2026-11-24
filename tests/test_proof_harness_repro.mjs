@@ -89,8 +89,12 @@ const [a, b] = ['set-1', 'set-2'].map(loadSet)
 assert.equal(a.candidate.plugin_sha256, b.candidate.plugin_sha256,
   'both runs captured the SAME candidate bytes')
 assert.match(a.candidate.plugin_sha256, /^[0-9a-f]{64}$/, 'candidate pinned by digest')
-assert.equal(a.candidate.repo_head, b.candidate.repo_head,
-  'both runs ran at the same repo head (current merged head at capture time)')
+// Head law: both runs record the 40-hex head they ran at; the CANDIDATE
+// bytes are the equality claim (plugin_sha256), because driver-only commits
+// can land between two independent captures of one merged-head candidate.
+assert.match(a.candidate.repo_head, /^[0-9a-f]{40}$/, 'set-1 pins its repo head')
+assert.match(b.candidate.repo_head, /^[0-9a-f]{40}$/, 'set-2 pins its repo head')
+assert.match(a.candidate.merge_base_origin_main, /^[0-9a-f]{40,}$/, 'set-1 pins the merge-base')
 assert.deepEqual(a.repro, b.repro,
   'DOUBLE-RUN REPRODUCIBILITY: the two manifests\' repro sections are not hash-equal')
 assert.equal(a.repro.combined_sha256, b.repro.combined_sha256,
