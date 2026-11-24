@@ -513,7 +513,11 @@ function ItemChips({ runId, nodeId, rows, picked, size }) {
 //   - honours the AbortSignal BETWEEN pages: a cancelled/invalidated query
 //     stops walking instead of continuing to hammer the route on a timer;
 //   - hard page cap — the walk is finite even against a server whose total is
-//     a lie, and the shortfall renders as a visible partial.
+//     a lie, and the shortfall renders as a visible partial;
+//   - the INCOMPLETE fact is carried independently of the total (review #717
+//     F1): `complete: false` rides on the result even when no numeric total
+//     exists to derive it from, so the pane can never conceal a known
+//     truncation behind 'runs unknown'.
 // Pure over an injected request fn so node behavior tests drive a fake server.
 const RUNS_PAGE_SIZE = 100   // the server's own page size — no bespoke cap
 const RUNS_MAX_PAGES = 30    // bounded walk: a >3000-row census shows a partial, never hangs
@@ -526,6 +530,7 @@ export function runsIndexFetcher(request) {
     const seen = new Set()
     let offset = 0
     let pages = 0
+    let complete = true
     for (;;) {
       if (cancelled()) throw new Error('workflows census fetch cancelled')
       const page = await request(`/runs?offset=${offset}&limit=${RUNS_PAGE_SIZE}`)
@@ -537,13 +542,18 @@ export function runsIndexFetcher(request) {
       if (!first) first = page
       const total = typeof first.total === 'number' ? first.total : null
       const covered = total != null ? offset + rows.length >= total : rows.length < RUNS_PAGE_SIZE
-      if (!rows.length || covered || pages >= RUNS_MAX_PAGES) break
+      if (!rows.length || covered) break
+      if (pages >= RUNS_MAX_PAGES) { complete = false; break }
       offset += rows.length
     }
+    // A known total the walk could not cover (mid-walk shrink, a page stream
+    // that stopped early) is the same INCOMPLETE fact as the cap.
+    if (typeof first?.total === 'number' && index.length < first.total) complete = false
     // The global summary (total/counts/roots) rides through UNTOUCHED from the
     // first page — it describes the whole census and stays distinct from the
-    // locally loaded rows; `loaded` makes the coverage honest.
-    return { ...first, runs: index, loaded: index.length }
+    // locally loaded rows; `loaded` makes the coverage honest and `complete`
+    // states the truncation independent of whether a total exists.
+    return { ...first, runs: index, loaded: index.length, complete }
   }
 }
 
@@ -2995,13 +3005,26 @@ export function WorkflowsPane() {
   const counts = data?.counts
   const total = data?.total ?? counts?.total
   const loaded = data ? (typeof data.loaded === 'number' ? data.loaded : runs.length) : null
+  // bd yjp follow-on (#717 review F1/F4): the INCOMPLETE fact is measured two
+  // ways — the fetcher's explicit `complete: false` (works even with NO total,
+  // so the 3000-row cap can never hide behind 'runs unknown') and the numeric
+  // shortfall `loaded < total` (defensive: payloads built outside the fetcher
+  // still disclose). A known truncation is ALWAYS shown on the census line.
+  const shortfall = typeof total === 'number' && typeof loaded === 'number' && loaded < total
+  const truncated = !!data && (data.complete === false || shortfall)
   let census
   if (!counts) census = 'runs unknown'
-  else {
+  else
     census = `runs ${data?.total ?? counts.total ?? '?'} · running ${counts.running ?? 0} · held ${counts.held ?? 0} · failed ${counts.failed ?? 0}`
-    if (typeof total === 'number' && typeof loaded === 'number' && loaded < total)
-      census += ` · loaded ${loaded} of ${total}`
-  }
+  if (truncated)
+    census += shortfall
+      ? ` · loaded ${loaded} of ${total}`
+      : ` · truncated — page cap (loaded ${loaded})`
+  // F4: 'No runs' is owned by an ANSWERED-EMPTY census only — data alone is
+  // not an answer. A payload that counted runs (total > 0) but rendered zero
+  // rows, or a truncated walk that landed nothing, wears the PENDING costume
+  // ('Census incomplete' + retry), never the empty costume.
+  const answeredEmpty = !!data && !truncated && (typeof total !== 'number' || total === 0)
   // Agent-first pane law (owner, est-wk7l round): THE REST renders EVERY row —
   // no pane-level cap, no fold. paneModel is uncapped and the consumer must
   // not re-introduce one (the old slice(0,10)+show-all fold made the PR body's
@@ -3023,12 +3046,21 @@ export function WorkflowsPane() {
       // (bd yjp: loading and unreachable must never wear the empty costume).
       // The backend names the scanned roots on an empty census — showing them
       // turns 'nothing found' into 'nothing found WHERE'.
-      ? [
-          jsx(EmptyState, { title: 'No runs', description: 'Ask the agent to start a workflow.' }, 'empty'),
-          Array.isArray(data.roots) && data.roots.length
-            ? label(`roots: ${data.roots.join(', ')}`)
-            : null
-        ]
+      ? answeredEmpty
+        ? [
+            jsx(EmptyState, { title: 'No runs', description: 'Ask the agent to start a workflow.' }, 'empty'),
+            Array.isArray(data.roots) && data.roots.length
+              ? label(`roots: ${data.roots.join(', ')}`)
+              : null
+          ]
+        : [
+            jsx(EmptyState, { title: 'Census incomplete', description: 'The page walk did not cover the counted census — "No runs" here would be a lie.' }, 'partial'),
+            jsx('button', {
+              type: 'button', title: 'Retry', onClick: retry,
+              className: 'self-start text-[0.6875rem] text-(--ui-text-tertiary) cursor-pointer',
+              children: `census incomplete (loaded ${loaded ?? 0}${shortfall ? ` of ${total}` : ''}) — retry`
+            }, 'census-partial')
+          ]
       : error
         ? jsx('button', {
             type: 'button', title: 'Retry', onClick: retry,

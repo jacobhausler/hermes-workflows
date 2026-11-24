@@ -14,7 +14,11 @@
 //  (4) unknown totals: no `total` key -> walk while pages are full; the
 //      total is never fabricated (census line says 'runs unknown').
 //  (5) the walk is BOUNDED: a server whose answer never covers stops at the
-//      hard page cap instead of hammering forever.
+//      hard page cap instead of hammering forever — and the cap is a VISIBLE
+//      fact: the fetcher carries `complete: false` independently of the total,
+//      the mounted pane discloses it even on a 'runs unknown' line (#717 F1).
+//      A counted-but-uncovered census with zero rows rendered wears the
+//      PENDING costume, never the 'No runs' empty costume (#717 F4).
 //  (6) cancellation: an aborted signal (react-query cancels on invalidate /
 //      unmount / key change) stops the walk — no further requests, and the
 //      half-walk result is never written. No cross-wiring of runs.
@@ -111,6 +115,7 @@ const row = i => ({ id: `20990101-${String(i).padStart(6, '0')}-yjp`, name: `run
     'requests are exact page windows — the walk is bounded per page, no bespoke cap')
   assert.equal(out.total, N, 'the global summary rides through from the census')
   assert.equal(out.loaded, N, 'coverage: loaded equals the counted total')
+  assert.equal(out.complete, true, 'a covered walk reports complete')
 }
 
 // (2) unstable snapshots across the 2 s TTL boundary dedupe by id.
@@ -131,6 +136,7 @@ const row = i => ({ id: `20990101-${String(i).padStart(6, '0')}-yjp`, name: `run
   assert.equal(out.runs.length, 200, 'the walk stopped at the empty page')
   assert.equal(out.total, 237, 'the counted census is NOT rewritten down to the loaded rows')
   assert.equal(out.loaded, 200, 'loaded reports the shortfall — the pane renders the partial')
+  assert.equal(out.complete, false, 'an uncovered known total is an explicit INCOMPLETE fact')
   assert.equal(srv.calls.length, 3, 'no request after the empty page')
 }
 
@@ -142,9 +148,13 @@ const row = i => ({ id: `20990101-${String(i).padStart(6, '0')}-yjp`, name: `run
   assert.equal(out.runs.length, 137, 'short page ends the walk without any total')
   assert.equal(srv.calls.length, 2, 'exactly ceil(137/100) requests — stopped at the short page')
   assert.equal('total' in out, false, 'no total key was fabricated')
+  assert.equal(out.complete, true, 'a drained page stream is complete even with no total')
 }
 
 // (5) bounded: a server whose pages never "cover" stops at the hard cap.
+// The cap is a TRUNCATION FACT, carried independently of any total (#717 F1)
+// — the pane mount in (7g) proves it is never concealed.
+let CAP_RESULT
 {
   let i = 0
   const srv = { calls: [], async request(path) {
@@ -156,6 +166,8 @@ const row = i => ({ id: `20990101-${String(i).padStart(6, '0')}-yjp`, name: `run
   const out = await mod.runsIndexFetcher(srv.request)()
   assert.equal(srv.calls.length, 30, 'hard page cap 30 — the walk is finite')
   assert.equal(out.runs.length, 3000, 'what loaded stays visible (rendered as a partial)')
+  assert.equal(out.complete, false, 'the cap reached while uncovered is an explicit INCOMPLETE fact')
+  CAP_RESULT = out
 }
 
 // (6) cancellation: session-change/invalidate cancels the walk, mid-page.
@@ -267,4 +279,49 @@ const FLEET100 = Array.from({ length: 100 }, (_, i) => row(i)).map(r => ({ ...r,
   assert.match(texts(tree), /roots: \/home\/u\/\.hermes\/workflows/, 'where it looked is honest, not fabricated')
 }
 
-console.log('ALL PASS: full-census fetch — paged, deduped, bounded, cancellable; pane states honest')
+// (7g) #717 review F1, mounted: a capped unknown-total walk — the ACTUAL
+// fetcher result from (5) on the ACTUAL pane — must DISCLOSE the truncation.
+// The reviewer's probe showed the old pane hiding 3000 capped rows behind a
+// bare 'runs unknown'; that costume is now illegal.
+{
+  const tree = mount({ data: CAP_RESULT })
+  const t = texts(tree)
+  assert.match(t, /runs unknown/, 'the absent total is still not fabricated')
+  assert.match(t, /truncated — page cap \(loaded 3000\)/,
+    'the cap-reached fact is ON THE LINE independent of any total')
+  assert.match(t, /THE REST · 3000/, 'the 3000 loaded rows still render — a partial, never a hang')
+  assert.ok(!emptyStates(tree).includes('No runs'), 'a truncated census never claims the void')
+}
+
+// (7h) #717 review F4: answered-but-incomplete ZERO rows must not wear the
+// empty costume. A census that counted 237 but rendered nothing is PENDING —
+// 'Census incomplete' with a working retry, while the line keeps 'loaded 0 of 237'.
+{
+  const tree = mount({ data: { runs: [], total: 237, counts: { running: 0 } } })
+  assert.ok(!emptyStates(tree).includes('No runs'), 'a counted-nonzero census with zero rows is NOT empty')
+  assert.ok(emptyStates(tree).includes('Census incomplete'), 'the pending costume owns the screen')
+  assert.match(texts(tree), /loaded 0 of 237/, 'the shortfall stays on the census line')
+  const retry = buttons(tree).find(b => String(b.props.children).includes('retry'))
+  assert.ok(retry, 'the pending state offers a retry button')
+  retry.props.onClick({})
+  assert.deepEqual(globalThis.__WF_INV__, [{ queryKey: ['hermes-workflows', 'runs'] }],
+    'pending retry invalidates the runs key — the re-walk starts from offset 0')
+}
+
+// (7i) the PENDING costume also owns a truncated walk that loaded nothing,
+// even when NO total exists to derive a shortfall from.
+{
+  const tree = mount({ data: { runs: [], complete: false, counts: { running: 0 } } })
+  assert.ok(!emptyStates(tree).includes('No runs'), 'an incomplete walk never claims the void')
+  assert.ok(emptyStates(tree).includes('Census incomplete'), 'truncation-with-nothing is pending, not empty')
+  assert.match(texts(tree), /truncated — page cap \(loaded 0\)/)
+}
+
+// (7j) legacy first-page-empty with NO total is an ANSWERED empty census:
+// the server looked and found nothing — 'No runs' stays honest here.
+{
+  const tree = mount({ data: { runs: [] } })
+  assert.deepEqual(emptyStates(tree), ['No runs'], 'a drained zero page is still an answer')
+}
+
+console.log('ALL PASS: full-census fetch — paged, deduped, bounded, cancellable; pane states honest; cap truncation disclosed, pending never wears empty')
