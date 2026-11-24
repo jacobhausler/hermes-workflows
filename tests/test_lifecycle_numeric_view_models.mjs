@@ -136,25 +136,27 @@ const { Vitals } = new Function('EDGE_TONE', 'METER_TONE', 'jsx', 'jsxs', 'Fragm
   assert.ok(!t({ cost: null }).some(x => /COST|\$0/.test(x)), 'unpriced shows no dollar figure at all')
 }
 
-// -- 5. real inlineHeader: run clock vs child clock + activity words -----------------
+// -- 5. real cardModel: run clock vs child clock + activity words -------------------
 {
-  const headerGrab = src.match(/const inlineHeader = \(data, elapsed\) => \{[\s\S]*?\n\}/)[0]
-  const inlineHeader = new Function('fmtDur', 'TERMINAL', `const EDGE_TONE = ${JSON.stringify(EDGE_TONE)}\n${PRELUDE}\n${nodesLine}\n${headerGrab};\nreturn inlineHeader`)(
-    ms => `${Math.round(ms / 1000)}s`, new Set(['done', 'failed', 'stopped']))
+  const cardModel = new Function('fmtDur', 'TERMINAL', 'NODE_TONE',
+    `const EDGE_TONE = ${JSON.stringify(EDGE_TONE)}\n${PRELUDE}\n${grab('parseTime')}\n${grab('cardModel')};\nreturn cardModel`)(
+    ms => `${Math.round(ms / 1000)}s`, new Set(['done', 'failed', 'stopped']), { pending: {} })
   const now = Date.now() / 1000
-  const fresh = inlineHeader({ name: 'w', status: 'running', nodes_done: 1, nodes_total: 4,
-    metrics: { last_activity: now - 1, live: 1 } }, 30000)
-  assert.ok(fresh[0].includes('Running · fresh activity'), `<=5 s stamp: table wording: ${fresh[0]}`)
-  assert.ok(fresh[0].includes('run 30s'), `the header clock is LABELLED run: ${fresh[0]}`)
-  assert.ok(fresh[1].some(x => /^IDLE \d+s$/.test(x)), 'live row answers IDLE')
-  const quiet = inlineHeader({ name: 'w', status: 'running', nodes_done: 1, nodes_total: 4,
-    metrics: { last_activity: now - 6, live: 1 } }, 30000)
-  assert.ok(quiet[0].includes('Running · quiet, alive'), `>5 s stamp: quiet, alive: ${quiet[0]}`)
-  const unknown = inlineHeader({ name: 'w', status: 'running', nodes_done: 1, nodes_total: 4,
-    metrics: { last_activity: now + 900, live: 1 } }, 30000)
-  assert.ok(unknown[0].includes('Running · activity unknown'), `future stamp: activity unknown: ${unknown[0]}`)
-  assert.ok(unknown[1].includes('LIVE 1') && unknown[1].includes('IDLE —'),
-    `the running-unknown row answers LIVE n / IDLE —, never a silent or 0 IDLE: ${unknown[1]}`)
+  const ago = s => new Date(Date.now() - s * 1000).toISOString()
+  const fresh = cardModel({ name: 'w', status: 'running', nodes_done: 1, nodes_total: 4, started: ago(30),
+    metrics: { last_activity: now - 1, live: 1 } })
+  assert.equal(fresh.statusWord, 'Running · fresh activity', `<=5 s stamp: table wording: ${fresh.statusWord}`)
+  assert.ok(fresh.census.some(x => /^◷ run 3[01]s$/.test(x)), `the census clock is LABELLED run (WF-06): ${fresh.census}`)
+  assert.ok(fresh.census.includes('1/4 nodes'), `exact completed/total census: ${fresh.census}`)
+  assert.ok(fresh.metrics.some(x => /^IDLE \d+s$/.test(x)), 'live row answers IDLE')
+  const quiet = cardModel({ name: 'w', status: 'running', nodes_done: 1, nodes_total: 4, started: ago(30),
+    metrics: { last_activity: now - 6, live: 1 } })
+  assert.equal(quiet.statusWord, 'Running · quiet, alive', `>5 s stamp: quiet, alive: ${quiet.statusWord}`)
+  const unknown = cardModel({ name: 'w', status: 'running', nodes_done: 1, nodes_total: 4, started: ago(30),
+    metrics: { last_activity: now + 900, live: 1 } })
+  assert.equal(unknown.statusWord, 'Running · activity unknown', `future stamp: activity unknown: ${unknown.statusWord}`)
+  assert.ok(unknown.metrics.includes('LIVE 1') && unknown.metrics.includes('IDLE —'),
+    `the running-unknown row answers LIVE n / IDLE —, never a silent or 0 IDLE: ${unknown.metrics}`)
   // child clocks stay unlabeled-by-run: ItemDetail renders fmtDur(row.ms) only.
   const itemGrab = grab('ItemDetail')
   const { ItemDetail } = new Function('jsx', 'box', 'label', 'Dot', 'Badge', 'Vitals', 'fmtDur', 'fmtOutput', 'EDGE_TONE',
@@ -165,24 +167,26 @@ const { Vitals } = new Function('EDGE_TONE', 'METER_TONE', 'jsx', 'jsxs', 'Fragm
   assert.ok(!it.some(x => /^run /.test(x)), 'no child span ever claims the run word')
 }
 
-// -- 6. real pillModel + DirectiveBody: public words, stale, clock ------------------
+// -- 6. real cardModel: public words, stale, clock, honest absence ------------------
 {
-  const pillGrab = grab('pillModel')
-  const pillModel = new Function('TERMINAL', 'NODE_TONE', 'fmtDur', `const EDGE_TONE = ${JSON.stringify(EDGE_TONE)}\n${PRELUDE}\n${nodesLine}\n${grab('parseTime')}\n${pillGrab};\nreturn pillModel`)(
-    new Set(['done', 'failed', 'stopped']), { pending: {} }, ms => `${Math.round(ms / 1000)}s`)
-  const line = pillModel({ id: 'w', status: 'done', nodes_done: 4, nodes_total: 4,
-    started: '2026-01-01T00:00:00Z', updated: '2026-01-01T00:02:00Z' }).collapsedLine
-  assert.ok(line.includes('Finished'), `successful done reads the table word: ${line}`)
-  assert.ok(line.includes('4/4 terminal'), `known census stays exact: ${line}`)
-  assert.ok(line.includes('run 120s'), `the pill clock is labelled run (WF-06): ${line}`)
-  const cancelled = pillModel({ id: 'w', status: 'cancelled' }).collapsedLine
-  assert.ok(cancelled.includes('cancelled'), `cancelled keeps its own neutral word: ${cancelled}`)
-  assert.ok(!/Finished|failed/i.test(cancelled), 'cancelled is never Finished and never failed')
-  const gone = pillModel({ id: 'w', status: 'running', started: '2026-01-01T00:00:00Z' }, true).collapsedLine
-  assert.ok(gone.startsWith('w · Disconnected · last known Running'), `cached-directive reads Disconnected, keeps last-known word: ${gone}`)
-  assert.ok(!/fresh|quiet, alive/.test(gone), 'a disconnected record never infers present liveness')
-  const empty = pillModel({}).collapsedLine
-  assert.ok(empty.includes('—'), `an absent status is the em-dash: ${empty}`)
+  const cardModel = new Function('fmtDur', 'TERMINAL', 'NODE_TONE',
+    `const EDGE_TONE = ${JSON.stringify(EDGE_TONE)}\n${PRELUDE}\n${grab('parseTime')}\n${grab('cardModel')};\nreturn cardModel`)(
+    ms => `${Math.round(ms / 1000)}s`, new Set(['done', 'failed', 'stopped']), { pending: {} })
+  const done = cardModel({ id: 'w', status: 'done', nodes_done: 4, nodes_total: 4,
+    started: '2026-01-01T00:00:00Z', updated: '2026-01-01T00:02:00Z' })
+  assert.ok(done.statusWord.includes('Finished'), `successful done reads the table word: ${done.statusWord}`)
+  assert.ok(done.census.includes('4/4 nodes'), `known census stays exact: ${done.census}`)
+  assert.ok(done.census.some(x => /^◷ run 120s$/.test(x)), `the census clock is labelled run (WF-06): ${done.census}`)
+  const cancelled = cardModel({ id: 'w', status: 'cancelled' })
+  assert.ok(cancelled.statusWord.includes('cancelled'), `cancelled keeps its own neutral word: ${cancelled.statusWord}`)
+  assert.ok(!/Finished|failed/i.test(cancelled.statusWord), 'cancelled is never Finished and never failed')
+  const gone = cardModel({ id: 'w', status: 'running', started: '2026-01-01T00:00:00Z' }, true)
+  assert.ok(gone.statusWord.startsWith('Disconnected · last known Running'),
+    `cached-directive reads Disconnected, keeps last-known word: ${gone.statusWord}`)
+  assert.ok(!/fresh|quiet, alive/.test(gone.statusWord), 'a disconnected record never infers present liveness')
+  const empty = cardModel({})
+  assert.equal(empty.statusWord, '—', 'an absent status is the em-dash')
+  assert.ok(empty.census.includes('—/— nodes'), `absent counts dash, never a fabricated 0: ${empty.census}`)
 }
 
 // -- 7. no palette fork: the view model touches words and digits, never tones -------

@@ -62,7 +62,7 @@ writeFileSync(modPath, src
 const mod = await import(pathToFileURL(modPath).href)
 
 
-const { ownedRuns, splitRuns, pillModel, SessionStrip } = mod
+const { ownedRuns, splitRuns, cardModel, SessionStrip } = mod
 assert.equal(typeof SessionStrip, 'function', 'SessionStrip is exported for L3 to register in composer.top')
 
 // -- 1. ownedRuns ---------------------------------------------------------------
@@ -100,14 +100,17 @@ assert.equal(s.terminalTotal, 7, 'fold reports the true terminal count')
 const empty = splitRuns([])
 assert.deepEqual([empty.active, empty.overflow, empty.terminalFold, empty.terminalTotal], [[], 0, [], 0])
 
-// -- 3. pillModel: collapsed by default, one line ---------------------------------
-const pm = pillModel(runs[0])
-assert.equal(pm.expanded, false, 'pill renders collapsed by default')
-assert.equal(typeof pm.collapsedLine, 'string')
-assert.ok(pm.collapsedLine.includes('a'), 'collapsed line names the run')
-assert.ok(!pm.collapsedLine.includes('\n'), 'collapsed line is one line')
-const pmUnknown = pillModel({})
-assert.ok(pmUnknown.collapsedLine.length > 0, 'an empty record still renders a line, never throws')
+// -- 3. cardModel: collapsed by default, one line per cell ----------------------
+// (Ship 2.0, bd_2026-11-13-1bm: the retired one-line pillModel model became the
+// two-baseline card model; the law migrates — no cell ever contains a newline,
+// the record is always named, an empty record never throws.)
+const pm = cardModel(runs[0])
+assert.equal(pm.expanded, false, 'the card renders collapsed by default')
+assert.equal(typeof pm.name, 'string')
+assert.ok(pm.name.includes('a'), 'the card names the run')
+assert.ok(!/[\n]/.test([pm.name, pm.statusWord, ...pm.census, ...pm.metrics].join('|')), 'every model cell is one line')
+const pmUnknown = cardModel({})
+assert.ok(pmUnknown.name.length > 0 && pmUnknown.census.length > 0, 'an empty record still renders cells, never throws')
 
 // -- 4. the whole-card navigate is gone: DirectiveBody has no role=link ----------
 assert.ok(!/role:\s*'link'/.test(src.slice(src.indexOf('function DirectiveBody'), src.indexOf('function DirectiveBody') + 4000)),
@@ -148,4 +151,4 @@ const sdkMod = await import(pathToFileURL(sdkPath).href)
 }
 
 rmSync(tmp, { recursive: true, force: true })
-console.log('ALL PASS test_session_strip (ownedRuns, splitRuns, pillModel, SessionStrip export, no whole-card link, host.state atoms render)')
+console.log('ALL PASS test_session_strip (ownedRuns, splitRuns, cardModel, SessionStrip export, no whole-card link, host.state atoms render)')

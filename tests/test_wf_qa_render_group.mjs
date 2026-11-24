@@ -58,7 +58,12 @@ const jsxs = jsx
 // The FINAL lifecycle/numeric laws ship as one marked block; render-group
 // evaluations prepend the REAL block so consumer renders use production code.
 const vmBlock = `const EDGE_TONE = { pending: 'P', running: 'R', held: 'H', failed: 'F' }\n${constGrab('statusLabel')}\n${src.match(/\/\/ BEGIN shared-view-model\n([\s\S]*?)\/\/ END shared-view-model/)[1]}`
-const headerGrab = src.match(/const inlineHeader = \(data, elapsed\) => \{[\s\S]*?\n\}/)[0]
+// 2.0 (bd_2026-11-13-1bm): the retired inlineHeader's laws ride the RC
+// cardModel — evaluate the REAL exported model over the shared view-model.
+const evalCardModel = terminal => new Function('fmtDur', 'TERMINAL', 'NODE_TONE',
+  `${vmBlock}\n${grab('parseTime')}\n${grab('cardModel')};\nreturn cardModel`)(
+  n => `${Math.round(n / 1000)}s`, terminal,
+  { pending: 'P', running: 'R', held: 'H', failed: 'F', done: 'D', stopped: 'S', skipped: 'K' })
 const walk = node => Array.isArray(node)
   ? node.flatMap(walk)
   : node && typeof node === 'object' ? [node, ...Object.values(node.props || {}).flatMap(walk)] : []
@@ -263,13 +268,11 @@ const sdkMod = await import(pathToFileURL(sdkPath).href)
 
 // ============================ WF-06 labeled clocks ==============================
 {
-  const inlineHeader = new Function('nodesCount', 'fmtDur', 'TERMINAL',
-    `${vmBlock}${headerGrab};\nreturn inlineHeader`)(
-    r => `${r.nodes_done}/${r.nodes_total} terminal`, n => `${Math.round(n / 1000)}s`, new Set(['done', 'failed', 'stopped'])
-  )
-  const [first] = inlineHeader({ id: 'x', name: 'x', status: 'running', nodes_done: 1, nodes_total: 2 }, 33000)
-  assert.ok(first.some(x => /^run \d+s$/.test(x)), `WF-06: the card header clock is labeled run: ${first}`)
-  assert.ok(!first.some(x => /^\d+s$/.test(x)), `WF-06: no unlabeled clock remains: ${first}`)
+  const cardModel = evalCardModel(new Set(['done', 'failed', 'stopped']))
+  const cmRun = cardModel({ id: 'x', name: 'x', status: 'running', nodes_done: 1, nodes_total: 2,
+    started: new Date(Date.now() - 33000).toISOString() })
+  assert.ok(cmRun.census.some(x => /^◷ run \d+s$/.test(x)), `WF-06: the card census clock is labeled run: ${cmRun.census}`)
+  assert.ok(!cmRun.census.some(x => /^\d+s$/.test(x)), `WF-06: no unlabeled clock remains: ${cmRun.census}`)
   assert.match(src, /children: `run \$\{hdr\.elapsedLabel\}`/, 'WF-06: the record header clock is labeled run')
   assert.match(src, /children: `node \$\{dur\}`/, 'WF-06: the node-card clock is labeled node')
   assert.match(src, /title: 'child wall \(node\.started → node\.finished\)'/, 'WF-06: the timeline row names the child-wall source')
@@ -298,21 +301,18 @@ const sdkMod = await import(pathToFileURL(sdkPath).href)
 
 // ============================ WF-09 no COST $0.0000 =============================
 {
-  const inlineHeader = new Function('nodesCount', 'fmtDur', 'TERMINAL',
-    `${vmBlock}${headerGrab};\nreturn inlineHeader`)(
-    r => `${r.nodes_done}/${r.nodes_total} terminal`, n => `${n}ms`, new Set(['done', 'failed', 'stopped'])
-  )
-  const [, second] = inlineHeader({ id: 'x', name: 'x', status: 'running', nodes_done: 1, nodes_total: 2,
-    metrics: { api_calls: 3, tokens_in: 1200, tokens_out: 80, cost: 0, live: 1 } }, null)
+  const cardModel = evalCardModel(new Set(['done', 'failed', 'stopped']))
+  const second = cardModel({ id: 'x', name: 'x', status: 'running', nodes_done: 1, nodes_total: 2,
+    metrics: { api_calls: 3, tokens_in: 1200, tokens_out: 80, cost: 0, live: 1 } }).metrics
   assert.ok(!second.some(x => /\$0\.0000/.test(x)), `WF-09: no zero-dollar literal: ${second}`)
   assert.ok(second.some(x => x === 'COST included'), `WF-09: seat-billed activity reads included: ${second}`)
   // zero cost with NO activity is nothing to say at all
-  const [, secondIdle] = inlineHeader({ id: 'x', name: 'x', status: 'pending', nodes_done: 0, nodes_total: 2,
-    metrics: { cost: 0 } }, null)
+  const secondIdle = cardModel({ id: 'x', name: 'x', status: 'pending', nodes_done: 0, nodes_total: 2,
+    metrics: { cost: 0 } }).metrics
   assert.ok(!secondIdle.some(x => x.startsWith('COST')), 'WF-09: a fresh run with zero cost prints no COST segment')
   // a real cost still renders
-  const [, secondPaid] = inlineHeader({ id: 'x', name: 'x', status: 'done', nodes_done: 2, nodes_total: 2,
-    metrics: { cost: 0.25 } }, null)
+  const secondPaid = cardModel({ id: 'x', name: 'x', status: 'done', nodes_done: 2, nodes_total: 2,
+    metrics: { cost: 0.25 } }).metrics
   assert.ok(secondPaid.some(x => x === 'COST $0.250'), `a real estimate still prints: ${secondPaid}`)
   // the usd formatter itself never answers '$0.0000' for a positive number
   const usd = new Function(`${constGrab('usd')}; return usd`)()

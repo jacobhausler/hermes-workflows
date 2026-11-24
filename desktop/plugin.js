@@ -647,13 +647,17 @@ function DirectiveCard({ id }) {
 // test it without a DOM. It answers the pill's TWO semantic baselines and the
 // expanded word row from ONE record — the pill and the expansion can never
 // disagree because they read the same call. Laws it carries forward:
-//  - Census (baseline 2): exact completed/total node count (numerator is
-//    SUCCESSFUL completion — an ended run is not a successful one), the failed
+//  - Census (baseline 2): exact ended-and-committed/total node count (the
+//    read model's rollup counts done, partial harvest and skipped — an ended
+//    run is not a successful one, and the word claims no success), the failed
 //    count explicit and separate whenever the node records answer it, the run
 //    WALL clock labelled (WF-06: 'run <dur>', never a bare duration), and the
 //    notices cell honestly dashed while the read model carries no notice
 //    stream (absent evidence is `— notices`, never a silent omission or 0).
 //    Absent counts ride the em-dash, a recorded zero stays 0 (no-fabrication).
+//  - WF-02 (the #7 law): a cancelled straggler is NEVER counted failed — it
+//    reads its own neutral bucket (the read model already separates it via
+//    disposition CANCELLED / error_class cancelled).
 //  - WF-06/WF-09 survive verbatim in words: 'COST included' at zero with
 //    recorded activity, never '$0.0000'; tokens 2sf, counts exact safe
 //    integers; a live running row always answers LIVE/IDLE, the IDLE cell
@@ -669,12 +673,17 @@ export function cardModel(run, stale = false) {
   const end = TERMINAL.has(run?.status) ? parseTime(run?.updated) : Date.now()
   const wallMs = start && end > start ? end - start : null
   const records = run?.nodes && typeof run.nodes === 'object' ? Object.values(run.nodes) : null
+  // WF-02 (#7): a cancelled straggler's record rides error_class 'cancelled'
+  // (the read model re-reads it pending, re-drivable) — it is stop history,
+  // never a failure, and gets its own neutral bucket.
+  const isCancelled = n => !!n && (n.disposition === 'CANCELLED' || n.error_class === 'cancelled')
   const census = [
     `${countCell(run?.nodes_done, '—')}/${countCell(run?.nodes_total, '—')} nodes`,
     // The failed bucket is exact-integer and explicit; it shows whenever the
     // records answer it — a reassuring fraction must never hide a failure
     // behind it, so a known zero is allowed to sit visible in the census.
-    records ? `! ${exactCount(records.filter(n => n && n.status === 'failed').length)} failed` : null,
+    records ? `! ${exactCount(records.filter(n => n && n.status === 'failed' && !isCancelled(n)).length)} failed` : null,
+    records && records.some(isCancelled) ? `· ${exactCount(records.filter(isCancelled).length)} cancelled` : null,
     wallMs != null ? `◷ run ${fmtDur(wallMs)}` : null,
     '— notices'
   ].filter(x => x != null)

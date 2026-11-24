@@ -2,7 +2,7 @@
 /**
  * Issue #48 — tab DAG polish: NODE_TONE parity, running glow, gate nag, calm
  * terminals. Pure JS (node, no deps), harness shape copied from the sibling
- * pillModel/model tests (test_pill_rail.mjs): the real plugin.js is loaded
+ * cardModel/model tests (test_pill_rail.mjs): the real plugin.js is loaded
  * against stub '@hermes/plugin-sdk', 'react' and 'react/jsx-runtime' blobs,
  * so the exported model AND the rendered jsx trees are asserted without a
  * DOM. The jsx stub returns plain {type, props, key} records; function
@@ -10,7 +10,7 @@
  *
  * Pinned laws under test:
  *  - ONE tone table (NODE_TONE: state x intensity -> color/shadow/pulse/calm);
- *    pillModel, Dot, edgeTone, timelineTone and the MiniGraph pill all read
+ *    cardModel, Dot, edgeTone, timelineTone and the MiniGraph pill all read
  *    the SAME colour values — a forked palette is the bug class (#48).
  *  - running + held carry shadow/pulse fields; EVERY terminal entry
  *    (done/failed/stopped/skipped) has pulseMs === null && shadow === null —
@@ -99,7 +99,7 @@ const textOf = node => {
   return textOf(node.props?.children)
 }
 // slice one top-level declaration out of the source (same trick the inline
-// header test uses for inlineHeader)
+// header test uses for cardModel)
 const decl = name => {
   const m = src.match(new RegExp(`(?:export )?(?:const|function) ${name}\\s*=?\\s?[\\s\\S]*?\\n\\}`, 'm'))
   assert.ok(m, `${name} exists in desktop/plugin.js`)
@@ -185,16 +185,19 @@ assert.ok(/rgba?\(/.test(NODE_TONE.failed.borderColor) || /color-mix/.test(NODE_
   'failed tint is a real red colour (rgba()/color-mix), not a bare var')
 
 // =================================================================================
-// 2. Single source: pillModel / Dot / edgeTone / timelineTone / MiniGraph pill
+// 2. Single source: cardModel / Dot / edgeTone / timelineTone / MiniGraph pill
 //    all speak the SAME colours (parity — a parallel palette is the bug class)
 // =================================================================================
 {
-  // 2a. pillModel exports the table entry for the run's status
-  assert.equal(mod.pillModel, undefined === mod.pillModel ? mod.pillModel : mod.pillModel, 'sentinel')
+  // 2a. cardModel exports the table entry for the run's status (2.0: the
+  // retired pillModel's parity law migrates to the RC card model — the
+  // card's tone entry IS NODE_TONE's, a forked palette is the bug class).
+  assert.equal(typeof mod.cardModel, 'function', 'cardModel is the exported card model (pillModel is retired)')
+  assert.equal(mod.pillModel, undefined, 'the retired pillModel export never returns as a shim')
   const live = { id: 'r', name: 'r', status: 'running', started: new Date(Date.now() - 4000).toISOString() }
   const done = { id: 'r', name: 'r', status: 'done', started: '2026-09-26T04:00:00Z', updated: '2026-09-26T04:05:00Z' }
-  assert.equal(mod.pillModel(live).tone, NODE_TONE.running, 'pillModel(running).tone IS the table entry (parity)')
-  assert.equal(mod.pillModel(done).tone, NODE_TONE.done, 'pillModel(done).tone IS the table entry (parity)')
+  assert.equal(mod.cardModel(live).tone, NODE_TONE.running, 'cardModel(running).tone IS the table entry (parity)')
+  assert.equal(mod.cardModel(done).tone, NODE_TONE.done, 'cardModel(done).tone IS the table entry (parity)')
   // no palette fork: the pill's colour equals the historical EDGE_TONE value
   const edgeToneSrc = decl('EDGE_TONE')
   for (const s of ['running', 'done', 'held', 'failed', 'pending']) {
