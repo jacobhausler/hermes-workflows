@@ -29,6 +29,9 @@ const constGrab = name => {
   return src.slice(i, i + 1 + nx)
 }
 
+// bd_2026-11-13-cj2: NodePanel/WorkflowsPage mount the real marked nav block
+const navBlock = src.match(/\/\/ BEGIN stored-session-nav\n([\s\S]*?)\/\/ END stored-session-nav/)[0].replace(/^export /gm, '')
+
 // ---- structural contract: Drawer is gone; the alias keeps L3 whole ----------
 assert.ok(!/function\s+Drawer\s*\(/.test(src), 'Drawer component deleted')
 assert.ok(/const\s+Drawer\s*=\s*NodePanel\b/.test(src), 'Drawer alias so the L3 call site needs no change')
@@ -54,6 +57,7 @@ const texts = node => walk(node).flatMap(n =>
 
 const EDGE_TONE = { done: 'D', running: 'R', held: 'H', failed: 'F', skipped: 'S', pending: 'P' }
 const code = [
+  navBlock,
   constGrab('EDGE_TONE'), constGrab('FACT_TONE'), constGrab('UNKNOWN'), constGrab('TAIL_BYTES'),
   constGrab('defaultTabFor'), constGrab('unk'), constGrab('factText'), constGrab('logBase'), constGrab('attemptNo'),
   grab('fanItems'), grab('itemLabel'), grab('renderGoal'),

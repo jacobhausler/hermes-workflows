@@ -45,6 +45,9 @@ const constGrab = name => {
   return src.slice(i, i + 1 + nx)
 }
 
+// bd_2026-11-13-cj2: NodePanel/WorkflowsPage mount the real marked nav block
+const navBlock = src.match(/\/\/ BEGIN stored-session-nav\n([\s\S]*?)\/\/ END stored-session-nav/)[0].replace(/^export /gm, '')
+
 // ---- the fixture is CAPTURED, not authored -----------------------------------
 // One read of the real read model: wfcommon.node_facts over a run dir whose node `b`
 // holds wf.py's `_window_spent_record` output verbatim.
@@ -67,6 +70,7 @@ const texts = node => walk(node).flatMap(n =>
   typeof n === 'string' ? [n] : typeof n.props?.children === 'string' ? [n.props.children] : [])
 
 const code = [
+  navBlock,
   constGrab('EDGE_TONE'), constGrab('FACT_TONE'), constGrab('UNKNOWN'), constGrab('TAIL_BYTES'),
   constGrab('defaultTabFor'), constGrab('unk'), constGrab('factText'), constGrab('logBase'), constGrab('attemptNo'),
   grab('fanItems'), grab('itemLabel'), grab('renderGoal'),

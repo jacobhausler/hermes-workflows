@@ -7450,10 +7450,16 @@ def child_metrics(run_id, home=None):
     try:
         c = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=0.5)
         try:
-            have_bp = any(r[1] == "billing_provider" for r in c.execute("pragma table_info(sessions)"))
+            cols = [r[1] for r in c.execute("pragma table_info(sessions)")]
+            have_bp = "billing_provider" in cols
             bp_sel = "billing_provider, " if have_bp else ""
+            # bd_2026-11-13-cj2: sessions.id rides the fold (recorded stored
+            # session ids). Minimal historical schemas without an id column
+            # (the parity fixtures) read NULL there — honest absence, the fold
+            # gains no key, and the legacy payload shape stays byte-identical.
+            id_sel = "id, " if "id" in cols else "NULL, "
             rows = c.execute(
-                f"select id, title, model, {bp_sel}input_tokens, output_tokens, cache_read_tokens, reasoning_tokens, "
+                f"select {id_sel}title, model, {bp_sel}input_tokens, output_tokens, cache_read_tokens, reasoning_tokens, "
                 "api_call_count, tool_call_count, estimated_cost_usd, last_activity_at, "
                 "last_activity_description, ended_at, started_at from sessions where title like ? "
                 "order by title, started_at, rowid",
