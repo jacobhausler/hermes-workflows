@@ -137,14 +137,15 @@ async function connectCdp(port, rendererPort, timeoutMs = 90_000) {
 // Trusted input (real pipeline, per skill): moved -> pressed -> released at
 // the element's rect center. Locator JS finds the DEEPEST visible element
 // whose trimmed text contains `needle` (or the first, when `nth` given).
-async function trustedClick(cdp, needle, { exact = false, nth = null } = {}) {
+async function trustedClick(cdp, needle, { exact = false, nth = null, ci = false } = {}) {
   const pt = await cdp.evl(`(async () => {
-    const needle = ${JSON.stringify(needle)}, exact = ${exact};
+    const needle = ${JSON.stringify(needle)}, exact = ${exact}, ci = ${ci};
     const nodes = [...document.querySelectorAll('div,button,a,span,li,td')];
+    const norm = t => ci ? t.toLowerCase() : t;
     const hits = nodes.filter(n => {
-      const t = (n.innerText || n.textContent || '').trim();
+      const t = norm((n.innerText || n.textContent || '').trim());
       if (t.length > 400 && !exact) return false;
-      if (exact ? t === needle : t.includes(needle)) {
+      if (exact ? t.split('·')[0].trim() === norm(needle) : t.includes(norm(needle))) {
         const r = n.getBoundingClientRect();
         return r.width > 0 && r.height > 0;
       }
@@ -166,6 +167,16 @@ async function trustedClick(cdp, needle, { exact = false, nth = null } = {}) {
   await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: pt.x, y: pt.y, button: 'left', clickCount: 1, buttons: 1 });
   await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: pt.x, y: pt.y, button: 'left', clickCount: 1, buttons: 0 });
   return pt;
+}
+
+async function waitPainted(cdp, ms = 20_000) {
+  const t0 = Date.now();
+  for (;;) {
+    const n = await cdp.evl(`document.body ? document.body.innerText.length : 0`);
+    if (n > 40) return n;
+    if (Date.now() - t0 > ms) die(EX.boot, 'renderer never painted a page (empty document)');
+    await sleep(400);
+  }
 }
 
 async function waitText(cdp, needle, ms = 30_000) {
@@ -245,20 +256,20 @@ class Supervisor {
   }
 }
 
-function readConfigValue(hermesBin, key) {
+function readConfigValue(hermesBin, key, env) {
   // `hermes config get` exits 0 printing the value; a missing key prints a
   // "not set" notice. Presence probe stays honest via --json parse, else null.
   try {
-    const out = execFileSync(hermesBin, ['config', 'get', key, '--json'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    const out = execFileSync(hermesBin, ['config', 'get', key, '--json'], { encoding: 'utf8', env });
     return JSON.parse(out);
   } catch { return null; }
 }
 
-function writeConfig(hermesBin, kv) {
-  execFileSync(hermesBin, ['config', 'set', '--force', ...kv], { encoding: 'utf8' });
+function writeConfig(hermesBin, kv, env) {
+  execFileSync(hermesBin, ['config', 'set', '--force', ...kv], { encoding: 'utf8', env });
 }
-function unsetConfig(hermesBin, key) {
-  try { execFileSync(hermesBin, ['config', 'unset', key], { encoding: 'utf8' }); } catch { /* best-effort revert */ }
+function unsetConfig(hermesBin, key, env) {
+  try { execFileSync(hermesBin, ['config', 'unset', key], { encoding: 'utf8', env }); } catch { /* best-effort revert */ }
 }
 
 async function main() {
@@ -364,7 +375,24 @@ async function main() {
   }
   identity.bench.discovery_copied = ['spawn-ledger.json', 'gateway_state.json', 'auth.json', 'config.yaml']
     .filter(f => fs.existsSync(path.join(B.home, f)));
+  // The app's OWN connection state lives in its user-data: seed a local-kind
+  // registry so the bench app serves the bench (it ensures/attaches under
+  // HERMES_HOME=bench home — a fork here is ISOLATION, never a trampled
+  // shared state, because the fork writes only inside the bench).
+  fs.writeFileSync(path.join(B.userdata, 'connections.json'), JSON.stringify({
+    version: 2, primary: 'local', launchMode: 'primary', lastUsed: 'local',
+    connections: [{ id: 'local', kind: 'local', label: 'This device' }],
+  }) + '\n');
+  fs.writeFileSync(path.join(B.userdata, 'connection.json'), JSON.stringify({ mode: 'local', profiles: {} }) + '\n');
+  // Agent half of the CANDIDATE: the bench home links the repo checkout, so
+  // the bench backend mounts /api/plugins/hermes-workflows/ FROM the tree
+  // under proof (same symlinked-dev-checkout shape the desktop-half
+  // migration supports).
+  fs.mkdirSync(path.join(B.home, 'plugins'), { recursive: true });
+  fs.symlinkSync(REPO, path.join(B.home, 'plugins', 'hermes-workflows'));
+  identity.bench.plugins_symlink = REPO;
 
+  const benchEnv = { ...process.env, HERMES_HOME: B.home };
   const sup = new Supervisor(A.outDir);
   sup._ownedUserData = B.userdata;
   sup._viteMarker = `--port ${A.rendererPort} --strictPort`;
@@ -372,18 +400,6 @@ async function main() {
   const revertFailures = [];
 
   try {
-    // Trusted inputs written to the SHARED gateway config (skill-proven
-    // recipe): runs_root isolates what the pane lists; tray arms the gated
-    // tray row. Both are read fresh by the serving gateway per request; the
-    // window is minutes, and teardown reverts (records prior absence).
-    for (const [key, value] of [['plugins.entries.hermes-workflows.settings.runs_root', B.runs],
-                                ['plugins.entries.hermes-workflows.settings.tray', true]]) {
-      const before = readConfigValue(hermesBin, key);
-      identity.config_touched[key] = { before, after: value };
-      touched.push(key);
-      writeConfig(hermesBin, [key, String(value)]);
-    }
-
     // -- boot the dev renderer (owned vite, strict port) --------------------
     sup.start('renderer', process.execPath,
       [path.join(desktop, 'node_modules', 'vite', 'bin', 'vite.js'),
@@ -407,11 +423,28 @@ async function main() {
       HERMES_DESKTOP_DEV_SERVER: `http://127.0.0.1:${A.rendererPort}`,
       HERMES_DESKTOP_CDP_PORT: String(A.cdpPort),
       HERMES_HOME: B.home };
-    if (!fs.existsSync(path.join(B.home, 'spawn-ledger.json')) &&
-        !fs.existsSync(path.join(B.home, 'gateway_state.json')))
-      die(EX.boot, `bench home has no gateway discovery input (copied neither spawn-ledger.json nor gateway_state.json from ${realHome}) — the pane API cannot attach`);
     sup.start('electron', path.join(desktop, 'node_modules', '.bin', 'electron'),
       ['.', `--user-data-dir=${B.userdata}`], { cwd: desktop, env: electronEnv });
+
+    // Trusted inputs are written AFTER the bench backend registers (the fork
+    // normalizes config.yaml at boot — a pre-boot write is silently dropped,
+    // field-proven). Both keys are read fresh by the door per request; the
+    // tray settings-gate is a bootstrap read, so the mid-run reload below
+    // re-runs plugin registration with the setting in place.
+    {
+      const gT0 = Date.now();
+      while (!fs.existsSync(path.join(B.home, 'gateway_state.json')) && Date.now() - gT0 < 90_000)
+        await sleep(500);
+      if (!fs.existsSync(path.join(B.home, 'gateway_state.json')))
+        die(EX.boot, 'bench backend never registered gateway_state.json (see logs/electron.log)');
+    }
+    for (const [key, value] of [['plugins.entries.hermes-workflows.settings.runs_root', B.runs],
+                                ['plugins.entries.hermes-workflows.settings.tray', true]]) {
+      const before = readConfigValue(hermesBin, key, benchEnv);
+      identity.config_touched[key] = { before, after: value, scope: 'bench home (isolated — shared config untouched)' };
+      touched.push(key);
+      writeConfig(hermesBin, [key, String(value)], benchEnv);
+    }
 
     // -- engine seed: launch the held-gate graph through the door -----------
     const engSeed = (c.seeds || []).find(s => s.kind === 'engine_seed' && s.method === 'door_run');
@@ -421,13 +454,34 @@ async function main() {
     let runId;
     let hermesAbs = hermesBin;
     if (!hermesAbs.startsWith('/')) {
-      try { hermesAbs = execFileSync('/usr/bin/which', [hermesAbs], { encoding: 'utf8' }).trim() || hermesAbs; } catch { /* PATH lookup stays the door's problem */ }
+      try { hermesAbs = execFileSync('/usr/bin/which', [hermesAbs], { encoding: 'utf8' }).trim() || hermesAbs; } catch { /* PATH lookup stays the door's own problem */ }
     }
+    // Door interpreter: the CLI shim itself names it (`exec <python> …`), so
+    // the seed runs under the SAME interpreter the gateway loads the door
+    // with. Fallbacks: UI2_PROOF_PYTHON, then a >=3.10 python3 probe (the
+    // door uses PEP-604 annotations at def time — system 3.9 dies on them).
+    let py = process.env.UI2_PROOF_PYTHON || '';
+    if (!py) {
+      try {
+        const shim = fs.readFileSync(hermesAbs, 'utf8').slice(0, 4000);
+        const m = shim.match(/^exec\s+(\S*python\S*)\b/m);
+        if (m && fs.existsSync(m[1])) py = m[1];
+      } catch { /* not a readable shim */ }
+    }
+    if (!py) {
+      for (const cand of ['python3', 'python3.14', 'python3.12', 'python3.10']) {
+        try {
+          execFileSync(cand, ['-c', 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)']);
+          py = cand; break;
+        } catch { /* too old or absent */ }
+      }
+    }
+    if (!py) die(EX.preflight, 'no >=3.10 interpreter found for the door (set UI2_PROOF_PYTHON)');
     try {
-      runId = execFileSync('python3', [path.join(HERE, 'seed_run.py'),
+      runId = execFileSync(py, [path.join(HERE, 'seed_run.py'),
         '--repo', REPO, '--runs-root', B.runs, '--graph-file', graphFile],
         { encoding: 'utf8', timeout: 60_000,
-          env: { ...process.env, WF_RUNS_ROOT: B.runs, HERMES_WF_HERMES_BIN: hermesAbs } }).trim();
+          env: { ...process.env, WF_RUNS_ROOT: B.runs, HERMES_WF_HERMES_BIN: hermesAbs, HERMES_HOME: B.home } }).trim();
     } catch (e) {
       die(EX.api, `engine seed launch failed (seed_run.py): ${String(e.stderr || e.message).slice(0, 400)}`);
     }
@@ -435,39 +489,90 @@ async function main() {
 
     // -- CDP attach; enable decision; reload (skill gotcha wall) ------------
     let cdp = await connectCdp(A.cdpPort, A.rendererPort);
-    await cdp.evl(`localStorage.setItem('hermes.desktop.pluginDecisions.v2', JSON.stringify({'hermes-workflows': true}))`);
+    {
+      // Storage can be briefly denied while the first document is replaced by
+      // the app boot — bounded retry, then a real failure.
+      let stored = 'denied';
+      const dT0 = Date.now();
+      while (stored !== 'ok' && Date.now() - dT0 < 20_000) {
+        stored = await cdp.evl(`(() => { try {
+          localStorage.setItem('hermes.desktop.pluginDecisions.v2', JSON.stringify({'hermes-workflows': true}));
+          return 'ok';
+        } catch { return 'denied' } })()`);
+        if (stored !== 'ok') { await sleep(750); cdp = await connectCdp(A.cdpPort, A.rendererPort, 20_000); }
+      }
+      if (stored !== 'ok') die(EX.boot, 'localStorage never writable on the renderer — enable decision impossible');
+    }
     await cdp.send('Page.reload', { ignoreCache: true });
     cdp.ws.close();
     await sleep(1500);
     cdp = await connectCdp(A.cdpPort, A.rendererPort, 60_000);
+    // Boot can re-navigate the window (main restores the dev-server URL after
+    // an early reload): be resilient — reconnect and re-paint-probe for up to
+    // 60 s instead of trusting one document.
+    {
+      const pT0 = Date.now();
+      for (;;) {
+        try { await waitPainted(cdp, 6_000); break; }
+        catch (e) {
+          if (Date.now() - pT0 > 60_000) throw e;
+          try { cdp.ws.close(); } catch { /* already gone */ }
+          cdp = await connectCdp(A.cdpPort, A.rendererPort, 30_000);
+        }
+      }
+    }
 
     // Checked API attachment (1): the dev-served registry shows the plugin's
-    // surfaces registered on the REAL renderer (skill probe).
-    const registry = await cdp.evl(`(async () => {
-      const mod = await import('/src/contrib/registry.ts');
-      const reg = mod.registry;
-      const names = area => { try { return (reg.getArea(area) || []).map(e => e.id ?? e.name ?? String(e)) } catch { return [] } };
-      return { routes: names('routes'), panes: names('panes'),
-               directives: names('transcript.directives'), composer: names('composer.underside') };
-    })()`);
+    // surfaces registered on the REAL renderer (skill probe). Bounded poll:
+    // activation follows the fs-watch push + bundle import and can lag boot.
+    let registry = { routes: [], panes: [], directives: [], composer: [] }, records = {};
+    const rT0 = Date.now();
+    while (Date.now() - rT0 < 45_000) {
+      registry = await cdp.evl(`(async () => {
+        const mod = await import('/src/contrib/registry.ts');
+        const reg = mod.registry;
+        const names = area => { try { return (reg.getArea(area) || []).map(e => e.id ?? e.name ?? String(e)) } catch { return [] } };
+        return { routes: names('routes'), panes: names('panes'),
+                 directives: names('transcript.directives'), composer: names('composer.underside') };
+      })()`);
+      try {
+        records = await cdp.evl(`(async () => {
+          const m = await import('/src/contrib/plugins-store.ts');
+          const rec = m.$pluginRecords.get();
+          return Object.fromEntries(Object.entries(rec).map(([k, v]) => [k, { error: v?.error ?? null, active: !!v?.active }]))
+        })()`) || records;
+      } catch { /* store shape differs on older builds — registry alone decides */ }
+      const attachedNow = registry.panes.some(x => String(x).includes('workflow'));
+      if (attachedNow) break;
+      await sleep(1500);
+    }
     identity.registry = registry;
+    identity.plugin_records = records;
     const surfacesWanted = new Set(c.surfaces);
     const attached = surfacesWanted.has('pane_workflows') ? registry.panes.some(x => String(x).includes('workflow'))
       : registry.panes.length > 0;
-    if (!attached) die(EX.api, `plugin API attachment unproven: registry panes=${JSON.stringify(registry.panes)} (bundle loaded but nothing registered — enable/reload/marker issue)`);
-    if (surfacesWanted.has('directive_card') && !registry.directives.some(x => String(x).includes('workflow')))
-      die(EX.api, `directive not registered on the real renderer: transcript.directives=${JSON.stringify(registry.directives)}`);
+    const postLoadSha = sha256(path.join(B.plugins, 'plugin.js'));
+    identity.plugin.staged_sha256_after_load = postLoadSha;
+    if (postLoadSha !== pluginSha)
+      die(EX.api, `loaded desktop half drifted from the candidate during boot (${postLoadSha.slice(0,12)} != ${pluginSha.slice(0,12)})`);
+    if (!attached) {
+      try { await shoot(cdp, A.outDir, '00-diagnostic-unattached.png'); } catch { /* diagnostics are best-effort */ }
+      die(EX.api, `plugin API attachment unproven: registry panes=${JSON.stringify(registry.panes)} ` +
+          `plugin_records=${JSON.stringify(records).slice(0, 400)} (diagnostic shot in captures/ if present)`);
+    }
 
     // Checked API attachment (2): the seeded run row can ONLY come from
-    // GET /api/plugins/hermes-workflows/ — proven by its rendering.
-    await trustedClick(cdp, 'WORKFLOWS', { exact: true });
-    await waitText(cdp, runId, 30_000);
+    // GET /api/plugins/hermes-workflows/ — proven by its rendering. Rows
+    // render the run NAME (the id rides card/directive text, not every row).
+    const runName = engSeed.graph.name
+    await trustedClick(cdp, 'workflows', { exact: true, ci: true });
+    await waitText(cdp, runName, 30_000);
     identity.api_attachment = { via: 'registry + live seeded run row rendered through the plugin API route', run_id: runId };
     const shots = [];
 
     // 01/02 pane: runs list, then the held-gate run detail
     shots.push({ surface: 'pane_workflows', state: 'runs list, seeded held-gate run', ...(await shoot(cdp, A.outDir, '01-pane-runs.png')) });
-    await trustedClick(cdp, runId);
+    await trustedClick(cdp, runName);
     await waitText(cdp, engSeed.graph.nodes[1].question, 20_000);
     shots.push({ surface: 'pane_workflows', state: 'run detail, held gate question', ...(await shoot(cdp, A.outDir, '02-pane-run-detail.png')) });
 
@@ -478,53 +583,113 @@ async function main() {
     if (cardSeed && surfacesWanted.has('directive_card')) {
       const ask = path.join(A.outDir, 'seed', 'ask.txt');
       fs.writeFileSync(ask, `Echo this line verbatim and nothing else:\n::workflow{id="${runId}"}\n`);
-      const chatArgs = ['chat', '--query-file', ask, '--oneshot', '-Q'];
+      // --source desktop: the app's session list shows titled, desktop-sourced
+      // sessions; a bare --oneshot stores source=oneshot WITHOUT a title and
+      // the list filters it out (field-proven: state.db source columns).
+      const chatArgs = ['chat', '--query-file', ask, '--oneshot', '-Q', '--source', 'desktop'];
       if (cardSeed.model) chatArgs.push('-m', cardSeed.model);
       if (cardSeed.provider) chatArgs.push('--provider', cardSeed.provider);
-      let cardSession = null;
-      try {
-        cardSession = execFileSync(hermesBin, chatArgs, { encoding: 'utf8', timeout: 240_000, maxBuffer: 32 * 1024 * 1024 });
-      } catch (e) {
-        die(EX.api, `directive card seed failed (hermes chat oneshot): ${String(e.message).slice(0, 300)}`);
+      let cardSession = '';
+      let cardSessionErr = '';
+      {
+        const r = spawnSync(hermesAbs, chatArgs, {
+          encoding: 'utf8', timeout: 240_000, maxBuffer: 32 * 1024 * 1024, env: benchEnv,
+        });
+        if (r.error || r.status !== 0) {
+          die(EX.api, `directive card seed failed (hermes chat oneshot): ${String(r.stderr || r.error?.message).slice(0, 300)}`);
+        }
+        cardSession = r.stdout || '';
+        cardSessionErr = r.stderr || '';
       }
       fs.writeFileSync(path.join(A.outDir, 'seed', 'oneshot-output.txt'), cardSession);
       identity.seeds.directive_card_echo = { kind: 'engine_seed', method: 'oneshot_echo',
         ask_sha256: sha256(ask), stdout_sha256: crypto.createHash('sha256').update(cardSession).digest('hex'),
         model: cardSeed.model || 'seat-default' };
-      await trustedClick(cdp, 'SESSIONS', { exact: true });
-      // Row titles derive from the first user message; the ask text embeds the
-      // directive, so match any of: ask text, raw directive, bare run id.
-      const rowHit = await cdp.evl(`(() => {
-        const nodes = [...document.querySelectorAll('div,li,button,a')].filter(n => {
-          const t = (n.innerText || '').trim();
-          if (!t || t.length > 300) return false;
-          return t.includes('Echo this line') || t.includes(${JSON.stringify(runId)}) || t.includes('::workflow{id=');
-        });
-        const leaf = nodes.find(h => !nodes.some(o => o !== h && h.contains(o))) ?? nodes[0];
-        if (!leaf) return null;
-        leaf.scrollIntoView({ block: 'center' });
-        const r = leaf.getBoundingClientRect();
-        return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
-      })()`);
+      // The session list caches at page load — reload so the freshly seeded
+      // one-shot (written straight to the bench store) is in the list.
+      await cdp.send('Page.reload', { ignoreCache: true });
+      cdp.ws.close();
+      await sleep(2000);
+      cdp = await connectCdp(A.cdpPort, A.rendererPort, 60_000);
+      await waitPainted(cdp);
+      await trustedClick(cdp, 'sessions', { exact: true, ci: true });
+      // Row titles are summarized (never the raw ask); in a fresh bench home
+      // the ONLY session is the seeded echo — click the topmost row-shaped
+      // element in the sidebar column (title + relative-time pattern).
+      let rowHit = null;
+      const rowT0 = Date.now();
+      while (!rowHit && Date.now() - rowT0 < 20_000) {
+        rowHit = await cdp.evl(`(async () => {
+          const cand = [...document.querySelectorAll('div,li,button,a')]
+            .map(n => ({ n, t: (n.innerText || '').trim() }))
+            .filter(({ n, t }) => t && t.length < 120 && (t.includes('now') || /ago|min|hour|sec/i.test(t)))
+            .filter(({ n }) => { const r = n.getBoundingClientRect(); return r.width > 60 && r.height > 16 && r.x < 420 && r.y > 40; })
+            .sort((a, b) => a.n.getBoundingClientRect().y - b.n.getBoundingClientRect().y);
+          const leaf = cand.find(({ n }) => !cand.some(o => o.n !== n && n.contains(o.n))) ?? cand[0];
+          if (!leaf) return null;
+          const el = leaf.n;
+          el.scrollIntoView({ block: 'center' });
+          await new Promise(r => setTimeout(r, 350));
+          const r = el.getBoundingClientRect();
+          return { x: r.x + r.width / 2, y: r.y + r.height / 2, t: leaf.t.slice(0, 60) };
+        })()`);
+        if (!rowHit) await sleep(750);
+      }
       if (!rowHit) die(EX.api, 'seeded one-shot session row not found in the SESSIONS list');
-      for (const t of ['mouseMoved', 'mousePressed', 'mouseReleased'])
-        await cdp.send('Input.dispatchMouseEvent', { type: t, x: rowHit.x, y: rowHit.y,
-          button: t === 'mouseMoved' ? undefined : 'left', clickCount: 1, buttons: t === 'mouseReleased' ? 0 : 1 });
-      await waitText(cdp, runId, 30_000);           // inert user-role directive text carries the id
+      identity.seeds.directive_card_echo.session_row_hit = rowHit;
+      {
+        // Click + assert, re-located on failure: a title-summary refresh can
+        // re-measure the virtualized row between rect and button-down.
+        let opened = false
+        for (let attempt = 0; attempt < 3 && !opened; attempt++) {
+          if (attempt > 0) rowHit = await cdp.evl(`(async () => {
+            const cand = [...document.querySelectorAll('div,li,button,a')]
+              .map(n => ({ n, t: (n.innerText || '').trim() }))
+              .filter(({ t }) => t && t.length < 120 && (t.includes('now') || /ago|min|hour|sec/i.test(t)))
+              .filter(({ n }) => { const r = n.getBoundingClientRect(); return r.width > 60 && r.height > 16 && r.x < 420 && r.y > 40; })
+              .sort((a, b) => a.n.getBoundingClientRect().y - b.n.getBoundingClientRect().y);
+            const leaf = cand.find(({ n }) => !cand.some(o => o.n !== n && n.contains(o.n))) ?? cand[0];
+            if (!leaf) return rowHit;
+            const el = leaf.n; el.scrollIntoView({ block: 'center' });
+            await new Promise(r => setTimeout(r, 350));
+            const r = el.getBoundingClientRect();
+            return { x: r.x + r.width / 2, y: r.y + r.height / 2, t: leaf.t.slice(0, 60) };
+          })()`)
+          for (const t of ['mouseMoved', 'mousePressed', 'mouseReleased'])
+            await cdp.send('Input.dispatchMouseEvent', { type: t, x: rowHit.x, y: rowHit.y,
+              button: t === 'mouseMoved' ? undefined : 'left', clickCount: 1, buttons: t === 'mouseReleased' ? 0 : 1 });
+          await sleep(1200)
+          opened = await cdp.evl(`document.body.innerText.includes(${JSON.stringify(runId)})`)
+        }
+        if (!opened) die(EX.api, 'session row clicks never opened the seeded transcript (run id absent after 3 attempts)')
+      }
+      // Directive cards render COLLAPSED (the expanded card header carries
+      // the Open-in-Workflows action — plugin.js:552-554, skill: expansion is
+      // in-memory only). Click the collapsed directive pill, then locate.
+      try {
+        await trustedClick(cdp, 'workflow…');
+      } catch { /* fall through to the button wait — a pre-expanded card also passes */ }
+      let openBtnSeen = false;
+      const bT0 = Date.now();
+      while (!openBtnSeen && Date.now() - bT0 < 12_000) {
+        openBtnSeen = await cdp.evl(`!!document.querySelector('button[title="Open in Workflows"],button[aria-label="Open in Workflows"]')`);
+        if (!openBtnSeen) await sleep(500);
+      }
       // Card = the innermost ancestor of the plugin's Open-in-Workflows button
       // that still holds exactly ONE such button (walk stops before the list).
       const card = await cdp.evl(`(() => {
-        const btns = [...document.querySelectorAll('button[aria-label="Open in Workflows"]')];
+        const CARD_BTN = 'button[title="Open in Workflows"],button[aria-label="Open in Workflows"]';
+        const btns = [...document.querySelectorAll(CARD_BTN)];
         for (const b of btns) {
           let n = b, last = null;
           for (let i = 0; i < 8 && n; i++) {
-            if (n.querySelectorAll('button[aria-label="Open in Workflows"]').length > 1) break;
+            if (n.querySelectorAll(CARD_BTN).length > 1) break;
             last = n; n = n.parentElement;
           }
           if (!last) continue;
           const host = last.closest('div') ?? last;
-          if (!(host.innerText || '').includes(${JSON.stringify(runId)}) &&
-              !(host.parentElement?.innerText || '').includes(${JSON.stringify(runId)})) continue;
+          const cardText = (host.innerText || '') + (host.parentElement?.innerText || '');
+          if (!cardText.includes(${JSON.stringify(runId)}) && !cardText.includes(${JSON.stringify(runName)})) continue;
           host.scrollIntoView({ block: 'center' });
           const r = host.getBoundingClientRect();
           if (r.width > 40 && r.height > 20)
@@ -549,7 +714,11 @@ async function main() {
         const r = leaf.getBoundingClientRect();
         return { x: r.x, y: r.y, width: r.width, height: r.height };
       })()`);
-      if (!tray) die(EX.api, 'tray row absent: settings.tray was set and the seeded run is live — check $trayGate (plugin.js:709) and reload');
+      if (!tray) {
+        const tail = await cdp.evl(`(() => { const t = document.body.innerText; const i = t.toLowerCase().indexOf('running'); return i < 0 ? t.slice(-400) : t.slice(Math.max(0, i - 80), i + 80); })()`);
+        try { await shoot(cdp, A.outDir, '00-diagnostic-tray.png'); } catch { /* best effort */ }
+        die(EX.api, `tray row absent: settings.tray was set and the seeded run is live — check $trayGate (plugin.js:709); text near 'running': ${JSON.stringify(String(tail).slice(0, 240))}`);
+      }
       shots.push({ surface: 'tray_row', state: 'slim live-run tray row, seeded live run', ...(await shoot(cdp, A.outDir, '05-tray-row.png', tray)) });
       shots.push({ surface: 'tray_row', state: 'full viewport with tray', ...(await shoot(cdp, A.outDir, '06-tray-full.png')) });
     }
@@ -573,8 +742,8 @@ async function main() {
     for (const key of touched.reverse()) {
       try {
         const before = identity.config_touched[key]?.before;
-        if (before === null || before === undefined) unsetConfig(hermesBin, key);
-        else if (['string', 'number', 'boolean'].includes(typeof before)) writeConfig(hermesBin, [key, String(before)]);
+        if (before === null || before === undefined) unsetConfig(hermesBin, key, benchEnv);
+        else if (['string', 'number', 'boolean'].includes(typeof before)) writeConfig(hermesBin, [key, String(before)], benchEnv);
         else revertFailures.push(`${key}: prior value ${JSON.stringify(before)} is non-scalar — restore by hand`);
       } catch (e) { revertFailures.push(`${key}: ${String(e.message).slice(0, 200)}`); }
     }
