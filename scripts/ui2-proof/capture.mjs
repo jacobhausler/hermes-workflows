@@ -487,6 +487,13 @@ async function main() {
     // field-proven). Both keys are read fresh by the door per request; the
     // tray settings-gate is a bootstrap read, so the mid-run reload below
     // re-runs plugin registration with the setting in place.
+    // DUAL WRITE (field-proven attach mode): when a live gateway is on this
+    // host the app ATTACHES to it (discovery copy is the contract) and that
+    // gateway reads the SHARED home's config — a bench-only write is invisible
+    // there and the seeded run never renders. So each key goes to BOTH homes:
+    // bench (fork mode) and shared (attach mode), each reverted at teardown
+    // from its own recorded `before` (SETUP.md: writes to the shared gateway
+    // config for the minutes of the run, trusted inputs, reverted at teardown).
     {
       const gT0 = Date.now();
       while (!fs.existsSync(path.join(B.home, 'gateway_state.json')) && Date.now() - gT0 < 90_000)
@@ -494,12 +501,26 @@ async function main() {
       if (!fs.existsSync(path.join(B.home, 'gateway_state.json')))
         die(EX.boot, 'bench backend never registered gateway_state.json (see logs/electron.log)');
     }
-    for (const [key, value] of [['plugins.entries.hermes-workflows.settings.runs_root', B.runs],
-                                ['plugins.entries.hermes-workflows.settings.tray', true]]) {
-      const before = readConfigValue(hermesBin, key, benchEnv);
-      identity.config_touched[key] = { before, after: value, scope: 'bench home (isolated — shared config untouched)' };
-      touched.push(key);
-      writeConfig(hermesBin, [key, String(value)], benchEnv);
+    {
+      const sharedEnv = { ...process.env }; // shared ~/.hermes config
+      delete sharedEnv.HERMES_HOME;
+      for (const [key, value] of [['plugins.entries.hermes-workflows.settings.runs_root', B.runs],
+                                  ['plugins.entries.hermes-workflows.settings.tray', true]]) {
+        const beforeBench = readConfigValue(hermesBin, key, benchEnv);
+        writeConfig(hermesBin, [key, String(value)], benchEnv);
+        const beforeShared = readConfigValue(hermesBin, key, sharedEnv);
+        writeConfig(hermesBin, [key, String(value)], sharedEnv);
+        touched.push(key);
+        identity.config_touched[key] = {
+          before: beforeBench, after: value, scope: 'bench home + shared gateway home (dual write — fork attaches to a live gateway)',
+          before_shared: beforeShared
+        };
+        if (beforeShared !== null && beforeShared !== undefined && beforeShared !== value) {
+          // Another estate lane's bench owns the shared key — last writer
+          // wins on the census. Record it; the revert restores THEIR value.
+          identity.config_touched[key].shared_was_held_by_other_value = beforeShared;
+        }
+      }
     }
 
     // -- engine seed: launch the held-gate graph through the door -----------
@@ -702,21 +723,41 @@ async function main() {
       if (!heldCell) die(EX.capture, 'held gate cell never rendered on the record page');
       shots.push({ surface: 'gate_modal', state: 'held: question, requester, option buttons',
         ...(await shoot(cdp, A.outDir, '07-gate-held.png', heldCell)) });
-      // Hold the ONE answer POST mid-flight, then trusted-click the option.
+      // Hold the answer POST mid-flight, then trusted-click the option. The
+      // FIRST click is force-failed with a real {ok:false} door response
+      // (Fetch.fulfillRequest, HTTP 200 like the door's semantic errors):
+      // the error frame is the RENDERED failure, not a staged picture, and
+      // it proves the options come back retryable. The SECOND click answers.
       await cdp.send('Fetch.enable', { patterns: [{ urlPattern: '*/gate', requestMethod: 'POST' }] });
-      const paused = new Promise((resolve, reject) => {
+      const pauseOnce = () => new Promise((resolve, reject) => {
         const t = setTimeout(() => reject(new Error('answer POST never paused')), 15_000);
-        cdp.ws.addEventListener('message', e => {
+        const on = e => {
           let m; try { m = JSON.parse(e.data); } catch { return; }
-          if (m.method === 'Fetch.requestPaused') { clearTimeout(t); resolve(m.params.requestId); }
-        }, { once: false });
+          if (m.method === 'Fetch.requestPaused') {
+            clearTimeout(t); cdp.ws.removeEventListener('message', on); resolve(m.params.requestId);
+          }
+        };
+        cdp.ws.addEventListener('message', on);
       });
       await trustedClick(cdp, gateDef.options[0], { exact: true });
-      const requestId = await paused;
+      const requestId = await pauseOnce();
       await waitText(cdp, 'Saving answer…', 5_000);
       shots.push({ surface: 'gate_modal', state: 'pending: POST held at Fetch interception, options disabled (duplicate prevention)',
         ...(await shoot(cdp, A.outDir, '08-gate-pending.png', await rectOf(cdp, 'Saving answer…'))) });
-      await cdp.send('Fetch.continueRequest', { requestId });
+      await cdp.send('Fetch.fulfillRequest', { requestId, responseCode: 200,
+        responseHeaders: [{ name: 'content-type', value: 'application/json' }],
+        body: Buffer.from(JSON.stringify({ ok: false, error: { message: 'ui2-proof forced error' } })).toString('base64') });
+      await waitText(cdp, 'Gate answer failed', 10_000);
+      const retryCell = await rectOf(cdp, 'Gate answer failed');
+      const retryOpt = await rectOf(cdp, gateDef.options[0], { exact: true });
+      if (!retryOpt) die(EX.capture, 'options not retryable after an ok:false answer — error state swallowed the gate');
+      if (await cdp.evl(`!!document.querySelector('[data-gate-receipt]')`))
+        die(EX.capture, 'ok:false rendered a saved receipt — error is not a successful mutation');
+      shots.push({ surface: 'gate_modal', state: 'error: forced {ok:false} door answer -> inline failure + retryable options, no receipt',
+        ...(await shoot(cdp, A.outDir, '08b-gate-error.png', retryCell || retryOpt)) });
+      const paused2 = pauseOnce();
+      await trustedClick(cdp, gateDef.options[0], { exact: true });
+      await cdp.send('Fetch.continueRequest', { requestId: await paused2 });
       await cdp.send('Fetch.disable');
       // 09: the durable saved receipt (recorded answer, scoped copy).
       await waitText(cdp, 'Answer saved', 20_000);
@@ -1004,15 +1045,26 @@ async function main() {
             env: { ...process.env, WF_RUNS_ROOT: B.runs, HERMES_HOME: B.home } });
       } catch (e) { revertFailures.push(`stop ${rid}: ${String(e.stderr || e.message).slice(0, 200)}`); }
     }
-    // Revert the two trusted inputs (config hygiene), then kill ONLY
-    // this supervisor's process groups + the path-scoped survivor sweep.
-    for (const key of touched.reverse()) {
-      try {
-        const before = identity.config_touched[key]?.before;
-        if (before === null || before === undefined) unsetConfig(hermesBin, key, benchEnv);
-        else if (['string', 'number', 'boolean'].includes(typeof before)) writeConfig(hermesBin, [key, String(before)], benchEnv);
-        else revertFailures.push(`${key}: prior value ${JSON.stringify(before)} is non-scalar — restore by hand`);
-      } catch (e) { revertFailures.push(`${key}: ${String(e.message).slice(0, 200)}`); }
+    // Revert the trusted inputs FIRST (config hygiene, BOTH homes — dual
+    // write), then kill ONLY this supervisor's process groups + the
+    // path-scoped survivor sweep.
+    const revertInto = (env, beforeKey) => {
+      for (const key of [...touched].reverse()) {
+        const before = beforeKey === 'before'
+          ? identity.config_touched[key]?.before
+          : identity.config_touched[key]?.before_shared;
+        try {
+          if (before === null || before === undefined) unsetConfig(hermesBin, key, env);
+          else if (['string', 'number', 'boolean'].includes(typeof before)) writeConfig(hermesBin, [key, String(before)], env);
+          else revertFailures.push(`${key}: prior value ${JSON.stringify(before)} is non-scalar — restore by hand`);
+        } catch (e) { revertFailures.push(`${key}: ${String(e.message).slice(0, 200)}`); }
+      }
+    };
+    {
+      const sharedEnv = { ...process.env };
+      delete sharedEnv.HERMES_HOME;
+      revertInto(benchEnv, 'before');
+      revertInto(sharedEnv, 'before_shared');
     }
     if (A.keep) fs.writeFileSync(path.join(A.outDir, 'logs', 'KEEP.txt'),
       JSON.stringify(sup.children) + '\n');
