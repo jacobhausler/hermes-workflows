@@ -1,6 +1,7 @@
 {
   "note": "Case manifest for tests/proof-harness/capture.mjs. Every seed entry names its kind explicitly: 'engine_seed' = state this driver launches live through the plugin door (zero-token graphs; one real assistant turn for the card echo); 'historical_snapshot' = a pinned, already-committed run/session fixture read via the door's legacy-launch-root fallback (read-only, never relaunched). Adding a case ADDS A NEW TEST: a case naming a surface outside surfaces_registry fails exit 3 ('new test, not implemented') — the driver never fabricates an existing command. Baseline never captures synthesis/index.html or any file-openable RC: surfaces come from the real app renderer only.",
-  "surfaces_registry": ["directive_card", "pane_workflows", "tray_row", "gate_modal"],
+  "surfaces_registry": ["directive_card", "pane_workflows", "tray_row", "gate_modal", "nodepanel", "timeline"],
+  "surfaces_note": "nodepanel + timeline wired by bd_2026-11-13-jtf (2.0): the NodePanel FACTS+tabs region and the Timeline rail (clipped shots). A new case naming either renders them on the real surface.",
   "cases": {
     "baseline": {
       "description": "Real-app proof of the three live surfaces of the actual React/SDK renderer: the ::workflow directive card in the message stream, the WORKFLOWS pane (run list + held-gate run detail), and the settings-gated live-run tray row. All state is engine-seeded into an isolated test runs root; nothing here is a CHATFRAME reconstruction.",
@@ -138,6 +139,38 @@
           "note": "pinned shelf fixture — sha256 of the fixture FILE itself (the materialized run.json comes FROM it); read-only, never relaunched, refusal-on-mismatch enforced by seed_graph.py. The original file is never touched: byte-for-byte preservation holds."
         }
       ]
+    },
+    "inspection": {
+      "description": "bd_2026-11-13-jtf real-app proof of the 2.0 NodePanel/Timeline state grammar. Trusted (engine-seeded) state: ONE door_run zero-token run holds a HUMAN gate (gate.held proven by seed_run.py) AND parks on a machine TIMER gate at the same time (the runner's own gates/park-gate.parked.json mirror feeds nodes[id].parked through the real read model — a live park frame, not a costume). Isolated fixtures materialized by seed_inspect.py (real wfcommon.efp stamps, real log/prompt bytes, SYNTHETIC.txt disclosed) drive every death-shape frame: insp-fan (fan census: done / provider_400 RED / cancelled NEUTRAL per-item records, a node.failed(cancelled) and a node.cancelled spine row, a released gate span, retry attempts_log, a >16KiB spawn log), insp-zero (red zero-spawn: attempts 0, log: unknown), insp-refusal (window_spent stamp verbatim), insp-mid (running record, no runner: interrupted). Proven frames: the ONE 16KiB tail fetched through the real dashboard route with ids+index+attempt only (TAIL-MARKER rides, HEAD-MARKER aged out), Output/Prompt/Final from the record, sentinel sections hidden while the ratified tab sentences remain, cancelled keeps its words and loses the red (panel identity, Final words, timeline rows, fanSummary ·1 cancelled), timeline row-click selection, run-wall vs child-wall clock naming, and the preserved opt/@profile/model badges. Historical lookbook records are not rewritten by this case.",
+      "surfaces": ["pane_workflows", "nodepanel", "timeline"],
+      "seeds": [
+        {
+          "name": "held_park_run",
+          "kind": "engine_seed",
+          "method": "door_run",
+          "note": "echo + human gate (held — the proven shape) + machine timer gate (parked in-process; the runner mirrors gates/park-gate.parked.json) + optional tail echo; zero tokens; stopped through the door at teardown.",
+          "graph": {
+            "name": "ui2-proof-inspect",
+            "nodes": [
+              { "id": "prep", "type": "echo", "output": { "msg": "inspect seed" } },
+              { "id": "hold", "type": "gate", "after": ["prep"],
+                "question": "inspect: answer this held gate after capture?",
+                "options": ["release", "stop"] },
+              { "id": "park-gate", "type": "gate", "after": ["prep"],
+                "wait": { "wait_s": 3600, "timeout_s": 7200 } },
+              { "id": "tail", "type": "echo", "after": ["hold", "park-gate"], "optional": true,
+                "output": { "msg": "seed done" } }
+            ]
+          }
+        },
+        {
+          "name": "inspect_fixtures",
+          "kind": "engine_seed",
+          "method": "seed_inspect",
+          "note": "isolated bench fixtures materialized THROUGH the repo read model (seed_inspect.py): insp-fan, insp-zero, insp-refusal, insp-mid. Never relaunched, never the historical records."
+        }
+      ],
+      "historical_snapshots": []
     }
   }
 }

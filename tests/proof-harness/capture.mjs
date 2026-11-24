@@ -72,6 +72,7 @@ cases: see tests/proof-harness/cases.json (setup: tests/proof-harness/SETUP.md)`
 const ONLY_TOKENS = {
   directive: 'directive_card', pane: 'pane_workflows', tray: 'tray_row',
   directive_card: 'directive_card', pane_workflows: 'pane_workflows', tray_row: 'tray_row',
+  panel: 'nodepanel', nodepanel: 'nodepanel', timeline: 'timeline',
 };
 
 function parseOnly(raw) {
@@ -1100,6 +1101,23 @@ async function main() {
       identity.seeds.graph_fixtures = seeded;
     }
 
+    // Inspection case (bd 2026-11-13-jtf): materialize the isolated
+    // zero-spawn/refusal/cancelled/interrupted fixtures through the repo's
+    // own read model (real efp, real log/prompt bytes) beside the engine
+    // seed. Historical records are never touched.
+    let inspectIds = null;
+    if (A.caseName === 'inspection') {
+      try {
+        inspectIds = JSON.parse(execFileSync(py, [path.join(HERE, 'seed_inspect.py'),
+          '--repo', REPO, '--runs-root', B.runs],
+          { encoding: 'utf8', timeout: 120_000,
+            env: { ...process.env, HERMES_HOME: B.home } }).trim().split('\n').pop());
+      } catch (e) {
+        die(EX.api, `inspection fixtures failed (seed_inspect.py): ${String(e.stderr || e.message).slice(0, 400)}`);
+      }
+      identity.seeds.inspect_fixtures = inspectIds.ids;
+    }
+
     // -- CDP attach; enable decision; reload (skill gotcha wall) ------------
     let cdp = await connectCdp(A.cdpPort, A.rendererPort);
     {
@@ -1571,6 +1589,142 @@ async function main() {
       ...(await shoot(cdp, A.outDir, '02-pane-run-detail.png', null, await stableColumnText(paneRegion))) });
     }
     } // end non-coverage (baseline/gate/graph) pane list + detail frames
+
+    // -- inspection (bd_2026-11-13-jtf): the 2.0 NodePanel/Timeline grammar --
+    // Real-app frames for the ratified state law: sentinel sections hide while
+    // the tab sentences keep their honest absence; cancelled keeps words and
+    // loses the red (chips, panel, and timeline spine rows); a fan pick reads
+    // the ITEM record (fact-swap, item_metrics, index/attempt tail bounds);
+    // the ONE 16 KiB tail is exercised through the real dashboard route with
+    // ids only; timeline rows select; run/child clocks stay separately named;
+    // opt/@crew/model badges and the gate-held badge are preserved, and a live
+    // runner parks on a machine timer gate.
+    if (A.caseName === 'inspection') {
+      const inspCol = () => stableColumnText(paneRegion);
+      const pollIn = async (needle, why, ms = 30_000) => {
+        const t0 = Date.now();
+        for (;;) {
+          const hit = await evlPoll(locateJS(needle, { region: paneRegion }), { err: 'reconnecting' });
+          if (!hit.err) return;
+          if (Date.now() - t0 > ms) {
+            try { await shoot(cdp, A.outDir, '00-diagnostic-inspection.png'); } catch { /* best effort */ }
+            die(EX.api, `inspection frame precondition failed (${why}): ${JSON.stringify(hit.err)} needle=${JSON.stringify(needle)}`);
+          }
+          const modalUp = await evlPoll(`document.body.innerText.includes("couldn't start")`, false);
+          if (modalUp) { try { await trustedClick(cdp, 'Retry', { exact: true, ci: true }); } catch { /* between frames */ } }
+          try { await trustedClick(cdp, 'workflows', { exact: true, ci: true }); } catch { /* tab not painted yet */ }
+          await sleep(800);
+        }
+      };
+      const push = async (surface, state, file, clip = null) =>
+        shots.push({ surface, state, ...(await shoot(cdp, A.outDir, file, clip, await inspCol())) });
+      const clickTab = async (t) => { await trustedClick(cdp, t, { region: paneRegion, exact: true }); await sleep(600); };
+      const openRun = async (rowNeedle) => {
+        await pollIn(rowNeedle, 'run row on the pane list', 45_000);
+        await trustedClick(cdp, rowNeedle, { region: paneRegion });
+        await sleep(1200);
+      };
+      const railRect = async () => {
+        const r = await cdp.evl(`(() => {
+          const lbl = [...document.querySelectorAll('div,span')].find(e =>
+            (e.innerText||'').trim() === 'timeline' && e.getBoundingClientRect().x > 440);
+          const rail = lbl && lbl.closest('.w-60');
+          if (!rail) return null;
+          const q = rail.getBoundingClientRect();
+          return { x: q.x, y: Math.max(40, q.y), width: q.width,
+                   height: Math.min(q.height, innerHeight - 60) } })()`);
+        if (!r) die(EX.api, 'timeline rail never painted');
+        return r;
+      };
+      // Trusted click scoped INSIDE the timeline rail (rail row, not the card
+      // of the same name): dispatch at the rail row's own rect center.
+      const clickRailRow = async (rowId) => {
+        const pt = await cdp.evl(`(() => {
+          const lbl = [...document.querySelectorAll('div,span')].find(e =>
+            (e.innerText||'').trim() === 'timeline' && e.getBoundingClientRect().x > 440);
+          const rail = lbl && lbl.closest('.w-60');
+          if (!rail) return null;
+          const btn = [...rail.querySelectorAll('button')].find(b =>
+            (b.innerText||'').trim().startsWith(${JSON.stringify(rowId)}));
+          if (!btn) return null;
+          const r = btn.getBoundingClientRect();
+          return { x: r.x + r.width / 2, y: r.y + r.height / 2 } })()`);
+        if (!pt) die(EX.api, `timeline row ${JSON.stringify(rowId)} not found in the rail`);
+        for (const t of ['mouseMoved', 'mousePressed', 'mouseReleased'])
+          await cdp.send('Input.dispatchMouseEvent', { type: t, x: pt.x, y: pt.y,
+            button: t === 'mouseMoved' ? undefined : 'left', clickCount: 1,
+            buttons: t === 'mouseReleased' ? 0 : 1 });
+        await sleep(800);
+      };
+
+      // (03) live parked machine gate on the engine seed (02 already holds
+      // the human gate — 'gate held' badge, verbatim question).
+      await pollIn('park-gate', 'parked timer gate card on the engine seed');
+      await trustedClick(cdp, 'park-gate', { region: paneRegion });
+      await pollIn('kind: timer', 'parked fact section in the panel');
+      await push('nodepanel', 'live PARKED timer gate: parked fact section (kind timer) on a live runner — park frame from the REAL park_gate mirror', '03-panel-parked.png');
+
+      // (04-08) insp-fan: badges, cancelled-vs-failed census, timeline.
+      await openRun('insp-fan');
+      await pollIn('workers', 'fan node card on the page canvas');
+      await pollIn('as @crew', 'profile badge preserved on the card');
+      await pollIn('opus-test', 'model tag preserved on the card');
+      await push('pane_workflows', 'fan run detail: opt/@profile/model badges preserved on cards; failed census word; run-wall header clock', '04-pane-fan-detail.png');
+      await push('timeline', 'timeline rail: child spans, real provider_400 RED, node.failed(cancelled)+node.cancelled NEUTRAL, released gate span, run-wall axis label + child-wall row labels', '05-timeline-insp-fan.png', await railRect());
+      await clickRailRow('sole');
+      await pollIn('provider rejected the payload (isolated fixture)', 'sole record opened by the timeline row click');
+      await push('timeline', 'timeline row click selected sole — the selection contract on the real surface', '06-timeline-selected.png', await railRect());
+      await push('nodepanel', 'panel from the timeline pick: a real failure keeps the red (error verbatim)', '07-panel-sole-failed.png');
+      await trustedClick(cdp, 'workers', { region: paneRegion });
+      await pollIn('items ·', 'fan items row in the panel');
+      await pollIn('1 cancelled', 'fanSummary cancelled bucket — its own neutral census word, never folded into failed');
+      await push('nodepanel', 'fan node panel: N/M terminal + ·1 cancelled summary, chips; no child metric rows -> no vitals line (honest absence, MF1)', '08-panel-workers.png');
+
+      // (09-13) fan pick: the ITEM record is the FACTS owner, and the ONE
+      // tail carries index/attempt — the 16 KiB window proven by its own
+      // bytes (HEAD ages out, TAIL rides).
+      await trustedClick(cdp, 'beta-item', { region: paneRegion });
+      await pollIn('BETA-400-CAPTURE', 'picked item log served by the ONE route with index bounds');
+      await push('nodepanel', 'picked provider_400 item: FACTS swapped to the item record, Log default, attempt+basename header, route tail verbatim', '09-panel-item-400.png');
+      await trustedClick(cdp, 'gamma-item', { region: paneRegion });
+      await pollIn('stopped: owner cancel (isolated fixture)', 'cancelled item keeps its words');
+      await push('nodepanel', 'picked cancelled item: its OWN neutral cancelled identity — words stay, red gone (fold F3)', '10-panel-item-cancelled.png');
+      await clickTab('Final');
+      await pollIn('cleaned up halfway', 'cancelled item final words');
+      await push('nodepanel', 'Final tab: a cancelled death keeps its last words, neutral tone', '11-panel-item-final.png');
+      await trustedClick(cdp, 'alpha-item', { region: paneRegion });
+      await clickTab('Log');
+      await pollIn('attempt 2 · workers.0.a2.log', 'attempt + basename header from the item record');
+      await push('nodepanel', 'the ONE 16 KiB tail: TAIL-MARKER rides, HEAD-MARKER aged out of the window (route fetch; ids+index+attempt only, never a path)', '12-panel-item-logtail.png');
+      await clickTab('Prompt');
+      await pollIn('PROMPT-BODY-INSPECT', 'prompt tab tails the record-named prompt file through the same route');
+      await push('nodepanel', 'Prompt tab: the A1 prompt file verbatim — not a second assembler', '13-panel-item-prompt.png');
+
+      // (14-15) isolated zero-spawn and refusal records.
+      await openRun('insp-zero');
+      await pollIn('spawner', 'zero-spawn card');
+      await trustedClick(cdp, 'spawner', { region: paneRegion });
+      await pollIn('log: unknown', 'honest absence sentence on the Log tab');
+      await push('nodepanel', 'red zero-spawn record: error verbatim (red), attempts 0 (the real zero the record carries), log: unknown', '14-panel-zero-spawn.png');
+      await openRun('insp-refusal');
+      await pollIn('asker', 'refusal card');
+      await trustedClick(cdp, 'asker', { region: paneRegion });
+      await pollIn('window_spent', 'refusal stamp verbatim');
+      await push('nodepanel', 'refusal stamp reads verbatim beside the death facts (the #584 law, real record)', '15-panel-refusal.png');
+
+      // (16) interrupted: an unfinished record with no live runner.
+      await openRun('insp-mid');
+      await pollIn('slow', 'mid-flight card');
+      await push('pane_workflows', 'interrupted run detail: running record, dead runner — never painted done (row word proven on the list frame)', '16-pane-interrupted.png');
+
+      identity.inspection = {
+        fixtures: inspectIds && inspectIds.ids,
+        markers: { tail: 'TAIL-MARKER-INSPECT-BOUNDED-WINDOW', head_aged_out: 'HEAD-MARKER-INSPECT-AGED-OUT',
+                   beta: 'BETA-400-CAPTURE', gamma: 'GAMMA-CANCELLED-CAPTURE', prompt: 'PROMPT-BODY-INSPECT' },
+        route: 'GET /runs/{run}/nodes/workers/log?kind=log|prompt&tail=16384[&index=N&attempt=N] — ids only; the path is resolved from the record, contained to <run>/logs',
+        healed: 'run.lock_healed rides insp-fan/events.jsonl (journal evidence pinned in the seed bytes); it is not a plugin DOM surface and is disclosed, not painted',
+      };
+    }
 
     // -- gate modal (bd_2026-11-13-qri): ONE decision surface, real trusted
     // click, REAL pending (the answer POST is held at Fetch interception so

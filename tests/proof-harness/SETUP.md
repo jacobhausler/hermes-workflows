@@ -58,6 +58,32 @@ provider later" button (pane poll + before the held frame). The green-era
 (0f602c5) option remains valid; `identity.app.commit` pins which app every
 proof ran against.
 
+## The inspection case (bd_2026-11-13-jtf)
+
+`--case inspection` proves the 2.0 NodePanel/Timeline state grammar on the
+REAL surface (surfaces `nodepanel` + `timeline`, clipped rail shots). State is
+two honest sources: (1) ONE door-seeded zero-token run that holds a HUMAN gate
+(proven by `seed_run.py`) and parks on a machine TIMER gate at the same time —
+the runner's own `gates/<id>.parked.json` mirror reaches the panel through the
+real read model, so the parked frame is live park, not a costume; and (2)
+isolated fixtures materialized by `seed_inspect.py` THROUGH the repo read
+model (real `wfcommon.efp` stamps, real log/prompt bytes, `SYNTHETIC.txt`
+disclosed in every run dir): `insp-fan` (fan census done/provider_400/
+cancelled side by side, cancelled spine rows, released gate span, retry
+attempts_log), `insp-zero` (red zero-spawn: `attempts` 0, `log: unknown`),
+`insp-refusal` (`window_spent` verbatim), `insp-mid` (running record, no
+runner → `interrupted`). The Log/Prompt frames exercise the ONE 16 KiB route
+with ids + index + attempt only — the >16 KiB spawn log's HEAD-MARKER ages
+out of the window while the TAIL-MARKER rides, server-side containment doing
+the rest. Cancelled keeps its words and loses the red in the panel identity,
+the Final tab and both timeline spine row types; timeline row clicks carry the
+selection contract; the axis is the named run wall, rows are named child
+walls; opt/@profile/model badges are preserved and photographed. The
+`run.lock_healed` journal row rides `insp-fan/events.jsonl` — agent-facing
+evidence, disclosed, not painted. Historical lookbook records are untouched.
+Entry point: `node scripts/ui2-proof/capture.mjs --case inspection --out DIR`
+(forwards to this driver).
+
 ## Reproducibility law (slice A)
 
 Every run writes an IMMUTABLE capture set. `manifest.json.captures[]` pins
