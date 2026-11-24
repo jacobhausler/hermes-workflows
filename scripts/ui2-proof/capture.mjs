@@ -37,6 +37,7 @@
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -809,28 +810,26 @@ async function main() {
       // unscoped, ?profile=proofhome, and /p/proofhome/api/... prefixed.
       try {
         const st = JSON.parse(fs.readFileSync(path.join(B.home, 'gateway_state.json'), 'utf8'));
-        const port = st.api_port || st.port || null;
-        const tokPath = path.join(B.home, 'gateway_api_token');
-        const tok = fs.existsSync(tokPath) ? fs.readFileSync(tokPath, 'utf8').trim() : null;
-        const base = port ? `http://127.0.0.1:${port}` : null;
+        const sock = fs.existsSync(path.join(B.home, 'gateway.sock')) ? path.join(B.home, 'gateway.sock') : null;
         const hits = {};
-        if (base) {
-          const hdr = tok ? { authorization: `Bearer ${tok}` } : {};
+        if (sock) {
           for (const [k, u] of Object.entries({
-            unscoped: `${base}/api/plugins/hermes-workflows/runs?offset=0&limit=2`,
-            named: `${base}/api/plugins/hermes-workflows/runs?offset=0&limit=2&profile=${B.profileName}`,
-            prefixed: `${base}/p/${B.profileName}/api/plugins/hermes-workflows/runs?offset=0&limit=2`,
-            profiles: `${base}/api/profiles`,
+            unscoped: `/api/plugins/hermes-workflows/runs?offset=0&limit=2`,
+            named: `/api/plugins/hermes-workflows/runs?offset=0&limit=2&profile=${B.profileName}`,
+            prefixed: `/p/${B.profileName}/api/plugins/hermes-workflows/runs?offset=0&limit=2`,
+            profiles: `/api/profiles`,
           })) {
-            try {
-              const r = await fetch(u, { headers: hdr });
-              const t = await r.text();
-              hits[k] = { status: r.status, body: t.slice(0, 140) };
-            } catch (e) { hits[k] = { err: String(e.message).slice(0, 120) }; }
+            hits[k] = await new Promise(res => {
+              const req = http.request({ socketPath: sock, path: u, method: 'GET',
+                                         headers: { host: 'localhost' } },
+                r => { let b = ''; r.on('data', d => { b += d; });
+                       r.on('end', () => res({ status: r.statusCode, body: b.slice(0, 160) })); });
+              req.on('error', e => res({ err: String(e.message).slice(0, 120) }));
+              req.setTimeout(5000, () => { req.destroy(new Error('uds timeout')); });
+            });
           }
         }
-        identity.gateway_scope_probe = { port, has_token: !!tok, hits,
-                                         state_pid: st.pid, state_home: st.hermes_home };
+        identity.gateway_scope_probe = { sock, hits, state_pid: st.pid, state_home: st.hermes_home };
         fs.writeFileSync(path.join(A.outDir, 'logs', 'scope-probe.json'),
                          JSON.stringify(identity.gateway_scope_probe, null, 2) + '\n');
       } catch (e) { identity.gateway_scope_probe = { err: String(e).slice(0, 200) }; }
