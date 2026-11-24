@@ -203,7 +203,9 @@ function locateJS(needle, { exact = false, nth = null, ci = false, region = null
     const hits = nodes.filter(n => {
       const t = norm((n.innerText || n.textContent || '').trim());
       if (t.length > 400 && !exact) return false;
-      if (exact ? t.split('·')[0].trim() === norm(needle) : t.includes(norm(needle))) {
+      if (exact ? (t.split('·')[0].trim() === norm(needle) ||
+                   (t.length <= 200 && norm(t).startsWith(norm(needle))))
+                : t.includes(norm(needle))) {
         const r = n.getBoundingClientRect();
         if (!(r.width > 0 && r.height > 0)) return false;
         if (region) {
@@ -292,7 +294,7 @@ async function pollPaneFor(cdp, paneRegion, needle, shotName, why) {
   const t0 = Date.now();
   let last = null;
   for (;;) {
-    last = await cdp.evl(locateJS(needle, { region: paneRegion }));
+    last = await cdp.evl(locateJS(needle, { exact: true, region: paneRegion }));
     if (!last.err) return;
     if (Date.now() - t0 > 45_000) break;
     try { await trustedClick(cdp, 'workflows', { exact: true, ci: true }); } catch { /* tab not painted yet */ }
