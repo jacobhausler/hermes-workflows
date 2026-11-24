@@ -1405,8 +1405,12 @@ async function main() {
 
     const report = { ok: true, case: A.caseName, identity, shots,
       review_note: 'reviewed:false means THIS tool run only proved PNG magic+size; visual review (vision_analyze per hermes-workflows-ui-qa) is mandatory before any layout claim' };
-    fs.writeFileSync(path.join(A.outDir, 'report.json'), JSON.stringify(report, null, 2) + '\n');
-    fs.writeFileSync(path.join(A.outDir, 'identity.json'), JSON.stringify(identity, null, 2) + '\n');
+    // Provenance serialization law: the capture machine's home path is
+    // machine-local noise — write it as ~ so committed evidence never carries
+    // an operator's absolute home (publish-scrub audits the evidence tree).
+    const redactHome = obj => JSON.stringify(obj, null, 2).split(os.homedir()).join('~');
+    fs.writeFileSync(path.join(A.outDir, 'report.json'), redactHome(report) + '\n');
+    fs.writeFileSync(path.join(A.outDir, 'identity.json'), redactHome(identity) + '\n');
 
     // -- immutable capture manifest (written LAST; slice A reproducibility
     //    contract). Per-file sha256 pins THIS run's bytes (immutability);
@@ -1437,8 +1441,7 @@ async function main() {
       repro,
       review_note: report.review_note,
     };
-    writeImmutable(path.join(A.outDir, 'manifest.json'),
-      JSON.stringify(manifestOut, null, 2) + '\n');
+    writeImmutable(path.join(A.outDir, 'manifest.json'), redactHome(manifestOut) + '\n');
     console.log(JSON.stringify({ ok: true, out: A.outDir, run_id: runId,
       plugin_sha256: pluginSha, captures: shots.map(s => s.file),
       repro_combined_sha256: repro.combined_sha256 }));
@@ -1485,7 +1488,8 @@ async function main() {
       JSON.stringify(sup.children) + '\n');
     else await sup.teardown();
     identity.teardown = { survivors: sup.survivors || [], revert_failures: revertFailures };
-    fs.writeFileSync(path.join(A.outDir, 'identity.json'), JSON.stringify(identity, null, 2) + '\n');
+    fs.writeFileSync(path.join(A.outDir, 'identity.json'),
+      JSON.stringify(identity, null, 2).split(os.homedir()).join('~') + '\n');
   }
 }
 
