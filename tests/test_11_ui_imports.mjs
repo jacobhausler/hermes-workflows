@@ -82,6 +82,9 @@ const constGrab = name => {
   return src.slice(i, i + 1 + nx)
 }
 
+// bd_2026-11-13-cj2: NodePanel/WorkflowsPage mount the real marked nav block
+const navBlock = src.match(/\/\/ BEGIN stored-session-nav\n([\s\S]*?)\/\/ END stored-session-nav/)[0].replace(/^export /gm, '')
+
 // ---- component stubs (no React, no SDK) --------------------------------------
 const jsx = (type, props) => ({ type, props })
 const jsxs = jsx
@@ -110,6 +113,7 @@ const NODE_TONE = Object.fromEntries(Object.entries(EDGE_TONE).map(([k, v]) => [
 }]))
 NODE_TONE.waiting = NODE_TONE.pending
 const sharedConsts = [
+  navBlock,
   constGrab('EDGE_TONE'), constGrab('FACT_TONE'), constGrab('UNKNOWN'), constGrab('TAIL_BYTES'),
   constGrab('defaultTabFor'), constGrab('unk'), constGrab('factText'), constGrab('logBase'), constGrab('attemptNo'),
   constGrab('CARD_W'), constGrab('modelTag'),
