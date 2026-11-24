@@ -1105,6 +1105,9 @@ async function main() {
     if (engSeed) try {
       runId = execFileSync(py, [path.join(HERE, 'seed_run.py'),
         '--repo', REPO, '--runs-root', B.runs, '--graph-file', graphFile,
+        // l8i: a case may launch its seed WITH a lane_key so the captured
+        // pill/tray/pane prove the instance-label-first title law.
+        ...(engSeed.lane_key ? ['--lane-key', String(engSeed.lane_key)] : []),
         '--wait-held-s', String(engSeed.wait_held_s ?? 25)],
         { encoding: 'utf8', timeout: 60_000,
           env: { ...process.env, WF_RUNS_ROOT: B.runs, HERMES_WF_HERMES_BIN: childBin, HERMES_HOME: B.home, HERMES_GATEWAY_LOCK_DIR: B.locks } }).trim();
@@ -1112,7 +1115,9 @@ async function main() {
       die(EX.api, `engine seed launch failed (seed_run.py): ${String(e.stderr || e.message).slice(0, 400)}`);
     }
     if (runId) {
-      identity.seeds.held_gate_run = { kind: 'engine_seed', run_id: runId, graph_sha256: sha256(graphFile) };
+      identity.seeds.held_gate_run = { kind: 'engine_seed', run_id: runId, graph_sha256: sha256(graphFile),
+                                       // l8i: the manifest names the label the captured frames must show.
+                                       ...(engSeed.lane_key ? { lane_key: String(engSeed.lane_key) } : {}) };
       seededRuns.push(runId);
     }
     // Fixture census (coverage case): rows materialized THROUGH the shared
@@ -2215,7 +2220,8 @@ async function main() {
       let trayRunId;
       try {
         trayRunId = execFileSync(py, [path.join(HERE, 'seed_run.py'),
-          '--repo', REPO, '--runs-root', B.runs, '--graph-file', graphFile],
+          '--repo', REPO, '--runs-root', B.runs, '--graph-file', graphFile,
+          ...(engSeed?.lane_key ? ['--lane-key', String(engSeed.lane_key)] : [])],
           { encoding: 'utf8', timeout: 60_000,
             env: { ...process.env, WF_RUNS_ROOT: B.runs, WF_OWNER_SESSION: traySid,
                    HERMES_WF_HERMES_BIN: hermesAbs, HERMES_HOME: B.home, HERMES_GATEWAY_LOCK_DIR: B.locks } }).trim();
@@ -2224,7 +2230,8 @@ async function main() {
       }
       seededRuns.push(trayRunId);
       identity.seeds.tray_run = { kind: 'engine_seed', run_id: trayRunId, owner_stamped: traySid,
-        graph_sha256: sha256(graphFile) };
+        graph_sha256: sha256(graphFile),
+        ...(engSeed?.lane_key ? { lane_key: String(engSeed.lane_key) } : {}) };
       let tray = null;
       const tT0 = Date.now();
       while (!tray && Date.now() - tT0 < 45_000) {

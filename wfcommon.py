@@ -6613,6 +6613,17 @@ def run_state(r, *, telemetry=True, lock_state=None):
     # same law as failed_nodes). Honest absence: no caps on this run => no keys
     # at all, the payload is byte-identical to a pre-budget build's.
     _run_meta = jload(r / "run.json", {}) or {}
+    # l8i (instance-label-first law): the display-title resolver needs the
+    # instance's label data on every read surface — the launch lane_key the
+    # door already stamps into run.json (_identity_stamps, verbatim) and the
+    # graph's own description. Honest absence: a legacy/unlabeled launch
+    # carries neither and gains no key; every title surface then falls to
+    # name, exactly the pre-2.0 rendering.
+    if isinstance(_run_meta.get("lane_key"), str) and _run_meta["lane_key"]:
+        out["lane_key"] = _run_meta["lane_key"]
+    _gd = stored_graph.get("description")
+    if isinstance(_gd, str) and _gd.strip():
+        out["description"] = _gd.strip()
     _cap_run = (_run_meta.get("budget") or {}).get("tokens") \
         if isinstance(_run_meta.get("budget"), dict) else None
     _node_caps = {n["id"]: (n.get("budget") or {}).get("tokens")
