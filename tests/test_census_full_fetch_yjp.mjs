@@ -14,7 +14,10 @@
 //  (4) unknown totals: no `total` key -> walk while pages are full; the
 //      total is never fabricated (census line says 'runs unknown').
 //  (5) the walk is BOUNDED: a server whose answer never covers stops at the
-//      hard page cap instead of hammering forever.
+//      hard page cap instead of hammering forever — and the clip is recorded
+//      as an explicit `truncated` fact on the result, independent of any
+//      total (ASTRA REVIEW-2 F1), pinned MOUNTED: the pane shows the cap
+//      disclosure for an unknown-total capped census and a lying-total one.
 //  (6) cancellation: an aborted signal (react-query cancels on invalidate /
 //      unmount / key change) stops the walk — no further requests, and the
 //      half-walk result is never written. No cross-wiring of runs.
@@ -25,6 +28,10 @@
 //      scanned). Retry REALLY invalidates: the click calls
 //      invalidateQueries on ['hermes-workflows','runs'] — the queryFn re-
 //      walks from offset 0 (no client-side memo exists to defeat it).
+//  (7h) F4 (ASTRA REVIEW-2): a POSITIVE counted census with ZERO loaded rows
+//      wears an honest PENDING state with a working re-walk — never the
+//      'No runs' costume; only an ANSWERED-empty census (measured zero, or a
+//      legacy empty first page) may say 'No runs'.
 import assert from 'node:assert/strict'
 import { readFileSync, writeFileSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -132,6 +139,7 @@ const row = i => ({ id: `20990101-${String(i).padStart(6, '0')}-yjp`, name: `run
   assert.equal(out.total, 237, 'the counted census is NOT rewritten down to the loaded rows')
   assert.equal(out.loaded, 200, 'loaded reports the shortfall — the pane renders the partial')
   assert.equal(srv.calls.length, 3, 'no request after the empty page')
+  assert.equal('truncated' in out, false, 'a natural shrink stop is NOT the cap clip — no marker fabricated')
 }
 
 // (4) unknown totals stay unavailable: no `total` key -> walk while full.
@@ -142,9 +150,11 @@ const row = i => ({ id: `20990101-${String(i).padStart(6, '0')}-yjp`, name: `run
   assert.equal(out.runs.length, 137, 'short page ends the walk without any total')
   assert.equal(srv.calls.length, 2, 'exactly ceil(137/100) requests — stopped at the short page')
   assert.equal('total' in out, false, 'no total key was fabricated')
+  assert.equal('truncated' in out, false, 'a walk that ended on a short page was NOT clipped — no marker fabricated')
 }
 
 // (5) bounded: a server whose pages never "cover" stops at the hard cap.
+let CAPPED, CAPPED_TOTAL
 {
   let i = 0
   const srv = { calls: [], async request(path) {
@@ -156,6 +166,26 @@ const row = i => ({ id: `20990101-${String(i).padStart(6, '0')}-yjp`, name: `run
   const out = await mod.runsIndexFetcher(srv.request)()
   assert.equal(srv.calls.length, 30, 'hard page cap 30 — the walk is finite')
   assert.equal(out.runs.length, 3000, 'what loaded stays visible (rendered as a partial)')
+  // F1 (ASTRA REVIEW-2): the clip is a MEASURED FACT on the result, not a
+  // reading the pane must infer — this payload has no total at all.
+  assert.equal(out.truncated, true, 'the capped walk records truncated:true without any total')
+  CAPPED = out
+}
+{
+  // The cap under a LYING numeric total: truncated stays explicit, and the
+  // counted total rides through un-fabricated (the pane will pair them).
+  let i = 0
+  const srv = { calls: [], async request(path) {
+    const url = new URL('http://x' + path)
+    srv.calls.push(Number(url.searchParams.get('offset')))
+    const page = Array.from({ length: 100 }, () => row(i++))
+    return { runs: page, total: 99999, counts: { running: 0 } } // a total the pages never reach
+  } }
+  const out = await mod.runsIndexFetcher(srv.request)()
+  assert.equal(out.truncated, true, 'a cap clip is recorded even when a (lying) total exists')
+  assert.equal(out.total, 99999, 'the counted census is not rewritten by the walk')
+  assert.equal(out.loaded, 3000, 'loaded reports what the capped walk actually holds')
+  CAPPED_TOTAL = out
 }
 
 // (6) cancellation: session-change/invalidate cancels the walk, mid-page.
@@ -204,6 +234,7 @@ const texts = tree => {
     if (typeof n === 'string') return t.push(n) // bare string child (box(..., census))
     if (typeof n !== 'object') return
     if (typeof n.props?.children === 'string') t.push(n.props.children)
+    if (typeof n.props?.description === 'string') t.push(n.props.description) // EmptyState frame text
     w(n.props?.children)
   }
   w(tree)
@@ -265,6 +296,50 @@ const FLEET100 = Array.from({ length: 100 }, (_, i) => row(i)).map(r => ({ ...r,
   const tree = mount({ data: { runs: [], total: 0, loaded: 0, counts: { running: 0 }, roots: ['/home/u/.hermes/workflows'] } })
   assert.deepEqual(emptyStates(tree), ['No runs'], 'empty says empty only when the census ANSWERED empty')
   assert.match(texts(tree), /roots: \/home\/u\/\.hermes\/workflows/, 'where it looked is honest, not fabricated')
+}
+{
+  // A legacy payload (no counts, no total) whose FIRST PAGE itself answered
+  // empty is still an answered-empty census — the walk stopped at offset 0 on
+  // the server's own nothing-here answer. This pins that the F4 defensive
+  // branch below does not rob the legacy shape of its honest 'No runs'.
+  const tree = mount({ data: { runs: [], loaded: 0, roots: ['/x'] } })
+  assert.deepEqual(emptyStates(tree), ['No runs'], 'no-counts empty first page still owns the empty costume')
+}
+
+// (7g) ASTRA REVIEW-2 F1, MOUNTED: the capped no-total census — the ACTUAL
+// fetcher output from (5) (3000 rows, truncated:true, no numeric total) must
+// disclose the clip on the pane, not hide behind 'runs unknown'. The reviewer
+// probe recorded the faulty render as `runs unknown | THE REST · 3000` with
+// hasPartial=false; the disclosure line below is the flip of that exact pin.
+{
+  const tree = mount({ data: CAPPED })
+  assert.match(texts(tree), /runs unknown.*first 3000 loaded — more exist \(page cap\)/,
+    'an unknown-total cap clip is VISIBLE, not concealed')
+  assert.match(texts(tree), /THE REST · 3000/, 'the loaded rows stay rendered — truncation hides them neither')
+}
+{
+  // The cap under a lying total: ONE honest disclosure (loaded of total), no
+  // doubled suffix — the cap fact is already carried by the shortfall reading.
+  const tree = mount({ data: CAPPED_TOTAL })
+  assert.match(texts(tree), /runs 99999 · running 0 · held 0 · failed 0 · loaded 3000 of 99999/)
+  assert.doesNotMatch(texts(tree), /page cap/, 'no double disclosure when loaded-of-total already says it')
+}
+
+// (7h) ASTRA REVIEW-2 F4, MOUNTED: a POSITIVE counted census with ZERO loaded
+// rows wears the honest PENDING state — never the 'No runs' costume.
+{
+  const tree = mount({ data: { runs: [], total: 237, loaded: 0, counts: { running: 0 } } })
+  assert.ok(!emptyStates(tree).includes('No runs'),
+    'loaded 0 of 237 must not simultaneously say No runs (the reviewer probe produced both at once)')
+  assert.ok(emptyStates(tree).includes('Runs pending…'), 'the pending state names the real state')
+  assert.match(texts(tree), /runs 237 · running 0 · held 0 · failed 0 · loaded 0 of 237/,
+    'the census line stays honest about the shortfall')
+  assert.match(texts(tree), /237 counted · 0 loaded/, 'the frame carries the counted-vs-loaded facts')
+  const walk = buttons(tree).find(b => String(b.props.children).includes('re-walk'))
+  assert.ok(walk, 'the pending frame offers a real re-walk')
+  walk.props.onClick({})
+  assert.deepEqual(globalThis.__WF_INV__, [{ queryKey: ['hermes-workflows', 'runs'] }],
+    'the pending re-walk invalidates the runs key — same recovery as every other honest frame')
 }
 
 console.log('ALL PASS: full-census fetch — paged, deduped, bounded, cancellable; pane states honest')
