@@ -502,7 +502,15 @@ async function main() {
               // Staging directly on the resting place keeps the after-load
               // sha guard honest: the bytes the app serves ARE the candidate.
               plugins: path.join(A.outDir, 'bench', 'desktop-plugins', 'hermes-workflows') };
-  for (const d of [B.home, B.userdata, B.runs, B.plugins,
+  // The APP is booted with --profile proofhome and HERMES_HOME=bench (the
+  // profiles parent): profileBackendParentEnv then re-anchors every backend
+  // spawn to bench/profiles/proofhome, where gateway.standalone: true lives.
+  // (electron-main resolveLaunchProfile -> backendArgs.unshift('--profile',p)
+  // — the app's own sanctioned satellite path; without it ensure flattens to
+  // 'default' and the host-gateway dedup refuses the fork.)
+  B.appHome = path.join(A.outDir, 'bench');
+  B.profileName = 'proofhome';
+  for (const d of [B.appHome, B.home, B.userdata, B.runs, B.plugins,
                    path.join(A.outDir, 'captures'), path.join(A.outDir, 'logs'), path.join(A.outDir, 'seed')])
     fs.mkdirSync(d, { recursive: true });
   fs.writeFileSync(path.join(A.outDir, '.ui2-proof-owned'), `${identity.ts} capture.mjs --case ${A.caseName}\n`);
@@ -519,8 +527,12 @@ async function main() {
   // desktop-half migration would resurrect the installed half over the
   // candidate; never workflows — the test runs root owns that name).
   for (const f of ['spawn-ledger.json', 'gateway_state.json', 'auth.json', 'config.yaml']) {
-    const src = path.join(realHome, f);
-    if (fs.existsSync(src)) fs.copyFileSync(src, path.join(B.home, f));
+    const srcFile = path.join(realHome, f);
+    if (fs.existsSync(srcFile)) {
+      fs.copyFileSync(srcFile, path.join(B.home, f));
+      if (f === 'config.yaml' || f === 'auth.json')
+        fs.copyFileSync(srcFile, path.join(B.appHome, f));   // app reads the root layout
+    }
   }
   // Standalone opt-out BEFORE boot (the refusal decision reads the profile's
   // own config at command start): without it a live host gateway refuses the
@@ -579,9 +591,10 @@ async function main() {
     const electronEnv = { ...process.env,
       HERMES_DESKTOP_DEV_SERVER: `http://127.0.0.1:${A.rendererPort}`,
       HERMES_DESKTOP_CDP_PORT: String(A.cdpPort),
-      HERMES_HOME: B.home };
+      HERMES_HOME: B.appHome };
     sup.start('electron', path.join(desktop, 'node_modules', '.bin', 'electron'),
-      ['.', `--user-data-dir=${B.userdata}`], { cwd: desktop, env: electronEnv });
+      ['.', `--user-data-dir=${B.userdata}`, '--profile', B.profileName],
+      { cwd: desktop, env: electronEnv });
 
     // Trusted inputs are written AFTER the bench backend registers (the fork
     // normalizes config.yaml at boot — a pre-boot write is silently dropped,
