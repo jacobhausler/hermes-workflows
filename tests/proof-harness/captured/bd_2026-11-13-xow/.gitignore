@@ -1,0 +1,10 @@
+# Committed proof set: evidence only (captures, contents, manifest/report/identity).
+bench/
+logs/
+seed/
+supervisors.json
+.ui2-proof-owned
+*.stale-*
+set-*/
+run-*/
+*.stale-*/
