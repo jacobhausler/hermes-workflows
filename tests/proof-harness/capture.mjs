@@ -978,7 +978,15 @@ async function main() {
           const t = ((el && (el.innerText || el.textContent)) || '').trim().toLowerCase();
           return t.includes('connecting') || t.length === 0;
         })()`, true);
-        if (underSplash) { try { await waitConnected(cdp, 15_000); } catch { /* loop budget decides */ } }
+        // Occlusion-class recovery (field-proven, regen try2): the row IS
+        // painted under a CONNECTING fragment INSIDE the pane column while
+        // viewport-center shows restored chat — the center probe says false.
+        // locateJS already reports the covering text: 'occluded over
+        // CONNECTING' is direct splash evidence; re-wait attach on it too.
+        const occludedBySplash = hit.err === 'occluded' && /connecting/i.test(String(hit.over || ''));
+        if (underSplash || occludedBySplash) {
+          try { await waitConnected(cdp, 15_000); wT0 = Date.now() - probeBudgetMs + 30_000; } catch { /* loop budget decides */ }
+        }
         // Route-restore race (field-proven: diagnostic shows the app restored
         // the chat view AFTER the tab click — SESSIONS active, hero rendered):
         // re-click the sidebar WORKFLOWS tab every poll until the pane column
