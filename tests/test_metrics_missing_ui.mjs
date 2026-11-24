@@ -63,7 +63,10 @@ const { ItemChips } = new Function('jsx', 'jsxs', '$fanItem', 'Dot', 'EDGE_TONE'
     `${grab('columnGroups')}\n${grab('bandRows')}; return { columnGroups, bandRows }`)()
   const { MiniGraph } = new Function('jsx', 'jsxs', 'useRef', 'useValue', '$fanOpen', 'Dot', 'EDGE_TONE', 'NODE_TONE', 'nodeState',
     'depthMap', 'useCardRects', 'Edges', 'MINI', 'useCanvasWidth', 'columnGroups', 'bandRows',
-    `${grab('MiniGraph')}; return { MiniGraph }`)(
+    // RC ch4: MiniGraph consults the run-keyed fan selectors before laying
+    // out; the harness supplies the REAL selector/projection code (none of
+    // which needs fanCounts — the rows are inputs, not derived here).
+    `${grab('fanOpenFor')}\n${grab('fanProjection')}\n${grab('fanItems')}\n${grab('itemLabel')}\n${grab('renderGoal')}\n${grab('MiniGraph')}; return { MiniGraph }`)(
     jsx, jsxs, () => null, () => null, {}, 'Dot', EDGE_TONE,
     Object.fromEntries(Object.entries(EDGE_TONE).map(([k, v]) => [k, { color: v, borderColor: v, shadow: null, shadowHover: null, pulseMs: null, calm: true, ui: 'muted', gate: null, breathe: null }])),
     (def, states) => states[def.id]?.status || 'pending',

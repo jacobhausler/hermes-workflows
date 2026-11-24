@@ -40,6 +40,8 @@ const state = { selNode: null, fanItem: null, expanded: null }
 const useValue = a => a === $selNode ? state.selNode : a === $fanItem ? state.fanItem : state.expanded
 
 const fanItemsFn = new Function(`${grab('fanItems')}\n${grab('itemLabel')}\n${grab('renderGoal')}\n${constGrab('fanCounts')}; return { fanItems, fanCounts }`)()
+// RC ch4: FanStack's ghost rings are retired — the harness needs the tick law too.
+const ticksFn = new Function(`${constGrab('ATTEMPT_TICK')}\n${grab('attemptTicks')}; return attemptTicks`)()
 const EDGE_TONE = { done: 'teal', pending: 'gray', failed: 'red', running: 'blue', held: 'orange', skipped: 'gray' }
 const cn = (...xs) => xs.filter(Boolean).join(' ')
 
@@ -52,7 +54,7 @@ const { GraphView } = new Function(
   'useValue', 'useRef', 'useState', 'useCardRects', 'Edges', 'EmptyState', 'NodeCard',
   'fanItems', 'fanCounts', 'depthMap', '$selNode', '$fanItem', '$fanExpanded',
   'useCanvasWidth', 'columnGroups', 'bandRows', 'CARD_W', 'NODE_TONE', 'edgeFlowPolicy',
-  `${['depthMap', 'columnGroups', 'bandRows', 'FanStack', 'ItemCard', 'GraphView'].map(grab).join('\n')}\nreturn { GraphView }`
+  `${['depthMap', 'columnGroups', 'bandRows', 'GraphView', 'ItemCard'].map(grab).join('\n')}\n${constGrab('ATTEMPT_TICK')}\n${grab('attemptTicks')}\n${grab('FanStack')}\nreturn { GraphView }`
 )(jsx, jsxs, box, cn, 'Dot', 'Vitals', s => s || 'unknown', ms => (ms ? `${Math.round(ms / 1000)}s` : ''), EDGE_TONE,
    useValue, () => ({ current: null }), () => [null, () => {}], () => ({}), 'Edges', 'EmptyState',
    props => jsx('div', { 'data-node-stub': props.def.id }),

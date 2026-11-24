@@ -106,6 +106,19 @@ try {
   const fanSummary = new Function(`${fanSummarySource}; return fanSummary`)()
   assert.equal(fanSummary(fanCounts(rows)), '3/5 terminal ·1 skipped ·1▶, 1 failed')
 
+  // RC ch4: FanStrip grew the fanout-aggregate label and the threshold ladder
+  // row — the harness supplies the REAL fanThreshold model (implicit-majority
+  // law from the runner) and a Fragment stand-in.
+  const ftStart = plugin.indexOf('export function fanThreshold(')
+  assert.notEqual(ftStart, -1)
+  let tbrace = plugin.indexOf('{', ftStart), tdepth = 0, tend = tbrace
+  for (; tend < plugin.length; tend++) {
+    if (plugin[tend] === '{') tdepth++
+    else if (plugin[tend] === '}' && --tdepth === 0) break
+  }
+  const fanThreshold = new Function('fanCounts', `${plugin.slice(ftStart + 'export '.length, tend + 1)}\nreturn fanThreshold`)(fanCounts)
+  const Fragment = Symbol('Fragment')
+
   const fnStart = plugin.indexOf('function FanStrip(')
   assert.notEqual(fnStart, -1)
   let fbrace = plugin.indexOf(') {', fnStart) + 2, fdepth = 0, fend = fbrace
@@ -119,7 +132,7 @@ try {
   const box = (className, ...children) => jsx('div', { className, children: children.length === 1 ? children[0] : children })
   const label = text => jsx('label', { children: text })
   const ItemChips = Symbol('ItemChips')
-  const FanStrip = new Function('jsxs', 'jsx', 'box', 'label', 'fanCounts', 'fanSummary', 'ItemChips', `${fanStripSource}; return FanStrip`)(jsxs, jsx, box, label, fanCounts, fanSummary, ItemChips)
+  const FanStrip = new Function('jsxs', 'jsx', 'box', 'label', 'fanCounts', 'fanSummary', 'fanThreshold', 'Fragment', 'ItemChips', `${fanStripSource}; return FanStrip`)(jsxs, jsx, box, label, fanCounts, fanSummary, fanThreshold, Fragment, ItemChips)
   const tree = FanStrip({ runId: 'wf-123', def: { id: 'f' }, rows, picked: null })
   const collectText = (value, out = []) => {
     if (typeof value === 'string') out.push(value)
@@ -128,6 +141,12 @@ try {
     return out
   }
   assert.ok(collectText(tree).some(text => text === '3/5 terminal ·1 skipped ·1▶, 1 failed'), collectText(tree).join(' | '))
+  // RC ch4 (MF1 fix): the fraction is labelled with its scope, never bare.
+  assert.ok(collectText(tree).includes('fanout aggregate'), 'FanStrip labels the aggregate as the fanout aggregate')
+  // Threshold ladder: 1 result of 5 vs implicit-majority threshold 3 — NOT yet
+  // acked, so the copy stays below the acknowledgement (no fabricated state).
+  assert.ok(collectText(tree).includes('1/5 results'), collectText(tree).join(' | '))
+  assert.ok(!collectText(tree).includes('Enough results to continue'), 'below threshold: no acknowledgement copy')
 
   const itemStart = plugin.indexOf('function ItemChips(')
   let ibrace = plugin.indexOf(') {', itemStart) + 2, idepth = 0, iend = ibrace
@@ -155,7 +174,8 @@ try {
   assert.equal(timelineTone({ kind: 'gate', status: 'skipped' }), 'skipped')
   assert.equal(timelineTone({ kind: 'gate', status: 'held' }), 'held')
   assert.equal(timelineTone({ kind: 'gate', status: 'done' }), 'done')
-  assert.equal(plugin.includes("title: 'Terminal fan-out items'"), true)
+  assert.equal(plugin.includes("title: 'Terminal fan-out items — finished, not necessarily successful'"), true,
+    'RC ch4: the terminal badge explains itself — terminal means ended, not successful (MF1 copy law)')
   const nodesCountStart = plugin.indexOf('const nodesCount =')
   const nodesCountSource = plugin.slice(nodesCountStart, plugin.indexOf('\n', nodesCountStart))
   const countCellSource = plugin.slice(plugin.indexOf('const countCell ='), plugin.indexOf('\n', plugin.indexOf('const countCell =')))

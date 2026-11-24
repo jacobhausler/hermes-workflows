@@ -218,7 +218,7 @@ const grab = name => {
 let instance = 0
 const jsx = (type, props, key) => ({ type, props, key })
 const { Edges, depthMap } = new Function('jsx', 'jsxs', 'useId',
-  `const EDGE_TONE = { done:'teal', pending:'gray', failed:'red', running:'blue', held:'orange', skipped:'gray' };\nconst NODE_TONE = Object.fromEntries(Object.entries(EDGE_TONE).map(([k,v]) => [k, { color:v, borderColor:v, shadow:null, shadowHover:null, pulseMs:null, calm:true, ui:'muted', gate:null, breathe:null }]));\nNODE_TONE.waiting = NODE_TONE.pending;\n${['depthMap', 'edgePath', 'routeEdge', 'edgeFlowPolicy', 'edgeTone', 'nodeState', 'Edges'].map(n => { try { return grab(n) } catch { return '' } }).join('\n')}\nreturn { Edges, depthMap }`)(jsx, jsx, () => `t-${++instance}`)
+`const EDGE_TONE = { done:'teal', pending:'gray', failed:'red', running:'blue', held:'orange', skipped:'gray' };\nconst NODE_TONE = Object.fromEntries(Object.entries(EDGE_TONE).map(([k,v]) => [k, { color:v, borderColor:v, shadow:null, shadowHover:null, pulseMs:null, calm:true, ui:'muted', gate:null, breathe:null }]));\nNODE_TONE.waiting = NODE_TONE.pending;\nconst ROUTE_TINTS = ['accent','purple','cyan','orange','green','yellow'];\n${['depthMap', 'edgePath', 'routeEdge', 'edgeFlowPolicy', 'edgeTone', 'nodeState', 'routeTint', 'Edges'].map(n => { try { return grab(n) } catch { return '' } }).join('\n')}\nreturn { Edges, depthMap }`)(jsx, jsx, () => `t-${++instance}`)
 const nodes = [
   { id: 'a' }, { id: 'b', after: ['a'] }, { id: 'c', after: ['a'] }, { id: 'd', after: ['b'] },
   { id: 'e', after: ['c'] }
@@ -237,17 +237,19 @@ function rectsFor(defs) {
 {
   const states = { a: { status: 'running' }, b: { status: 'pending' }, c: { status: 'failed' }, d: { status: 'pending' } }
   const svg = Edges({ nodes, rects: rectsFor(nodes), states, gate: null })
-  const paths = svg.props.children.filter(x => x && x.type === 'path' && x.props.d)
-  assert.equal(paths.length, 4, 'every edge renders')
-  for (const p of paths) {
-    const from = p.key.split('->')[0]
+  // RC ch4: one <g> per route; the <animate> law is checked on the STATE path.
+  const groups = svg.props.children.filter(x => x && x.type === 'g')
+  assert.equal(groups.length, 4, 'every edge renders')
+  for (const g of groups) {
+    const p = g.props.children.filter(c => c && c.type === 'path')[0]
+    const from = g.key.split('->')[0]
     const kids = (Array.isArray(p.props.children) ? p.props.children : [p.props.children]).filter(Boolean)
     const anims = kids.filter(k => k && k.type === 'animate')
     if (states[from].status === 'running') {
-      assert.equal(anims.length, 1, `${p.key}: running source gets exactly one <animate>`)
+      assert.equal(anims.length, 1, `${g.key}: running source gets exactly one <animate>`)
       assert.equal(anims[0].props.attributeName, 'stroke-dashoffset')
     } else {
-      assert.equal(anims.length, 0, `${p.key}: non-running source gets NO <animate>`)
+      assert.equal(anims.length, 0, `${g.key}: non-running source gets NO <animate>`)
     }
   }
 }
@@ -255,10 +257,11 @@ function rectsFor(defs) {
   // all-terminal graph: zero animate children anywhere.
   const states = Object.fromEntries(nodes.map(n => [n.id, { status: 'done' }]))
   const svg = Edges({ nodes, rects: rectsFor(nodes), states, gate: null })
-  const paths = svg.props.children.filter(x => x && x.type === 'path' && x.props.d)
-  for (const p of paths) {
-    const kids = (Array.isArray(p.props.children) ? p.props.children : [p.props.children]).filter(Boolean)
-    assert.equal(kids.filter(k => k && k.type === 'animate').length, 0, `${p.key}: done source is still`)
+  for (const g of svg.props.children.filter(x => x && x.type === 'g')) {
+    for (const p of g.props.children.filter(c => c && c.type === 'path')) {
+      const kids = (Array.isArray(p.props.children) ? p.props.children : [p.props.children]).filter(Boolean)
+      assert.equal(kids.filter(k => k && k.type === 'animate').length, 0, `${g.key}: done source is still`)
+    }
   }
 }
 
