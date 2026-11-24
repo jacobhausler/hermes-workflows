@@ -8,7 +8,7 @@ supervisors.json
 # Failed-attempt rotations, scratch probes, and runner logs are workspace
 # noise; only the committed set-1/set-2 pair is evidence.
 *.stale-*
-probe/
+probe*/
 run-*.log*
 PAIR-STATUS*
 run-pair.sh
