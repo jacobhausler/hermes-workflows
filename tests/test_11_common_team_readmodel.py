@@ -24,7 +24,10 @@ def mkprofile(name, config=True, consent=None):
     ph = PROOT / name
     ph.mkdir(parents=True)
     if config:
-        (ph / "config.yaml").write_text("model:\n  default: fake\n")
+        # provider present: the route-completeness rule (papercut 2026-11-23,
+        # tests/test_profile_route_guard_pcg.py) would otherwise refuse every
+        # consent fixture and blur what these checks pin.
+        (ph / "config.yaml").write_text("model:\n  default: fake\n  provider: fake\n")
     if consent is not None:
         (ph / "workflow_team.json").write_text(json.dumps(consent))
     return ph

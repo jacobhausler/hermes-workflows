@@ -60,9 +60,9 @@ launch a replacement or mutate configuration.
   predicate prunes the node and exclusively dependent arms (agents spawn nothing);
   `on_skip:"pass"` lets descendants run. Malformed or non-ancestor-head predicates are refused
   before write/spawn; echo/join reject both; `when` heads are hyphen-free (`out.<id>.answer`). Route arms on `out.<gate>.answer` — any other field name resolves to None and prunes the arm SILENTLY (green run, zero wake). Probes read `out.<gate>.answer` too: `_machine: "auto_release"` marks a default, not a human. Examples `approve-publish`, `branch-on-verdict`: [grammar](references/grammar.md).
-- `profile` runs a node AS a named teammate: DELEGATION, not isolation — same UID,
-  the target's SOUL/memory/`.env`/tools; the target's `workflow_team.json` must list
-  the launcher in `accept_from`; `default` is never a target.
+- `profile` runs a node AS a named teammate: DELEGATION, not isolation — same UID, target's SOUL/memory/
+  `.env`/tools; its `workflow_team.json` lists the launcher in `accept_from`; `default` is never a target; a
+  provider-less node needs the target's `config.yaml` to complete the route — `model.provider` beside `model.default` or a typed pre-spawn refusal carrying the fix shape (`auto` passes).
 - `requires` on an agent/gate fails the node (`error_class:"precondition"`, zero
   spawns) when an ancestor's committed output lacks a listed path — the run FAILS,
   never skips quietly; skip-on-missing is `when` + `on_skip:"prune"` on the node itself.
