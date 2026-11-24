@@ -501,9 +501,8 @@ async function main() {
     }
     // Door interpreter: the CLI shim itself names it (`exec <python> …`), so
     // the seed runs under the SAME interpreter the gateway loads the door
-    // with. Fallbacks: UI2_PROOF_PYTHON, then a >=3.10 python3 probe (the
-    // door uses PEP-604 annotations at def time — system 3.9 dies on them).
-    let py = process.env.UI2_PROOF_PYTHON || '';
+    // with. Fallbacks: UI2_PROOF_PYTHON (hoisted), then a >=3.10 python3 probe
+    // (the door uses PEP-604 annotations at def time — system 3.9 dies on them).
     if (!py) {
       try {
         const shim = fs.readFileSync(hermesAbs, 'utf8').slice(0, 4000);
@@ -644,7 +643,21 @@ async function main() {
     // 01/02 pane: runs list, then the held-gate run detail
     shots.push({ surface: 'pane_workflows', state: 'runs list, seeded held-gate run', ...(await shoot(cdp, A.outDir, '01-pane-runs.png')) });
     await trustedClick(cdp, runName, { region: paneRegion });
-    await waitText(cdp, engSeed.graph.nodes[1].question, 20_000);
+    // The gate question must render IN THE DETAIL VIEW: the expanded tray run
+    // card shows the same question text (field-proven: shot 02 was 'Loading…'
+    // while the question wait passed on the tray card).
+    {
+      const qT0 = Date.now();
+      for (;;) {
+        const hit = await cdp.evl(locateJS(engSeed.graph.nodes[1].question, { region: paneRegion }));
+        if (!hit.err) break;
+        if (Date.now() - qT0 > 30_000) {
+          try { await shoot(cdp, A.outDir, '00-diagnostic-detail.png'); } catch { /* best effort */ }
+          die(EX.api, `held-gate question never rendered IN THE PANE DETAIL (${JSON.stringify(hit.err)}) — diagnostic shot in captures/ if present`);
+        }
+        await sleep(600);
+      }
+    }
     shots.push({ surface: 'pane_workflows', state: 'run detail, held gate question', ...(await shoot(cdp, A.outDir, '02-pane-run-detail.png')) });
 
     // 03/04 directive card: seed one real assistant turn, open its session,
@@ -721,7 +734,7 @@ async function main() {
               .filter(({ n }) => { const r = n.getBoundingClientRect(); return r.width > 60 && r.height > 16 && r.x < 420 && r.y > 40; })
               .sort((a, b) => a.n.getBoundingClientRect().y - b.n.getBoundingClientRect().y);
             const leaf = cand.find(({ n }) => !cand.some(o => o.n !== n && n.contains(o.n))) ?? cand[0];
-            if (!leaf) return rowHit;
+            if (!leaf) return ${JSON.stringify(rowHit)};  // page JS cannot see the Node-side var
             const el = leaf.n; el.scrollIntoView({ block: 'center' });
             await new Promise(r => setTimeout(r, 350));
             const r = el.getBoundingClientRect();

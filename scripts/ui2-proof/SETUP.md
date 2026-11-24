@@ -79,6 +79,22 @@ plugin sha256, seeded run ids, config-before/after, teardown survivors).
 | 7 | capture: zero shots, a PNG under 4 KiB, or missing PNG magic |
 | 8 | teardown: survivor under the owned `--user-data-dir` path, or config revert failed |
 
+Engine-seeded runs are stopped through the door (`action:stop`) in teardown —
+parked held-gate runners never outlive the bench.
+
+### Tray ownership law (why the tray needs its OWN seed)
+
+The composer strip renders ONLY the FOCUSED chat's owned runs
+(`ownedRuns`/`SessionStrip`, desktop/plugin.js:728-737/1288): a run whose
+`owner.session_id` is blank (a bare door launch) is PANE-ONLY by the
+honest-absence law — a settings-true tray stays hidden. The baseline case
+therefore seeds TWO engine runs: run #1 (blank owner) drives the pane and the
+directive card; the tray seed relaunches the SAME graph with
+`WF_OWNER_SESSION=<the one-shot's session id>` — the door's on-behalf stamp
+(`__init__.py` `_owner_stamp`) — so the tray row appears in the seeded
+transcript with count 1. The driver parses `session_id:` from the one-shot's
+own output (never a fixture edit) and pins it in identity.json.
+
 ## Mandatory screenshot review
 
 The driver proves PNG magic, size and hash — it CANNOT make a visual claim.
