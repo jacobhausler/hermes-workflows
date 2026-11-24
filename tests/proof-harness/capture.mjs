@@ -793,6 +793,21 @@ async function main() {
     // paint knob (default 60 s keeps CI-era benches honest; loaded boxes pass
     // --paint-budget 300 and wait accordingly).
     const probeBudgetMs = Math.max(45_000, A.paintBudgetMs);
+    // Navigation-tolerant probe eval (field-proven 2026-11-24): an SPA route
+    // reset or self-reload under crew load kills an in-flight Runtime.evaluate
+    // with 'Inspected target navigated or closed'. Inside a POLL loop that is
+    // a miss, not a death: reconnect and hand the loop its no-hit shape.
+    const evlPoll = async (expr, fallback) => {
+      try { return await cdp.evl(expr); }
+      catch (e) {
+        const m = String((e && e.message) || e);
+        if (!/navigated or closed|WebSocket is not open|socket hang up|target closed|not attached/i.test(m)) throw e;
+        await sleep(1200);
+        try { cdp.ws.close(); } catch { /* already gone */ }
+        cdp = await connectCdp(A.cdpPort, A.rendererPort, 30_000);
+        return fallback;
+      }
+    };
     const rT0 = Date.now();
     while (Date.now() - rT0 < probeBudgetMs) {
       registry = await cdp.evl(`(async () => {
@@ -842,7 +857,7 @@ async function main() {
     {
       const wT0 = Date.now();
       for (;;) {
-        const hit = await cdp.evl(locateJS(runName, { region: paneRegion }));
+        const hit = await evlPoll(locateJS(runName, { region: paneRegion }), { err: 'reconnecting' });
         if (!hit.err) break;
         if (Date.now() - wT0 > probeBudgetMs) {
           try { await shoot(cdp, A.outDir, '00-diagnostic-pane.png'); } catch { /* best effort */ }
@@ -852,7 +867,7 @@ async function main() {
         // Boot-modal recovery (field-proven): a backend still starting puts
         // the "Hermes couldn't start" modal over the chrome; dismiss it by
         // clicking Retry and keep polling within the probe budget.
-        const modalUp = await cdp.evl(`document.body.innerText.includes("couldn't start")`).catch(() => false);
+        const modalUp = await evlPoll(`document.body.innerText.includes("couldn't start")`, false);
         if (modalUp) { try { await trustedClick(cdp, 'Retry', { exact: true, ci: true }); } catch { /* modal between frames */ } }
         // Route-restore race (field-proven: diagnostic shows the app restored
         // the chat view AFTER the tab click — SESSIONS active, hero rendered):
@@ -877,7 +892,7 @@ async function main() {
     {
       const qT0 = Date.now();
       for (;;) {
-        const hit = await cdp.evl(locateJS(engSeed.graph.nodes[1].question, { region: paneRegion }));
+        const hit = await evlPoll(locateJS(engSeed.graph.nodes[1].question, { region: paneRegion }), { err: 'reconnecting' });
         if (!hit.err) break;
         if (Date.now() - qT0 > 30_000) {
           try { await shoot(cdp, A.outDir, '00-diagnostic-detail.png'); } catch { /* best effort */ }
@@ -940,9 +955,9 @@ async function main() {
       let rowT0 = Date.now();
       let rowReloads = 0;
       while (!rowHit) {
-        const modalUp2 = await cdp.evl(`document.body.innerText.includes("couldn't start")`).catch(() => false);
+        const modalUp2 = await evlPoll(`document.body.innerText.includes("couldn't start")`, false);
         if (modalUp2) { try { await trustedClick(cdp, 'Retry', { exact: true, ci: true }); } catch { /* between frames */ } }
-        rowHit = await cdp.evl(`(async () => {
+        rowHit = await evlPoll(`(async () => {
           const cand = [...document.querySelectorAll('div,li,button,a')]
             .map(n => ({ n, t: (n.innerText || '').trim() }))
             .filter(({ n, t }) => {
@@ -963,7 +978,7 @@ async function main() {
           await new Promise(r => setTimeout(r, 350));
           const r = el.getBoundingClientRect();
           return { x: r.x + r.width / 2, y: r.y + r.height / 2, t: leaf.t.slice(0, 60) };
-        })()`);
+        })()`, null);
         if (rowHit) break;
         if (Date.now() - rowT0 > probeBudgetMs) {
           if (!rowReloads++) {
@@ -999,7 +1014,7 @@ async function main() {
         // re-measure the virtualized row between rect and button-down.
         let opened = false
         for (let attempt = 0; attempt < 3 && !opened; attempt++) {
-          if (attempt > 0) rowHit = await cdp.evl(`(async () => {
+          if (attempt > 0) rowHit = await evlPoll(`(async () => {
             const cand = [...document.querySelectorAll('div,li,button,a')]
               .map(n => ({ n, t: (n.innerText || '').trim() }))
               .filter(({ t }) => {
@@ -1021,7 +1036,7 @@ async function main() {
             await cdp.send('Input.dispatchMouseEvent', { type: t, x: rowHit.x, y: rowHit.y,
               button: t === 'mouseMoved' ? undefined : 'left', clickCount: 1, buttons: t === 'mouseReleased' ? 0 : 1 });
           await sleep(1200)
-          opened = await cdp.evl(`document.body.innerText.includes(${JSON.stringify(runId)})`)
+          opened = await evlPoll(`document.body.innerText.includes(${JSON.stringify(runId)})`, false)
         }
         if (!opened) die(EX.api, 'session row clicks never opened the seeded transcript (run id absent after 3 attempts)')
       }
@@ -1058,7 +1073,7 @@ async function main() {
             return { x: r.x, y: r.y, width: r.width, height: r.height, text: host.innerText || '' };
         }
         return null;
-      })()`);
+      })()`, rowHit);
       if (!card) die(EX.api, 'directive card not rendered for the seeded run (Open in Workflows hook absent)');
       // The card's own innerText is the reproducible content of BOTH card
       // shots (the crop proves pixels, the text layer proves content; the
