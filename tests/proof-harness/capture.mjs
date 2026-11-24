@@ -1435,6 +1435,7 @@ async function main() {
     } else {
     {
       let wT0 = Date.now();
+      let splashWaits = 0, paneReloaded = false;
       for (;;) {
         const hit = await evlPoll(locateJS(paneRowNeedle, { region: paneRegion }), { err: 'reconnecting' });
         if (!hit.err) break;
@@ -1465,6 +1466,17 @@ async function main() {
         const occludedBySplash = hit.err === 'occluded' && /connecting/i.test(String(hit.over || ''));
         if (underSplash || occludedBySplash) {
           try { await waitConnected(cdp, 15_000); wT0 = Date.now() - probeBudgetMs + 30_000; } catch { /* loop budget decides */ }
+          // Splash persistence (field-proven 2026-11-24, crew load): the
+          // renderer's WS/ticket exchange can die once at boot and the splash
+          // never lifts — ONE bounded document reload after the second
+          // splash-wait re-runs the attach from a clean slate.
+          if (++splashWaits >= 2 && !paneReloaded) {
+            paneReloaded = true;
+            try { await cdp.send('Page.reload', { ignoreCache: true }); } catch { /* navigating */ }
+            await sleep(2500);
+            try { cdp.ws.close(); } catch { /* already gone */ }
+            cdp = await connectCdp(A.cdpPort, A.rendererPort, 60_000);
+          }
         }
         // Route-restore race (field-proven: diagnostic shows the app restored
         // the chat view AFTER the tab click — SESSIONS active, hero rendered):
