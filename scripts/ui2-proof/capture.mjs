@@ -482,10 +482,19 @@ async function main() {
       die(EX.preflight, `--out exists without ownership marker, refusing to touch: ${A.outDir}`);
     fs.renameSync(A.outDir, `${A.outDir}.stale-${Date.now()}`);
   }
-  const B = { root: A.outDir, home: path.join(A.outDir, 'bench', 'home'),
+  const B = { root: A.outDir,
+              // The home is shaped as a SATELLITE PROFILE (.../profiles/<name>) and
+              // seeded with gateway.standalone: true (below) — the one-gateway-per-
+              // host law's sanctioned opt-out: with a live host gateway, a
+              // default-shaped home is refused ('already serves profile default —
+              // nothing to start', rc 0) and the bench backend never registers
+              // (field-proven bd_2026-11-13-yjp bench wars; hermes_cli/gateway.py
+              // _named_profile_refused_under_multiplexer standalone branch). A
+              // standalone satellite forks its own gateway while the host serves.
+              home: path.join(A.outDir, 'bench', 'profiles', 'proofhome'),
               userdata: path.join(A.outDir, 'bench', 'userdata'),
               runs: path.join(A.outDir, 'bench', 'runs'),
-              plugins: path.join(A.outDir, 'bench', 'home', 'desktop-plugins', 'hermes-workflows') };
+              plugins: path.join(A.outDir, 'bench', 'profiles', 'proofhome', 'desktop-plugins', 'hermes-workflows') };
   for (const d of [B.home, B.userdata, B.runs, B.plugins,
                    path.join(A.outDir, 'captures'), path.join(A.outDir, 'logs'), path.join(A.outDir, 'seed')])
     fs.mkdirSync(d, { recursive: true });
@@ -506,6 +515,11 @@ async function main() {
     const src = path.join(realHome, f);
     if (fs.existsSync(src)) fs.copyFileSync(src, path.join(B.home, f));
   }
+  // Standalone opt-out BEFORE boot (the refusal decision reads the profile's
+  // own config at command start): without it a live host gateway refuses the
+  // bench fork — see the B.home comment for the law and the field history.
+  writeConfig(hermesBin, ['gateway.standalone', 'true'], { ...process.env, HERMES_HOME: B.home });
+  identity.bench.gateway_standalone = true;
   identity.bench.discovery_copied = ['spawn-ledger.json', 'gateway_state.json', 'auth.json', 'config.yaml']
     .filter(f => fs.existsSync(path.join(B.home, f)));
   // The app's OWN connection state lives in its user-data: seed a local-kind
@@ -575,7 +589,8 @@ async function main() {
         die(EX.boot, 'bench backend never registered gateway_state.json (see logs/electron.log)');
     }
     for (const [key, value] of [['plugins.entries.hermes-workflows.settings.runs_root', B.runs],
-                                ['plugins.entries.hermes-workflows.settings.tray', true]]) {
+                                ['plugins.entries.hermes-workflows.settings.tray', true],
+                                ['gateway.standalone', 'true']]) {
       const before = readConfigValue(hermesBin, key, benchEnv);
       identity.config_touched[key] = { before, after: value, scope: 'bench home (isolated — shared config untouched)' };
       touched.push(key);
