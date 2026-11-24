@@ -6761,6 +6761,14 @@ def run_child_metrics(r):
                     prev[kk] = prev.get(kk) or v.get(kk)
                 prev["api_calls_known"] = prev.get("api_calls_known", True) and v.get("api_calls_known", True)
                 prev["sessions"].update(v.get("sessions") or {})
+                # bd_2026-11-13-cj2: recorded session ids merge additively too —
+                # prev first (the earlier folded home in the sorted-name scan; a
+                # total order because names and per-home SELECTs are each
+                # deterministic), never a replacement.
+                _ids = prev.setdefault("session_ids", [])
+                for _sid in v.get("session_ids") or []:
+                    if _sid not in _ids:
+                        _ids.append(_sid)
     # Any node record without a profile home (and the whole-run case where NONE exist)
     # folds from the caller's home — but at most once.
     unowned = [p.name[:-5] for p in (nodes.glob("*.json") if nodes.is_dir() else [])
@@ -7445,7 +7453,7 @@ def child_metrics(run_id, home=None):
             have_bp = any(r[1] == "billing_provider" for r in c.execute("pragma table_info(sessions)"))
             bp_sel = "billing_provider, " if have_bp else ""
             rows = c.execute(
-                f"select title, model, {bp_sel}input_tokens, output_tokens, cache_read_tokens, reasoning_tokens, "
+                f"select id, title, model, {bp_sel}input_tokens, output_tokens, cache_read_tokens, reasoning_tokens, "
                 "api_call_count, tool_call_count, estimated_cost_usd, last_activity_at, "
                 "last_activity_description, ended_at, started_at from sessions where title like ? "
                 "order by title, started_at, rowid",
@@ -7454,7 +7462,7 @@ def child_metrics(run_id, home=None):
             c.close()
     except Exception:
         return {}
-    for (title, model, *rest) in rows:
+    for (_sid, title, model, *rest) in rows:
         billing_provider = None
         if len(rest) == 11:   # legacy schema (no billing_provider column): honest unknown
             (ti, to, cr, rs, api, tools, cost, last, desc, ended, started) = rest
@@ -7465,9 +7473,16 @@ def child_metrics(run_id, home=None):
                                  "api_calls": 0, "api_calls_known": True,
                                  "tool_calls": 0, "cost": 0.0, "attempts": 0,
                                  "model": None, "billing_provider": None, "last_activity": None, "last_desc": None,
-                                 "ended": None, "started": None, "sessions": {}})
+                                 "ended": None, "started": None, "sessions": {}, "session_ids": []})
         m["sessions"][title] = {"last_activity": last or started,
                                 "last_desc": desc or None}
+        # bd_2026-11-13-cj2: the recorded stored-session ids of this node's child
+        # sessions, verbatim from the sessions.id column — the pane's read-only
+        # conversation link resolves ONLY through these (recorded, never a
+        # runtime-id guess). The append follows the SELECT's total order
+        # (title, started_at, rowid), so attempts land chronologically.
+        if isinstance(_sid, str) and _sid:
+            m["session_ids"].append(_sid)
         if api is None:
             m["api_calls_known"] = False
         m["tokens_in"] += ti or 0; m["tokens_out"] += to or 0; m["cache_read"] += cr or 0
@@ -7596,7 +7611,9 @@ def fold_child_metrics(rows):
     ANY contributing row says api_calls_known: false — an unknown count is absent
     (the existing omission convention, R2: absent reads unknown, never invented),
     never a zero and never a partial sum advertised as exact. Pure over
-    already-read rows: no IO, no new field, persisted shapes unchanged (R10).
+    already-read rows: no IO; the additive derived key `session_ids` (bd_2026-11-13-cj2)
+    is a passthrough of the rows' own recorded ids, present only when a row has
+    them (R10: persisted shapes unchanged — a fold over pre-cj2 rows gains no key).
     Both projection adapters (door act_status, dashboard _view) route EVERY
     aggregation level — node line, fanout item, run total/rollup — through here
     so the surfaces can never diverge on which levels hide an unknown.
@@ -7608,6 +7625,7 @@ def fold_child_metrics(rows):
          "tool_calls": 0, "cost": 0.0, "attempts": 0, "children": len(rows), "live": 0,
          "last_activity": None, "last_desc": None, "models": []}
     known = True
+    ids: list = []
     for m in rows:
         for k in ("tokens_in", "tokens_out", "cache_read", "reasoning", "api_calls", "tool_calls", "cost", "attempts"):
             f[k] += m.get(k) or 0
@@ -7615,6 +7633,15 @@ def fold_child_metrics(rows):
             known = False
         if m.get("model") and m["model"] not in f["models"]:
             f["models"].append(m["model"])
+        # bd_2026-11-13-cj2: the recorded stored-session ids pass through the ONE
+        # fold (the pane's conversation-link keys). Row-contributed order only
+        # (callers iterate projections whose SELECT order is total); rows that
+        # carry none keep the key absent — honest absence, never an empty claim.
+        for sid in m.get("session_ids") or []:
+            if sid not in ids:
+                ids.append(sid)
+    if ids:
+        f["session_ids"] = ids
     if not known:
         f.pop("api_calls")
     return f

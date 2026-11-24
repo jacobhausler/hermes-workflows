@@ -2660,6 +2660,114 @@ function Timeline({ detail }) {
   )
 }
 
+// -- stored-session navigation (bd_2026-11-13-cj2, UI-2 RC navigation adapter) --
+// BEGIN stored-session-nav
+// Read-only viewing law (synthesis/NAVIGATION.md §Resume-without-side-effects):
+// a conversation link opens/focuses the RECORDED stored session through
+// host.openSession — the SDK's own core door. Never composer, never a
+// hydration wait, resume, submit, insert, nudge, and never another session's
+// ID as a stand-in. The SDK was inspected at wiring time: openSession(
+// storedSessionId, options) takes the PluginOpenSessionOptions union
+// (hermes-agent apps/desktop/src/sdk/index.ts), whose `intent` admits
+// 'in-place'|'main'|'stack'|'tab'|'window'; there is NO `readOnly` option, so
+// none is invented — this block passes only the union's own default, made
+// explicit as data so the read-only route is visible at the call site.
+// Id verification is provenance, not parsing: an ID counts only when it rode a
+// designated recorded field — the run's owner stamp, or a node's backend
+// state.db-joined metrics.session_ids — and, for fields that mix runtime and
+// stored shapes (owner.session_id, a CLI-era runtime id), only the measured
+// stored-session shape qualifies (desktop-owned rows are `local-` + 64 hex;
+// that same string is the state.db sessions.id and the openSession key).
+// Missing/expired/unverified renders unavailable and makes NO host call; an
+// absent adapter renders unavailable; a rejection stays a local error state
+// with the exact ID for inspection. No core DOM or storage mutation anywhere.
+const STORED_SESSION_SHAPE = /^local-[0-9a-f]{64}$/
+
+/** Recorded desktop-stored IDs only, in recorded order (runtime-shaped CLI IDs
+ *  are dropped, never repaired — structure encodes the no-guess law). */
+export function storedSessionIds(metrics) {
+  const raw = metrics && Array.isArray(metrics.session_ids) ? metrics.session_ids : []
+  return raw.filter(s => typeof s === 'string' && STORED_SESSION_SHAPE.test(s.trim()))
+            .map(s => s.trim())
+}
+/** The node's current recorded session: the newest attempt's ID, last in the
+ *  recorded order the read model shipped (a rotated attempt re-lands this link
+ *  on the fresh ID at the next fetch — no cached first ID, ever). */
+export function latestStoredSessionId(metrics) {
+  const ids = storedSessionIds(metrics)
+  return ids.length ? ids[ids.length - 1] : null
+}
+/** The run's recorded owner session: the designated ui_session_id stamp wins;
+ *  otherwise the launch session_id ONLY when it already IS stored-session
+ *  shaped (measured live: desktop-launched runs stamp owner.session_id as the
+ *  local-* stored id). Never another session, never the viewer's own. */
+export function ownerStoredSessionId(owner) {
+  if (!owner || typeof owner !== 'object') return null
+  const ui = typeof owner.ui_session_id === 'string' ? owner.ui_session_id.trim() : ''
+  if (ui) return ui
+  const sid = typeof owner.session_id === 'string' ? owner.session_id.trim() : ''
+  return STORED_SESSION_SHAPE.test(sid) ? sid : null
+}
+
+/** ONE host call per user action, or zero — the fail-closed adapter. */
+export async function openRecordedSession(h, storedId) {
+  const id = typeof storedId === 'string' ? storedId.trim() : ''
+  if (!id || /[\s\x00-\x1f]/.test(id) || id.length > 512)
+    return { ok: false, reason: 'unverified id — not a recorded stored session' }
+  if (!h || typeof h.openSession !== 'function')
+    return { ok: false, reason: 'host session adapter absent' }
+  try {
+    await h.openSession(id, { intent: 'in-place' })
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, reason: `host refused the recorded session (${String((e && e.message) || e).slice(0, 160)})` }
+  }
+}
+
+// Back/focus restoration: a module-owned one-shot token (never core storage).
+// The link that launched the session marks its key; the first render of that
+// key after the host navigation re-focuses exactly once and clears the token.
+let navFocusPending = null
+export function markNavFocus(key) { navFocusPending = key || null }
+export function consumeNavFocus(key) {
+  const hit = navFocusPending != null && navFocusPending === key
+  if (hit) navFocusPending = null
+  return hit
+}
+
+/** The explicit conversation link: labeled button, full recorded ID visible
+ *  and copyable, honest unavailable/error states with no execution anywhere. */
+export function SessionLink({ storedId, linkText = 'open recorded chat', note = 'no verified recorded session', focusKey }) {
+  const [refused, setRefused] = useState(null)
+  const [copied, setCopied] = useState(false)
+  const ref = useRef(null)
+  useEffect(() => { if (focusKey && consumeNavFocus(focusKey) && ref.current) ref.current.focus() }, [])
+  const id = typeof storedId === 'string' && storedId.trim() ? storedId.trim() : null
+  const copy = () => {
+    try { navigator.clipboard?.writeText(id).then(() => setCopied(true)).catch(() => {}) } catch { /* selection stays readable */ }
+  }
+  const idRow = box('flex flex-wrap items-center gap-1',
+    jsx('span', { className: 'select-text text-[0.6875rem] text-(--ui-text-tertiary)', title: id, children: id }),
+    jsx('button', { type: 'button', className: 'text-[0.6875rem] text-(--ui-text-tertiary)',
+      style: { cursor: 'pointer', background: 'none', border: 'none', padding: 0 },
+      onClick: copy, children: copied ? 'copied' : 'copy' }))
+  const known = id != null && typeof host?.openSession === 'function' && !refused
+  const reason = id == null ? note : (refused || 'host session adapter absent')
+  return box('flex flex-col gap-1',
+    known
+      ? jsx('button', {
+          ref, type: 'button', title: id, 'aria-label': `${linkText} · ${id}`,
+          onClick: async () => {
+            markNavFocus(focusKey)
+            const r = await openRecordedSession(host, id)
+            if (!r.ok) { markNavFocus(null); setRefused(r.reason) }
+          },
+          children: linkText })
+      : null,
+    known ? null : box('text-[0.6875rem] text-(--ui-text-tertiary)', `Session unavailable · ${reason}`),
+    id != null ? idRow : null)
+}
+// END stored-session-nav
 // -- O2 NodePanel: one node truth, two readers --------------------------------
 // Replaces Drawer + the drawer's ItemDetail use. Every field reads verbatim from
 // the record the backend merges into nodes[id] (wfcommon.node_facts via the
@@ -2818,6 +2926,18 @@ function NodePanel({ detail }) {
       `${facts.efp}${shown.stale_of_amend ? ' · stale of amend' : ''}`)) : null,
     steerTrip ? sect('steer', box('text-xs text-(--ui-text-secondary)', steerTrip)) : null,
     factKnown(facts?.skey) ? sect('skey', box('text-xs select-text text-(--ui-text-tertiary)', facts.skey)) : null,
+    // bd_2026-11-13-cj2: the explicit conversation link, agent lanes only (an
+    // echo/gate node never had a child chat — the row would LIE there). The ID
+    // comes only from the backend's state.db-joined metrics.session_ids /
+    // item_metrics[i].session_ids; picked fan-out item swaps the row to that
+    // item's own recorded session. Expired row -> field gone at next fetch ->
+    // honest 'Session unavailable', never a stale link.
+    def.type === 'agent'
+      ? sect('recorded chat', jsx(SessionLink, {
+          storedId: latestStoredSessionId(picked != null && shown.item_metrics
+            ? shown.item_metrics[picked.index] : shown.metrics),
+          focusKey: `${detail.id}:${name}` }))
+      : null,
     fc
       ? box('flex flex-col gap-2',
           label(`items · ${fanSummary(fc)}`),
@@ -2944,6 +3064,17 @@ export function WorkflowsPage() {
                   // honest 'unknown' included (deep review #156 A2 — one law,
                   // both surfaces; never a fabricated name).
                   jsx('span', { className: 'text-xs text-(--ui-text-tertiary)', title: 'launched by this agent', children: `@${originLabel(d.owner, d.owner_profile)}` }),
+                  // bd_2026-11-13-cj2: the launch receipt's inverse — an explicit
+                  // link to the RECORDED owner session (owner.ui_session_id, or
+                  // owner.session_id only when it is stored-shaped; never the
+                  // viewer's focused chat, never another session). Missing or
+                  // unverified ID renders unavailable with zero host calls.
+                  jsx(SessionLink, {
+                    storedId: ownerStoredSessionId(d.owner),
+                    linkText: 'owner chat',
+                    note: 'no stored owner session recorded',
+                    focusKey: `${d.id}:owner`
+                  }),
                   // WF-06 (QA 2026-10-27): the record header shows the RUN
                   // wall — the word keeps it distinct from the node cards'
                   // node clocks and the timeline's child spans.
