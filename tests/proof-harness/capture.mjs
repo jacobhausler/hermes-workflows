@@ -1617,6 +1617,25 @@ async function main() {
         die(EX.capture, 'ok:false rendered a saved receipt — error is not a successful mutation');
       shots.push({ surface: 'gate_modal', state: 'error: real fail-once door answer -> inline failure + retryable options, no receipt',
         ...(await shoot(cdp, A.outDir, '08b-gate-error.png', retryCell || retryOpt)) });
+      // The fail-once ERROR toast is user-cleared and stays; the notification
+      // stack renders later arrivals as collapsed 'older' items, which is
+      // exactly how the success receipt toast escaped both the '◇ ' needle
+      // and every container scan (notifications.tsx slice(1); field-proven
+      // qri-proof22/23/24 body dumps). Dismiss it so the success toast is
+      // the live top notification when the second answer lands.
+      const dismissed = await cdp.evl(`(() => {
+        const namesError = b => { let n = b;
+          for (let i = 0; i < 6 && n.parentElement; i++) { n = n.parentElement;
+            if ((n.innerText || '').includes('Gate answer failed')) return true; }
+          return false; };
+        for (const b of document.querySelectorAll('button[aria-label="Dismiss notification"]'))
+          if (namesError(b)) { b.click(); return true; }
+        for (const b of document.querySelectorAll('button'))
+          if ((b.innerText || '').trim() === 'Clear all') { b.click(); return true; }
+        return false;
+      })()`);
+      if (!dismissed) die(EX.capture, 'fail-once error toast present but undismissable — the success toast would stack behind it');
+      await sleep(500);
       await trustedClick(cdp, gateDef.options[0], { exact: true });
       // ONE tight interleaved poll from the click instant: the success toast
       // auto-expires seconds after the response (TTL measured live,
