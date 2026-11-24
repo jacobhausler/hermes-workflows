@@ -397,7 +397,9 @@ async function trustedClick(cdp, needle, opts = {}) {
 // captured behind a rule is the app's OWN honest state, never a fake DOM.
 // Rules are evaluated in order against the paused request URL; a request that
 // matches no rule simply continues (mock mounted, traffic untouched). The
-// listener rides the raw ws exactly like the gate case's pauseOnce: the
+// listener rides the raw ws (the gate case used the same trick before app
+// b9b36c9 moved plugin REST onto the IPC bridge — gate now uses the door's
+// bench knobs instead): the
 // coverage path never closes/reconnects the session it armed (a reattach
 // re-arms a fresh mock instead — see armMock at every reconnect site).
 const urlGlob = p => {
@@ -866,6 +868,11 @@ async function main() {
   identity.bench.locks = B.locks;
 
   const benchEnv = { ...process.env, HERMES_HOME: B.home, HERMES_GATEWAY_LOCK_DIR: B.locks };
+  // Gate-case bench knobs (bd_2026-11-13-qri): ride the fork's env so the
+  // door's fail-once / delay are armed only for THIS bench gateway (never a
+  // production install, never another case). See plugin_api.release_gate.
+  if (A.caseName === 'gate')
+    Object.assign(benchEnv, { UI2_PROOF_GATE_FAIL_ONCE: '1', UI2_PROOF_GATE_POST_DELAY_MS: '2500' });
   // The standalone opt-out rides the COPIED config BEFORE boot: decide() reads
   // it inside the ensure CLI fork (pre-boot plugin-settings writes are
   // fork-normalized away — separate law, see below), and gateway.standalone
@@ -934,7 +941,9 @@ async function main() {
       HERMES_DESKTOP_DEV_SERVER: `http://127.0.0.1:${A.rendererPort}`,
       HERMES_DESKTOP_CDP_PORT: String(A.cdpPort),
       HERMES_DESKTOP_HERMES: resolvedHermes,
-      HERMES_HOME: B.home, HERMES_GATEWAY_LOCK_DIR: B.locks };
+      HERMES_HOME: B.home, HERMES_GATEWAY_LOCK_DIR: B.locks,
+      ...(A.caseName === 'gate' ? { UI2_PROOF_GATE_FAIL_ONCE: '1',
+        UI2_PROOF_GATE_POST_DELAY_MS: '2500' } : {}) };
     sup.start('electron', path.join(desktop, 'node_modules', '.bin', 'electron'),
       ['.', `--user-data-dir=${B.userdata}`], { cwd: desktop, env: electronEnv });
 
@@ -1528,42 +1537,34 @@ async function main() {
       if (!heldCell) die(EX.capture, 'held gate cell never rendered on the record page');
       shots.push({ surface: 'gate_modal', state: 'held: question, requester, option buttons',
         ...(await shoot(cdp, A.outDir, '07-gate-held.png', heldCell)) });
-      // Hold the answer POST mid-flight, then trusted-click the option. The
-      // FIRST click is force-failed with a real {ok:false} door response
-      // (Fetch.fulfillRequest, HTTP 200 like the door's semantic errors):
-      // the error frame is the RENDERED failure, not a staged picture, and
-      // it proves the options come back retryable. The SECOND click answers.
-      await cdp.send('Fetch.enable', { patterns: [{ urlPattern: '*/gate', requestMethod: 'POST' }] });
-      const pauseOnce = () => new Promise((resolve, reject) => {
-        const t = setTimeout(() => reject(new Error('answer POST never paused')), 15_000);
-        const on = e => {
-          let m; try { m = JSON.parse(e.data); } catch { return; }
-          if (m.method === 'Fetch.requestPaused') {
-            clearTimeout(t); cdp.ws.removeEventListener('message', on); resolve(m.params.requestId);
-          }
-        };
-        cdp.ws.addEventListener('message', on);
-      });
+      // The answer POST rides the app's IPC bridge: since app b9b36c9 plugin
+      // REST goes through the 'hermes:api' remote method, so an in-flight
+      // POST is INVISIBLE to CDP Fetch interception (field-proven 2026-11-24:
+      // 'answer POST never paused' though the answer landed). The frames are
+      // REAL server-side transport instead: the fork runs with
+      // UI2_PROOF_GATE_FAIL_ONCE (the first click meets a typed {ok:false}
+      // refusal from the door BEFORE any write — the error frame is the
+      // rendered failure, options come back retryable) and
+      // UI2_PROOF_GATE_POST_DELAY_MS (the second click's response stays
+      // in-flight while the door sleeps after its durable write — a genuinely
+      // slow door, not a staged picture). The SECOND click answers.
       await trustedClick(cdp, gateDef.options[0], { exact: true });
-      const requestId = await pauseOnce();
-      await waitText(cdp, 'Saving answer…', 5_000);
-      shots.push({ surface: 'gate_modal', state: 'pending: POST held at Fetch interception, options disabled (duplicate prevention)',
-        ...(await shoot(cdp, A.outDir, '08-gate-pending.png', await rectOf(cdp, 'Saving answer…'))) });
-      await cdp.send('Fetch.fulfillRequest', { requestId, responseCode: 200,
-        responseHeaders: [{ name: 'content-type', value: 'application/json' }],
-        body: Buffer.from(JSON.stringify({ ok: false, error: { message: 'ui2-proof forced error' } })).toString('base64') });
       await waitText(cdp, 'Gate answer failed', 10_000);
       const retryCell = await rectOf(cdp, 'Gate answer failed');
       const retryOpt = await rectOf(cdp, gateDef.options[0], { exact: true });
       if (!retryOpt) die(EX.capture, 'options not retryable after an ok:false answer — error state swallowed the gate');
       if (await cdp.evl(`!!document.querySelector('[data-gate-receipt]')`))
         die(EX.capture, 'ok:false rendered a saved receipt — error is not a successful mutation');
-      shots.push({ surface: 'gate_modal', state: 'error: forced {ok:false} door answer -> inline failure + retryable options, no receipt',
+      shots.push({ surface: 'gate_modal', state: 'error: real fail-once door answer -> inline failure + retryable options, no receipt',
         ...(await shoot(cdp, A.outDir, '08b-gate-error.png', retryCell || retryOpt)) });
-      const paused2 = pauseOnce();
       await trustedClick(cdp, gateDef.options[0], { exact: true });
-      await cdp.send('Fetch.continueRequest', { requestId: await paused2 });
-      await cdp.send('Fetch.disable');
+      await waitText(cdp, 'Saving answer…', 5_000);
+      shots.push({ surface: 'gate_modal', state: 'pending: response in-flight on the door bench delay, options disabled (duplicate prevention)',
+        ...(await shoot(cdp, A.outDir, '08-gate-pending.png', await rectOf(cdp, 'Saving answer…'))) });
+      if (await cdp.evl(`(() => { const b = [...document.querySelectorAll('button')]
+          .find(b => (b.innerText||'').trim() === ${JSON.stringify(gateDef.options[0])});
+        return !!b && !b.disabled; })()`))
+        die(EX.capture, 'options stayed enabled while the answer POST was in flight — duplicate prevention missing');
       // 09: the durable saved receipt (recorded answer, scoped copy).
       await waitText(cdp, 'Answer saved', 20_000);
       const receipt = await cdp.evl(`(() => {

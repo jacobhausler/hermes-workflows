@@ -213,6 +213,36 @@ res = asyncio.run(api.release_gate("gate.ui", {"gate_id": "review", "answer": UI
 check(res.get("ok") is True and res.get("at") == json.loads((uir / "gates" / "review.json").read_text())["at"],
       "a stale (amend-invalidated) answer is overwritable, re-stamped with a fresh receipt time", str(res))
 
+# Bench proof knobs (bd_2026-11-13-qri): the current desktop carries plugin
+# REST over the IPC bridge — no renderer network request — so the capture's
+# error/pending frames come from these door-side behaviors, pinned here:
+# fail-once refuses the FIRST armed UI answer before any write; the delay
+# sleeps AFTER the durable write, before the response.
+import os, time
+os.environ["UI2_PROOF_GATE_FAIL_ONCE"] = "1"
+rec["answer"] = "stale seed"; rec["_def"] = "0" * 64
+(uir / "gates" / "review.json").write_text(json.dumps(rec))
+res = asyncio.run(api.release_gate("gate.ui", {"gate_id": "review", "answer": UI_ANSWER}))
+check(res.get("ok") is False and "fail-once" in str(res.get("error")),
+      "bench knob: an armed UI answer fails ONCE with a typed ok:false", str(res))
+check(json.loads((uir / "gates" / "review.json").read_text())["answer"] == "stale seed",
+      "the fail-once refusal wrote nothing — the hold stays answerable")
+res = asyncio.run(api.release_gate("gate.ui", {"gate_id": "review", "answer": UI_ANSWER}))
+check(res.get("ok") is True, "bench knob: the retry after a fail-once answers (once per run+gate)")
+os.environ["UI2_PROOF_GATE_POST_DELAY_MS"] = "300"
+rec = json.loads((uir / "gates" / "review.json").read_text())
+rec["answer"] = "stale seed"; rec["_def"] = "0" * 64
+(uir / "gates" / "review.json").write_text(json.dumps(rec))
+t0 = time.monotonic()
+res = asyncio.run(api.release_gate("gate.ui", {"gate_id": "review", "answer": UI_ANSWER}))
+dt = time.monotonic() - t0
+check(res.get("ok") is True and dt >= 0.25,
+      "bench knob: the POST delay really slows the response (honest pending frame)", f"{dt:.3f}s")
+check(res.get("at") == json.loads((uir / "gates" / "review.json").read_text())["at"]
+      and json.loads((uir / "gates" / "review.json").read_text())["answer"] == UI_ANSWER,
+      "the delayed response still returns the stamped at of the ALREADY-COMMITTED record")
+del os.environ["UI2_PROOF_GATE_FAIL_ONCE"], os.environ["UI2_PROOF_GATE_POST_DELAY_MS"]
+
 # backend error classes: unknown run + stopped run, both ok:false, never ok:true.
 res = asyncio.run(api.release_gate("nope-not-here", {"gate_id": "review", "answer": "x"}))
 check(res == {"ok": False, "error": "unknown run"}, "unknown run answers ok:false")

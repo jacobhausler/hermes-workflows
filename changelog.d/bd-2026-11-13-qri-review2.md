@@ -49,3 +49,11 @@ The driver now dies at preflight (exit 4) with the law spelled out when
   backend at `$HERMES_HOME/hermes-agent`, which a bench home never has, and
   otherwise halts on the bootstrap first-run setup choice (no plugin, no
   frame). SETUP.md documents the dedicated-app-copy provisioning law.
+
+- door: bench-only proof knobs on POST /runs/{id}/gate —
+  UI2_PROOF_GATE_FAIL_ONCE (first armed answer is a typed ok:false before any
+  write) and UI2_PROOF_GATE_POST_DELAY_MS (sleep AFTER the durable write,
+  BEFORE the response). The current desktop's plugin REST rides the
+  'hermes:api' IPC bridge — no renderer network request exists to intercept —
+  so the gate capture's error/pending frames are real door behavior now.
+  Pinned by behavior checks in test_gate_answer_flows (33 total).
