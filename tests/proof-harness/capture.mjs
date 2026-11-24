@@ -941,6 +941,16 @@ async function main() {
         // clicking Retry and keep polling within the probe budget.
         const modalUp = await evlPoll(`document.body.innerText.includes("couldn't start")`, false);
         if (modalUp) { try { await trustedClick(cdp, 'Retry', { exact: true, ci: true }); } catch { /* modal between frames */ } }
+        // Splash recovery (field-proven, pair regen): after a route restore the
+        // renderer can fall BACK to the CONNECTING splash; the pane poll then
+        // burns its whole budget 'no-match' under the overlay (diagnostic shot
+        // proves it). Re-wait the attach (bounded) before the next tab click.
+        const underSplash = await evlPoll(`(() => {
+          const el = document.elementFromPoint(Math.floor(innerWidth/2), Math.floor(innerHeight/2));
+          const t = ((el && (el.innerText || el.textContent)) || '').trim().toLowerCase();
+          return t.includes('connecting') || t.length === 0;
+        })()`, true);
+        if (underSplash) { try { await waitConnected(cdp, 15_000); } catch { /* loop budget decides */ } }
         // Route-restore race (field-proven: diagnostic shows the app restored
         // the chat view AFTER the tab click — SESSIONS active, hero rendered):
         // re-click the sidebar WORKFLOWS tab every poll until the pane column
