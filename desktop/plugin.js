@@ -2084,14 +2084,13 @@ function motionTokenMs (token) {
 // (FINAL.md: do not instantiate one allocator per lane).
 export function createMotionAllocator ({
   cap = MOTION_CAP, insertGapMs = MOTION_INSERT_GAP_MS, insertTotalMs = MOTION_INSERT_TOTAL_MS,
-  clock = null, staleSweeps = 3
+  clock = null, idleMs = 15_000
 } = {}) {
   const nowFn = clock || (() => Date.now())
-  const holders = new Map() // id -> {id, cls, ts, durMs, phaseMs, once, key, arriveAt, until, gen, lastSweep}
+  const holders = new Map() // id -> {id, cls, ts, durMs, phaseMs, once, key, arriveAt, until, gen, lastSeen}
   const consumed = new Set() // one-shot event identities already granted their single animator
   const consumedFifo = []
   let reduced = false
-  let sweeps = 0
   let genSeq = 1
   const counters = { admitted: 0, denied: 0, preempted: 0, released: 0, consumedDenied: 0 }
 
@@ -2122,13 +2121,15 @@ export function createMotionAllocator ({
     while (consumedFifo.length > 512) consumed.delete(consumedFifo.shift())
   }
   function sweep () {
-    sweeps++
     const now = nowFn()
     for (const [id, h] of holders) {
       // one-shots and reservations expire at their settle instant; infinite
       // holders expire when they stop being re-claimed (unmount/route-away)
       // — the stale cancellation law: nobody may hold a slot from off-screen.
-      if (h.until != null ? h.until <= now : sweeps - h.lastSweep > staleSweeps) {
+      // The pane re-claims every visible effect each poll, so an un-refreshed
+      // holder after idleMs (>=3 lost 4 s cycles) is gone, not resting.
+      const dead = h.until != null ? h.until <= now : h.lastSeen + idleMs <= now
+      if (dead) {
         holders.delete(id)
         if (h.key) consume(h.key)
         counters.released++
@@ -2150,14 +2151,14 @@ export function createMotionAllocator ({
     const d = Math.max(0, Number(delayMs) || 0)
     const cur = holders.get(id)
     if (cur) {
-      cur.lastSweep = sweeps
+      cur.lastSeen = nowFn()
       cur.phaseMs = phaseFor(known ? ts : Number.NaN, dur, nowFn() + d)
       return { admitted: true, idempotent: true, phaseMs: cur.phaseMs, delayMs: d, token: { id, gen: cur.gen }, unknownTs: !known }
     }
     const key = once ? (eventKey || `${id}@${known ? ts : nowFn()}`) : null
     if (once && consumed.has(key)) { counters.consumedDenied++; return reject('consumed') }
     const h = {
-      id, cls, ts: known ? ts : 0, durMs: dur, once, key, gen: genSeq++, lastSweep: sweeps,
+      id, cls, ts: known ? ts : 0, durMs: dur, once, key, gen: genSeq++, lastSeen: nowFn(),
       phaseMs: phaseFor(known ? ts : Number.NaN, dur, nowFn() + d),
       arriveAt: d > 0 ? nowFn() + d : null,
       until: (once || d > 0) ? nowFn() + d + dur : null
@@ -2202,7 +2203,9 @@ export function createMotionAllocator ({
     for (const id of [...ids].sort()) {
       const delay = n * insertGapMs
       if (delay > insertTotalMs) { out.push({ id, delayMs: null, admitted: false, reason: 'over-schedule' }); continue }
-      const r = claim({ id, cls, ts, delayMs: delay })
+      // Insertions animate with the registered --dur-insert token: a delay
+      // without a settle instant would hold its slot forever.
+      const r = claim({ id, cls, ts, delayMs: delay, once: true, durToken: '--dur-insert' })
       if (r.admitted) { out.push({ id, delayMs: delay, admitted: true }); n++ }
       else out.push({ id, delayMs: null, admitted: false, reason: r.reason })
     }

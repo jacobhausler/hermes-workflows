@@ -310,7 +310,13 @@ const cardProps = (def, st, gate, selected = false, hovered = false) =>
   // held-at-gate: slow BORDER pulse via the hoisted animation
   const held = render(cardProps(NODES[2], {}, GATE))
   assert.ok(held.props.style.animation?.includes(NODE_TONE.held.gate.name), 'held gate card runs the hoisted border-pulse animation')
-  assert.ok(held.props.style.animation?.includes(`${NODE_TONE.held.pulseMs}ms`), 'the nag period comes from the table')
+  // W4 (bd_2026-11-13-32i): the nag period/easing ride the REGISTERED tokens —
+  // one vocabulary, no second literal duration source.
+  assert.ok(held.props.style.animation?.includes('var(--dur-attention)'),
+    'the nag duration is the registered --dur-attention token')
+  assert.ok(held.props.style.animation?.includes('var(--ease-breathe)'),
+    'the nag easing is the registered --ease-breathe token')
+  assert.equal(held.props.style.animationDelay, '0ms', 'a gate with no recorded hold time claims no recency phase')
   assert.ok(held.props.style.borderColor, 'held border colour from the table')
   // waiting (pending): faint dashed breathing outline
   const wait = render(cardProps(NODES[3], {}, null))
@@ -423,13 +429,19 @@ const cardProps = (def, st, gate, selected = false, hovered = false) =>
 //    keyframes inside @media (prefers-reduced-motion: no-preference)
 // =================================================================================
 {
-  assert.ok(/export const STYLE_HREF/.test(src), 'the hoisted style href is an exported constant (bump per CSS edit)')
+  assert.ok(/export const STYLE_HREF/.test(src), 'the hoisted style href is an exported constant (content digest, W4)')
   assert.ok(/export function PolishStyles|PolishStyles\s*=/.test(src), 'PolishStyles is the single hoisted style injector')
   assert.equal((src.match(/jsx\(\s*'style'/g) || []).length, 1, 'exactly ONE hoisted <style> injector in the file')
   const ps = mod.PolishStyles()
   const styleEl = render(ps)
   assert.equal(styleEl.type, 'style', 'PolishStyles renders a <style> element')
-  assert.match(String(styleEl.props.href), /hermes-workflows\.\d+\.css$/, 'href carries a numeric version for React 19 href-precedence dedupe')
+  // W4 (bd_2026-11-13-32i): the version counter is GONE — the href is a
+  // FNV-1a/64 content digest of the full emitted bytes, so every lane's edit
+  // auto-versions the single emission for React 19 href-precedence dedupe.
+  assert.match(String(styleEl.props.href), /^hermes-workflows\.[0-9a-f]{16}\.css$/,
+    'href carries the 16-hex content digest of the emitted bytes')
+  assert.equal(styleEl.props.href, mod.styleHrefFor(styleEl.props.children),
+    'the digest is of the FULL emitted bytes — not a lane fragment')
   const css = styleEl.props.children
   const mediaAt = css.indexOf('prefers-reduced-motion')
   const kfAt = css.indexOf('@keyframes')
