@@ -305,6 +305,12 @@ async function connectCdp(port, rendererPort, timeoutMs = 90_000) {
     }
   };
   await send('Page.enable').catch(() => { /* most builds auto-enable; reload/shot prove it anyway */ });
+  // Paint truth (field-proven 2026-11-24): an occluded/background window stops
+  // compositing and Page.captureScreenshot returns a black frame even though
+  // the DOM is fully live — a black diagnostic shot once masked a mounted,
+  // fetching plugin. Activating the target makes shots reflect what a human
+  // would see. Best-effort: headless-ish builds reject it.
+  await send('Page.bringToFront').catch(() => { /* unsupported on this target */ });
   const evl = async expr => {
     const r = await send('Runtime.evaluate', { expression: expr, returnByValue: true, awaitPromise: true });
     if (r.exceptionDetails) {
