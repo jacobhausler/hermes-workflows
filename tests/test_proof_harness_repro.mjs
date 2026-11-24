@@ -33,11 +33,13 @@ const sha256 = buf => crypto.createHash('sha256').update(buf).digest('hex')
     '2026-11-23T21:00:00', 'runs 1 · running 0 · held 1 · failed 0',
     'UI2 proof: release this held gate after capture?',
     '@local-40efe64dac6ddd336cd2fc986bfab43033b4bea13f4539bc5a7df5f1b7d3ee06', '<1s>',
+    '10:53 PM',
   ].join('\n')
   const masked = maskVolatile(sample)
   for (const gone of ['20261123-205616-ui2-proof-held', 'run 46s', '5m 54s',
                       '1 min ago', '2026-11-23T21:00:00',
-                      '40efe64dac6ddd336cd2fc986bfab43033b4bea13f4539bc5a7df5f1b7d3ee06', '<1s>']) {
+                      '40efe64dac6ddd336cd2fc986bfab43033b4bea13f4539bc5a7df5f1b7d3ee06', '<1s>',
+                      '10:53 PM']) {
     assert.ok(!masked.includes(gone), `volatile token survived the mask: ${gone}`)
   }
   for (const kept of ['1/3 terminal', 'runs 1 · running 0 · held 1 · failed 0',
@@ -46,8 +48,15 @@ const sha256 = buf => crypto.createHash('sha256').update(buf).digest('hex')
   }
   assert.ok(masked.includes('<RUN-ID>') && masked.includes('<RUN-CLOCK>')
     && masked.includes('<REL-TIME>') && masked.includes('<DATE>')
-    && masked.includes('<HEX-ID>') && masked.includes('<ELAPSED>'),
-  'all six volatile classes must actually fire on the sample (mask is not a no-op)')
+    && masked.includes('<HEX-ID>') && masked.includes('<ELAPSED>')
+    && masked.includes('<CLOCK>'),
+  'all seven volatile classes must actually fire on the sample (mask is not a no-op)')
+  // the intro-copy pool is an exact-line literal class (the app's own
+  // rotation pool, loaded at capture time): pool lines mask, prose does not.
+  assert.equal(maskVolatile('Ask me to open a repo, run tests.', ['Ask me to open a repo, run tests.']), '<INTRO-COPY>',
+    'intro-copy pool line must mask to <INTRO-COPY>')
+  assert.ok(maskVolatile('UI2 proof prose', ['UI2 proof']).includes('UI2 proof prose'),
+    'literal masking is exact-line, never substring')
   console.log('PASS mask law: volatile classes masked, stable prose kept')
 }
 

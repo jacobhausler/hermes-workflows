@@ -132,12 +132,27 @@ export const VOLATILE_MASKS = [
   // chips as '<1s>'/'<46s>' which tick between runs.
   [/\b[0-9a-f]{40,}\b/g, '<HEX-ID>'],
   [/<\d+\s*(?:s|sec|secs?|m|min|mins?|h|hr|hrs?|d|day|days)>/gi, '<ELAPSED>'],
+  // field-proven (pair run try A/B): the transcript renders wall-clock
+  // message times as '10:53 PM' — they shift between two captures minutes
+  // apart and are pure clock, not content.
+  [/\b\d{1,2}:\d{2}(?::\d{2})?\s*[AP]\.?M\.?\b/gi, '<CLOCK>'],
 ];
-export function maskVolatile(text) {
+// The empty-state intro card rotates its headline/body per mount from the
+// app's own intro-copy.jsonl — a rotation pool, so a regex cannot name it.
+// The driver loads the pool from the app checkout at capture time and hands
+// it to maskVolatile as exact-line literals; the committed masked content
+// then carries <INTRO-COPY> and the mask stays idempotent under CI (where
+// the pool file need not exist).
+export function maskVolatile(text, literals = []) {
   let t = String(text);
   for (const [re, rep] of VOLATILE_MASKS) t = t.replace(re, rep);
+  if (literals.length) {
+    const pool = new Set(literals);
+    t = t.split('\n').map(line => pool.has(line.trim()) ? '<INTRO-COPY>' : line).join('\n');
+  }
   return t;
 }
+let CAPTURE_LITERALS = [];
 
 // Deterministic JSON: sorted keys everywhere, so a manifest section hashed
 // for repro is byte-stable regardless of object insertion order.
@@ -414,7 +429,7 @@ async function shoot(cdp, outDir, name, clipRect = null, contentText = null) {
   const rec = { file: path.relative(outDir, file), bytes: buf.length, sha256: sha256(file),
            clip: clipRect ? 'element' : 'viewport', reviewed: false };
   if (contentText !== null) {
-    const masked = maskVolatile(contentText) + '\n';
+    const masked = maskVolatile(contentText, CAPTURE_LITERALS) + '\n';
     const cfile = path.join(outDir, 'contents', name.replace(/\.png$/, '.txt'));
     fs.mkdirSync(path.dirname(cfile), { recursive: true });
     writeImmutable(cfile, masked);
@@ -565,6 +580,16 @@ async function main() {
   if (A.plan) { console.log(JSON.stringify({ ok: true, mode: 'plan', plan }, null, 2)); return 0; }
 
   if (!fs.existsSync(desktop)) die(EX.preflight, `no apps/desktop in app repo ${appRepo} (read SETUP.md; --app-repo or UI2_PROOF_APP_REPO)`);
+  // Load the app's intro-copy rotation pool: its headline/body lines mount
+  // randomly on the empty-state card, so they are captured noise, not
+  // content — masked as exact-line literals (see maskVolatile).
+  try {
+    for (const line of fs.readFileSync(path.join(desktop, 'src', 'components', 'chat', 'intro-copy.jsonl'), 'utf8').split('\n')) {
+      if (!line.trim()) continue;
+      const rec = JSON.parse(line);
+      for (const f of ['headline', 'body']) if (typeof rec[f] === 'string') CAPTURE_LITERALS.push(rec[f]);
+    }
+  } catch { /* pool absent: intro lines simply stay unmasked (older app) */ }
   for (const bin of ['electron', 'vite', 'tsc']) {
     if (!fs.existsSync(path.join(desktop, 'node_modules', '.bin', bin)))
       die(EX.preflight, `app checkout not provisioned: node_modules/.bin/${bin} absent in ${desktop} (pnpm install first; see SETUP.md)`);
