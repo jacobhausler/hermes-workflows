@@ -1899,9 +1899,12 @@ export function NodeCard({ runId, def, st, gate, selected, owner, events, answer
   // Attention motion goes through the ONE allocator (W4): a denied or
   // preempted claim renders the constant amber border — the static
   // equivalent — immediately, never a queued retry. Phase rides the gate's
-  // own hold event timestamp (spelling-tolerant), so redraws and remounts
-  // cannot restart it; an absent/future/invalid time claims no recency cue.
-  const heldAt = liveGate ? parseTime(liveGate.held_at ?? liveGate.heldAt ?? liveGate.at ?? liveGate.held) : 0
+  // own hold event (spelling-tolerant on the gate object, else the SAME
+  // gate.held ledger row gateDwell reads — one source, never the mount);
+  // an absent/future/invalid time claims no recency cue.
+  const heldFromGate = liveGate ? parseTime(liveGate.held_at ?? liveGate.heldAt ?? liveGate.at ?? liveGate.held) : 0
+  const heldEv = heldFromGate ? 0 : (events || []).find(e => e && e.event === 'gate.held' && e.node === def.id)
+  const heldAt = heldFromGate || (heldEv ? parseTime(heldEv.ts) : 0)
   const motionAnim = tone.calm || status === 'running' ? null
     : status === 'held' && tone.gate
       ? { spec: tone.gate, anim: 'var(--dur-attention) var(--ease-breathe)',

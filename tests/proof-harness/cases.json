@@ -96,6 +96,33 @@
         }
       ]
     },
+    "motion-core": {
+      "description": "bd_2026-11-13-32i real-app proof of the ONE motion allocator under a controlled labelled event schedule: the seeded held gate's attention claim (timestamp-derived phase from the gate.held ledger row), a 12-transition flood that preempts it into an instrumented STATIC spill (amber base kept, opacity 1), flood release + route-away REMOUNT re-admission retaining the timestamp phase, the insertion reservation ladder (0/30/60/90ms, reservations inside N=12, excess spilled), consume-once one-shot settle, and the reduced flip on both halves (prefers-reduced-motion media rule unmatched -> border byte-still; allocator active AND reserved zeroed). Instrumentation is the plugin's own __wfMotion bench seam sampled per step (logs/motion-schedule.json); the stills show the states, the counters — never the PNGs — certify the budget.",
+      "surfaces": ["pane_workflows"],
+      "seeds": [
+        {
+          "name": "held_gate_run",
+          "kind": "engine_seed",
+          "method": "door_run",
+          "note": "echo+gate+echo at zero tokens (the proven lookbook hold shape). The runner stays live through the walk (NOT kill_runner_after_hold): the held state must be the engine's own, with the gate.held event row the phase proof aligns against; teardown stops it through the door.",
+          "graph": {
+            "name": "ui2-proof-motion",
+            "nodes": [
+              { "id": "say", "type": "echo", "output": { "msg": "seeded" } },
+              {
+                "id": "hold",
+                "type": "gate",
+                "after": ["say"],
+                "question": "UI2 motion proof: release this held gate after capture?",
+                "options": ["release", "stop"]
+              },
+              { "id": "tail", "type": "echo", "after": ["hold"], "output": { "msg": "released" } }
+            ]
+          }
+        }
+      ],
+      "historical_snapshots": []
+    },
     "graph": {
       "description": "RC ch4 graph grammar on the shared expansion mounts (bd_2026-11-13-33h): the pinned wave6-council shelf snapshot, one engine-seeded quorum fan (exact ENDED census through the real door + zero-token fake children), and one CLEARLY SYNTHETIC MF1 run (done parent, raw partial + cancelled child rows — stamped with real wfcommon efp so the read model says done for the right reason). Frames: pane GraphView + fan expansion, one assistant turn echoing all three directives, child projection (10 identities / 14 routes / 28 echoes MEASURED on the rendered svg, crossings a count of THIS geometry only), threshold ladder on engine records, MF1 item detail, phone metrics 390x844@2, sparse 2560x1440.",
       "capture": "graph",

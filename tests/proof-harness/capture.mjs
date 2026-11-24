@@ -1400,7 +1400,7 @@ async function main() {
         let recordUp = false;
         const recT0 = Date.now();
         while (!recordUp && Date.now() - recT0 < 20_000) {
-          recordUp = await cdp.evl(`!!document.querySelector('style[data-plugin="hermes-workflows"][href="hermes-workflows.3.css"]')`);
+          recordUp = await cdp.evl(`!!document.querySelector('style[data-plugin="hermes-workflows"]')`) // href is content-versioned since bd-32i — match by plugin ownership, never a bumped number
           if (!recordUp) await sleep(400);
         }
         if (!recordUp) die(EX.api, 'the deepest counted row never opened its record page (hoisted record style absent)');
@@ -1571,6 +1571,192 @@ async function main() {
       ...(await shoot(cdp, A.outDir, '02-pane-run-detail.png', null, await stableColumnText(paneRegion))) });
     }
     } // end non-coverage (baseline/gate/graph) pane list + detail frames
+
+    // ── motion-core (bd_2026-11-13-32i): the ONE allocator on the REAL surface ──
+    // A controlled, LABELLED event schedule walks the candidate plugin's global
+    // MOTION pool over the seeded held-gate run's live renderer: the card's own
+    // attention claim, a transition flood that preempts it into a static spill,
+    // re-admission with the retained timestamp phase (remount continuity), the
+    // insertion reservation ladder, consume-once settle, and the reduced flip.
+    // Every step samples instrumented stats through __wfMotion (the plugin's
+    // bench seam) and pins PNGs. No performance certification comes from the
+    // stills: the admissions/denials counters, not pixels, are the evidence.
+    if (A.caseName === 'motion-core') {
+      const mSnap = () => cdp.evl(`(() => { const M = globalThis.__wfMotion;
+        return M ? M.stats() : null })()`);
+      const mRun = expr => cdp.evl(`(() => { const M = globalThis.__wfMotion;
+        if (!M) throw new Error('no __wfMotion bench seam on the candidate'); return (${expr}) })()`);
+      const sched = [];
+      const step = async (label, fn) => {
+        const at = Date.now();
+        const value = await fn();
+        const snap = await mSnap();
+        if (!snap) die(EX.api, `motion step ${JSON.stringify(label)}: bench seam disappeared`);
+        if (snap.total > snap.cap) die(EX.api, `motion step ${JSON.stringify(label)}: pool ${snap.total} > cap ${snap.cap}`);
+        sched.push({ label, ts: at, value, stats: snap });
+        return { value, snap };
+      };
+      // The held card is on screen (frame 02): its claim must ALREADY be in
+      // the pool with a nonzero, timestamp-derived phase — a mount-anchored
+      // animation would report delay 0.
+      const cardSel = `[data-motion-id="attention:${runId}:hold"]`;
+      const seen0 = await step('held-card claim admitted (seeded gate hold)', () => cdp.evl(`(() => {
+        const el = document.querySelector(${JSON.stringify(cardSel)});
+        if (!el) return null;
+        const cs = getComputedStyle(el);
+        return { dataMotion: el.dataset.motion, animationName: cs.animationName,
+                 animationDuration: cs.animationDuration, animationDelay: cs.animationDelay,
+                 borderColor: cs.borderTopColor, opacity: cs.opacity };
+      })()`));
+      if (!seen0.value) die(EX.api, 'the held gate card exposes no allocator claim on the real surface (data-motion-id absent)');
+      if (seen0.value.animationName !== 'wf-gate-nag' || seen0.value.animationDuration !== '4s')
+        die(EX.api, `held card is not running the registered nag: ${JSON.stringify(seen0.value)}`);
+      const delay0 = Number(seen0.value.animationDelay.replace('ms', ''));
+      if (!(delay0 < 0 && delay0 > -4000))
+        die(EX.api, `held card phase ${delay0}ms is not a timestamp-derived offset in the 4000ms cycle (mount-anchored motion would be 0)`);
+      const heldEv = JSON.parse(fs.readFileSync(path.join(B.runs, runId, 'events.jsonl'), 'utf8'))
+        .toString().split('\n').filter(l => l.includes('"gate.held"')).map(JSON.parse);
+      if (!heldEv.length) die(EX.api, 'the seed carries no gate.held event to align the phase against');
+      const heldMs = Date.parse(heldEv[0].ts) || heldEv[0].ts * 1000;
+      if (Date.now() - heldMs < 4000 && delay0 === 0)
+        die(EX.api, 'phase 0 this young could be the mount anchor — the seed must hold >4s before sampling');
+      const s0 = await step('baseline pool snapshot', async () => true);
+      if (!s0.snap.holders.some(h => h.id === `attention:${runId}:hold`))
+        die(EX.api, 'the live card claim is missing from the instrumented pool');
+      shots.push({ surface: 'pane_workflows', state: 'held gate card animating via the ONE allocator (timestamp phase ' + delay0 + 'ms)',
+        ...(await shoot(cdp, A.outDir, '10-motion-held-admitted.png', null, await stableColumnText(paneRegion))) });
+
+      // Flood twelve transition claims — the card spills to a STATIC amber
+      // border on the next pane re-render (the poll re-claims; a denied claim
+      // must never queue). Wait past one 4 s poll cycle.
+      await step('transition flood: claim 12 bench transitions', () => mRun(`
+        (() => { const out = []; for (let i = 1; i <= 12; i++)
+          out.push(globalThis.__wfMotion.claim({ id: 'bench:t' + i, cls: 'transition', ts: Date.now() - 5000, durToken: '--dur-flow' }).admitted);
+        return out })()`));
+      {
+        const t0 = Date.now();
+        let spilled = null;
+        while (!spilled && Date.now() - t0 < 30_000) {
+          spilled = await cdp.evl(`(() => { const el = document.querySelector(${JSON.stringify(cardSel)});
+            if (!el) return null; const cs = getComputedStyle(el);
+            return el.dataset.motion.startsWith('spill') && cs.animationName === 'none'
+              ? { dataMotion: el.dataset.motion, borderColor: cs.borderTopColor, opacity: cs.opacity } : null; })()`);
+          if (!spilled) await sleep(1000);
+        }
+        if (!spilled) die(EX.api, 'under a full transition pool the card never settled to its static spill within two poll cycles');
+        const ss = await step('flood spill observed on the live card (static amber, full opacity)', async () => spilled);
+        if (!(ss.snap.counters.preempted >= 1 && ss.snap.counters.denied >= 1))
+          die(EX.api, `spill not instrumented as preemption+denial: ${JSON.stringify(ss.snap.counters)}`);
+        if (spilled.borderColor !== seen0.value.borderColor || spilled.opacity !== seen0.value.opacity)
+          die(EX.api, 'the spilled static state lost the amber base or the opacity (spill must be the truthful final state)');
+        shots.push({ surface: 'pane_workflows', state: 'held gate card spilled to static amber under the transition flood',
+          ...(await shoot(cdp, A.outDir, '11-motion-flood-spill.png', null, await stableColumnText(paneRegion))) });
+      }
+
+      // Release the flood: the SAME claim re-admits on the next re-render and
+      // keeps the ORIGINAL event timestamp phase (remount/re-admission
+      // continuity — DESIGN Round 10's flagged integration requirement).
+      await step('release the 12 flood claims', () => mRun(`
+        (() => { for (let i = 1; i <= 12; i++) globalThis.__wfMotion.release({ id: 'bench:t' + i }); return 12 })()`));
+      {
+        const t0 = Date.now();
+        let back = null;
+        while (!back && Date.now() - t0 < 30_000) {
+          back = await cdp.evl(`(() => { const el = document.querySelector(${JSON.stringify(cardSel)});
+            if (!el || el.dataset.motion !== 'admitted:active') return null;
+            return Number(el.style.animationDelay.replace('ms', '')); })()`);
+          if (back === null) await sleep(1000);
+        }
+        if (back === null || !(back < 0 && back > -4000))
+          die(EX.api, `post-release re-admission did not restore a timestamp phase (got ${JSON.stringify(back)})`);
+        await step('attention re-admitted retaining the timestamp-anchored phase', async () => back);
+        // remount: route away to SESSIONS (unmounts the pane) and back; the
+        // phase may ADVANCE with wall time but must never restart at 0
+        // (mount anchoring would zero it).
+        await trustedClick(cdp, 'SESSIONS', { exact: true }).catch(() => {})
+        await sleep(1200)
+        await trustedClick(cdp, 'workflows', { exact: true, ci: true }).catch(() => {})
+        await sleep(800)
+        await trustedClick(cdp, paneRowNeedle, { region: paneRegion })
+        const t1 = Date.now();
+        let remount = null;
+        while (remount === null && Date.now() - t1 < 30_000) {
+          remount = await cdp.evl(`(() => { const el = document.querySelector(${JSON.stringify(cardSel)});
+            if (!el || el.dataset.motion !== 'admitted:active') return null;
+            const d = Number(el.style.animationDelay.replace('ms', ''));
+            return Number.isFinite(d) && d < 0 && d > -4000 ? d : 'bad'; })()`);
+          if (remount === 'bad') die(EX.api, 'remount reset the phase to the mount anchor (0) — DESIGN Round 10 violation');
+          await sleep(1000);
+        }
+        if (remount === null) die(EX.api, 'remount never re-admitted the attention claim');
+        shots.push({ surface: 'pane_workflows', state: 'attention re-admitted after remount, phase retained from the hold event',
+          ...(await shoot(cdp, A.outDir, '12-motion-remount-phase.png', null, await stableColumnText(paneRegion))) });
+      }
+
+      // The scheduler laws, executed on the real pool:
+      // insertion ladder 0/30/60/90 + spill; consume-once one-shot settle.
+      {
+        const ins = await step('insertion reservation ladder (6 arrivals)', () => mRun(`
+          globalThis.__wfMotion.planInsertion(['bench:i1','bench:i2','bench:i3','bench:i4','bench:i5','bench:i6'], { ts: Date.now() })`));
+        const delays = ins.value.map(p => p.delayMs);
+        if (JSON.stringify(delays) !== JSON.stringify([0, 30, 60, 90, null, null]))
+          die(EX.api, `insertion ladder wrong on the real pool: ${JSON.stringify(delays)}`);
+        if (ins.snap.reserved !== 3) die(EX.api, `reservations did not occupy the pool: ${JSON.stringify(ins.snap)}`);
+        const one = await step('consume-once one-shot settle', () => mRun(`
+          (() => { const a = globalThis.__wfMotion.claim({ id: 'bench:failed', cls: 'transition', ts: Date.now(), durToken: '--dur-failed', once: true, eventKey: 'proof:failed' }).admitted;
+            return { first: a, second: globalThis.__wfMotion.claim({ id: 'bench:failed2', cls: 'transition', ts: Date.now(), durToken: '--dur-failed', once: true, eventKey: 'proof:failed' }).admitted }; })()`));
+        if (one.value.first !== true || one.value.second !== false)
+          die(EX.api, `one-shot consumption failed on the real surface: ${JSON.stringify(one.value)}`);
+      }
+
+      // The reduced flip, both halves. CSS half: the plugin's keyframes sit in
+      // @media (prefers-reduced-motion: no-preference) — under the emulated
+      // preference the rule does not MATCH and the border stays static: the
+      // probe is (a) matchMedia on the plugin's own media rule and (b) the
+      // card's computed border colour sampled 900 ms apart (a running nag
+      // pulls luminance; a stilled card is byte-identical). Allocator half:
+      // setReduced zeroes active AND reserved.
+      {
+        await cdp.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] })
+        await sleep(1500)
+        const cssHalf = await step('prefers-reduced-motion: reduce emulated on the live renderer', async () => {
+          const probe = () => cdp.evl(`(() => {
+            const sheet = [...document.styleSheets].find(s => (s.ownerNode?.dataset?.plugin) === 'hermes-workflows');
+            if (!sheet) return { err: 'plugin sheet not found' };
+            const media = [...sheet.cssRules].filter(r => r.type === CSSRule.MEDIA_RULE).map(r =>
+              ({ cond: r.conditionText, matches: matchMedia(r.conditionText).matches }));
+            const el = document.querySelector(${JSON.stringify(cardSel)});
+            return { media, border: el ? getComputedStyle(el).borderTopColor : null,
+                     opacity: el ? getComputedStyle(el).opacity : null }; })()`)
+          const a = await probe()
+          if (a.err) return a
+          await sleep(900)
+          const b = await probe()
+          // A running nag pulls luminance every second: across a 900 ms real
+          // gap it cannot sample the identical colour twice.
+          return { ...a, border_stable: a.border === b.border, border_b: b.border }
+        })
+        if (cssHalf.value.err) die(EX.api, `reduced CSS probe failed: ${JSON.stringify(cssHalf.value)}`);
+        const gateMedia = (cssHalf.value.media || []).find(m => /prefers-reduced-motion/.test(m.cond || ''));
+        if (!gateMedia || gateMedia.matches !== false)
+          die(EX.api, `reduced emulation did not silence the no-preference block: ${JSON.stringify(cssHalf.value.media)}`);
+        if (cssHalf.value.border_stable !== true || cssHalf.value.opacity !== '1')
+          die(EX.api, `card still animating or faded under reduced: ${JSON.stringify(cssHalf.value)}`);
+        const red = await step('allocator reduced flip: zero effects, zero reservations', () => mRun(`
+          (() => { globalThis.__wfMotion.setReduced(true); return globalThis.__wfMotion.stats() })()`));
+        if (red.snap.active !== 0 || red.snap.reserved !== 0)
+          die(EX.api, `reduced flip left effects behind: ${JSON.stringify(red.snap)}`);
+        shots.push({ surface: 'pane_workflows', state: 'reduced preference: media block unmatched (no keyframes apply), static border at opacity 1, zero allocator effects/reservations',
+          ...(await shoot(cdp, A.outDir, '13-motion-reduced-zero.png', null, await stableColumnText(paneRegion))) });
+        await mRun(`(() => { globalThis.__wfMotion.setReduced(false); return 1 })()`);
+        await cdp.send('Emulation.setEmulatedMedia', { features: [] }).catch(() => {});
+      }
+      fs.writeFileSync(path.join(A.outDir, 'logs', 'motion-schedule.json'),
+        JSON.stringify({ run_id: runId, held_event: heldEv[0], steps: sched }, null, 2) + '\n');
+      identity.motion = { steps: sched.length,
+        counters: (sched[sched.length - 1] || {}).stats?.counters || null };
+    }
+
 
     // -- gate modal (bd_2026-11-13-qri): ONE decision surface, real trusted
     // click, REAL pending (the answer POST is held at Fetch interception so
