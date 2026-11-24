@@ -13,11 +13,25 @@
 // bench's own --user-data-dir path.
 //
 // Interface used by later beads:
-//   node scripts/ui2-proof/capture.mjs --case CASE --out DIR
+//   node tests/proof-harness/capture.mjs [--case CASE] [--only TOKENS] [--out DIR]
+// CASE defaults to baseline. --only selects surfaces by short token
+// (directive, pane, tray) or full surface name; it never ADDS a surface the
+// case doesn't declare (intersection only). DIR defaults to
+// tests/proof-harness/captured/run-<ts>.
 // Cases and their seeds live in ./cases.json; every seed declares
 // kind: engine_seed | historical_snapshot. A known case whose surfaces are
 // not yet wired fails exit 3 as an explicitly NEW test — never an invented
 // existing command.
+//
+// Slice A reproducibility law (bd_2026-11-13-iqf): every run writes an
+// IMMUTABLE capture set — captures/*.png (0444), contents/*.txt (0444, the
+// masked visible-text layer of each captured region), and manifest.json
+// (0444, written last) pinning per-file sha256 plus a REPRO section:
+// content hashes over the volatile-masked text layer only, so two
+// independent live-app runs at one candidate pin the same repro hash even
+// though raster bytes legitimately differ (run clock words, relative
+// timestamps). The volatile classes are declared (VOLATILE_MASKS below);
+// masking is exported so the double-run spec can pin it with samples.
 //
 // Failure law (fail nonzero, never a green no-op):
 //   exit 2 usage / unknown case (lists known cases)
@@ -39,19 +53,40 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, '..', '..');
 const MANIFEST = path.join(HERE, 'cases.json');
 
-const USAGE = `usage: node scripts/ui2-proof/capture.mjs --case CASE --out DIR
+const USAGE = `usage: node tests/proof-harness/capture.mjs [--case CASE] [--only TOKENS] [--out DIR]
        [--app-repo PATH] [--plugin PATH] [--cdp-port N] [--renderer-port N]
        [--hermes-bin PATH] [--plan] [--keep] [--no-prebuild] [--paint-budget S]
-cases: see scripts/ui2-proof/cases.json (setup: scripts/ui2-proof/SETUP.md)`;
+default case: baseline; --only tokens: directive,pane,tray (or full surface
+names); default out: tests/proof-harness/captured/run-<ts>
+cases: see tests/proof-harness/cases.json (setup: tests/proof-harness/SETUP.md)`;
+
+// short token -> surface id (slice A: directive + pane; tray pre-wired on
+// this branch, slices B extend the surfaces themselves, not this map law).
+const ONLY_TOKENS = {
+  directive: 'directive_card', pane: 'pane_workflows', tray: 'tray_row',
+  directive_card: 'directive_card', pane_workflows: 'pane_workflows', tray_row: 'tray_row',
+};
+
+function parseOnly(raw) {
+  const parts = String(raw).split(',').map(s => s.trim()).filter(Boolean);
+  if (!parts.length) die(EX.usage, `--only needs at least one token (${Object.keys(ONLY_TOKENS).join(',')})\n${USAGE}`);
+  const out = [];
+  for (const p of parts) {
+    const id = ONLY_TOKENS[p.toLowerCase()];
+    if (!id) die(EX.usage, `unknown --only token ${JSON.stringify(p)}; known: ${Object.keys(ONLY_TOKENS).join(', ')}\n${USAGE}`);
+    if (!out.includes(id)) out.push(id);
+  }
+  return out;
+}
 
 function parseArgs(argv) {
-  const a = { cdpPort: 9394, rendererPort: 5194, prebuild: true, plan: false, keep: false,
+  const a = { caseName: 'baseline', cdpPort: 9394, rendererPort: 5194, prebuild: true, plan: false, keep: false,
               paintBudgetMs: 60_000 };
   for (let i = 0; i < argv.length; i++) {
     const take = () => {
@@ -61,6 +96,7 @@ function parseArgs(argv) {
     };
     switch (argv[i]) {
       case '--case': a.caseName = take(); break;
+      case '--only': a.only = parseOnly(take()); break;
       case '--out': a.outDir = path.resolve(take()); break;
       case '--app-repo': a.appRepo = path.resolve(take()); break;
       case '--plugin': a.plugin = path.resolve(take()); break;
@@ -75,13 +111,69 @@ function parseArgs(argv) {
       default: die(EX.usage, `unknown argument: ${argv[i]}\n${USAGE}`);
     }
   }
-  if (!a.caseName) die(EX.usage, `--case is required\n${USAGE}`);
-  if (!a.outDir) die(EX.usage, `--out is required\n${USAGE}`);
   return a;
 }
 
 const sha256 = file => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+// Volatile-text classes for the REPRO layer (slice A law): these are the
+// only regions of captured text allowed to differ between two runs at one
+// candidate pin. Anything else that changes is a REAL content change and
+// must break the repro hash. Exported so the double-run spec pins the mask
+// itself with samples (positive and negative).
+export const VOLATILE_MASKS = [
+  [/\b\d{8}-\d{6}-[A-Za-z0-9._-]+\b/g, '<RUN-ID>'],
+  [/\brun\s+(?:\d+\s*(?:s|sec|secs?|m|min|mins?|h|hr|hrs?|d|day|days)?)(?:\s+\d+\s*(?:s|sec|secs?|m|min|mins?|h|hr|hrs?|d|day|days))?/gi, '<RUN-CLOCK>'],
+  [/\b(?:now|just now|\d+\s*(?:s|sec|secs?|m|min|mins?|h|hr|hrs?|hour|hours?|d|day|days?)\s*ago)\b/gi, '<REL-TIME>'],
+  [/\b\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}[^,\s]*)?\b/g, '<DATE>'],
+];
+export function maskVolatile(text) {
+  let t = String(text);
+  for (const [re, rep] of VOLATILE_MASKS) t = t.replace(re, rep);
+  return t;
+}
+
+// Deterministic JSON: sorted keys everywhere, so a manifest section hashed
+// for repro is byte-stable regardless of object insertion order.
+export function canonicalJson(v) {
+  if (Array.isArray(v)) return '[' + v.map(canonicalJson).join(',') + ']';
+  if (v && typeof v === 'object')
+    return '{' + Object.keys(v).sort().map(k => JSON.stringify(k) + ':' + canonicalJson(v[k])).join(',') + '}';
+  return JSON.stringify(v);
+}
+
+// Visible text of everything inside a content-column region (same region
+// predicate the locators use): DOM-ordered text nodes whose painted rect
+// lives in the column. This is the captured CONTENT of a viewport shot,
+// minus the sidebar (session order/relative times) and the tray strip.
+function columnTextJS(region) {
+  return `(() => {
+    const R = ${JSON.stringify(region)};
+    const out = [];
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    let n;
+    while ((n = walker.nextNode())) {
+      const t = (n.textContent || '').trim();
+      if (!t) continue;
+      const el = n.parentElement;
+      if (!el) continue;
+      const r = el.getBoundingClientRect();
+      if (!(r.width > 0 && r.height > 0)) continue;
+      if (r.x + r.width < R.xMin || r.y < R.yMin) continue;
+      if (r.y + r.height > innerHeight - R.bottomMargin) continue;
+      out.push(t);
+    }
+    return out.join('\\n');
+  })()`;
+}
+
+// Immutable write: content, then 0444 — a capture file is never rewritten
+// in place (stale DIRS are archived whole; files inside are write-once).
+function writeImmutable(file, data) {
+  fs.writeFileSync(file, data);
+  fs.chmodSync(file, 0o444);
+}
 
 // exit codes (documented above; tests assert them)
 const EX = { usage: 2, notImplemented: 3, preflight: 4, boot: 5, api: 6, capture: 7, teardown: 8 };
@@ -234,7 +326,7 @@ async function waitText(cdp, needle, ms = 30_000) {
   }
 }
 
-async function shoot(cdp, outDir, name, clipRect = null) {
+async function shoot(cdp, outDir, name, clipRect = null, contentText = null) {
   const params = { format: 'png' };
   if (clipRect) {
     params.clip = { x: Math.max(0, clipRect.x), y: Math.max(0, clipRect.y),
@@ -243,11 +335,22 @@ async function shoot(cdp, outDir, name, clipRect = null) {
   const r = await cdp.send('Page.captureScreenshot', params);
   const buf = Buffer.from(r.data, 'base64');
   const file = path.join(outDir, 'captures', name);
-  fs.writeFileSync(file, buf);
+  writeImmutable(file, buf);
   const ok = buf.length > 4096 && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47;
   if (!ok) die(EX.capture, `empty/suspicious PNG (need >4096B + magic): ${name} (${buf.length}B)`);
-  return { file: path.relative(outDir, file), bytes: buf.length, sha256: sha256(file),
+  const rec = { file: path.relative(outDir, file), bytes: buf.length, sha256: sha256(file),
            clip: clipRect ? 'element' : 'viewport', reviewed: false };
+  if (contentText !== null) {
+    const masked = maskVolatile(contentText) + '\n';
+    const cfile = path.join(outDir, 'contents', name.replace(/\.png$/, '.txt'));
+    fs.mkdirSync(path.dirname(cfile), { recursive: true });
+    writeImmutable(cfile, masked);
+    const nontrivial = masked.replace(/\n+/g, '').length >= 40;
+    if (!nontrivial) die(EX.capture, `content layer trivial (masked text < 40 chars): ${name}`);
+    rec.content_file = path.relative(outDir, cfile);
+    rec.content_sha256 = sha256(cfile);
+  }
+  return rec;
 }
 
 // -- owned process supervision: spawn detached (own pgid); teardown kills the
@@ -335,6 +438,16 @@ async function main() {
   if (unwired.length) {
     die(EX.notImplemented, `case ${A.caseName} names surfaces outside the driver's registry (${unwired.join(', ')}): they are NEW TESTS, add them to capture.mjs + surfaces_registry`);
   }
+  if (!A.outDir) {
+    A.outDir = path.join(HERE, 'captured',
+      'run-' + new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z'));
+  }
+  const surfacesFiltered = A.only
+    ? (c.surfaces || []).filter(s => A.only.includes(s))
+    : (c.surfaces || []);
+  if (!surfacesFiltered.length) {
+    die(EX.usage, `--only ${A.only.join(',')} selects nothing from case ${A.caseName} (case surfaces: ${(c.surfaces || []).join(', ')})`);
+  }
 
   const appRepo = path.resolve(A.appRepo || process.env.UI2_PROOF_APP_REPO ||
     path.join(process.env.UI2_PROOF_HOME || path.join(os.homedir(), '.hermes'), 'hermes-agent'));
@@ -357,8 +470,17 @@ async function main() {
   if (!fs.existsSync(pluginSrc)) die(EX.preflight, `candidate plugin missing: ${pluginSrc}`);
   const pluginSha = sha256(pluginSrc);
   identity.plugin.sha256 = pluginSha;
+  // The candidate is pinned to THIS repo's head (slice A: "against current
+  // merged head" — after merging origin/main, repo_head IS the merge result).
+  try {
+    identity.candidate_head = execFileSync('git', ['-C', REPO, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  } catch { identity.candidate_head = 'unknown'; }
+  try {
+    identity.merge_base_origin_main = execFileSync('git', ['-C', REPO, 'merge-base', 'HEAD', 'origin/main'], { encoding: 'utf8' }).trim();
+  } catch { identity.merge_base_origin_main = 'unknown'; }
 
-  const plan = { case: A.caseName, surfaces: c.surfaces,
+  const plan = { case: A.caseName, surfaces: surfacesFiltered,
+    only: A.only || null,
     seeds: (c.seeds || []).map(s => ({ name: s.name, kind: s.kind, method: s.method })),
     historical_snapshots: (c.historical_snapshots || []).map(s => s.name),
     plugin_sha256: pluginSha, ports: identity.bench.ports, out: A.outDir };
@@ -604,7 +726,7 @@ async function main() {
     }
     identity.registry = registry;
     identity.plugin_records = records;
-    const surfacesWanted = new Set(c.surfaces);
+    const surfacesWanted = new Set(surfacesFiltered);
     const attached = surfacesWanted.has('pane_workflows') ? registry.panes.some(x => String(x).includes('workflow'))
       : registry.panes.length > 0;
     const postLoadSha = sha256(path.join(B.plugins, 'plugin.js'));
@@ -649,8 +771,11 @@ async function main() {
     identity.api_attachment = { via: 'registry + live seeded run row rendered through the plugin API route', run_id: runId };
     const shots = [];
 
-    // 01/02 pane: runs list, then the held-gate run detail
-    shots.push({ surface: 'pane_workflows', state: 'runs list, seeded held-gate run', ...(await shoot(cdp, A.outDir, '01-pane-runs.png')) });
+    // 01/02 pane: runs list, then the held-gate run detail. The captured
+    // CONTENT of each viewport shot is the pane column's painted text (same
+    // region predicate as the locators), volatile-masked into contents/.
+    shots.push({ surface: 'pane_workflows', state: 'runs list, seeded held-gate run',
+      ...(await shoot(cdp, A.outDir, '01-pane-runs.png', null, await cdp.evl(columnTextJS(paneRegion)))) });
     await trustedClick(cdp, runName, { region: paneRegion });
     // The gate question must render IN THE DETAIL VIEW: the expanded tray run
     // card shows the same question text (field-proven: shot 02 was 'Loading…'
@@ -667,7 +792,8 @@ async function main() {
         await sleep(600);
       }
     }
-    shots.push({ surface: 'pane_workflows', state: 'run detail, held gate question', ...(await shoot(cdp, A.outDir, '02-pane-run-detail.png')) });
+    shots.push({ surface: 'pane_workflows', state: 'run detail, held gate question',
+      ...(await shoot(cdp, A.outDir, '02-pane-run-detail.png', null, await cdp.evl(columnTextJS(paneRegion)))) });
 
     // 03/04 directive card: seed one real assistant turn, open its session,
     // find the plugin's card (its 'Open in Workflows' action is the stable
@@ -800,13 +926,18 @@ async function main() {
           host.scrollIntoView({ block: 'center' });
           const r = host.getBoundingClientRect();
           if (r.width > 40 && r.height > 20)
-            return { x: r.x, y: r.y, width: r.width, height: r.height };
+            return { x: r.x, y: r.y, width: r.width, height: r.height, text: host.innerText || '' };
         }
         return null;
       })()`);
       if (!card) die(EX.api, 'directive card not rendered for the seeded run (Open in Workflows hook absent)');
-      shots.push({ surface: 'directive_card', state: 'in-chat card for seeded held-gate run', ...(await shoot(cdp, A.outDir, '04-directive-card.png', card)) });
-      shots.push({ surface: 'directive_card', state: 'full viewport with card', ...(await shoot(cdp, A.outDir, '03-directive-card-full.png')) });
+      // The card's own innerText is the reproducible content of BOTH card
+      // shots (the crop proves pixels, the text layer proves content; the
+      // surrounding chat prose is LLM output and deliberately NOT hashed).
+      shots.push({ surface: 'directive_card', state: 'in-chat card for seeded held-gate run',
+        ...(await shoot(cdp, A.outDir, '04-directive-card.png', card, card.text)) });
+      shots.push({ surface: 'directive_card', state: 'full viewport with card',
+        ...(await shoot(cdp, A.outDir, '03-directive-card-full.png', null, card.text)) });
     }
 
     // 05 tray: settings-gated slim row in the composer underside
@@ -867,8 +998,41 @@ async function main() {
       review_note: 'reviewed:false means THIS tool run only proved PNG magic+size; visual review (vision_analyze per hermes-workflows-ui-qa) is mandatory before any layout claim' };
     fs.writeFileSync(path.join(A.outDir, 'report.json'), JSON.stringify(report, null, 2) + '\n');
     fs.writeFileSync(path.join(A.outDir, 'identity.json'), JSON.stringify(identity, null, 2) + '\n');
+
+    // -- immutable capture manifest (written LAST; slice A reproducibility
+    //    contract). Per-file sha256 pins THIS run's bytes (immutability);
+    //    the repro section pins only the volatile-masked content layer, so
+    //    two independent runs at one candidate hash-diff empty there.
+    const reproMap = {};
+    for (const s of shots) if (s.content_sha256) reproMap[s.file] = s.content_sha256;
+    const repro = {
+      content_sha256_by_file: reproMap,
+      combined_sha256: crypto.createHash('sha256')
+        .update(canonicalJson(reproMap)).digest('hex'),
+    };
+    const manifestOut = {
+      schema: 'proof-harness/1',
+      run_ts: identity.ts,
+      case: A.caseName,
+      only: A.only || null,
+      surfaces: [...new Set(shots.map(s => s.surface))].sort(),
+      candidate: { plugin: 'desktop/plugin.js', plugin_sha256: pluginSha,
+                   repo_head: identity.candidate_head,
+                   merge_base_origin_main: identity.merge_base_origin_main },
+      app: identity.app,
+      seeds: identity.seeds,
+      captures: shots.map(s => ({ surface: s.surface, state: s.state, file: s.file,
+        bytes: s.bytes, sha256: s.sha256, clip: s.clip,
+        content_file: s.content_file ?? null, content_sha256: s.content_sha256 ?? null,
+        reviewed: false })),
+      repro,
+      review_note: report.review_note,
+    };
+    writeImmutable(path.join(A.outDir, 'manifest.json'),
+      JSON.stringify(manifestOut, null, 2) + '\n');
     console.log(JSON.stringify({ ok: true, out: A.outDir, run_id: runId,
-      plugin_sha256: pluginSha, captures: shots.map(s => s.file) }));
+      plugin_sha256: pluginSha, captures: shots.map(s => s.file),
+      repro_combined_sha256: repro.combined_sha256 }));
     return 0;
   } finally {
     // Stop engine-seeded runs FIRST (parked held-gate runners outlive
@@ -899,7 +1063,10 @@ async function main() {
   }
 }
 
-main().then(code => process.exit(code ?? 0)).catch(async e => {
+// CLI guard: importing this module (the repro spec imports maskVolatile +
+// the parse helpers) must never boot the bench.
+const isCli = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+if (isCli) main().then(code => process.exit(code ?? 0)).catch(async e => {
   const code = e instanceof Bail ? e.code : 1;
   console.error(`UI2_PROOF_FAIL(${code}): ${e.message}`);
   if (e.stack && code === 1) console.error(e.stack.split('\n').slice(0, 4).join('\n'));

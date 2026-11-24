@@ -1,4 +1,4 @@
-// Behaviour spec for the ui2-proof real-app capture driver: the failure
+// Behaviour spec for the proof-harness real-app capture driver: the failure
 // semantics that keep the driver from being a green no-op. Runs the real CLI
 // end-to-end and asserts EXIT CODES and report structure — never string
 // matches. The full-bench behaviour (real renderer capture, config revert,
@@ -7,14 +7,13 @@
 // no gateway, no electron needed).
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, readFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { readFileSync, existsSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
-const driver = join(root, 'scripts', 'ui2-proof', 'capture.mjs')
-const manifestPath = join(root, 'scripts', 'ui2-proof', 'cases.json')
+const driver = join(root, 'tests', 'proof-harness', 'capture.mjs')
+const manifestPath = join(root, 'tests', 'proof-harness', 'cases.json')
 const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
 
 function run(args) {
@@ -26,10 +25,15 @@ function run(args) {
   }
 }
 
-// 1. usage errors exit 2 (missing --case, missing --out).
-assert.equal(run(['--out', '/tmp/x']).code, 2, 'missing --case must exit 2')
-assert.equal(run(['--case', 'baseline']).code, 2, 'missing --out must exit 2')
-console.log('PASS usage: missing required flags exit 2')
+// 1. usage errors exit 2 (unknown argument). --case and --out DEFAULT
+//    (baseline / captured/run-<ts>): the slice A verification command
+//    `node tests/proof-harness/capture.mjs --only directive,pane` is the
+//    canonical invocation and must not die on missing optional flags.
+{
+  const r = run(['--definitely-not-a-flag'])
+  assert.equal(r.code, 2, 'unknown argument must exit 2')
+  console.log('PASS usage: unknown flag exits 2; case/out default')
+}
 
 // 2. unknown case exits 2 and names the known cases (a later bead's case is
 //    a NEW TEST, never an invented existing command silently accepted).
@@ -40,10 +44,24 @@ console.log('PASS usage: missing required flags exit 2')
   console.log('PASS unknown case: exit 2, known-case list emitted')
 }
 
-// 3. a known-but-unwired case exits 3 (new test), NOT 0 and NOT 2.
+// 2b. --only token law (slice A): an unknown token exits 2 — no silent
+//     drop. The intersection-empty and unwired-case legs are covered in
+//     legs 3 and 5 below (new-test law evaluated before the filter).
+{
+  const r = run(['--only', 'bogus', '--out', '/tmp/ui2-proof-nope'])
+  assert.equal(r.code, 2, 'unknown --only token must exit 2')
+  console.log('PASS --only: unknown token exit 2')
+}
+
+// 3. a known-but-unwired case exits 3 (new test), NOT 0 and NOT 2 — also
+//    when --only selects a registry-wired surface of it (the case itself
+//    is the NEW TEST; a filter must never downgrade it to green).
 {
   const r = run(['--case', 'held-gate-snapshot-example', '--out', '/tmp/ui2-proof-nope'])
   assert.equal(r.code, 3, 'documented-not-implemented case must exit 3')
+  const f = run(['--case', 'held-gate-snapshot-example', '--only', 'pane',
+                 '--out', '/tmp/ui2-proof-nope'])
+  assert.equal(f.code, 3, '--only on an unwired case still exits 3')
   console.log('PASS unwired case: exit 3 (new test, not an existing command)')
 }
 
@@ -58,7 +76,9 @@ console.log('PASS usage: missing required flags exit 2')
 
 // 5. --plan prints the structured intent without needing the app: surfaces,
 //    seed kinds/methods, and the candidate hash. (Behaviour: the plan IS the
-//    contract later beads capture against.)
+//    contract later beads capture against.) --only INTERSECTS the case
+//    surfaces — it never widens them, and an intersection that selects
+//    nothing is a usage error, not a green no-op.
 {
   const r = run(['--case', 'baseline', '--out', '/tmp/ui2-proof-plan', '--plan'])
   assert.equal(r.code, 0, 'plan mode must exit 0')
@@ -71,7 +91,17 @@ console.log('PASS usage: missing required flags exit 2')
   assert.ok(plan.plan.seeds.every(s => s.kind === 'engine_seed' || s.kind === 'historical_snapshot'),
     'every seed declares its kind')
   assert.match(plan.plan.plugin_sha256, /^[0-9a-f]{64}$/, 'plan pins the real candidate hash')
-  console.log('PASS --plan: structured intent, three surfaces, seed kinds, plugin hash')
+
+  const o = run(['--only', 'directive,pane', '--out', '/tmp/ui2-proof-plan', '--plan'])
+  assert.equal(o.code, 0, 'slice A verification command must plan clean')
+  const op = JSON.parse(o.stdout)
+  assert.deepEqual([...op.plan.surfaces].sort(), ['directive_card', 'pane_workflows'].sort(),
+    '--only directive,pane narrows the plan to the two slice A surfaces')
+  assert.deepEqual(op.plan.only, ['directive_card', 'pane_workflows'], 'plan echoes the filter')
+
+  const wide = run(['--only', 'directive,pane,tray,bogus-tray', '--out', '/tmp/ui2-proof-plan', '--plan'])
+  assert.equal(wide.code, 2, 'one bad token taints the whole filter (exit 2, no silent drop)')
+  console.log('PASS --plan: structured intent, --only intersection, plugin hash')
 }
 
 // 6. manifest law (data contract behind the CLI): every seed of every case
@@ -109,9 +139,22 @@ console.log('PASS manifest: seed kinds typed, snapshots pinned, registry present
     assert.doesNotThrow(() => new Function(built),
       `locateJS(${JSON.stringify(opts)}) page source must parse`)
   }
+  // columnTextJS (slice A content layer): the same parse law covers it.
+  const colMatch = src.match(/function columnTextJS[\s\S]*?\n}\n/)
+  assert.ok(colMatch, 'columnTextJS extractable for the parse check')
+  const columnTextJS = eval(`(${colMatch[0].replace('function columnTextJS', 'function')})`)
+  for (const region of [
+    { xMin: 440, yMin: 40, bottomMargin: 90 },
+    { xMin: 0, yMin: 0 },
+    { xMin: 10, yMin: 20, bottomMargin: 0 },
+  ]) {
+    const built = columnTextJS(region)
+    assert.doesNotThrow(() => new Function(built),
+      `columnTextJS(${JSON.stringify(region)}) page source must parse`)
+  }
   // Inline eval'd templates (session-row locators etc.): interpolate every
   // ${...} with a JSON scalar and require the result to parse.
-  const tmplRe = /cdp\.evl\(`((?:[^`\\]|\\.|\$\{[^}]*(?:\{[^}]*\}[^}]*)?\})*)`\)/g
+  const tmplRe = /cdp\.evl\(`((?:[^`\\]|\\\\.|\$\{[^}]*(?:\{[^}]*\}[^}]*)?\})*)`\)/g
   let m, seen = 0
   while ((m = tmplRe.exec(src))) {
     // EVALUATE the template (Node consumes its escapes, exactly as the driver
@@ -123,7 +166,7 @@ console.log('PASS manifest: seed kinds typed, snapshots pinned, registry present
     seen++
   }
   assert.ok(seen >= 3, `checked inline eval templates (saw ${seen})`)
-  console.log(`PASS eval-template parse check: locateJS legs + ${seen} inline templates`)
+  console.log(`PASS eval-template parse law: locateJS + columnTextJS legs + ${seen} inline templates`)
 }
 
-console.log('ALL PASS: ui2-proof driver failure semantics (2/3/4), plan contract, manifest law, eval-template parse law')
+console.log('ALL PASS: proof-harness driver failure semantics (2/3/4), defaults, --only intersection, plan contract, manifest law, eval-template parse law')

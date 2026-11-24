@@ -1,21 +1,44 @@
-# ui2-proof — real-app proof driver (source-only)
+# proof-harness — real-app proof driver (source-only)
 
 Repeatable capture of the ACTUAL React/SDK renderer of the hermes-workflows
 desktop half — never CHATFRAME, never `synthesis/index.html`, never a
 file-openable RC or a JSX-to-DOM fake, as production proof.
 
-Interface (the contract later beads use):
+Interface (the contract later beads use — slice A, bd_2026-11-13-iqf):
 
 ```sh
-node scripts/ui2-proof/capture.mjs --case CASE --out DIR
+node tests/proof-harness/capture.mjs [--case CASE] [--only directive,pane,tray] [--out DIR]
 ```
+
+`--case` defaults to `baseline`; `--only` INTERSECTS the case's surfaces
+(short tokens or full surface names; an unknown token exits 2, an
+intersection that selects nothing exits 2 — never a green no-op); `--out`
+defaults to `captured/run-<ts>` under this directory.
 
 `--out DIR` is driver-owned scratch (ownership marker `.ui2-proof-owned`;
 a pre-existing DIR without the marker is refused, and a stale marked DIR is
 archived to `DIR.stale-<ts>` — never rm'd under the cold-before-delete law).
-Evidence lands at `DIR/captures/*.png`, `DIR/report.json`, `DIR/identity.json`
+Evidence lands at `DIR/captures/*.png` (0444), `DIR/contents/*.txt` (0444),
+`DIR/manifest.json` (0444, written last), `DIR/report.json`, `DIR/identity.json`
 (app commit/dirty count/package/electron/hermes versions, candidate+staged
-plugin sha256, seeded run ids, config-before/after, teardown survivors).
+plugin sha256, repo head + merge-base pinning "current merged head", seeded
+run ids, config-before/after, teardown survivors).
+
+## Reproducibility law (slice A)
+
+Every run writes an IMMUTABLE capture set. `manifest.json.captures[]` pins
+each PNG's bytes with sha256 (immutability — files are write-once, stale dirs
+are archived whole). The `manifest.json.repro` section pins only the
+CONTENT layer: per capture, the masked visible text of the captured region
+(pane-column text for viewport shots; the card element's innerText for card
+shots) hashed after masking exactly the declared volatile classes
+(`VOLATILE_MASKS`: run ids, run-clock words, relative timestamps, dates —
+the pixels those words occupy legitimately differ between two live runs).
+Two independent runs at one candidate pin the same
+`repro.combined_sha256`: the double-run hash diff is empty at the content
+layer. The committed proof is `captured/bd_2026-11-13-iqf/set-{1,2}/`
+(two full sets); `tests/test_proof_harness_repro.mjs` verifies the pair,
+recomputes the combined hash from disk, and pins the mask with samples.
 
 ## Prerequisites (one-time, host-side)
 
@@ -110,12 +133,20 @@ know, capture.mjs exits 3 naming it a new test. Do not "make it pass" by
 pointing at `synthesis/index.html`. Wire real renderer surfaces into the
 capture section of capture.mjs and extend `surfaces_registry` instead.
 
-## Verification (this bead's command)
+## Verification (slice A command)
 
 ```sh
-node --check scripts/ui2-proof/capture.mjs \
-  && node scripts/ui2-proof/capture.mjs --case baseline --out "$PROOF_DIR/baseline"
+node --check tests/proof-harness/capture.mjs \
+  && node tests/proof-harness/capture.mjs --only directive,pane --out "$PROOF_DIR/set-1" --cdp-port 9394 --renderer-port 5194 \
+  && node tests/proof-harness/capture.mjs --only directive,pane --out "$PROOF_DIR/set-2" --cdp-port 9404 --renderer-port 5204 \
+  && node -e 'const m=p=>JSON.parse(require("fs").readFileSync(p)).repro.combined_sha256; if (m(process.argv[1])!==m(process.argv[2])) { console.error("REPRO HASH DIFF NOT EMPTY"); process.exit(1) }' "$PROOF_DIR/set-1/manifest.json" "$PROOF_DIR/set-2/manifest.json"
 ```
+
+The double-run diff is over the repro section — the two runs are fully
+independent benches (own ports, own user-data, own seeds), so an equal
+combined content hash is reproducibility, not a re-read of one scratch dir.
+Committed copies of both sets ride at `captured/bd_2026-11-13-iqf/` and are
+re-verified from bytes by `tests/test_proof_harness_repro.mjs` (CI-safe).
 
 On a loaded box (crew waves), first paint can outgrow the 60 s default and
 the run dies exit 5 while vite/CDP are healthy — pass
@@ -130,11 +161,13 @@ and adds identity, seeding, revert and teardown law.
 
 ## Packaging decision
 
-`scripts/ui2-proof/` is a SOURCE-ONLY helper directory (estate/app QA
-tooling; the release ZIP ships `desktop/plugin.js`, never this). The
-mechanical pack-list contract scans the flat `scripts/*.py` set, so the
-subdirectory needs no `SOURCE_ONLY_SCRIPTS` row; the behavior test
-`tests/test_ui2_proof_driver.mjs` DOES ride the `tests/test_*.mjs` glob, so
-it is declared in `pack.py` `SOURCE_ONLY_TESTS` (with reason) and mirrored
-in `tests/test_package_source_only_756.py`. ZIP membership is otherwise
-byte-for-byte unchanged.
+`tests/proof-harness/` (driver, case manifest, seeds, committed capture
+sets) is a SOURCE-ONLY subdirectory — the ZIP's tests glob is the FLAT
+`tests/test_*.py|mjs` set, so nothing under the subdirectory ships, and the
+release ZIP stays `desktop/plugin.js` + shipped suite, byte-for-byte
+otherwise unchanged. The behaviour spec `tests/test_ui2_proof_driver.mjs`
+and the reproducibility spec `tests/test_proof_harness_repro.mjs` DO ride
+that glob, so both are declared in `pack.py` `SOURCE_ONLY_TESTS` (with
+reason) and mirrored in `tests/test_package_source_only_756.py` — the exact
+est-4vnq finding-4 shape: a shipped test executing an unpackaged helper
+dies at an unpacked root.
