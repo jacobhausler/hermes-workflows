@@ -85,7 +85,8 @@ fan_graph = [
      "profile": "crew", "provider": "fake", "model": "fake/opus-test", "reasoning": "medium",
      "fanout": {"goal": "inspect {item}", "items": fan_items}},
     {"id": "watchdog", "type": "agent", "after": ["prep"], "goal": "straggler that was cancelled"},
-    {"id": "sole", "type": "agent", "after": ["prep"], "goal": "single child that really failed"},
+    {"id": "sole", "type": "agent", "after": ["prep"], "optional": True,
+     "goal": "single child that really failed"},
     {"id": "hold", "type": "gate", "after": ["workers"], "question": "inspect: release?",
      "options": ["release", "stop"]},
     {"id": "tail", "type": "echo", "after": ["hold"], "optional": True, "output": {"msg": "skippable"}},
@@ -147,7 +148,9 @@ fan, fby = write_run(
             "log_path": None, "prompt_path": None, "efp": None, "fp_rule_version": None}),
     },
     synth_note="Fan-out census, cancelled-vs-failed spine rows, retry history and the\n"
-               ">16 KiB spawn log are isolated fixtures; no live launch produced them.\n")
+               ">16 KiB spawn log are isolated fixtures; no live launch produced them.\n"
+               "The opt badge key rides the sole def: the engine closed key set does not\n"
+               "carry optional, so this is the ONLY honest carrier for the UI branch.\n")
 
 # Re-stamp the item files with real efp + absolute record paths (the route's
 # ONLY path source) — written through the same helpers the runner uses shape-wise.

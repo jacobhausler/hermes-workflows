@@ -1669,6 +1669,7 @@ async function main() {
       await pollIn('workers', 'fan node card on the page canvas');
       await pollIn('as @crew', 'profile badge preserved on the card');
       await pollIn('opus-test', 'model tag preserved on the card');
+      await pollIn('opt', 'opt badge preserved (isolated def key — the only honest carrier; the door closed key set has no optional)');
       await push('pane_workflows', 'fan run detail: opt/@profile/model badges preserved on cards; failed census word; run-wall header clock', '04-pane-fan-detail.png');
       await push('timeline', 'timeline rail: child spans, real provider_400 RED, node.failed(cancelled)+node.cancelled NEUTRAL, released gate span, run-wall axis label + child-wall row labels', '05-timeline-insp-fan.png', await railRect());
       await clickRailRow('sole');
