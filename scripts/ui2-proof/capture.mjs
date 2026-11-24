@@ -32,7 +32,7 @@
 // UI2_PROOF_HERMES_BIN (hermes CLI), UI2_PROOF_HOME (real Hermes home,
 // default ~/.hermes). Bench knobs: --cdp-port, --renderer-port, --keep,
 // --no-prebuild, --plan.
-import { execFileSync, spawn } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -134,12 +134,16 @@ async function connectCdp(port, rendererPort, timeoutMs = 90_000) {
   return { ws, send, evl };
 }
 
-// Trusted input (real pipeline, per skill): moved -> pressed -> released at
-// the element's rect center. Locator JS finds the DEEPEST visible element
-// whose trimmed text contains `needle` (or the first, when `nth` given).
-async function trustedClick(cdp, needle, { exact = false, nth = null, ci = false } = {}) {
-  const pt = await cdp.evl(`(async () => {
+// Locator JS: finds the DEEPEST visible element whose trimmed text contains
+// `needle` (or the first, when `nth` given). `region` (field-proven overlay
+// lesson: a full-window CONNECTING overlay paints OVER the chrome, so
+// innerText/global hits can pass while the real target is occluded):
+// {xMin, yMin, bottomMargin} restricts hits to the main content column,
+// excluding the sidebar (x) and the tray strip (bottom).
+function locateJS(needle, { exact = false, nth = null, ci = false, region = null } = {}) {
+  return `(async () => {
     const needle = ${JSON.stringify(needle)}, exact = ${exact}, ci = ${ci};
+    const region = ${JSON.stringify(region)};
     const nodes = [...document.querySelectorAll('div,button,a,span,li,td')];
     const norm = t => ci ? t.toLowerCase() : t;
     const hits = nodes.filter(n => {
@@ -147,7 +151,13 @@ async function trustedClick(cdp, needle, { exact = false, nth = null, ci = false
       if (t.length > 400 && !exact) return false;
       if (exact ? t.split('·')[0].trim() === norm(needle) : t.includes(norm(needle))) {
         const r = n.getBoundingClientRect();
-        return r.width > 0 && r.height > 0;
+        if (!(r.width > 0 && r.height > 0)) return false;
+        if (region) {
+          if (r.x + r.width < (region.xMin ?? 0)) return false;
+          if (r.y < (region.yMin ?? 0)) return false;
+          if (r.y + r.height > innerHeight - (region.bottomMargin ?? 0)) return false;
+        }
+        return true;
       }
       return false;
     });
@@ -158,15 +168,46 @@ async function trustedClick(cdp, needle, { exact = false, nth = null, ci = false
     el.scrollIntoView({ block: 'center', inline: 'center' });
     await new Promise(r => setTimeout(r, 120)); // settle: re-probe after scroll (skill law)
     const r = el.getBoundingClientRect();
-    return { x: r.x + r.width / 2, y: r.y + r.height / 2, w: r.width, h: r.height,
+    const out = { x: r.x + r.width / 2, y: r.y + r.height / 2, w: r.width, h: r.height,
              rect: { x: r.x, y: r.y, width: r.width, height: r.height },
              text: (el.innerText || el.textContent || '').slice(0, 80) };
-  })()`);
-  if (pt.err) die(EX.capture, `click target not found on rendered page: ${JSON.stringify(needle)}`);
+    ${region ? `
+    // Occlusion truth test: trusted input lands on document.elementFromPoint
+    // — a hit hidden under an overlay is NOT on the rendered page.
+    const top = document.elementFromPoint(out.x, out.y);
+    if (!top || !(el.contains(top) || top.contains(el)))
+      return { err: 'occluded', over: (top && (top.innerText || top.textContent) || '').trim().slice(0, 60) };` : ''}
+    return out;
+  })()`;
+}
+
+// Trusted input (real pipeline, per skill): moved -> pressed -> released at
+// the element's rect center.
+async function trustedClick(cdp, needle, opts = {}) {
+  let pt = await cdp.evl(locateJS(needle, opts));
+  if (pt.err === 'occluded') { await sleep(1500); pt = await cdp.evl(locateJS(needle, opts)); }
+  if (pt.err) die(EX.capture, `click target not found on rendered page: ${JSON.stringify(needle)} (${pt.err}${pt.over ? ` over: ${JSON.stringify(pt.over)}` : ''})`);
   await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: pt.x, y: pt.y });
   await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: pt.x, y: pt.y, button: 'left', clickCount: 1, buttons: 1 });
   await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: pt.x, y: pt.y, button: 'left', clickCount: 1, buttons: 0 });
   return pt;
+}
+
+// The app paints a full-window CONNECTING splash over the chrome until its
+// gateway WS attaches; input and screenshots are the SPLASH underneath it.
+// Wait for the splash to actually clear (viewport center no longer splash text).
+async function waitConnected(cdp, ms = 90_000) {
+  const t0 = Date.now();
+  for (;;) {
+    const clear = await cdp.evl(`(() => {
+      const el = document.elementFromPoint(Math.floor(innerWidth/2), Math.floor(innerHeight/2));
+      const t = ((el && (el.innerText || el.textContent)) || '').trim().toLowerCase();
+      return t.length > 0 && !t.includes('connecting') && !t.includes('loading');
+    })()`);
+    if (clear) return Date.now() - t0;
+    if (Date.now() - t0 > ms) die(EX.api, 'app never attached to its backend: viewport center still shows the CONNECTING splash');
+    await sleep(600);
+  }
 }
 
 async function waitPainted(cdp, ms = 20_000) {
@@ -398,6 +439,9 @@ async function main() {
   sup._viteMarker = `--port ${A.rendererPort} --strictPort`;
   const touched = [];
   const revertFailures = [];
+  let py = process.env.UI2_PROOF_PYTHON || '';
+  let hermesAbs = hermesBin;
+  const seededRuns = [];
 
   try {
     // -- boot the dev renderer (owned vite, strict port) --------------------
@@ -452,7 +496,6 @@ async function main() {
     const graphFile = path.join(A.outDir, 'seed', 'held-gate.graph.json');
     fs.writeFileSync(graphFile, JSON.stringify(engSeed.graph, null, 2) + '\n');
     let runId;
-    let hermesAbs = hermesBin;
     if (!hermesAbs.startsWith('/')) {
       try { hermesAbs = execFileSync('/usr/bin/which', [hermesAbs], { encoding: 'utf8' }).trim() || hermesAbs; } catch { /* PATH lookup stays the door's own problem */ }
     }
@@ -486,6 +529,7 @@ async function main() {
       die(EX.api, `engine seed launch failed (seed_run.py): ${String(e.stderr || e.message).slice(0, 400)}`);
     }
     identity.seeds.held_gate_run = { kind: 'engine_seed', run_id: runId, graph_sha256: sha256(graphFile) };
+    seededRuns.push(runId);
 
     // -- CDP attach; enable decision; reload (skill gotcha wall) ------------
     let cdp = await connectCdp(A.cdpPort, A.rendererPort);
@@ -509,13 +553,22 @@ async function main() {
     cdp = await connectCdp(A.cdpPort, A.rendererPort, 60_000);
     // Boot can re-navigate the window (main restores the dev-server URL after
     // an early reload): be resilient — reconnect and re-paint-probe for up to
-    // 60 s instead of trusting one document.
+    // 60 s instead of trusting one document. On give-up, dump what we are
+    // actually attached to (target list + one shot) before dying.
     {
       const pT0 = Date.now();
       for (;;) {
         try { await waitPainted(cdp, 6_000); break; }
         catch (e) {
-          if (Date.now() - pT0 > 60_000) throw e;
+          if (Date.now() - pT0 > 60_000) {
+            try {
+              const list = await (await fetch(`http://127.0.0.1:${A.cdpPort}/json`)).json();
+              fs.writeFileSync(path.join(A.outDir, 'logs', 'targets-on-fail.json'),
+                JSON.stringify(list.map(t => ({ type: t.type, url: t.url })), null, 2));
+              await shoot(cdp, A.outDir, '00-diagnostic-unpainted.png');
+            } catch { /* diagnostics best-effort */ }
+            throw e;
+          }
           try { cdp.ws.close(); } catch { /* already gone */ }
           cdp = await connectCdp(A.cdpPort, A.rendererPort, 30_000);
         }
@@ -565,14 +618,32 @@ async function main() {
     // GET /api/plugins/hermes-workflows/ — proven by its rendering. Rows
     // render the run NAME (the id rides card/directive text, not every row).
     const runName = engSeed.graph.name
+    // The pane column only becomes real once the splash clears (field-proven:
+    // global innerText/clicks pass on DOM UNDER a CONNECTING overlay). The
+    // seeded row can only come from GET /api/plugins/hermes-workflows/ —
+    // requiring it INSIDE the pane column (x >= 440, above the tray strip,
+    // occlusion-tested) is the attachment proof that survives overlays.
+    const paneRegion = { xMin: 440, yMin: 40, bottomMargin: 90 };
+    await waitConnected(cdp);
     await trustedClick(cdp, 'workflows', { exact: true, ci: true });
-    await waitText(cdp, runName, 30_000);
+    {
+      const wT0 = Date.now();
+      for (;;) {
+        const hit = await cdp.evl(locateJS(runName, { region: paneRegion }));
+        if (!hit.err) break;
+        if (Date.now() - wT0 > 45_000) {
+          try { await shoot(cdp, A.outDir, '00-diagnostic-pane.png'); } catch { /* best effort */ }
+          die(EX.api, `seeded run row never rendered IN THE PANE COLUMN (${JSON.stringify(hit.err)}${hit.over ? ` over ${JSON.stringify(hit.over)}` : ''}) — diagnostic shot in captures/ if present`);
+        }
+        await sleep(600);
+      }
+    }
     identity.api_attachment = { via: 'registry + live seeded run row rendered through the plugin API route', run_id: runId };
     const shots = [];
 
     // 01/02 pane: runs list, then the held-gate run detail
     shots.push({ surface: 'pane_workflows', state: 'runs list, seeded held-gate run', ...(await shoot(cdp, A.outDir, '01-pane-runs.png')) });
-    await trustedClick(cdp, runName);
+    await trustedClick(cdp, runName, { region: paneRegion });
     await waitText(cdp, engSeed.graph.nodes[1].question, 20_000);
     shots.push({ surface: 'pane_workflows', state: 'run detail, held gate question', ...(await shoot(cdp, A.outDir, '02-pane-run-detail.png')) });
 
@@ -589,21 +660,22 @@ async function main() {
       const chatArgs = ['chat', '--query-file', ask, '--oneshot', '-Q', '--source', 'desktop'];
       if (cardSeed.model) chatArgs.push('-m', cardSeed.model);
       if (cardSeed.provider) chatArgs.push('--provider', cardSeed.provider);
-      let cardSession = '';
+      let cardSession = null;
       let cardSessionErr = '';
       {
         const r = spawnSync(hermesAbs, chatArgs, {
-          encoding: 'utf8', timeout: 240_000, maxBuffer: 32 * 1024 * 1024, env: benchEnv,
-        });
+          encoding: 'utf8', timeout: 240_000, maxBuffer: 32 * 1024 * 1024, env: benchEnv });
         if (r.error || r.status !== 0) {
           die(EX.api, `directive card seed failed (hermes chat oneshot): ${String(r.stderr || r.error?.message).slice(0, 300)}`);
         }
         cardSession = r.stdout || '';
         cardSessionErr = r.stderr || '';
       }
-      fs.writeFileSync(path.join(A.outDir, 'seed', 'oneshot-output.txt'), cardSession);
+      fs.writeFileSync(path.join(A.outDir, 'seed', 'oneshot-output.txt'), cardSession + '\n--- stderr ---\n' + cardSessionErr);
+      const sidMatch = `${cardSessionErr}\n${cardSession}`.match(/session_id:\s*(\S+)/);
       identity.seeds.directive_card_echo = { kind: 'engine_seed', method: 'oneshot_echo',
         ask_sha256: sha256(ask), stdout_sha256: crypto.createHash('sha256').update(cardSession).digest('hex'),
+        session_id: sidMatch ? sidMatch[1] : null,
         model: cardSeed.model || 'seat-default' };
       // The session list caches at page load — reload so the freshly seeded
       // one-shot (written straight to the bench store) is in the list.
@@ -703,23 +775,50 @@ async function main() {
     }
 
     // 05 tray: settings-gated slim row in the composer underside
-    // (plugin.js:1027/1111 — 'N running workflows').
+    // (plugin.js:1027/1111 — 'N running workflows'). OWNERSHIP LAW
+    // (ownedRuns, plugin.js:728-737 + SessionStrip 1288/1326): the strip
+    // renders ONLY the focused chat's owned runs — owner.session_id must
+    // equal the focused session. A blank-owner run is pane-only (honest
+    // absence), so the tray seed relaunches the SAME held-gate graph through
+    // the door with WF_OWNER_SESSION=<the seeded one-shot's session id> —
+    // the door's on-behalf stamp (__init__.py _owner_stamp), not a fixture
+    // edit. Gate + runs-list refresh poll: the pane fetch is periodic.
     if (surfacesWanted.has('tray_row')) {
-      const tray = await cdp.evl(`(() => {
-        const els = [...document.querySelectorAll('div,span,button')].filter(n =>
-          /\\d+ running workflows/.test((n.innerText || '').trim()) && n.getBoundingClientRect().height > 0);
-        const leaf = els.find(h => !els.some(o => o !== h && h.contains(o))) ?? els[0];
-        if (!leaf) return null;
-        leaf.scrollIntoView({ block: 'center' });
-        const r = leaf.getBoundingClientRect();
-        return { x: r.x, y: r.y, width: r.width, height: r.height };
-      })()`);
+      const traySid = identity.seeds.directive_card_echo?.session_id;
+      if (!traySid) die(EX.preflight, 'tray seed needs the one-shot session id (parse failed — see seed/oneshot-output.txt)');
+      let trayRunId;
+      try {
+        trayRunId = execFileSync(py, [path.join(HERE, 'seed_run.py'),
+          '--repo', REPO, '--runs-root', B.runs, '--graph-file', graphFile],
+          { encoding: 'utf8', timeout: 60_000,
+            env: { ...process.env, WF_RUNS_ROOT: B.runs, WF_OWNER_SESSION: traySid,
+                   HERMES_WF_HERMES_BIN: hermesAbs, HERMES_HOME: B.home } }).trim();
+      } catch (e) {
+        die(EX.api, `tray engine seed launch failed: ${String(e.stderr || e.message).slice(0, 400)}`);
+      }
+      seededRuns.push(trayRunId);
+      identity.seeds.tray_run = { kind: 'engine_seed', run_id: trayRunId, owner_stamped: traySid,
+        graph_sha256: sha256(graphFile) };
+      let tray = null;
+      const tT0 = Date.now();
+      while (!tray && Date.now() - tT0 < 45_000) {
+        tray = await cdp.evl(`(() => {
+          const els = [...document.querySelectorAll('div,span,button')].filter(n =>
+            /\\d+ running workflows/.test((n.innerText || '').trim()) && n.getBoundingClientRect().height > 0);
+          const leaf = els.find(h => !els.some(o => o !== h && h.contains(o))) ?? els[0];
+          if (!leaf) return null;
+          leaf.scrollIntoView({ block: 'center' });
+          const r = leaf.getBoundingClientRect();
+          return { x: r.x, y: r.y, width: r.width, height: r.height };
+        })()`);
+        if (!tray) await sleep(1500);
+      }
       if (!tray) {
         const tail = await cdp.evl(`(() => { const t = document.body.innerText; const i = t.toLowerCase().indexOf('running'); return i < 0 ? t.slice(-400) : t.slice(Math.max(0, i - 80), i + 80); })()`);
         try { await shoot(cdp, A.outDir, '00-diagnostic-tray.png'); } catch { /* best effort */ }
-        die(EX.api, `tray row absent: settings.tray was set and the seeded run is live — check $trayGate (plugin.js:709); text near 'running': ${JSON.stringify(String(tail).slice(0, 240))}`);
+        die(EX.api, `tray row absent after 45s: settings.tray set, owner-stamped run ${trayRunId} live, session ${traySid} focused — check $trayGate (plugin.js:709) and owner stamp; text near 'running': ${JSON.stringify(String(tail).slice(0, 240))}`);
       }
-      shots.push({ surface: 'tray_row', state: 'slim live-run tray row, seeded live run', ...(await shoot(cdp, A.outDir, '05-tray-row.png', tray)) });
+      shots.push({ surface: 'tray_row', state: 'slim live-run tray row, owner-stamped live run', ...(await shoot(cdp, A.outDir, '05-tray-row.png', tray)) });
       shots.push({ surface: 'tray_row', state: 'full viewport with tray', ...(await shoot(cdp, A.outDir, '06-tray-full.png')) });
     }
 
@@ -737,7 +836,17 @@ async function main() {
       plugin_sha256: pluginSha, captures: shots.map(s => s.file) }));
     return 0;
   } finally {
-    // Revert the two trusted inputs FIRST (config hygiene), then kill ONLY
+    // Stop engine-seeded runs FIRST (parked held-gate runners outlive
+    // electron otherwise): the same door, action:stop, isolated runs root.
+    for (const rid of seededRuns) {
+      try {
+        execFileSync(py, [path.join(HERE, 'seed_run.py'), '--repo', REPO,
+          '--runs-root', B.runs, '--stop', rid],
+          { encoding: 'utf8', timeout: 30_000,
+            env: { ...process.env, WF_RUNS_ROOT: B.runs, HERMES_HOME: B.home } });
+      } catch (e) { revertFailures.push(`stop ${rid}: ${String(e.stderr || e.message).slice(0, 200)}`); }
+    }
+    // Revert the two trusted inputs (config hygiene), then kill ONLY
     // this supervisor's process groups + the path-scoped survivor sweep.
     for (const key of touched.reverse()) {
       try {
