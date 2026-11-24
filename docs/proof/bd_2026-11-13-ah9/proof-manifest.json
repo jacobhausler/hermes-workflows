@@ -1,0 +1,150 @@
+{
+  "bead": "bd_2026-11-13-ah9",
+  "attempt": "W1-review (merged-head real-app acceptance)",
+  "merged_head_candidate": {
+    "branch_head": "89b12cad4fbec3da6770aa34d223d82dc0e90bee",
+    "origin_main": "19675869c849e4e07bd3d5eedf41af213e406af0",
+    "proof_merge": "no-op: main is direct parent, merge-tree conflicts=0; squash result tree == branch head",
+    "plugin_sha256": "d22feb08d72d4ed012e8d1ff652a2849adb02d5516bd285cbecbd3f457c211c8"
+  },
+  "verification_at_candidate_exit_codes": {
+    "node --check desktop/plugin.js": 0,
+    "tests/test_metrics_missing_ui.mjs": 0,
+    "tests/test_live_truth_ui.mjs": 0,
+    "tests/test_lifecycle_numeric_view_models.mjs": 0,
+    "tests/test_inline_header.mjs": 0,
+    "tests/test_directive_card_error.mjs": 0,
+    "tests/test_card_frontend_contract.mjs": 0,
+    "tests/test_pill_rail.mjs": 0,
+    "tests/test_session_strip.mjs": 0,
+    "tests/test_run_tray.mjs": 0,
+    "tests/test_wf_qa_render_group.mjs": 0,
+    "tests/test_node_panel.mjs": 0,
+    "tests/test_pane_render_uncapped.mjs": 0
+  },
+  "method": {
+    "driver_pass": "l62 real-app proof driver (feat/ui2-proof-driver @ /Users/jacobhausler/code/wf-pr-20261123): node scripts/ui2-proof/capture.mjs --case baseline --out $D1/baseline --plugin <candidate> \u2014 real dev renderer vite:5194 + electron CDP 9394, isolated bench HERMES_HOME with candidate STAGED and re-hashed (identity.json: staged_sha256_after_load == candidate), engine-seeded held-gate run 20261123-205616-ui2-proof-held (graph_sha256 a6c5a511...4aac7) + ONE real oneshot assistant turn; driver exited 6 only at the tray-row probe: l62's capture.mjs is being actively edited by the sibling l62 worker in this very worktree (mid-edit revision lacks the session_id extraction), an environment fault of the driver, not of the candidate; captures up to the tray probe are valid candidate renders",
+    "wfqa_pass": "minimal local capture per documented command (hermes-workflows-ui-qa skill): candidate deployed to both sanctioned roots, dev bench (vite:5174, CDP 9333, isolated userdata in this dir) against the live estate gateway (REST-backed; WS flap = environment, modal dismissed); documented command: WFQA_PORT=9333 node /Users/jacobhausler/.hermes/skills/hermes-workflows-ui-qa/scripts/wfqa.mjs <eval|probe|click xy:X,Y|shot PATH>; restored byte-identical after (restore-verification.txt: 918f205... == before)"
+  },
+  "states_captured": [
+    {
+      "state": "directive card pill, held run, NEW run-clock word",
+      "quote": "ui2-proof-held \u00b7 held \u00b7 1/3 terminal \u00b7 run 46s",
+      "shot": "03-directive-card-full.png + 04-directive-card.png (driver pass)",
+      "review": "vision: fully populated real transcript surface, Backend ready"
+    },
+    {
+      "state": "pane fleet census, exact plain integers",
+      "quote": "runs 164 \u00b7 running 0 \u00b7 held 0 \u00b7 failed 3",
+      "shot": "02-pane-fleet-census.png (wfqa pass)",
+      "review": "vision: exact unabbreviated integers"
+    },
+    {
+      "state": "record header FINISHED relabel + run-clock word",
+      "quote": "iron-792  Finished  @clankville  run 5m 54s",
+      "shot": "03-record-finished-run-clock-word.png",
+      "review": "vision: 'Finished' verbatim, 'run 5m 54s' prefixed; census '4/4 terminal' on qmngr"
+    },
+    {
+      "state": "fan strip, terminal census, item chips",
+      "quote": "items \u00b7 4/4 terminal + 4x IRON-PUMP chips",
+      "shot": "05-fan-strip-viewport.png",
+      "review": "vision: label + 4 chips verbatim; fanSummary shape byte-stable"
+    },
+    {
+      "state": "run-vs-child clock law",
+      "quote": "only parent carries 'run 5m 54s'; child pills/detail/timeline read 'Finished' + '5m 52s' WITHOUT 'run'",
+      "shot": "08-item-selected-detail.png",
+      "review": "vision confirmed"
+    },
+    {
+      "state": "pane row detail (driver bench)",
+      "quote": "captured but CONNECTING placeholder (timing)",
+      "shot": "02-pane-run-detail.png",
+      "review": "vision: blank/loading \u2014 NOT counted as pane proof; pane coverage comes from wfqa-pass shots"
+    }
+  ],
+  "not_captured_at_surface": [
+    "'Running \u00b7 fresh/quiet/activity unknown' + 'IDLE \u2014' on a live running row: zero running runs in the live fleet at capture time (running 0); a locally-parked seed (20261123-210715-ui2-ah9-parked, door-launched, stopped after) was invisible to the estate gateway pane \u2014 honest absence; behavior-level proof: tests/test_lifecycle_numeric_view_models.mjs renders the REAL Vitals/inlineHeader/pillModel (exit=0 above)"
+  ],
+  "pngs": [
+    {
+      "file": "/Users/jacobhausler/research/hermes-workflows-rust-ax/2026-11-13/ship-2.0/proof/bd_2026-11-13-ah9-20261124T025502Z/baseline/captures/00-diagnostic-tray.png",
+      "sha256": "712cc990bce2b1efe55eec2a41bfee92edda595845bc7281eafd7fe468f95ff5",
+      "bytes": 249305
+    },
+    {
+      "file": "/Users/jacobhausler/research/hermes-workflows-rust-ax/2026-11-13/ship-2.0/proof/bd_2026-11-13-ah9-20261124T025502Z/baseline/captures/01-pane-runs.png",
+      "sha256": "5e91d64dba8ca91ddbc6da892f142cc69ea45b369d613b6d8456fd8634a609c8",
+      "bytes": 28954
+    },
+    {
+      "file": "/Users/jacobhausler/research/hermes-workflows-rust-ax/2026-11-13/ship-2.0/proof/bd_2026-11-13-ah9-20261124T025502Z/baseline/captures/02-pane-run-detail.png",
+      "sha256": "39cbb618eb179c63b8ccb8b4e065c4a634cd924b7f194b04c37912429d65bb31",
+      "bytes": 29100
+    },
+    {
+      "file": "/Users/jacobhausler/research/hermes-workflows-rust-ax/2026-11-13/ship-2.0/proof/bd_2026-11-13-ah9-20261124T025502Z/baseline/captures/03-directive-card-full.png",
+      "sha256": "712cc990bce2b1efe55eec2a41bfee92edda595845bc7281eafd7fe468f95ff5",
+      "bytes": 249305
+    },
+    {
+      "file": "/Users/jacobhausler/research/hermes-workflows-rust-ax/2026-11-13/ship-2.0/proof/bd_2026-11-13-ah9-20261124T025502Z/baseline/captures/04-directive-card.png",
+      "sha256": "21a21c1671aa27fcc0190ce98594e11a3d1c9dfebe5903edc518cbda00c09900",
+      "bytes": 38069
+    },
+    {
+      "file": "/Users/jacobhausler/research/hermes-workflows-rust-ax/2026-11-13/ship-2.0/proof/bd_2026-11-13-ah9-20261124T025846Z-wfqa/shots/00-boot-diagnostic.png",
+      "sha256": "1ef776af4862fdb481df4a435fb1c2172a2e6720d71e3553294f0b99a20d092a",
+      "bytes": 26158
+    },
+    {
+      "file": "/Users/jacobhausler/research/hermes-workflows-rust-ax/2026-11-13/ship-2.0/proof/bd_2026-11-13-ah9-20261124T025846Z-wfqa/shots/01-after-tab-click.png",
+      "sha256": "39cbb618eb179c63b8ccb8b4e065c4a634cd924b7f194b04c37912429d65bb31",
+      "bytes": 29100
+    },
+    {
+      "file": "/Users/jacobhausler/research/hermes-workflows-rust-ax/2026-11-13/ship-2.0/proof/bd_2026-11-13-ah9-20261124T025846Z-wfqa/shots/02-pane-fleet-census.png",
+      "sha256": "40b76674f3c7c384f4583003fdb3a7c6e5d1598f58a8dab77b09e449996db3c7",
+      "bytes": 346840
+    },
+    {
+      "file": "/Users/jacobhausler/research/hermes-workflows-rust-ax/2026-11-13/ship-2.0/proof/bd_2026-11-13-ah9-20261124T025846Z-wfqa/shots/03-record-finished-run-clock-word.png",
+      "sha256": "ed9c3cd93e8eb22a08f7f00802640a3559476813350a6e5bb20f04d27b8d4255",
+      "bytes": 382830
+    },
+    {
+      "file": "/Users/jacobhausler/research/hermes-workflows-rust-ax/2026-11-13/ship-2.0/proof/bd_2026-11-13-ah9-20261124T025846Z-wfqa/shots/04-fan-items-4of4-terminal.png",
+      "sha256": "aaee4a263be72d0695997119b13a76542ad74b45f962e211d317047ba803648c",
+      "bytes": 1185890
+    },
+    {
+      "file": "/Users/jacobhausler/research/hermes-workflows-rust-ax/2026-11-13/ship-2.0/proof/bd_2026-11-13-ah9-20261124T025846Z-wfqa/shots/05-fan-strip-viewport.png",
+      "sha256": "aaee4a263be72d0695997119b13a76542ad74b45f962e211d317047ba803648c",
+      "bytes": 1185890
+    },
+    {
+      "file": "/Users/jacobhausler/research/hermes-workflows-rust-ax/2026-11-13/ship-2.0/proof/bd_2026-11-13-ah9-20261124T025846Z-wfqa/shots/06-item-detail-child-clock.png",
+      "sha256": "2dabc243fe1afc94775d058187d3d30920ea59aa3ccaeda3cb5e27419f25ccdc",
+      "bytes": 1180125
+    },
+    {
+      "file": "/Users/jacobhausler/research/hermes-workflows-rust-ax/2026-11-13/ship-2.0/proof/bd_2026-11-13-ah9-20261124T025846Z-wfqa/shots/07-item-detail-tall-viewport.png",
+      "sha256": "054300c6849fa73770e27ec125f2fce8c2b5df44b5f20acc0c10b5f2482208e4",
+      "bytes": 1616009
+    },
+    {
+      "file": "/Users/jacobhausler/research/hermes-workflows-rust-ax/2026-11-13/ship-2.0/proof/bd_2026-11-13-ah9-20261124T025846Z-wfqa/shots/08-item-selected-detail.png",
+      "sha256": "db36b3435603104553285a4fb70e6cf78b9bc9506eb1866722dfa2ee9d2829b2",
+      "bytes": 1318304
+    }
+  ],
+  "provenance": {
+    "candidate_plugin": "sha256 above, pinned in baseline/identity.json",
+    "driver_log": "/Users/jacobhausler/research/hermes-workflows-rust-ax/2026-11-13/ship-2.0/proof/bd_2026-11-13-ah9-20261124T025502Z/driver.log (capture exit=6 documented)",
+    "seed_graph": "/Users/jacobhausler/research/hermes-workflows-rust-ax/2026-11-13/ship-2.0/proof/bd_2026-11-13-ah9-20261124T025502Z/baseline/seed/held-gate.graph.json",
+    "parked_graph": "/Users/jacobhausler/research/hermes-workflows-rust-ax/2026-11-13/ship-2.0/proof/bd_2026-11-13-ah9-20261124T025846Z-wfqa/parked.graph.json",
+    "before_hashes": "/Users/jacobhausler/research/hermes-workflows-rust-ax/2026-11-13/ship-2.0/proof/bd_2026-11-13-ah9-20261124T025846Z-wfqa/before-hashes.txt",
+    "restore": "/Users/jacobhausler/research/hermes-workflows-rust-ax/2026-11-13/ship-2.0/proof/bd_2026-11-13-ah9-20261124T025846Z-wfqa/restore-verification.txt"
+  }
+}
