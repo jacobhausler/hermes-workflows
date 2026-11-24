@@ -754,6 +754,17 @@ async function main() {
   for (const port of [A.cdpPort, A.rendererPort]) {
     if (!(await portFree(port))) die(EX.preflight, `port ${port} already in use — one bench per port (another proof run or the user's dev server owns it)`);
   }
+  // Bench-home law (field-proven 2026-11-24, bd_2026-11-13-qri): a bench HERMES_HOME
+  // that lives UNDER the native ~/.hermes gets the NATIVE default root — hermes_constants
+  // ._hermes_root_of treats any home under ~/.hermes as profile mode of the native install.
+  // The fork's own profile registry then anchors at the real root, the bench profile is
+  // invisible to it, and an app that names the active profile on registry API requests
+  // (hermes-agent >= the plugin-run-backend feature) 403s profile_scope_mismatch on every
+  // plugin call. So --out must be provisioned OUTSIDE the native home.
+  const nativeHome = path.resolve(os.homedir(), '.hermes');
+  const outResolved = path.resolve(A.outDir);
+  if (outResolved === nativeHome || outResolved.startsWith(nativeHome + path.sep))
+    die(EX.preflight, `--out ${A.outDir} lives under the native home ${nativeHome}: the bench fork's profile registry would anchor there (hermes_constants._hermes_root_of forces the native root for homes under it) and the app would 403 profile_scope_mismatch. Provision the bench outside the native home (e.g. the repo's captured/ dir or a TMPDIR path).`);
   let appCommit = 'unknown', appDirtyEntries = -1, appVersion = 'unknown', electronVersion = 'unknown';
   try {
     appCommit = execFileSync('git', ['-C', appRepo, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();

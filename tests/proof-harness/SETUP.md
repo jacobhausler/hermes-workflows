@@ -92,6 +92,17 @@ recomputes the combined hash from disk, and pins the mask with samples.
 
 ## Bench profile law (field-proven 2026-11-24, bd_2026-11-13-iqf)
 
+**Bench-home corollary (field-proven 2026-11-24, bd_2026-11-13-qri):** `--out`
+must sit OUTSIDE the native `~/.hermes`. A bench home under the native root is
+treated as profile mode of the native install (`hermes_constants._hermes_root_of`
+forces the native default root for any `HERMES_HOME` beneath it), so the fork's
+profile registry never sees `ui2bench`; an app that names the active profile on
+registry API requests then 403s `profile_scope_mismatch` on every plugin call
+(exit 6 with a "workflows unreachable … profile_scope_mismatch" sidebar).
+The driver refuses such `--out` at preflight (exit 4). The repo's `captured/`
+dir or a TMPDIR path are the sanctioned hosts; copy the finished set wherever
+the bead's ledger wants it afterwards.
+
 One gateway per host serves every profile: while a live host gateway exists,
 `gateway ensure` for the DEFAULT profile ATTACHes or refuses — a bench fork
 under the default profile cannot exist ("The host gateway already serves

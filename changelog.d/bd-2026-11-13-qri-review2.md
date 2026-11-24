@@ -30,3 +30,16 @@ receipt carries the door-stamped `Answered` line and the toast matches
 the receipt prefix — the frame is the contract, verified on the real
 renderer (SETUP.md updated; tests/test_composer_owner.mjs gains the
 same-mount refetch case the reviewer's reproduction demanded).
+
+## Bench-home law (field-proven, this bead's capture attempt)
+
+`_hermes_root_of` forces the default hermes root to the native
+`~/.hermes` whenever `HERMES_HOME` lives under it, so a bench provisioned
+under the native home resolves `ui2bench` at the REAL profile registry.
+The app (hermes-agent >= the plugin-run-backend feature, which names the
+active profile on registry API requests) then 403s
+`profile_scope_mismatch` on every plugin call — the old exit-6
+"row never rendered" was that auth failure wearing a UI costume.
+The driver now dies at preflight (exit 4) with the law spelled out when
+`--out` lands under the native home; provision at the repo's
+`captured/` or a TMPDIR path and copy the finished set to the ledger.
