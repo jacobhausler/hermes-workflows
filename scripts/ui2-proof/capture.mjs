@@ -1,0 +1,1 @@
+../../tests/proof-harness/capture.mjs
