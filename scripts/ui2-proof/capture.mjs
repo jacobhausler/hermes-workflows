@@ -282,6 +282,34 @@ async function waitPainted(cdp, ms = 20_000) {
   }
 }
 
+// Re-click the WORKFLOWS tab until the PANE COLUMN itself carries `needle`
+// (field-proven twice: route-restore flips the view back after the tab click,
+// and a splash overlay passes global innerText waits — bd_2026-11-13-yjp
+// coverage frame 01 died exactly this death). Dumps a diagnostic shot + body
+// excerpt + a /runs resource-timing probe on give-up.
+async function pollPaneFor(cdp, paneRegion, needle, shotName, why) {
+  await trustedClick(cdp, 'workflows', { exact: true, ci: true });
+  const t0 = Date.now();
+  let last = null;
+  for (;;) {
+    last = await cdp.evl(locateJS(needle, { region: paneRegion }));
+    if (!last.err) return;
+    if (Date.now() - t0 > 45_000) break;
+    try { await trustedClick(cdp, 'workflows', { exact: true, ci: true }); } catch { /* tab not painted yet */ }
+    await sleep(1200);
+  }
+  const diag = await cdp.evl(`(() => ({
+    body: (document.body.innerText || '').replace(/\\s+/g, ' ').slice(0, 300),
+    runsReqs: performance.getEntriesByType('resource').filter(r => r.name.includes('workflows/runs'))
+      .map(r => ({ name: r.name.slice(0, 160), start: Math.round(r.startTime), dur: Math.round(r.duration) })).slice(-6)
+  }))()`).catch(() => ({}));
+  try { await shoot(cdp, A_globalOut, shotName); } catch { /* best effort */ }
+  try { fs.writeFileSync(path.join(A_globalOut, 'logs', shotName.replace(/\.png$/, '-diag.json')),
+                         JSON.stringify({ needle, locate: last, ...diag }, null, 2)); } catch { /* best effort */ }
+  die(EX.api, `${why}: ${JSON.stringify(last.err || last)}${last.over ? ` over ${JSON.stringify(last.over)}` : ''} | body=${JSON.stringify((diag.body || '').slice(0, 160))} | runsReqs=${JSON.stringify(diag.runsReqs || [])}`);
+}
+let A_globalOut = null;   // set in main() to A.outDir (diagnostic paths)
+
 async function waitText(cdp, needle, ms = 30_000) {
   const t0 = Date.now();
   for (;;) {
@@ -377,6 +405,7 @@ function unsetConfig(hermesBin, key, env) {
 
 async function main() {
   const A = parseArgs(process.argv.slice(2));
+  A_globalOut = A.outDir;
   const manifest = JSON.parse(fs.readFileSync(MANIFEST, 'utf8'));
   const known = Object.keys(manifest.cases);
   if (!Object.hasOwn(manifest.cases, A.caseName)) {
@@ -732,8 +761,8 @@ async function main() {
         // 01 LOADING: stall every /runs page, then open the pane — the one
         // honest costume for a census not yet answered.
         mock.setRules([{ urlPattern: '*workflows/runs*', action: 'stall' }]);
-        await trustedClick(cdp, 'workflows', { exact: true, ci: true });
-        await waitText(cdp, 'Loading…', 30_000);
+        await pollPaneFor(cdp, paneRegion, 'Loading…', '00-diagnostic-loading.png',
+                          'loading state never rendered IN THE PANE COLUMN');
         shots.push({ surface: 'pane_workflows', state: 'loading (every /runs page stalled)',
                      ...(await shoot(cdp, A.outDir, '01-coverage-loading.png')) });
         // 02 EMPTY: release the stall on the unseeded bench — an ANSWERED
@@ -764,8 +793,8 @@ async function main() {
             }
           }
         }
-        await trustedClick(cdp, 'workflows', { exact: true, ci: true });
-        await waitText(cdp, `runs ${COUNT} ·`, 30_000);
+        await pollPaneFor(cdp, paneRegion, `runs ${COUNT} ·`, '00-diagnostic-census.png',
+                          'census summary never rendered IN THE PANE COLUMN');
         identity.api_attachment = { via: 'whole-census summary rendered by the pane from GET /runs', counted: COUNT };
         shots.push({ surface: 'pane_workflows', state: `full census: ${COUNT} counted rows (>1 page), all loaded`,
                      ...(await shoot(cdp, A.outDir, '03-coverage-census-full.png')) });
