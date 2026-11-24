@@ -57,7 +57,11 @@ class NodeIdAdvisoryTests(unittest.TestCase):
 
     def assert_nudge(self, response, node_id):
         self.assertNotIn("error", response, response)
-        warnings = response.get("run_warnings", [])
+        # l8i: a SHELF source legitimately adds its OWN advisory channel
+        # (unlabeled shelf launch); the node_id law under test is ONE nudge
+        # per offender, counted on the s12 channel alone.
+        warnings = [w for w in response.get("run_warnings", [])
+                    if not w.startswith("unlabeled shelf launch")]
         self.assertEqual(len(warnings), 1, response)
         self.assertIn(repr(node_id), warnings[0])
         self.assertIn("s12", warnings[0])

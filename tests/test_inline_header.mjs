@@ -16,8 +16,15 @@ const vm = source.match(/\/\/ BEGIN shared-view-model\n([\s\S]*?)\/\/ END shared
 assert.ok(vm, 'plugin.js ships the shared lifecycle + numeric view-model block')
 const statusLine = source.match(/const statusLabel = [^\n]+/)
 assert.ok(statusLine, 'statusLabel law present')
+// l8i: inlineHeader resolves titles through the REAL displayTitle/templateTag —
+// the sandbox evaluates the exported resolvers too (same shared-source law).
+const resolver = [
+  source.match(/const TITLE_MAX = [^\n]+/)[0],
+  source.match(/export function displayTitle[\s\S]*?\n}/)[0].replace('export ', ''),
+  source.match(/export function templateTag[\s\S]*?\n}/)[0].replace('export ', ''),
+].join('\n')
 const header = new Function('nodesCount', 'fmtDur', 'TERMINAL',
-  `const EDGE_TONE = { pending: 'P', running: 'R', held: 'H', failed: 'F' }\n${statusLine[0]}\n${vm[1]}${match[0]}; return inlineHeader`)(
+  `const EDGE_TONE = { pending: 'P', running: 'R', held: 'H', failed: 'F' }\n${statusLine[0]}\n${vm[1]}${resolver}\n${match[0]}; return inlineHeader`)(
   r => `${r.nodes_done ?? 0}/${r.nodes_total ?? '?'} terminal`, n => `${n}ms`,
   new Set(['done', 'failed', 'stopped'])
 )

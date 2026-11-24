@@ -117,6 +117,15 @@ def _view(r, full=False, lock_state=None):
             "started": st.get("started"), "owner": st.get("owner"),
             "nodes_done": st["done"], "nodes_skipped": st["skipped"], "nodes_total": st["total"],
             "updated": (r / "events.jsonl").stat().st_mtime if (r / "events.jsonl").exists() else 0}
+    # l8i (instance-label-first law): the display-title resolver rides every
+    # row — lane_key + description when the read model carries them (the door
+    # stamps lane_key at launch; description rides the graph root). Honest
+    # absence: an unlabeled legacy run gains no keys and the resolver falls to
+    # name — the pre-2.0 rendering, never a fabricated label.
+    if st.get("lane_key"):
+        view["lane_key"] = st["lane_key"]
+    if st.get("description"):
+        view["description"] = st["description"]
     if st.get("runner_lock") and st["runner_lock"] not in ("busy", "free"):
         # #44: a wedge (or an EACCES-ambiguous lock) is visible on the card —
         # honest absence otherwise (golden key sets byte-unchanged for busy/free).
