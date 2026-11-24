@@ -27,8 +27,10 @@ const constGrab = name => {
   const j = src.indexOf('\n\n', i)
   return src.slice(i, j)
 }
-const code = [grab('fanItems'), grab('itemLabel'), grab('renderGoal'), constGrab('fanCounts')].join('\n')
-const { fanItems, fanCounts } = new Function(`${code}; return { fanItems, fanCounts }`)()
+const code = [grab('fanItems'), grab('itemLabel'), grab('renderGoal'), constGrab('fanCounts'), constGrab('fanSummary'),
+  grab('fanThreshold'), grab('fanOpenFor'), grab('fanPickedRow'), grab('fanProjection')].join('\n')
+const { fanItems, fanCounts, fanSummary, fanThreshold, fanOpenFor, fanPickedRow, fanProjection } =
+  new Function(`${code}; return { fanItems, fanCounts, fanSummary, fanThreshold, fanOpenFor, fanPickedRow, fanProjection }`)()
 
 let fails = 0
 const check = (label, cond, detail = '') => { console.log((cond ? 'PASS ' : 'FAIL ') + label + (cond ? '' : `  [${detail}]`)); if (!cond) fails++ }
@@ -134,5 +136,95 @@ const load = run => {
     c.every(r => r.metrics === null) && c[0].status === 'failed' && c[1].status === 'done',
     JSON.stringify(c.map(r => [r.status, r.metrics])))
 }
-console.log(fails ? `\n${fails} FAILED` : '\nALL PASS')
+// 9. RC ch4 (bd_2026-11-13-33h) MF1 synthetic regression — CLEARLY SYNTHETIC:
+//    parent done + raw child 'partial', no borrowed metrics. The frozen shelf
+//    fixture (research ui2/synthesis/fixtures-real/20261122-121032-wave6-council.json,
+//    sha256 8ad015ceb58e0dd8e61d017a279e654c5c33bd70ffcbfcbf159b4e7ae5139922)
+//    reads done for parent AND children and is preserved byte-for-byte — the
+//    source was NOT rewritten to fit the audit; this synthetic row exercises
+//    the regression the audit named.
+{
+  const def = { id: 'synthmf1', fanout: { goal: 'g {index}', items: [{ id: 'a' }, { id: 'b' }] } }
+  const st = {
+    status: 'done',
+    metrics: { api_calls: 99, tokens_out: 5000 }, // the PARENT's own vitals
+    output: { all_results: [
+      { status: 'done', output: { r: 1 } },
+      { status: 'partial', output: { r: 2 }, error_class: 'cap_exhausted' }
+    ] }
+  }
+  const rows = fanItems(def, st, [])
+  check('mf1: child raw status preserved (no parent borrowing)', rows[1].status === 'partial', rows[1].status)
+  check('mf1: child metrics stay null while the parent has vitals', rows.every(r => r.metrics === null), JSON.stringify(rows.map(r => r.metrics)))
+  const c = fanCounts(rows)
+  check('mf1: partial is terminal in its OWN bucket', c.terminal === 2 && c.partial === 1 && c.done === 1 && c.failed === 0, JSON.stringify(c))
+  check('mf1: the ended census is 2/2 terminal with the partial spelled out', fanSummary(c) === '2/2 terminal ·1 partial', fanSummary(c))
+  const proj = fanProjection({ id: 'runMF', graph: { nodes: [def] }, nodes: { synthmf1: st } }, { synthmf1: rows })
+  check('mf1 projection: child identity carries the RAW status', proj.states['synthmf1.1']?.status === 'partial', JSON.stringify(proj.states))
+  check('mf1 projection: the parent keeps the aggregate, not the reverse', proj.states.synthmf1?.status === 'done' && proj.nodes.some(n => n.id === 'synthmf1'))
+  const liveRows = fanItems(def, { status: 'running', output: null }, [{ node: 'synthmf1', event: 'item.finished', index: 0, status: 'done' }])
+  check('projection law: live-event rows never project (recorded-only)',
+    fanProjection({ id: 'r', graph: { nodes: [def] }, nodes: {} }, { synthmf1: liveRows }).nodes.length === 1)
+}
+// 10. exact ended census: cancelled vs failed separated, every row counted
+//     exactly once, and fanSummary spelling each non-zero bucket's own word.
+{
+  const def = { id: 'census', fanout: { goal: 'g', items: [{}, {}, {}, {}] } }
+  const st = { status: 'stopped', output: { all_results: [
+    { status: 'done' },
+    { status: 'failed', error_class: 'cancelled', error: 'cancelled: stop' },
+    { status: 'failed', error_class: 'transport', error: 'boom' },
+    { status: 'partial', output: { r: 3 } }
+  ] } }
+  const rows = fanItems(def, st, [])
+  check('census: cancelled separates from failed', rows[1].status === 'cancelled' && rows[2].status === 'failed', JSON.stringify(rows.map(r => r.status)))
+  const c = fanCounts(rows)
+  check('census: cancelled rides its own neutral bucket', c.cancelled === 1 && c.failed === 1, JSON.stringify(c))
+  const summed = c.done + c.failed + (c.cancelled || 0) + c.skipped + c.stopped + (c.partial || 0) + c.running + c.pending
+  check('census: every row lands in exactly one bucket; terminal is exact', summed === c.total && c.terminal === 4, JSON.stringify(c))
+  check('census: fanSummary is the exact census sentence', fanSummary(c) === '4/4 terminal ·1 cancelled ·1 partial, 1 failed', fanSummary(c))
+}
+// 11. threshold ladder: 0/3 -> 2/3 -> ack (SAME fraction) -> 3/3, driven by
+//     two same-instant finishes then one late arrival. No fabricated 1/3 ever
+//     exists in the model; acknowledgement moves copy, never the numerator.
+{
+  const def = { id: 'fanthr', fanout: { goal: 'g {index}', quorum: 2, items: [{ id: 'a' }, { id: 'b' }, { id: 'c' }] } }
+  const fin = (i) => ({ node: 'fanthr', event: 'item.finished', index: i, status: 'done' })
+  const snap = evs => {
+    const t = fanThreshold(def, fanItems(def, { status: 'running', output: null }, evs))
+    return `${t.results}/${t.total}${t.acked ? ' ack' : ''}`
+  }
+  const seq = [snap([]), snap([fin(0), fin(1)]), snap([fin(0), fin(1), fin(2)])]
+  check('threshold: exact ladder 0/3 -> 2/3 ack -> 3/3 ack', seq.join(' -> ') === '0/3 -> 2/3 ack -> 3/3 ack', seq.join(' -> '))
+  check('threshold: no fabricated intermediate exists at the ack moment',
+    fanThreshold(def, fanItems(def, { status: 'running', output: null }, [fin(0), fin(1)])).results === 2)
+  const tAck = fanThreshold(def, fanItems(def, { status: 'running', output: null }, [fin(0), fin(1)]))
+  check('threshold: fraction identical before and after acknowledgement (copy, not numerator)',
+    `${tAck.results}/${tAck.total}` === '2/3' && tAck.acked === true)
+  // implicit-majority law (runner: len//2+1 when no quorum declared)
+  const noq = { id: 'noq', fanout: { goal: 'g', items: [{}, {}, {}] } }
+  check('threshold: null quorum reads the engine implicit majority 2/3',
+    fanThreshold(noq, []).threshold === 2, JSON.stringify(fanThreshold(noq, [])))
+  // unknown stays unknown: items_from with zero rows has no total and no fraction
+  const fromd = { id: 'from', fanout: { goal: 'x {item}', items_from: 'plan.result' } }
+  const tu = fanThreshold(fromd, [])
+  check('threshold: unknown threshold remains unavailable (never invented)',
+    tu.total === null && tu.threshold === null && tu.acked === false, JSON.stringify(tu))
+}
+// 12. same-run identities: two runs sharing one node id must never share the
+//     fan expansion; the selectors are the single law the components call.
+{
+  const detail = { id: 'runA', graph: { nodes: [{ id: 'shared', fanout: { items: [{}] } }] }, nodes: {} }
+  check('identity: cross-run fanOpen resolves null even with the same node id',
+    fanOpenFor(detail, { runId: 'runB', nodeId: 'shared' }) === null)
+  check('identity: same-run fanOpen resolves the def',
+    fanOpenFor(detail, { runId: 'runA', nodeId: 'shared' })?.id === 'shared')
+  check('identity: cross-run pick resolves null',
+    fanPickedRow(detail, { id: 'shared', fanout: {} }, { runId: 'runB', nodeId: 'shared', index: 0 }, [{ index: 0, status: 'done' }]) === null)
+  check('identity: same-run pick resolves the row',
+    fanPickedRow(detail, { id: 'shared', fanout: {} }, { runId: 'runA', nodeId: 'shared', index: 0 }, [{ index: 0, status: 'done' }])?.status === 'done')
+  check('identity: runA pick never drives the runB card',
+    fanPickedRow({ ...detail, id: 'runB' }, { id: 'shared', fanout: {} }, { runId: 'runA', nodeId: 'shared', index: 0 }, [{ index: 0, status: 'done' }]) === null)
+}
+console.log(fails ? `\n${fails} FAILED` : '\nALL PASS (fanout normaliser + RC ch4: MF1 synthetic, exact census, threshold ladder, same-run identities, recorded-only projection)')
 process.exit(fails ? 1 : 0)

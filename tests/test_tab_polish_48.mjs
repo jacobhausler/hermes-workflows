@@ -401,16 +401,21 @@ const cardProps = (def, st, gate, selected = false, hovered = false) =>
 }
 
 // =================================================================================
-// 6. FanStack links: ghost links + a flowing connector only while LIVE
+// 6. RC ch4 (bd_2026-11-13-33h): ghost rings RETIRED — FanStack mounts static
+//    footer attempt ticks + the numeric badge; NO <animate> ever mounts inside
+//    the stack (the ghost links flowed on the rings; the rings are gone).
 // =================================================================================
 {
   const live = findBy(mod.FanStack({ count: 3, terminal: 1, children: 'x', live: true }), n => n.type === 'animate')
-  assert.ok(live.length >= 1, 'FanStack draws an animated link while the node is live')
-  const calm = findBy(mod.FanStack({ count: 3, terminal: 3, children: 'x', live: false }), n => n.type === 'animate')
-  assert.equal(calm.length, 0, 'terminal stack renders NO <animate> (the calm law reaches the stack)')
-  const flowDf = findBy(mod.FanStack({ count: 3, terminal: null, children: 'x', live: true, dataFlow: true }), n => n.type === 'animate')
-  assert.ok(flowDf.length >= 1, 'items_from stacks shimmer their links while the consumer runs')
-  assert.ok(/live|dataFlow/.test(decl('FanStack')), 'FanStack reads the live/dataFlow props (no second flow rule)')
+  assert.equal(live.length, 0, 'RC ch4: even a live-prop stack mounts no animation (ticks are static facts; flow lives only on edges)')
+  const ticked = mod.FanStack({ count: 4, terminal: 1, children: 'x' })
+  const ticks = findBy(ticked, n => n.props?.style?.width === 3 && n.props?.style?.height === 3)
+  assert.equal(ticks.length, 3, 'four items: three footer attempt ticks (cap 3, DESIGN ladder "short footer ticks")')
+  const expanded = findBy(mod.FanStack({ count: 4, expanded: true, children: 'x' }), n => n.props?.style?.width === 3)
+  assert.equal(expanded.length, 0, 'expanded: the real cards replace the ticks')
+  assert.ok(/attemptTicks/.test(decl('FanStack')), 'FanStack counts ticks through the exported attemptTicks law (one place)')
+  assert.ok(textOf(mod.FanStack({ count: 4, terminal: 2, children: 'x' })).includes('2/4'),
+    'the numeric terminal/count data the ghosts were decoration for stays on the badge')
 }
 
 // =================================================================================
@@ -552,9 +557,11 @@ const cardProps = (def, st, gate, selected = false, hovered = false) =>
   assert.ok(/animate-pulse/.test(dot.props.className), 'Dot(running) keeps the pulse')
 
   // F3 · dead arrowhead follows NODE_TONE.failed like the failed stroke does.
-  const mkEdges = table => new Function('jsx', 'jsxs', 'useId', 'NODE_TONE', 'edgeFlowPolicy',
+  // RC ch4: mkEdges also needs the route-identity pair (real cycle from the
+  // canary module, so the canary table probe still moves strokes+heads).
+  const mkEdges = table => new Function('jsx', 'jsxs', 'useId', 'NODE_TONE', 'edgeFlowPolicy', 'routeTint', 'ROUTE_TINTS',
     `${grabFn('routeEdge')}\n${grabFn('edgeTone')}\n${grabFn('nodeState')}\n${grabFn('Edges')}; return Edges`)(
-    jsx, jsxs, () => 'probe-0', table, mod.edgeFlowPolicy)
+    jsx, jsxs, () => 'probe-0', table, mod.edgeFlowPolicy, canary.routeTint, canary.ROUTE_TINTS)
   const deadEdges = mkEdges(C)({
     nodes: [{ id: 'a' }, { id: 'b', after: ['a'] }],
     rects: { a: { x: 0, y: 0, w: 100, h: 40 }, b: { x: 260, y: 0, w: 100, h: 40 } },
@@ -571,10 +578,13 @@ const cardProps = (def, st, gate, selected = false, hovered = false) =>
     'F3: selected NodeCard ring colour is the table value (color-mix of tone.color)')
 
   // F3 · MiniGraph open fan-out pill border rides the table too.
-  const openPillFn = new Function('jsx', 'jsxs', 'nodeState', 'states', 'gate', 'detail', 'fanOpen', 'Dot', 'MINI', 'NODE_TONE', 'FanStack',
+  // RC ch4: the pill's isOpen law is `openDef?.id === def.id` (openDef came
+  // through fanOpenFor, run-keyed) — the harness feeds the already-resolved
+  // openDef for the same run the pill strip belongs to.
+  const openPillFn = new Function('jsx', 'jsxs', 'nodeState', 'states', 'gate', 'detail', 'fanOpen', 'openDef', 'Dot', 'MINI', 'NODE_TONE', 'FanStack',
     `${grabFn('nodeState')}\n${constArrow('const pill = def =>')}\nreturn pill`)(
     jsx, jsxs, (def, st, g) => (st[def.id] || {}).status || 'pending', { gen: { status: 'running' } }, null, { id: 'r' },
-    { runId: 'r', nodeId: 'gen' }, () => jsx('i', {}), { pillH: 22 }, C, props => props.children)
+    { runId: 'r', nodeId: 'gen' }, { id: 'gen', fanout: {} }, () => jsx('i', {}), { pillH: 22 }, C, props => props.children)
   const openLabel = openPillFn({ id: 'gen', type: 'agent', fanout: { items: [1] } })
   const openBorder = findBy(openLabel, n => n.props?.style?.borderColor)[0]
   assert.ok(openBorder, 'F3: MiniGraph renders the open fan-out pill')
@@ -592,17 +602,18 @@ const cardProps = (def, st, gate, selected = false, hovered = false) =>
     const f4rects = { gen: { x: 0, y: 0, w: 100, h: 40 }, fan: { x: 260, y: 0, w: 100, h: 40 } }
     const E = mkEdges(C)
     const both = E({ nodes: f4nodes, rects: f4rects, states: { gen: { status: 'done' }, fan: { status: 'running' } }, dataEdges: [{ from: 'gen', to: 'fan' }] })
-    const paths = both.props.children.filter(n => n.type === 'path')
-    assert.equal(paths.length, 1, 'F4: after+items_from dedupes to ONE edge (no duplicate path)')
-    assert.equal(paths[0].key, 'gen->fan:data', 'F4: the kept edge is the DATA-classified one (dedup ORs the flags, never drops them)')
-    assert.equal(findBy(paths[0], n => n.type === 'animate').length, 1,
+    const groups = both.props.children.filter(n => n.type === 'g')
+    assert.equal(groups.length, 1, 'F4: after+items_from dedupes to ONE route (no duplicate group)')
+    assert.equal(groups[0].key, 'gen->fan:data', 'F4: the kept route is the DATA-classified one (dedup ORs the flags, never drops them)')
+    const f4paths = groups[0].props.children.filter(c => c.type === 'path')
+    assert.equal(findBy(f4paths[0], n => n.type === 'animate').length, 1,
       'F4: producer done -> consumer running renders the <animate> shimmer (the counterexample: base rendered ZERO)')
-    assert.equal(paths[0].props.stroke, CANARY.running.color, 'shimmer stroke rides the perturbed table')
-    assert.match(String(paths[0].props.markerEnd), /-live\)/, 'shimmer edge keeps the live marker')
+    assert.equal(f4paths[0].props.stroke, CANARY.running.color, 'shimmer stroke rides the perturbed table')
+    assert.match(String(f4paths[0].props.markerEnd), /-live\)/, 'shimmer edge keeps the live marker')
     const plain = E({ nodes: f4nodes, rects: f4rects, states: { gen: { status: 'done' }, fan: { status: 'running' } }, dataEdges: [] })
-    const plainPaths = plain.props.children.filter(n => n.type === 'path')
-    assert.equal(plainPaths[0].key, 'gen->fan', 'control: without the items_from link the edge is the plain after-edge')
-    assert.equal(findBy(plainPaths[0], n => n.type === 'animate').length, 0, 'control: a plain done->running edge stays calm (classification is what brings the shimmer)')
+    const plainGroups = plain.props.children.filter(n => n.type === 'g')
+    assert.equal(plainGroups[0].key, 'gen->fan', 'control: without the items_from link the route is the plain after-edge')
+    assert.equal(findBy(plainGroups[0].props.children.filter(c => c.type === 'path')[0], n => n.type === 'animate').length, 0, 'control: a plain done->running route stays calm (classification is what brings the shimmer)')
   }
 
   // F5 · diamond (ok:done, bad:failed, pending join after BOTH): the OK→join
@@ -619,38 +630,40 @@ const cardProps = (def, st, gate, selected = false, hovered = false) =>
       join: { x: 260, y: 60, w: 100, h: 40 }
     }
     const dg = mkEdges(C)({ nodes: dnodes, rects: drects, states: { ok: { status: 'done' }, bad: { status: 'failed' }, join: {} } })
-    const dpaths = dg.props.children.filter(n => n.type === 'path')
-    const okEdge = dpaths.find(n => n.key === 'ok->join')
-    const badEdge = dpaths.find(n => n.key === 'bad->join')
-    assert.ok(okEdge && badEdge, 'F5: diamond renders both feeding edges')
-    for (const [label, e] of [['ok->join', okEdge], ['bad->join', badEdge]]) {
-      assert.equal(e.props.strokeDasharray, '3 3', `F5: ${label} carries the dead dash`)
-      assert.match(String(e.props.markerEnd), /-dead\)/, `F5: ${label} carries the dead marker`)
-      assert.equal(findBy(e, n => n.type === 'animate').length, 0, `F5: ${label} never animates`)
+    const dgroups = dg.props.children.filter(n => n.type === 'g')
+    const okEdge = dgroups.find(n => n.key === 'ok->join')
+    const badEdge = dgroups.find(n => n.key === 'bad->join')
+    assert.ok(okEdge && badEdge, 'F5: diamond renders both feeding routes')
+    for (const [label, g] of [['ok->join', okEdge], ['bad->join', badEdge]]) {
+      const sp = g.props.children.filter(c => c.type === 'path')[0]
+      assert.equal(sp.props.strokeDasharray, '3 3', `F5: ${label} carries the dead dash`)
+      assert.match(String(sp.props.markerEnd), /-dead\)/, `F5: ${label} carries the dead marker`)
+      assert.equal(findBy(sp, n => n.type === 'animate').length, 0, `F5: ${label} never animates`)
     }
-    // control: with no failed sibling the ok->join edge is a calm ready edge
+    // control: with no failed sibling the ok->join route is a calm ready route
     const ready = mkEdges(C)({ nodes: dnodes, rects: drects, states: { ok: { status: 'done' }, bad: { status: 'done' }, join: {} } })
-    const readyOk = ready.props.children.filter(n => n.type === 'path').find(n => n.key === 'ok->join')
-    assert.notEqual(readyOk.props.strokeDasharray, '3 3', 'F5 control: a READY join does not dead-dash (readiness, not pessimism)')
+    const readyOk = ready.props.children.filter(n => n.type === 'g').find(n => n.key === 'ok->join')
+    assert.notEqual(readyOk.props.children.filter(c => c.type === 'path')[0].props.strokeDasharray, '3 3', 'F5 control: a READY join does not dead-dash (readiness, not pessimism)')
   }
 
-  // F5 · FanStack consumes the EXPORTED policy — deny all flow and a LIVE
-  // three-card stack renders ZERO animations (base rendered two).
+  // F5 superseded by RC ch4 (bd_2026-11-13-33h): FanStack's policy mapping
+  // retired WITH the ghost links. The stack is static by construction —
+  // footer attempt ticks (count law: min(count-1, 3), none while expanded)
+  // plus the untouched numeric badge. No <animate> inside the stack in ANY
+  // state; flow lives only on Edges via edgeFlowPolicy (sections above).
   {
-    const mkStack = policy => new Function('jsx', 'jsxs', 'NODE_TONE', 'edgeFlowPolicy',
-      `${grabFn('FanStack')}; return FanStack`)(jsx, jsxs, C, policy)
-    const denyAll = () => ({ flow: false, shimmer: false, dead: false, dash: null })
-    const starved = mkStack(denyAll)({ count: 3, terminal: 1, children: 'x', live: true })
+    const ticksOf = t => findBy(t, n => n.props?.style?.width === 3 && n.props?.style?.height === 3).length
+    const starved = canary.FanStack({ count: 3, terminal: 1, children: 'x', live: true })
     assert.equal(findBy(starved, n => n.type === 'animate').length, 0,
-      'F5: with the shared policy denying flow, FanStack mounts NO animation (no second decision left in the stack)')
-    const normal = mkStack(mod.edgeFlowPolicy)({ count: 3, terminal: 1, children: 'x', live: true })
-    assert.ok(findBy(normal, n => n.type === 'animate').length >= 1, 'live stack under the REAL policy still flows')
-    const df = findBy(mkStack(mod.edgeFlowPolicy)({ count: 3, terminal: null, children: 'x', live: true, dataFlow: true }), n => n.type === 'animate')
-    assert.ok(df.length >= 1, 'dataFlow stack shimmers under the real policy')
-    const dead = mkStack(mod.edgeFlowPolicy)({ count: 3, terminal: 3, children: 'x', live: false })
+      'RC ch4: a LIVE stack mounts NO animation — the second flow decision is gone with the rings')
+    assert.equal(ticksOf(starved), 2, 'live stack still shows the fan count statically: two ticks for three items')
+    const df = canary.FanStack({ count: 3, terminal: null, children: 'x', live: true, dataFlow: true })
+    assert.equal(findBy(df, n => n.type === 'animate').length, 0, 'RC ch4: dataFlow props are inert on the stack')
+    const dead = canary.FanStack({ count: 3, terminal: 3, children: 'x' })
     assert.equal(findBy(dead, n => n.type === 'animate').length, 0, 'terminal stack renders none (calm law)')
+    assert.ok(textOf(dead).includes('3/3'), 'the numeric terminal count the ghosts decorated stays on the badge')
   }
 }
 
-console.log('ALL PASS test_tab_polish_48 (NODE_TONE coverage + calm terminals, pill/edge/timeline/pill-graph parity, flow & items_from shimmer + readiness dead-dash, NodeCard glow/gate-nag/breathe/hover/select, hook order, FanStack links, hoisted reduced-motion style, gradient header, banned shapes, F3/F4/F5 rendered-tree perturbation probes)')
+console.log('ALL PASS test_tab_polish_48 (NODE_TONE coverage + calm terminals, pill/edge/timeline/pill-graph parity, flow & items_from shimmer + readiness dead-dash, NodeCard glow/gate-nag/breathe/hover/select, hook order, RC attempt-tick stacks (ghost rings retired, no stack animation in any state), hoisted reduced-motion style, gradient header, banned shapes, F3/F4/F5 rendered-tree perturbation probes on route groups)')
 rmSync(tmp, { recursive: true, force: true })

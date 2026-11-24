@@ -209,3 +209,30 @@ that glob, so both are declared in `pack.py` `SOURCE_ONLY_TESTS` (with
 reason) and mirrored in `tests/test_package_source_only_756.py` — the exact
 est-4vnq finding-4 shape: a shipped test executing an unpackaged helper
 dies at an unpacked root.
+
+## The `graph` case (bd_2026-11-13-33h, RC ch4 visual grammar)
+
+`node tests/proof-harness/capture.mjs --case graph --out DIR` proves the shared
+graph grammar on every expansion mount of the same candidate bytes:
+
+* seeds — three, kinds stated: one `door_run` engine seed (quorum-1 fan-out
+  over three items, zero-token fake children through `tests/fake_hermes.py`;
+  the strip must render the engine's own ENDED census — the driver computes
+  the expected `fanSummary` mirror from the committed `all_results` and
+  refuses if the DOM copy disagrees); one `historical_snapshot` (the pinned
+  wave6-council shelf fixture, sha256-pinned file, read-only, never
+  relaunched — `seed_graph.py` refuses on digest mismatch); one CLEARLY
+  SYNTHETIC MF1 trio (done parent, raw `partial` + `cancelled` child rows,
+  stamped with REAL `wfcommon.efp` so `run_state` reads `done` for the right
+  reason — `SYNTHETIC.txt` in the run dir says so in so many words);
+* frames — pane GraphView and fan expansion, one assistant turn echoing all
+  three directives, in-chat child projection (10 identities / 14 route
+  groups / 28 endpoint echoes are asserted against the pinned law; strict
+  crossings are MEASURED at the current geometry and reported as a count of
+  THAT geometry only — never transplanted), the threshold ladder on engine
+  records, the MF1 item detail (child raw status survives independently of
+  the parent aggregate; footer attempt ticks, ghost rings retired), phone
+  metrics 390x844@2 and sparse 2560x1440 (window bounds, with an honest
+  device-metrics fallback recorded in `identity.graph_measurement`);
+* the frozen shelf fixture is never rewritten to fit the audit — the MF1
+  rows ride the separate synthetic run.

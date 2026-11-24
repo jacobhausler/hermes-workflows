@@ -27,9 +27,9 @@ const { depthMap, columnGroups, bandRows, Edges, CARD_W, MINI } = new Function(
   'jsx', 'jsxs', 'useId',
   [constGrab('EDGE_TONE'),
     `const NODE_TONE = Object.fromEntries(Object.entries(EDGE_TONE).map(([k,v]) => [k, { color:v, borderColor:v, shadow:null, shadowHover:null, pulseMs:null, calm:true, ui:'muted', gate:null, breathe:null }]));\nNODE_TONE.waiting = NODE_TONE.pending;`,
-    constGrab('CARD_W'), constGrab('MINI'),
+    constGrab('CARD_W'), constGrab('MINI'), constGrab('ROUTE_TINTS'),
     grab('edgeFlowPolicy'), grab('depthMap'), grab('columnGroups'), grab('bandRows'),
-    grab('edgeTone'), grab('nodeState'), grab('routeEdge'), grab('Edges')].join('\n')
+    grab('edgeTone'), grab('nodeState'), grab('routeEdge'), grab('routeTint'), grab('Edges')].join('\n')
   + '; return { depthMap, columnGroups, bandRows, Edges, CARD_W, MINI }'
 )(jsx, jsx, () => `t-${++instance}`)
 
@@ -80,10 +80,15 @@ function checkWrap(defs, canvasW, mini, label) {
   const { bands, boxes } = layout(defs, canvasW, mini)
   const states = Object.fromEntries(defs.map(n => [n.id, { status: 'done' }]))
   const svg = Edges({ nodes: defs, rects: boxes, states })
-  const paths = (svg?.props.children || []).filter(x => x && x.type === 'path')
-  assert.equal(paths.length, defs.reduce((n, d) => n + (d.after?.length || 0), 0), `${label}: every dependency routed`)
+  // RC ch4: Edges renders one <g> per route (state path + static tint
+  // overlay + endpoint echo rings + title). The geometry contract runs on the
+  // STATE path inside each group; the group key keeps the a->b identity.
+  const groups = (svg?.props.children || []).filter(x => x && x.type === 'g')
+  assert.equal(groups.length, defs.reduce((n, d) => n + (d.after?.length || 0), 0), `${label}: every dependency routed`)
+  const paths = groups.map(g => g.props.children.filter(c => c && c.type === 'path')).map((ps, gi) => ({ key: groups[gi].key, props: ps[0].props, all: ps }))
   const ports = {}
   for (const path of paths) {
+    assert.equal(path.all.length, 2, `${label}: ${path.key} carries a state stroke AND a static identity overlay`)
     const [a, b] = path.key.split('->'), p = points(path.props.d), from = boxes[a], to = boxes[b]
     assert.equal(p[0][0], from.x + from.w); assert.equal(p.at(-1)[0], to.x)
     assert.ok(p.every(([x, y]) => Number.isFinite(x) && Number.isFinite(y) && x >= 0 && y >= 0), `${label}: finite path`)

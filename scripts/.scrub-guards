@@ -246,3 +246,9 @@ tests/proof-harness/captured/bd_2026-11-13-iqf/set-2/contents/04-directive-card.
 tests/proof-harness/captured/bd_2026-11-13-iqf/set-2/identity.json
 tests/proof-harness/captured/bd_2026-11-13-iqf/set-2/report.json
 tests/proof-harness/captured/bd_2026-11-13-iqf/set-2/manifest.json
+# ---- bd_2026-11-13-33h: ui2-proof historical_snapshot fixture identity ----
+# The graph case's pinned-fixture row must name the estate fixture path
+# VERBATIM: the driver refuses the capture unless the on-disk bytes match the
+# sha256 pin, so placeholder-izing the path would make the real-app proof
+# point at nothing. One anchored row (the fixture line inside cases.json).
+regex:"fixture": "[^"]*ui2/synthesis/fixtures-real/

@@ -167,6 +167,10 @@ function fanItems(def, st, events) {
     const goal = item && typeof item === 'object' && typeof item.goal === 'string' ? item.goal : fo.goal ? renderGoal(fo.goal, item, i) : ''
     rows.push({
       index: i, status, errorClass: ec0, refusal: rf0, item, goal,
+      // RC ch4 (ui2 FINAL): projection provenance — a row is a COMMITTED child
+      // record (all_results / per-item records), not a live-event guess. Only
+      // recorded rows project into the graph; live rows stay chips.
+      recorded: !!rec,
       label: itemLabel(item, i),
       output: rec && rec.status === 'done' ? rec.output : (recs == null && out && Array.isArray(out.items) && st?.status === 'done' ? out.items[i] : undefined),
       error: rec?.error || ev?.error || null,
@@ -198,11 +202,15 @@ function renderGoal(tmpl, item, i) {
 // bucket — never folded into failed. The key rides the counts ONLY when
 // non-zero (the ratified no-cancelled fanCounts shape stays byte-identical for
 // every contract pin that deep-equals it).
+// RC ch4 (MF1 law): 'partial' joins the same way — its OWN bucket, terminal
+// (the child finished) yet NEVER counted as a success. The exact ended census
+// is the one fraction the surface may print; a raw child PARTIAL is spelled
+// out by the bucket suffix, not smoothed into the parent's verdict.
 const fanCounts = rows => {
   const counts = { total: rows.length, done: 0, failed: 0, running: 0, skipped: 0, stopped: 0, pending: 0, terminal: 0 }
   for (const row of rows) {
     const status = row.status
-    if (status === 'done' || status === 'failed' || status === 'skipped' || status === 'stopped' || status === 'cancelled') {
+    if (status === 'done' || status === 'failed' || status === 'skipped' || status === 'stopped' || status === 'cancelled' || status === 'partial') {
       counts[status] = (counts[status] || 0) + 1
       counts.terminal++
     } else if (status === 'running' || status === 'pending') {
@@ -212,7 +220,75 @@ const fanCounts = rows => {
   return counts
 }
 
-const fanSummary = c => `${c.terminal}/${c.total} terminal${c.skipped ? ` ·${c.skipped} skipped` : ''}${c.stopped ? ` ·${c.stopped} stopped` : ''}${c.cancelled ? ` ·${c.cancelled} cancelled` : ''}${c.running ? ` ·${c.running}▶` : ''}${c.failed ? `, ${c.failed} failed` : ''}`
+const fanSummary = c => `${c.terminal}/${c.total} terminal${c.skipped ? ` ·${c.skipped} skipped` : ''}${c.stopped ? ` ·${c.stopped} stopped` : ''}${c.cancelled ? ` ·${c.cancelled} cancelled` : ''}${c.partial ? ` ·${c.partial} partial` : ''}${c.running ? ` ·${c.running}▶` : ''}${c.failed ? `, ${c.failed} failed` : ''}`
+
+// RC ch4 (threshold ladder): the quorum progress model — pure, exported, no
+// DOM. `results` counts COMMITTED DONE results (a cancelled straggler or a
+// partial harvest is census, not a result); `threshold` is the declared quorum,
+// else the engine's implicit majority over a KNOWN item count — and stays null
+// (unknown) until the item count exists. `acked` is a separate static state,
+// never a numerator tweak: the fraction reads the same before and after.
+// Copy law: "2/3 results" / "Enough results to continue" — never "quorum".
+export function fanThreshold(def, rows) {
+  const c = fanCounts(rows || [])
+  const defN = Array.isArray(def?.fanout?.items) ? def.fanout.items.length : null
+  const total = c.total || defN || null
+  const declared = def?.fanout && Number.isFinite(def.fanout.quorum) && def.fanout.quorum > 0 ? def.fanout.quorum : null
+  const threshold = declared != null ? declared : (total ? Math.floor(total / 2) + 1 : null)
+  return { total, results: c.done, threshold, acked: threshold != null && c.done >= threshold }
+}
+
+// RC ch4 (same-run identities): the fan open/pick guards as ONE law, so two
+// runs carrying the same node id can never share an expansion. Keyed atoms
+// ({runId, nodeId[, index]}); the selectors refuse a cross-run match.
+export function fanOpenFor(detail, fanOpen) {
+  if (!detail || !fanOpen || fanOpen.runId !== detail.id) return null
+  return (detail.graph?.nodes || []).find(n => n.id === fanOpen.nodeId && n.fanout) || null
+}
+
+export function fanPickedRow(detail, openDef, fanItem, rows) {
+  if (!detail || !openDef || !fanItem) return null
+  if (fanItem.runId !== detail.id || fanItem.nodeId !== openDef.id) return null
+  return (rows || []).find(r => r.index === fanItem.index) || null
+}
+
+// RC ch4 (child projection): fan-out child RECORDS project into the graph as
+// their own node identities (Council law: 10 identities, 14 projected
+// dependencies from 6 committed child records). Pure + exported so the unit
+// test pins the topology arithmetic without a DOM.
+//   def.id -> def.id.i (after: [def.id]) for every RECORDED row
+//   every dependent's after: [.., def.id, ..] rewrites to the child identities
+//   the projected parent keeps its own state (the fanout aggregate); each
+//   child pill/card carries its RAW row status — never borrowed from the
+//   parent's verdict (MF1).
+// statesByNode maps parent nodeId -> rows (already through fanItems).
+export function fanProjection(detail, statesByNode) {
+  const graph = detail?.graph?.nodes || []
+  const states = { ...(detail?.nodes || {}) }
+  const rowsFor = id => (statesByNode && (statesByNode.get?.(id) ?? statesByNode[id])) || null
+  let projected = false
+  let nodes = graph.map(n => ({ ...n }))
+  const childNodes = []
+  for (const n of nodes) {
+    const rows = n.fanout ? rowsFor(n.id) : null
+    const kids = (rows || []).filter(r => r.recorded)
+    if (!kids.length) continue
+    projected = true
+    for (const r of kids) {
+      childNodes.push({ id: `${n.id}.${r.index}`, after: [n.id], _fanChild: { parent: n.id, row: r } })
+      states[`${n.id}.${r.index}`] = { status: r.status }
+    }
+  }
+  if (!projected) return { nodes: graph, states: detail?.nodes || {}, childRows: new Map() }
+  const parentIds = new Set(childNodes.map(c => c._fanChild.parent))
+  nodes = nodes.map(n => ({
+    ...n,
+    after: n.after?.some(a => parentIds.has(a))
+      ? [...new Set(n.after.flatMap(a => parentIds.has(a) ? graph.some(g => g.id === a) ? childNodes.filter(c => c._fanChild.parent === a).map(c => c.id) : [a] : [a]))]
+      : n.after
+  }))
+  return { nodes: [...nodes, ...childNodes], states, childRows: statesByNode }
+}
 
 // ---- vitals: dense spend + liveness ----------------------------------------------
 // Backend joins each child's state.db sessions row (title = wf:<run>:<node>[:<i>]:<efp8>)
@@ -673,9 +749,11 @@ function DirectiveBody({ id }) {
   const start = parseTime(data.started)
   const end = TERMINAL.has(data.status) ? parseTime(data.updated) : Date.now()
   const nodes = data.graph?.nodes || []
-  const openDef = fanOpen && fanOpen.runId === data.id ? nodes.find(n => n.id === fanOpen.nodeId && n.fanout) : null
+  // RC ch4 (same-run identities): one selector law for the fan open/pick
+  // guards — a fanOpen/fanItem from ANOTHER run can never drive this card.
+  const openDef = fanOpenFor(data, fanOpen)
   const rows = openDef ? fanItems(openDef, (data.nodes || {})[openDef.id], data.events) : null
-  const picked = fanItem && fanItem.runId === data.id && openDef && fanItem.nodeId === openDef.id ? rows?.find(r => r.index === fanItem.index) : null
+  const picked = fanPickedRow(data, openDef, fanItem, rows)
   const headerRows = inlineHeader(data, start ? end - start : null)
   return jsxs('span', {
     style: frame,
@@ -704,9 +782,15 @@ function DirectiveBody({ id }) {
 }
 
 /** Inline fan-out expansion under the mini-DAG: item chips, then the picked
- *  item's detail. Clicks inside never bubble to the card's navigate. */
+ *  item's detail. Clicks inside never bubble to the card's navigate.
+ *  RC ch4: the header labels the fraction as the FANOUT AGGREGATE (MF1 fix —
+ *  an aggregate badge never poses as the child's verdict) and the threshold
+ *  ladder rides its own row: exact `${results}/${total} results` + threshold
+ *  tick, never a tweened numerator, "quorum" never surfaces as copy. */
 function FanStrip({ runId, def, rows, picked }) {
   const c = fanCounts(rows)
+  const t = fanThreshold(def, rows)
+  const known = t.total && t.threshold != null
   return jsxs('span', {
     onClick: e => e.stopPropagation(),
     style: { display: 'flex', flexDirection: 'column', gap: 6, cursor: 'default', borderTop: '1px solid var(--ui-stroke-secondary)', paddingTop: 6, maxWidth: 520 },
@@ -715,6 +799,7 @@ function FanStrip({ runId, def, rows, picked }) {
         className: 'flex items-center gap-2 text-[0.6875rem] text-(--ui-text-tertiary)',
         children: [
           jsx('span', { className: 'font-medium text-(--ui-text-secondary)', children: def.id }),
+          jsx('span', { children: 'fanout aggregate' }),
           jsx('span', { children: fanSummary(c) }),
           jsx('button', {
             type: 'button', 'aria-label': 'Collapse', style: { marginLeft: 'auto', cursor: 'pointer', opacity: 0.8 },
@@ -722,6 +807,29 @@ function FanStrip({ runId, def, rows, picked }) {
           })
         ]
       }),
+      known ? jsxs('span', {
+        className: 'flex items-center gap-2 text-[0.6875rem]',
+        style: { color: 'var(--ui-text-tertiary)', fontVariantNumeric: 'tabular-nums' },
+        children: [
+          // Threshold tick law (DESIGN): discrete fill at results/total, a
+          // 2px solid currentColor tick at threshold/total. No intermediate
+          // values exist between polls — the fill IS the integer count.
+          jsx('span', {
+            'aria-hidden': true,
+            style: { position: 'relative', display: 'inline-block', width: 120, height: 4, background: 'var(--ui-stroke-secondary)', borderRadius: 2 },
+            children: jsxs(Fragment, { children: [
+              jsx('span', { style: { position: 'absolute', left: 0, top: 0, bottom: 0, width: `${(100 * t.results) / t.total}%`, background: 'var(--ui-accent)', borderRadius: 2 } }, 'fill'),
+              jsx('span', {
+                title: `threshold ${t.threshold}/${t.total}`,
+                style: { position: 'absolute', left: `${(100 * t.threshold) / t.total}%`, top: -1, bottom: -1, width: 2, background: 'currentColor' }
+              }, 'tick')
+            ] })
+          }),
+          jsx('span', { children: `${t.results}/${t.total} results` }),
+          t.acked ? jsx('span', { style: { color: 'var(--ui-success, var(--ui-accent))' }, children: 'Enough results to continue' }) : null,
+          t.acked && t.results < t.total ? jsx('span', { children: 'Any late results will be added as they arrive.' }) : null
+        ]
+      }) : null,
       jsx(ItemChips, { runId, nodeId: def.id, rows, picked: picked?.index, size: 'sm' }),
       picked ? jsx(ItemDetail, { row: picked, compact: true }) : null
     ]
@@ -731,17 +839,31 @@ function FanStrip({ runId, def, rows, picked }) {
 // Compact DAG for the transcript card: same band-wrap layout + edge tones as
 // the page, pills instead of cards. Pills are measured after mount AND every
 // column is placed by bandRows, so it shares the page's no-clip no-scroll law.
+// RC ch4 (shared grammar, ported ONCE): this one function serves every
+// expansion mount (directive card, rail strip, tray accordion) — route
+// identity, echoes and attempt ticks arrive here for all of them together.
+// When this run's open fan has COMMITTED child records they project as their
+// own pill identities (`node.i`) carrying their RAW status (Council law:
+// ten identities, fourteen projected dependencies) — the parent pill keeps
+// the fanout aggregate, never the reverse (MF1).
 const CARD_W = 168
 const MINI = { pillW: 84, pillH: 20, colGap: 34, rowGap: 6, pad: 4 }
 export function MiniGraph({ detail }) {
   const ref = useRef(null)
-  const nodes = detail.graph?.nodes || []
-  const states = detail.nodes || {}
   const gate = detail.gate
+  const fanOpen = useValue($fanOpen)
+  // Same-run identity first (fanOpenFor), then the projection over THIS run's
+  // open fan only. No committed records => the graph renders unchanged.
+  const openDef = fanOpenFor(detail, fanOpen)
+  const openRows = openDef ? fanItems(openDef, (detail.nodes || {})[openDef.id], detail.events) : null
+  const proj = openDef && openRows?.some(r => r.recorded)
+    ? fanProjection(detail, { [openDef.id]: openRows })
+    : { nodes: detail.graph?.nodes || [], states: detail.nodes || {} }
+  const nodes = proj.nodes
+  const states = proj.states
   const stateKey = nodes.map(n => `${n.id}:${states[n.id]?.status || ''}`).join('|')
   const rects = useCardRects(ref, [detail.id, stateKey, nodes.length])
   const canvasW = useCanvasWidth(ref, [detail.id, nodes.length])
-  const fanOpen = useValue($fanOpen)
   const pill = def => {
     const st = nodeState(def, states, gate)
     const isGate = def.type === 'gate'
@@ -754,7 +876,7 @@ export function MiniGraph({ detail }) {
     // read-once: the guard and the interpolation below share this binding
     const apiCalls = nstate ? nstate.metrics?.api_calls : null
     const items = out && Array.isArray(out.all_results) ? out.all_results.length : out && Array.isArray(out.items) ? out.items.length : Array.isArray(fo?.items) ? fo.items.length : null
-    const isOpen = !!fo && fanOpen && fanOpen.runId === detail.id && fanOpen.nodeId === def.id
+    const isOpen = !!fo && openDef?.id === def.id
     const label = jsxs('span', {
       'data-node': def.id,
       title: fo ? (isOpen ? 'Collapse items' : 'Fan out: show items') : undefined,
@@ -1893,6 +2015,23 @@ export function runHeaderModel(run) {
   }
 }
 
+// RC ch4 (route identity): every route carries a static identity stroke, a
+// static target arrow (the existing marker) and matching open-ring endpoint
+// echoes. Six deterministic palette aliases cycle by dependency order; they
+// REUSE host palette tokens (--ui-purple/-cyan/-orange/-green/-yellow are the
+// host's own tokens — no new colors, no registrations here). Tint means route
+// IDENTITY, never execution state: the state stroke, dashes and markers are
+// untouched underneath. This is a bounded port over the incumbent measured-rect
+// cubic router (routeEdge), NOT an arbitrary-DAG equivalence claim.
+export function routeTint(i) {
+  const t = i % ROUTE_TINTS.length
+  return ROUTE_TINTS[(t + ROUTE_TINTS.length) % ROUTE_TINTS.length]
+}
+const ROUTE_TINTS = [
+  'var(--ui-accent)', 'var(--ui-purple)', 'var(--ui-cyan)',
+  'var(--ui-orange)', 'var(--ui-green)', 'var(--ui-yellow)'
+]
+
 function edgeTone(upState, downState) {
   // #48: reads the ONE tone table (colours are EDGE_TONE's by construction —
   // NODE_TONE extracts them). Same decision tree as before, no new palette.
@@ -2101,7 +2240,7 @@ function Edges({ nodes, rects, states, gate, dataEdges = [] }) {
   spread('from', 'to', (rec, r, y) => { rec.x1 = r.x + r.w; rec.y1 = y })
   spread('to', 'from', (rec, r, y) => { rec.x2 = r.x; rec.y2 = y })
   const paths = []
-  for (const e of edges) {
+  edges.forEach((e, i) => {
     const { x1, y1, x2, y2 } = port.get(e)
     const up = states[e.from]?.status || 'pending'
     const down = nodeState(nodes.find(n => n.id === e.to), states, gate)
@@ -2112,22 +2251,42 @@ function Edges({ nodes, rects, states, gate, dataEdges = [] }) {
     // failed sibling doomed reads dead on EVERY feeding edge, not just the
     // one leaving the failure.
     const policy = edgeFlowPolicy(up, down, e.data, canRunNow(nodes.find(n => n.id === e.to)))
+    const d = routeEdge(x1, y1, x2, y2, rects, [e.from, e.to])
+    // RC ch4 (identity layer): one deterministic tint per route, cycling by
+    // dependency order. The identity stroke rides the SAME routed d as a
+    // static 0.8px dashed overlay; matching open-ring echoes mark both ports;
+    // the state stroke underneath keeps every incumbent dash/marker law.
+    // Nothing here claims a general DAG router or junction semantics.
+    const tint = routeTint(i)
     paths.push(
-      jsx('path', {
-        d: routeEdge(x1, y1, x2, y2, rects, [e.from, e.to]),
-        fill: 'none', stroke: policy.shimmer ? NODE_TONE.running.color : tone, strokeWidth: 1.5,
-        strokeDasharray: policy.dash ?? undefined,
-        markerEnd: `url(#${mid}-${policy.dead ? 'dead' : 'live'})`,
-        opacity: up === 'pending' && !e.data ? 0.55 : 0.95,
-        // SMIL candy: flowing while live (inline <animate>, no Tailwind
-        // animate-*); terminal states never get an <animate> child — the calm
-        // law is enforced inside edgeFlowPolicy (flow/shimmer false once calm).
-        children: policy.flow || policy.shimmer
-          ? jsx('animate', { attributeName: 'stroke-dashoffset', from: 10, to: 0, dur: '0.9s', repeatCount: 'indefinite' })
-          : undefined
+      jsxs('g', {
+        children: [
+          jsx('title', {
+            children: `${e.from} → ${e.to} · ${up} → ${down}${e.data ? ' · data flow' : ''}${policy.dead ? ' · unavailable' : ''}`
+          }, 't'),
+          jsx('path', {
+            d,
+            fill: 'none', stroke: policy.shimmer ? NODE_TONE.running.color : tone, strokeWidth: 1.5,
+            strokeDasharray: policy.dash ?? undefined,
+            markerEnd: `url(#${mid}-${policy.dead ? 'dead' : 'live'})`,
+            opacity: up === 'pending' && !e.data ? 0.55 : 0.95,
+            // SMIL candy: flowing while live (inline <animate>, no Tailwind
+            // animate-*); terminal states never get an <animate> child — the calm
+            // law is enforced inside edgeFlowPolicy (flow/shimmer false once calm).
+            children: policy.flow || policy.shimmer
+              ? jsx('animate', { attributeName: 'stroke-dashoffset', from: 10, to: 0, dur: '0.9s', repeatCount: 'indefinite' })
+              : undefined
+          }, 'state'),
+          jsx('path', {
+            d, fill: 'none', stroke: tint, strokeWidth: 0.8, strokeDasharray: '2 3', opacity: 0.85
+          }, 'tint'),
+          // Endpoint echoes: open rings, same tint, at the exact ports.
+          jsx('circle', { cx: x1, cy: y1, r: 3, fill: 'none', stroke: tint, strokeWidth: 1 }, 'echo-src'),
+          jsx('circle', { cx: x2, cy: y2, r: 3, fill: 'none', stroke: tint, strokeWidth: 1 }, 'echo-dst')
+        ]
       }, `${e.from}->${e.to}${e.data ? ':data' : ''}`)
     )
-  }
+  })
   if (!paths.length) return null
   return jsxs('svg', {
     className: 'pointer-events-none absolute inset-0 h-full w-full overflow-visible',
@@ -2148,62 +2307,42 @@ function Edges({ nodes, rects, states, gate, dataEdges = [] }) {
   })
 }
 
-/** Fan-out: the real card in front, N-1 ghost offsets behind + an items badge.
- *  THE one fan-stack (O4): the page canvas uses the card geometry (size 6,
- *  rounded-md, badge); MiniGraph's pills reuse it with size 2 and the pill
- *  outline tone (pill:true, badge:false — the pill carries its own ×N count).
- *  Expanded (page canvas): the badge becomes a chevron toggle that collapses the
- *  stack back, and the per-item cards render as its sibling (see GraphView).
- *  #48: while `live` (node or an item still running) the ghost links FLOW — a
- *  dash-marching connector (SMIL <animate>, the same pattern as the edges)
- *  stitches each ghost to the front card; a dataFlow stack shimmers too. The
- *  calm law holds: no `live`, no <animate> child ever mounts. */
-export function FanStack({ children, count, terminal, expanded, onToggleExpand, size = 6, pill = false, tone, live = false, dataFlow = false }) {
-  const ghosts = expanded ? 0 : Math.min(Math.max(count - 1, 0), 3)
-  // F5 (#48 deep review): ONE flow/dead decision. The stack no longer
-  // re-decides `flowing = live && ghosts > 0` for itself — the flow/shimmer
-  // answer comes from the SAME exported policy the Edges render reads. A live
-  // stack presents as a running edge; a dataFlow stack as a data edge whose
-  // consumer runs; a terminal stack as a done→done calm edge. Geometry (the
-  // ghosts, offsets, badges) stays local here.
-  const policy = edgeFlowPolicy(live ? 'running' : 'done', live ? 'running' : 'done', dataFlow)
-  const flowing = (policy.flow || policy.shimmer) && ghosts > 0
-  const linkTone = dataFlow ? (NODE_TONE.running || NODE_TONE.pending).color : (tone || (NODE_TONE.pending || {}).color)
+/** Fan-out: the real card in front + the numeric items badge.
+ *  THE one fan-stack (O4): the page canvas uses the card geometry (badge);
+ *  MiniGraph's pills reuse it in pill mode (the pill carries its own ×N count).
+ *  RC ch4 (ui2 FINAL incumbent-replacement ledger): the ghost rings/offset
+ *  cards are RETIRED — footer ATTEMPT TICKS (3px squares, DESIGN ladder
+ *  "Attempts: short footer ticks") replace ghost multiplication, not graph
+ *  membership. The numeric terminal/count data the ghosts were decoration for
+ *  stays exactly where it was (badge `${terminal}/${count}` / `×${count}`).
+ *  Calm by construction: the stack mounts no <animate> in any state — flow
+ *  lives only on edges via edgeFlowPolicy (the retired FanStack mapping was
+ *  inferred liveness; ticks are static facts). Expanded: no ticks (the real
+ *  cards are right there). */
+const ATTEMPT_TICK = { size: 3, gap: 2, max: 3 }
+export function attemptTicks(count) {
+  return Math.min(Math.max((count | 0) - 1, 0), ATTEMPT_TICK.max)
+}
+export function FanStack({ children, count, terminal, expanded, onToggleExpand, size = 6, pill = false, tone }) {
+  const ticks = expanded ? 0 : attemptTicks(count)
+  const tickTone = pill ? (tone || (NODE_TONE.pending || {}).color) : EDGE_TONE.skipped
   return jsxs('div', {
     className: 'relative',
-    style: { paddingRight: ghosts * size, paddingBottom: ghosts * size },
+    style: { paddingBottom: ATTEMPT_TICK.size + 3 },
     children: [
-      // Ghost links: one short dash-marching connector per ghost, corner to
-      // corner, only while the stack is live (terminal stacks render none).
-      // The dash itself is the policy's — one decision, two readers.
-      flowing
-        ? jsxs('svg', {
+      jsx('div', { className: 'relative', style: { zIndex: 1 }, children }),
+      ticks
+        ? jsx('div', {
             'aria-hidden': true,
-            className: 'pointer-events-none absolute inset-0 h-full w-full overflow-visible',
-            children: Array.from({ length: ghosts }, (_, i) => {
-              const off = (ghosts - i) * size
-              return jsx('path', {
-                d: `M 2 2 L ${off + 2} ${off + 2}`, fill: 'none', stroke: linkTone, strokeWidth: 1,
-                strokeDasharray: policy.dash ?? '4 3', opacity: 0.7,
-                children: jsx('animate', { attributeName: 'stroke-dashoffset', from: 7, to: 0, dur: '0.9s', repeatCount: 'indefinite' })
-              }, `link-${i}`)
-            })
-          }, 'links')
+            title: `${count} fan-out items — ${ticks} more behind this card (footer attempt ticks)`,
+            className: 'absolute flex items-center',
+            style: { left: 1, bottom: 0, gap: ATTEMPT_TICK.gap, zIndex: 2 },
+            children: Array.from({ length: ticks }, (_, i) =>
+              jsx('span', {
+                style: { display: 'inline-block', width: ATTEMPT_TICK.size, height: ATTEMPT_TICK.size, background: tickTone }
+              }, `tick-${i}`))
+          }, 'ticks')
         : null,
-      ...Array.from({ length: ghosts }, (_, i) =>
-        jsx('div', {
-          'aria-hidden': true,
-          className: pill ? 'absolute inset-0' : 'absolute inset-0 rounded-md border border-(--ui-stroke-secondary)',
-          style: pill
-            ? {
-                transform: `translate(${(ghosts - i) * size}px, ${(ghosts - i) * size}px)`, zIndex: i,
-                right: ghosts * size, bottom: ghosts * size,
-                border: `1px solid ${tone}`, borderRadius: 999, opacity: i === ghosts - 1 ? 0.55 : 0.35
-              }
-            : { transform: `translate(${(ghosts - i) * size}px, ${(ghosts - i) * size}px)`, zIndex: i, right: ghosts * size, bottom: ghosts * size, background: 'var(--ui-sidebar-surface-background, var(--card))' }
-        }, `g${i}`)
-      ),
-      jsx('div', { className: 'relative', style: { zIndex: ghosts + 1 }, children }),
       // Pill mode carries its own ×N count on the pill itself — no badge.
       pill ? null : onToggleExpand ? jsxs('button', {
         type: 'button',
@@ -2213,7 +2352,7 @@ export function FanStack({ children, count, terminal, expanded, onToggleExpand, 
         onClick: e => { e.stopPropagation(); onToggleExpand() },
         className: 'absolute cursor-pointer rounded-full border text-(--ui-text-secondary)',
         style: {
-          zIndex: ghosts + 2, top: -9, right: ghosts * 6 - 6, padding: '0 6px', fontSize: 10, lineHeight: '16px',
+          zIndex: 2, top: -9, right: -6, padding: '0 6px', fontSize: 10, lineHeight: '16px',
           background: 'var(--ui-sidebar-surface-background, var(--card))',
           borderColor: expanded ? 'var(--ui-accent)' : 'var(--ui-stroke-secondary)',
           color: 'var(--ui-text-secondary)'
@@ -2221,8 +2360,8 @@ export function FanStack({ children, count, terminal, expanded, onToggleExpand, 
         children: [`${terminal != null ? `${terminal}/${count}` : `×${count}`}`, expanded ? ' ▴' : ' ▾']
       }) : jsx('span', {
         className: 'absolute rounded-full border border-(--ui-stroke-secondary) text-(--ui-text-secondary)',
-        title: 'Terminal fan-out items',
-        style: { zIndex: ghosts + 2, top: -9, right: ghosts * 6 - 6, padding: '0 6px', fontSize: 10, lineHeight: '16px', background: 'var(--ui-sidebar-surface-background, var(--card))' },
+        title: 'Terminal fan-out items — finished, not necessarily successful',
+        style: { zIndex: 2, top: -9, right: -6, padding: '0 6px', fontSize: 10, lineHeight: '16px', background: 'var(--ui-sidebar-surface-background, var(--card))' },
         children: terminal != null ? `${terminal}/${count}` : `×${count}`
       })
     ]
@@ -2329,14 +2468,11 @@ export function GraphView({ detail }) {
         const fm = fanMeta(def)
         if (!fm) return [card]
         const exp = isExpanded(def)
-        // #48: the stack's ghost links flow while the node or any item is
-        // live; an items_from (data-flow) stack shimmers while the consumer
-        // itself runs. Terminal stacks draw nothing — the calm law.
-        const nodeLive = st?.status === 'running'
+        // RC ch4: the stack retired its ghost links (attempt ticks are
+        // static), so it no longer consumes the flow policy — the live/
+        // dataFlow props and their GraphView-side derivation went with them.
         const stack = jsx(FanStack, {
           count: fm.count, terminal: fm.terminal, expanded: exp, children: card,
-          live: nodeLive || (fm.rows || []).some(r => r.status === 'running'),
-          dataFlow: !!def.fanout?.items_from && nodeLive,
           onToggleExpand: () => {
             $fanExpanded.set(exp ? null : { runId: detail.id, nodeId: def.id })
             if (exp) $fanItem.set(null)
