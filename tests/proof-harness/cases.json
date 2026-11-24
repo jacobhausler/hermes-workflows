@@ -66,6 +66,20 @@
       ],
       "historical_snapshots": []
     },
+    "coverage": {
+      "description": "bd_2026-11-13-yjp full-census fetch frames on the REAL renderer: >1 page fixture census seeded THROUGH the read model (seed_fixture.py; rows read 'interrupted' — never TERMINAL — so the pane's own 4 s poll loop drives the frames). Frames: loading (every /runs page stalled via CDP Fetch), empty census answered (roots named), full census (133 counted rows all loaded), deepest counted row rendered past the first 100 + its record page opened, refetch-failure with cached census kept (stale chip), retry re-walk (census grew to 134 while the edge failed; chip gone, no loaded-suffix), partial fetch (page-2 fulfill short: 'loaded 100 of 134' shown honestly while the summary stays global).",
+      "surfaces": ["pane_workflows"],
+      "seeds": [
+        {
+          "name": "fixture_census",
+          "kind": "engine_seed",
+          "method": "fixture_census",
+          "count": 133,
+          "note": "read-model fixture rows, ids 20990101-100000..100132-covr (+ one recovery row 100133 seeded mid-run by the driver); no door launch, no tokens"
+        }
+      ],
+      "historical_snapshots": []
+    },
     "held-gate-snapshot-example": {
       "description": "DOCUMENTED SHAPE, not yet implemented: later beads pin an existing committed run (e.g. 20261122-113636-lookbook-canvas-held) by id + run.json sha256 and capture it via the launch-root fallback WITHOUT launching anything. Implemented when its surfaces are wired — until then it fails exit 3 like any new test.",
       "implemented": false,

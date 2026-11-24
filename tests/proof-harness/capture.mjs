@@ -51,6 +51,7 @@
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -369,16 +370,75 @@ async function rectOf(cdp, needle, opts = {}) {
   return pt && !pt.err ? pt.rect : null;
 }
 
-// Trusted input (real pipeline, per skill): moved -> pressed -> released at
-// the element's rect center.
-async function trustedClick(cdp, needle, opts = {}) {
+// locateClickPoint is the locator probe WITHOUT the dispatch — the coverage
+// case needs the row's rect for a clipped shot BEFORE the click navigates
+// away (bd_2026-11-13-yjp). Occluded retries once, then dies honest.
+async function locateClickPoint(cdp, needle, opts = {}) {
   let pt = await cdp.evl(locateJS(needle, opts));
   if (pt.err === 'occluded') { await sleep(1500); pt = await cdp.evl(locateJS(needle, opts)); }
   if (pt.err) die(EX.capture, `click target not found on rendered page: ${JSON.stringify(needle)} (${pt.err}${pt.over ? ` over: ${JSON.stringify(pt.over)}` : ''})`);
+  return pt;
+}
+
+// Trusted input (real pipeline, per skill): moved -> pressed -> released at
+// the element's rect center.
+async function trustedClick(cdp, needle, opts = {}) {
+  const pt = await locateClickPoint(cdp, needle, opts);
   await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: pt.x, y: pt.y });
   await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: pt.x, y: pt.y, button: 'left', clickCount: 1, buttons: 1 });
   await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: pt.x, y: pt.y, button: 'left', clickCount: 1, buttons: 0 });
   return pt;
+}
+
+// -- CDP Fetch-domain transport mock (bd_2026-11-13-yjp, coverage case) ------
+// Manufactures loading / error / partial-fetch conditions ON THE REAL SURFACE:
+// renderer, plugin, react-query loop and backend stay the actual code — only
+// the network edge lies (stall, fail, or a short-page fulfill), so every frame
+// captured behind a rule is the app's OWN honest state, never a fake DOM.
+// Rules are evaluated in order against the paused request URL; a request that
+// matches no rule simply continues (mock mounted, traffic untouched). The
+// listener rides the raw ws exactly like the gate case's pauseOnce: the
+// coverage path never closes/reconnects the session it armed (a reattach
+// re-arms a fresh mock instead — see armMock at every reconnect site).
+const urlGlob = p => {
+  const re = new RegExp('^' + String(p).split('*').map(s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('.*') + '$');
+  return u => re.test(u);
+};
+async function mockRuns(cdp) {
+  let rules = [];
+  const paused = new Map(); // requestId -> url while stalled (continued on release)
+  cdp.ws.addEventListener('message', e => {
+    let m; try { m = JSON.parse(e.data); } catch { return; }
+    if (m.method !== 'Fetch.requestPaused') return;
+    const ev = m.params;
+    const url = ev.request.url;
+    const rule = rules.find(r => r.g(url));
+    if (rule && rule.action === 'stall') { paused.set(ev.requestId, url); return; }
+    paused.delete(ev.requestId);
+    if (rule && rule.action === 'fail')
+      cdp.send('Fetch.failRequest', { requestId: ev.requestId, errorReason: 'Failed' }).catch(() => {});
+    else if (rule && rule.action === 'fulfill')
+      cdp.send('Fetch.fulfillRequest', {
+        requestId: ev.requestId, responseCode: 200,
+        responseHeaders: [{ name: 'content-type', value: 'application/json' }],
+        body: Buffer.from(String(rule.body)).toString('base64')
+      }).catch(() => {});
+    else cdp.send('Fetch.continueRequest', { requestId: ev.requestId }).catch(() => {});
+  });
+  await cdp.send('Fetch.enable', { patterns: [{ urlPattern: '*workflows/runs*', requestStage: 'Request' }] });
+  return {
+    setRules(rs) { rules = rs.map(r => ({ ...r, g: urlGlob(r.urlPattern) })); },
+    releaseStalled() {
+      for (const rid of paused.keys()) cdp.send('Fetch.continueRequest', { requestId: rid }).catch(() => {});
+      paused.clear();
+      rules = [];
+    },
+    async off() {
+      for (const rid of paused.keys()) cdp.send('Fetch.continueRequest', { requestId: rid }).catch(() => {});
+      paused.clear(); rules = [];
+      try { await cdp.send('Fetch.disable'); } catch { /* disable resumes held traffic; best-effort */ }
+    }
+  };
 }
 
 // The app paints a full-window CONNECTING splash over the chrome until its
@@ -615,6 +675,7 @@ async function main() {
         `— a later bead ADDS a case (new test); it is not an existing command`);
   }
   const c = manifest.cases[A.caseName];
+  const isCoverage = A.caseName === 'coverage';
   const unwired = (c.surfaces || []).filter(s => !manifest.surfaces_registry.includes(s))
         .concat(c.implemented === false ? c.surfaces : []);
   if (unwired.length && c.implemented === false) {
@@ -712,11 +773,12 @@ async function main() {
       die(EX.preflight, `--out exists without ownership marker, refusing to touch: ${A.outDir}`);
     fs.renameSync(A.outDir, `${A.outDir}.stale-${Date.now()}`);
   }
-  // Bench profile law (field-proven 2026-11-24, the estate-gateway era): a
-  // live host gateway makes `gateway ensure` ATTACH-or-refuse for the DEFAULT
-  // profile ("one gateway per host serves every profile"), so a bench fork
-  // under the default profile cannot exist while the estate gateway runs.
-  // The bench therefore serves its OWN standalone satellite profile
+  // Bench profile law (field-proven 2026-11-24, the estate-gateway era, twice
+  // re-proven against the app-generation bump): a live host gateway makes
+  // `gateway ensure` ATTACH-or-refuse for the DEFAULT profile ("one gateway
+  // per host serves every profile"), and a STANDALONE default fork is refused
+  // outright at this generation ("the host gateway still serves profile
+  // 'default'"), so the bench serves its OWN standalone satellite profile
   // (gateway.standalone: true opts out of the host multiplexer) under an
   // isolated HERMES_GATEWAY_LOCK_DIR (the host rendezvous root is the lock
   // dir's own gateway-locks tree — $HERMES_GATEWAY_LOCK_DIR else
@@ -731,6 +793,13 @@ async function main() {
   // crew wave — three parallel captures, one green). The name must be unique per
   // bench home: derive it from the owned --out dir, sanitized to the CLI's
   // profile-name law, hash-suffixed for stable length.
+  // FIELD-PROVEN APP-GENERATION LAW: the desktop app MUST be at (or under) a
+  // build whose hermes:api honors that pinned profile — b9b36c9 (2026-11-24)
+  // spawns hermes:api's gateway as the DEFAULT profile of HERMES_HOME instead,
+  // which 403s profile_scope_mismatch against the satellite fork and wedges the
+  // host record (exit-75 churn). Pass --app-repo at a green-era checkout
+  // (0f602c5 proven) until the app half honors the pin again; the proof-harness
+  // CI pins the app commit under identity.app.commit either way.
   const BENCH_PROFILE = 'ui2bench-' + crypto.createHash('sha1').update(A.outDir)
     .digest('hex').slice(0, 8);
   const B = { root: A.outDir, home: path.join(A.outDir, 'bench', 'home'),
@@ -872,12 +941,14 @@ async function main() {
       touched.push(key);
     }
 
-    // -- engine seed: launch the held-gate graph through the door -----------
+    // -- engine seed (baseline/gate): launch the held-gate graph through the
+    // door. The coverage case seeds a FIXTURE CENSUS instead (seed_fixture.py
+    // — read-model bytes, no door launch); the door graph stays non-coverage.
     const engSeed = (c.seeds || []).find(s => s.kind === 'engine_seed' && s.method === 'door_run');
-    if (!engSeed) die(EX.preflight, `case ${A.caseName} has no door_run engine seed`);
+    if (!engSeed && !isCoverage) die(EX.preflight, `case ${A.caseName} has no door_run engine seed`);
     const graphFile = path.join(A.outDir, 'seed', 'held-gate.graph.json');
-    fs.writeFileSync(graphFile, JSON.stringify(engSeed.graph, null, 2) + '\n');
-    let runId;
+    if (engSeed) fs.writeFileSync(graphFile, JSON.stringify(engSeed.graph, null, 2) + '\n');
+    let runId = null;
     if (!hermesAbs.startsWith('/')) {
       try { hermesAbs = execFileSync('/usr/bin/which', [hermesAbs], { encoding: 'utf8' }).trim() || hermesAbs; } catch { /* PATH lookup stays the door's own problem */ }
     }
@@ -904,13 +975,13 @@ async function main() {
     // A case may run its door children through the repo's zero-token fake CLI
     // (tests/fake_hermes.py): not +x, so wrap it with the discovered python.
     let childBin = hermesAbs;
-    if (engSeed.child_binary) {
+    if (engSeed?.child_binary) {
       const wrapper = path.join(A.outDir, 'seed', 'fake-hermes.sh');
       fs.writeFileSync(wrapper, `#!/bin/sh\nexec ${py} ${path.join(REPO, engSeed.child_binary)} "$@"\n`);
       fs.chmodSync(wrapper, 0o755);
       childBin = wrapper;
     }
-    try {
+    if (engSeed) try {
       runId = execFileSync(py, [path.join(HERE, 'seed_run.py'),
         '--repo', REPO, '--runs-root', B.runs, '--graph-file', graphFile,
         '--wait-held-s', String(engSeed.wait_held_s ?? 25)],
@@ -919,8 +990,22 @@ async function main() {
     } catch (e) {
       die(EX.api, `engine seed launch failed (seed_run.py): ${String(e.stderr || e.message).slice(0, 400)}`);
     }
-    identity.seeds.held_gate_run = { kind: 'engine_seed', run_id: runId, graph_sha256: sha256(graphFile) };
-    seededRuns.push(runId);
+    if (runId) {
+      identity.seeds.held_gate_run = { kind: 'engine_seed', run_id: runId, graph_sha256: sha256(graphFile) };
+      seededRuns.push(runId);
+    }
+    // Fixture census (coverage case): rows materialized THROUGH the shared
+    // read model (wfcommon constants, run_state-acceptable trio + events) so
+    // the route — not a mock — counts them. seed_fixture.py prints
+    // {ids, names}; ids sort by name-DESC (the traversal contract), names are
+    // what the pane rows render.
+    const seedFixture = (count, start) => {
+      const out = execFileSync(py, [path.join(HERE, 'seed_fixture.py'),
+        '--repo', REPO, '--runs-root', B.runs, '--count', String(count), '--start', String(start)],
+        { encoding: 'utf8', timeout: 120_000, env: { ...process.env, HERMES_HOME: B.home } });
+      try { return JSON.parse(out); }
+      catch { die(EX.api, `seed_fixture.py printed non-JSON: ${out.slice(0, 200)}`); }
+    };
 
     // Graph case (bd 33h): materialize the pinned shelf snapshot + the MF1
     // synthetic trio beside the engine seed, then wait for the engine seed to
@@ -960,10 +1045,32 @@ async function main() {
       }
       if (stored !== 'ok') die(EX.boot, 'localStorage never writable on the renderer — enable decision impossible');
     }
+    // bd yjp (coverage case): arm the transport mock BEFORE the activation
+    // reload — a same-session Fetch domain survives the reload, and the
+    // pre-decision document CANNOT have fired /runs yet (the plugin is not
+    // enabled until this reload), so the LOADING frame is deterministic:
+    // activation's first census page meets the paused edge. Baseline/gate
+    // keep their close/reconnect dance byte-for-byte.
+    let mock = null;
+    // Rules survive session churn: every re-arm re-applies them, and every
+    // setRules site records them here (the field-proven #720 lesson — the
+    // app's own gateway ensure can restart the fork mid-walk; the pane then
+    // wears the boot-failure modal and a rule-less poll dies at 45 s).
+    let mockRules = [];
+    const armRules = rs => { mockRules = rs; if (mock) mock.setRules(rs); };
+    const armMock = async () => {
+      mock = await mockRuns(cdp);
+      armRules([{ urlPattern: '*workflows/runs*', action: 'stall' }]);
+    };
+    if (isCoverage) await armMock();
     await cdp.send('Page.reload', { ignoreCache: true });
-    cdp.ws.close();
-    await sleep(1500);
-    cdp = await connectCdp(A.cdpPort, A.rendererPort, 60_000);
+    if (!isCoverage) {
+      cdp.ws.close();
+      await sleep(1500);
+      cdp = await connectCdp(A.cdpPort, A.rendererPort, 60_000);
+    } else {
+      await sleep(1500);   // keep the session — the armed mock must survive it
+    }
     // Boot can re-navigate the window (main restores the dev-server URL after
     // an early reload): be resilient — reconnect and re-paint-probe for up to
     // 60 s instead of trusting one document. On give-up, dump what we are
@@ -984,6 +1091,7 @@ async function main() {
           }
           try { cdp.ws.close(); } catch { /* already gone */ }
           cdp = await connectCdp(A.cdpPort, A.rendererPort, 30_000);
+          if (isCoverage) await armMock();   // the session moved — re-arm
         }
       }
     }
@@ -1048,21 +1156,223 @@ async function main() {
     }
 
     // Checked API attachment (2): the seeded run row can ONLY come from
-    // GET /api/plugins/hermes-workflows/ — proven by its rendering. Rows
-    // render the run NAME (the id rides card/directive text, not every row).
-    // Rows render the run NAME (the id rides card/directive text, not every
-    // row). Graph case: the pane proof centers on the PINNED shelf snapshot —
+    // GET /api/plugins/hermes-workflows/ — proven by its rendering.
+    // Graph case: the pane proof centers on the PINNED shelf snapshot —
     // its row can only render from GET /runs too, and it is the fixture whose
     // projection arithmetic (10/14/28) the case measures.
-    const runName = engSeed.graph.name
-    const paneRowNeedle = graphIds ? 'wave6-council' : runName
     // The pane column only becomes real once the splash clears (field-proven:
     // global innerText/clicks pass on DOM UNDER a CONNECTING overlay). The
-    // seeded row can only come from GET /api/plugins/hermes-workflows/ —
-    // requiring it INSIDE the pane column (x >= 440, above the tray strip,
-    // occlusion-tested) is the attachment proof that survives overlays.
+    // pane-rendered content can only come from GET /api/plugins/hermes-workflows/.
     const paneRegion = { xMin: 440, yMin: 40, bottomMargin: 90 };
     await waitConnected(cdp, probeBudgetMs);
+    const shots = [];
+    // Field-proven (pair regen try2): route-restore can re-mount the chat
+    // empty-state over the pane column exactly between the question hit and
+    // the content read — everything painted is then intro-copy + clocks, and
+    // the masked content layer lands trivial. Poll the column text until the
+    // MASKED layer is non-trivial (shoot's own threshold) before shooting.
+    const stableColumnText = async (region, budgetMs = 25_000) => {
+      const t0 = Date.now();
+      for (;;) {
+        const txt = await cdp.evl(columnTextJS(region));
+        const masked = maskVolatile(txt, CAPTURE_LITERALS).replace(/\n+/g, '');
+        if (masked.length >= 40 || Date.now() - t0 > budgetMs) return txt; // shoot() decides the death
+        await sleep(1000);
+      }
+    };
+    // Checked API attachment (2): proven per mode below (baseline/gate: the
+    // seeded run row IN THE PANE COLUMN — rows render the run NAME, the id
+    // rides card/directive text, not every row; coverage: the whole-census
+    // summary rendered over a fixture census that exceeds one page).
+    const runName = engSeed ? engSeed.graph.name : null;
+    const paneRowNeedle = graphIds ? 'wave6-council' : runName;
+    if (isCoverage) {
+      const fixture = (c.seeds || []).find(s => s.kind === 'engine_seed' && s.method === 'fixture_census');
+      if (!fixture) die(EX.preflight, `case ${A.caseName} has no fixture_census seed`);
+      const COUNT = Number(fixture.count) || 133;
+      // Re-click the WORKFLOWS tab until the pane content itself carries
+      // `needle`. The pane LIST column is the left column under the tab
+      // strip (vision-proven), so the probe is region-free with exact
+      // matches — the needle texts here are census-state strings unique on
+      // the page. Field-proven recoverances, one budget: (a) route-restore
+      // flips the view back after the tab click — re-click every pass;
+      // (b) a CONNECTING splash passes global innerText waits — re-wait the
+      // attach; (c) the app's gateway ensure loses a restart race and paints
+      // the "Hermes couldn't start" modal — click Retry (#720 law; coverage
+      // frame 01's first real-app death, fork SIGTERM + status-1 re-ensure).
+      // Dumps a diagnostic shot + body excerpt + /runs resource timing on
+      // give-up.
+      const covPoll = async (needle, shotName, why) => {
+        const t0 = Date.now();
+        let last = null;
+        for (;;) {
+          try {
+            last = await cdp.evl(locateJS(needle, { exact: true }));
+            if (!last.err) return;
+          } catch (e) {
+            const m = String((e && e.message) || e);
+            if (!/navigated or closed|WebSocket is not open|socket hang up|target closed|not attached/i.test(m)) throw e;
+            await sleep(1200);
+            try { cdp.ws.close(); } catch { /* already gone */ }
+            cdp = await connectCdp(A.cdpPort, A.rendererPort, 30_000);
+            mock = await mockRuns(cdp);
+            mock.setRules(mockRules);   // session moved: same rules back
+            last = { err: 'reconnecting' };
+          }
+          if (Date.now() - t0 > probeBudgetMs) break;
+          const modalUp = await cdp.evl(`document.body.innerText.includes("couldn't start")`).catch(() => false);
+          if (modalUp) { try { await trustedClick(cdp, 'Retry', { exact: true, ci: true }); } catch { /* modal between frames */ } }
+          const occludedBySplash = last.err === 'occluded' && /connecting/i.test(String(last.over || ''));
+          if (occludedBySplash) {
+            try { await waitConnected(cdp, 15_000); } catch { /* loop budget decides */ }
+          }
+          try { await trustedClick(cdp, 'workflows', { exact: true, ci: true }); } catch { /* tab not painted yet */ }
+          await sleep(1200);
+        }
+        const diag = await cdp.evl(`(() => ({
+          body: (document.body.innerText || '').replace(/\\s+/g, ' ').slice(0, 300),
+          runsReqs: performance.getEntriesByType('resource').filter(r => r.name.includes('workflows/runs'))
+            .map(r => ({ name: r.name.slice(0, 160), start: Math.round(r.startTime), dur: Math.round(r.duration) })).slice(-6)
+        }))()`).catch(() => ({}));
+        try { await shoot(cdp, A.outDir, shotName); } catch { /* best effort */ }
+        try { fs.writeFileSync(path.join(A.outDir, 'logs', shotName.replace(/\.png$/, '-diag.json')),
+                               JSON.stringify({ needle, locate: last, ...diag }, null, 2)); } catch { /* best effort */ }
+        die(EX.api, `${why}: ${JSON.stringify(last.err || last)}${last.over ? ` over ${JSON.stringify(last.over)}` : ''} | body=${JSON.stringify((diag.body || '').slice(0, 160))} | runsReqs=${JSON.stringify(diag.runsReqs || [])}`);
+      };
+      // Scope probe (field-proven #12: hermes:api 403 profile_scope_mismatch
+      // survived the satellite home + self-link): talk to the fork directly
+      // over its UDS BEFORE the frame walk needs it, and record which
+      // selector it accepts — unscoped, ?profile=<bench>, /p/<bench>/api/...
+      // prefixed, and /api/profiles.
+      try {
+        const statePath = [path.join(B.profile, 'gateway_state.json'),
+                           path.join(B.home, 'gateway_state.json')].find(p => fs.existsSync(p));
+        const st = statePath ? JSON.parse(fs.readFileSync(statePath, 'utf8')) : null;
+        const sockDir = statePath ? path.dirname(statePath) : null;
+        const sock = sockDir && fs.existsSync(path.join(sockDir, 'gateway.sock'))
+          ? path.join(sockDir, 'gateway.sock') : null;
+        const hits = {};
+        if (sock) {
+          for (const [k, u] of Object.entries({
+            unscoped: `/api/plugins/hermes-workflows/runs?offset=0&limit=2`,
+            named: `/api/plugins/hermes-workflows/runs?offset=0&limit=2&profile=${BENCH_PROFILE}`,
+            prefixed: `/p/${BENCH_PROFILE}/api/plugins/hermes-workflows/runs?offset=0&limit=2`,
+            profiles: `/api/profiles`,
+          })) {
+            hits[k] = await new Promise(res => {
+              const req = http.request({ socketPath: sock, path: u, method: 'GET',
+                                         headers: { host: 'localhost' } },
+                r => { let b = ''; r.on('data', d => { b += d; });
+                       r.on('end', () => res({ status: r.statusCode, body: b.slice(0, 160) })); });
+              req.on('error', e => res({ err: String(e.message).slice(0, 120) }));
+              req.setTimeout(5000, () => { req.destroy(new Error('uds timeout')); });
+            });
+          }
+        }
+        identity.gateway_scope_probe = { sock, hits, state_pid: st?.pid ?? null, state_home: st?.hermes_home ?? null };
+        fs.writeFileSync(path.join(A.outDir, 'logs', 'scope-probe.json'),
+                         JSON.stringify(identity.gateway_scope_probe, null, 2) + '\n');
+      } catch (e) { identity.gateway_scope_probe = { err: String(e).slice(0, 200) }; }
+      try {
+        // 01 LOADING: stall every /runs page, then open the pane — the one
+        // honest costume for a census not yet answered.
+        armRules([{ urlPattern: '*workflows/runs*', action: 'stall' }]);
+        await covPoll('Loading…', '00-diagnostic-loading.png',
+                      'loading state never rendered IN THE PANE COLUMN');
+        shots.push({ surface: 'pane_workflows', state: 'loading (every /runs page stalled)',
+                     ...(await shoot(cdp, A.outDir, '01-coverage-loading.png', null, await stableColumnText(paneRegion))) });
+        // 02 EMPTY: release the stall on the unseeded bench — an ANSWERED
+        // empty census names the roots it scanned; empty is not loading.
+        mock.releaseStalled();
+        await waitText(cdp, 'No runs', 30_000);
+        identity.coverage = { roots_line_seen: await cdp.evl(`document.body.innerText.includes('roots:')`) };
+        shots.push({ surface: 'pane_workflows', state: 'empty census answered (roots named)',
+                     ...(await shoot(cdp, A.outDir, '02-coverage-empty.png', null, await stableColumnText(paneRegion))) });
+
+        // Seed a >1-page census THROUGH the shared read model, then reload so
+        // the pane performs a FRESH page-walk against the real route.
+        const seeded = seedFixture(COUNT, 0);
+        identity.coverage.fixture = { count: COUNT, first_id: seeded.ids[0],
+          last_id: seeded.ids[seeded.ids.length - 1],
+          ids_sha256: crypto.createHash('sha256').update(seeded.ids.join('\n')).digest('hex') };
+        await cdp.send('Page.reload', { ignoreCache: true });
+        await sleep(1500);
+        {   // keep the armed session across the reload; re-arm if it moved
+          const pT0 = Date.now();
+          for (;;) {
+            try { await waitPainted(cdp, 8_000); break; }
+            catch (e) {
+              if (Date.now() - pT0 > A.paintBudgetMs) throw e;
+              try { cdp.ws.close(); } catch { /* already gone */ }
+              cdp = await connectCdp(A.cdpPort, A.rendererPort, 30_000);
+              mock = await mockRuns(cdp);
+              mock.setRules(mockRules);   // session moved: same rules back
+            }
+          }
+        }
+        await covPoll(`runs ${COUNT} ·`, '00-diagnostic-census.png',
+                      'census summary never rendered IN THE PANE COLUMN');
+        identity.api_attachment = { via: 'whole-census summary rendered by the pane from GET /runs', counted: COUNT };
+        shots.push({ surface: 'pane_workflows', state: `full census: ${COUNT} counted rows (>1 page), all loaded`,
+                     ...(await shoot(cdp, A.outDir, '03-coverage-census-full.png', null, await stableColumnText(paneRegion))) });
+
+        // 04/05 the FIRST-PAGE CEILING is gone: the DEEPEST counted row (last
+        // position — only reachable from page 2 of the route) renders, and its
+        // RECORD opens. The record-page proof is the hoisted style element
+        // ONLY WorkflowsPage mounts (plugin.js PolishStyles, one per document).
+        const deepest = seeded.names[0];
+        await waitText(cdp, deepest, 20_000);
+        const rowPt = await locateClickPoint(cdp, deepest);
+        shots.push({ surface: 'pane_workflows', state: `counted row ${deepest} rendered past the first 100`,
+                     ...(await shoot(cdp, A.outDir, '04-coverage-deepest-row.png', rowPt.rect)) });
+        await trustedClick(cdp, deepest);
+        let recordUp = false;
+        const recT0 = Date.now();
+        while (!recordUp && Date.now() - recT0 < 20_000) {
+          recordUp = await cdp.evl(`!!document.querySelector('style[data-plugin="hermes-workflows"][href="hermes-workflows.3.css"]')`);
+          if (!recordUp) await sleep(400);
+        }
+        if (!recordUp) die(EX.api, 'the deepest counted row never opened its record page (hoisted record style absent)');
+        shots.push({ surface: 'pane_workflows', state: `record page for ${deepest} opened by runQuery(id)`,
+                     ...(await shoot(cdp, A.outDir, '05-coverage-record-page.png')) });
+
+        // 06 ERROR with cached data: fail every /runs poll — the fixture rows
+        // read `interrupted` (never TERMINAL), so the pane's own 4 s loop
+        // trips the error, and the CACHED CENSUS WINS: rows stay on screen and
+        // the failure wears the clickable stale chip.
+        armRules([{ urlPattern: '*workflows/runs*', action: 'fail' }]);
+        await waitText(cdp, 'stale — retry', 25_000);
+        if (!(await cdp.evl(`document.body.innerText.includes('runs ${COUNT}')`)))
+          die(EX.api, 'a refetch failure evicted the cached census — data must win over error');
+        shots.push({ surface: 'pane_workflows', state: 'refetch failed: cached census kept, stale chip clickable',
+                     ...(await shoot(cdp, A.outDir, '06-coverage-error-cached.png', null, await stableColumnText(paneRegion))) });
+
+        // 07 RECOVERY: the chip's click invalidates the runs key — the walk
+        // re-runs from offset 0 and picks up a census that GREW while the edge
+        // was failing (one more fixture row seeded first), so the count moving
+        // proves a real re-walk, not a redraw.
+        seedFixture(1, COUNT);
+        armRules([]);
+        await trustedClick(cdp, 'stale — retry');
+        await waitText(cdp, `runs ${COUNT + 1} ·`, 25_000);
+        const recovered = await cdp.evl(`(() => { const t = document.body.innerText;
+          return { stale: t.includes('stale'), loaded: /loaded \\d+ of/.test(t) }; })()`);
+        if (recovered.stale || recovered.loaded)
+          die(EX.api, `retry did not fully recover (stale=${recovered.stale} loaded=${recovered.loaded})`);
+        shots.push({ surface: 'pane_workflows', state: `retry re-walked every page: census now counts ${COUNT + 1}`,
+                     ...(await shoot(cdp, A.outDir, '07-coverage-recovery.png', null, await stableColumnText(paneRegion))) });
+
+        // 08 PARTIAL FETCH: fulfill the SECOND page with an honest empty slice
+        // — the walk stops short, the summary stays GLOBAL (still counts 134),
+        // and the line says `loaded 100 of 134` instead of implying coverage.
+        armRules([{ urlPattern: '*offset=100*', action: 'fulfill',
+                     body: JSON.stringify({ runs: [], total: COUNT + 1, counts: { running: 0 } }) }]);
+        await waitText(cdp, `loaded 100 of ${COUNT + 1}`, 25_000);
+        shots.push({ surface: 'pane_workflows', state: 'page-2 flake: loaded < total shown honestly',
+                     ...(await shoot(cdp, A.outDir, '08-coverage-partial-fetch.png', null, await stableColumnText(paneRegion))) });
+        await mock.off();
+      } finally { await mock.off(); }
+    } else {
     {
       let wT0 = Date.now();
       for (;;) {
@@ -1107,21 +1417,6 @@ async function main() {
       }
     }
     identity.api_attachment = { via: 'registry + live seeded run row rendered through the plugin API route', run_id: runId };
-    const shots = [];
-    // Field-proven (pair regen try2): route-restore can re-mount the chat
-    // empty-state over the pane column exactly between the question hit and
-    // the content read — everything painted is then intro-copy + clocks, and
-    // the masked content layer lands trivial. Poll the column text until the
-    // MASKED layer is non-trivial (shoot's own threshold) before shooting.
-    const stableColumnText = async (region, budgetMs = 25_000) => {
-      const t0 = Date.now();
-      for (;;) {
-        const txt = await cdp.evl(columnTextJS(region));
-        const masked = maskVolatile(txt, CAPTURE_LITERALS).replace(/\n+/g, '');
-        if (masked.length >= 40 || Date.now() - t0 > budgetMs) return txt; // shoot() decides the death
-        await sleep(1000);
-      }
-    };
 
     // 01/02 pane: runs list, then the held-gate run detail. The captured
     // CONTENT of each viewport shot is the pane column's painted text (same
@@ -1181,6 +1476,7 @@ async function main() {
     shots.push({ surface: 'pane_workflows', state: 'run detail, held gate question',
       ...(await shoot(cdp, A.outDir, '02-pane-run-detail.png', null, await stableColumnText(paneRegion))) });
     }
+    } // end non-coverage (baseline/gate/graph) pane list + detail frames
 
     // -- gate modal (bd_2026-11-13-qri): ONE decision surface, real trusted
     // click, REAL pending (the answer POST is held at Fetch interception so
