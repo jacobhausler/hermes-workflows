@@ -17,11 +17,20 @@ try {
   const src = readFileSync(new URL('../desktop/plugin.js', import.meta.url), 'utf8')
 
   // -- 0. deletion laws (the repo's established idiom for retired paths) ------
+  // The cj2 stored-session-nav block is the ONE legal home of openSession:
+  // a read-only conversation link, proven by tests/test_stored_session_nav.mjs.
+  // The retired-chain scan applies to everything OUTSIDE that marked block;
+  // section 7 keeps its global BEHAVIOR pin — no answer flow may call the
+  // openSession spy, inside or outside the block.
+  const navBlock = src.match(/\/\/ BEGIN stored-session-nav\n([\s\S]*?)\/\/ END stored-session-nav/)
+  assert.ok(navBlock, 'plugin.js ships one marked stored-session-nav block')
+  const outsideNav = src.replace(/\/\/ BEGIN stored-session-nav\n[\s\S]*?\/\/ END stored-session-nav/g, '')
   for (const gone of [/nudgeOwner/, /composer\.submit/, /composer\.insertText/,
                       /openSession/, /awaitHydration/, /resume it now/,
                       /press Enter there to resume/]) {
-    assert.doesNotMatch(src, gone, `${gone} is retired with nudgeOwner — no compat shim`)
+    assert.doesNotMatch(outsideNav, gone, `${gone} is retired with nudgeOwner — no compat shim outside the marked nav block`)
   }
+  assert.match(navBlock[1], /openSession/, 'the nav block is where the legal openSession call lives')
 
   globalThis.__calls = []        // every host surface call, in order
   globalThis.__notifs = []       // notify payloads (action objects included)
