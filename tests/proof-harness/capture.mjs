@@ -305,6 +305,12 @@ async function connectCdp(port, rendererPort, timeoutMs = 90_000) {
     }
   };
   await send('Page.enable').catch(() => { /* most builds auto-enable; reload/shot prove it anyway */ });
+  // Paint truth (field-proven 2026-11-24): an occluded/background window stops
+  // compositing and Page.captureScreenshot returns a black frame even though
+  // the DOM is fully live — a black diagnostic shot once masked a mounted,
+  // fetching plugin. Activating the target makes shots reflect what a human
+  // would see. Best-effort: headless-ish builds reject it.
+  await send('Page.bringToFront').catch(() => { /* unsupported on this target */ });
   const evl = async expr => {
     const r = await send('Runtime.evaluate', { expression: expr, returnByValue: true, awaitPromise: true });
     if (r.exceptionDetails) {
@@ -397,7 +403,9 @@ async function trustedClick(cdp, needle, opts = {}) {
 // captured behind a rule is the app's OWN honest state, never a fake DOM.
 // Rules are evaluated in order against the paused request URL; a request that
 // matches no rule simply continues (mock mounted, traffic untouched). The
-// listener rides the raw ws exactly like the gate case's pauseOnce: the
+// listener rides the raw ws (the gate case used the same trick before app
+// b9b36c9 moved plugin REST onto the IPC bridge — gate now uses the door's
+// bench knobs instead): the
 // coverage path never closes/reconnects the session it armed (a reattach
 // re-arms a fresh mock instead — see armMock at every reconnect site).
 const urlGlob = p => {
@@ -754,6 +762,17 @@ async function main() {
   for (const port of [A.cdpPort, A.rendererPort]) {
     if (!(await portFree(port))) die(EX.preflight, `port ${port} already in use — one bench per port (another proof run or the user's dev server owns it)`);
   }
+  // Bench-home law (field-proven 2026-11-24, bd_2026-11-13-qri): a bench HERMES_HOME
+  // that lives UNDER the native ~/.hermes gets the NATIVE default root — hermes_constants
+  // ._hermes_root_of treats any home under ~/.hermes as profile mode of the native install.
+  // The fork's own profile registry then anchors at the real root, the bench profile is
+  // invisible to it, and an app that names the active profile on registry API requests
+  // (hermes-agent >= the plugin-run-backend feature) 403s profile_scope_mismatch on every
+  // plugin call. So --out must be provisioned OUTSIDE the native home.
+  const nativeHome = path.resolve(os.homedir(), '.hermes');
+  const outResolved = path.resolve(A.outDir);
+  if (outResolved === nativeHome || outResolved.startsWith(nativeHome + path.sep))
+    die(EX.preflight, `--out ${A.outDir} lives under the native home ${nativeHome}: the bench fork's profile registry would anchor there (hermes_constants._hermes_root_of forces the native root for homes under it) and the app would 403 profile_scope_mismatch. Provision the bench outside the native home (e.g. the repo's captured/ dir or a TMPDIR path).`);
   let appCommit = 'unknown', appDirtyEntries = -1, appVersion = 'unknown', electronVersion = 'unknown';
   try {
     appCommit = execFileSync('git', ['-C', appRepo, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
@@ -855,6 +874,11 @@ async function main() {
   identity.bench.locks = B.locks;
 
   const benchEnv = { ...process.env, HERMES_HOME: B.home, HERMES_GATEWAY_LOCK_DIR: B.locks };
+  // Gate-case bench knobs (bd_2026-11-13-qri): ride the fork's env so the
+  // door's fail-once / delay are armed only for THIS bench gateway (never a
+  // production install, never another case). See plugin_api.release_gate.
+  if (A.caseName === 'gate')
+    Object.assign(benchEnv, { UI2_PROOF_GATE_FAIL_ONCE: '1', UI2_PROOF_GATE_POST_DELAY_MS: '2500' });
   // The standalone opt-out rides the COPIED config BEFORE boot: decide() reads
   // it inside the ensure CLI fork (pre-boot plugin-settings writes are
   // fork-normalized away — separate law, see below), and gateway.standalone
@@ -906,10 +930,52 @@ async function main() {
       execFileSync(process.execPath, ['scripts/bundle-electron-main.mjs', '--dev'],
         { cwd: desktop, stdio: 'ignore', timeout: 120_000 });
     }
+    // App-generation law (field-proven 2026-11-24, bd_2026-11-13-qri, four
+    // bench homes): do NOT pass HERMES_DESKTOP_HERMES. In the dev boot the
+    // renderer checkout's SOURCE_REPO backend already pins the CLI deterministically
+    // (dev rung precedes the override), and the override re-parents the app's
+    // ensure to the DEFAULT profile: the boot spawns a root fork at the bench
+    // home while the satellite fork from pre-ensure goes orphan, the multiplexer
+    // answers every named-profile ticket with `bootstrap binding rejected`, and
+    // the renderer sits on the first-run setup modal forever ('Invalid gateway
+    // ticket response' storm in logs/electron.log, exit 6 with no pane). The
+    // app-repo copy therefore serves BOTH halves in the green era — and the
+    // b9b36c9-era app still cannot bench at all (SETUP.md App generation note).
+    // App SOURCE rung law (field-proven 2026-11-24, qri-proof20): a bare
+    // green-era app-copy checkout has no .venv, so the app's dev source rung
+    // (isHermesSourceRoot + findPythonForRoot) finds no interpreter and the
+    // resolution answer becomes 'bootstrap-needed' — the renderer wedges on
+    // the 'Set up Hermes Desktop' first-run choice modal forever (exit 6).
+    // Name the door interpreter explicitly: the same >=3.10 python the door
+    // and the engine seeds run under.
+    if (!py) {
+      try {
+        const shimAbs = hermesBin.startsWith('/') ? hermesBin
+          : execFileSync('/usr/bin/which', [hermesBin], { encoding: 'utf8' }).trim();
+        const shim = fs.readFileSync(shimAbs, 'utf8').slice(0, 4000);
+        const m = shim.match(/^exec\s+(\S*python\S*)\b/m);
+        if (m && fs.existsSync(m[1])) py = m[1];
+      } catch { /* shim unreadable — the door-time probe still runs */ }
+    }
+    if (!py) {
+      for (const cand of ['python3', 'python3.14', 'python3.12', 'python3.10']) {
+        try {
+          execFileSync(cand, ['-c', 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)']);
+          py = cand; break;
+        } catch { /* too old or absent */ }
+      }
+    }
+    let pyAbs = py;
+    if (py && !py.includes('/')) {
+      try { pyAbs = execFileSync('/usr/bin/which', [py], { encoding: 'utf8' }).trim() || py; } catch { /* stays a name */ }
+    }
     const electronEnv = { ...process.env,
       HERMES_DESKTOP_DEV_SERVER: `http://127.0.0.1:${A.rendererPort}`,
       HERMES_DESKTOP_CDP_PORT: String(A.cdpPort),
-      HERMES_HOME: B.home, HERMES_GATEWAY_LOCK_DIR: B.locks };
+      ...(pyAbs ? { HERMES_DESKTOP_PYTHON: pyAbs } : {}),
+      HERMES_HOME: B.home, HERMES_GATEWAY_LOCK_DIR: B.locks,
+      ...(A.caseName === 'gate' ? { UI2_PROOF_GATE_FAIL_ONCE: '1',
+        UI2_PROOF_GATE_POST_DELAY_MS: '2500' } : {}) };
     sup.start('electron', path.join(desktop, 'node_modules', '.bin', 'electron'),
       ['.', `--user-data-dir=${B.userdata}`], { cwd: desktop, env: electronEnv });
 
@@ -1375,6 +1441,7 @@ async function main() {
     } else {
     {
       let wT0 = Date.now();
+      let splashWaits = 0, paneReloaded = false;
       for (;;) {
         const hit = await evlPoll(locateJS(paneRowNeedle, { region: paneRegion }), { err: 'reconnecting' });
         if (!hit.err) break;
@@ -1403,8 +1470,30 @@ async function main() {
         // locateJS already reports the covering text: 'occluded over
         // CONNECTING' is direct splash evidence; re-wait attach on it too.
         const occludedBySplash = hit.err === 'occluded' && /connecting/i.test(String(hit.over || ''));
+        // Onboarding wedge (field-proven 2026-11-24): a provider-less bench
+        // boots into the onboarding wizard ("Let's get you setup… Connect a
+        // model provider"), which occludes the pane rows forever. Dismiss it
+        // with its own honest button (a plain click — dismissal is not
+        // evidence; the ANSWER click stays trusted).
+        if (hit.err === 'occluded' && /get you setup|provider/i.test(String(hit.over || ''))) {
+          await cdp.evl(`(() => { const b = [...document.querySelectorAll('button')]
+              .find(b => (b.innerText||'').includes('choose a provider later'));
+            if (b) b.click(); return !!b; })()`).catch(() => false);
+          await sleep(500);
+        }
         if (underSplash || occludedBySplash) {
           try { await waitConnected(cdp, 15_000); wT0 = Date.now() - probeBudgetMs + 30_000; } catch { /* loop budget decides */ }
+          // Splash persistence (field-proven 2026-11-24, crew load): the
+          // renderer's WS/ticket exchange can die once at boot and the splash
+          // never lifts — ONE bounded document reload after the second
+          // splash-wait re-runs the attach from a clean slate.
+          if (++splashWaits >= 2 && !paneReloaded) {
+            paneReloaded = true;
+            try { await cdp.send('Page.reload', { ignoreCache: true }); } catch { /* navigating */ }
+            await sleep(2500);
+            try { cdp.ws.close(); } catch { /* already gone */ }
+            cdp = await connectCdp(A.cdpPort, A.rendererPort, 60_000);
+          }
         }
         // Route-restore race (field-proven: diagnostic shows the app restored
         // the chat view AFTER the tab click — SESSIONS active, hero rendered):
@@ -1498,47 +1587,124 @@ async function main() {
         } catch { /* already gone: the tested shape is a dead runner */ }
       }
       // 07: the held frame — verbatim question, declared requester, options.
+      // One pre-dismiss of the onboarding wizard (same honest button): the
+      // held frame must not wear it and waitText would match UNDER it.
+      await cdp.evl(`(() => { const b = [...document.querySelectorAll('button')]
+          .find(b => (b.innerText||'').includes('choose a provider later'));
+        if (b) b.click(); return !!b; })()`).catch(() => false);
       await waitText(cdp, gateDef.question, 20_000);
-      const heldCell = await rectOf(cdp, gateDef.question);
+      const heldCell = await cdp.evl(`(() => {
+        const els = [...document.querySelectorAll('div,section')].filter(e =>
+          (e.innerText || '').includes(${JSON.stringify(gateDef.question)})
+          && (e.innerText || '').includes('requester:'));
+        const cell = els.sort((a, b) => a.innerText.length - b.innerText.length)[0];
+        if (!cell) return null;
+        const r = cell.getBoundingClientRect();
+        return { x: r.x, y: r.y, width: r.width, height: r.height };
+      })()`) || await rectOf(cdp, gateDef.question);
       if (!heldCell) die(EX.capture, 'held gate cell never rendered on the record page');
       shots.push({ surface: 'gate_modal', state: 'held: question, requester, option buttons',
         ...(await shoot(cdp, A.outDir, '07-gate-held.png', heldCell)) });
-      // Hold the answer POST mid-flight, then trusted-click the option. The
-      // FIRST click is force-failed with a real {ok:false} door response
-      // (Fetch.fulfillRequest, HTTP 200 like the door's semantic errors):
-      // the error frame is the RENDERED failure, not a staged picture, and
-      // it proves the options come back retryable. The SECOND click answers.
-      await cdp.send('Fetch.enable', { patterns: [{ urlPattern: '*/gate', requestMethod: 'POST' }] });
-      const pauseOnce = () => new Promise((resolve, reject) => {
-        const t = setTimeout(() => reject(new Error('answer POST never paused')), 15_000);
-        const on = e => {
-          let m; try { m = JSON.parse(e.data); } catch { return; }
-          if (m.method === 'Fetch.requestPaused') {
-            clearTimeout(t); cdp.ws.removeEventListener('message', on); resolve(m.params.requestId);
-          }
-        };
-        cdp.ws.addEventListener('message', on);
-      });
+      // The answer POST rides the app's IPC bridge: since app b9b36c9 plugin
+      // REST goes through the 'hermes:api' remote method, so an in-flight
+      // POST is INVISIBLE to CDP Fetch interception (field-proven 2026-11-24:
+      // 'answer POST never paused' though the answer landed). The frames are
+      // REAL server-side transport instead: the fork runs with
+      // UI2_PROOF_GATE_FAIL_ONCE (the first click meets a typed {ok:false}
+      // refusal from the door BEFORE any write — the error frame is the
+      // rendered failure, options come back retryable) and
+      // UI2_PROOF_GATE_POST_DELAY_MS (the second click's response stays
+      // in-flight while the door sleeps after its durable write — a genuinely
+      // slow door, not a staged picture). The SECOND click answers.
       await trustedClick(cdp, gateDef.options[0], { exact: true });
-      const requestId = await pauseOnce();
-      await waitText(cdp, 'Saving answer…', 5_000);
-      shots.push({ surface: 'gate_modal', state: 'pending: POST held at Fetch interception, options disabled (duplicate prevention)',
-        ...(await shoot(cdp, A.outDir, '08-gate-pending.png', await rectOf(cdp, 'Saving answer…'))) });
-      await cdp.send('Fetch.fulfillRequest', { requestId, responseCode: 200,
-        responseHeaders: [{ name: 'content-type', value: 'application/json' }],
-        body: Buffer.from(JSON.stringify({ ok: false, error: { message: 'ui2-proof forced error' } })).toString('base64') });
       await waitText(cdp, 'Gate answer failed', 10_000);
       const retryCell = await rectOf(cdp, 'Gate answer failed');
       const retryOpt = await rectOf(cdp, gateDef.options[0], { exact: true });
       if (!retryOpt) die(EX.capture, 'options not retryable after an ok:false answer — error state swallowed the gate');
       if (await cdp.evl(`!!document.querySelector('[data-gate-receipt]')`))
         die(EX.capture, 'ok:false rendered a saved receipt — error is not a successful mutation');
-      shots.push({ surface: 'gate_modal', state: 'error: forced {ok:false} door answer -> inline failure + retryable options, no receipt',
+      shots.push({ surface: 'gate_modal', state: 'error: real fail-once door answer -> inline failure + retryable options, no receipt',
         ...(await shoot(cdp, A.outDir, '08b-gate-error.png', retryCell || retryOpt)) });
-      const paused2 = pauseOnce();
+      // The fail-once ERROR toast is user-cleared and stays; the notification
+      // stack renders later arrivals as collapsed 'older' items, which is
+      // exactly how the success receipt toast escaped both the '◇ ' needle
+      // and every container scan (notifications.tsx slice(1); field-proven
+      // qri-proof22/23/24 body dumps). Dismiss it so the success toast is
+      // the live top notification when the second answer lands.
+      const dismissed = await cdp.evl(`(() => {
+        const namesError = b => { let n = b;
+          for (let i = 0; i < 6 && n.parentElement; i++) { n = n.parentElement;
+            if ((n.innerText || '').includes('Gate answer failed')) return true; }
+          return false; };
+        for (const b of document.querySelectorAll('button[aria-label="Dismiss notification"]'))
+          if (namesError(b)) { b.click(); return true; }
+        for (const b of document.querySelectorAll('button'))
+          if ((b.innerText || '').trim() === 'Clear all') { b.click(); return true; }
+        return false;
+      })()`);
+      if (!dismissed) die(EX.capture, 'fail-once error toast present but undismissable — the success toast would stack behind it');
+      await sleep(500);
       await trustedClick(cdp, gateDef.options[0], { exact: true });
-      await cdp.send('Fetch.continueRequest', { requestId: await paused2 });
-      await cdp.send('Fetch.disable');
+      // ONE tight interleaved poll from the click instant: the success toast
+      // auto-expires seconds after the response (TTL measured live,
+      // qri-proof22/23 — sequential phases lost it), so the pending frame,
+      // the duplicate-prevention check and the toast ride the same 150 ms
+      // loop. Order of shots stays 08 -> 10.
+      // 10's locator keys on the run/gate ledger line — the ONLY string the
+      // toast carries and the receipt card never renders (the card shows
+      // question/requester/answer/time; a structural 'Answer saved' walk
+      // alone matched the card — field-proven, qri-proof21 frame 10).
+      const ledgerNeedle = runId + ' / ' + gateDef.id;
+      let toast = null;
+      let pending = null;
+      const tT0 = Date.now();
+      while (Date.now() - tT0 < 15_000 && (!toast || !pending)) {
+        if (!pending) {
+          const r = await rectOf(cdp, 'Saving answer…').catch(() => null);
+          if (r) {
+            if (await cdp.evl(`(() => { const b = [...document.querySelectorAll('button')]
+                .find(b => (b.innerText||'').trim() === ${JSON.stringify(gateDef.options[0])});
+              return !!b && !b.disabled; })()`))
+              die(EX.capture, 'options stayed enabled while the answer POST was in flight — duplicate prevention missing');
+            shots.push({ surface: 'gate_modal', state: 'pending: response in-flight on the door bench delay, options disabled (duplicate prevention)',
+              ...(await shoot(cdp, A.outDir, '08-gate-pending.png', r)) });
+            pending = true;
+          }
+        }
+        if (!toast) {
+          toast = await cdp.evl(`(() => {
+            const btns = [...document.querySelectorAll('button')].filter(b =>
+              (b.innerText || '').trim() === 'View exact gate');
+            for (const b of btns) {
+              let n = b;
+              for (let i = 0; i < 7 && n.parentElement; i++) {
+                n = n.parentElement;
+                if ((n.innerText || '').includes(${JSON.stringify(ledgerNeedle)})) break;
+              }
+              const txt = (n.innerText || '');
+              if (!txt.includes(${JSON.stringify(ledgerNeedle)})) continue;
+              if (!txt.includes('Answer saved') || !txt.includes('Approve review')
+                  || !/\\d{4}-\\d{2}-\\d{2}T/.test(txt)) return null;
+              const r = n.getBoundingClientRect();
+              if (r.width === 0 || r.height === 0) continue;
+              return { x: r.x, y: r.y, width: r.width, height: r.height, text: txt };
+            }
+            return null;
+          })()`);
+          if (toast) {
+            delete toast.text;
+            shots.push({ surface: 'gate_modal', state: 'success toast: answer saved + exact answer + requester + run / gate + stamped time, action View exact gate',
+              ...(await shoot(cdp, A.outDir, '10-gate-toast.png', toast)) });
+          }
+        }
+        if (!toast) await sleep(150);
+      }
+      if (!pending) die(EX.capture, 'never observed the real pending frame (Saving answer…)');
+      if (!toast) {
+        const bodyDump = await cdp.evl(`document.body.innerText.slice(0, 6000)`);
+        fs.writeFileSync(path.join(A.outDir, 'logs', 'toast-miss-body.txt'), String(bodyDump));
+        die(EX.capture, 'no notification element carried the run / gate ledger line within 15s; body dump in logs/toast-miss-body.txt');
+      }
       // 09: the durable saved receipt (recorded answer, scoped copy).
       await waitText(cdp, 'Answer saved', 20_000);
       const receipt = await cdp.evl(`(() => {
@@ -1548,13 +1714,16 @@ async function main() {
         return { x: r.x, y: r.y, width: r.width, height: r.height };
       })()`);
       if (!receipt) die(EX.capture, 'saved receipt surface [data-gate-receipt] absent after the answer');
-      shots.push({ surface: 'gate_modal', state: 'saved: Answer saved receipt, exact answer, nothing-restarted scope note',
+      // Receipt time contract (review-2 Q1/Q2): the rendered receipt carries
+      // the door-stamped Answered timestamp — who/WHAT/WHEN, not a bare word.
+      const receiptText = await cdp.evl(`(() => {
+        const el = document.querySelector('[data-gate-receipt]');
+        return el ? (el.innerText || '') : '';
+      })()`);
+      if (!/Answered · \d{4}-\d{2}-\d{2}T/.test(receiptText))
+        die(EX.capture, `saved receipt lacks the door-stamped Answered time: ${JSON.stringify(receiptText)}`);
+      shots.push({ surface: 'gate_modal', state: 'saved: Answer saved receipt, exact answer, door-stamped Answered time, nothing-restarted scope note',
         ...(await shoot(cdp, A.outDir, '09-gate-saved.png', receipt)) });
-      // 10: the toast — same ledger line, View exact gate action.
-      await waitText(cdp, 'View exact gate', 15_000);
-      const toast = await rectOf(cdp, '◇ Held ·', {});
-      shots.push({ surface: 'gate_modal', state: 'success toast: held glyph + requester + run / gate, action View exact gate',
-        ...(await shoot(cdp, A.outDir, '10-gate-toast.png', toast)) });
       // Identity proof: leave the record entirely, then take the toast's (or
       // the receipt's) View exact gate — the route must return to THIS run's
       // gate cell showing the durable receipt, never a bare list.
@@ -1609,8 +1778,14 @@ async function main() {
       if (identityLine.gate_node_committed)
         die(EX.capture, 'the killed runner consumed the answer — the seed is no longer isolated');
       identity.gate_answer = identityLine;
+      const afterRect = await cdp.evl(`(() => {
+        const el = document.querySelector('[data-gate-receipt]');
+        if (!el) return null;
+        const r = el.getBoundingClientRect();
+        return { x: r.x, y: r.y, width: r.width, height: r.height };
+      })()`) || await rectOf(cdp, gateDef.question);
       shots.push({ surface: 'gate_modal', state: 'after View exact gate: exact receipt re-rendered from the read model',
-        ...(await shoot(cdp, A.outDir, '11-gate-after-view.png', await rectOf(cdp, gateDef.question))) });
+        ...(await shoot(cdp, A.outDir, '11-gate-after-view.png', afterRect)) });
     }
 
     // 03/04 directive card: seed one real assistant turn, open its session,

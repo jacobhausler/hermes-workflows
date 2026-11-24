@@ -44,17 +44,19 @@ re-arming at every reconnect site. Run on loaded boxes with
 `--paint-budget 300` and non-default ports (`--cdp-port 9594
 --renderer-port 5394`) when a sibling bench owns 9394/5194.
 
-**App generation (2026-11-24):** the CURRENT desktop app (b9b36c9) ensures its
-local gateway as the DEFAULT profile of HERMES_HOME, so a satellite-profile
-bench fork answers hermes:api with 403 profile_scope_mismatch and the host
-record wedges (exit-75 churn) — and a standalone default fork cannot coexist
-with a live estate gateway ("the host gateway still serves profile
-'default'"). Until the app honors the profile pin again, run the bench with
-`--app-repo` at a green-era checkout (0f602c5 proven) — provision it with
-`pnpm@<packageManager> install --frozen-lockfile` (a REAL install; sharing the
-live checkout's node_modules by symlink mixes HEAD workspace packages with the
-older src and main.tsx fails to load). The app commit is pinned in
-`identity.app.commit`, so every proof says which app it ran against.
+**App generation (2026-11-24, amended by field evidence):** the b9b36c9-era
+desktop app CAN bench, with two laws: (1) the bench-home corollary (outside
+the native root — the 403 `profile_scope_mismatch` the first b9b36c9 runs saw
+was that re-parenting, not the app), and (2) the backend pin
+`HERMES_DESKTOP_HERMES` (absolute preflight CLI) — without it the app resolves
+its backend at `$HERMES_HOME/hermes-agent`, finds nothing, and halts on the
+bootstrap first-run setup choice (de-pinned qri-proof18 re-proved the halt).
+With the pin, the full gate capture walked held→error→pending→saved on
+qri-proof12 against `identity.app.commit` b9b36c9. A provider-less bench boots
+into the onboarding wizard; the driver dismisses it via its own "choose a
+provider later" button (pane poll + before the held frame). The green-era
+(0f602c5) option remains valid; `identity.app.commit` pins which app every
+proof ran against.
 
 ## Reproducibility law (slice A)
 
@@ -89,8 +91,41 @@ recomputes the combined hash from disk, and pins the mask with samples.
    (or `--plugin PATH`). It is staged into a bench-local
    `HERMES_HOME/desktop-plugins/hermes-workflows/plugin.js` and re-hashed:
    the app loads exactly the candidate bytes (identity.json pins both hashes).
+4. **App-copy law (field-proven 2026-11-24, bd_2026-11-13-qri):** on a loaded
+   box run `--app-repo` against a DEDICATED hermes-agent worktree for the
+   RENDERER half, never the shared checkout: concurrent vite dev servers over
+   one `apps/desktop/node_modules/.vite` swap dep-optimizer chunks mid-load
+   ("Failed to fetch dynamically imported module /src/main.tsx", exit 5, and
+   registry-probe hangs with no frame). Provision it with a frozen pnpm
+   install (PATH pnpm may be a broken corepack shim — `node
+   ~/.cache/node/corepack/v1/pnpm/<v>/bin/pnpm.mjs` works). The BACKEND of a
+   dev boot is the app-repo checkout's own SOURCE_REPO python — but a bare
+   worktree has no `.venv`, so the driver names the interpreter explicitly:
+   the door interpreter (or `UI2_PROOF_PYTHON`) rides electronEnv as
+   `HERMES_DESKTOP_PYTHON`. Without it the app's answer is
+   `bootstrap-needed` and the renderer wedges on the 'Set up Hermes Desktop'
+   first-run choice (field-proven qri-proof20, exit 6 with the modal).
+   Do NOT pin `HERMES_DESKTOP_HERMES` on a bench boot: field-proven (four bench
+   homes, bd_2026-11-13-qri) the override re-parents the app's ensure to the
+   DEFAULT profile — a root fork spawns at the bench home, the pre-ensured
+   satellite goes orphan, every named-profile ticket answers `bootstrap binding
+   rejected`, and the renderer wedges on the first-run setup modal (exit 6).
+   The b9b36c9-era app cannot bench at all (App generation note above).
+   The bench also needs disk headroom: a full Data volume surfaces as
+   gateway-ensure timeouts and `unable to open database file`, not ENOSPC.
 
 ## Bench profile law (field-proven 2026-11-24, bd_2026-11-13-iqf)
+
+**Bench-home corollary (field-proven 2026-11-24, bd_2026-11-13-qri):** `--out`
+must sit OUTSIDE the native `~/.hermes`. A bench home under the native root is
+treated as profile mode of the native install (`hermes_constants._hermes_root_of`
+forces the native default root for any `HERMES_HOME` beneath it), so the fork's
+profile registry never sees `ui2bench`; an app that names the active profile on
+registry API requests then 403s `profile_scope_mismatch` on every plugin call
+(exit 6 with a "workflows unreachable … profile_scope_mismatch" sidebar).
+The driver refuses such `--out` at preflight (exit 4). The repo's `captured/`
+dir or a TMPDIR path are the sanctioned hosts; copy the finished set wherever
+the bead's ledger wants it afterwards.
 
 One gateway per host serves every profile: while a live host gateway exists,
 `gateway ensure` for the DEFAULT profile ATTACHes or refuses — a bench fork
@@ -189,8 +224,10 @@ capture section of capture.mjs and extend `surfaces_registry` instead.
 decision surface end-to-end on the real renderer: the held gate cell, a
 trusted option click, the PENDING frame made real by holding the answer POST
 at CDP `Fetch` interception (never a staged screenshot), the durable
-`[data-gate-receipt]` saved frame, the success toast carrying the exact
-ledger line (`◇ Held · <requester> · <run> / <gate>`) with its
+`[data-gate-receipt]` saved frame asserting the door-stamped
+`Answered · <ISO time>` line, the success toast that IS the receipt
+(`◇ Answer saved · <answer> · <requester> · <run> / <gate> · <ISO time>`,
+review-2 Q2) with its
 `View exact gate` action, and the route-away/route-back identity proof.
 The seed SIGKILLs the isolated runner at `gate.held` (seed field
 `kill_runner_after_hold`), then the driver reads `gates/<id>.json` back from

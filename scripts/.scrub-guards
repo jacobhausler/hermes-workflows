@@ -246,9 +246,24 @@ tests/proof-harness/captured/bd_2026-11-13-iqf/set-2/contents/04-directive-card.
 tests/proof-harness/captured/bd_2026-11-13-iqf/set-2/identity.json
 tests/proof-harness/captured/bd_2026-11-13-iqf/set-2/report.json
 tests/proof-harness/captured/bd_2026-11-13-iqf/set-2/manifest.json
+# ---- Captured real-app gate evidence (bd_2026-11-13-qri) ----
+# Same byte-immutability law as the iqf set: the pane content layers name the
+# seat model (composer chip) and the provenance dumps pin capturing-host
+# paths; guards scoped to the evidence tree only.
+tests/proof-harness/captured/bd_2026-11-13-qri/contents/01-pane-runs.txt
+tests/proof-harness/captured/bd_2026-11-13-qri/contents/02-pane-run-detail.txt
+tests/proof-harness/captured/bd_2026-11-13-qri/identity.json
+tests/proof-harness/captured/bd_2026-11-13-qri/report.json
+tests/proof-harness/captured/bd_2026-11-13-qri/manifest.json
 # ---- bd_2026-11-13-33h: ui2-proof historical_snapshot fixture identity ----
 # The graph case's pinned-fixture row must name the estate fixture path
 # VERBATIM: the driver refuses the capture unless the on-disk bytes match the
 # sha256 pin, so placeholder-izing the path would make the real-app proof
 # point at nothing. One anchored row (the fixture line inside cases.json).
 regex:"fixture": "[^"]*ui2/synthesis/fixtures-real/
+# Gate captured set (bd_2026-11-13-qri): the pane column's model chip renders
+# the live seat at capture time; the contents txt is manifest-hash-pinned by
+# the repro law, so renaming the row would void byte identity with
+# manifest.json.captures[]. Fixture identity, load-bearing verbatim.
+tests/proof-harness/captured/bd_2026-11-13-qri/contents/01-pane-runs.txt
+

@@ -60,6 +60,10 @@ def _events(r, limit=400):
 
 LOG_TAIL = 16384  # O2: chosen constant, not a measured one and not a config.
 
+# Process-scoped state for the bench fail-once knob (see release_gate): one
+# refusal per (run, gate) per gateway process while the env is armed.
+_PROOF_FAIL_ONCE_DONE = set()
+
 def _node_log_tail(r, nid, index, attempt, kind, tail):
     """O2's single read-only log route core. The path comes ONLY from the record's
     log_path/prompt_path (the client never sends a path) and must resolve inside
@@ -384,9 +388,31 @@ if router is not None:
         r = _safe_run(run_id)
         if not r:
             return {"ok": False, "error": "unknown run"}
+        # Bench proof knobs (bd_2026-11-13-qri): the current desktop serves
+        # plugin REST through the IPC bridge (remote method 'hermes:api'), so
+        # an in-flight answer POST is INVISIBLE to CDP Fetch interception —
+        # the pending/error capture frames must instead be REAL transport.
+        # UI2_PROOF_GATE_FAIL_ONCE makes the first UI answer per (run, gate)
+        # a typed ok:false refusal before the write; UI2_PROOF_GATE_POST_DELAY_MS
+        # sleeps AFTER the durable write but BEFORE the response, so the UI's
+        # pending frame rides a genuinely slow door, not a staged picture.
+        # Env-gated: production traffic never sets them.
+        if os.environ.get("UI2_PROOF_GATE_FAIL_ONCE"):
+            _key = (run_id, str(body.get("gate_id")))
+            if _key not in _PROOF_FAIL_ONCE_DONE:
+                _PROOF_FAIL_ONCE_DONE.add(_key)
+                return {"ok": False, "error": "proof: transient (bench fail-once)"}
         import importlib.util
         spec = importlib.util.spec_from_file_location(
             "_hermes_workflows_door", Path(__file__).resolve().parent.parent / "__init__.py")
         door = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(door)
-        return door._release_core(r, body.get("gate_id"), body.get("answer", ""), ui=True)
+        res = door._release_core(r, body.get("gate_id"), body.get("answer", ""), ui=True)
+        try:
+            _delay = int(os.environ.get("UI2_PROOF_GATE_POST_DELAY_MS", "0") or "0")
+        except ValueError:
+            _delay = 0
+        if _delay and isinstance(res, dict) and res.get("ok") is True:
+            import asyncio
+            await asyncio.sleep(_delay / 1000.0)
+        return res

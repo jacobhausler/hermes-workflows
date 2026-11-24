@@ -4567,7 +4567,11 @@ def _release_core(r, gate_id, answer, ui=False):
         _orphan_watch.revoke_run(r.name, "release", by=_session_env("HERMES_SESSION_ID") or None)
     except Exception:
         pass
-    return {"ok": True}
+    # Additive receipt contract (bd_2026-11-13-qri review-2 Q1/Q2): the success
+    # response carries the server-stamped `at` so the UI receipt/toast show the
+    # DURABLE timestamp, not a client clock. Additive key only — every existing
+    # caller reads .get("ok"); act_release's tool path ignores res on success.
+    return {"ok": True, "at": rec["at"]}
 
 def act_release(args):
     r = run_dir(args.get("run_id"))
