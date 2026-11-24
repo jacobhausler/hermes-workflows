@@ -942,7 +942,29 @@ async function main() {
           const r = el.getBoundingClientRect();
           return { x: r.x + r.width / 2, y: r.y + r.height / 2, t: leaf.t.slice(0, 60) };
         })()`);
-        if (!rowHit) await sleep(750);
+        if (rowHit) break;
+        if (Date.now() - rowT0 > probeBudgetMs) {
+          if (!rowReloads++) {
+            // Field-proven (set-1c): the first reload can land the ticket-
+            // refresh window and wedge the INITIAL list load — recover once,
+            // fresh budget, and keep probing.
+            await cdp.send('Page.reload', { ignoreCache: true });
+            cdp.ws.close();
+            await sleep(2000);
+            cdp = await connectCdp(A.cdpPort, A.rendererPort, 60_000);
+            await waitPainted(cdp, A.paintBudgetMs);
+            await waitConnected(cdp, probeBudgetMs);
+            await trustedClick(cdp, 'sessions', { exact: true, ci: true });
+            rowT0 = Date.now();
+          } else {
+            break;
+          }
+          continue;
+        }
+        // Pane-loop discipline: re-click SESSIONS every poll to ride route
+        // resets and reconnect churn (boot-modal Retry rides the loop head).
+        try { await trustedClick(cdp, 'sessions', { exact: true, ci: true }); } catch { /* view already there */ }
+        await sleep(750);
       }
       if (!rowHit) {
         try { await shoot(cdp, A.outDir, '00-diagnostic-sessions.png'); } catch { /* best effort */ }
