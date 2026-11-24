@@ -189,6 +189,26 @@ def _view(r, full=False, lock_state=None):
             # half of the divergence this fix removes).
         view.update({"graph": st["graph"], "nodes": nodes, "events": _events(r),
                      "gate": dict(st["held_gate"] or {}), "metrics": rollup})
+        # bd_2026-11-13-qri: the durable answer receipt for the gate cell. Every
+        # gate whose COMMITTED answer carries an 'answer' field, verbatim minus
+        # the efp stamp — gate_answer_valid is the law, so an answer invalidated
+        # by an amend never renders as saved. Skipped/machine records without an
+        # 'answer' field and unanswered gates stay absent (honest absence). The
+        # release route invalidates the census BEFORE the write resolves, so this
+        # block reflects the UI's own POST on the very next GET.
+        byid_g = {n["id"]: n for n in st["graph"]["nodes"]}
+        gate_records = {}
+        for n in st["graph"]["nodes"]:
+            if n.get("type") != "gate":
+                continue
+            ans = common.gate_answer_valid(r, n, byid_g)
+            if isinstance(ans, dict) and "answer" in ans:
+                rec = {"answer": ans["answer"], "at": ans.get("at")}
+                if ans.get("_ui") is True:
+                    rec["_ui"] = True
+                gate_records[n["id"]] = rec
+        if gate_records:
+            view["gates"] = gate_records
     return view
 
 def _fold_metrics(ms):
