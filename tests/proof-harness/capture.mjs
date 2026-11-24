@@ -404,20 +404,25 @@ class Supervisor {
   }
 }
 
-function readConfigValue(hermesBin, key, env) {
+function readConfigValue(hermesBin, key, env, profile = null) {
   // `hermes config get` exits 0 printing the value; a missing key prints a
   // "not set" notice. Presence probe stays honest via --json parse, else null.
   try {
-    const out = execFileSync(hermesBin, ['config', 'get', key, '--json'], { encoding: 'utf8', env });
+    const out = execFileSync(hermesBin,
+      [...(profile ? ['--profile', profile] : []), 'config', 'get', key, '--json'], { encoding: 'utf8', env });
     return JSON.parse(out);
   } catch { return null; }
 }
 
-function writeConfig(hermesBin, kv, env) {
-  execFileSync(hermesBin, ['config', 'set', '--force', ...kv], { encoding: 'utf8', env });
+function writeConfig(hermesBin, kv, env, profile = null) {
+  execFileSync(hermesBin,
+    [...(profile ? ['--profile', profile] : []), 'config', 'set', '--force', ...kv], { encoding: 'utf8', env });
 }
-function unsetConfig(hermesBin, key, env) {
-  try { execFileSync(hermesBin, ['config', 'unset', key], { encoding: 'utf8', env }); } catch { /* best-effort revert */ }
+function unsetConfig(hermesBin, key, env, profile = null) {
+  try {
+    execFileSync(hermesBin,
+      [...(profile ? ['--profile', profile] : []), 'config', 'unset', key], { encoding: 'utf8', env });
+  } catch { /* best-effort revert */ }
 }
 
 async function main() {
@@ -516,11 +521,29 @@ async function main() {
       die(EX.preflight, `--out exists without ownership marker, refusing to touch: ${A.outDir}`);
     fs.renameSync(A.outDir, `${A.outDir}.stale-${Date.now()}`);
   }
+  // Bench profile law (field-proven 2026-11-24, the estate-gateway era): a
+  // live host gateway makes `gateway ensure` ATTACH-or-refuse for the DEFAULT
+  // profile ("one gateway per host serves every profile"), so a bench fork
+  // under the default profile cannot exist while the estate gateway runs.
+  // The bench therefore serves its OWN standalone satellite profile
+  // (gateway.standalone: true opts out of the host multiplexer) under an
+  // isolated HERMES_GATEWAY_LOCK_DIR (the host rendezvous root is the lock
+  // dir's own gateway-locks tree — $HERMES_GATEWAY_LOCK_DIR else
+  // $XDG_STATE_HOME/hermes/gateway-locks — so the fork neither sees nor
+  // claims the estate record). The app launches the pinned profile via
+  // <userData>/active-profile.json, so the whole backend is bench-local:
+  // the estate gateway is untouched and no trusted input ever lands in the
+  // shared config again.
+  const BENCH_PROFILE = 'ui2bench';
   const B = { root: A.outDir, home: path.join(A.outDir, 'bench', 'home'),
+              profile: path.join(A.outDir, 'bench', 'home', 'profiles', BENCH_PROFILE),
+              locks: path.join(A.outDir, 'bench', 'locks'),
               userdata: path.join(A.outDir, 'bench', 'userdata'),
               runs: path.join(A.outDir, 'bench', 'runs'),
-              plugins: path.join(A.outDir, 'bench', 'home', 'desktop-plugins', 'hermes-workflows') };
-  for (const d of [B.home, B.userdata, B.runs, B.plugins,
+              plugins: path.join(A.outDir, 'bench', 'home', 'profiles', BENCH_PROFILE, 'plugins', 'hermes-workflows'),
+              dplugins: path.join(A.outDir, 'bench', 'home', 'desktop-plugins', 'hermes-workflows') };
+  for (const d of [B.home, B.profile, B.locks, B.userdata, B.runs, B.dplugins,
+                   path.join(B.profile, 'plugins'),
                    path.join(A.outDir, 'captures'), path.join(A.outDir, 'logs'), path.join(A.outDir, 'seed')])
     fs.mkdirSync(d, { recursive: true });
   fs.writeFileSync(path.join(A.outDir, '.ui2-proof-owned'), `${identity.ts} capture.mjs --case ${A.caseName}\n`);
@@ -528,38 +551,50 @@ async function main() {
   // Stage the CANDIDATE into the bench home's desktop-plugins root — the app
   // loads exactly these bytes. Staged copy is re-hashed and must equal the
   // candidate before any capture is trusted.
-  fs.copyFileSync(pluginSrc, path.join(B.plugins, 'plugin.js'));
-  const stagedSha = sha256(path.join(B.plugins, 'plugin.js'));
-  identity.plugin.staged = path.join(B.plugins, 'plugin.js');
+  fs.copyFileSync(pluginSrc, path.join(B.dplugins, 'plugin.js'));
+  const stagedSha = sha256(path.join(B.dplugins, 'plugin.js'));
+  identity.plugin.staged = path.join(B.dplugins, 'plugin.js');
   identity.plugin.staged_sha256 = stagedSha;
   if (stagedSha !== pluginSha) die(EX.preflight, 'staged plugin bytes diverged from candidate');
-  // Copy discovery/state the app READS (never the real plugins dir — the
-  // desktop-half migration would resurrect the installed half over the
-  // candidate; never workflows — the test runs root owns that name).
-  for (const f of ['spawn-ledger.json', 'gateway_state.json', 'auth.json', 'config.yaml']) {
+  // Copy discovery/state the app's BENCH PROFILE reads (never the real
+  // plugins dir — the desktop-half migration would resurrect the installed
+  // half over the candidate; and never gateway_state.json — a copied
+  // running-state poisons the fork's profile reservation, field-proven:
+  // "Gateway runtime already owns profile <real home>").
+  for (const f of ['spawn-ledger.json', 'auth.json', 'config.yaml']) {
     const src = path.join(realHome, f);
-    if (fs.existsSync(src)) fs.copyFileSync(src, path.join(B.home, f));
+    if (fs.existsSync(src)) fs.copyFileSync(src, path.join(B.profile, f));
   }
-  identity.bench.discovery_copied = ['spawn-ledger.json', 'gateway_state.json', 'auth.json', 'config.yaml']
-    .filter(f => fs.existsSync(path.join(B.home, f)));
+  identity.bench.discovery_copied = ['spawn-ledger.json', 'auth.json', 'config.yaml']
+    .filter(f => fs.existsSync(path.join(B.profile, f)));
   // The app's OWN connection state lives in its user-data: seed a local-kind
-  // registry so the bench app serves the bench (it ensures/attaches under
-  // HERMES_HOME=bench home — a fork here is ISOLATION, never a trampled
-  // shared state, because the fork writes only inside the bench).
+  // registry so the bench app serves the bench, and pin the launch profile
+  // (active-profile.json → startHermes passes `--profile ui2bench`, the one
+  // deterministic way to home the primary backend at the bench).
   fs.writeFileSync(path.join(B.userdata, 'connections.json'), JSON.stringify({
     version: 2, primary: 'local', launchMode: 'primary', lastUsed: 'local',
     connections: [{ id: 'local', kind: 'local', label: 'This device' }],
   }) + '\n');
   fs.writeFileSync(path.join(B.userdata, 'connection.json'), JSON.stringify({ mode: 'local', profiles: {} }) + '\n');
-  // Agent half of the CANDIDATE: the bench home links the repo checkout, so
-  // the bench backend mounts /api/plugins/hermes-workflows/ FROM the tree
-  // under proof (same symlinked-dev-checkout shape the desktop-half
-  // migration supports).
-  fs.mkdirSync(path.join(B.home, 'plugins'), { recursive: true });
-  fs.symlinkSync(REPO, path.join(B.home, 'plugins', 'hermes-workflows'));
+  fs.writeFileSync(path.join(B.userdata, 'active-profile.json'), JSON.stringify({ profile: BENCH_PROFILE }) + '\n');
+  // Agent half of the CANDIDATE: the bench PROFILE links the repo checkout, so
+  // the bench fork mounts /api/plugins/hermes-workflows/ FROM the tree under
+  // proof (same symlinked-dev-checkout shape the desktop-half migration
+  // supports — the migration re-syncs the desktop half from this symlink, and
+  // it must equal the candidate bytes or the staged re-hash below goes red).
+  fs.symlinkSync(REPO, path.join(B.profile, 'plugins', 'hermes-workflows'));
   identity.bench.plugins_symlink = REPO;
+  identity.bench.profile = BENCH_PROFILE;
+  identity.bench.locks = B.locks;
 
-  const benchEnv = { ...process.env, HERMES_HOME: B.home };
+  const benchEnv = { ...process.env, HERMES_HOME: B.home, HERMES_GATEWAY_LOCK_DIR: B.locks };
+  // The standalone opt-out rides the COPIED config BEFORE boot: decide() reads
+  // it inside the ensure CLI fork (pre-boot plugin-settings writes are
+  // fork-normalized away — separate law, see below), and gateway.standalone
+  // is what lets the bench fork START beside a live estate multiplexer
+  // instead of ATTACH/REFUSE. Written via the profile-scoped CLI so YAML
+  // shape stays canonical.
+  writeConfig(hermesBin, ['gateway.standalone', 'true'], benchEnv, BENCH_PROFILE);
   const sup = new Supervisor(A.outDir);
   sup._ownedUserData = B.userdata;
   sup._viteMarker = `--port ${A.rendererPort} --strictPort`;
@@ -592,7 +627,7 @@ async function main() {
     const electronEnv = { ...process.env,
       HERMES_DESKTOP_DEV_SERVER: `http://127.0.0.1:${A.rendererPort}`,
       HERMES_DESKTOP_CDP_PORT: String(A.cdpPort),
-      HERMES_HOME: B.home };
+      HERMES_HOME: B.home, HERMES_GATEWAY_LOCK_DIR: B.locks };
     sup.start('electron', path.join(desktop, 'node_modules', '.bin', 'electron'),
       ['.', `--user-data-dir=${B.userdata}`], { cwd: desktop, env: electronEnv });
 
@@ -600,20 +635,23 @@ async function main() {
     // normalizes config.yaml at boot — a pre-boot write is silently dropped,
     // field-proven). Both keys are read fresh by the door per request; the
     // tray settings-gate is a bootstrap read, so the mid-run reload below
-    // re-runs plugin registration with the setting in place.
+    // re-runs plugin registration with the setting in place. The fork
+    // registers gateway_state.json in the BENCH PROFILE home (the launch
+    // profile pins it); the bench root path is accepted too (older homes).
     {
       const gT0 = Date.now();
-      while (!fs.existsSync(path.join(B.home, 'gateway_state.json')) && Date.now() - gT0 < 90_000)
+      const statePaths = [path.join(B.profile, 'gateway_state.json'), path.join(B.home, 'gateway_state.json')];
+      while (!statePaths.some(p => fs.existsSync(p)) && Date.now() - gT0 < 90_000)
         await sleep(500);
-      if (!fs.existsSync(path.join(B.home, 'gateway_state.json')))
+      if (!statePaths.some(p => fs.existsSync(p)))
         die(EX.boot, 'bench backend never registered gateway_state.json (see logs/electron.log)');
     }
     for (const [key, value] of [['plugins.entries.hermes-workflows.settings.runs_root', B.runs],
                                 ['plugins.entries.hermes-workflows.settings.tray', true]]) {
-      const before = readConfigValue(hermesBin, key, benchEnv);
-      identity.config_touched[key] = { before, after: value, scope: 'bench home (isolated — shared config untouched)' };
+      const before = readConfigValue(hermesBin, key, benchEnv, BENCH_PROFILE);
+      identity.config_touched[key] = { before, after: value, scope: `bench profile ${BENCH_PROFILE} (isolated — shared config untouched)` };
       touched.push(key);
-      writeConfig(hermesBin, [key, String(value)], benchEnv);
+      writeConfig(hermesBin, [key, String(value)], benchEnv, BENCH_PROFILE);
     }
 
     // -- engine seed: launch the held-gate graph through the door -----------
@@ -649,7 +687,7 @@ async function main() {
       runId = execFileSync(py, [path.join(HERE, 'seed_run.py'),
         '--repo', REPO, '--runs-root', B.runs, '--graph-file', graphFile],
         { encoding: 'utf8', timeout: 60_000,
-          env: { ...process.env, WF_RUNS_ROOT: B.runs, HERMES_WF_HERMES_BIN: hermesAbs, HERMES_HOME: B.home } }).trim();
+          env: { ...process.env, WF_RUNS_ROOT: B.runs, HERMES_WF_HERMES_BIN: hermesAbs, HERMES_HOME: B.home, HERMES_GATEWAY_LOCK_DIR: B.locks } }).trim();
     } catch (e) {
       die(EX.api, `engine seed launch failed (seed_run.py): ${String(e.stderr || e.message).slice(0, 400)}`);
     }
@@ -729,7 +767,7 @@ async function main() {
     const surfacesWanted = new Set(surfacesFiltered);
     const attached = surfacesWanted.has('pane_workflows') ? registry.panes.some(x => String(x).includes('workflow'))
       : registry.panes.length > 0;
-    const postLoadSha = sha256(path.join(B.plugins, 'plugin.js'));
+    const postLoadSha = sha256(path.join(B.dplugins, 'plugin.js'));
     identity.plugin.staged_sha256_after_load = postLoadSha;
     if (postLoadSha !== pluginSha)
       die(EX.api, `loaded desktop half drifted from the candidate during boot (${postLoadSha.slice(0,12)} != ${pluginSha.slice(0,12)})`);
@@ -805,7 +843,7 @@ async function main() {
       // --source desktop: the app's session list shows titled, desktop-sourced
       // sessions; a bare --oneshot stores source=oneshot WITHOUT a title and
       // the list filters it out (field-proven: state.db source columns).
-      const chatArgs = ['chat', '--query-file', ask, '--oneshot', '-Q', '--source', 'desktop'];
+      const chatArgs = ['--profile', BENCH_PROFILE, 'chat', '--query-file', ask, '--oneshot', '-Q', '--source', 'desktop'];
       if (cardSeed.model) chatArgs.push('-m', cardSeed.model);
       if (cardSeed.provider) chatArgs.push('--provider', cardSeed.provider);
       let cardSession = null;
@@ -958,7 +996,7 @@ async function main() {
           '--repo', REPO, '--runs-root', B.runs, '--graph-file', graphFile],
           { encoding: 'utf8', timeout: 60_000,
             env: { ...process.env, WF_RUNS_ROOT: B.runs, WF_OWNER_SESSION: traySid,
-                   HERMES_WF_HERMES_BIN: hermesAbs, HERMES_HOME: B.home } }).trim();
+                   HERMES_WF_HERMES_BIN: hermesAbs, HERMES_HOME: B.home, HERMES_GATEWAY_LOCK_DIR: B.locks } }).trim();
       } catch (e) {
         die(EX.api, `tray engine seed launch failed: ${String(e.stderr || e.message).slice(0, 400)}`);
       }
@@ -1045,13 +1083,30 @@ async function main() {
             env: { ...process.env, WF_RUNS_ROOT: B.runs, HERMES_HOME: B.home } });
       } catch (e) { revertFailures.push(`stop ${rid}: ${String(e.stderr || e.message).slice(0, 200)}`); }
     }
-    // Revert the two trusted inputs (config hygiene), then kill ONLY
-    // this supervisor's process groups + the path-scoped survivor sweep.
+    // Bench fork down: profile-scoped `gateway stop`, then the pid the state
+    // file names (only when that state file lives IN THIS BENCH and names
+    // this bench's profile home — never a borrowed pid). The fork is spawned
+    // detached by the ensure CLI and outlives electron's process group, so
+    // this is its only teardown; a survivor here is a teardown failure.
+    try {
+      execFileSync(hermesBin, ['--profile', BENCH_PROFILE, 'gateway', 'stop'],
+        { encoding: 'utf8', timeout: 30_000, env: benchEnv });
+    } catch (e) { revertFailures.push(`gateway stop: ${String(e.stderr || e.message).slice(0, 200)}`); }
+    try {
+      const st = JSON.parse(fs.readFileSync(path.join(B.profile, 'gateway_state.json'), 'utf8'));
+      if (st.pid && st.kind === 'hermes-gateway' && st.hermes_home
+          && path.resolve(st.hermes_home) === path.resolve(B.profile)) {
+        try { process.kill(st.pid, 'SIGKILL'); } catch { /* raced away */ }
+      }
+    } catch { /* no fork ever registered */ }
+    // Revert the trusted inputs (config hygiene — now profile-local, still
+    // reverted for honesty), then kill ONLY this supervisor's process groups
+    // + the path-scoped survivor sweep.
     for (const key of touched.reverse()) {
       try {
         const before = identity.config_touched[key]?.before;
-        if (before === null || before === undefined) unsetConfig(hermesBin, key, benchEnv);
-        else if (['string', 'number', 'boolean'].includes(typeof before)) writeConfig(hermesBin, [key, String(before)], benchEnv);
+        if (before === null || before === undefined) unsetConfig(hermesBin, key, benchEnv, BENCH_PROFILE);
+        else if (['string', 'number', 'boolean'].includes(typeof before)) writeConfig(hermesBin, [key, String(before)], benchEnv, BENCH_PROFILE);
         else revertFailures.push(`${key}: prior value ${JSON.stringify(before)} is non-scalar — restore by hand`);
       } catch (e) { revertFailures.push(`${key}: ${String(e.message).slice(0, 200)}`); }
     }

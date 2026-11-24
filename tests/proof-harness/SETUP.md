@@ -47,14 +47,32 @@ recomputes the combined hash from disk, and pins the mask with samples.
    (`pnpm install` at the repo root). Default checkout:
    `$UI2_PROOF_HOME/hermes-agent` (i.e. `~/.hermes/hermes-agent`); override
    with `--app-repo` or `UI2_PROOF_APP_REPO`.
-2. A running `hermes serve` gateway whose plugin API mounts
-   `/api/plugins/hermes-workflows/` (proof: AGENTS.md §2a — the gui.log line,
-   not a 401). The `hermes` CLI must be on PATH (or `--hermes-bin` /
-   `UI2_PROOF_HERMES_BIN`) — used for the config writes below and their revert.
+2. The `hermes` CLI must be on PATH (or `--hermes-bin` /
+   `UI2_PROOF_HERMES_BIN`) — the bench boots its OWN gateway fork as a
+   standalone satellite profile (see "Bench profile law" below), and the CLI
+   is used for the profile-scoped config writes and their revert. A live
+   estate/host gateway is NOT a prerequisite and is NOT disturbed: the bench
+   fork runs beside it under an isolated `HERMES_GATEWAY_LOCK_DIR`.
 3. The candidate desktop half is the checkout's `desktop/plugin.js`
    (or `--plugin PATH`). It is staged into a bench-local
    `HERMES_HOME/desktop-plugins/hermes-workflows/plugin.js` and re-hashed:
    the app loads exactly the candidate bytes (identity.json pins both hashes).
+
+## Bench profile law (field-proven 2026-11-24, bd_2026-11-13-iqf)
+
+One gateway per host serves every profile: while a live host gateway exists,
+`gateway ensure` for the DEFAULT profile ATTACHes or refuses — a bench fork
+under the default profile cannot exist ("The host gateway already serves
+profile 'default'"), and a COPIED `gateway_state.json` poisons the fork's
+profile reservation ("Gateway runtime already owns profile <real home>").
+The bench therefore homes its backend at a satellite profile `ui2bench`
+inside the bench home: the profile config carries `gateway.standalone: true`
+(the sanctioned opt-out that STARTs beside the host multiplexer),
+`HERMES_GATEWAY_LOCK_DIR` points inside the bench (the host rendezvous record
+is invisible both ways), and `<userData>/active-profile.json` pins the app's
+launch profile. Consequence: every trusted input — `settings.runs_root`,
+`settings.tray` — lands in the BENCH PROFILE's config, never the shared one,
+and teardown's revert + `gateway stop` are bench-local by construction.
 
 ## What the driver owns and touches
 

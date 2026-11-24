@@ -1,0 +1,7 @@
+# Committed proof sets keep only the evidence: captures/, contents/,
+# manifest.json (plus report/identity provenance). The bench scratch the
+# driver also writes inside its --out dir is NOT evidence.
+bench/
+logs/
+seed/
+supervisors.json
