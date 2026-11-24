@@ -90,4 +90,36 @@ assert.ok(Array.isArray(manifest.surfaces_registry) && manifest.surfaces_registr
   'surfaces registry lists the wired surfaces')
 console.log('PASS manifest: seed kinds typed, snapshots pinned, registry present')
 
-console.log('ALL PASS: ui2-proof driver failure semantics (2/3/4), plan contract, manifest law')
+// 7. template-escape regression (field-proven): escape sequences inside the
+//    eval'd template literals render into the PAGE SOURCE — a '\n' in a
+//    `//` comment line breaks the statement after it and Runtime.evaluate
+//    dies with 'Unexpected token <'. Every cdp.evl template in the driver
+//    must yield page source that V8 itself can parse, for all option legs.
+{
+  const src = readFileSync(driver, 'utf8')
+  const fnMatch = src.match(/function locateJS[\s\S]*?\n}\n/)
+  assert.ok(fnMatch, 'locateJS extractable for the parse check')
+  const locateJS = eval(`(${fnMatch[0].replace('function locateJS', 'function')})`)
+  for (const opts of [
+    {}, { ci: true }, { exact: true },
+    { region: { xMin: 440, yMin: 40, bottomMargin: 90 } },
+    { nth: 0, region: { xMin: 1 }, ci: true },
+  ]) {
+    const built = locateJS('needle", with"quotes\\u2028', opts)
+    assert.doesNotThrow(() => new Function(built),
+      `locateJS(${JSON.stringify(opts)}) page source must parse`)
+  }
+  // Inline eval'd templates (session-row locators etc.): interpolate every
+  // ${...} with a JSON scalar and require the result to parse.
+  const tmplRe = /cdp\.evl\(`((?:[^`\\]|\\.|\$\{[^}]*(?:\{[^}]*\}[^}]*)?\})*)`\)/g
+  let m, seen = 0
+  while ((m = tmplRe.exec(src))) {
+    const built = m[1].replace(/\\`/g, '`').replace(/\$\{[^}]*\}/g, '""')
+    assert.doesNotThrow(() => new Function(built), `inline cdp.evl template at index ${m.index} must parse`)
+    seen++
+  }
+  assert.ok(seen >= 3, `checked inline eval templates (saw ${seen})`)
+  console.log(`PASS eval-template parse check: locateJS legs + ${seen} inline templates`)
+}
+
+console.log('ALL PASS: ui2-proof driver failure semantics (2/3/4), plan contract, manifest law, eval-template parse law')

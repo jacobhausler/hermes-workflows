@@ -713,13 +713,13 @@ async function main() {
           const cand = [...document.querySelectorAll('div,li,button,a')]
             .map(n => ({ n, t: (n.innerText || '').trim() }))
             .filter(({ n, t }) => {
-              // session row shape = '<title>\n<relative-time>' (field-proven:
+              // session row shape = title line + relative-time line (field-proven:
               // a bare /now/ hit 'runs unkNOW' — the pane stats line). Require a
               // second line whose WHOLE trimmed text is a relative-time token.
               if (!t || t.length > 120) return false;
-              const lines = t.split('\n').map(s => s.trim()).filter(Boolean);
+              const lines = t.split('\\n').map(s => s.trim()).filter(Boolean);
               if (lines.length < 2) return false;
-              return /^(?:now|just now|\d+\s*(?:s|sec|secs?|m|min|mins?|h|hr|hrs?|hour|hours?|d|day|days?)\s*ago)$/i.test(lines[lines.length - 1]);
+              return /^(?:now|just now|\\d+\\s*(?:s|sec|secs?|m|min|mins?|h|hr|hrs?|hour|hours?|d|day|days?)\\s*ago)$/i.test(lines[lines.length - 1]);
             })
             .filter(({ n }) => { const r = n.getBoundingClientRect(); return r.width > 60 && r.height > 16 && r.x < 420 && r.y > 40; })
             .sort((a, b) => a.n.getBoundingClientRect().y - b.n.getBoundingClientRect().y);
@@ -745,9 +745,9 @@ async function main() {
               .map(n => ({ n, t: (n.innerText || '').trim() }))
               .filter(({ t }) => {
                 if (!t || t.length > 120) return false;
-                const lines = t.split('\n').map(s => s.trim()).filter(Boolean);
+                const lines = t.split('\\n').map(s => s.trim()).filter(Boolean);
                 if (lines.length < 2) return false;
-                return /^(?:now|just now|\d+\s*(?:s|sec|secs?|m|min|mins?|h|hr|hrs?|hour|hours?|d|day|days?)\s*ago)$/i.test(lines[lines.length - 1]);
+                return /^(?:now|just now|\\d+\\s*(?:s|sec|secs?|m|min|mins?|h|hr|hrs?|hour|hours?|d|day|days?)\\s*ago)$/i.test(lines[lines.length - 1]);
               })
               .filter(({ n }) => { const r = n.getBoundingClientRect(); return r.width > 60 && r.height > 16 && r.x < 420 && r.y > 40; })
               .sort((a, b) => a.n.getBoundingClientRect().y - b.n.getBoundingClientRect().y);
