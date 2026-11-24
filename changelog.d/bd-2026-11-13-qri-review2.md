@@ -48,9 +48,13 @@ The driver now dies at preflight (exit 4) with the law spelled out when
   `HERMES_DESKTOP_HERMES` — field-proven on four bench homes that the override
   re-parents the app's ensure to the DEFAULT profile (root fork, orphan
   satellite, `bootstrap binding rejected` ticket storm, first-run modal wedge,
-  exit 6). The dev SOURCE_REPO rung pins the backend deterministically for the
-  dedicated green-era app copy, which serves both halves. SETUP.md documents
-  the app-copy and app-generation laws.
+  exit 6). Instead it names the SOURCE-rung interpreter directly
+  (`HERMES_DESKTOP_PYTHON` = the door python): a bare green-era app copy has
+  no `.venv`, and without it the answer is `bootstrap-needed` -> the 'Set up
+  Hermes Desktop' first-run modal wedge. The gate case shots the success
+  toast BEFORE the receipt and locates it by the `<run> / <gate>` ledger
+  line the card never renders. SETUP.md documents the app-copy,
+  app-generation and source-rung laws.
 
 - door: bench-only proof knobs on POST /runs/{id}/gate —
   UI2_PROOF_GATE_FAIL_ONCE (first armed answer is a typed ok:false before any

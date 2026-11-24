@@ -97,18 +97,19 @@ recomputes the combined hash from disk, and pins the mask with samples.
    registry-probe hangs with no frame). Provision it with a frozen pnpm
    install (PATH pnpm may be a broken corepack shim — `node
    ~/.cache/node/corepack/v1/pnpm/<v>/bin/pnpm.mjs` works). The BACKEND of a
-   dev boot is the app-repo checkout's own SOURCE_REPO python (the dev rung
-   precedes PATH and `HERMES_DESKTOP_HERMES` in the app's resolution ladder),
-   so one dedicated GREEN-ERA (0f602c5-proven) checkout serves both halves.
+   dev boot is the app-repo checkout's own SOURCE_REPO python — but a bare
+   worktree has no `.venv`, so the driver names the interpreter explicitly:
+   the door interpreter (or `UI2_PROOF_PYTHON`) rides electronEnv as
+   `HERMES_DESKTOP_PYTHON`. Without it the app's answer is
+   `bootstrap-needed` and the renderer wedges on the 'Set up Hermes Desktop'
+   first-run choice (field-proven qri-proof20, exit 6 with the modal).
    Do NOT pin `HERMES_DESKTOP_HERMES` on a bench boot: field-proven (four bench
    homes, bd_2026-11-13-qri) the override re-parents the app's ensure to the
    DEFAULT profile — a root fork spawns at the bench home, the pre-ensured
    satellite goes orphan, every named-profile ticket answers `bootstrap binding
    rejected`, and the renderer wedges on the first-run setup modal (exit 6).
-   The b9b36c9-era app cannot bench at all (App generation note above); a bare
-   worktree copy can never serve as the primary-install backend either (its
-   launcher passes `--version` but dies inside ensure, no committed dependency
-   env). The bench also needs disk headroom: a full Data volume surfaces as
+   The b9b36c9-era app cannot bench at all (App generation note above).
+   The bench also needs disk headroom: a full Data volume surfaces as
    gateway-ensure timeouts and `unable to open database file`, not ENOSPC.
 
 ## Bench profile law (field-proven 2026-11-24, bd_2026-11-13-iqf)
