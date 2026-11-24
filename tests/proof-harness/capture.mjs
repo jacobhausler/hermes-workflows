@@ -1593,7 +1593,15 @@ async function main() {
           .find(b => (b.innerText||'').includes('choose a provider later'));
         if (b) b.click(); return !!b; })()`).catch(() => false);
       await waitText(cdp, gateDef.question, 20_000);
-      const heldCell = await rectOf(cdp, gateDef.question);
+      const heldCell = await cdp.evl(`(() => {
+        const els = [...document.querySelectorAll('div,section')].filter(e =>
+          (e.innerText || '').includes(${JSON.stringify(gateDef.question)})
+          && (e.innerText || '').includes('requester:'));
+        const cell = els.sort((a, b) => a.innerText.length - b.innerText.length)[0];
+        if (!cell) return null;
+        const r = cell.getBoundingClientRect();
+        return { x: r.x, y: r.y, width: r.width, height: r.height };
+      })()`) || await rectOf(cdp, gateDef.question);
       if (!heldCell) die(EX.capture, 'held gate cell never rendered on the record page');
       shots.push({ surface: 'gate_modal', state: 'held: question, requester, option buttons',
         ...(await shoot(cdp, A.outDir, '07-gate-held.png', heldCell)) });
@@ -1770,8 +1778,14 @@ async function main() {
       if (identityLine.gate_node_committed)
         die(EX.capture, 'the killed runner consumed the answer — the seed is no longer isolated');
       identity.gate_answer = identityLine;
+      const afterRect = await cdp.evl(`(() => {
+        const el = document.querySelector('[data-gate-receipt]');
+        if (!el) return null;
+        const r = el.getBoundingClientRect();
+        return { x: r.x, y: r.y, width: r.width, height: r.height };
+      })()`) || await rectOf(cdp, gateDef.question);
       shots.push({ surface: 'gate_modal', state: 'after View exact gate: exact receipt re-rendered from the read model',
-        ...(await shoot(cdp, A.outDir, '11-gate-after-view.png', await rectOf(cdp, gateDef.question))) });
+        ...(await shoot(cdp, A.outDir, '11-gate-after-view.png', afterRect)) });
     }
 
     // 03/04 directive card: seed one real assistant turn, open its session,
