@@ -614,7 +614,7 @@ function unsetConfig(hermesBin, key, env, profile = null) {
 // (bezier-sampled polylines; edges sharing an endpoint can never count as a
 // crossing). The crossing number is a count of THIS geometry — never a
 // transplanted constant.
-async function measureGraphSvg(cdp, minGroups) {
+async function measureGraphSvg(cdp, minGroups, opts = {}) {
   const m = await cdp.evl(`(() => {
     const svg = [...document.querySelectorAll('svg')]
       .filter(s => s.querySelectorAll('g').length >= ${minGroups})
@@ -661,7 +661,11 @@ async function measureGraphSvg(cdp, minGroups) {
           if (seg(curves[i].pts[p], curves[i].pts[p+1], curves[j].pts[q], curves[j].pts[q+1])) hit = true
       if (hit) { crossings++; pairs.push([i, j]) }
     }
+    // The svg is in the DOCUMENT, but only the SELECTED run's GraphView has
+    // >= 14 route groups, so the count doubles as a selection proof.
+    const hdr = document.body.innerText.match(/([A-Za-z0-9][A-Za-z0-9._-]{2,60})\s+(Finished|Running|Held|Failed|Interrupted|Stopped)/)
     return {
+      detailTitle: hdr ? hdr[1] : null,
       routeGroups: gs.length,
       echoCircles: svg.querySelectorAll('circle').length,
       edgeTitles: gs.filter(g => g.querySelector('title')).length,
@@ -670,7 +674,10 @@ async function measureGraphSvg(cdp, minGroups) {
       geometry: { innerWidth, innerHeight, dpr: devicePixelRatio },
     }
   })()`)
-  if (m && m.err) die(EX.api, `graph svg measurement failed: ${m.err}`)
+  if (m && m.err) {
+    if (opts.dieOnErr === false) return m
+    die(EX.api, `graph svg measurement failed: ${m.err}`)
+  }
   return m
 }
 
@@ -1522,30 +1529,57 @@ async function main() {
     if (graphIds) {
       // 02 the pinned council's GraphView; 03 its fans expanded: projected
       // child pills (critics.0..5), footer attempt ticks, no ghost rings.
-      {
-        const gT0 = Date.now();
+      // Row-selection race (field-proven 12:24:33 attempt): trustedClick can
+      // land while a react-query refresh reorders the list, so the DETAIL
+      // opens the wrong row (shots showed the MF1 trio, and the svg measure
+      // then died on 'no svg with >= 14 route groups'). The council run is the
+      // only graph on this page with >= 14 route groups, so the measure IS
+      // the selection predicate: wrap click -> paint -> expand -> measure in
+      // one bounded unit that re-clicks the row until the council svg is on
+      // screen, and take 02/03 only once selection is proven.
+      const selT0 = Date.now();
+      let pageM = null, toggledOk = false;
+      for (;;) {
         let painted = false;
-        while (!painted && Date.now() - gT0 < 30_000) {
+        const pT0 = Date.now();
+        while (!painted && Date.now() - pT0 < 10_000) {
           painted = await cdp.evl(`(() => { const s = [...document.querySelectorAll('svg')]
             .filter(x => x.querySelectorAll('path').length >= 3); return s.length > 0 })()`);
           if (!painted) await sleep(500);
         }
-        if (!painted) die(EX.api, 'council detail GraphView never painted route paths in the pane');
+        if (painted) {
+          // Selection predicate BEFORE expansion: the static route-identity
+          // layer already carries the council's 14 route groups; expansion
+          // only adds the ItemCards/pills the post-03 measure counts.
+          pageM = await measureGraphSvg(cdp, 14, { dieOnErr: false });
+          if (!(pageM && pageM.err)) break;
+        }
+        if (Date.now() - selT0 > 45_000) {
+          try { await shoot(cdp, A.outDir, '00-diagnostic-detail.png'); } catch { /* best effort */ }
+          if (!painted) die(EX.api, 'council detail GraphView never painted route paths in the pane');
+          die(EX.api, `council detail never became the selection (last: ${JSON.stringify(pageM)}) — diagnostic shot in captures/ if present`);
+        }
+        await trustedClick(cdp, paneRowNeedle, { region: paneRegion });
+        await sleep(900);
       }
       shots.push({ surface: 'pane_workflows', state: 'council GraphView (pinned shelf fixture, no fan interaction)',
         ...(await shoot(cdp, A.outDir, '02-pane-council-graphview.png', null, await stableColumnText(paneRegion))) });
-      const toggled = await cdp.evl(`(() => {
-        const btn = [...document.querySelectorAll('button[aria-label]')].find(b => /fan-out items/i.test(b.getAttribute('aria-label') || ''));
-        if (!btn) return null;
-        const r = btn.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 } })()`);
-      if (!toggled) die(EX.api, 'no fan-out expand toggle on the page canvas');
-      for (const t of ['mouseMoved', 'mousePressed', 'mouseReleased'])
-        await cdp.send('Input.dispatchMouseEvent', { type: t, x: toggled.x, y: toggled.y,
-          button: t === 'mouseMoved' ? undefined : 'left', clickCount: 1, buttons: t === 'mouseReleased' ? 0 : 1 });
-      await sleep(1300);
+      {
+        const toggled = await cdp.evl(`(() => {
+          const btn = [...document.querySelectorAll('button[aria-label]')].find(b => /fan-out items/i.test(b.getAttribute('aria-label') || ''));
+          if (!btn) return null;
+          const r = btn.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 } })()`);
+        if (!toggled) die(EX.api, 'no fan-out expand toggle on the page canvas');
+        for (const t of ['mouseMoved', 'mousePressed', 'mouseReleased'])
+          await cdp.send('Input.dispatchMouseEvent', { type: t, x: toggled.x, y: toggled.y,
+            button: t === 'mouseMoved' ? undefined : 'left', clickCount: 1, buttons: t === 'mouseReleased' ? 0 : 1 });
+        await sleep(1300);
+        toggledOk = true;
+      }
+      pageM = await measureGraphSvg(cdp, 14);   // post-expansion truth: pills + echoes + crossings
       shots.push({ surface: 'pane_workflows', state: 'council fans expanded on the page canvas (ItemCards + footer ticks)',
         ...(await shoot(cdp, A.outDir, '03-pane-council-expanded.png', null, await stableColumnText(paneRegion))) });
-      identity.graph_measurement = { page: await measureGraphSvg(cdp, 14) };
+      identity.graph_measurement = { page: pageM };
       identity.graph_measurement.page.projected_pills = identity.graph_measurement.page.projectedPills.filter(n => /^critics\.\d+$/.test(n));
     } else {
     // The gate question must render IN THE DETAIL VIEW: the expanded tray run
