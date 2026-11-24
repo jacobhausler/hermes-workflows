@@ -1010,24 +1010,78 @@ export function sessionStripArea(composerAreas) {
   return composerAreas?.tray ?? composerAreas?.underside ?? composerAreas?.top
 }
 
-/** Model split of one chat's runs: held first, then running by started desc,
- *  active capped at 3 with the rest as an overflow count; terminal runs fold
- *  into at most 5 lines (most recently updated first). */
-export function splitRuns(runs) {
-  const list = runs || []
-  const live = list.filter(r => !TERMINAL.has(r.status))
-  const terminal = list.filter(r => TERMINAL.has(r.status))
+/** THE shared live comparator (W3 collection law, AGENTS 4c.12 collapse-to-one):
+ *  held rows keep their INPUT order; every other live run (status ∉ TERMINAL)
+ *  sorts by started DESC. Documented tie law: `Array#sort` is stable in every
+ *  shipping engine, so EQUAL (or both-unparseable) `started` keeps input order,
+ *  and an absent/unparseable started sorts LAST (read as oldest, never
+ *  interleaved at random). ONE comparator feeds splitRuns, railModel and
+ *  trayRunModel — the rail, the tray and the pane can never fork the order.
+ *  Pure, node-testable; the tie law is pinned by tests/test_run_tray.mjs. */
+export function liveOrder(runs) {
+  const live = (runs || []).filter(r => r && !TERMINAL.has(runStatusOf(r)))
   const held = live.filter(r => r.status === 'held')
   const rest = live.filter(r => r.status !== 'held')
-    .sort((a, b) => parseTime(b.started) - parseTime(a.started))
-  const active = [...held, ...rest]
+    .sort((a, b) => {
+      const ta = parseTime(a.started), tb = parseTime(b.started)
+      if (!Number.isFinite(ta) && !Number.isFinite(tb)) return 0 // equal/unparseable: input order (stable sort)
+      if (!Number.isFinite(ta)) return 1                         // unparseable started sorts last
+      if (!Number.isFinite(tb)) return -1
+      return tb - ta                                             // started desc; ties keep input order
+    })
+  return [...held, ...rest]
+}
+
+/** Model split of one chat's runs (the rail law): THE shared comparator
+ *  (liveOrder), active capped at 3 with the rest as an overflow count — the
+ *  +N affordance reaches the uncapped index (pane lists every run). The
+ *  superseded cap-5 terminal fold is DELETED with no compat shim: the
+ *  terminal half of the collection is the collectionModel's clean-finished
+ *  fold (INCHAT:111-112 — partition failures out before computing the
+ *  finished label). Pure, node-testable. */
+export function splitRuns(runs) {
+  const active = liveOrder(runs)
   return {
     active: active.slice(0, 3),
-    overflow: Math.max(0, active.length - 3),
-    terminalFold: terminal
-      .sort((a, b) => parseTime(b.updated) - parseTime(a.updated))
-      .slice(0, 5),
-    terminalTotal: terminal.length
+    overflow: Math.max(0, active.length - 3)
+  }
+}
+
+/** Named clean-fold boundary (INCHAT:136, --wf-fold-min-clean): the fold
+ *  condition is STRICTLY GREATER THAN SIX clean finished rows. */
+export const CLEAN_FOLD_MAX = 6
+
+const byUpdatedDesc = (a, b) => {
+  const ua = parseTime(a.updated), ub = parseTime(b.updated)
+  if (!Number.isFinite(ua) && !Number.isFinite(ub)) return 0 // equal/unparseable: input order (stable sort)
+  if (!Number.isFinite(ua)) return 1                         // unparseable updated sorts last
+  if (!Number.isFinite(ub)) return -1
+  return ub - ua
+}
+
+/** Collection model over one chat's owned runs — replaces the cap-5 terminal
+ *  fold (INCHAT:111-112, "attention-first collection with no hidden
+ *  failures"):
+ *   - attention: every TERMINAL run that is NOT clean done (failed/stopped —
+ *     failures/attention are EXCLUDED from the finished count by
+ *     construction). Always rendered as explicit rows, never folded away;
+ *     sorted by updated DESC under the same documented stable tie law as
+ *     liveOrder (absent/unparseable last, ties keep input order).
+ *   - finished: the clean done ledger — the only status 'Finished' speaks —
+ *     same updated-DESC total order. The fold engages ONLY when the count
+ *     exceeds CLEAN_FOLD_MAX (six rows visible, seven folded), and the
+ *     expanded fold lists EVERY counted row (full counted list reachable —
+ *     no cap, no hidden rows, no compat shim). Pure, node-testable. */
+export function collectionModel(runs) {
+  const list = (runs || []).filter(Boolean)
+  const finished = list.filter(r => r.status === 'done').sort(byUpdatedDesc)
+  const attention = list.filter(r => TERMINAL.has(r.status) && r.status !== 'done').sort(byUpdatedDesc)
+  return {
+    attention,
+    finished,
+    attentionTotal: attention.length,
+    finishedTotal: finished.length,
+    finishedFolded: finished.length > CLEAN_FOLD_MAX
   }
 }
 
@@ -1091,16 +1145,12 @@ export function safeProfileLabel(map, sessionId) {
 const pillProgress = r =>
   (r?.nodes_done != null && r?.nodes_total != null) ? `${countCell(r.nodes_done, '?')}/${countCell(r.nodes_total, '?')}` : '?'
 
-/** Rail model over one chat's owned runs: the LIVE set folded into pills —
- *  held first, then running by started desc, capped at 3 (the same policy as
- *  splitRuns, which stays for the pane and the terminal fold). Pure, so node
- *  can test it without a DOM. */
+/** Rail model over one chat's owned runs: the LIVE set folded into pills via
+ *  THE shared comparator (liveOrder — held first, then the rest by started
+ *  desc, documented tie law), capped at 3 (the same policy as splitRuns).
+ *  Pure, so node can test it without a DOM. */
 export function railModel(ownedRunsList) {
-  const live = (ownedRunsList || []).filter(r => !TERMINAL.has(r.status))
-  const held = live.filter(r => r.status === 'held')
-  const rest = live.filter(r => r.status !== 'held')
-    .sort((a, b) => parseTime(b.started) - parseTime(a.started))
-  const active = [...held, ...rest]
+  const active = liveOrder(ownedRunsList)
   return {
     pills: active.slice(0, 3).map(r => ({
       id: r.id,
@@ -1207,11 +1257,15 @@ export function PillRail({ runs, sid, railOpen, onPill, suppressGates }) {
   })
 }
 
-/** Mini node-strip ABOVE the pills for the one expanded run (#22 item 4):
- *  the run's existing MiniGraph fed by runQuery. Its own component so the
- *  runQuery hook runs only while expanded (rendering a component conditionally
- *  is legal; hooks behind an early return would not be). */
-function RailPanel({ runId }) {
+/** ONE shared run-graph panel (F2 fold law: every MiniGraph cell belongs to
+ *  the graph lane; the shells keep only mount mechanics): the expanded rail
+ *  pill (#22 item 4) AND the tray accordion's single opened row (#230) both
+ *  mount THIS component — the per-surface RailPanel/TrayPanel twins were the
+ *  superseded duplicate render branches and are deleted with no compat shim.
+ *  Fed by runQuery; its own component so the runQuery hook runs only while
+ *  one panel is mounted. Exported so the mirror's injected-adapter parity
+ *  test can mount the real element. */
+export function RunGraphPanel({ runId }) {
   const { data } = useQuery(runQuery(runId))
   if (!data) return null
   return jsx('div', {
@@ -1222,7 +1276,7 @@ function RailPanel({ runId }) {
       padding: '4px 6px'
     },
     children: jsx(MiniGraph, { detail: data })
-  }, 'rail-panel')
+  }, 'run-graph-panel')
 }
 
 /** ---- Live-run tray (#22, design contract on issue #22) -----------------
@@ -1264,16 +1318,14 @@ const runStatusOf = r => (r && r.status) || 'pending'
  *  The tray's ledger is the live set ONLY: rows = runs whose status ∉
  *  TERMINAL={done,failed,stopped}. A terminal run LEAVES the tray outright —
  *  no ack-away ledger, no 60 s recap (both superseded, deleted with their
- *  exports). Ordering is THE SAME comparator as splitRuns: held first, then
- *  the rest by started desc — asserted as trayRunModel order == splitRuns
- *  active order on one shared ledger (splitRuns caps `active` at 3; the tray
- *  lists every live run, uncapped, same comparator). Pure, node-testable. */
+ *  exports). Ordering rides THE shared comparator (liveOrder — held in input
+ *  order, then the rest by started desc, documented tie law), asserted as
+ *  trayRunModel order == splitRuns active order on one shared ledger
+ *  (splitRuns caps `active` at 3; the tray lists every live run, uncapped,
+ *  same comparator — the cap-3 +N affordance reaches this uncapped index).
+ *  Pure, node-testable. */
 export function trayRunModel(runs) {
-  const live = (runs || []).filter(r => r && !TERMINAL.has(runStatusOf(r)))
-  const held = live.filter(r => runStatusOf(r) === 'held')
-  const rest = live.filter(r => runStatusOf(r) !== 'held')
-    .sort((a, b) => parseTime(b.started) - parseTime(a.started))
-  return { rows: [...held, ...rest].map(r => ({ id: r.id, status: runStatusOf(r), run: r })) }
+  return { rows: liveOrder(runs).map(r => ({ id: r.id, status: runStatusOf(r), run: r })) }
 }
 
 /** The live set as a PLAIN run array (#230 spec): the running-only ledger
