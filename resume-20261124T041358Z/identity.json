@@ -1,0 +1,116 @@
+{
+  "ts": "2026-11-24T04:39:39.209Z",
+  "case": "baseline",
+  "plugin": {
+    "candidate": "/Users/jacobhausler/code/wf-pr-20261123/desktop/plugin.js",
+    "sha256": "d22feb08d72d4ed012e8d1ff652a2849adb02d5516bd285cbecbd3f457c211c8",
+    "staged": "/Users/jacobhausler/research/hermes-workflows-rust-ax/2026-11-13/ship-2.0/proof/bd_2026-11-13-ah9-resume-20261124T041358Z/baseline-run/bench/home/desktop-plugins/hermes-workflows/plugin.js",
+    "staged_sha256": "d22feb08d72d4ed012e8d1ff652a2849adb02d5516bd285cbecbd3f457c211c8",
+    "staged_sha256_after_load": "d22feb08d72d4ed012e8d1ff652a2849adb02d5516bd285cbecbd3f457c211c8"
+  },
+  "app": {
+    "repo": "/Users/jacobhausler/.hermes/hermes-agent",
+    "hermes_version": "Hermes Agent v0.23.2+2659.g0f602c5 (2026.9.24) · stable · local 0f602c5f6f18\nInstall directory: /Users/jacobhausler/.hermes/hermes-agent\nInstall method: git\nPython: 3.14.9\nOpenAI SDK: 2.54.0\nUp to date",
+    "commit": "0f602c5f6f18615632535251d62a2db74ce93b69",
+    "dirty_entries": 1,
+    "package_version": "0.0.0",
+    "electronVersion": "unknown",
+    "electron_package_version": "44.10.2"
+  },
+  "bench": {
+    "ports": {
+      "cdp": 9633,
+      "renderer": 5333
+    },
+    "discovery_copied": [
+      "spawn-ledger.json",
+      "auth.json",
+      "config.yaml"
+    ],
+    "plugins_symlink": "/Users/jacobhausler/code/wf-pr-20261123",
+    "profile": "ui2bench",
+    "locks": "/Users/jacobhausler/research/hermes-workflows-rust-ax/2026-11-13/ship-2.0/proof/bd_2026-11-13-ah9-resume-20261124T041358Z/baseline-run/bench/locks",
+    "pre_ensure": "ok"
+  },
+  "seeds": {
+    "held_gate_run": {
+      "kind": "engine_seed",
+      "run_id": "20261123-224051-ui2-proof-held",
+      "graph_sha256": "a6c5a5113e426ee6745c585997f1eab0d1da0bd9a89933a9dd3d01209434aac7"
+    },
+    "directive_card_echo": {
+      "kind": "engine_seed",
+      "method": "oneshot_echo",
+      "ask_sha256": "eb3cca5fa91cb18df8a6a32be87e095e3d4598b83ae89f6cc42946929bd5fb83",
+      "stdout_sha256": "4b88ba7b41eb1837deb3977bb3e35c87085b1b6b55a9505f2706c8c1f1536d69",
+      "session_id": "local-ed7bd65bcc16e8cc9d640c22fd80c7ce7bad9afa397419ddbcdc53447114457d",
+      "model": "seat-default",
+      "session_row_hit": {
+        "x": 402.85546875,
+        "y": 120.8984375,
+        "t": "ui2-ah9-running\n@local-8a9fc984d5e9568460811eebbe50fd2f0f27f"
+      }
+    }
+  },
+  "config_touched": {
+    "plugins.entries.hermes-workflows.settings.runs_root": {
+      "before": "/Users/jacobhausler/.hermes/workflows/20261123-204418-estate-bead-crew/work/beadworker.1/proof/gate-final/bench/runs",
+      "after": "/Users/jacobhausler/research/hermes-workflows-rust-ax/2026-11-13/ship-2.0/proof/bd_2026-11-13-ah9-resume-20261124T041358Z/baseline-run/bench/runs",
+      "scope": "bench profile ui2bench (isolated — shared config untouched)"
+    },
+    "plugins.entries.hermes-workflows.settings.tray": {
+      "before": true,
+      "after": true,
+      "scope": "bench profile ui2bench (isolated — shared config untouched)"
+    }
+  },
+  "candidate_head": "ce37debf9aff3f5d57d2a57a194f8fcb4882fca4",
+  "merge_base_origin_main": "50f02d47b1347f3896e28d63ce9a1cb84b64c7e9",
+  "registry": {
+    "routes": [
+      "hermes-workflows:page"
+    ],
+    "panes": [
+      "sessions",
+      "workspace",
+      "terminal",
+      "files",
+      "review",
+      "hermes-bots:pane",
+      "hermes-workflows:pane"
+    ],
+    "directives": [
+      "transcript.preview",
+      "hermes-workflows:directive"
+    ],
+    "composer": [
+      "hermes-workflows:session-strip"
+    ]
+  },
+  "plugin_records": {
+    "hermes-bots": {
+      "error": null,
+      "active": false
+    },
+    "kanban": {
+      "error": null,
+      "active": false
+    },
+    "radio": {
+      "error": null,
+      "active": false
+    },
+    "hermes-workflows": {
+      "error": null,
+      "active": false
+    }
+  },
+  "api_attachment": {
+    "via": "registry + live seeded run row rendered through the plugin API route",
+    "run_id": "20261123-224051-ui2-proof-held"
+  },
+  "teardown": {
+    "survivors": [],
+    "revert_failures": []
+  }
+}

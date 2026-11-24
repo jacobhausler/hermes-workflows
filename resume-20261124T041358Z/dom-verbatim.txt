@@ -1,0 +1,33 @@
+1
+SESSIONS
+BOTS
+WORKFLOWS · 0
+runs 1 · running 0 · held 1 · failed 0
+THE REST · 1
+ui2-proof-held
+@local-8a9fc984d5e9568460811eebbe50fd2f0f27f46f5688a1ca63c3fae4fb4407c2
+UI2 proof: release this held gate after capture?
+NEW SESSION
+ui2-proof-held
+held
+@local-8a9fc984d5e9568460811eebbe50fd2f0f27f46f5688a1ca63c3fae4fb4407c2
+run 3m 56s
+gate held
+say
+Finished
+hold
+held
+UI2 proof: release this held gate after capture?
+release
+stop
+tail
+pending
+timeline
+<1s
+hold
+Backend
+ready
+Nous
+Sign in
+Off
+v0.23.2+2659

@@ -1,0 +1,96 @@
+{
+  "bead": "bd_2026-11-13-ah9",
+  "attempt": "W1 resume (this session) \u2014 merged-head real-app acceptance per ASTRA review",
+  "when_utc": "2026-11-24T04:13Z..04:55Z",
+  "candidate": {
+    "merged_sha": "db405cf0c49d8bc056824add3b71241e7963fe0e",
+    "branch_head": "89b12cad4fbec3da6770aa34d223d82dc0e90bee",
+    "base": "19675869c849e4e07bd3d5eedf41af213e406af0",
+    "plugin_sha256": "d22feb08d72d4ed012e8d1ff652a2849adb02d5516bd285cbecbd3f457c211c8",
+    "note": "desktop/ byte-identical db405cf..origin(main@50f02d4); staged==loaded==candidate in every driver identity.json"
+  },
+  "drivers": {
+    "merged": "hermes-workflows@50f02d4 scripts/ui2-proof/capture.mjs",
+    "iqf": "hermes-workflows@bc2b041 tests/proof-harness/capture.mjs (adds re-locate fix; open slice of l62)"
+  },
+  "verification_exit_codes": {
+    "node --check desktop/plugin.js (at merged head 50f02d4==db405cf bytes)": 0,
+    "tests/test_metrics_missing_ui.mjs": 0,
+    "tests/test_live_truth_ui.mjs": 0,
+    "tests/test_lifecycle_numeric_view_models.mjs": 0,
+    "driver merged-revision (50f02d4) baseline --cdp 9533": 6,
+    "driver iqf slice-A (bc2b041) baseline --cdp 9633": 7,
+    "driver iqf subset --only directive_card,tray_row": 6,
+    "driver iqf slice-A rerun (baseline-run, live Running-row injection)": 6,
+    "seed_run injected chain stop": 0
+  },
+  "states_proven_on_merged_head_this_session": [
+    {
+      "state": "fleet census exact integers",
+      "quote": "runs 2 \u00b7 running 1 \u00b7 held 1 \u00b7 failed 0",
+      "shots": [
+        "running/15-running-row-fresh.png",
+        "running/16-running-row-quiet.png",
+        "baseline-run/captures/01-pane-runs.png"
+      ],
+      "review": "vision 2026-11-24T04:55Z: verbatim, fully rendered"
+    },
+    {
+      "state": "LIVE Running row, run-clock word, live count",
+      "quote": "Running \u00b7 activity unknown @local-8a9f\u2026 run 6s 1 live (then run 14s)",
+      "shots": [
+        "running/15-running-row-fresh.png",
+        "running/16-running-row-quiet.png",
+        "running/17-running-row-activity.png"
+      ],
+      "review": "vision: verbatim; injected engine seed 20261123-224945-ui2-ah9-running (3-node agent chain, stopped through the door, run.stopped recorded)"
+    },
+    {
+      "state": "held row + child clock law (children say 'Finished' WITHOUT 'run'; only parent header carries the run clock)",
+      "quote": "ui2-proof-held held run 3m 52s \u00b7 gate held \u00b7 say Finished \u00b7 hold held \u00b7 tail pending",
+      "shots": [
+        "running/14-live-pane-held-words.png",
+        "baseline-run/captures/01-pane-runs.png",
+        "baseline-run/captures/02-pane-run-detail.png"
+      ],
+      "review": "vision: verbatim, release/stop nudge present"
+    },
+    {
+      "state": "activity fresh/quiet words",
+      "quote": "Running \u00b7 activity unknown on-surface (honest absence: installed backend list payload carries no last_activity \u2014 run.json has no activity field); fresh<=5s/quiet>5s ride behavior test tests/test_lifecycle_numeric_view_models.mjs (exit 0 at this head)",
+      "shots": null,
+      "review": "recorded, not hidden"
+    }
+  ],
+  "remaining_honest_gaps": [
+    "tray row on the CANDIDATE: driver's transcript-open/tray step is the exact gap l62's own receipt tracks ('single locator step under load', load avg 25 on crew box); tray pill renders through the SAME shared pillModel exercised green by test_lifecycle_numeric_view_models.mjs + test_run_tray.mjs; l62's exit-0 tray shot pinned pre-change bytes 918f205e (no --plugin), so it is not candidate proof",
+    "directive card: not re-shot this session \u2014 already proven at identical candidate bytes (PROOF bd_2026-11-13-ah9-20261124T025502Z/baseline identity staged==loaded d22feb08, captures 03/04, vision-reviewed)"
+  ],
+  "png_sha256": {
+    "baseline-run/captures/01-pane-runs.png": "a4d51e038984c7172247aa562099c227d627021ab338b16a4aec7df46dba8c29",
+    "baseline-run/captures/02-pane-run-detail.png": "759fa3bddaffd57c45ca8d8faf8d99ccfac0a2c7ba41d4762ff4803b237def5e",
+    "baseline-iqf/captures/01-pane-runs.png": "e5f38555edadcd26535ccc3c35f6938ebf8b3020241ba231945893ceb54d2094",
+    "baseline-iqf/captures/02-pane-run-detail.png": "f26612b047381b8790736a58ad949620defd37a9dfe52ad9bf06ab63d2d3d4fe",
+    "running/14-live-pane-held-words.png": "ef8672601788243d0bb4d3859eb1adc4b1d8f74ba7dbbaf776360869b8721bc5",
+    "running/15-running-row-fresh.png": "a8d19427ce242b14f91f07bd6e661a94486240d795374b05c9d693bef640843e",
+    "running/16-running-row-quiet.png": "36119ae79388a138f07e195462c5937e7d06232ea2a69db73c6ff45bcb2d2707",
+    "running/17-running-row-activity.png": "6ed830c0a5316c10fa8f4dfe3f8b3bd7de1652b561515acb302bb534ba0930ce",
+    "tray-directive/captures/00-diagnostic-pane.png": "e0b9fa80e97c0a1912c0622e8f08a95a8be0501530ca458941eb5c5fd4dbcfd6",
+    "baseline/captures/01-pane-runs.png": "e607152bd3487c4563ab9c463b820aeca07a90baa9be8b4d01baab43571f6f4e",
+    "baseline/captures/02-pane-run-detail.png": "33a4805ee139ff9d2e198a6bebd4d8d564702ad5031a099ac5376fd0e7263da1"
+  },
+  "hygiene": {
+    "installed_roots": "restored byte-for-byte 918f205e (running/restore-verification.txt)",
+    "gateway_config": "runs_root/tray restored to pre-snapshot (running/before.txt)",
+    "teardown": "driver survivors [] revert_failures [] every run; injected run stopped; manual bench pids killed, survivors 0",
+    "historical_fixtures": "untouched"
+  },
+  "text_artifact_sha256": {
+    "verify-log.txt": "0bd9bcb1e01a90215047e063eec19439921fb46ebb3200bd030bf92ffebd06a8",
+    "running/dom-verbatim.txt": "e8436dd99b28ec4ee45211b3e34d9f024ec6acbf832a0a8102c8b8859f88aa2c",
+    "running/injected-run.txt": "b4930d4dd71a6590014fed08c182e7a865209994b803836c91624f5fa634d7c2",
+    "running/before.txt": "021a5572aa08f8d5bb4138c180b2d99a4b192aae6c3f5909d4e23ca6345da85a",
+    "running/restore-verification.txt": "5b35c6fa5f15f9538d7fabc4d518774e7b03c76d7658a72c64ef2dbb72b04526"
+  },
+  "note_png_scope": "PNG hashes cover driver captures/* and running/* evidence; driver bench/userdata caches are runtime scratch, not evidence"
+}

@@ -1,0 +1,4 @@
+918f205e225fcc4ed48cea15c8fff003a4497becf3e72ce7ad6888ebbe819e6e  /Users/jacobhausler/.hermes/plugins/hermes-workflows/desktop/plugin.js
+918f205e225fcc4ed48cea15c8fff003a4497becf3e72ce7ad6888ebbe819e6e  /Users/jacobhausler/.hermes/desktop-plugins/hermes-workflows/plugin.js
+runs_root=/Users/jacobhausler/.hermes/workflows/20261123-204418-estate-bead-crew/work/beadworker.1/proof/gate10/bench/runs
+tray=true

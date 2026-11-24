@@ -1,0 +1,4 @@
+node --check exit=0
+test_metrics_missing_ui exit=0
+test_live_truth_ui exit=0
+test_lifecycle_numeric_view_models exit=0
