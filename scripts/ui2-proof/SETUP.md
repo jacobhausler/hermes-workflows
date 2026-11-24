@@ -117,6 +117,11 @@ node --check scripts/ui2-proof/capture.mjs \
   && node scripts/ui2-proof/capture.mjs --case baseline --out "$PROOF_DIR/baseline"
 ```
 
+On a loaded box (crew waves), first paint can outgrow the 60 s default and
+the run dies exit 5 while vite/CDP are healthy — pass
+`--paint-budget 300`. Parallel lanes pick distinct
+`--cdp-port/--renderer-port` pairs (preflight refuses busy ports at exit 4).
+
 Before this driver lands, use the existing real-client QA driver:
 `node ~/.hermes/skills/hermes-workflows-ui-qa/scripts/wfqa.mjs <cmd> [args]`
 against a manually booted bench (setup recipe at the top of
