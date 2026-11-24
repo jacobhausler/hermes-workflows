@@ -180,6 +180,23 @@ function writeImmutable(file, data) {
   fs.chmodSync(file, 0o444);
 }
 
+// Crew-wave law (field-proven 2026-11-24): parallel benches sharing one
+// hermes install serialize on a GLOBAL source-update lock — a CLI call
+// landing mid-install exits 'an update is still running' / 'no dependency
+// environment is committed'. Those are transient by definition: retry with
+// backoff, but only that shape; anything else propagates immediately.
+function retryCli(fn, { attempts = 12, delayMs = 5_000 } = {}) {
+  for (let i = 1; ; i++) {
+    try { return fn(); }
+    catch (e) {
+      const msg = String((e && (e.stderr || e.message)) || '');
+      const transient = /update is still running|no dependency environment is committed|pm repair/.test(msg);
+      if (!transient || i >= attempts) throw e;
+      execFileSync('/bin/sleep', [String(Math.round(delayMs / 1000))]);
+    }
+  }
+}
+
 // exit codes (documented above; tests assert them)
 const EX = { usage: 2, notImplemented: 3, preflight: 4, boot: 5, api: 6, capture: 7, teardown: 8 };
 class Bail extends Error { constructor(code, msg) { super(msg); this.code = code; } }
@@ -603,7 +620,7 @@ async function main() {
   // is what lets the bench fork START beside a live estate multiplexer
   // instead of ATTACH/REFUSE. Written via the profile-scoped CLI so YAML
   // shape stays canonical.
-  writeConfig(hermesBin, ['gateway.standalone', 'true'], benchEnv, BENCH_PROFILE);
+  retryCli(() => writeConfig(hermesBin, ['gateway.standalone', 'true'], benchEnv, BENCH_PROFILE));
   const sup = new Supervisor(A.outDir);
   sup._ownedUserData = B.userdata;
   sup._viteMarker = `--port ${A.rendererPort} --strictPort`;
@@ -634,8 +651,8 @@ async function main() {
     // cost here, under OUR paint budget, so electron attaches to a live
     // gateway on its first request. Idempotent once warm.
     try {
-      execFileSync(hermesBin, ['--profile', BENCH_PROFILE, 'gateway', 'ensure', '--json'],
-        { encoding: 'utf8', timeout: A.paintBudgetMs + 30_000, maxBuffer: 8 * 1024 * 1024, env: benchEnv });
+      retryCli(() => execFileSync(hermesBin, ['--profile', BENCH_PROFILE, 'gateway', 'ensure', '--json'],
+        { encoding: 'utf8', timeout: A.paintBudgetMs + 30_000, maxBuffer: 8 * 1024 * 1024, env: benchEnv }));
       identity.bench.pre_ensure = 'ok';
     } catch (e) {
       identity.bench.pre_ensure = `best-effort failed: ${String(e.stderr || e.message).slice(0, 200)}`;
@@ -672,10 +689,15 @@ async function main() {
     }
     for (const [key, value] of [['plugins.entries.hermes-workflows.settings.runs_root', B.runs],
                                 ['plugins.entries.hermes-workflows.settings.tray', true]]) {
-      const before = readConfigValue(hermesBin, key, benchEnv, BENCH_PROFILE);
+      // A sibling bench mid-source-update makes EVERY CLI call exit transiently;
+      // retry the read/write pair together so `before` and `after` stay coherent.
+      const before = retryCli(() => {
+        const b = readConfigValue(hermesBin, key, benchEnv, BENCH_PROFILE);
+        writeConfig(hermesBin, [key, String(value)], benchEnv, BENCH_PROFILE);
+        return b;
+      });
       identity.config_touched[key] = { before, after: value, scope: `bench profile ${BENCH_PROFILE} (isolated — shared config untouched)` };
       touched.push(key);
-      writeConfig(hermesBin, [key, String(value)], benchEnv, BENCH_PROFILE);
     }
 
     // -- engine seed: launch the held-gate graph through the door -----------
@@ -1174,8 +1196,8 @@ async function main() {
     for (const key of touched.reverse()) {
       try {
         const before = identity.config_touched[key]?.before;
-        if (before === null || before === undefined) unsetConfig(hermesBin, key, benchEnv, BENCH_PROFILE);
-        else if (['string', 'number', 'boolean'].includes(typeof before)) writeConfig(hermesBin, [key, String(before)], benchEnv, BENCH_PROFILE);
+        if (before === null || before === undefined) retryCli(() => unsetConfig(hermesBin, key, benchEnv, BENCH_PROFILE), { attempts: 3 });
+        else if (['string', 'number', 'boolean'].includes(typeof before)) retryCli(() => writeConfig(hermesBin, [key, String(before)], benchEnv, BENCH_PROFILE), { attempts: 3 });
         else revertFailures.push(`${key}: prior value ${JSON.stringify(before)} is non-scalar — restore by hand`);
       } catch (e) { revertFailures.push(`${key}: ${String(e.message).slice(0, 200)}`); }
     }
