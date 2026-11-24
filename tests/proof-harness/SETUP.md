@@ -7,12 +7,15 @@ file-openable RC or a JSX-to-DOM fake, as production proof.
 Interface (the contract later beads use — slice A, bd_2026-11-13-iqf):
 
 ```sh
-node tests/proof-harness/capture.mjs [--case CASE] [--only directive,pane,tray] [--out DIR]
+node tests/proof-harness/capture.mjs [--case CASE] [--only directive,pane,tray,gate,toast] [--out DIR]
 ```
 
 `--case` defaults to `baseline`; `--only` INTERSECTS the case's surfaces
 (short tokens or full surface names; an unknown token exits 2, an
-intersection that selects nothing exits 2 — never a green no-op); `--out`
+intersection that selects nothing exits 2 — never a green no-op; with no
+explicit `--case`, tokens that select nothing from the default case resolve
+the case when exactly one implemented case declares them, so
+`--only gate,toast` runs the gate case); `--out`
 defaults to `captured/run-<ts>` under this directory.
 
 `--out DIR` is driver-owned scratch (ownership marker `.ui2-proof-owned`;
@@ -218,12 +221,16 @@ know, capture.mjs exits 3 naming it a new test. Do not "make it pass" by
 pointing at `synthesis/index.html`. Wire real renderer surfaces into the
 capture section of capture.mjs and extend `surfaces_registry` instead.
 
-## The `gate` case (bd_2026-11-13-qri)
+## The `gate` case (bd_2026-11-13-qri, repro layer bd_2026-11-13-xow)
 
-`node tests/proof-harness/capture.mjs --case gate --out DIR` proves the ONE
-decision surface end-to-end on the real renderer: the held gate cell, a
-trusted option click, the PENDING frame made real by holding the answer POST
-at CDP `Fetch` interception (never a staged screenshot), the durable
+`node tests/proof-harness/capture.mjs --case gate --out DIR` (slice B: also
+reachable as `--only gate,toast`, which resolves this case without `--case`)
+proves the ONE decision surface end-to-end on the real renderer: the held
+gate cell, a trusted option click, the REAL fail-once refusal (08b), the
+second click's PENDING frame made real by the door's
+`UI2_PROOF_GATE_POST_DELAY_MS` in-flight delay (the answer POST rides the
+app IPC bridge since b9b36c9, so CDP Fetch interception is blind to it),
+the durable
 `[data-gate-receipt]` saved frame asserting the door-stamped
 `Answered · <ISO time>` line, the success toast that IS the receipt
 (`◇ Answer saved · <answer> · <requester> · <run> / <gate> · <ISO time>`,
@@ -236,8 +243,24 @@ literally true, `events.jsonl` is byte-identical before/after (Nothing
 restarted — verified for THIS tested runner only, not a universal scheduler
 claim), and the gate node was never consumed. Frames 07-11 (08b = a FORCED
 real `{ok:false}` door response rendered as the inline failure with
-retryable options and no receipt); report.json
+retryable options and no receipt; frame 10 rides the `toast` SURFACE and
+frame 11 the post-jump receipt — slice B pins their volatile-masked text
+layers into the REPRO section). report.json
 entries are `reviewed:false` until the mandatory vision pass.
+
+Slice B verification (the double-run pair at `captured/bd_2026-11-13-xow/`):
+
+```sh
+node tests/proof-harness/capture.mjs --only gate,toast --out "$PROOF_DIR/set-1" --cdp-port 9514 --renderer-port 5314 \
+  && node tests/proof-harness/capture.mjs --only gate,toast --out "$PROOF_DIR/set-2" --cdp-port 9524 --renderer-port 5324
+```
+
+then copy both sets to `captured/bd_2026-11-13-xow/{set-1,set-2}` and run
+`node tests/test_proof_harness_gate_toast_repro.mjs` — it recomputes every
+manifest hash from the committed bytes and asserts the two REPRO sections
+are hash-equal (the double-run hash diff is empty). Pending and the
+fail-once error frame ride raster-only by design (spinner text / short
+banner under the trivial-content threshold).
 
 
 ## Verification (slice A command)
