@@ -240,6 +240,31 @@ retryable options and no receipt); report.json
 entries are `reviewed:false` until the mandatory vision pass.
 
 
+## The `chat` case (bd_2026-11-13-1bm)
+
+`node tests/proof-harness/capture.mjs --case chat --out DIR` proves the RC
+in-chat pill+expand across the WHOLE state matrix on the real renderer:
+`held` and `Finished` come from two real door runs (gate-held and an
+echo-only graph); `running`, `failed`, `partial`, `interrupted` and
+`cancelled` materialize THROUGH the read model (`seed_chat.py`: real
+`wfcommon.efp`, `run.stopped`/`run.partial` as the facts, SYNTHETIC.txt in
+every fixture dir). The running row's liveness is genuinely earned: the
+driver spawns a flock keeper on `<run>/runner.lock` (killed at teardown by
+recorded pid), so run_state's ONE liveness law reads it `running` while
+nothing is faked about activity (`Running · activity unknown` at worst).
+One assistant turn echoes nine directives — seven states plus a valid-unknown
+id and a malformed one. Per state: collapsed word row (behaviour tokens
+asserted against the card's own text layer), a TRUSTED `[data-wf-expand]`
+click, structural probes (aria-expanded flips, aria-controls resolves to the
+mounted body, focus stays on the trigger, `button button` count zero), the
+expanded mount, and collapse restoring the trigger. Loading and stale
+last-good are manufactured at the network edge (CDP Fetch stall/fail on the
+exact `/runs/<id>` path); the valid-unknown stays a clickable RETRY (and
+shows the loading word on itself while a refetch is stalled); the malformed
+id never mounts nor offers a retry (INERT). Run on loaded boxes with
+`--paint-budget 300` and distinct ports, e.g. `--cdp-port 9694
+--renderer-port 5494`.
+
 ## Verification (slice A command)
 
 ```sh

@@ -67,6 +67,10 @@ default case: baseline; --only tokens: directive,pane,tray (or full surface
 names); default out: tests/proof-harness/captured/run-<ts>
 cases: see tests/proof-harness/cases.json (setup: tests/proof-harness/SETUP.md)`;
 
+// CHAT case id pins (bd_2026-11-13-1bm): a VALID id with no run exercises the
+// retry-unknown frame; a MALFORMED id (the slash breaks ID_OK) must stay inert.
+const CHAT_UNKNOWN = '20990101-000000-zz-1bm';
+const CHAT_MALFORMED = 'wf/../x';
 // short token -> surface id (slice A: directive + pane; tray pre-wired on
 // this branch, slices B extend the surfaces themselves, not this map law).
 const ONLY_TOKENS = {
@@ -684,6 +688,7 @@ async function main() {
   }
   const c = manifest.cases[A.caseName];
   const isCoverage = A.caseName === 'coverage';
+  const isChat = A.caseName === 'chat';
   const unwired = (c.surfaces || []).filter(s => !manifest.surfaces_registry.includes(s))
         .concat(c.implemented === false ? c.surfaces : []);
   if (unwired.length && c.implemented === false) {
@@ -891,6 +896,7 @@ async function main() {
   sup._viteMarker = `--port ${A.rendererPort} --strictPort`;
   const touched = [];
   const revertFailures = [];
+  let chatKeeper = null;  // chat running-row flock keeper (teardown kills this pid)
   let py = process.env.UI2_PROOF_PYTHON || '';
   let hermesAbs = hermesBin;
   const seededRuns = [];
@@ -1093,6 +1099,62 @@ async function main() {
       }
       graphIds = { council: seeded.council_run_id, mf1: seeded.mf1_run_id, thr: runId };
       identity.seeds.graph_fixtures = seeded;
+    }
+
+    // CHAT case (bd_2026-11-13-1bm): the state matrix on the REAL renderer.
+    // `held` and `Finished` are real door runs (the held seed above plus a
+    // second echo-only launch); running/failed/partial/interrupted/cancelled
+    // materialize THROUGH the read model (seed_chat.py — real efp, the
+    // stopped/partial events as the facts, mf1's synthetic honesty). The
+    // running row's liveness is genuinely earned: a driver-spawned flock
+    // keeper holds <run>/runner.lock for the capture window (teardown kills
+    // exactly this pid), so run_state's ONE liveness law reads it `running`
+    // for the right reason — no painted costume.
+    let chatIds = null;
+    if (isChat) {
+      const doorSeeds = (c.seeds || []).filter(x => x.kind === 'engine_seed' && x.method === 'door_run');
+      if (doorSeeds.length < 2) die(EX.preflight, 'chat case needs a held and a finished door_run seed');
+      const finGraphFile = path.join(A.outDir, 'seed', 'finished.graph.json');
+      fs.writeFileSync(finGraphFile, JSON.stringify(doorSeeds[1].graph, null, 2) + '\n');
+      let doneId;
+      try {
+        doneId = execFileSync(py, [path.join(HERE, 'seed_run.py'),
+          '--repo', REPO, '--runs-root', B.runs, '--graph-file', finGraphFile, '--wait-held-s', '0'],
+          { encoding: 'utf8', timeout: 60_000,
+            env: { ...process.env, WF_RUNS_ROOT: B.runs, HERMES_WF_HERMES_BIN: childBin,
+                   HERMES_HOME: B.home, HERMES_GATEWAY_LOCK_DIR: B.locks } }).trim();
+      } catch (e) {
+        die(EX.api, `chat finished engine seed failed: ${String(e.stderr || e.message).slice(0, 400)}`);
+      }
+      seededRuns.push(doneId);
+      let fx;
+      try {
+        fx = JSON.parse(execFileSync(py, [path.join(HERE, 'seed_chat.py'),
+          '--repo', REPO, '--runs-root', B.runs, '--wait-run', doneId],
+          { encoding: 'utf8', timeout: 150_000,
+            env: { ...process.env, HERMES_HOME: B.home } }).trim().split('\n').pop());
+      } catch (e) {
+        die(EX.api, `chat fixture seed failed (seed_chat.py): ${String(e.stderr || e.message).slice(0, 400)}`);
+      }
+      // The keeper: flock the running row's runner.lock until killed. It opens
+      // the EXISTING file (the seed created it); the child blocks in flock()
+      // for its whole life — SIGKILL at teardown releases it deterministically.
+      const keeperFile = path.join(A.outDir, 'seed', 'keeper.txt');
+      const keeper = spawn(py, ['-c',
+        'import fcntl,sys; f=open(sys.argv[1],"r+b"); fcntl.flock(f,fcntl.LOCK_EX); ' +
+        'open(sys.argv[2],"w").write(str(__import__("os").getpid())); ' +
+        'import time; time.sleep(900)', fx.running_lock, keeperFile],
+        { stdio: 'ignore', detached: true });
+      keeper.unref();
+      chatKeeper = keeper;
+      const kT0 = Date.now();
+      while (!fs.existsSync(keeperFile) && Date.now() - kT0 < 10_000) await sleep(200);
+      if (!fs.existsSync(keeperFile)) die(EX.api, 'running-row flock keeper never took the lock');
+      chatIds = { running: fx.running, held: runId, done: doneId, partial: fx.partial,
+                  failed: fx.failed, interrupted: fx.interrupted, cancelled: fx.cancelled };
+      identity.seeds.chat_matrix = { ...chatIds, unknown: CHAT_UNKNOWN, malformed: CHAT_MALFORMED,
+        keeper_pid: Number(fs.readFileSync(keeperFile, 'utf8')),
+        fixtures: fx, finished_graph_sha256: sha256(finGraphFile) };
     }
 
     // -- CDP attach; enable decision; reload (skill gotcha wall) ------------
@@ -1789,16 +1851,22 @@ async function main() {
     }
 
     // 03/04 directive card: seed one real assistant turn, open its session,
-    // find the plugin's card (its 'Open in Workflows' action is the stable
-    // hook — plugin.js:554) in the message stream.
+    // find the plugin's card by its RC hook [data-wf-directive="<id>"]
+    // (bd_2026-11-13-1bm: mounted in BOTH states — the 1.4-era
+    // 'Open in Workflows' whole-card button walk is retired with the renderer).
     const cardSeed = (c.seeds || []).find(s => s.kind === 'engine_seed' && s.method === 'oneshot_echo');
     if (cardSeed && surfacesWanted.has('directive_card')) {
       const ask = path.join(A.outDir, 'seed', 'ask.txt');
       // The graph case echoes ALL THREE run ids in one assistant turn — one
       // session, three cards, the same shared grammar on each mount.
-      fs.writeFileSync(ask, graphIds
+      const askIds = graphIds
+        ? [graphIds.council, graphIds.thr, graphIds.mf1]
+        : chatIds
+          ? Object.values(chatIds).concat([CHAT_UNKNOWN, CHAT_MALFORMED])
+          : [runId];
+      fs.writeFileSync(ask, askIds.length > 1
         ? `Echo these lines verbatim and nothing else:\n` +
-          [graphIds.council, graphIds.thr, graphIds.mf1].map(i => `::workflow{id="${i}"}`).join('\n') + '\n'
+          askIds.map(i => `::workflow{id="${i}"}`).join('\n') + '\n'
         : `Echo this line verbatim and nothing else:\n::workflow{id="${runId}"}\n`);
       // --source desktop: the app's session list shows titled, desktop-sourced
       // sessions; a bare --oneshot stores source=oneshot WITHOUT a title and
@@ -1929,50 +1997,30 @@ async function main() {
         }
         if (!opened) die(EX.api, 'session row clicks never opened the seeded transcript (run id absent after 3 attempts)')
       }
-      // Directive cards render COLLAPSED (the expanded card header carries
-      // the Open-in-Workflows action — plugin.js:552-554, skill: expansion is
-      // in-memory only). Click collapsed directive pills (up to 3 rounds),
-      // then locate the wanted card. The graph case's ask echoes three
-      // directives; the wanted card is the PINNED council one (its id is
-      // first in the echo), so early rounds may open the other two first —
-      // the loop only exits when the wanted card itself is up.
-      const cardIdWant = graphIds ? graphIds.council : runId;
-      let card = null;
-      for (let expand = 0; expand < 3 && !card; expand++) {
-        try {
-          await trustedClick(cdp, 'workflow…');
-        } catch { /* fall through to the button wait — a pre-expanded card also passes */ }
-        let openBtnSeen = false;
-        const bT0 = Date.now();
-        while (!openBtnSeen && Date.now() - bT0 < 12_000) {
-          openBtnSeen = await cdp.evl(`!!document.querySelector('button[title="Open in Workflows"],button[aria-label="Open in Workflows"]')`);
-          if (!openBtnSeen) await sleep(500);
+      // RC card hook (bd_2026-11-13-1bm): the retired 1.4-era pill located its
+      // card through the whole-card button walk; the 2.0 card carries
+      // [data-wf-directive="<id>"] on its container in BOTH states, so every
+      // card is addressable by run id, collapsed or expanded — no ancestor
+      // heuristics, no dependence on a click to mount the hook.
+      const cardOf = async (wantId, ms = 30_000) => {
+        const t0 = Date.now();
+        for (;;) {
+          const c = await cdp.evl(`(() => {
+            const el = document.querySelector('[data-wf-directive="' + ${JSON.stringify(wantId)} + '"]');
+            if (!el) return null;
+            el.scrollIntoView({ block: 'center' });
+            const r = el.getBoundingClientRect();
+            if (r.width < 40 || r.height < 20) return null;
+            return { x: r.x, y: r.y, width: r.width, height: r.height, text: el.innerText || '' };
+          })()`);
+          if (c) return c;
+          if (Date.now() - t0 > ms) return null;
+          await sleep(500);
         }
-        // Card = the innermost ancestor of the plugin's Open-in-Workflows button
-        // that still holds exactly ONE such button (walk stops before the list).
-        card = await cdp.evl(`(() => {
-          const CARD_BTN = 'button[title="Open in Workflows"],button[aria-label="Open in Workflows"]';
-          const btns = [...document.querySelectorAll(CARD_BTN)];
-          for (const b of btns) {
-            let n = b, last = null;
-            for (let i = 0; i < 8 && n; i++) {
-              if (n.querySelectorAll(CARD_BTN).length > 1) break;
-              last = n; n = n.parentElement;
-            }
-            if (!last) continue;
-            const host = last.closest('div') ?? last;
-            const cardText = (host.innerText || '') + (host.parentElement?.innerText || '');
-            if (!cardText.includes(${JSON.stringify(cardIdWant)}) && !cardText.includes(${JSON.stringify(runName)})) continue;
-            host.scrollIntoView({ block: 'center' });
-            const r = host.getBoundingClientRect();
-            if (r.width > 40 && r.height > 20)
-              return { x: r.x, y: r.y, width: r.width, height: r.height, text: host.innerText || '' };
-          }
-          return null;
-        })()`, rowHit);
-        if (!card) await sleep(700);
-      }
-      if (!card) die(EX.api, 'directive card not rendered for the seeded run (Open in Workflows hook absent)');
+      };
+      const cardIdWant = graphIds ? graphIds.council : runId;
+      const card = await cardOf(cardIdWant);
+      if (!card) die(EX.api, 'directive card not rendered for the seeded run (data-wf-directive hook absent)');
       // The card's own innerText is the reproducible content of BOTH card
       // shots (the crop proves pixels, the text layer proves content; the
       // surrounding chat prose is LLM output and deliberately NOT hashed).
@@ -1981,7 +2029,43 @@ async function main() {
         ...(await shoot(cdp, A.outDir, '04-directive-card.png', card, card.text)) });
       shots.push({ surface: 'directive_card', state: 'full viewport with card',
         ...(await shoot(cdp, A.outDir, '03-directive-card-full.png', null, card.text)) });
+      const clickXY = async (x, y) => {
+        for (const t of ['mouseMoved', 'mousePressed', 'mouseReleased'])
+          await cdp.send('Input.dispatchMouseEvent', { type: t, x, y,
+            button: t === 'mouseMoved' ? undefined : 'left', clickCount: 1,
+            buttons: t === 'mouseReleased' ? 0 : 1 });
+        await sleep(900);
+      };
+      const expandXY = id => cdp.evl(`(() => {
+        const el = document.querySelector('[data-wf-directive="' + ${JSON.stringify(id)} + '"] [data-wf-expand]');
+        if (!el) return null;
+        el.scrollIntoView({ block: 'center' });
+        const r = el.getBoundingClientRect();
+        return r.width > 0 ? { x: r.x + r.width / 2, y: r.y + r.height / 2 } : null;
+      })()`);
+      const probe = id => cdp.evl(`(() => {
+        const card = document.querySelector('[data-wf-directive="' + ${JSON.stringify(id)} + '"]');
+        if (!card) return { err: 'card gone' };
+        const btn = card.querySelector('[data-wf-expand]');
+        const ctl = btn && btn.getAttribute('aria-controls');
+        const body = ctl ? document.getElementById(ctl) : null;
+        return {
+          expanded: btn && btn.getAttribute('aria-expanded'),
+          hasOpen: !!card.querySelector('[data-wf-open]'),
+          bodyMounted: !!body && card.contains(body),
+          focusOnTrigger: document.activeElement === btn,
+          nestedButtons: card.querySelectorAll('button button').length,
+          buttons: card.querySelectorAll('button').length,
+          text: card.innerText || '',
+        };
+      })()`);
       if (A.caseName === 'graph') {
+        // RC card hook (bd_2026-11-13-1bm): the shared graph grammar lives in
+        // the EXPANDED body, and expansion is now the explicit disclosure
+        // click — the retired whole-pill click ('workflow…' preamble) is gone.
+        const gh = await expandXY(graphIds.council);
+        if (!gh) die(EX.api, 'graph card: [data-wf-expand] disclosure absent on the council card');
+        await clickXY(gh.x, gh.y);
         // 05-09: the SAME shared grammar on every expansion mount — pill →
         // MiniGraph → fan expansion → child projection, threshold ladder and
         // MF1 raw rows in-chat, then phone and sparse-2560 geometry.
@@ -2021,7 +2105,11 @@ async function main() {
 
         // (b) the engine-seeded threshold run: exact ENDED census on the
         //     strip — the DOM copy must equal the engine's own rows.
-        await trustedClick(cdp, 'workflow…').catch(() => {});
+        //     RC disclosure: open THAT card by id, then click its fan pill.
+        {
+          const p0 = await probe(graphIds.thr);
+          if (!p0 || p0.expanded !== 'true') { const h = await expandXY(graphIds.thr); if (!h) die(EX.api, 'threshold card disclosure absent'); await clickXY(h.x, h.y); }
+        }
         await cardPillClick('work');
         const thrRec = JSON.parse(fs.readFileSync(path.join(B.runs, runId, 'nodes', 'work.json'), 'utf8'));
         const rows = (thrRec.output || {}).all_results || [];
@@ -2044,7 +2132,10 @@ async function main() {
         // (c) MF1 (clearly synthetic): raw child partial + cancelled survive
         //     under a done parent — no parent-metric borrowing, cancelled
         //     separated from failed, attempt ticks replace ghost rings.
-        await trustedClick(cdp, 'workflow…').catch(() => {});
+        {
+          const p0 = await probe(graphIds.mf1);
+          if (!p0 || p0.expanded !== 'true') { const h = await expandXY(graphIds.mf1); if (!h) die(EX.api, 'MF1 card disclosure absent'); await clickXY(h.x, h.y); }
+        }
         await cardPillClick('fan');
         const mf1Ticks = await tickCount();
         const mf1Texts = await stripTexts();
@@ -2105,6 +2196,149 @@ async function main() {
             state: `sparse 2560x1440 (${method}): ${wide ? `${wide.crossings} strict crossings measured at this geometry` : 'graph off-screen'}`,
             ...(await shoot(cdp, A.outDir, '09-2560-council-card.png')) });
         }
+      }
+
+      if (isChat) {
+        // -- the chat state matrix on the REAL renderer (bd_2026-11-13-1bm).
+        // For every state the acceptance names: the collapsed card word row,
+        // a TRUSTED disclosure click, structural aria/focus/no-nesting probes,
+        // the expanded mount, and collapse restoring the trigger. The words
+        // are asserted as tokens of the card's own text layer (behavior, not
+        // a string-match-only pin: the shots carry the pixels, the contents
+        // files carry the masked layer, the probes assert the DOM law).
+        const tokens = t => t.split(/[\n\u00b7]+/).map(x => x.trim()).filter(Boolean);
+        const MATRIX = [
+          ['running', chatIds.running, ['Running \u00b7 activity unknown'], []],
+          ['held', chatIds.held, ['held'], ['\u25f7 run ']],
+          ['finished', chatIds.done, ['Finished'], []],
+          ['partial', chatIds.partial, ['partial'], []],
+          ['failed', chatIds.failed, ['failed'], []],
+          ['interrupted', chatIds.interrupted, ['interrupted'], []],
+          ['cancelled', chatIds.cancelled, ['stopped', 'cancelled'], ['\u00b7 1 cancelled', '! 0 failed']],
+        ];
+        for (const [state, id, wordTokens, substrs] of MATRIX) {
+          const collapsed = await cardOf(id);
+          if (!collapsed) die(EX.api, `chat matrix: no card mounted for state ${state} (${id})`);
+          const toks = tokens(collapsed.text);
+          for (const w of wordTokens)
+            if (!(toks.includes(w) || collapsed.text.includes(w)))
+              die(EX.api, `chat matrix ${state}: word ${JSON.stringify(w)} absent from the real card: ${JSON.stringify(collapsed.text.slice(0, 300))}`);
+          for (const sub of substrs)
+            if (!collapsed.text.includes(sub))
+              die(EX.api, `chat matrix ${state}: census cell ${JSON.stringify(sub)} absent: ${JSON.stringify(collapsed.text.slice(0, 300))}`);
+          shots.push({ surface: 'directive_card', state: `collapsed card \u00b7 ${state}`,
+            ...(await shoot(cdp, A.outDir, `10-chat-${state}-collapsed.png`, collapsed, collapsed.text)) });
+          const hit = await expandXY(id);
+          if (!hit) die(EX.api, `chat matrix ${state}: disclosure button never addressable`);
+          await clickXY(hit.x, hit.y);
+          const up = await probe(id);
+          if (up.expanded !== 'true' || !up.bodyMounted || !up.focusOnTrigger || up.nestedButtons !== 0 || !up.hasOpen)
+            die(EX.api, `chat matrix ${state}: expand probe failed: ${JSON.stringify(up).slice(0, 400)}`);
+          shots.push({ surface: 'directive_card',
+            state: `expanded card \u00b7 ${state} (aria-expanded=true, body mounted, focus on trigger, no nested buttons)`,
+            ...(await shoot(cdp, A.outDir, `11-chat-${state}-expanded.png`, collapsed, up.text)) });
+          const hit2 = await expandXY(id);
+          await clickXY(hit2.x, hit2.y);
+          const down = await probe(id);
+          if (down.expanded !== 'false' || down.bodyMounted || !down.focusOnTrigger)
+            die(EX.api, `chat matrix ${state}: collapse probe failed: ${JSON.stringify(down).slice(0, 400)}`);
+        }
+
+        // -- valid-unknown id: the retry frame, then a STALLED refetch proves
+        // the loading word on the same control, then release returns it to a
+        // retryable error branch (never inert chrome).
+        mock = await mockRuns(cdp);
+        let unk = null;
+        {
+          // The retry branch alternates words while react-query's retry ladder
+          // and the 4 s poll interleave — poll for the id-bearing frame.
+          const uT0 = Date.now();
+          while (!unk && Date.now() - uT0 < 25_000) {
+            unk = await cdp.evl(`(() => {
+              const btns = [...document.querySelectorAll('button')]
+                .filter(b => (b.innerText || '').includes(${JSON.stringify(CHAT_UNKNOWN)}));
+              if (!btns.length) return null;
+              btns[0].scrollIntoView({ block: 'center' });
+              const r = btns[0].getBoundingClientRect();
+              return { x: r.x + r.width / 2, y: r.y + r.height / 2, t: btns[0].innerText };
+            })()`).catch(() => null);
+            if (!unk) await sleep(600);
+          }
+        }
+        if (!unk) die(EX.api, 'unknown-id card never rendered its RETRY button (valid unknown ids must stay retryable)');
+        shots.push({ surface: 'directive_card', state: 'unknown id: clickable RETRY branch',
+          ...(await shoot(cdp, A.outDir, '13-chat-unknown-retry.png',
+            { x: unk.x - 90, y: unk.y - 16, width: 340, height: 34 }, unk.t)) });
+        armRules([{ urlPattern: `*workflows/runs/${CHAT_UNKNOWN}`, action: 'stall' }]);
+        await clickXY(unk.x, unk.y);
+        const loading = await evlPoll(`(() => {
+          const btns = [...document.querySelectorAll('button')].filter(b => (b.innerText || '').trim() === 'workflow\u2026');
+          if (!btns.length) return null;
+          const r = btns[0].getBoundingClientRect();
+          return { x: r.x, y: r.y, width: r.width, height: r.height, t: btns[0].innerText };
+        })()`, null, 10_000);
+        if (loading)
+          shots.push({ surface: 'directive_card', state: 'unknown id: RETRY clicked -> refetch in flight (stalled at the network edge), loading word on the button',
+            ...(await shoot(cdp, A.outDir, '14-chat-unknown-refetch-loading.png', loading, loading.t)) });
+        mock.releaseStalled();
+        let back = null;
+        {
+          const bT1 = Date.now();
+          while (!back && Date.now() - bT1 < 20_000) {
+            back = await cdp.evl(`(() => {
+              const b = [...document.querySelectorAll('button')].find(b => (b.innerText || '').includes(${JSON.stringify(CHAT_UNKNOWN)}));
+              return b ? b.innerText : null;
+            })()`).catch(() => null);
+            if (!back) await sleep(700);   // react-query's retry ladder keeps the button in the loading word briefly
+          }
+        }
+        if (!back) die(EX.api, 'after release the unknown-id card never returned to the retryable error branch');
+        armRules([]);
+
+        // -- malformed id: INERT. No query mount, no retry affordance — the
+        // label alone (DirectiveCard guard). Asserted structurally, plus the
+        // viewport frame showing it beside the live cards.
+        const inert = await cdp.evl(`(() => ({
+          mounted: !!document.querySelector('[data-wf-directive="' + ${JSON.stringify(CHAT_MALFORMED)} + '"]'),
+          retriable: [...document.querySelectorAll('button')].some(b => (b.innerText || '').includes(${JSON.stringify(CHAT_MALFORMED)})),
+        }))()`);
+        if (inert.mounted || inert.retriable)
+          die(EX.api, `malformed id is not inert (mounted=${inert.mounted} retriable=${inert.retriable})`);
+        shots.push({ surface: 'directive_card', state: 'malformed id INERT beside live cards (no mount, no retry affordance)',
+          ...(await shoot(cdp, A.outDir, '12-chat-inert-view.png')) });
+
+        // -- stale last-good: a FAILED refetch over the cached held card reads
+        // Disconnected \u00b7 last known and keeps every census word (Cached
+        // directive 04). The held card keeps its own 4 s poll — the edge lies,
+        // the loop is the app\u2019s.
+        armRules([{ urlPattern: `*workflows/runs/${chatIds.held}`, action: 'fail' }]);
+        let staleCard = null;
+        const sT0 = Date.now();
+        while (!staleCard && Date.now() - sT0 < 45_000) {
+          const p2 = await probe(chatIds.held);
+          if (p2 && /Disconnected \u00b7 last known/.test(p2.text || '')) staleCard = p2;
+          else await sleep(1000);
+        }
+        if (!staleCard) { await mock.releaseStalled(); die(EX.api, 'held card over a failing refetch never read Disconnected \u00b7 last known'); }
+        const staleRect = await cardOf(chatIds.held);
+        shots.push({ surface: 'directive_card', state: 'stale last-good: refetch failure over cached data reads Disconnected \u00b7 last known held',
+          ...(await shoot(cdp, A.outDir, '15-chat-stale-held.png', staleRect, staleCard.text)) });
+        armRules([]);
+        let recovered = false;
+        const rT0 = Date.now();
+        while (!recovered && Date.now() - rT0 < 30_000) {
+          const p3 = await probe(chatIds.held);
+          recovered = !!p3 && !/Disconnected/.test(p3.text || '');
+          if (!recovered) await sleep(1000);
+        }
+        identity.seeds.chat_matrix.stale_recovery = recovered ? 're-observed' : 'not re-observed within 30 s';
+        if (recovered) {
+          const rec = await cardOf(chatIds.held);
+          shots.push({ surface: 'directive_card', state: 'edge restored: held card re-reads live (stale word gone)',
+            ...(await shoot(cdp, A.outDir, '15b-chat-held-recovered.png', rec, rec.text)) });
+        }
+        await mock.off();
+        mock = null;
       }
     }
 
@@ -2206,6 +2440,9 @@ async function main() {
       repro_combined_sha256: repro.combined_sha256 }));
     return 0;
   } finally {
+    // The chat running-row flock keeper dies here (exactly the pid this
+    // driver spawned): the fixture's liveness was borrowed, not owned.
+    if (chatKeeper?.pid) { try { process.kill(chatKeeper.pid, 'SIGKILL'); } catch { /* already gone */ } }
     // Stop engine-seeded runs FIRST (parked held-gate runners outlive
     // electron otherwise): the same door, action:stop, isolated runs root.
     for (const rid of seededRuns) {
