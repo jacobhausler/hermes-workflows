@@ -2490,8 +2490,15 @@ async function main() {
 }
 
 // CLI guard: importing this module (the repro spec imports maskVolatile +
-// the parse helpers) must never boot the bench.
-const isCli = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+// the parse helpers) must never boot the bench. Node resolves the entry to
+// its realpath, so a symlinked canonical entry (scripts/ui2-proof/capture.mjs
+// -> this file, the bd_2026-11-13-1bm contract path) must be realpath'd here
+// too — otherwise the guard goes quiet and exits 0 as a GREEN NO-OP.
+let isCli = false;
+try {
+  isCli = !!process.argv[1] &&
+    import.meta.url === pathToFileURL(fs.realpathSync(path.resolve(process.argv[1]))).href;
+} catch { isCli = false; }
 if (isCli) main().then(code => process.exit(code ?? 0)).catch(async e => {
   const code = e instanceof Bail ? e.code : 1;
   console.error(`UI2_PROOF_FAIL(${code}): ${e.message}`);
