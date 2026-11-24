@@ -707,7 +707,15 @@ async function main() {
         rowHit = await cdp.evl(`(async () => {
           const cand = [...document.querySelectorAll('div,li,button,a')]
             .map(n => ({ n, t: (n.innerText || '').trim() }))
-            .filter(({ n, t }) => t && t.length < 120 && (t.includes('now') || /ago|min|hour|sec/i.test(t)))
+            .filter(({ n, t }) => {
+              // session row shape = '<title>\n<relative-time>' (field-proven:
+              // a bare /now/ hit 'runs unkNOW' — the pane stats line). Require a
+              // second line whose WHOLE trimmed text is a relative-time token.
+              if (!t || t.length > 120) return false;
+              const lines = t.split('\n').map(s => s.trim()).filter(Boolean);
+              if (lines.length < 2) return false;
+              return /^(?:now|just now|\d+\s*(?:s|sec|secs?|m|min|mins?|h|hr|hrs?|hour|hours?|d|day|days?)\s*ago)$/i.test(lines[lines.length - 1]);
+            })
             .filter(({ n }) => { const r = n.getBoundingClientRect(); return r.width > 60 && r.height > 16 && r.x < 420 && r.y > 40; })
             .sort((a, b) => a.n.getBoundingClientRect().y - b.n.getBoundingClientRect().y);
           const leaf = cand.find(({ n }) => !cand.some(o => o.n !== n && n.contains(o.n))) ?? cand[0];
@@ -730,7 +738,12 @@ async function main() {
           if (attempt > 0) rowHit = await cdp.evl(`(async () => {
             const cand = [...document.querySelectorAll('div,li,button,a')]
               .map(n => ({ n, t: (n.innerText || '').trim() }))
-              .filter(({ t }) => t && t.length < 120 && (t.includes('now') || /ago|min|hour|sec/i.test(t)))
+              .filter(({ t }) => {
+                if (!t || t.length > 120) return false;
+                const lines = t.split('\n').map(s => s.trim()).filter(Boolean);
+                if (lines.length < 2) return false;
+                return /^(?:now|just now|\d+\s*(?:s|sec|secs?|m|min|mins?|h|hr|hrs?|hour|hours?|d|day|days?)\s*ago)$/i.test(lines[lines.length - 1]);
+              })
               .filter(({ n }) => { const r = n.getBoundingClientRect(); return r.width > 60 && r.height > 16 && r.x < 420 && r.y > 40; })
               .sort((a, b) => a.n.getBoundingClientRect().y - b.n.getBoundingClientRect().y);
             const leaf = cand.find(({ n }) => !cand.some(o => o.n !== n && n.contains(o.n))) ?? cand[0];
