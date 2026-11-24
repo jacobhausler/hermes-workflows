@@ -110,6 +110,25 @@ know, capture.mjs exits 3 naming it a new test. Do not "make it pass" by
 pointing at `synthesis/index.html`. Wire real renderer surfaces into the
 capture section of capture.mjs and extend `surfaces_registry` instead.
 
+## The `gate` case (bd_2026-11-13-qri)
+
+`node scripts/ui2-proof/capture.mjs --case gate --out DIR` proves the ONE
+decision surface end-to-end on the real renderer: the held gate cell, a
+trusted option click, the PENDING frame made real by holding the answer POST
+at CDP `Fetch` interception (never a staged screenshot), the durable
+`[data-gate-receipt]` saved frame, the success toast carrying the exact
+ledger line (`◇ Held · <requester> · <run> / <gate>`) with its
+`View exact gate` action, and the route-away/route-back identity proof.
+The seed SIGKILLs the isolated runner at `gate.held` (seed field
+`kill_runner_after_hold`), then the driver reads `gates/<id>.json` back from
+disk and refuses the run unless: the answer matches byte-for-byte, `_ui` is
+literally true, `events.jsonl` is byte-identical before/after (Nothing
+restarted — verified for THIS tested runner only, not a universal scheduler
+claim), and the gate node was never consumed. Frames 07-11 (08b = a FORCED
+real `{ok:false}` door response rendered as the inline failure with
+retryable options and no receipt); report.json
+entries are `reviewed:false` until the mandatory vision pass.
+
 ## Verification (this bead's command)
 
 ```sh
