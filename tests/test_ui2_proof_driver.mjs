@@ -114,7 +114,11 @@ console.log('PASS manifest: seed kinds typed, snapshots pinned, registry present
   const tmplRe = /cdp\.evl\(`((?:[^`\\]|\\.|\$\{[^}]*(?:\{[^}]*\}[^}]*)?\})*)`\)/g
   let m, seen = 0
   while ((m = tmplRe.exec(src))) {
-    const built = m[1].replace(/\\`/g, '`').replace(/\$\{[^}]*\}/g, '""')
+    // EVALUATE the template (Node consumes its escapes, exactly as the driver
+    // will) before parsing the page source — raw-source parsing hides the
+    // consumed-escape bug that killed run6 (a '\n' ending a // comment line
+    // mid-statement: page got 'Unexpected token <').
+    const built = eval('`' + m[1].replace(/\$\{[^}]*\}/g, '"x"') + '`')
     assert.doesNotThrow(() => new Function(built), `inline cdp.evl template at index ${m.index} must parse`)
     seen++
   }
