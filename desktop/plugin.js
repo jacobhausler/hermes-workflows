@@ -2599,7 +2599,17 @@ function Timeline({ detail }) {
     if (e.event === 'node.started') { spans.delete(e.node); startOf(e.node, ts) }
     else if (e.event === 'node.finished' || e.event === 'node.failed') {
       const sp = spans.get(e.node) || { id: e.node, start: ts, end: null, kind: 'node' }
-      sp.end = ts; sp.status = e.event === 'node.failed' ? 'failed' : 'done'; spans.set(e.node, sp)
+      sp.end = ts
+      // 2.0 (bd_2026-11-13-jtf, coverage row 136 / fold F3): cancelled is never
+      // a failure — a stop/straggler death journals node.failed with
+      // error_class=cancelled, and the row reads NEUTRAL like skipped/stopped,
+      // never the failed red (the #7 law: a stop re-drives cancelled work).
+      sp.status = e.event === 'node.failed' ? (e.error_class === 'cancelled' ? 'cancelled' : 'failed') : 'done'
+      spans.set(e.node, sp)
+    } else if (e.event === 'node.cancelled') {
+      // A fan-out stop folds all items to cancelled and journals this typed
+      // event (wf.py); its row is neutral, and it closes the span.
+      spans.set(e.node, { id: e.node, start: ts, end: ts, kind: 'node', status: 'cancelled' })
     } else if (e.event === 'gate.held') { spans.delete(e.node); spans.set(e.node, { id: e.node, start: ts, end: null, kind: 'gate', status: 'held' }) }
     else if (e.event === 'gate.released' || e.event === 'gate.skipped' || e.event === 'gate.answered') {
       const sp = spans.get(e.node); if (sp) { sp.end = ts; sp.status = e.on_skip === 'prune' ? 'skipped' : 'done' }
@@ -2612,6 +2622,11 @@ function Timeline({ detail }) {
   for (const sp of spans.values()) {
     if (!sp.end) sp.status = detail.held_gate?.id === sp.id ? 'held'
       : live && detail.nodes?.[sp.id]?.status === 'running' ? 'running' : 'pending'
+    // 2.0 (bd_2026-11-13-jtf): the COMMITTED record outranks the event spine —
+    // a node whose record reads failed+error_class=cancelled is a cancelled
+    // row, never red, even when the node.failed line aged out of the tail.
+    const rec = detail.nodes?.[sp.id]
+    if (rec && rec.status === 'failed' && rec.error_class === 'cancelled') sp.status = 'cancelled'
   }
   const tEnd = Math.max(live ? Date.now() : last, ...[...spans.values()].map(s => s.end || last))
   const total = Math.max(tEnd - t0, 1)
@@ -2688,16 +2703,27 @@ const attemptNo = facts => {
   return m ? m[1] : '—'
 }
 
-function useNodeLogTail(runId, nodeId, facts, tab, open, live) {
+function useNodeLogTail(runId, nodeId, facts, tab, open, live, bounds) {
   // ONE read-only route, the client never sends a path; polled at 4 s only while
   // the panel is open on the Log tab and the node is running.
   const want = open && (tab === 'Log' || tab === 'Prompt') && facts
     && (tab === 'Log' ? facts.log_path : facts.prompt_path)
   const q = want ? `?kind=${tab === 'Log' ? 'log' : 'prompt'}&tail=${TAIL_BYTES}` : null
+  // 2.0 (bd_2026-11-13-jtf): a picked fan-out item's record lives at
+  // nodes/<nid>.<index>.json — the route resolves it from the INDEX (IDs only,
+  // never a path), and the sibling spawn log from the ATTEMPT the record itself
+  // names (.a<N> in the path). Bounds ride ONLY the numbers the record carries;
+  // an unnumbered path sends neither, exactly as before.
+  let qs = q
+  if (qs && bounds) {
+    if (Number.isInteger(bounds.index)) qs += `&index=${bounds.index}`
+    const m = /\.a(\d+)\.(?:log|prompt\.md)$/.exec(String(tab === 'Log' ? facts.log_path : facts.prompt_path))
+    if (m) qs += `&attempt=${m[1]}`
+  }
   return useQuery({
-    queryKey: [...Q, 'log', runId, nodeId, q || 'off'],
+    queryKey: [...Q, 'log', runId, nodeId, qs || 'off'],
     enabled: !!q && ID_OK.test(String(runId)) && ID_OK.test(String(nodeId)),
-    queryFn: () => api(`/runs/${encodeURIComponent(runId)}/nodes/${encodeURIComponent(nodeId)}/log${q}`),
+    queryFn: () => api(`/runs/${encodeURIComponent(runId)}/nodes/${encodeURIComponent(nodeId)}/log${qs}`),
     refetchInterval: tab === 'Log' && live ? 4000 : false
   })
 }
@@ -2742,11 +2768,20 @@ function NodePanel({ detail }) {
         : k === 'ms' ? [k, picked.ms ?? null] : [k, null]))
     : shown
   const effStatus = (facts && facts.status != null && facts.status !== UNKNOWN ? facts.status : status) || 'pending'
+  // 2.0 (bd_2026-11-13-jtf, coverage row 126): the header vitals follow the
+  // FACTS owner — a picked fan-out item shows ONLY its own folded metric row
+  // (item_metrics[i], the read model's per-child join); the parent's fan
+  // aggregate never poses as the child's spend, and an item without its own
+  // row shows nothing. Absence, never borrowing (aggregate honesty / MF1).
+  const vitalsM = picked ? (shown.item_metrics || {})[picked.index] || null : shown.metrics || null
   const name = def ? (picked != null ? `${def.id}·${picked.index}` : def.id) : ''
   // No remembered state: a manual pick lives only for this node+status; a new
   // selection (or a status change) re-derives the default tab.
   const activeTab = (tab && tab[0] === `${name}:${effStatus}` ? tab[1] : null) || defaultTabFor(effStatus)
-  const logQ = useNodeLogTail(detail.id, def?.id, facts, activeTab, open && !!def, live && activeTab === 'Log')
+  const logQ = useNodeLogTail(detail.id, def?.id, facts, activeTab, open && !!def, live && activeTab === 'Log',
+    // A fan pick resolves the ITEM's record: the route takes the index as an id,
+    // never a path (2.0, bd_2026-11-13-jtf).
+    picked != null && picked.index != null ? { index: picked.index } : null)
   if (!def) return null
   const fc = rows && rows.length ? fanCounts(rows) : null
   const preCls = 'overflow-auto whitespace-pre-wrap break-words rounded border border-(--ui-stroke-secondary) p-2 text-[0.6875rem]'
@@ -2775,9 +2810,20 @@ function NodePanel({ detail }) {
   const budgetBits = [['max_turns', def.max_turns], ['timeout', def.timeout], ['run_budget', def.run_budget], ['shape', def.shape]]
     .filter(([, v]) => factKnown(v))
   // WF-02: a cancelled class keeps the error text but loses the red tone.
+  // 2.0 (bd_2026-11-13-jtf): on a fan pick the FACTS owner is the ITEM —
+  // error/output/final read the item's record; the parent's aggregate never
+  // poses as the child's (absence reads honest, never borrowed).
+  const pickedOwner = picked != null
+  const ownError = pickedOwner ? (facts && facts.error) : (facts && facts.error) ?? shown.error
   const cancelledClass = (facts && facts.error_class) === 'cancelled'
     || (picked && picked.errorClass) === 'cancelled'
     || shown.error_class === 'cancelled'
+  // 2.0 (bd_2026-11-13-jtf, row fanitem.cancelled_vs_failed): the header identity
+  // follows the FACTS owner too — a picked record that reads failed+cancelled
+  // renders as its OWN neutral 'cancelled' word/tone (the ONE tone table's
+  // alias), never the parent's red 'failed'. An unpicked node is byte-identical
+  // to the pre-2.0 header.
+  const hdrStatus = effStatus === 'failed' && cancelledClass ? 'cancelled' : (picked ? effStatus : status)
   const steerTrip = facts?.steer
     ? `queued ${unk(facts.steer.queued)} · baked ${unk(facts.steer.baked)} · consumed ${unk(facts.steer.consumed)}`
     : null
@@ -2800,7 +2846,7 @@ function NodePanel({ detail }) {
       ? sect('blocked_by', box('text-xs whitespace-pre-wrap text-(--ui-text-secondary)', shown.blocked_by.join(', ')))
       : null,
     shown.parked ? sect('parked', box('text-xs text-(--ui-text-secondary)', factText(shown.parked))) : null,
-    pre('error', facts && facts.error !== UNKNOWN ? facts.error : shown.error !== UNKNOWN ? shown.error : null, cancelledClass ? undefined : EDGE_TONE.failed),
+    pre('error', ownError != null && ownError !== UNKNOWN ? ownError : null, cancelledClass ? undefined : EDGE_TONE.failed),
     // est-zmpx8 (the #584 residual): the refusal stamp — the machine-readable class
     // of a REFUSAL (wf.py `_window_spent_record` → wfcommon.FACT_KEYS `refusal`) —
     // renders verbatim beside the death facts. Same WF-03 discipline as error_class
@@ -2831,7 +2877,10 @@ function NodePanel({ detail }) {
       ? box('text-[0.6875rem] text-(--ui-text-tertiary)', logBase(facts?.prompt_path)) : null
   const tabBody = () => {
     if (activeTab === 'Output') {
-      const out = fmtOutput(facts?.output ?? shown.output)
+      // Record-owned output (2.0, bd_2026-11-13-jtf): a picked item shows the
+      // ITEM record's output; only an unpicked node may read the merged
+      // shown.output (for it facts IS shown — the same value, one source).
+      const out = fmtOutput(pickedOwner ? facts?.output : facts?.output ?? shown.output)
       return out
         ? box('flex flex-col gap-1',
             effStatus === 'partial' ? jsx(Badge, { variant: 'outline', children: 'partial — harvested output' }) : null,
@@ -2840,7 +2889,10 @@ function NodePanel({ detail }) {
     }
     if (activeTab === 'Final') {
       const f = facts && typeof facts.final === 'string' ? facts.final : null
-      return f ? pre('final', f, status === 'failed' ? EDGE_TONE.failed : FACT_TONE)
+      // WF-02 (2.0, bd_2026-11-13-jtf): a cancelled death keeps its last words
+      // but loses the red — the row/facts already read cancelled-neutral; the
+      // final pre follows the same tone law as the error pre above.
+      return f ? pre('final', f, status === 'failed' && !cancelledClass ? EDGE_TONE.failed : FACT_TONE)
         : box('text-xs text-(--ui-text-tertiary)', 'final: unknown')
     }
     if (activeTab === 'Prompt') {
@@ -2872,9 +2924,9 @@ function NodePanel({ detail }) {
     'flex flex-col gap-3 border-t border-(--ui-stroke-secondary) p-4',
     box(
       'flex items-center gap-2',
-      jsx(Dot, { status }),
+      jsx(Dot, { status: hdrStatus }),
       box('min-w-0 flex-1 truncate text-sm font-medium', name),
-      jsx(Badge, { variant: 'outline', children: statusLabel(status) }),
+      jsx(Badge, { variant: 'outline', children: statusLabel(hdrStatus) }),
       // F2 desktop (RATIFY): delegation badge — ONLY when the def carries
       // `profile`; a no-team def yields null and the panel is byte-identical.
       def.profile ? jsx('span', { title: `as @${def.profile}`, className: 'text-[0.6875rem] text-(--ui-text-tertiary)', children: `as @${def.profile}` }) : null,
@@ -2889,7 +2941,13 @@ function NodePanel({ detail }) {
         ? box('min-w-0 truncate text-[0.6875rem] text-(--ui-text-tertiary)',
             [def.model, def.provider, def.reasoning].filter(factKnown).join(' · '))
         : null,
-      shown.metrics ? jsx(Vitals, { m: shown.metrics, live, cost: true, wall: live ? shown.wall : null }) : null,
+      // 2.0 (bd_2026-11-13-jtf, coverage row 126): the vitals line renders the
+      // FACTS owner's row — vitalsM (item_metrics[i] on a fan pick, else the
+      // node's own metrics). A picked item never borrows the parent's fan
+      // aggregate (MF1); without its own row it shows NOTHING, and the run
+      // wall rides only the node's own live state — never the parent's.
+      vitalsM ? jsx(Vitals, { m: vitalsM, live: picked ? picked.status === 'running' : live, cost: true,
+        wall: !picked && live ? shown.wall : null }) : null,
       jsx(Button, { size: 'xs', variant: 'ghost', 'aria-label': 'Close', onClick: () => { $selNode.set(null); $fanItem.set(null) }, children: '×' })
     ),
     jsx('div', {
