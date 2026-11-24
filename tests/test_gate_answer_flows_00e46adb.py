@@ -116,4 +116,116 @@ check("ancestor gate answer" in src, "the injection loop ships")
 check("a in injected or a not in outputs" in src,
       "skip rule: non-gates, covered ids, and UNCOMMITTED answers never inject")
 
+# --- (6) UI ANSWER DOOR (bd_2026-11-13-qri): the UI's POST records a _ui
+# answer, the read model reads it back, and NOTHING resumes on this path.
+# Isolated runner: this run dir has no live pid/lock and never spawns a child
+# — "nothing restarted" is verified for the tested isolated runner, not
+# claimed as a universal scheduler law.
+import asyncio, hashlib, types
+home20 = HERE / "home20"
+if home20.exists():
+    shutil.rmtree(home20)
+home20.mkdir()
+os.environ["HERMES_HOME"] = str(home20)
+os.environ["WF_RUNS_ROOT"] = str(home20 / "workflows")  # est-2ek.1.762 pin again
+
+# plugin_api guards its router import; feed it a stub fastapi so the route
+# FUNCTIONS exist and are driven directly (no HTTP server, no dependency).
+_fastapi = types.ModuleType("fastapi")
+class _Router:
+    def get(self, *a, **k): return lambda f: f
+    def post(self, *a, **k): return lambda f: f
+_fastapi.APIRouter = _Router
+_fastapi.HTTPException = Exception
+sys.modules.setdefault("fastapi", _fastapi)
+api_spec = importlib.util.spec_from_file_location(
+    "plugin_api_qri", BUILD / "dashboard" / "plugin_api.py")
+api = importlib.util.module_from_spec(api_spec)
+api_spec.loader.exec_module(api)
+
+runs = home20 / "workflows"; runs.mkdir(exist_ok=True)
+uir = runs / "gate.ui"
+(uir / "nodes").mkdir(parents=True); (uir / "gates").mkdir()
+UGRAPH = {"nodes": [
+    {"id": "plan", "type": "agent", "goal": "plan"},
+    {"id": "review", "type": "gate", "after": ["plan"],
+     "question": "Save this review decision?",
+     "options": ["Approve review", "Keep for revision"],
+     "context": "Isolated review workflow"},
+]}
+uir_byid = {n["id"]: n for n in UGRAPH["nodes"]}
+(uir / "graph.json").write_text(json.dumps(UGRAPH))
+(uir / "run.json").write_text(json.dumps({"name": "gate.ui", "hermes_bin": fake,
+                                          "concurrency": 4, "node_timeout": 30,
+                                          "started": "2099-01-01T00:00:00+00:00"}))
+(uir / "events.jsonl").write_text(json.dumps(
+    {"ts": "2099-01-01T00:00:00+00:00", "event": "gate.held", "node": "review"}) + "\n")
+(uir / "nodes" / "plan.json").write_text(json.dumps(
+    {"status": "done", "output": {"result": "planned"},
+     "efp": wfcommon.efp(uir_byid, uir_byid["plan"]),
+     "fp_rule_version": wfcommon.FP_RULE_VERSION}))
+
+UI_ANSWER = "Approve review"
+sha_before = hashlib.sha256((uir / "events.jsonl").read_bytes()).hexdigest()
+
+# held truth BEFORE the answer: question verbatim, declared requester, options.
+v = api.get_run("gate.ui")
+check(v.get("status") == "held", "isolated ready gate reads held")
+check(v.get("held_gate", {}).get("question") == "Save this review decision?"
+      and v["held_gate"]["options"] == ["Approve review", "Keep for revision"],
+      "held_gate carries question + options verbatim")
+check(v["held_gate"].get("context") == "Isolated review workflow",
+      "the requester identity rides the read model (graph-declared, never invented)")
+check("gates" not in v, "unanswered gate: no receipt block (honest absence)")
+
+# warm the census cache, then the UI's POST — and the VERY NEXT read inside the
+# TTL window must reflect it (proof the route invalidates BEFORE the read).
+api.list_runs()
+res = asyncio.run(api.release_gate("gate.ui", {"gate_id": "review", "answer": UI_ANSWER}))
+check(res == {"ok": True}, "UI door: release returns ok", str(res))
+rec = json.loads((uir / "gates" / "review.json").read_text())
+check(rec["answer"] == UI_ANSWER, "the exact answer reads back from the record")
+check(rec.get("_ui") is True, "the UI write stamps _ui provenance")
+check("_def" in rec and rec.get("fp_rule_version") == wfcommon.FP_RULE_VERSION,
+      "the answer carries the efp stamp the read model validates")
+row = [x for x in api.list_runs()["runs"] if x["id"] == "gate.ui"][0]
+check(row["status"] != "held" and "held_gate" not in row,
+      "invalidate-before-read: the next GET reflects the answer inside one TTL window")
+v2 = api.get_run("gate.ui")
+check(v2.get("gates", {}).get("review", {}).get("answer") == UI_ANSWER
+      and v2["gates"]["review"].get("_ui") is True,
+      "full view exposes the durable gates block for the saved receipt")
+
+# duplicate / conflict: a VALID answer is never silently overwritten.
+res = asyncio.run(api.release_gate("gate.ui", {"gate_id": "review", "answer": "Keep for revision"}))
+check(res == {"ok": False, "error": "gate already answered (current graph)"},
+      "pending duplicate prevention at the API: second POST is a typed refusal, ok:false")
+check(json.loads((uir / "gates" / "review.json").read_text())["answer"] == UI_ANSWER,
+      "the refused second answer wrote nothing")
+
+# stale answer (amend moved the def): overwrite is allowed, receipt re-records.
+rec["answer"] = "stale seed"
+rec["_def"] = "0000000000000000000000000000000000000000000000000000000000000000"
+(uir / "gates" / "review.json").write_text(json.dumps(rec))
+res = asyncio.run(api.release_gate("gate.ui", {"gate_id": "review", "answer": UI_ANSWER}))
+check(res == {"ok": True}, "a stale (amend-invalidated) answer is overwritable", str(res))
+
+# backend error classes: unknown run + stopped run, both ok:false, never ok:true.
+res = asyncio.run(api.release_gate("nope-not-here", {"gate_id": "review", "answer": "x"}))
+check(res == {"ok": False, "error": "unknown run"}, "unknown run answers ok:false")
+(uir / "stop.request").write_text("")
+res = asyncio.run(api.release_gate("gate.ui", {"gate_id": "review", "answer": "x"}))
+check(res.get("ok") is False and "stopped" in res.get("error", ""),
+      "a stopping run refuses the answer (nothing consumed)")
+(uir / "stop.request").unlink()
+
+# no resume, nothing restarted on this tested path: the event ledger is
+# byte-identical, no gate.released event, no gate node record, no child log.
+check(hashlib.sha256((uir / "events.jsonl").read_bytes()).hexdigest() == sha_before,
+      "Nothing restarted (tested isolated runner): events.jsonl byte-identical after the UI answer")
+check(not (uir / "nodes" / "review.json").exists(),
+      "the UI answer did not consume the gate — no runner commit appeared")
+check(not (uir / "logs").exists() or not list((uir / "logs").glob("*")),
+      "zero spawns on the answer path: no child logs")
+
 print(f"ALL PASS ({ok})")

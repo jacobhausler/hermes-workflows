@@ -12,3 +12,5 @@ probe/
 run-*.log
 PAIR-STATUS
 run-pair.sh
+probe*/
+.ui2-proof-owned
