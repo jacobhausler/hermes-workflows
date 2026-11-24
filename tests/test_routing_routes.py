@@ -201,4 +201,36 @@ with tempfile.TemporaryDirectory(prefix=".routing-test-", dir=HERE) as tmp:
     assert tail(run2, "f", 1, "x", "log", 16384) is None, "a non-numeric attempt is refused"
     assert tail(run2, "../f", None, None, "log", 16384) is None, "the node id must match ID_OK — ids, never paths"
 
+    # _view (full): a fan node's committed per-item files merge as
+    # item_records[index] over the SAME closed fact set — the route-side half of
+    # "item selection reads the item's record". A node without item files keeps
+    # the exact pre-2.0 key set (absent, never an empty costume).
+    run3 = Path(tmp) / "viewrun"
+    (run3 / "nodes").mkdir(parents=True)
+    byid3 = {
+        "workers": {"id": "workers", "type": "agent", "goal": "g",
+                    "fanout": {"goal": "g {item}", "items": ["a", "b"]}},
+    }
+    (run3 / "graph.json").write_text(json.dumps({"name": "viewrun", "nodes": list(byid3.values())}))
+    (run3 / "run.json").write_text(json.dumps({"run_id": "viewrun", "name": "viewrun", "started": 4102444800.0}))
+    e0 = wfcommon.efp(byid3, byid3["workers"])
+    (run3 / "nodes" / "workers.json").write_text(json.dumps(
+        {"status": "done", "efp": e0, "fp_rule_version": wfcommon.FP_RULE_VERSION,
+         "output": {"all_results": [{"index": 0, "status": "done", "item": "a"}]}}))
+    (run3 / "nodes" / "workers.1.json").write_text(json.dumps(
+        {"status": "failed", "error_class": "cancelled", "error": "stopped", "final": "bye",
+         "refusal": None, "attempts": 1, "attempts_log": [], "harvest": None, "output": None,
+         "ms": 5, "started": 1, "log_path": "logs/workers.1.a1.log", "prompt_path": None,
+         "efp": e0, "skey": "s", "fp_rule_version": wfcommon.FP_RULE_VERSION}))
+    (run3 / "events.jsonl").write_text(json.dumps({"ts": 4102444800.0, "event": "run.started"}) + "\n")
+    view = api._view(run3, full=True)
+    assert view, "the trio is valid through the shared read model"
+    ir = view["nodes"]["workers"].get("item_records")
+    assert ir and ir[1]["status"] == "failed" and ir[1]["error_class"] == "cancelled" \
+        and ir[1]["final"] == "bye", ir
+    assert set(ir[1]) >= {"status", "error_class", "refusal", "error", "attempts", "attempts_log",
+                          "final", "harvest", "output", "ms", "started", "log_path", "prompt_path",
+                          "efp", "skey", "steer"}, sorted(ir[1])
+    assert 0 not in ir or ir[0]["status"] == "unknown", "an unwritten item index honestly has no facts"
+
 print("ALL PASS")

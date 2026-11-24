@@ -164,6 +164,25 @@ def _view(r, full=False, lock_state=None):
             if facts is not None:
                 facts = {k: x for k, x in facts.items() if k != "status"}
                 nodes[nid].update(facts)
+                # 2.0 (bd_2026-11-13-jtf): a fan-out node's per-ITEM records
+                # (nodes/<nid>.<index>.json, the runner's own committed child
+                # files) ride the SAME closed fact set, keyed by index — the
+                # NodePanel's fan pick swaps FACTS onto the item record through
+                # this key and never borrows the aggregate above it. Nodes with
+                # no item files keep the exact pre-2.0 payload (absent key).
+                irec = {}
+                try:
+                    for p in sorted((r / "nodes").glob(f"{nid}.*.json")):
+                        stem = p.name[:-5]
+                        idx = stem[len(nid) + 1:] if stem.startswith(nid + ".") else ""
+                        if idx.isdecimal():
+                            ifr = common.node_facts(r, nid, index=int(idx))
+                            if isinstance(ifr, dict):
+                                irec[int(idx)] = ifr
+                except OSError:
+                    pass
+                if irec:
+                    nodes[nid]["item_records"] = irec
             # metrics: node-level = the node's own child, or the fold of its items' children.
             # Keys are prefix-matched (any efp suffix) so an amended re-run's fresh rows count.
             prefix = f"wf:{st['run_id']}:{nid}:"
