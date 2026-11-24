@@ -53,7 +53,11 @@ const parseTime = v => {
   return Number.isFinite(t) ? t : NaN
 }
 const runStatusOf = r => (r && r.status) || 'pending'
-const statusLabel = s => s || 'unknown'
+// Root parity (review #233): the public status word is the FINAL lifecycle
+// table law — done reads Finished; every other raw status keeps its exact
+// word (cancelled neutrality law). The absent-sentinel here ('unknown') is
+// the tray's own ratified wording, unchanged.
+const statusLabel = s => !s ? 'unknown' : s === 'done' ? 'Finished' : s
 const pillProgress = r =>
   (r?.nodes_done != null && r?.nodes_total != null) ? `${r.nodes_done}/${r.nodes_total}` : '?'
 function fmtDur(ms) {

@@ -51,10 +51,14 @@ const constGrab = name => {
   assert.ok(i >= 0, `plugin.js must define const ${name}`)
   const rest = src.slice(i + 1)
   const nx = Math.min(...['\nconst ', '\nfunction ', '\n\n'].map(p => { const j = rest.indexOf(p); return j < 0 ? rest.length : j }))
-  return src.slice(i, i + 1 + nx)
+  return src.slice(i, i + 1 + nx) + '\n'
 }
 const jsx = (type, props, key) => ({ type, props: props || {}, key })
 const jsxs = jsx
+// The FINAL lifecycle/numeric laws ship as one marked block; render-group
+// evaluations prepend the REAL block so consumer renders use production code.
+const vmBlock = `const EDGE_TONE = { pending: 'P', running: 'R', held: 'H', failed: 'F' }\n${constGrab('statusLabel')}\n${src.match(/\/\/ BEGIN shared-view-model\n([\s\S]*?)\/\/ END shared-view-model/)[1]}`
+const headerGrab = src.match(/const inlineHeader = \(data, elapsed\) => \{[\s\S]*?\n\}/)[0]
 const walk = node => Array.isArray(node)
   ? node.flatMap(walk)
   : node && typeof node === 'object' ? [node, ...Object.values(node.props || {}).flatMap(walk)] : []
@@ -165,9 +169,11 @@ const sdkMod = await import(pathToFileURL(sdkPath).href)
 
 // ============================ WF-03 no raw 'unknown' ============================
 {
-  const statusLabel = new Function(`${constGrab('statusLabel')}; return statusLabel`)()
+  const statusLabel = new Function(`${constGrab('statusLabel')};\nreturn statusLabel`)()
   assert.equal(statusLabel(''), '—', 'WF-03: an empty status reads an em-dash, never the word unknown')
-  assert.equal(statusLabel('done'), 'done', 'WF-03: present statuses pass through verbatim')
+  assert.equal(statusLabel('done'), 'Finished', 'FINAL lifecycle table: successful done reads Finished')
+  assert.equal(statusLabel('cancelled'), 'cancelled', 'exact raw statuses law: cancelled keeps its own word')
+  assert.equal(statusLabel('interrupted'), 'interrupted', 'exact raw statuses law: pass-through for every other word')
   const unk = new Function(`${constGrab('UNKNOWN')}\n${constGrab('unk')}; return unk`)()
   assert.equal(unk(null), 'unknown', 'the O2 law stands: unk PRODUCES the sentinel for absent facts')
   assert.match(src, /const factKnown = v => v != null && v !== '' && v !== UNKNOWN/,
@@ -245,7 +251,7 @@ const sdkMod = await import(pathToFileURL(sdkPath).href)
   const openStrip = mod.SessionStrip()
   const open = texts(openStrip).join('|')
   assert.ok(/▾ 7 finished/.test(open), `WF-05: expanded flips the chevron to ▾: ${open.slice(0, 120)}`)
-  const foldRows = walk(openStrip).filter(n => n.type === 'button' && /· (done|failed|stopped) ·/.test(texts(n).join('')))
+  const foldRows = walk(openStrip).filter(n => n.type === 'button' && /· (Finished|failed|stopped) ·/.test(texts(n).join('')))
   const shown = foldRows.length
   assert.ok(shown > 0 && shown < 7, `the fold lists ${shown} of 7 rows`)
   const overflow = walk(openStrip).find(n => n.type === 'button' && /\+\s*\d+\s+more/.test(texts(n).join('')))
@@ -257,10 +263,9 @@ const sdkMod = await import(pathToFileURL(sdkPath).href)
 
 // ============================ WF-06 labeled clocks ==============================
 {
-  const inlineHeader = new Function('nodesCount', 'fmtDur', 'kfmt', 'usd', 'idleS', 'TERMINAL',
-    `${src.match(/const inlineHeader = \(data, elapsed\) => \{[\s\S]*?\n\}/)[0]}; return inlineHeader`)(
-    r => `${r.nodes_done}/${r.nodes_total} terminal`, n => `${Math.round(n / 1000)}s`, String,
-    n => `$${n.toFixed(2)}`, () => null, new Set(['done', 'failed', 'stopped'])
+  const inlineHeader = new Function('nodesCount', 'fmtDur', 'TERMINAL',
+    `${vmBlock}${headerGrab};\nreturn inlineHeader`)(
+    r => `${r.nodes_done}/${r.nodes_total} terminal`, n => `${Math.round(n / 1000)}s`, new Set(['done', 'failed', 'stopped'])
   )
   const [first] = inlineHeader({ id: 'x', name: 'x', status: 'running', nodes_done: 1, nodes_total: 2 }, 33000)
   assert.ok(first.some(x => /^run \d+s$/.test(x)), `WF-06: the card header clock is labeled run: ${first}`)
@@ -287,10 +292,9 @@ const sdkMod = await import(pathToFileURL(sdkPath).href)
 
 // ============================ WF-09 no COST $0.0000 =============================
 {
-  const inlineHeader = new Function('nodesCount', 'fmtDur', 'kfmt', 'usd', 'idleS', 'TERMINAL',
-    `${src.match(/const inlineHeader = \(data, elapsed\) => \{[\s\S]*?\n\}/)[0]}; return inlineHeader`)(
-    r => `${r.nodes_done}/${r.nodes_total} terminal`, n => `${n}ms`, String,
-    n => `$${n.toFixed(2)}`, () => null, new Set(['done', 'failed', 'stopped'])
+  const inlineHeader = new Function('nodesCount', 'fmtDur', 'TERMINAL',
+    `${vmBlock}${headerGrab};\nreturn inlineHeader`)(
+    r => `${r.nodes_done}/${r.nodes_total} terminal`, n => `${n}ms`, new Set(['done', 'failed', 'stopped'])
   )
   const [, second] = inlineHeader({ id: 'x', name: 'x', status: 'running', nodes_done: 1, nodes_total: 2,
     metrics: { api_calls: 3, tokens_in: 1200, tokens_out: 80, cost: 0, live: 1 } }, null)
@@ -303,14 +307,16 @@ const sdkMod = await import(pathToFileURL(sdkPath).href)
   // a real cost still renders
   const [, secondPaid] = inlineHeader({ id: 'x', name: 'x', status: 'done', nodes_done: 2, nodes_total: 2,
     metrics: { cost: 0.25 } }, null)
-  assert.ok(secondPaid.some(x => x === 'COST $0.25'), `a real estimate still prints: ${secondPaid}`)
+  assert.ok(secondPaid.some(x => x === 'COST $0.250'), `a real estimate still prints: ${secondPaid}`)
   // the usd formatter itself never answers '$0.0000' for a positive number
   const usd = new Function(`${constGrab('usd')}; return usd`)()
   assert.equal(usd(0.000001), '<$0.0001', 'WF-09: sub-cent renders as <$0.0001, never $0.0000')
   assert.equal(usd(0.25), '$0.250', 'WF-09: normal costs keep the money format')
   assert.equal(usd(2), '$2.00')
-  // Vitals (the other cost line) honors the same law: zero is never printed
-  assert.match(src, /if \(cost && m\.cost\) parts\.push/, 'WF-09: Vitals keeps the truthy-cost guard')
+  // Vitals (the other cost line) honors the same law: zero is only ever the
+  // recorded-activity 'COST included' word, never a printed $0 figure.
+  assert.match(src, /if \(m\.cost > 0\) parts\.push\(/, 'WF-09: Vitals gates the dollar figure on cost > 0')
+  assert.match(src, /m\.cost === 0 && hasRecordedActivity\(m\)\) parts\.push\([^)]*COST included/, 'WF-09: Vitals answers zero-with-activity with the included word')
 }
 
 rmSync(tmp, { recursive: true, force: true })
