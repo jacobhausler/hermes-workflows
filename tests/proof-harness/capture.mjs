@@ -917,9 +917,23 @@ async function main() {
       execFileSync(process.execPath, ['scripts/bundle-electron-main.mjs', '--dev'],
         { cwd: desktop, stdio: 'ignore', timeout: 120_000 });
     }
+    // First-run-gate law (field-proven 2026-11-24, app b9b36c9): the desktop
+    // resolves its backend as join(HERMES_HOME,'hermes-agent') — the bench
+    // home — and when that install is absent it HALTS on the bootstrap
+    // first-run setup choice, so the plugin never mounts and every capture
+    // dies unpainted/modal. Pass HERMES_DESKTOP_HERMES = the preflight
+    // hermesBin (resolved to an absolute path): the app's backend is then
+    // deterministic. It must be a FULLY PROVISIONED install — a bare
+    // worktree copy's launcher passes --version but dies inside ensure with
+    // ModuleNotFoundError (no committed dependency env for a foreign
+    // HERMES_HOME), so the app-repo copy serves RENDERER isolation only.
+    const resolvedHermes = hermesBin.startsWith('/') ? hermesBin
+      : (() => { try { return execFileSync('/usr/bin/env', ['which', hermesBin],
+          { encoding: 'utf8' }).trim(); } catch { return hermesBin; } })();
     const electronEnv = { ...process.env,
       HERMES_DESKTOP_DEV_SERVER: `http://127.0.0.1:${A.rendererPort}`,
       HERMES_DESKTOP_CDP_PORT: String(A.cdpPort),
+      HERMES_DESKTOP_HERMES: resolvedHermes,
       HERMES_HOME: B.home, HERMES_GATEWAY_LOCK_DIR: B.locks };
     sup.start('electron', path.join(desktop, 'node_modules', '.bin', 'electron'),
       ['.', `--user-data-dir=${B.userdata}`], { cwd: desktop, env: electronEnv });

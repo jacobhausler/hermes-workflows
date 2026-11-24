@@ -89,6 +89,22 @@ recomputes the combined hash from disk, and pins the mask with samples.
    (or `--plugin PATH`). It is staged into a bench-local
    `HERMES_HOME/desktop-plugins/hermes-workflows/plugin.js` and re-hashed:
    the app loads exactly the candidate bytes (identity.json pins both hashes).
+4. **App-copy law (field-proven 2026-11-24, bd_2026-11-13-qri):** on a loaded
+   box run `--app-repo` against a DEDICATED hermes-agent worktree for the
+   RENDERER half, never the shared checkout: concurrent vite dev servers over
+   one `apps/desktop/node_modules/.vite` swap dep-optimizer chunks mid-load
+   ("Failed to fetch dynamically imported module /src/main.tsx", exit 5, and
+   registry-probe hangs with no frame). Provision it with a frozen pnpm
+   install (PATH pnpm may be a broken corepack shim — `node
+   ~/.cache/node/corepack/v1/pnpm/<v>/bin/pnpm.mjs` works). The BACKEND is
+   always the primary, fully provisioned install: the driver passes it as
+   `HERMES_DESKTOP_HERMES`, because the app since b9b36c9 otherwise resolves
+   its backend at `$HERMES_HOME/hermes-agent` — which a bench home never has
+   — and halts on the bootstrap first-run setup choice (no plugin, no frame).
+   A bare worktree copy can never serve as backend: its launcher passes
+   `--version` but dies inside ensure (no committed dependency env).
+   The bench also needs disk headroom: a full Data volume surfaces as
+   gateway-ensure timeouts and `unable to open database file`, not ENOSPC.
 
 ## Bench profile law (field-proven 2026-11-24, bd_2026-11-13-iqf)
 
