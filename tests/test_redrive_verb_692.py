@@ -1,17 +1,23 @@
 #!/usr/bin/env python3
 """#692 slice 1 — the engine lifecycle REDRIVE verb (act_redrive + wf.py redrive).
 
-The wake-consumer law (issue #692, binding): redrive takes an explicit
-mode in {same-fingerprint-resume, new-fingerprint-rerun} with NO silent
-default, and its response enumerates which nodes re-drive and which
-completed-work receipts the resume preserves. The two failure modes it
+The wake-consumer law (issue #692, as amended by the 2026-11-23 defaults
+audit): redrive takes a mode in {same-fingerprint-resume,
+new-fingerprint-rerun}; an OMITTED mode defaults to same-fingerprint-resume —
+the safe side, the one that re-drives only failed lanes and REFUSES (nothing
+written) on fingerprint drift. The token-spending rerun mode stays
+explicit-only. The response enumerates which nodes re-drive and which
+completed-work receipts the resume preserves, echoes the applied mode, and
+stamps mode_defaulted when the key was absent. The two failure modes the verb
 replaces (hand-run setsid + node-record deletion): a silent re-run of
 completed nodes, and an opaque refusal under creation-override drift.
 
 Laws pinned here:
-  M  mode law: missing mode and unknown mode both refuse, naming the flag and
-     the closed set; the refusal is typed (redrive_mode_required). A done run
-     and an unknown run_id refuse honestly.
+  M  mode law: a missing mode takes the safe default (proven on an unknown
+     run_id — the mode gate passes and the honest unknown-run_id refusal
+     answers, with no redrive_mode_required anywhere); an unknown mode refuses,
+     naming the flag and the closed set; the refusal is typed
+     (redrive_mode_required). A done run and an unknown run_id refuse honestly.
   R  resume law: over a genuinely failed run (one failed lane, upstream
      receipts efp-valid), same-fingerprint-resume re-drives ONLY the failed
      lane — the completed node's record bytes stay byte-identical and its
@@ -28,8 +34,9 @@ Laws pinned here:
      says consumed) and the P40 grant ledger is zeroed at the boundary
      (grant_ledger_reset in the response) — the verb consumes the tick's
      mechanism and forks no second scheduler.
-  C  CLI law: `wf.py redrive <id>` with no --mode exits 1 on the door's OWN
-     typed refusal (the CLI never invents a default); an unknown extra
+  C  CLI law: `wf.py redrive <id>` with no --mode rides the door's safe
+     default and REDRIVES (exit 0, REDRIVEN line echoing mode=same-fingerprint-resume);
+     --mode=<bogus> exits 1 on the door's OWN typed refusal; an unknown extra
      argument is a usage fault (exit 2).
 
 Style: PASS/FAIL lines + exit code (test_failures_0923 house style). The stub
@@ -137,15 +144,17 @@ check("R0b prep/worka committed done, bad committed failed",
 prep_spawns_before = sum("GOAL-PREP" in l for l in log_lines())
 fail_spawns_before = sum("FAILME" in l for l in log_lines())
 
-# no mode / bogus mode refuse BEFORE anything else is touched
-out = call(action="redrive", run_id="rd692-resume")
-check("M1 missing mode: typed refusal naming the flag and the closed set",
-      out.get("ok") is False and out.get("error_type") == "redrive_mode_required"
-      and "mode" in out.get("error", "") and "same-fingerprint-resume" in out.get("error", "")
-      and "new-fingerprint-rerun" in out.get("error", ""), json.dumps(out)[:220])
+# a missing mode takes the safe default (proven gate-pass on an unknown run;
+# the resume itself is proven below on the real failed run, where R1 redrives
+# with NO mode key — the default must land on same-fingerprint-resume)
+out = call(action="redrive", run_id="nope")
+check("M1 missing mode rides the default (no redrive_mode_required; honest unknown-run_id refusal)",
+      out.get("error_type") != "redrive_mode_required"
+      and out.get("error") == "unknown run_id", json.dumps(out)[:220])
 out = call(action="redrive", run_id="rd692-resume", mode="redo")
-check("M2 unknown mode refuses with the same typed shape",
-      out.get("ok") is False and out.get("error_type") == "redrive_mode_required", json.dumps(out)[:160])
+check("M2 unknown mode refuses with the same typed shape, naming the default",
+      out.get("ok") is False and out.get("error_type") == "redrive_mode_required"
+      and "same-fingerprint-resume" in out.get("error", ""), json.dumps(out)[:160])
 check("M3 the refusal wrote nothing (verdict and failed record intact)",
       (r1 / "runner_exit.json").exists() and (r1 / "nodes" / "bad.json").exists()
       and rec_bytes(r1, "prep") == prep_before)
@@ -158,9 +167,12 @@ OKF.write_text("go")
 (r1 / "retry-window.json").write_text(json.dumps(
     {"bad:0": {"deadline": time.time() - 1, "attempts": 2, "log": [{"n": 1, "rc": 1}]}}))
 
-out = call(action="redrive", run_id="rd692-resume", mode="same-fingerprint-resume")
-check("R1 resume-mode redrive answers ok and enumerates exactly the failed lane",
-      out.get("ok") is True and out.get("re_drive") == ["bad"], json.dumps(out)[:260])
+out = call(action="redrive", run_id="rd692-resume")     # NO mode: the default
+check("R1 default-mode (no mode key) redrive answers ok on same-fingerprint-resume, "
+      "stamps mode_defaulted, and enumerates exactly the failed lane",
+      out.get("ok") is True and out.get("mode") == "same-fingerprint-resume"
+      and out.get("mode_defaulted") is True and out.get("re_drive") == ["bad"],
+      json.dumps(out)[:260])
 check("R2 the response enumerates the preserved completed receipts",
       {p["node"] for p in out.get("preserved", [])} == {"prep", "worka"}
       and all(p["status"] == "done" and p.get("efp") for p in out.get("preserved", [])),
@@ -233,18 +245,38 @@ check("D4 the rerun reaches done and the drifted receipt was actually re-run",
       json.dumps(st.get("status")))
 
 # ================= C: the CLI rides the door's own mode law =================
+# The default-mode CLI redrive must land on a FAILED run: the stub flips back
+# to failing for this lane by pointing STUB_OK_FILE at a fresh absent path.
+COK = HOME / "c-ok"
+if COK.exists():
+    COK.unlink()
+os.environ["STUB_OK_FILE"] = str(COK)
 r3 = mk("rd692-cli")
-boot("rd692-cli")
+booted3 = boot("rd692-cli")
+check("C0 the CLI run ends failed (stub flips FAILME off while C-OK is absent)",
+      "WORKFLOW_FAILED" in booted3, booted3[-160:])
+COK.write_text("go")
 cli = subprocess.run([sys.executable, str(BUILD / "wf.py"), "redrive", "rd692-cli"],
                      env=dict(os.environ, HERMES_HOME=str(HOME)),
                      capture_output=True, text=True, timeout=120)
-check("C1 CLI without --mode exits 1 on the door's typed refusal (no default invented)",
-      cli.returncode == 1 and "REFUSED" in cli.stdout and "redrive_mode_required" in cli.stdout,
+check("C1 CLI without --mode rides the door's safe default: REDRIVEN on same-fingerprint-resume",
+      cli.returncode == 0 and "REDRIVEN" in cli.stdout and "same-fingerprint-resume" in cli.stdout,
       cli.stdout[-200:] + cli.stderr[-200:])
+deadline = time.monotonic() + 90
+st3 = {}
+while time.monotonic() < deadline:
+    st3 = call(action="status", run_id="rd692-cli")
+    if st3.get("status") in ("done", "failed"):
+        break
+    time.sleep(0.3)
+check("C1b the default-mode CLI redrive reaches done (mode event echoes the default)",
+      st3.get("status") == "done"
+      and any(e.get("event") == "run.redriven" and e.get("mode") == "same-fingerprint-resume"
+              for e in events(r3)), json.dumps(st3.get("status")))
 cli = subprocess.run([sys.executable, str(BUILD / "wf.py"), "redrive", "rd692-cli", "--mode=again"],
                      env=dict(os.environ, HERMES_HOME=str(HOME)),
                      capture_output=True, text=True, timeout=120)
-check("C2 CLI --mode=<bogus> exits 1 with the closed-set refusal",
+check("C2 CLI --mode=<bogus> exits 1 with the closed-set refusal (mode gate fires first)",
       cli.returncode == 1 and "same-fingerprint-resume" in cli.stdout, cli.stdout[-200:])
 cli = subprocess.run([sys.executable, str(BUILD / "wf.py"), "redrive", "rd692-cli", "--force"],
                      env=dict(os.environ, HERMES_HOME=str(HOME)),

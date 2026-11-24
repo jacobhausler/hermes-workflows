@@ -13778,9 +13778,11 @@ if __name__ == "__main__":
     # #692 slice 1: the engine redrive verb rides the SAME door pipeline as the
     # tool action — this entry spec-loads the sibling door and calls its
     # handle({"action": "redrive", ...}) verbatim (one door, one mode law, no
-    # second validator). `wf.py redrive <run_id> --mode=<mode>`; a missing or
-    # unknown --mode is the door's OWN typed refusal, printed and exit 1 — the
-    # CLI never invents a default the door forbids.
+    # second validator). `wf.py redrive <run_id> [--mode=<mode>]`; an omitted
+    # --mode rides the door's safe default (same-fingerprint-resume, defaults
+    # audit 2026-11-23 amending #692's no-default clause); an unknown --mode is
+    # the door's OWN typed refusal, printed and exit 1 — the CLI invents no
+    # default of its own, it forwards the key and lets the door decide.
     if len(sys.argv) >= 3 and sys.argv[1] == "redrive":
         _rd = {"action": "redrive", "run_id": sys.argv[2]}
         for _a in sys.argv[3:]:
@@ -13788,8 +13790,8 @@ if __name__ == "__main__":
                 _rd["mode"] = _a.split("=", 1)[1]
             else:
                 print(f"redrive: unknown argument {_a!r} "
-                      "(usage: wf.py redrive <run_id> --mode=same-fingerprint-resume|"
-                      "new-fingerprint-rerun)")
+                      "(usage: wf.py redrive <run_id> [--mode=same-fingerprint-resume|"
+                      "new-fingerprint-rerun])")
                 sys.exit(2)
         _rd_spec = importlib.util.spec_from_file_location(
             _DOOR_MOD_NAME, Path(__file__).resolve().parent / "__init__.py")
@@ -13817,7 +13819,7 @@ if __name__ == "__main__":
         sys.exit(_cli_validate(sys.argv))
     if len(sys.argv) < 3 or sys.argv[1] != "run":
         print("usage: wf.py run <run_id> | wf.py validate [--json] <graph.json> "
-              "| wf.py release-lock <run_id> | wf.py redrive <run_id> --mode=<mode> "
+              "| wf.py release-lock <run_id> | wf.py redrive <run_id> [--mode=<mode>] "
               "| wf.py recover <run_id>"); sys.exit(2)
     # 5c37b19 guard 2 (belt-and-braces): a runner whose cwd was deleted mid-life dies
     # on the FIRST relative-path/cwd-touching call. HERE is durable — the same dir
