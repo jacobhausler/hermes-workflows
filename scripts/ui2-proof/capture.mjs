@@ -122,9 +122,13 @@ async function connectCdp(port, rendererPort, timeoutMs = 90_000) {
     const m = JSON.parse(e.data);
     if (m.id && pend.has(m.id)) { pend.get(m.id)(m); pend.delete(m.id); }
   };
-  const send = (method, params = {}) => new Promise(res => {
+  const send = (method, params = {}) => new Promise((res, rej) => {
     const i = ++id;
-    pend.set(i, m => { if (m.error) throw new Error(`${method}: ${JSON.stringify(m.error).slice(0, 300)}`); res(m.result); });
+    // Reject the awaiter instead of THROWING inside the ws event handler:
+    // a mid-poll "Inspected target navigated or closed" (a Reload after the
+    // startup-modal Retry) is catchable at the poll site, never an
+    // uncaughtException that kills a otherwise-healthy capture.
+    pend.set(i, m => { if (m.error) rej(new Error(`${method}: ${JSON.stringify(m.error).slice(0, 300)}`)); else res(m.result); });
     ws.send(JSON.stringify({ id: i, method, params }));
   });
   await send('Page.enable').catch(() => { /* most builds auto-enable; reload/shot prove it anyway */ });
@@ -215,11 +219,29 @@ async function waitConnected(cdp, ms = 90_000) {
       const el = document.elementFromPoint(Math.floor(innerWidth/2), Math.floor(innerHeight/2));
       const t = ((el && (el.innerText || el.textContent)) || '').trim().toLowerCase();
       return t.length > 0 && !t.includes('connecting') && !t.includes('loading');
-    })()`);
+    })()`).catch(() => false);
     if (clear) return Date.now() - t0;
     if (Date.now() - t0 > ms) die(EX.api, 'app never attached to its backend: viewport center still shows the CONNECTING splash');
     await sleep(600);
   }
+}
+
+// Field-proven bench lesson: the app's gateway ensure can lose the shared
+// install.lock race when several benches boot at once -> "Hermes couldn't
+// start" modal covers the chrome. The modal's Retry button re-runs that
+// exact ensure; bounded re-tries turn a transient lock collision into a
+// slow boot, never a red proof.
+let retryGateBudget = 4;
+async function retryGateIfModal(cdp) {
+  if (retryGateBudget <= 0) return false;
+  const modal = await cdp.evl(`(() => {
+    const t = (document.body && document.body.innerText || '').toLowerCase();
+    return t.includes("hermes couldn't start") ? 1 : 0;
+  })()`).catch(() => 0);
+  if (!modal) return false;
+  retryGateBudget--;
+  try { await trustedClick(cdp, 'Retry', { exact: true }); } catch { /* modal re-rendering */ }
+  return true;
 }
 
 async function waitPainted(cdp, ms = 20_000) {
@@ -235,7 +257,9 @@ async function waitPainted(cdp, ms = 20_000) {
 async function waitText(cdp, needle, ms = 30_000) {
   const t0 = Date.now();
   for (;;) {
-    const seen = await cdp.evl(`document.body.innerText.includes(${JSON.stringify(needle)})`);
+    // a reload in flight (Retry after the startup modal) is 'not yet seen',
+    // not a fatal: keep polling until the wall.
+    const seen = await cdp.evl(`document.body.innerText.includes(${JSON.stringify(needle)})`).catch(() => false);
     if (seen) return Date.now() - t0;
     if (Date.now() - t0 > ms) die(EX.api, `never rendered on the real app: ${JSON.stringify(needle)} (within ${ms}ms)`);
     await sleep(400);
@@ -619,7 +643,7 @@ async function main() {
         const names = area => { try { return (reg.getArea(area) || []).map(e => e.id ?? e.name ?? String(e)) } catch { return [] } };
         return { routes: names('routes'), panes: names('panes'),
                  directives: names('transcript.directives'), composer: names('composer.underside') };
-      })()`);
+      })()`).catch(() => registry);
       try {
         records = await cdp.evl(`(async () => {
           const m = await import('/src/contrib/plugins-store.ts');
@@ -658,9 +682,10 @@ async function main() {
     const paneRegion = { xMin: 440, yMin: 40, bottomMargin: 90 };
     await waitConnected(cdp);
     {
-      const wT0 = Date.now();
+      let wT0 = Date.now();
       for (;;) {
-        const hit = await cdp.evl(locateJS(runName, { region: paneRegion }));
+        const hit = await cdp.evl(locateJS(runName, { region: paneRegion }))
+          .catch(() => ({ err: 'reload-in-flight' }));
         if (!hit.err) break;
         if (Date.now() - wT0 > 45_000) {
           try { await shoot(cdp, A.outDir, '00-diagnostic-pane.png'); } catch { /* best effort */ }
@@ -670,7 +695,9 @@ async function main() {
         // Route-restore race (field-proven: diagnostic shows the app restored
         // the chat view AFTER the tab click — SESSIONS active, hero rendered):
         // re-click the sidebar WORKFLOWS tab every poll until the pane column
-        // itself carries the seeded row.
+        // itself carries the seeded row. A startup modal (lock race) gets the
+        // bounded Retry treatment — same field-proven lesson.
+        try { if (await retryGateIfModal(cdp)) wT0 = Date.now(); } catch { /* eval transient */ }
         try { await trustedClick(cdp, 'workflows', { exact: true, ci: true }); } catch { /* tab not painted yet */ }
         await sleep(1200);
       }
@@ -686,10 +713,15 @@ async function main() {
     // while the question wait passed on the tray card).
     {
       const qT0 = Date.now();
+      let qRetryT0 = Date.now();
       for (;;) {
-        const hit = await cdp.evl(locateJS(engSeed.graph.nodes[1].question, { region: paneRegion }));
+        const hit = await cdp.evl(locateJS(engSeed.graph.nodes[1].question, { region: paneRegion }))
+          .catch(() => ({ err: 'reload-in-flight' }));
         if (!hit.err) break;
-        if (Date.now() - qT0 > 30_000) {
+        try { if (await retryGateIfModal(cdp)) qRetryT0 = Date.now(); } catch { /* eval transient */ }
+        // die only when the wall AND the post-Retry reload grace are both past
+        // (Retry budget is bounded, so this cannot spin forever).
+        if (Date.now() - qT0 > 30_000 && Date.now() - qRetryT0 > 15_000) {
           try { await shoot(cdp, A.outDir, '00-diagnostic-detail.png'); } catch { /* best effort */ }
           die(EX.api, `held-gate question never rendered IN THE PANE DETAIL (${JSON.stringify(hit.err)}) — diagnostic shot in captures/ if present`);
         }
