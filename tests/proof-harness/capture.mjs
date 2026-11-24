@@ -15,8 +15,13 @@
 // Interface used by later beads:
 //   node tests/proof-harness/capture.mjs [--case CASE] [--only TOKENS] [--out DIR]
 // CASE defaults to baseline. --only selects surfaces by short token
-// (directive, pane, tray) or full surface name; it never ADDS a surface the
-// case doesn't declare (intersection only). DIR defaults to
+// (directive, pane, tray, gate, toast) or full surface name; it never ADDS a
+// surface the case doesn't declare (intersection only). Slice B law
+// (bd_2026-11-13-xow): when --only is given WITHOUT an explicit --case and
+// the default case selects nothing, the driver resolves the case from the
+// tokens — iff exactly one implemented case declares a selected surface —
+// so `--only gate,toast` runs the gate case end to end; zero or ambiguous
+// matches exit 2, never a silent pick. DIR defaults to
 // tests/proof-harness/captured/run-<ts>.
 // Cases and their seeds live in ./cases.json; every seed declares
 // kind: engine_seed | historical_snapshot. A known case whose surfaces are
@@ -63,15 +68,22 @@ const MANIFEST = path.join(HERE, 'cases.json');
 const USAGE = `usage: node tests/proof-harness/capture.mjs [--case CASE] [--only TOKENS] [--out DIR]
        [--app-repo PATH] [--plugin PATH] [--cdp-port N] [--renderer-port N]
        [--hermes-bin PATH] [--plan] [--keep] [--no-prebuild] [--paint-budget S]
-default case: baseline; --only tokens: directive,pane,tray (or full surface
-names); default out: tests/proof-harness/captured/run-<ts>
+default case: baseline; --only tokens: directive,pane,tray,gate,toast (or full
+surface names; without an explicit --case, tokens that select nothing from the
+default case resolve the case when exactly one implemented case declares them);
+default out: tests/proof-harness/captured/run-<ts>
 cases: see tests/proof-harness/cases.json (setup: tests/proof-harness/SETUP.md)`;
 
-// short token -> surface id (slice A: directive + pane; tray pre-wired on
-// this branch, slices B extend the surfaces themselves, not this map law).
+// short token -> surface id (slice A: directive + pane; slice B: gate +
+// toast; tray pre-wired on this branch, slices extend the surfaces
+// themselves, not this map law). 'toast' is its own surface id: the gate
+// receipt toast is captured as a distinct frame (10-gate-toast.png), and
+// slice B's verification command is `--only gate,toast`.
 const ONLY_TOKENS = {
   directive: 'directive_card', pane: 'pane_workflows', tray: 'tray_row',
+  gate: 'gate_modal', toast: 'toast',
   directive_card: 'directive_card', pane_workflows: 'pane_workflows', tray_row: 'tray_row',
+  gate_modal: 'gate_modal',
 };
 
 function parseOnly(raw) {
@@ -96,7 +108,7 @@ function parseArgs(argv) {
       return v;
     };
     switch (argv[i]) {
-      case '--case': a.caseName = take(); break;
+      case '--case': a.caseName = take(); a.caseExplicit = true; break;
       case '--only': a.only = parseOnly(take()); break;
       case '--out': a.outDir = path.resolve(take()); break;
       case '--app-repo': a.appRepo = path.resolve(take()); break;
@@ -374,6 +386,25 @@ function locateJS(needle, { exact = false, nth = null, ci = false, region = null
 async function rectOf(cdp, needle, opts = {}) {
   const pt = await cdp.evl(locateJS(needle, opts));
   return pt && !pt.err ? pt.rect : null;
+}
+
+// Text of the clipped region for the content layer (slice B, bd_2026-11-13-xow):
+// the smallest painted element whose rect matches the shot clip, so a frame's
+// text layer is what the raster actually shows — never a hand-composed caption.
+// Returns null when no element matches the clip (the frame rides raster-only).
+async function textAtRect(cdp, rect) {
+  if (!rect) return null;
+  const t = await cdp.evl(`(() => {
+    const target = ${JSON.stringify(rect)};
+    const els = [...document.querySelectorAll('div,section,span,li')].filter(n => {
+      const r = n.getBoundingClientRect();
+      return Math.abs(r.x - target.x) <= 2 && Math.abs(r.y - target.y) <= 2
+        && Math.abs(r.width - target.width) <= 2 && Math.abs(r.height - target.height) <= 2;
+    });
+    const el = els.sort((a, b) => (a.innerText || '').length - (b.innerText || '').length)[0];
+    return el ? (el.innerText || '') : null;
+  })()`) || '';
+  return t.trim() ? t : null;
 }
 
 // locateClickPoint is the locator probe WITHOUT the dispatch — the coverage
@@ -681,6 +712,24 @@ async function main() {
   if (!Object.hasOwn(manifest.cases, A.caseName)) {
     die(EX.usage, `unknown case ${JSON.stringify(A.caseName)}; known cases: ${known.join(', ')} ` +
         `— a later bead ADDS a case (new test); it is not an existing command`);
+  }
+  // Slice B case resolution (bd_2026-11-13-xow): --only without an explicit
+  // --case resolves the case from the tokens when the default case declares
+  // none of them — exactly one implemented case must match, else exit 2.
+  // Never a silent pick; the intersection law for an explicit --case is
+  // untouched.
+  if (A.only && !A.caseExplicit) {
+    const sel = new Set(A.only);
+    const intersects = name => manifest.cases[name].implemented !== false &&
+      (manifest.cases[name].surfaces || []).some(s => sel.has(s));
+    if (!intersects(A.caseName)) {
+      const hits = known.filter(intersects);
+      if (hits.length !== 1) {
+        die(EX.usage, `--only ${A.only.join(',')} selects nothing from default case ` +
+            `${JSON.stringify(A.caseName)} and ${hits.length ? `matches ${hits.length} cases (${hits.join(', ')})` : 'no implemented case'} — pass --case explicitly`);
+      }
+      A.caseName = hits[0];
+    }
   }
   const c = manifest.cases[A.caseName];
   const isCoverage = A.caseName === 'coverage';
@@ -1510,9 +1559,15 @@ async function main() {
     // 01/02 pane: runs list, then the held-gate run detail. The captured
     // CONTENT of each viewport shot is the pane column's painted text (same
     // region predicate as the locators), volatile-masked into contents/.
-    shots.push({ surface: 'pane_workflows',
-      state: graphIds ? 'runs list: engine-seeded fan + pinned snapshot + synthetic MF1' : 'runs list, seeded held-gate run',
-      ...(await shoot(cdp, A.outDir, '01-pane-runs.png', null, await stableColumnText(paneRegion))) });
+    // Slice B: the pushes are surface-guarded — the row click and the
+    // question poll are NOT (the gate flow needs the record page open);
+    // `--only gate,toast` therefore lands on the same detail view and
+    // captures zero pane frames.
+    if (surfacesWanted.has('pane_workflows')) {
+      shots.push({ surface: 'pane_workflows',
+        state: graphIds ? 'runs list: engine-seeded fan + pinned snapshot + synthetic MF1' : 'runs list, seeded held-gate run',
+        ...(await shoot(cdp, A.outDir, '01-pane-runs.png', null, await stableColumnText(paneRegion))) });
+    }
     await trustedClick(cdp, paneRowNeedle, { region: paneRegion });
     if (graphIds) {
       // 02 the pinned council's GraphView; 03 its fans expanded: projected
@@ -1562,8 +1617,10 @@ async function main() {
         await sleep(600);
       }
     }
-    shots.push({ surface: 'pane_workflows', state: 'run detail, held gate question',
-      ...(await shoot(cdp, A.outDir, '02-pane-run-detail.png', null, await stableColumnText(paneRegion))) });
+    if (surfacesWanted.has('pane_workflows')) {
+      shots.push({ surface: 'pane_workflows', state: 'run detail, held gate question',
+        ...(await shoot(cdp, A.outDir, '02-pane-run-detail.png', null, await stableColumnText(paneRegion))) });
+    }
     }
     } // end non-coverage (baseline/gate/graph) pane list + detail frames
 
@@ -1574,7 +1631,12 @@ async function main() {
     // different route. kill_runner_after_hold: the isolated runner dies at the
     // hold BEFORE the answer, so the events ledger must stay byte-identical
     // afterwards — "nothing restarted" verified for THIS tested runner only.
-    if (surfacesWanted.has('gate_modal')) {
+    // Slice B (bd_2026-11-13-xow): the gate flow runs when either surface is
+    // selected; each frame's push is surface-guarded — gate frames ride
+    // 'gate_modal', the receipt toast rides its own 'toast' surface — while
+    // the flow's guarantees (pending seen, options disabled in flight, read-
+    // back + events-ledger proof) hold for BOTH selections.
+    if (surfacesWanted.has('gate_modal') || surfacesWanted.has('toast')) {
       const gateDef = (engSeed.graph.nodes || []).find(n => n.type === 'gate');
       if (!gateDef) die(EX.preflight, 'gate case seed graph carries no gate node');
       const runDir = path.join(B.runs, runId);
@@ -1600,11 +1662,16 @@ async function main() {
         const cell = els.sort((a, b) => a.innerText.length - b.innerText.length)[0];
         if (!cell) return null;
         const r = cell.getBoundingClientRect();
-        return { x: r.x, y: r.y, width: r.width, height: r.height };
+        return { x: r.x, y: r.y, width: r.width, height: r.height, text: (cell.innerText || '') };
       })()`) || await rectOf(cdp, gateDef.question);
       if (!heldCell) die(EX.capture, 'held gate cell never rendered on the record page');
-      shots.push({ surface: 'gate_modal', state: 'held: question, requester, option buttons',
-        ...(await shoot(cdp, A.outDir, '07-gate-held.png', heldCell)) });
+      const heldText = typeof heldCell.text === 'string' && heldCell.text.trim()
+        ? heldCell.text : await textAtRect(cdp, heldCell);
+      delete heldCell.text;
+      if (surfacesWanted.has('gate_modal')) {
+        shots.push({ surface: 'gate_modal', state: 'held: question, requester, option buttons',
+          ...(await shoot(cdp, A.outDir, '07-gate-held.png', heldCell, heldText || null)) });
+      }
       // The answer POST rides the app's IPC bridge: since app b9b36c9 plugin
       // REST goes through the 'hermes:api' remote method, so an in-flight
       // POST is INVISIBLE to CDP Fetch interception (field-proven 2026-11-24:
@@ -1623,8 +1690,10 @@ async function main() {
       if (!retryOpt) die(EX.capture, 'options not retryable after an ok:false answer — error state swallowed the gate');
       if (await cdp.evl(`!!document.querySelector('[data-gate-receipt]')`))
         die(EX.capture, 'ok:false rendered a saved receipt — error is not a successful mutation');
-      shots.push({ surface: 'gate_modal', state: 'error: real fail-once door answer -> inline failure + retryable options, no receipt',
-        ...(await shoot(cdp, A.outDir, '08b-gate-error.png', retryCell || retryOpt)) });
+      if (surfacesWanted.has('gate_modal')) {
+        shots.push({ surface: 'gate_modal', state: 'error: real fail-once door answer -> inline failure + retryable options, no receipt',
+          ...(await shoot(cdp, A.outDir, '08b-gate-error.png', retryCell || retryOpt)) });
+      }
       // The fail-once ERROR toast is user-cleared and stays; the notification
       // stack renders later arrivals as collapsed 'older' items, which is
       // exactly how the success receipt toast escaped both the '◇ ' needle
@@ -1666,8 +1735,10 @@ async function main() {
                 .find(b => (b.innerText||'').trim() === ${JSON.stringify(gateDef.options[0])});
               return !!b && !b.disabled; })()`))
               die(EX.capture, 'options stayed enabled while the answer POST was in flight — duplicate prevention missing');
-            shots.push({ surface: 'gate_modal', state: 'pending: response in-flight on the door bench delay, options disabled (duplicate prevention)',
-              ...(await shoot(cdp, A.outDir, '08-gate-pending.png', r)) });
+            if (surfacesWanted.has('gate_modal')) {
+              shots.push({ surface: 'gate_modal', state: 'pending: response in-flight on the door bench delay, options disabled (duplicate prevention)',
+                ...(await shoot(cdp, A.outDir, '08-gate-pending.png', r)) });
+            }
             pending = true;
           }
         }
@@ -1692,9 +1763,15 @@ async function main() {
             return null;
           })()`);
           if (toast) {
+            // Slice B: the toast is its OWN surface — the receipt toast text
+            // (masked into contents/10-gate-toast.txt) is the durable proof
+            // the answer came back through the door, not a staged caption.
+            const toastText = typeof toast.text === 'string' ? toast.text : '';
             delete toast.text;
-            shots.push({ surface: 'gate_modal', state: 'success toast: answer saved + exact answer + requester + run / gate + stamped time, action View exact gate',
-              ...(await shoot(cdp, A.outDir, '10-gate-toast.png', toast)) });
+            if (surfacesWanted.has('toast')) {
+              shots.push({ surface: 'toast', state: 'success toast: answer saved + exact answer + requester + run / gate + stamped time, action View exact gate',
+                ...(await shoot(cdp, A.outDir, '10-gate-toast.png', toast, toastText || null)) });
+            }
           }
         }
         if (!toast) await sleep(150);
@@ -1722,8 +1799,10 @@ async function main() {
       })()`);
       if (!/Answered · \d{4}-\d{2}-\d{2}T/.test(receiptText))
         die(EX.capture, `saved receipt lacks the door-stamped Answered time: ${JSON.stringify(receiptText)}`);
-      shots.push({ surface: 'gate_modal', state: 'saved: Answer saved receipt, exact answer, door-stamped Answered time, nothing-restarted scope note',
-        ...(await shoot(cdp, A.outDir, '09-gate-saved.png', receipt)) });
+      if (surfacesWanted.has('gate_modal')) {
+        shots.push({ surface: 'gate_modal', state: 'saved: Answer saved receipt, exact answer, door-stamped Answered time, nothing-restarted scope note',
+          ...(await shoot(cdp, A.outDir, '09-gate-saved.png', receipt, receiptText)) });
+      }
       // Identity proof: leave the record entirely, then take the toast's (or
       // the receipt's) View exact gate — the route must return to THIS run's
       // gate cell showing the durable receipt, never a bare list.
@@ -1784,8 +1863,15 @@ async function main() {
         const r = el.getBoundingClientRect();
         return { x: r.x, y: r.y, width: r.width, height: r.height };
       })()`) || await rectOf(cdp, gateDef.question);
-      shots.push({ surface: 'gate_modal', state: 'after View exact gate: exact receipt re-rendered from the read model',
-        ...(await shoot(cdp, A.outDir, '11-gate-after-view.png', afterRect)) });
+      if (surfacesWanted.has('gate_modal')) {
+        const afterText = await cdp.evl(`(() => {
+          const el = document.querySelector('[data-gate-receipt]');
+          return el ? (el.innerText || '') : '';
+        })()`);
+        shots.push({ surface: 'gate_modal', state: 'after View exact gate: exact receipt re-rendered from the read model',
+          ...(await shoot(cdp, A.outDir, '11-gate-after-view.png', afterRect,
+                          afterText || await textAtRect(cdp, afterRect) || null)) });
+      }
     }
 
     // 03/04 directive card: seed one real assistant turn, open its session,
