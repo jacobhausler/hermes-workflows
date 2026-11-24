@@ -423,10 +423,58 @@ function ItemChips({ runId, nodeId, rows, picked, size }) {
   })
 }
 
-function listQuery() {
+// Full-census fetch (bd_2026-11-13-yjp): /runs is PAGED — one call answers the
+// first 100 rows plus the WHOLE-CENSUS summary, so a single fetch silently
+// stopped at page 1 while the pane's census line promised every counted run.
+// This queryFn walks bounded pages into one deduped index. Laws:
+//   - known total: page until covered; a short/empty page means the census
+//     shrank mid-walk — stop and report loaded honestly (loaded < total
+//     renders as a partial, never as a lie about the count);
+//   - unknown total (legacy payload without `total`): keep walking while pages
+//     stay full; the total is never fabricated;
+//   - dedupe by id across pages — slices from two snapshot scans (a walk that
+//     crosses a TTL boundary) may repeat a row;
+//   - honours the AbortSignal BETWEEN pages: a cancelled/invalidated query
+//     stops walking instead of continuing to hammer the route on a timer;
+//   - hard page cap — the walk is finite even against a server whose total is
+//     a lie, and the shortfall renders as a visible partial.
+// Pure over an injected request fn so node behavior tests drive a fake server.
+const RUNS_PAGE_SIZE = 100   // the server's own page size — no bespoke cap
+const RUNS_MAX_PAGES = 30    // bounded walk: a >3000-row census shows a partial, never hangs
+
+export function runsIndexFetcher(request) {
+  return async ({ signal } = {}) => {
+    const cancelled = () => signal?.aborted === true
+    let first
+    const index = []
+    const seen = new Set()
+    let offset = 0
+    let pages = 0
+    for (;;) {
+      if (cancelled()) throw new Error('workflows census fetch cancelled')
+      const page = await request(`/runs?offset=${offset}&limit=${RUNS_PAGE_SIZE}`)
+      if (cancelled()) throw new Error('workflows census fetch cancelled')
+      pages++
+      const rows = Array.isArray(page?.runs) ? page.runs : []
+      for (const r of rows)
+        if (r && typeof r.id === 'string' && !seen.has(r.id)) { seen.add(r.id); index.push(r) }
+      if (!first) first = page
+      const total = typeof first.total === 'number' ? first.total : null
+      const covered = total != null ? offset + rows.length >= total : rows.length < RUNS_PAGE_SIZE
+      if (!rows.length || covered || pages >= RUNS_MAX_PAGES) break
+      offset += rows.length
+    }
+    // The global summary (total/counts/roots) rides through UNTOUCHED from the
+    // first page — it describes the whole census and stays distinct from the
+    // locally loaded rows; `loaded` makes the coverage honest.
+    return { ...first, runs: index, loaded: index.length }
+  }
+}
+
+export function listQuery() {
   return {
     queryKey: [...Q, 'runs'],
-    queryFn: () => api('/runs'),
+    queryFn: runsIndexFetcher(api),
     refetchInterval: q => ((q.state.data?.runs || []).some(r => !TERMINAL.has(r.status)) ? 4000 : 30000)
   }
 }
@@ -2758,7 +2806,22 @@ function PaneRow({ run, thisChat }) {
 }
 
 export function WorkflowsPane() {
-  const { data } = useQuery(listQuery())
+  const { data, error } = useQuery(listQuery())
+  const qc = useQueryClient()
+  // Same law as the directive card (test_directive_card_error): data WINS over
+  // error. A failed refetch keeps the last good index on screen and says so —
+  // the stale chip is a clickable RETRY, and invalidating the runs key re-runs
+  // the whole bounded page-walk from offset 0 (no client-side memo to defeat
+  // it). The error branch only owns the screen when NOTHING was ever loaded,
+  // and it is a button, never a false 'No runs'.
+  const retry = () => qc.invalidateQueries({ queryKey: [...Q, 'runs'] })
+  const staleChip = error && data
+    ? jsx('button', {
+        type: 'button', title: 'Retry', onClick: retry,
+        style: { cursor: 'pointer', font: 'inherit', color: 'inherit', background: 'none', border: 0, padding: 0 },
+        children: ' · stale — retry'
+      }, 'census-stale')
+    : null
   // Same key pairing as SessionStrip: owner.session_id pairs with the runtime id,
   // both atoms live under host.state (sdk/index.ts:665-697 — see #23).
   const runtimeSid = useValue(focusAtom(host?.state?.focusedSessionId))
@@ -2776,10 +2839,20 @@ export function WorkflowsPane() {
   // LEVEL ({total, counts}) — counts carries no total key, so the census
   // reads data.total first (counts.total stays the fallback for legacy
   // payloads; 'runs ?' on a payload that answers a number was the bug).
+  // bd_2026-11-13-yjp: the summary stays GLOBAL and distinct from the loaded
+  // rows — when the bounded walk could not cover the counted census (a page
+  // flaked mid-walk, or the hard page cap was hit) the line says
+  // `loaded N of M` instead of implying every counted run is on screen.
   const counts = data?.counts
-  const census = counts
-    ? `runs ${data?.total ?? counts.total ?? '?'} · running ${counts.running ?? 0} · held ${counts.held ?? 0} · failed ${counts.failed ?? 0}`
-    : 'runs unknown'
+  const total = data?.total ?? counts?.total
+  const loaded = data ? (typeof data.loaded === 'number' ? data.loaded : runs.length) : null
+  let census
+  if (!counts) census = 'runs unknown'
+  else {
+    census = `runs ${data?.total ?? counts.total ?? '?'} · running ${counts.running ?? 0} · held ${counts.held ?? 0} · failed ${counts.failed ?? 0}`
+    if (typeof total === 'number' && typeof loaded === 'number' && loaded < total)
+      census += ` · loaded ${loaded} of ${total}`
+  }
   // Agent-first pane law (owner, est-wk7l round): THE REST renders EVERY row —
   // no pane-level cap, no fold. paneModel is uncapped and the consumer must
   // not re-introduce one (the old slice(0,10)+show-all fold made the PR body's
@@ -2791,19 +2864,37 @@ export function WorkflowsPane() {
         ...list.map(r => jsx(PaneRow, { run: r, thisChat: owned.has(r.id) }, r.id))
       ]
     : [])
+  const body = running.length || rest.length
+    ? [
+        ...group('RUNNING', running),
+        ...group('THE REST', rest)
+      ]
+    : data
+      // A healthily-loaded empty census is the ONLY honest owner of 'No runs'
+      // (bd yjp: loading and unreachable must never wear the empty costume).
+      // The backend names the scanned roots on an empty census — showing them
+      // turns 'nothing found' into 'nothing found WHERE'.
+      ? [
+          jsx(EmptyState, { title: 'No runs', description: 'Ask the agent to start a workflow.' }, 'empty'),
+          Array.isArray(data.roots) && data.roots.length
+            ? label(`roots: ${data.roots.join(', ')}`)
+            : null
+        ]
+      : error
+        ? jsx('button', {
+            type: 'button', title: 'Retry', onClick: retry,
+            className: 'self-start text-[0.6875rem] text-(--ui-text-tertiary) cursor-pointer',
+            children: `workflows unreachable (${error?.message || error}) — retry`
+          }, 'census-error')
+        : jsx(EmptyState, { title: 'Loading…' }, 'loading')
   return box(
     'flex h-full min-h-0 flex-col',
-    box('px-2 py-1.5 text-[0.6875rem] text-(--ui-text-tertiary)', census),
+    box('px-2 py-1.5 text-[0.6875rem] text-(--ui-text-tertiary)', census, staleChip),
     jsx(ScrollArea, {
       className: 'min-h-0 flex-1',
       children: box(
         'flex flex-col gap-0.5 px-1 pb-2',
-        (running.length || rest.length)
-          ? [
-              ...group('RUNNING', running),
-              ...group('THE REST', rest)
-            ]
-          : jsx(EmptyState, { title: 'No runs', description: 'Ask the agent to start a workflow.' })
+        body
       )
     })
   )

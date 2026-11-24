@@ -280,7 +280,13 @@ const sdkMod = await import(pathToFileURL(sdkPath).href)
 {
   sdkMod.ledger.list = {
     runs: [{ id: 'a', status: 'running', name: 'a', owner: { session_id: 'other' }, updated: '2026-09-26T04:00:00Z' }],
-    total: 38, counts: { running: 2, held: 0, failed: 8 }
+    total: 38, counts: { running: 2, held: 0, failed: 8 },
+    // bd_2026-11-13-yjp: the pane now receives a FULL-CENSUS fetch result —
+    // loaded (rows in hand) rides beside the global summary. A payload whose
+    // rows fall short of its total discloses the shortfall; this pin keeps the
+    // WF-07 claim (census reads the top-level total) on a fully loaded census.
+    // The partial disclosure itself is pinned by tests/test_census_full_fetch_yjp.mjs.
+    loaded: 38
   }
   const tree = mod.WorkflowsPane()
   const t = texts(tree).join('|')

@@ -1,28 +1,56 @@
 {
   "note": "Case manifest for scripts/ui2-proof/capture.mjs. Every seed entry names its kind explicitly: 'engine_seed' = state this driver launches live through the plugin door (zero-token graphs; one real assistant turn for the card echo); 'historical_snapshot' = a pinned, already-committed run/session fixture read via the door's legacy-launch-root fallback (read-only, never relaunched). Adding a case ADDS A NEW TEST: a case naming a surface outside surfaces_registry fails exit 3 ('new test, not implemented') — the driver never fabricates an existing command. Baseline never captures synthesis/index.html or any file-openable RC: surfaces come from the real app renderer only.",
-  "surfaces_registry": ["directive_card", "pane_workflows", "tray_row", "gate_modal"],
+  "surfaces_registry": [
+    "directive_card",
+    "pane_workflows",
+    "tray_row"
+  ],
   "cases": {
     "baseline": {
       "description": "Real-app proof of the three live surfaces of the actual React/SDK renderer: the ::workflow directive card in the message stream, the WORKFLOWS pane (run list + held-gate run detail), and the settings-gated live-run tray row. All state is engine-seeded into an isolated test runs root; nothing here is a CHATFRAME reconstruction.",
-      "surfaces": ["directive_card", "pane_workflows", "tray_row"],
+      "surfaces": [
+        "directive_card",
+        "pane_workflows",
+        "tray_row"
+      ],
       "seeds": [
         {
           "name": "held_gate_run",
           "kind": "engine_seed",
           "method": "door_run",
-          "note": "echo+gate+echo graph — full gate UI (held pill, answer receipt) at zero tokens; the proven lookbook shape (run 20261122-113636-lookbook-canvas-held). The tray_row seed relaunches THIS SAME graph with WF_OWNER_SESSION=<one-shot session id>: the composer strip renders only the focused chat's owned runs (ownedRuns law, plugin.js:728), so a blank-owner run is pane-only. Both runs are stopped through the door at teardown.",
+          "note": "echo+gate+echo graph — full gate UI (held pill, record, release nudge) at zero tokens; the proven lookbook shape (run 20261122-113636-lookbook-canvas-held). The tray_row seed relaunches THIS SAME graph with WF_OWNER_SESSION=<one-shot session id>: the composer strip renders only the focused chat's owned runs (ownedRuns law, plugin.js:728), so a blank-owner run is pane-only. Both runs are stopped through the door at teardown.",
           "graph": {
             "name": "ui2-proof-held",
             "nodes": [
-              { "id": "say", "type": "echo", "output": { "msg": "seeded" } },
+              {
+                "id": "say",
+                "type": "echo",
+                "output": {
+                  "msg": "seeded"
+                }
+              },
               {
                 "id": "hold",
                 "type": "gate",
-                "after": ["say"],
+                "after": [
+                  "say"
+                ],
                 "question": "UI2 proof: release this held gate after capture?",
-                "options": ["release", "stop"]
+                "options": [
+                  "release",
+                  "stop"
+                ]
               },
-              { "id": "tail", "type": "echo", "after": ["hold"], "output": { "msg": "released" } }
+              {
+                "id": "tail",
+                "type": "echo",
+                "after": [
+                  "hold"
+                ],
+                "output": {
+                  "msg": "released"
+                }
+              }
             ]
           }
         },
@@ -37,39 +65,12 @@
       ],
       "historical_snapshots": []
     },
-    "gate": {
-      "description": "bd_2026-11-13-qri real-app proof of the ONE decision surface: held gate cell (verbatim question, declared requester, options) -> trusted click -> REAL pending frame (the answer POST held at CDP Fetch interception) -> durable Answer-saved receipt -> success toast with View exact gate -> route-away/route-back identity proof -> gates/<id>.json read-back (_ui:true, exact answer, events ledger byte-identical: nothing restarted for this tested isolated runner).",
-      "surfaces": ["pane_workflows", "gate_modal"],
-      "seeds": [
-        {
-          "name": "held_gate_run",
-          "kind": "engine_seed",
-          "method": "door_run",
-          "kill_runner_after_hold": true,
-          "note": "gate-only zero-token seed; the runner is SIGKILLed at gate.held so the UI answer lands on a dead-runner (interrupted) run and can be proven record-only — the exact RC sandbox shape (runner_live=false), never a re-answer of a historical seed.",
-          "graph": {
-            "name": "ui2-proof-gate",
-            "nodes": [
-              { "id": "say", "type": "echo", "output": { "msg": "seeded" } },
-              {
-                "id": "review",
-                "type": "gate",
-                "after": ["say"],
-                "question": "UI2 proof: record this answer?",
-                "options": ["Approve review", "Keep for revision"],
-                "context": "Isolated review workflow"
-              },
-              { "id": "tail", "type": "echo", "after": ["review"], "output": { "msg": "released" } }
-            ]
-          }
-        }
-      ],
-      "historical_snapshots": []
-    },
     "held-gate-snapshot-example": {
       "description": "DOCUMENTED SHAPE, not yet implemented: later beads pin an existing committed run (e.g. 20261122-113636-lookbook-canvas-held) by id + run.json sha256 and capture it via the launch-root fallback WITHOUT launching anything. Implemented when its surfaces are wired — until then it fails exit 3 like any new test.",
       "implemented": false,
-      "surfaces": ["pane_workflows"],
+      "surfaces": [
+        "pane_workflows"
+      ],
       "seeds": [],
       "historical_snapshots": [
         {
@@ -80,6 +81,23 @@
           "note": "Byte-for-byte fixture law: pinned by digest at implementation time; the driver must refuse to capture it if the on-disk run.json no longer matches."
         }
       ]
+    },
+    "coverage": {
+      "capture": "coverage",
+      "description": "bd_2026-11-13-yjp full-census fetch frames on the REAL renderer: >1 page fixture census seeded THROUGH the read model (seed_fixture.py; rows read 'interrupted' — never TERMINAL — so the pane's own 4 s poll loop drives the frames). Frames: loading (every /runs page stalled via CDP Fetch), empty census answered (roots named), full census (133 counted rows all loaded), deepest counted row rendered past the first 100 + its record page opened, refetch-failure with cached census kept (stale chip), retry re-walk (census grew to 134 while the edge failed; chip gone, no loaded-suffix), partial fetch (page-2 fulfill short: 'loaded 100 of 134' shown honestly while the summary stays global).",
+      "surfaces": [
+        "pane_workflows"
+      ],
+      "seeds": [
+        {
+          "name": "fixture_census",
+          "kind": "engine_seed",
+          "method": "fixture_census",
+          "count": 133,
+          "note": "read-model fixture rows, ids 20990101-100000..100132-covr (+ one recovery row 100133 seeded mid-run by the driver); no door launch, no tokens"
+        }
+      ],
+      "historical_snapshots": []
     }
   }
 }
