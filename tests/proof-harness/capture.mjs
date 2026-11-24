@@ -1618,51 +1618,66 @@ async function main() {
       shots.push({ surface: 'gate_modal', state: 'error: real fail-once door answer -> inline failure + retryable options, no receipt',
         ...(await shoot(cdp, A.outDir, '08b-gate-error.png', retryCell || retryOpt)) });
       await trustedClick(cdp, gateDef.options[0], { exact: true });
-      await waitText(cdp, 'Saving answer…', 5_000);
-      shots.push({ surface: 'gate_modal', state: 'pending: response in-flight on the door bench delay, options disabled (duplicate prevention)',
-        ...(await shoot(cdp, A.outDir, '08-gate-pending.png', await rectOf(cdp, 'Saving answer…'))) });
-      if (await cdp.evl(`(() => { const b = [...document.querySelectorAll('button')]
-          .find(b => (b.innerText||'').trim() === ${JSON.stringify(gateDef.options[0])});
-        return !!b && !b.disabled; })()`))
-        die(EX.capture, 'options stayed enabled while the answer POST was in flight — duplicate prevention missing');
-      // 10 (shot FIRST — the notification is the shortest-lived surface):
-      // the success toast IS the receipt (review-2 Q2). Locate it by the
-      // RUN/GATE identity only the ledger line carries: the receipt card
-      // renders question/requester/answer/time but never the run id, so a
-      // container whose text includes `<runId> / <gateId>` is the toast and
-      // not the card (a structural 'Answer saved' walk alone matched the
-      // card — field-proven, qri-proof21 frame 10).
-      await waitText(cdp, 'View exact gate', 15_000);
+      // ONE tight interleaved poll from the click instant: the success toast
+      // auto-expires seconds after the response (TTL measured live,
+      // qri-proof22/23 — sequential phases lost it), so the pending frame,
+      // the duplicate-prevention check and the toast ride the same 150 ms
+      // loop. Order of shots stays 08 -> 10.
+      // 10's locator keys on the run/gate ledger line — the ONLY string the
+      // toast carries and the receipt card never renders (the card shows
+      // question/requester/answer/time; a structural 'Answer saved' walk
+      // alone matched the card — field-proven, qri-proof21 frame 10).
       const ledgerNeedle = runId + ' / ' + gateDef.id;
       let toast = null;
+      let pending = null;
       const tT0 = Date.now();
-      while (Date.now() - tT0 < 10_000 && !toast) {
-        toast = await cdp.evl(`(() => {
-          const btns = [...document.querySelectorAll('button')].filter(b =>
-            (b.innerText || '').trim() === 'View exact gate');
-          for (const b of btns) {
-            let n = b;
-            for (let i = 0; i < 7 && n.parentElement; i++) {
-              n = n.parentElement;
-              if ((n.innerText || '').includes(${JSON.stringify(ledgerNeedle)})) break;
-            }
-            const txt = (n.innerText || '');
-            if (!txt.includes(${JSON.stringify(ledgerNeedle)})) continue;
-            if (!txt.includes('Answer saved') || !txt.includes('Approve review')
-                || !/\\d{4}-\\d{2}-\\d{2}T/.test(txt)) return null;
-            const r = n.getBoundingClientRect();
-            if (r.width === 0 || r.height === 0) continue;
-            return { x: r.x, y: r.y, width: r.width, height: r.height, text: txt };
+      while (Date.now() - tT0 < 15_000 && (!toast || !pending)) {
+        if (!pending) {
+          const r = await rectOf(cdp, 'Saving answer…').catch(() => null);
+          if (r) {
+            if (await cdp.evl(`(() => { const b = [...document.querySelectorAll('button')]
+                .find(b => (b.innerText||'').trim() === ${JSON.stringify(gateDef.options[0])});
+              return !!b && !b.disabled; })()`))
+              die(EX.capture, 'options stayed enabled while the answer POST was in flight — duplicate prevention missing');
+            shots.push({ surface: 'gate_modal', state: 'pending: response in-flight on the door bench delay, options disabled (duplicate prevention)',
+              ...(await shoot(cdp, A.outDir, '08-gate-pending.png', r)) });
+            pending = true;
           }
-          return null;
-        })()`);
-        if (!toast) await sleep(300);
+        }
+        if (!toast) {
+          toast = await cdp.evl(`(() => {
+            const btns = [...document.querySelectorAll('button')].filter(b =>
+              (b.innerText || '').trim() === 'View exact gate');
+            for (const b of btns) {
+              let n = b;
+              for (let i = 0; i < 7 && n.parentElement; i++) {
+                n = n.parentElement;
+                if ((n.innerText || '').includes(${JSON.stringify(ledgerNeedle)})) break;
+              }
+              const txt = (n.innerText || '');
+              if (!txt.includes(${JSON.stringify(ledgerNeedle)})) continue;
+              if (!txt.includes('Answer saved') || !txt.includes('Approve review')
+                  || !/\\d{4}-\\d{2}-\\d{2}T/.test(txt)) return null;
+              const r = n.getBoundingClientRect();
+              if (r.width === 0 || r.height === 0) continue;
+              return { x: r.x, y: r.y, width: r.width, height: r.height, text: txt };
+            }
+            return null;
+          })()`);
+          if (toast) {
+            delete toast.text;
+            shots.push({ surface: 'gate_modal', state: 'success toast: answer saved + exact answer + requester + run / gate + stamped time, action View exact gate',
+              ...(await shoot(cdp, A.outDir, '10-gate-toast.png', toast)) });
+          }
+        }
+        if (!toast) await sleep(150);
       }
-      if (!toast)
-        die(EX.capture, 'no notification element carries the run / gate ledger line (toast absent or located on the receipt card)');
-      delete toast.text;
-      shots.push({ surface: 'gate_modal', state: 'success toast: answer saved + exact answer + requester + run / gate + stamped time, action View exact gate',
-        ...(await shoot(cdp, A.outDir, '10-gate-toast.png', toast)) });
+      if (!pending) die(EX.capture, 'never observed the real pending frame (Saving answer…)');
+      if (!toast) {
+        const bodyDump = await cdp.evl(`document.body.innerText.slice(0, 6000)`);
+        fs.writeFileSync(path.join(A.outDir, 'logs', 'toast-miss-body.txt'), String(bodyDump));
+        die(EX.capture, 'no notification element carried the run / gate ledger line within 15s; body dump in logs/toast-miss-body.txt');
+      }
       // 09: the durable saved receipt (recorded answer, scoped copy).
       await waitText(cdp, 'Answer saved', 20_000);
       const receipt = await cdp.evl(`(() => {
