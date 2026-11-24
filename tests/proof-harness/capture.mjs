@@ -232,15 +232,47 @@ async function connectCdp(port, rendererPort, timeoutMs = 90_000) {
   }
   let id = 0;
   const pend = new Map();
-  ws.onmessage = e => {
-    const m = JSON.parse(e.data);
-    if (m.id && pend.has(m.id)) { pend.get(m.id)(m); pend.delete(m.id); }
+  const bind = () => {
+    ws.onmessage = e => {
+      const m = JSON.parse(e.data);
+      if (m.id && pend.has(m.id)) { pend.get(m.id)(m); pend.delete(m.id); }
+    };
   };
-  const send = (method, params = {}) => new Promise(res => {
+  bind();
+  const rawSend = (method, params = {}) => new Promise(res => {
     const i = ++id;
     pend.set(i, m => { if (m.error) throw new Error(`${method}: ${JSON.stringify(m.error).slice(0, 300)}`); res(m.result); });
     ws.send(JSON.stringify({ id: i, method, params }));
   });
+  // Field-proven (pair run, try2/3): the renderer can full-reload under us
+  // (vite reload / app-init navigation) exactly between attach and eval —
+  // one -32000 'Inspected target navigated or closed' killed the WHOLE run
+  // via an uncaught rejection. The navigation class is transient: re-attach
+  // to the fresh page target and retry, bounded, before giving up.
+  const NAV_TRANSIENT = /navigated or closed|target closed|Cannot find context/i;
+  const reattach = async () => {
+    const list = await (await fetch(`http://127.0.0.1:${port}/json`)).json();
+    const page = list.find(t => t.type === 'page' && t.url.includes(`:${rendererPort}`));
+    if (!page) throw new Error('reattach: no page target yet');
+    const nws = new WebSocket(page.webSocketDebuggerUrl);
+    await new Promise((res, rej) => { nws.onopen = res; nws.onerror = rej; });
+    try { ws.close(); } catch { /* already dead */ }
+    ws = nws;
+    pend.clear();
+    bind();
+    await rawSend('Page.enable').catch(() => { /* auto-enable builds */ });
+  };
+  const send = async (method, params = {}) => {
+    for (let attempt = 0; ; attempt++) {
+      try { return await rawSend(method, params); }
+      catch (e) {
+        if (!NAV_TRANSIENT.test(String(e?.message)) || attempt >= 3) throw e;
+        await sleep(600 * (attempt + 1));
+        await reattach().catch(() => { /* target storm; loop retries */ });
+        if (attempt >= 3) throw e;
+      }
+    }
+  };
   await send('Page.enable').catch(() => { /* most builds auto-enable; reload/shot prove it anyway */ });
   const evl = async expr => {
     const r = await send('Runtime.evaluate', { expression: expr, returnByValue: true, awaitPromise: true });
