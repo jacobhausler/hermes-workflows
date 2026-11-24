@@ -1,6 +1,6 @@
 {
   "note": "Case manifest for tests/proof-harness/capture.mjs. Every seed entry names its kind explicitly: 'engine_seed' = state this driver launches live through the plugin door (zero-token graphs; one real assistant turn for the card echo); 'historical_snapshot' = a pinned, already-committed run/session fixture read via the door's legacy-launch-root fallback (read-only, never relaunched). Adding a case ADDS A NEW TEST: a case naming a surface outside surfaces_registry fails exit 3 ('new test, not implemented') — the driver never fabricates an existing command. Baseline never captures synthesis/index.html or any file-openable RC: surfaces come from the real app renderer only.",
-  "surfaces_registry": ["directive_card", "pane_workflows", "tray_row", "gate_modal"],
+  "surfaces_registry": ["directive_card", "pane_workflows", "tray_row", "gate_modal", "stored_session_link"],
   "cases": {
     "baseline": {
       "description": "Real-app proof of the three live surfaces of the actual React/SDK renderer: the ::workflow directive card in the message stream, the WORKFLOWS pane (run list + held-gate run detail), and the settings-gated live-run tray row. All state is engine-seeded into an isolated test runs root; nothing here is a CHATFRAME reconstruction.",
@@ -138,6 +138,43 @@
           "note": "pinned shelf fixture — sha256 of the fixture FILE itself (the materialized run.json comes FROM it); read-only, never relaunched, refusal-on-mismatch enforced by seed_graph.py. The original file is never touched: byte-for-byte preservation holds."
         }
       ]
+    },
+    "navigation": {
+      "description": "bd_2026-11-13-cj2 stored-session navigation fail-closed integration on the REAL renderer: one engine-seeded held-gate run whose fan-out children are zero-token fake CLIs registering DESKTOP-SHAPED stored sessions (fake_hermes.py FAKE_SESSION_STORED: id = 'local-' + sha256(title), source 'local', plus two readable message rows), launched through the door stamped on-behalf of a real seeded one-shot owner session (WF_OWNER_SESSION + HERMES_UI_SESSION_ID — the same on-behalf law the tray seed uses). Frames: NodePanel 'recorded chat' link + header 'owner chat' link against IDs read back from the bench state.db (never parsed off the screen); a trusted click opens the recorded destination (transcript content proves identity); Back restores the record page with the link re-focused; DELETE of the row at the source models expiry — the link renders 'Session unavailable' with zero navigation calls and the location never moves; re-inserting the row under a fresh id (rotation) re-arms the link on the NEW id and the destination opens that one; the owner round trip opens the recorded owner session and returns. Read-only law: message counts of every seeded session are identical before and after the whole walk — viewing sent no message and resumed nothing.",
+      "capture": "navigation",
+      "surfaces": ["pane_workflows", "stored_session_link"],
+      "seeds": [
+        {
+          "name": "held_gate_run",
+          "kind": "engine_seed",
+          "method": "door_run",
+          "child_binary": "tests/fake_hermes.py",
+          "child_env": { "FAKE_SESSION_STORED": "1", "FAKE_SESSION_MESSAGES": "1" },
+          "owner_echo": "directive_card_echo",
+          "wait_held_s": 120,
+          "note": "say -> fan-out work(2 items, zero-token fake children) -> hold: the run stays live at the held gate so the pane's own 4 s poll loop drives the expired/rotation re-renders — no mock, no reload dance. The children write stored-shape session rows into the BENCH state.db (the exact field the pane's conversation link reads). owner_echo: the driver launches directive_card_echo FIRST and relaunches THIS graph with WF_OWNER_SESSION + HERMES_UI_SESSION_ID = that session id, so the header's recorded owner stamp is a real desktop session.",
+          "graph": {
+            "name": "ui2-proof-nav",
+            "nodes": [
+              { "id": "say", "type": "echo", "output": { "msg": "seeded" } },
+              { "id": "work", "type": "agent", "after": ["say"],
+                "fanout": { "goal": "UI2 proof nav child {item}", "items": ["nav-one", "nav-two"] } },
+              { "id": "hold", "type": "gate", "after": ["work"],
+                "question": "UI2 proof nav: capture done — release?", "options": ["release", "stop"] }
+            ]
+          }
+        },
+        {
+          "name": "directive_card_echo",
+          "kind": "engine_seed",
+          "method": "oneshot_echo",
+          "owner_echo_text": "Echo this line verbatim and nothing else:\nUI2-PROOF-CJ2 owner launch receipt\n",
+          "note": "ONE real assistant turn; for the navigation case this session IS the recorded owner (launched BEFORE the door launch, the id parsed from its own output — never a fixture edit). model/provider null rides the seat default (documented in SETUP.md).",
+          "model": null,
+          "provider": null
+        }
+      ],
+      "historical_snapshots": []
     }
   }
 }
