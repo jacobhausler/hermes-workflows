@@ -30,6 +30,9 @@ def main() -> int:
                     help="stop this run id through the same door and exit (no launch)")
     ap.add_argument("--wait-held-s", type=float, default=25.0,
                     help="seconds to wait for the gate.held event (0 skips the proof wait)")
+    ap.add_argument("--lane-key", default=None,
+                    help="l8i: launch through the door WITH this lane_key, so the "
+                         "pill/tray/fleet proof surfaces render the instance label")
     args = ap.parse_args()
 
     repo = Path(args.repo).resolve()
@@ -64,7 +67,10 @@ def main() -> int:
 
     os.environ["WF_RUNS_ROOT"] = str(runs_root)   # shared-team-root override wins (wfcommon)
 
-    payload = json.loads(door.handle({"action": "run", "graph": graph}))
+    launch = {"action": "run", "graph": graph}
+    if args.lane_key:
+        launch["lane_key"] = args.lane_key
+    payload = json.loads(door.handle(launch))
     if "error" in payload and not payload.get("run_id"):
         print(f"DOOR_ERROR: {json.dumps(payload)[:800]}", file=sys.stderr)
         return 1

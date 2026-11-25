@@ -2198,6 +2198,27 @@ def _fanout_cell_warnings(graph):
                 "streams finished members while the straggler tail is still out")
     return notes
 
+def _unlabeled_shelf_warnings(args, graph, lib_name):
+    """l8i (instance-label-first law): a launch replayed FROM THE SHELF with
+    neither lane_key nor description carries no instance datum — every title
+    surface would fall all the way to the template name, the one word the
+    owner demoted. The door WARNS, never blocks (the launch succeeded; the
+    label was optional at launch): the warning names exactly the two missing
+    data and the fix. Shelf-only — an inline graph is authored in-flight, and
+    `start` always synthesizes both. [] otherwise (no empty key, #475 shape)."""
+    if not lib_name:
+        return []
+    lane = args.get("lane_key")
+    if isinstance(lane, str) and lane.strip():
+        return []
+    desc = graph.get("description")
+    if isinstance(desc, str) and desc.strip():
+        return []
+    return ["unlabeled shelf launch (" + str(lib_name) + "): no lane_key and no "
+            "description \u2014 the instance carries no label, so its title falls "
+            "back to the template name; relaunch with lane_key=<label> (or shelve "
+            "a description) to name the instance"]
+
 def _stale_literal_warnings(graph):
     """[] when the graph binds or is literal-free; else one warning string per
     offending literal, each naming where it lives and the run_context fix."""
@@ -3500,6 +3521,16 @@ def act_run(args):
         graph = entry.get("graph")
         if graph is None:
             return _from_unknown_error(args["from"])
+        # l8i (instance-label-first law): an envelope's meta.description is
+        # instance datum — inject it into the launched graph when the graph
+        # root carries none (root `description` is a legal wf/1 key the shelf
+        # author could have written directly), so the read model and every
+        # title surface can resolve the description arm for shelf launches.
+        _gd = graph.get("description")
+        if not (isinstance(_gd, str) and _gd.strip()):
+            _ed = entry.get("description")
+            if isinstance(_ed, str) and _ed.strip():
+                graph["description"] = _ed.strip()
         lib_name = _lib_rel_name(_lib_path(args["from"]))   # #50: general/ names keep their prefix
     if graph is None:
         return {"error": "run needs graph, graph_path or from=<library name>"}
@@ -3707,6 +3738,7 @@ def act_run(args):
         if _include_notes:
             out["include_notes"] = _include_notes
         warnings = _node_id_warnings(graph) + _common.wall_invariant_warnings(graph)  # #475
+        warnings += _unlabeled_shelf_warnings(args, graph, lib_name)   # l8i: warn, never block
         if warnings:
             out["run_warnings"] = warnings
         return out
@@ -4005,6 +4037,7 @@ def _create_run(args, graph, lib_name, models, routes, _liveness_notes, lane_pat
     if include_notes:
         out["include_notes"] = include_notes   # scratch-collision warnings ride the launch
     warnings = _node_id_warnings(graph) + _common.wall_invariant_warnings(graph)  # #475
+    warnings += _unlabeled_shelf_warnings(args, graph, lib_name)   # l8i: warn, never block
     if warnings:
         out["run_warnings"] = warnings
     return out

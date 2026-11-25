@@ -58,6 +58,13 @@ const jsxs = jsx
 // The FINAL lifecycle/numeric laws ship as one marked block; render-group
 // evaluations prepend the REAL block so consumer renders use production code.
 const vmBlock = `const EDGE_TONE = { pending: 'P', running: 'R', held: 'H', failed: 'F' }\n${constGrab('statusLabel')}\n${src.match(/\/\/ BEGIN shared-view-model\n([\s\S]*?)\/\/ END shared-view-model/)[1]}`
+// l8i: inlineHeader titles through the real displayTitle/templateTag —
+// every inlineHeader sandbox in this file evaluates the exported resolvers.
+const l8iResolver = [
+  src.match(/const TITLE_MAX = [^\n]+/)[0],
+  src.match(/export function displayTitle[\s\S]*?\n}/)[0].replace('export ', ''),
+  src.match(/export function templateTag[\s\S]*?\n}/)[0].replace('export ', ''),
+].join('\n')
 const headerGrab = src.match(/const inlineHeader = \(data, elapsed\) => \{[\s\S]*?\n\}/)[0]
 const walk = node => Array.isArray(node)
   ? node.flatMap(walk)
@@ -262,7 +269,7 @@ const sdkMod = await import(pathToFileURL(sdkPath).href)
 // ============================ WF-06 labeled clocks ==============================
 {
   const inlineHeader = new Function('nodesCount', 'fmtDur', 'TERMINAL',
-    `${vmBlock}${headerGrab};\nreturn inlineHeader`)(
+    `${vmBlock}${l8iResolver}\n${headerGrab};\nreturn inlineHeader`)(
     r => `${r.nodes_done}/${r.nodes_total} terminal`, n => `${Math.round(n / 1000)}s`, new Set(['done', 'failed', 'stopped'])
   )
   const [first] = inlineHeader({ id: 'x', name: 'x', status: 'running', nodes_done: 1, nodes_total: 2 }, 33000)
@@ -297,7 +304,7 @@ const sdkMod = await import(pathToFileURL(sdkPath).href)
 // ============================ WF-09 no COST $0.0000 =============================
 {
   const inlineHeader = new Function('nodesCount', 'fmtDur', 'TERMINAL',
-    `${vmBlock}${headerGrab};\nreturn inlineHeader`)(
+    `${vmBlock}${l8iResolver}\n${headerGrab};\nreturn inlineHeader`)(
     r => `${r.nodes_done}/${r.nodes_total} terminal`, n => `${n}ms`, new Set(['done', 'failed', 'stopped'])
   )
   const [, second] = inlineHeader({ id: 'x', name: 'x', status: 'running', nodes_done: 1, nodes_total: 2,
