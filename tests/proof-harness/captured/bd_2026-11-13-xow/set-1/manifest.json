@@ -1,0 +1,113 @@
+{
+  "schema": "proof-harness/1",
+  "run_ts": "2026-11-25T00:11:40.302Z",
+  "case": "gate",
+  "only": [
+    "gate_modal",
+    "toast"
+  ],
+  "surfaces": [
+    "gate_modal",
+    "toast"
+  ],
+  "candidate": {
+    "plugin": "desktop/plugin.js",
+    "plugin_sha256": "89728e26793436766a2b4771c97eef1431e67e8013295434d54d531003cf0634",
+    "repo_head": "edb69ec6eafd0c471e927b84b0a242d9125685a3",
+    "merge_base_origin_main": "a6fd2020650992f4a2a165312200cebb1a19fa32"
+  },
+  "app": {
+    "repo": "~/.cache/xow-bench/app",
+    "hermes_version": "Hermes Agent v0.23.3+1142.gb9b36c9 (2026.9.24) · stable · local b9b36c933759\nInstall directory: ~/.hermes/hermes-agent\nInstall method: git\nPython: 3.14.9\nOpenAI SDK: 2.54.0\nUp to date",
+    "commit": "0f602c5f6f18615632535251d62a2db74ce93b69",
+    "dirty_entries": 0,
+    "package_version": "0.0.0",
+    "electronVersion": "unknown",
+    "electron_package_version": "44.10.2"
+  },
+  "seeds": {
+    "held_gate_run": {
+      "kind": "engine_seed",
+      "run_id": "20261124-181222-ui2-proof-gate",
+      "graph_sha256": "325debf66509feaed3d73c05b4368ee471460af79a4b3f6bccb54418b0714c85"
+    }
+  },
+  "captures": [
+    {
+      "surface": "gate_modal",
+      "state": "held: question, requester, option buttons",
+      "file": "captures/07-gate-held.png",
+      "bytes": 25390,
+      "sha256": "a7c2e0c927ca0a75cd8a666890c68be230b2feadba4576b34f9a0353cb784608",
+      "clip": "element",
+      "content_file": "contents/07-gate-held.txt",
+      "content_sha256": "b3654f6182bd817716af212f68b8946d1bd8d2362ed3a497c322b3be8e08f398",
+      "reviewed": false
+    },
+    {
+      "surface": "gate_modal",
+      "state": "error: real fail-once door answer -> inline failure + retryable options, no receipt",
+      "file": "captures/08b-gate-error.png",
+      "bytes": 11575,
+      "sha256": "c27dc996610b16491b2c1f1ad36987a949120017bd2dc97868d64d6bc9fa236b",
+      "clip": "element",
+      "content_file": null,
+      "content_sha256": null,
+      "reviewed": false
+    },
+    {
+      "surface": "gate_modal",
+      "state": "pending: response in-flight on the door bench delay, options disabled (duplicate prevention)",
+      "file": "captures/08-gate-pending.png",
+      "bytes": 4139,
+      "sha256": "6656c947d257d1459822d288d3968f1186cd15e58cc6c1fbb36cd1505c7abcdc",
+      "clip": "element",
+      "content_file": null,
+      "content_sha256": null,
+      "reviewed": false
+    },
+    {
+      "surface": "toast",
+      "state": "success toast: answer saved + exact answer + requester + run / gate + stamped time, action View exact gate",
+      "file": "captures/10-gate-toast.png",
+      "bytes": 31055,
+      "sha256": "81d5ee4b7afd8d5e0a41d7d4bcff4ee01627500c42277271374c8083077b4b32",
+      "clip": "element",
+      "content_file": "contents/10-gate-toast.txt",
+      "content_sha256": "16f705252d1dc1a3c91fccde737074ab5404c1ff5b6768b3469af05270f09082",
+      "reviewed": false
+    },
+    {
+      "surface": "gate_modal",
+      "state": "saved: Answer saved receipt, exact answer, door-stamped Answered time, nothing-restarted scope note",
+      "file": "captures/09-gate-saved.png",
+      "bytes": 80348,
+      "sha256": "907999855edeb7fb82077d57f4e83d8b27ab8304ba98f337373df64033defbe6",
+      "clip": "element",
+      "content_file": "contents/09-gate-saved.txt",
+      "content_sha256": "621cd7544aa9209820029ea87b52dfdb6d000bf98636762f371e52586e506b3c",
+      "reviewed": false
+    },
+    {
+      "surface": "gate_modal",
+      "state": "after View exact gate: exact receipt re-rendered from the read model",
+      "file": "captures/11-gate-after-view.png",
+      "bytes": 87661,
+      "sha256": "47fee90373452364594a967872727022eb286ca31ced49bcdb52692402655f9a",
+      "clip": "element",
+      "content_file": "contents/11-gate-after-view.txt",
+      "content_sha256": "621cd7544aa9209820029ea87b52dfdb6d000bf98636762f371e52586e506b3c",
+      "reviewed": false
+    }
+  ],
+  "repro": {
+    "content_sha256_by_file": {
+      "captures/07-gate-held.png": "b3654f6182bd817716af212f68b8946d1bd8d2362ed3a497c322b3be8e08f398",
+      "captures/10-gate-toast.png": "16f705252d1dc1a3c91fccde737074ab5404c1ff5b6768b3469af05270f09082",
+      "captures/09-gate-saved.png": "621cd7544aa9209820029ea87b52dfdb6d000bf98636762f371e52586e506b3c",
+      "captures/11-gate-after-view.png": "621cd7544aa9209820029ea87b52dfdb6d000bf98636762f371e52586e506b3c"
+    },
+    "combined_sha256": "1ecee8a65e9746bb184533993f2a7dd41e48aeb4a96aefeebe0d13fa3c7700cf"
+  },
+  "review_note": "reviewed:false means THIS tool run only proved PNG magic+size; visual review (vision_analyze per hermes-workflows-ui-qa) is mandatory before any layout claim"
+}

@@ -1,0 +1,115 @@
+{
+  "ts": "2026-11-25T00:14:10.843Z",
+  "case": "gate",
+  "plugin": {
+    "candidate": "~/.hermes/workflows/20261124-123529-ship20-m/work/wsliceB/repo/desktop/plugin.js",
+    "sha256": "89728e26793436766a2b4771c97eef1431e67e8013295434d54d531003cf0634",
+    "staged": "/tmp/ui2-proof-xow/set-2/bench/home/desktop-plugins/hermes-workflows/plugin.js",
+    "staged_sha256": "89728e26793436766a2b4771c97eef1431e67e8013295434d54d531003cf0634",
+    "staged_sha256_after_load": "89728e26793436766a2b4771c97eef1431e67e8013295434d54d531003cf0634"
+  },
+  "app": {
+    "repo": "~/.cache/xow-bench/app",
+    "hermes_version": "Hermes Agent v0.23.3+1142.gb9b36c9 (2026.9.24) · stable · local b9b36c933759\nInstall directory: ~/.hermes/hermes-agent\nInstall method: git\nPython: 3.14.9\nOpenAI SDK: 2.54.0\nUp to date",
+    "commit": "0f602c5f6f18615632535251d62a2db74ce93b69",
+    "dirty_entries": 0,
+    "package_version": "0.0.0",
+    "electronVersion": "unknown",
+    "electron_package_version": "44.10.2"
+  },
+  "bench": {
+    "ports": {
+      "cdp": 9524,
+      "renderer": 5324
+    },
+    "discovery_copied": [
+      "spawn-ledger.json",
+      "auth.json",
+      "config.yaml"
+    ],
+    "plugins_symlink": "~/.hermes/workflows/20261124-123529-ship20-m/work/wsliceB/repo",
+    "profile": "ui2bench-cc31c2e7",
+    "locks": "/tmp/ui2-proof-xow/set-2/bench/locks",
+    "pre_ensure": "ok"
+  },
+  "seeds": {
+    "held_gate_run": {
+      "kind": "engine_seed",
+      "run_id": "20261124-181450-ui2-proof-gate",
+      "graph_sha256": "325debf66509feaed3d73c05b4368ee471460af79a4b3f6bccb54418b0714c85"
+    }
+  },
+  "config_touched": {
+    "plugins.entries.hermes-workflows.settings.runs_root": {
+      "before": null,
+      "after": "/tmp/ui2-proof-xow/set-2/bench/runs",
+      "scope": "bench profile ui2bench-cc31c2e7 (isolated — shared config untouched)"
+    },
+    "plugins.entries.hermes-workflows.settings.tray": {
+      "before": true,
+      "after": true,
+      "scope": "bench profile ui2bench-cc31c2e7 (isolated — shared config untouched)"
+    }
+  },
+  "candidate_head": "edb69ec6eafd0c471e927b84b0a242d9125685a3",
+  "merge_base_origin_main": "a6fd2020650992f4a2a165312200cebb1a19fa32",
+  "registry": {
+    "routes": [
+      "hermes-workflows:page"
+    ],
+    "panes": [
+      "sessions",
+      "workspace",
+      "terminal",
+      "files",
+      "review",
+      "hermes-bots:pane",
+      "hermes-workflows:pane"
+    ],
+    "directives": [
+      "transcript.preview",
+      "hermes-workflows:directive"
+    ],
+    "composer": [
+      "hermes-workflows:session-strip"
+    ]
+  },
+  "plugin_records": {
+    "hermes-bots": {
+      "error": null,
+      "active": false
+    },
+    "kanban": {
+      "error": null,
+      "active": false
+    },
+    "radio": {
+      "error": null,
+      "active": false
+    },
+    "hermes-workflows": {
+      "error": null,
+      "active": false
+    }
+  },
+  "api_attachment": {
+    "via": "registry + live seeded run row rendered through the plugin API route",
+    "run_id": "20261124-181450-ui2-proof-gate"
+  },
+  "gate_answer": {
+    "run_id": "20261124-181450-ui2-proof-gate",
+    "gate_id": "review",
+    "answer": "Approve review",
+    "_ui": true,
+    "events_sha_before": "81d3cf18b08890ac7aa6c9d01c0ae00b6fd66c4c991ec11389e35f3c0a0278b1",
+    "events_sha_after": "81d3cf18b08890ac7aa6c9d01c0ae00b6fd66c4c991ec11389e35f3c0a0278b1",
+    "gate_node_committed": false
+  },
+  "renderer_probe": {
+    "script_srcs": 2
+  },
+  "teardown": {
+    "survivors": [],
+    "revert_failures": []
+  }
+}

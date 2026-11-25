@@ -1,7 +1,7 @@
 # Slice B capture review (bd_2026-11-13-xow)
 
-Candidate: `desktop/plugin.js` sha256 `ae149734e4ba167e84c45ba119677ed593e5a615c9e9ad9f57a0d3b98b3f3f76`
-(== qri's reviewed bytes from #724; slice B ships zero plugin.js changes).
+Candidate: `desktop/plugin.js` sha256 `89728e26793436766a2b4771c97eef1431e67e8013295434d54d531003cf0634`
+(== merged-head bytes incl. l8i #728; slice B ships zero plugin.js changes).
 App: hermes-agent `0f602c5f6f18` (dirty_entries 0), electron 44.10.2,
 renderer checkout `~/.cache/xow-bench/app` (dedicated copy, app-copy law).
 Two independent benches (ports 9514/5314 and 9524/5324, own user-data, own

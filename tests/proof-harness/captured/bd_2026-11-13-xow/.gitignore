@@ -5,6 +5,4 @@ seed/
 supervisors.json
 .ui2-proof-owned
 *.stale-*
-set-*/
 run-*/
-*.stale-*/

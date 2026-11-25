@@ -1,0 +1,8 @@
+UI2 proof: record this answer?
+requester: Isolated review workflow
+Answer saved · nothing will be sent on this path.
+Approve review
+Answered · <DATE>
+<HELD-CLOCK>
+Nothing restarted. The UI answer path records only — verified against the tested isolated runner; a live scheduler may consume the answer when it next checks.
+View exact gate
