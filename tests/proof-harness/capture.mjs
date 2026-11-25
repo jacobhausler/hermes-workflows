@@ -33,6 +33,19 @@
 // timestamps). The volatile classes are declared (VOLATILE_MASKS below);
 // masking is exported so the double-run spec can pin it with samples.
 //
+// Owned-bench retention law (bd_2026-11-13-4fy): every capture attempt that
+// dies leaves its bench tree (0.5-2 GiB) under the proof tree forever — the
+// finally-teardown covers process groups, not the dir, and the provision law
+// archives instead of deleting. So every STARTUP first reclaims proven-dead
+// sibling bench dirs under its own --out root's parent (see
+// planBenchRetention below): owned-marker present, nothing git-tracked
+// inside, not written since the run began (sealed manifest.json proves
+// terminal; unsealed dirs need a quiet grace so a concurrent crew-wave
+// bench stays alive), unreferenced by any committed manifest.json, and
+// either a *.stale-*/*abandoned-* rotation, a run-* scratch dir, or a dead
+// attempt (no manifest at all). One log line per reclaimed tree (path, MiB)
+// on stderr. Net effect: proof disk caps at ~2 concurrent runs.
+//
 // Failure law (fail nonzero, never a green no-op):
 //   exit 2 usage / unknown case (lists known cases)
 //   exit 3 case known, surface not yet implemented (new test)
@@ -220,6 +233,122 @@ function retryCli(fn, { attempts = 12, delayMs = 5_000 } = {}) {
       execFileSync('/bin/sleep', [String(Math.round(delayMs / 1000))]);
     }
   }
+}
+
+// -- owned-bench retention (bd_2026-11-13-4fy) ------------------------------
+// Recursive stat walk (no data reads, symlinks skipped — rm never follows
+// them and their bytes belong to the target, not the tree): the honest
+// {bytes, maxMtimeMs} of a bench dir. Mirrors scripts/retention.py's law
+// that liveness reads file/package mtimes, never only the dir mtime.
+function treeScan(dir, depth = 0) {
+  let bytes = 0, maxMtimeMs = 0;
+  try { maxMtimeMs = fs.statSync(dir).mtimeMs; } catch { return { bytes, maxMtimeMs }; }
+  if (depth > 32) return { bytes, maxMtimeMs };
+  let ents = [];
+  try { ents = fs.readdirSync(dir, { withFileTypes: true }); } catch { return { bytes, maxMtimeMs }; }
+  for (const ent of ents) {
+    const p = path.join(dir, ent.name);
+    if (ent.isSymbolicLink()) continue;
+    if (ent.isDirectory()) {
+      const sub = treeScan(p, depth + 1);
+      bytes += sub.bytes;
+      if (sub.maxMtimeMs > maxMtimeMs) maxMtimeMs = sub.maxMtimeMs;
+    } else {
+      try { const st = fs.lstatSync(p); bytes += st.size;
+            if (st.mtimeMs > maxMtimeMs) maxMtimeMs = st.mtimeMs; } catch { /* raced */ }
+    }
+  }
+  return { bytes, maxMtimeMs };
+}
+
+// True when ANY git-tracked file lives under dir (committed proof bytes,
+// wherever they sit inside the tree). Outside the repo → nothing tracked.
+function gitTrackedFiles(repoRoot, dir) {
+  const rel = path.relative(repoRoot, dir);
+  if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) return false;
+  try {
+    return execFileSync('git', ['-C', repoRoot, 'ls-files', '--', rel + '/'],
+      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim().length > 0;
+  } catch { return false; }
+}
+
+// Concatenated text of every COMMITTED manifest.json under the repo's
+// captured/ dir (and any disk-side manifest of an out-of-repo proof tree):
+// a bench dir whose name appears there is referenced proof, never scratch.
+function committedManifestText(repoRoot, proofRoot) {
+  const files = [];
+  try {
+    for (const f of execFileSync('git', ['-C', repoRoot, 'ls-files', '--',
+        path.relative(repoRoot, path.join(HERE, 'captured'))],
+      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
+      .split('\n').filter(Boolean))
+      if (f.endsWith('manifest.json')) files.push(path.join(repoRoot, f));
+  } catch { /* no repo/git: nothing is committed here */ }
+  for (const root of [proofRoot]) {
+    // proof trees outside the repo carry no index; scan disk one level down
+    let ents = [];
+    try { ents = fs.readdirSync(root, { withFileTypes: true }); } catch { continue; }
+    for (const e of ents) {
+      if (e.isFile() && e.name === 'manifest.json') files.push(path.join(root, e.name));
+      else if (e.isDirectory()) {
+        try { for (const f of fs.readdirSync(path.join(root, e.name), { withFileTypes: true }))
+          if (f.isFile() && f.name === 'manifest.json')
+            files.push(path.join(root, e.name, f.name)); } catch { /* unreadable */ }
+      }
+    }
+  }
+  let text = '';
+  for (const f of files) { try { text += fs.readFileSync(f, 'utf8') + '\n'; } catch { /* honest absence */ } }
+  return text;
+}
+
+// The retention law itself (header comment above is the contract). Plans AND
+// reclaims direct children of proofRoot; NEVER deletes an unowned, tracked,
+// live (fresh writes inside graceMs), or committed-manifest-referenced tree,
+// nor an uncommitted-but-sealed custom-named dir (pending proof — deleting
+// it would delete bytes, which retention must never do). runStartMs/nowMs/
+// graceMs are injected so the fake-tree spec is deterministic; dryRun plans
+// without touching disk. Returns {reclaimed:[{dir,mib,reason}], kept:[{dir,
+// reason}]}; per-dir errors demote that dir to kept, never to a crash.
+export function planBenchRetention({ proofRoot, runStartMs, nowMs = Date.now(),
+    graceMs = 600_000, repoRoot = REPO, dryRun = false } = {}) {
+  const reclaimed = [], kept = [];
+  let ents = [];
+  try { ents = fs.readdirSync(proofRoot, { withFileTypes: true }); }
+  catch { return { reclaimed, kept }; }
+  const refText = committedManifestText(repoRoot, proofRoot);
+  for (const ent of ents) {
+    if (!ent.isDirectory()) continue;
+    const dir = path.join(proofRoot, ent.name);
+    try {
+      if (!fs.existsSync(path.join(dir, '.ui2-proof-owned')))
+        { kept.push({ dir, reason: 'unowned' }); continue; }
+      if (fs.existsSync(path.join(dir, '.owner-held'))
+          || fs.existsSync(path.join(dir, 'OWNER_HELD')))
+        { kept.push({ dir, reason: 'owner-held' }); continue; }
+      if (gitTrackedFiles(repoRoot, dir))
+        { kept.push({ dir, reason: 'committed-proof' }); continue; }
+      const scan = treeScan(dir);
+      if (scan.maxMtimeMs >= runStartMs)
+        { kept.push({ dir, reason: 'younger-than-run' }); continue; }
+      const sealed = fs.existsSync(path.join(dir, 'manifest.json'));
+      if (!sealed && nowMs - scan.maxMtimeMs < graceMs)
+        { kept.push({ dir, reason: 'live-grace' }); continue; }
+      if (refText.includes(ent.name))
+        { kept.push({ dir, reason: 'referenced-by-committed-manifest' }); continue; }
+      const rotation = ent.name.includes('.stale-') || ent.name.includes('abandoned-');
+      const scratch = ent.name.startsWith('run-');
+      if (!rotation && !scratch && sealed)
+        { kept.push({ dir, reason: 'pending-proof-uncommitted' }); continue; }
+      const mib = Math.round((scan.bytes / 1048576) * 10) / 10;
+      if (!dryRun) fs.rmSync(dir, { recursive: true, force: true });
+      reclaimed.push({ dir, mib,
+        reason: rotation ? 'rotation' : scratch ? 'scratch' : 'dead-attempt' });
+    } catch (e) {
+      kept.push({ dir, reason: `retention-error:${String(e && e.message).slice(0, 80)}` });
+    }
+  }
+  return { reclaimed, kept };
 }
 
 // exit codes (documented above; tests assert them)
@@ -794,6 +923,24 @@ async function main() {
     electronVersion = fs.readFileSync(path.join(desktop, 'node_modules', 'electron', 'package.json'), 'utf8');
     identity.app.electron_package_version = JSON.parse(electronVersion).version;
   } catch { /* honest unknown */ }
+
+  // -- owned-bench retention (bd_2026-11-13-4fy): reclaim proven-dead sibling
+  //    bench trees under THIS run's proof tree before provisioning ours, so
+  //    crashed attempts can't grow disk past ~2 concurrent runs. Opportunistic
+  //    GC: any failure here must never fail the run — planBenchRetention
+  //    demotes per-dir errors to kept and this call swallows the rest.
+  try {
+    const ret = planBenchRetention({
+      proofRoot: path.dirname(outResolved),
+      runStartMs: Date.parse(identity.ts),
+      graceMs: Math.max(600_000, A.paintBudgetMs + 300_000),
+    });
+    for (const r of ret.reclaimed)
+      console.error(`[retention] reclaimed ${r.dir} ${r.mib}MiB (${r.reason})`);
+    const keptReasons = [...new Set(ret.kept.map(k => k.reason))];
+    if (ret.reclaimed.length || keptReasons.some(x => x.startsWith('retention-error')))
+      console.error(`[retention] kept ${ret.kept.length} (${keptReasons.join(',') || 'none'})`);
+  } catch (e) { console.error(`[retention] disabled this run: ${String(e.message).slice(0, 200)}`); }
 
   // -- provision (owned scratch; stale dirs are archived, never rm'd) ------
   if (fs.existsSync(A.outDir)) {
