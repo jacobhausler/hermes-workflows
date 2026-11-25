@@ -5,6 +5,7 @@ launch it, read its run-dir via the SHARED read model (wfcommon.run_state), drop
 its input files. No standing daemon or control plane, no second opinion on run
 state (one runner process per run, detached out of the caller's tree at spawn #8).
 """
+import asyncio
 import contextlib
 import importlib.util, json, math, os, re, select, shutil, stat, subprocess, sys, time
 import fcntl, hashlib, uuid
@@ -5713,6 +5714,10 @@ def _wf_command(raw_args):
             + "}`"
             + "; then `wait` and answer human gates only with the human's decision. Cards are optional.")
 
+async def _stopped_process_notification(*, session_title):
+    return await asyncio.to_thread(_common.stopped_process_notification, session_title=session_title)
+
+
 def _hook_surface():
     """THE plugin's hook surface: (name, handler) pairs. One source for both the
     register() gate below and the structural test's expected count
@@ -5722,7 +5727,8 @@ def _hook_surface():
             ("pre_llm_call", _card_enforcement._pre_llm_call),
             ("transform_llm_output", _card_enforcement._card_hook),
             ("post_gateway_admission", _admission_handler),
-            ("pre_gateway_dispatch", _dispatch_witness)) + tuple(_orphan_watch.HOOKS.items())
+            ("pre_gateway_dispatch", _dispatch_witness),
+            ("pre_process_notification", _stopped_process_notification)) + tuple(_orphan_watch.HOOKS.items())
 
 # The card ledger's three hooks: registered at literal, allow-list-gated sites in register().
 _CARD_HOOKS = ("post_tool_call", "pre_llm_call", "transform_llm_output")

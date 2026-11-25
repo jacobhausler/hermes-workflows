@@ -802,11 +802,13 @@ def emit(line):
 # gateway-log match).
 SPAWN_LEDGER_PURPOSE = "workflow-runner"
 
-def ledger_row(meta_or_run, role, pid, node=None, index=None, skey=None):
+def ledger_row(meta_or_run, role, pid, node=None, index=None, skey=None, started_ns=None):
     run = meta_or_run.get("_run") if isinstance(meta_or_run, dict) else meta_or_run
     row = {"ts": now(), "pid": pid, "role": role,
            "node": node, "index": index, "skey": skey,
            "purpose": SPAWN_LEDGER_PURPOSE}
+    if started_ns is not None:
+        row["started_ns"] = started_ns
     try:
         with open(Path(run) / "spawn-ledger.jsonl", "a") as f:
             f.write(json.dumps(row, ensure_ascii=False) + "\n")
@@ -9316,7 +9318,7 @@ def run_child(meta, node, byid, goal, context, schema, attempt_note="", steering
         except Exception as e:
             log(run, "spawn.record.error", node=node["id"], error=f"{type(e).__name__}: {e}")
         # #8 spawn-ledger: the child is legible from the moment its spawn record is.
-        ledger_row(meta, "child", proc.pid, node=node["id"], index=index, skey=skey)
+        ledger_row(meta, "child", proc.pid, node=node["id"], index=index, skey=skey, started_ns=started_ns)
         evd = {"log_path": str(lp), "prompt_path": str(pp), "pid": proc.pid,
                "spawn_cmd": spawn_cmd, "started": started_iso, "started_ns": started_ns,
                "spawn": spawn_no, **route}
@@ -12872,7 +12874,7 @@ def main(run_id):
             # the two leaves the marker for the next admitted runner to
             # re-consume — the duplicate-run.stopped shape is unchanged from
             # the old kill-after-unlink window.
-            log(run, "run.stopped")
+            log(run, "run.stopped", stopped_ns=time.time_ns())
             emit(f"WORKFLOW_STOPPED {run_id}")
             try: (run / "stop.request").unlink()
             except OSError: pass

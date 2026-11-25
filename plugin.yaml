@@ -23,6 +23,7 @@ provides_hooks:
   - transform_llm_output
   - post_gateway_admission
   - pre_gateway_dispatch
+  - pre_process_notification # optional on core versions that expose the producer admission hook
   - on_session_end
   - on_session_finalize
   - agent_loop_stopped

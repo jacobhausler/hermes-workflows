@@ -583,6 +583,67 @@ def launch_runs_root():
     return Path(os.environ.get("HERMES_HOME") or (Path.home() / ".hermes")) / "workflows"
 
 
+def _notification_rows(path):
+    try:
+        with path.open(encoding="utf-8", errors="replace") as file:
+            for line in file:
+                try:
+                    row = json.loads(line)
+                except ValueError:
+                    continue  # concurrent append or torn record is not ownership proof
+                if isinstance(row, dict):
+                    yield row
+    except OSError:
+        return
+
+
+def _notification_epoch(stamp):
+    try:
+        when = datetime.fromisoformat(stamp)
+        return when.timestamp() if when.tzinfo is not None else None
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+def stopped_process_notification(*, session_title):
+    """Drop producer wakes to a worker dispatched before its workflow's stop.
+
+    Titles are editable: the run's own spawn ledger must corroborate the full
+    worker key. Stop history survives runner replacement; a fresh dispatch after
+    an explicit resume gets a new key. Human input does not pass this hook.
+    """
+    match = re.fullmatch(r"(wf:([A-Za-z0-9_-][A-Za-z0-9_.-]*):[^:]+(?::\d+)?:[0-9a-f]{8}\.[0-9a-f]{6})#a\d+",
+                         session_title)
+    if not match:
+        return None
+    skey, run_id = match.groups()
+    roots = (runs_root(), launch_runs_root(), hermes_root() / "workflows")
+    for root in dict.fromkeys(roots):
+        run = root / run_id
+        dispatch = next((row for row in _notification_rows(run / "spawn-ledger.jsonl")
+                         if row.get("purpose") == "workflow-runner" and row.get("role") == "child"
+                         and row.get("skey") == skey), None)
+        if dispatch is None:
+            continue
+        if (run / "stop.request").exists():
+            return {"action": "drop"}
+        launched = _notification_epoch(dispatch.get("ts"))
+        launched_ns = dispatch.get("started_ns")
+        for row in _notification_rows(run / "events.jsonl"):
+            if row.get("event") != "run.stopped":
+                continue
+            stopped_ns = row.get("stopped_ns")
+            if type(launched_ns) is int and type(stopped_ns) is int:
+                if stopped_ns >= launched_ns:
+                    return {"action": "drop"}
+                continue
+            stopped = _notification_epoch(row.get("ts"))
+            if stopped is not None and (launched is None or stopped >= launched):
+                return {"action": "drop"}
+        return None
+    return None
+
+
 def find_run(rid):
     """Locate a run dir by id: resolved runs_root() first; legacy launch root only
     for an EXISTING run (pre-fix ids stay resumable, new ids never land there).
