@@ -46,6 +46,11 @@ SOURCE_ONLY_TESTS = {
     # #729 (W8 packaged-test blocker): the bench-env isolation spec imports
     # the source-only driver — it must stay source-only like its siblings.
     "tests/test_proof_bench_env.mjs",
+    # bd_2026-11-13-4fy (wave-B review BLOCKER): the retention spec imports
+    # the source-only driver (and its CLI leg executes it) — the equality
+    # pin refuses a one-sided edit; the packaged run died
+    # ERR_MODULE_NOT_FOUND on capture.mjs before this row.
+    "tests/test_bench_retention_4fy.mjs",
 }
 # A shipped test that loads/executes `<root> / "scripts" / "<file>"` needs that file in the ZIP.
 SCRIPT_REF = re.compile(r'(?:ROOT|BUILD)\s*/\s*"scripts"\s*/\s*"([^"]+)"|ROOT\s*/\s*"scripts/([^"]+)"')
