@@ -17,9 +17,12 @@
  *   - collapsed: ONE slim single-line row `[chevron] N running workflows` —
  *     numeral + label, muted secondary text (CSS var), 1px low-contrast
  *     border, ~4-6px above the composer. Theme-safe inline styles only.
- *   - expanded: one THICK row per RUNNING run — status chip, name + lane_key,
- *     x/y + mini progress bar ('?' when absent, never 0/0), current node,
- *     gate-question snippet when held, elapsed, token chip. Ordering is THE
+ *   - expanded: one THICK row per RUNNING run — status chip, INSTANCE LABEL
+ *     FIRST (l8i displayTitle: the lane_key human segment, else the
+ *     description's first clause, else the name), the demoted template badge,
+ *     the full lane_key chip, x/y + mini progress bar ('?' when absent,
+ *     never 0/0), current node, gate-question snippet when held, elapsed,
+ *     token chip. Ordering is THE
  *     SAME comparator as splitRuns: held first, then the rest by started desc
  *     (asserted as trayLiveModel order == splitRuns active order on one
  *     shared ledger). Row click accordion-expands the shared MiniGraph;
@@ -33,6 +36,13 @@
  *    tests/test_session_tray.mjs asserts the same trees and the same ordering
  *    on one shared fake ledger, so this file is design documentation that can
  *    no longer lie.
+ *  - 2.0 PARITY NOTE (bd_2026-11-13-74u; ui2 mirror decision: refresh the
+ *    documentation, no second runtime — FINAL.md "Mirror decision"). The l8i
+ *    title chain (#728: instance label first, template demoted) is carried
+ *    below as displayTitle/templateTag mirrors, so the note no longer teaches
+ *    the pre-l8i name-first row. plugin.js remains the ONLY live surface;
+ *    this file stays import-free and tests/test_session_tray.mjs §8-9
+ *    (including the labeled-run tree parity case) is the leash.
  *  - The REAL integration lives in desktop/plugin.js: SessionStrip is the
  *    mount owner and the tray models + components are exported from there and
  *    exercised by tests/test_run_tray.mjs and tests/test_session_tray.mjs.
@@ -75,6 +85,36 @@ const NODE_TONE = {
   running: { color: 'var(--ui-accent-primary, var(--ui-text-secondary))', borderColor: 'var(--ui-stroke-secondary)' },
   held: { color: 'var(--ui-warning-primary, var(--ui-text-secondary))', borderColor: 'var(--ui-stroke-secondary)' },
   pending: { color: 'var(--ui-text-tertiary)', borderColor: 'var(--ui-stroke-secondary)' },
+}
+
+// MIRROR of plugin.js displayTitle/templateTag (l8i #728, owner axiom
+// 2026-11-24: "the name of a WOF instance describing it is more important
+// than the name of the template"). ONE resolver chain, bodies identical to
+// plugin.js — title := the last human segment of lane_key (after the final
+// '/'), else the description's first clause, else the name; a door-
+// synthesized `start-` segment is machine-derived, so the chain skips it.
+// The template word then renders ONLY as secondary metadata.
+const TITLE_MAX = 64   // one line of room (owner): clip long clauses, never wrap
+
+export function displayTitle(run) {
+  const lane = typeof run?.lane_key === 'string' ? run.lane_key.trim() : ''
+  if (lane) {
+    const seg = lane.slice(lane.lastIndexOf('/') + 1).trim()
+    if (seg && !seg.startsWith('start-')) return seg
+  }
+  const desc = typeof run?.description === 'string' ? run.description.trim() : ''
+  if (desc) {
+    const clause = desc.split(/[.,;\n]/)[0].trim()
+    if (clause) return clause.length > TITLE_MAX ? clause.slice(0, TITLE_MAX - 1) + '…' : clause
+  }
+  return run?.name || run?.id || 'workflow'
+}
+
+/** The template name as secondary metadata — null when the title already IS
+ *  the name (an unlabeled run never prints its own name twice). */
+export function templateTag(run) {
+  const t = typeof run?.name === 'string' && run.name ? run.name : null
+  return t && t !== displayTitle(run) ? t : null
 }
 
 /**
@@ -234,8 +274,9 @@ function trayElapsed(r) {
 const trayBarPct = r => (r?.nodes_done != null && r?.nodes_total != null && r.nodes_total > 0)
   ? `${Math.floor((r.nodes_done / r.nodes_total) * 100)}%` : '0%'
 
-/** One expanded THICK row for a single RUNNING run: status chip, name +
- *  lane_key, x/y + mini progress bar (key 'bar', width = the ratio), current
+/** One expanded THICK row for a single RUNNING run: status chip, instance
+ *  label (displayTitle — l8i chain), demoted template badge, full lane_key
+ *  chip, x/y + mini progress bar (key 'bar', width = the ratio), current
  *  running/held node ('→ id'), gate-question snippet when held, elapsed,
  *  token chip, `open ↗` to the pane. The accordion MiniGraph body is the
  *  caller's (plugin.js renders the shared component for the opened row; the
@@ -262,7 +303,13 @@ export function RunTrayRunRow({ run, open, band, onToggleRow, onOpenPane, gateSl
     onClick: e => { e?.stopPropagation?.(); onToggleRow?.(r.id) },
     children: [
       jsx('span', { style: { color: tone.color }, children: statusLabel(r.status) }, 'chip'),
-      jsx('span', { style: { fontWeight: 600 }, children: r.name || r.id || 'workflow' }, 'name'),
+      jsx('span', { style: { fontWeight: 600 }, children: displayTitle(r) }, 'name'),
+      // l8i: the template word is secondary metadata — muted, after the
+      // (also-secondary) lane chip; the full lane_key chip stays so a
+      // team-prefixed key reads whole next to its short title segment.
+      templateTag(r)
+        ? jsx('span', { style: { opacity: 0.55 }, title: `template ${templateTag(r)}`, children: templateTag(r) }, 'tmpl')
+        : null,
       r.lane_key ? jsx('span', { style: { opacity: 0.7 }, children: r.lane_key }, 'lane') : null,
       // x/y rides the read model's counts, '?' when absent — never 0/N; the
       // mini bar beside it SPEAKS the ratio (key 'bar', width = pct).

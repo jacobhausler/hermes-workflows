@@ -151,3 +151,13 @@ No other clause needed correction.
   exact-gate View identity and focus restoration included. API-door leg:
   `tests/test_gate_answer_flows_00e46adb.py` (invalidate-before-read,
   `_ui:true` read-back, duplicate/stale refusal, zero resume events).
+- 2.0 re-pin (bd_2026-11-13-74u, head `a6fd2020`): the catalog PR body's
+  rule-8 line was STILL teaching the retired submit/insertText contract
+  after this section retired it — replaced here with the same recording
+  contract this section states. Grep at this head: zero `nudgeOwner`, zero
+  `composer.submit`, zero `insertText` in `desktop/plugin.js`; the receipt
+  label `View exact gate` and the `_release_core(ui=True)` note read live at
+  `desktop/plugin.js:1744,1780,1852`. The real-app proof of the receipt
+  surface is the #724 gate-receipt capture (`c0a5da6b`,
+  `tests/proof-harness/captured/bd_2026-11-13-qri/`) — pre-#716 frames show
+  the retired nudge and are historical receipts, not current acceptance.

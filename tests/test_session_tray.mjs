@@ -288,7 +288,7 @@ assert.match(src, /composerAreas\?\.tray \?\? composerAreas\?\.underside \?\? co
   assert.doesNotMatch(src, /import\s[^\n]*runtray/, 'plugin.js never imports runtray.mjs')
   for (const name of ['trayScoping', 'trayModel', 'trayLiveModel', 'trayRunningLabel',
     'trayAggregateLabel', 'trayRecap', 'ackFinished', 'toggleTray', 'flipChevron',
-    'RunTrayRow', 'RunTrayRunRow', 'RunTray']) {
+    'displayTitle', 'templateTag', 'RunTrayRow', 'RunTrayRunRow', 'RunTray']) {
     assert.equal(typeof mirror[name], 'function', `mirror exports ${name} as a real body (never a throwing shell)`)
   }
   // Mirror pure models agree with plugin.js on the SAME fake ledger.
@@ -323,6 +323,31 @@ assert.match(src, /composerAreas\?\.tray \?\? composerAreas\?\.underside \?\? co
   const thick = mirror.RunTrayRunRow({ run: mk('b1', 'running', 'S1', { nodes_done: 2, nodes_total: 5 }), band: 'building', open: false })
   assert.ok(thick, 'mirror RunTrayRunRow renders a real body')
   assert.match(textOf(thick), /2\/5/, 'mirror thick row shows node progress')
+  // l8i parity (bd_2026-11-13-74u): a LABELED run must render the SAME
+  // instance-label-first tree through both surfaces. The unlabeled ledger
+  // above hides the #728 chain (displayTitle falls back to run.name), so
+  // this case pins it with a lane_key whose human segment differs from the
+  // template name — behavior through the renderers, not source text.
+  const labeled = mk('run-7f3', 'running', 'S1', {
+    name: 'approve-publish', lane_key: 'crew/build-wave-b',
+    description: 'Audit the disclosure set, then stop teaching the nudge',
+    nodes_done: 1, nodes_total: 4,
+  })
+  const realRow = mod.RunTrayRunRow({ run: labeled, open: false })
+  const mirRow = mirror.RunTrayRunRow({ run: labeled, open: false })
+  assert.ok(mirRow, 'mirror renders the labeled thick row too')
+  assert.deepEqual(norm(mirRow), norm(realRow),
+    'mirror thick row mirrors the l8i title chain (instance label first, template demoted)')
+  const lTxt = textOf(mirRow)
+  assert.match(lTxt, /build-wave-b/, 'the lane label leads the mirror row')
+  assert.doesNotMatch(lTxt, /start-/, 'a door-synthesized lane segment is machine-derived, never a title')
+  assert.match(lTxt, /approve-publish/, 'the demoted template still rides the mirror row as secondary metadata')
+  assert.equal(mirror.displayTitle(labeled), mod.displayTitle(labeled), 'mirror displayTitle body matches')
+  assert.equal(mirror.templateTag(labeled), mod.templateTag(labeled), 'mirror templateTag body matches')
+  // The description rung: a lane-less labeled run titles from its first clause.
+  const descOnly = mk('run-9a1', 'running', 'S1', { description: 'Watch the drop, buy at target' })
+  assert.equal(mirror.displayTitle(descOnly), mod.displayTitle(descOnly),
+    'mirror displayTitle mirrors the description-clause rung')
 }
 
 // -- 9. review #233 (zap @7e1cce8): blank-sid root parity + rail release surface -----
