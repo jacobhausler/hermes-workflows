@@ -28,9 +28,9 @@ const constGrab = name => {
   return src.slice(i, j)
 }
 const code = [grab('fanItems'), grab('itemLabel'), grab('renderGoal'), constGrab('fanCounts'), constGrab('fanSummary'),
-  grab('fanThreshold'), grab('fanOpenFor'), grab('fanPickedRow'), grab('fanProjection')].join('\n')
-const { fanItems, fanCounts, fanSummary, fanThreshold, fanOpenFor, fanPickedRow, fanProjection } =
-  new Function(`${code}; return { fanItems, fanCounts, fanSummary, fanThreshold, fanOpenFor, fanPickedRow, fanProjection }`)()
+  grab('fanThreshold'), grab('fanOpenFor'), grab('fanPickedRow'), grab('fanProjection'), grab('fanPageProjection')].join('\n')
+const { fanItems, fanCounts, fanSummary, fanThreshold, fanOpenFor, fanPickedRow, fanProjection, fanPageProjection } =
+  new Function(`${code}; return { fanItems, fanCounts, fanSummary, fanThreshold, fanOpenFor, fanPickedRow, fanProjection, fanPageProjection }`)()
 
 let fails = 0
 const check = (label, cond, detail = '') => { console.log((cond ? 'PASS ' : 'FAIL ') + label + (cond ? '' : `  [${detail}]`)); if (!cond) fails++ }
@@ -165,6 +165,38 @@ const load = run => {
   const liveRows = fanItems(def, { status: 'running', output: null }, [{ node: 'synthmf1', event: 'item.finished', index: 0, status: 'done' }])
   check('projection law: live-event rows never project (recorded-only)',
     fanProjection({ id: 'r', graph: { nodes: [def] }, nodes: {} }, { synthmf1: liveRows }).nodes.length === 1)
+}
+// 9b. fanPageProjection: the page canvas projects COMMITTED fans at rest —
+//     the Council law (10 identities, 14 projected dependencies) must hold
+//     WITHOUT opening the fan, and a live fan must pass through unchanged
+//     (items stay chips under the stack; the page never fabricates children).
+{
+  const def = { id: 'critics', type: 'agent', after: ['charter'],
+                fanout: { goal: 'c {index}', items: Array.from({ length: 6 }, (_, i) => ({ id: `c${i}` })) } }
+  const st = { status: 'done', output: { all_results:
+    Array.from({ length: 6 }, (_, i) => ({ status: 'done', output: { r: i } })) } }
+  const adjudicate = { id: 'adjudicate', type: 'agent', after: ['critics'] }
+  const report = { id: 'report', type: 'agent', after: ['adjudicate'] }
+  const detail = { id: 'wave6', graph: { nodes: [{ id: 'charter', type: 'agent' }, def, adjudicate, report] },
+                   nodes: { charter: { status: 'done' }, critics: st, adjudicate: { status: 'done' }, report: { status: 'done' } },
+                   events: [] }
+  const proj = fanPageProjection(detail)
+  check('page projection: ten node identities at rest', proj.nodes.length === 10, proj.nodes.map(n => n.id).join(','))
+  const deps = proj.nodes.reduce((k, n) => k + (n.after?.length || 0), 0)
+  check('page projection: fourteen projected dependencies (Council law)', deps === 14, String(deps))
+  check('page projection: parent keeps the aggregate, child carries its own state',
+    proj.states.critics?.status === 'done' && proj.states['critics.0']?.status === 'done' && proj.states['critics.5']?.status === 'done')
+  const liveDetail = { ...detail, nodes: { charter: { status: 'done' }, critics: { status: 'running' } } }
+  const passthru = fanPageProjection(liveDetail)
+  check('page projection: a live fan (no committed rows) passes through unchanged',
+    passthru.nodes.length === 4 && passthru.nodes.every(n => !String(n.id).includes('.')), passthru.nodes.map(n => n.id).join(','))
+  check('page projection: MF1 child raw status survives at the page mount too',
+    (() => {
+      const mst = { status: 'done', output: { all_results: [{ status: 'done' }, { status: 'partial', error_class: 'cap_exhausted' }] } }
+      const m = fanPageProjection({ id: 'r', graph: { nodes: [{ id: 'seed', type: 'echo' }, def, adjudicate] },
+                                    nodes: { seed: { status: 'done' }, critics: mst, adjudicate: { status: 'pending' } }, events: [] })
+      return m.states['critics.1']?.status === 'partial' && m.states.critics?.status === 'done'
+    })())
 }
 // 10. exact ended census: cancelled vs failed separated, every row counted
 //     exactly once, and fanSummary spelling each non-zero bucket's own word.

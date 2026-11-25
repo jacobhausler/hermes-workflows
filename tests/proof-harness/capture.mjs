@@ -1559,9 +1559,11 @@ async function main() {
           if (!painted) await sleep(500);
         }
         if (painted) {
-          // Selection predicate BEFORE expansion: the static route-identity
-          // layer already carries the council's 14 route groups; expansion
-          // only adds the ItemCards/pills the post-03 measure counts.
+          // Selection predicate BEFORE expansion: GraphView runs
+          // fanPageProjection at rest (committed fan children project without
+          // a click — the only >= 14-route-group graph on this page), so the
+          // measure proves WHICH detail is open. Expansion only adds the
+          // ItemCards the 03 shot shows.
           pageM = await measureGraphSvg(cdp, 14, { dieOnErr: false });
           if (!(pageM && pageM.err)) break;
         }

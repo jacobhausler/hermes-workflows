@@ -290,6 +290,28 @@ export function fanProjection(detail, statesByNode) {
   return { nodes: [...nodes, ...childNodes], states, childRows: statesByNode }
 }
 
+// RC ch4 (page canvas): the SAME projection law MiniGraph runs when a fan is
+// opened drives the run page whenever the fan's child RECORDS are committed —
+// the terminal truth of a finished run needs no click to be the graph it is
+// (Council law: 10 identities, 14 projected dependencies). Live fans have no
+// committed rows, so the graph passes through unchanged and items stay chips
+// under the stack. MF1: children carry their RAW row status (never the
+// parent's aggregate); the parent keeps its own state. Pure + exported so the
+// decision is pinned without a DOM; GraphView feeds the result through the
+// incumbent bandRows/router layout — no arbitrary-DAG claim.
+export function fanPageProjection(detail) {
+  const graph = detail?.graph?.nodes || []
+  const statesByNode = {}
+  for (const def of graph) {
+    if (!def.fanout) continue
+    const rows = fanItems(def, (detail.nodes || {})[def.id], detail.events)
+    if (rows?.some(r => r.recorded)) statesByNode[def.id] = rows
+  }
+  return Object.keys(statesByNode).length
+    ? fanProjection(detail, statesByNode)
+    : { nodes: graph, states: detail?.nodes || {}, childRows: new Map() }
+}
+
 // ---- vitals: dense spend + liveness ----------------------------------------------
 // Backend joins each child's state.db sessions row (title = wf:<run>:<node>[:<i>]:<efp8>)
 // into node.metrics / node.item_metrics / run.metrics. Liveness is deterministic: while a
@@ -2479,8 +2501,13 @@ export function GraphView({ detail }) {
   const fanPicked = useValue($fanItem)
   const expanded = useValue($fanExpanded)
   const canvasRef = useRef(null)
-  const nodes = detail.graph?.nodes || []
-  const states = detail.nodes || {}
+  // RC ch4 (page canvas mount): committed fan children project AT REST —
+  // the same fanProjection law MiniGraph runs when a pill opens. A terminal
+  // run's truth needs no click to be the graph it is (Council: 10 identities,
+  // 14 projected dependencies); live fans pass through unchanged.
+  const proj = fanPageProjection(detail)
+  const nodes = proj.nodes
+  const states = proj.states
   const isExpanded = def => !!expanded && expanded.runId === detail.id && expanded.nodeId === def.id
   // While expanded, item statuses move mid-run: re-measure so edges track the
   // growing item column (the item-keyed render below keeps scroll position).
