@@ -60,8 +60,16 @@ const jsxs = jsx
 const vmBlock = `const EDGE_TONE = { pending: 'P', running: 'R', held: 'H', failed: 'F' }\n${constGrab('statusLabel')}\n${src.match(/\/\/ BEGIN shared-view-model\n([\s\S]*?)\/\/ END shared-view-model/)[1]}`
 // 2.0 (bd_2026-11-13-1bm): the retired inlineHeader's laws ride the RC
 // cardModel — evaluate the REAL exported model over the shared view-model.
+// l8i: cardModel titles through the real displayTitle/templateTag — every
+// cardModel sandbox in this file evaluates the exported resolvers (same
+// shared-source law as grab('parseTime')).
+const l8iResolver = [
+  src.match(/const TITLE_MAX = [^\n]+/)[0],
+  src.match(/export function displayTitle[\s\S]*?\n}/)[0].replace('export ', ''),
+  src.match(/export function templateTag[\s\S]*?\n}/)[0].replace('export ', ''),
+].join('\n')
 const evalCardModel = terminal => new Function('fmtDur', 'TERMINAL', 'NODE_TONE',
-  `${vmBlock}\n${grab('parseTime')}\n${grab('cardModel')};\nreturn cardModel`)(
+  `${vmBlock}\n${l8iResolver}\n${grab('parseTime')}\n${grab('cardModel')};\nreturn cardModel`)(
   n => `${Math.round(n / 1000)}s`, terminal,
   { pending: 'P', running: 'R', held: 'H', failed: 'F', done: 'D', stopped: 'S', skipped: 'K' })
 const walk = node => Array.isArray(node)

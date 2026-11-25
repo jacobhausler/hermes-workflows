@@ -137,9 +137,17 @@ const { Vitals } = new Function('EDGE_TONE', 'METER_TONE', 'jsx', 'jsxs', 'Fragm
 }
 
 // -- 5. real cardModel: run clock vs child clock + activity words -------------------
+// l8i: cardModel resolves titles through the exported resolvers — the
+// sandboxes below evaluate the REAL displayTitle/templateTag too (same
+// shared-source law as grab('parseTime')).
+const resolver = [
+  src.match(/const TITLE_MAX = [^\n]+/)[0],
+  src.match(/export function displayTitle[\s\S]*?\n}/)[0].replace('export ', ''),
+  src.match(/export function templateTag[\s\S]*?\n}/)[0].replace('export ', ''),
+].join('\n')
 {
   const cardModel = new Function('fmtDur', 'TERMINAL', 'NODE_TONE',
-    `const EDGE_TONE = ${JSON.stringify(EDGE_TONE)}\n${PRELUDE}\n${grab('parseTime')}\n${grab('cardModel')};\nreturn cardModel`)(
+    `const EDGE_TONE = ${JSON.stringify(EDGE_TONE)}\n${PRELUDE}\n${resolver}\n${grab('parseTime')}\n${grab('cardModel')};\nreturn cardModel`)(
     ms => `${Math.round(ms / 1000)}s`, new Set(['done', 'failed', 'stopped']), { pending: {} })
   const now = Date.now() / 1000
   const ago = s => new Date(Date.now() - s * 1000).toISOString()
@@ -170,7 +178,7 @@ const { Vitals } = new Function('EDGE_TONE', 'METER_TONE', 'jsx', 'jsxs', 'Fragm
 // -- 6. real cardModel: public words, stale, clock, honest absence ------------------
 {
   const cardModel = new Function('fmtDur', 'TERMINAL', 'NODE_TONE',
-    `const EDGE_TONE = ${JSON.stringify(EDGE_TONE)}\n${PRELUDE}\n${grab('parseTime')}\n${grab('cardModel')};\nreturn cardModel`)(
+    `const EDGE_TONE = ${JSON.stringify(EDGE_TONE)}\n${PRELUDE}\n${resolver}\n${grab('parseTime')}\n${grab('cardModel')};\nreturn cardModel`)(
     ms => `${Math.round(ms / 1000)}s`, new Set(['done', 'failed', 'stopped']), { pending: {} })
   const done = cardModel({ id: 'w', status: 'done', nodes_done: 4, nodes_total: 4,
     started: '2026-01-01T00:00:00Z', updated: '2026-01-01T00:02:00Z' })

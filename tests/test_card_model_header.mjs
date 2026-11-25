@@ -18,6 +18,13 @@ const vm = source.match(/\/\/ BEGIN shared-view-model\n([\s\S]*?)\/\/ END shared
 assert.ok(vm, 'plugin.js ships the shared lifecycle + numeric view-model block')
 const statusLine = source.match(/const statusLabel = [^\n]+/)
 assert.ok(statusLine, 'statusLabel law present')
+// l8i: cardModel titles through the REAL displayTitle/templateTag — the
+// sandbox evaluates the exported resolvers too (shared-source law).
+const resolver = [
+  source.match(/const TITLE_MAX = [^\n]+/)[0],
+  source.match(/export function displayTitle[\s\S]*?\n}/)[0].replace('export ', ''),
+  source.match(/export function templateTag[\s\S]*?\n}/)[0].replace('export ', ''),
+].join('\n')
 const grab = name => {
   const i = source.indexOf(`function ${name}(`)
   assert.ok(i >= 0, `plugin.js must define ${name}`)
@@ -26,7 +33,7 @@ const grab = name => {
   return source.slice(i, j + 1)
 }
 const cardModel = new Function('fmtDur', 'TERMINAL', 'NODE_TONE',
-  `const EDGE_TONE = { pending: 'P', running: 'R', held: 'H', failed: 'F' }\n${statusLine[0]}\n${vm[1]}\n${grab('parseTime')}\n${grab('cardModel')};\nreturn cardModel`)(
+  `const EDGE_TONE = { pending: 'P', running: 'R', held: 'H', failed: 'F' }\n${statusLine[0]}\n${vm[1]}\n${resolver}\n${grab('parseTime')}\n${grab('cardModel')};\nreturn cardModel`)(
   n => `${Math.round(n / 1000)}s`, new Set(['done', 'failed', 'stopped']),
   { pending: 'P', running: 'R', held: 'H', failed: 'F', done: 'D' })
 const ago = s => new Date(Date.now() - s * 1000).toISOString()
@@ -106,4 +113,21 @@ assert.ok(cardModel({ id: 'x', status: 'done', nodes_done: 1, nodes_total: 1,
   assert.ok(!/role:\s*'link'/.test(body), 'no role=link anywhere (one click, one effect)')
 }
 
-console.log('ALL PASS: RC card model rows, lifecycle words, numeric laws, cancelled-neutral census, retired inlineHeader, disclosure DOM laws')
+// l8i (instance-label-first, bd_2026-11-13-l8i) — the law SURVIVES the
+// renderer swap: a LABELED run titles with the instance label; the template
+// is demoted to a model slot + hover + the lead word of the expanded row,
+// never the identity baseline; an unlabeled run never prints its name twice.
+{
+  const labeled = cardModel({ id: 'r', name: 'tpl', lane_key: 'ship20W2c', status: 'pending',
+    nodes_done: 0, nodes_total: 1 })
+  assert.equal(labeled.name, 'ship20W2c', 'the identity baseline carries the resolved label, not the template')
+  assert.equal(labeled.template, 'tpl', 'the demoted template rides the model as secondary metadata')
+  assert.equal(labeled.metrics[0], 'template tpl', 'the expanded word row leads with the labelled template')
+  assert.equal(cardModel({ id: 'r', name: 'tpl', status: 'pending' }).template, null,
+    'unlabeled run: title IS the name — the template nulls, never printed twice')
+  const body = source.slice(source.indexOf('function DirectiveBody'))
+  assert.match(body, /title: cm\.template \? `template \$\{cm\.template\}` : undefined/,
+    'the compact pill hover is where the demoted template rides')
+}
+
+console.log('ALL PASS: RC card model rows, lifecycle words, numeric laws, cancelled-neutral census, retired inlineHeader, l8i label-first demotion, disclosure DOM laws')

@@ -19,7 +19,8 @@
      "name": "held_gate_run",
      "kind": "engine_seed",
      "method": "door_run",
-     "note": "echo+gate+echo graph — full gate UI (held pill, answer receipt) at zero tokens; the proven lookbook shape (run 20261122-113636-lookbook-canvas-held). The tray_row seed relaunches THIS SAME graph with WF_OWNER_SESSION=<one-shot session id>: the composer strip renders only the focused chat's owned runs (ownedRuns law, plugin.js:728), so a blank-owner run is pane-only. Both runs are stopped through the door at teardown.",
+     "lane_key": "ship20W2c",
+     "note": "echo+gate+echo graph — full gate UI (held pill, answer receipt) at zero tokens; the proven lookbook shape (run 20261122-113636-lookbook-canvas-held). The tray_row seed relaunches THIS SAME graph with WF_OWNER_SESSION=<one-shot session id>: the composer strip renders only the focused chat's owned runs (ownedRuns law, plugin.js:728), so a blank-owner run is pane-only. Both runs are stopped through the door at teardown. l8i: the door launch carries lane_key=ship20W2c, so the captured pill/tray/pane prove the instance-label-first title law — label 'ship20W2c' rendered, template 'ui2-proof-held' demoted to secondary metadata.",
      "graph": {
       "name": "ui2-proof-held",
       "nodes": [

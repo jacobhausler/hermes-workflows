@@ -124,9 +124,15 @@ const { ItemChips } = new Function('jsx', 'jsxs', '$fanItem', 'Dot', 'EDGE_TONE'
   const oend = src.indexOf('\n}', oi)
   assert.ok(oend > oi, 'originLabel body located')
   const originLabel = new Function(`${src.slice(oi, oend + 2).replace('export function', 'function')}; return originLabel`)()
+  // l8i: the record header titles through the real displayTitle/templateTag.
+  const l8iResolver = [
+    src.match(/const TITLE_MAX = [^\n]+/)[0],
+    src.match(/export function displayTitle[\s\S]*?\n}/)[0].replace('export ', ''),
+    src.match(/export function templateTag[\s\S]*?\n}/)[0].replace('export ', ''),
+  ].join('\n')
   const { WorkflowsPage } = new Function('useQuery', 'useValue', '$selRun', 'listQuery', 'runQuery', 'box', 'Dot', 'statusLabel',
     'Vitals', 'Badge', 'GraphView', 'Drawer', 'Timeline', 'EmptyState', 'ScrollArea', 'RunRow', 'Fragment', 'jsx', 'jsxs', 'runHeaderModel', 'PolishStyles', 'originLabel', 'runStatusLabel',
-    `${grab('WorkflowsPage')}; return { WorkflowsPage }`)(
+    `${l8iResolver}\n${grab('WorkflowsPage')}; return { WorkflowsPage }`)(
     q => (q.queryKey?.[2] === 'run' ? { data: detail } : { data: { runs: [{ id: 'r1', status: 'running' }] } }),
     () => null, { get() { return null }, set() {} }, () => ({ queryKey: ['x', 'runs'] }), id => ({ queryKey: ['x', 'run', id] }),
     (t, ...k) => jsx('div', { children: k }), 'Dot', s => s, 'Vitals', 'Badge', 'GraphView', 'Drawer', 'Timeline',

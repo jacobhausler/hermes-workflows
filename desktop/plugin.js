@@ -643,6 +643,46 @@ function DirectiveCard({ id }) {
   return jsx(DirectiveBody, { id })
 }
 
+// -- instance-label-first display title (l8i; owner axiom 2026-11-24: "the
+// name of a WOF instance describing it is more important than the name of the
+// template"). ONE resolver, every title surface the 2.0 card keeps (in-chat
+// pill identity row, tray accordion row, fleet landing row, rail, record
+// header): title := the last human segment of lane_key (after the final '/'),
+// else the description's first clause, else run.name. Door-synthesized keys
+// (wfstart.lane_key: `start-<template-slug>`, team-prefix optional) ARE the
+// template re-promoted through the back door — a `start-` segment is
+// machine-derived, not human, so the chain skips it. The template word then
+// renders ONLY as secondary metadata (templateTag): a hover/detail badge on
+// the compact surfaces; the fleet row has width and keeps a template COLUMN.
+// bd_2026-11-13-1bm: the l8i law SURVIVES the renderer swap — the RC
+// cardModel below titles with displayTitle and carries templateTag as its
+// `template` slot (identity-row hover + first word of the expanded row, the
+// exact two surfaces the 1.4-era pill/half-row renderer carried it on); those
+// legacy renderers are retired with the rest of the old card.
+const TITLE_MAX = 64   // one line of room (owner): clip long clauses, never wrap
+
+export function displayTitle(run) {
+  const lane = typeof run?.lane_key === 'string' ? run.lane_key.trim() : ''
+  if (lane) {
+    const seg = lane.slice(lane.lastIndexOf('/') + 1).trim()
+    if (seg && !seg.startsWith('start-')) return seg
+  }
+  const desc = typeof run?.description === 'string' ? run.description.trim() : ''
+  if (desc) {
+    const clause = desc.split(/[.,;\n]/)[0].trim()
+    if (clause) return clause.length > TITLE_MAX ? clause.slice(0, TITLE_MAX - 1) + '…' : clause
+  }
+  return run?.name || run?.id || 'workflow'
+}
+
+/** The template name as secondary metadata — null when the title already IS
+ *  the name (an unlabeled run never prints its own name twice), else the
+ *  demoted template. */
+export function templateTag(run) {
+  const t = typeof run?.name === 'string' && run.name ? run.name : null
+  return t && t !== displayTitle(run) ? t : null
+}
+
 // RC in-chat card model (INCHAT §1/§2, bd_2026-11-13-1bm), pure so node can
 // test it without a DOM. It answers the pill's TWO semantic baselines and the
 // expanded word row from ONE record — the pill and the expansion can never
@@ -669,6 +709,10 @@ function DirectiveCard({ id }) {
 //    (parity is a law; a forked palette is the bug class).
 export function cardModel(run, stale = false) {
   const m = run?.metrics || null
+  // l8i: the identity baseline titles with the ONE resolver; the demoted
+  // template is secondary metadata — a hover on the compact pill and the
+  // first word of the expanded row, never the headline.
+  const tmpl = templateTag(run)
   const start = parseTime(run?.started)
   const end = TERMINAL.has(run?.status) ? parseTime(run?.updated) : Date.now()
   const wallMs = start && end > start ? end - start : null
@@ -707,8 +751,12 @@ export function cardModel(run, stale = false) {
   if (m && m.live > 0 && run?.status === 'running') {
     metrics.push(`LIVE ${exactCount(m.live)}`, idleCell(idleS(m)))
   }
+  // l8i: the demoted template leads the expanded word row — secondary
+  // metadata with its own label, never the headline word.
+  if (tmpl) metrics.unshift(`template ${tmpl}`)
   return {
-    name: run?.name || run?.id || 'workflow',
+    name: displayTitle(run),
+    template: tmpl,
     statusWord: runStatusLabel(run, stale),
     tone: NODE_TONE[run?.status] || NODE_TONE.pending,
     census, metrics,
@@ -774,7 +822,10 @@ function DirectiveBody({ id }) {
         style: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '2px 8px', minWidth: 0 },
         children: [
           jsx(Dot, { status: data.status }),
-          jsx('span', { className: 'text-xs font-medium text-(--ui-text-secondary)', children: cm.name }),
+          // l8i: hover on the compact pill is where the demoted template
+          // rides — secondary metadata, never the headline word.
+          jsx('span', { className: 'text-xs font-medium text-(--ui-text-secondary)',
+            title: cm.template ? `template ${cm.template}` : undefined, children: cm.name }),
           jsx('span', { className: 'text-xs text-(--ui-text-tertiary)', children: cm.statusWord }),
           jsxs('span', {
             style: { marginLeft: 'auto', display: 'inline-flex', gap: 4 },
@@ -1143,7 +1194,8 @@ export function railModel(ownedRunsList) {
   return {
     pills: active.slice(0, 3).map(r => ({
       id: r.id,
-      label: r.name || r.id || 'workflow',
+      // l8i: instance label first — same resolver as the directive pill.
+      label: displayTitle(r),
       status: runStatusLabel(r),
       progress: pillProgress(r),
       held: r.status === 'held',
@@ -1163,7 +1215,11 @@ export function Pill({ run, sid, open, onToggle, suppressGates }) {
   // carries the toggle; GateActions sit beside it, not inside the clickable.
   return jsxs('div', {
     role: 'group',
-    title: `${run.name || run.id} — node strip above the rail`,
+    // l8i: instance label in the tooltip headline; the demoted template rides
+    // behind it as the secondary fact.
+    title: templateTag(run)
+      ? `${displayTitle(run)} (template ${run.name}) — node strip above the rail`
+      : `${displayTitle(run)} — node strip above the rail`,
     // Toggle the mini node-strip (item 4), do NOT navigate: the rail is the
     // glanceable view; the +N overflow and the terminal rows still deep-link.
     // The open state rides as a PROP (no module-global read at render — repo
@@ -1200,7 +1256,7 @@ export function Pill({ run, sid, open, onToggle, suppressGates }) {
         },
         children: [
           jsx(Dot, { status: run.status }),
-          jsx('span', { style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }, children: run.name || run.id || 'workflow' }),
+          jsx('span', { style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }, children: displayTitle(run) }),
           jsx('span', { style: { fontVariantNumeric: 'tabular-nums', opacity: 0.7 }, children: pillProgress(run) }),
         ],
       }, 'label'),
@@ -1426,11 +1482,14 @@ function trayElapsed(r) {
 const trayBarPct = r => (r?.nodes_done != null && r?.nodes_total != null && r.nodes_total > 0)
   ? `${Math.floor((r.nodes_done / r.nodes_total) * 100)}%` : '0%'
 
-/** Per-run chip (design row anatomy). lane_key and token totals have NO
- *  read-model surface today (the door's lane ledger and per-run token rollup
- *  are not exposed on /runs): the chips render ONLY when the run record
- *  carries the field — an absent fact is never fabricated (the rail's '?'
- *  law). The current-node label derives from the nodes map when present.
+/** Per-run chip (design row anatomy). Title is the ONE l8i resolver
+ *  (instance label first — lane_key's human segment, else description, else
+ *  name); the demoted template rides a muted badge beside it. lane_key and
+ *  token totals have NO read-model surface on rows predating the l8i read
+ *  (the door's lane ledger and per-run token rollup are not exposed on
+ *  /runs): the chips render ONLY when the run record carries the field — an
+ *  absent fact is never fabricated (the rail's '?' law). The current-node
+ *  label derives from the nodes map when present.
  *  #230: rows are RUNNING-ONLY — no finished band, no ack × (terminal runs
  *  leave the tray; there is nothing to dismiss). */
 export function RunTrayRunRow({ run, open, onToggleRow, onOpenPane }) {
@@ -1457,7 +1516,13 @@ export function RunTrayRunRow({ run, open, onToggleRow, onOpenPane }) {
     onClick: e => { e?.stopPropagation?.(); onToggleRow?.(r.id) },
     children: [
       jsx('span', { style: { color: tone.color }, children: statusLabel(r.status) }, 'chip'),
-      jsx('span', { style: { fontWeight: 600 }, children: r.name || r.id || 'workflow' }, 'name'),
+      jsx('span', { style: { fontWeight: 600 }, children: displayTitle(r) }, 'name'),
+      // l8i: the template word is secondary metadata — muted, after the
+      // (also-secondary) lane chip; the full lane_key chip stays so a
+      // team-prefixed key reads whole next to its short title segment.
+      templateTag(r)
+        ? jsx('span', { style: { opacity: 0.55 }, title: `template ${templateTag(r)}`, children: templateTag(r) }, 'tmpl')
+        : null,
       r.lane_key ? jsx('span', { style: { opacity: 0.7 }, children: r.lane_key }, 'lane') : null,
       // Node dots are MiniGraph's visual language at row density; the x/y
       // count rides the read model's counts, '?' when absent — never 0/N.
@@ -1684,7 +1749,8 @@ export function SessionStrip() {
               type: 'button', className: 'text-left text-[0.6875rem] text-(--ui-text-tertiary)',
               style: { cursor: 'pointer', background: 'none', border: 'none', padding: 0 },
               onClick: () => openRun(r.id),
-              children: `${r.name || r.id} · ${runStatusLabel(r)} · ${ago(r.updated) || 'unknown'}`
+              // l8i: the fold's row leads with the instance label, same law.
+              children: `${displayTitle(r)} · ${runStatusLabel(r)} · ${ago(r.updated) || 'unknown'}`
             }, r.id)),
             // WF-04 (QA 2026-10-27): the fold lists at most 5 but the label
             // counts ALL N — the hidden rows keep an explicit affordance to
@@ -2916,7 +2982,10 @@ export function WorkflowsPage() {
                 box(
                   'flex items-center gap-2 border-b border-(--ui-stroke-secondary) px-4 py-2',
                   jsx(Dot, { status: d.status }),
-                  box('text-sm font-medium', d.name || d.id),
+                  // l8i: the record page heads with the instance label; the
+                  // demoted template rides a muted kind badge beside it.
+                  box('text-sm font-medium', displayTitle(d)),
+                  templateTag(d) ? jsx('span', { className: 'text-xs text-(--ui-text-tertiary)', title: 'template', children: `template ${templateTag(d)}` }) : null,
                   box('text-xs text-(--ui-text-tertiary)', runStatusLabel(d)),
                   // Agent-first (2026-10-03): the record page names the launching
                   // agent next to the state — the same fact the pane row shows,
@@ -2954,7 +3023,11 @@ function PaneTabTitle() {
   return jsx('span', { children: `WORKFLOWS · ${runningCount(data)}` })
 }
 
-function PaneRow({ run, thisChat }) {
+export function PaneRow({ run, thisChat }) {
+  // l8i (instance-label-first law): the fleet landing row has WIDTH, so it is
+  // the one surface that keeps a template COLUMN — run.name (the template)
+  // renders as a muted column beside the instance label, never as the title.
+  const t = templateTag(run)
   const open = () => {
     $selRun.set(run.id)
     $selNode.set(null)
@@ -2979,7 +3052,11 @@ function PaneRow({ run, thisChat }) {
     title: jsxs('span', {
       className: 'inline-flex min-w-0 items-center gap-1',
       children: [
-        jsx('span', { className: 'truncate', children: run.name || run.id }),
+        jsx('span', { className: 'truncate', children: displayTitle(run) }),
+        // l8i: the template COLUMN (the fleet view has the width for it).
+        // Unlabeled runs resolve to name, so the column prints only when it
+        // is a genuinely SECOND fact (templateTag nulls the duplicate).
+        t ? jsx('span', { className: 'shrink-0 text-[0.6875rem] text-(--ui-text-tertiary)', title: 'template', children: t }) : null,
         // Agent-first (2026-10-03): who launched it, on EVERY row — including
         // the honest word 'unknown' when the read model cannot attribute it
         // (deep review #156 A2: 'originator on every row' is the law; silence
