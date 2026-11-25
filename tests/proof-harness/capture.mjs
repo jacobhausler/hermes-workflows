@@ -1525,7 +1525,18 @@ async function main() {
     shots.push({ surface: 'pane_workflows',
       state: graphIds ? 'runs list: engine-seeded fan + pinned snapshot + synthetic MF1' : 'runs list, seeded held-gate run',
       ...(await shoot(cdp, A.outDir, '01-pane-runs.png', null, await stableColumnText(paneRegion))) });
-    await trustedClick(cdp, paneRowNeedle, { region: paneRegion });
+    // The first row click is a race, not a proof (field-proven 14:28/14:32/15:12
+    // attempts, exit 7): the stableColumnText poll above runs up to 25 s and the
+    // pane's 4 s react-query refresh re-renders the list inside that window, so
+    // the single trustedClick on the council row legitimately misses. In the
+    // graph case the miss is swallowed: the selection loop below is the proof
+    // (the measure IS the selection predicate) and re-clicks the row.
+    // Baseline/gate keep the strict semantics — no loop behind them.
+    try {
+      await trustedClick(cdp, paneRowNeedle, { region: paneRegion });
+    } catch (e) {
+      if (!(graphIds && e instanceof Bail && e.code === EX.capture)) throw e;
+    }
     if (graphIds) {
       // 02 the pinned council's GraphView; 03 its fans expanded: projected
       // child pills (critics.0..5), footer attempt ticks, no ghost rings.
@@ -1538,7 +1549,7 @@ async function main() {
       // one bounded unit that re-clicks the row until the council svg is on
       // screen, and take 02/03 only once selection is proven.
       const selT0 = Date.now();
-      let pageM = null, toggledOk = false;
+      let pageM = null, toggledOk = false, selRecovers = 0;
       for (;;) {
         let painted = false;
         const pT0 = Date.now();
@@ -1554,12 +1565,34 @@ async function main() {
           pageM = await measureGraphSvg(cdp, 14, { dieOnErr: false });
           if (!(pageM && pageM.err)) break;
         }
+        // Attach-drop recovery (field-proven 2026-11-24, crew-wave v10
+        // attempts a1-a9): a gateway ticket-mint storm mid-walk drops the
+        // plugin runtime and the pane column re-renders its intro copy
+        // ("Runtime not ready") — from there no row re-click ever repaints
+        // the GraphView, and the walk dies exit 6 however quiet the box
+        // looked at launch. Recover the same way the pane-row poll does:
+        // re-wait the attach bounded, re-click the WORKFLOWS tab, re-grant
+        // the selection window. Two recoveries max; the loop still decides.
+        const introUp = await cdp.evl(columnTextJS(paneRegion))
+          .then(t => /runtime not ready/i.test(t)).catch(() => false);
+        if (introUp && selRecovers < 2) {
+          selRecovers++;
+          try { await waitConnected(cdp, 15_000); } catch { /* the loop budget decides */ }
+          try { await trustedClick(cdp, 'workflows', { exact: true, ci: true }); } catch { /* tab not painted yet */ }
+          selT0 = Date.now();
+          await sleep(900);
+          continue;
+        }
         if (Date.now() - selT0 > 45_000) {
           try { await shoot(cdp, A.outDir, '00-diagnostic-detail.png'); } catch { /* best effort */ }
           if (!painted) die(EX.api, 'council detail GraphView never painted route paths in the pane');
           die(EX.api, `council detail never became the selection (last: ${JSON.stringify(pageM)}) — diagnostic shot in captures/ if present`);
         }
-        await trustedClick(cdp, paneRowNeedle, { region: paneRegion });
+        // A miss on this re-click is one more failed attempt inside the
+        // selection budget (same refresh race as the first click): the budget
+        // decides, a transient no-match never aborts the walk.
+        try { await trustedClick(cdp, paneRowNeedle, { region: paneRegion }); }
+        catch (e) { if (!(e instanceof Bail && e.code === EX.capture)) throw e; }
         await sleep(900);
       }
       shots.push({ surface: 'pane_workflows', state: 'council GraphView (pinned shelf fixture, no fan interaction)',
