@@ -55,6 +55,7 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { stageCoveragePlugin } from './coverage-fixture.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
@@ -877,8 +878,13 @@ async function main() {
   // proof (same symlinked-dev-checkout shape the desktop-half migration
   // supports — the migration re-syncs the desktop half from this symlink, and
   // it must equal the candidate bytes or the staged re-hash below goes red).
-  fs.symlinkSync(REPO, path.join(B.profile, 'plugins', 'hermes-workflows'));
-  identity.bench.plugins_symlink = REPO;
+  const coverageMarker = A.caseName === 'coverage' ? stageCoveragePlugin(REPO, B.plugins) : null;
+  if (!coverageMarker) {
+    fs.symlinkSync(REPO, B.plugins);
+    identity.bench.plugins_symlink = REPO;
+  } else {
+    identity.bench.coverage_api_fixture = path.join(B.plugins, 'dashboard', 'plugin_api.py');
+  }
   identity.bench.profile = BENCH_PROFILE;
   identity.bench.locks = B.locks;
 
@@ -1311,8 +1317,7 @@ async function main() {
     if (isCoverage) {
       const fixture = (c.seeds || []).find(s => s.kind === 'engine_seed' && s.method === 'fixture_census');
       if (!fixture) die(EX.preflight, `case ${A.caseName} has no fixture_census seed`);
-      if (!process.env.WF_PROOF_SHORT_PAGES_FILE)
-        die(EX.preflight, `case ${A.caseName} needs WF_PROOF_SHORT_PAGES_FILE exported (server-side partial-fetch knob — the fork inherits the driver env at spawn; plugin REST rides IPC, so the Fetch mock cannot lay this edge)`);
+
       const COUNT = Number(fixture.count) || 133;
       // Re-click the WORKFLOWS tab until the pane content itself carries
       // `needle`. The pane LIST column is the left column under the tab
@@ -1411,7 +1416,7 @@ async function main() {
         await covThaw();
         await waitText(cdp, 'No runs', 30_000);
         identity.coverage = {
-          edge: 'fork SIGSTOP/SIGKILL at the app IPC bridge; partial-fetch costume served by the server-side WF_PROOF_SHORT_PAGES_FILE knob (plugin REST rides hermes:api, invisible to the Fetch domain)',
+          edge: 'fork SIGSTOP/SIGKILL at the app IPC bridge; partial fetch served only by the staged bench dashboard API',
           roots_line_seen: await cdp.evl(`document.body.innerText.includes('roots:')`) };
         shots.push({ surface: 'pane_workflows', state: 'empty census answered (roots named)',
                      ...(await shoot(cdp, A.outDir, '02-coverage-empty.png', null, await stableColumnText(paneRegion))) });
@@ -1506,18 +1511,11 @@ async function main() {
         shots.push({ surface: 'pane_workflows', state: `retry re-walked every page: census now counts ${COUNT + 1}`,
                      ...(await shoot(cdp, A.outDir, '07-coverage-recovery.png', null, await stableColumnText(paneRegion))) });
 
-        // 08 PARTIAL FETCH: the SERVER-side short-page knob (its integer is
-        // an offset floor: pages at/past it answer an empty slice with the
-        // census-wide summary — pinned by test_census_pages_full_yjp.py W7)
-        // makes the walk's next poll stop short while the summary stays
-        // GLOBAL: `loaded 100 of 134` instead of implying coverage. This
-        // replaces the Fetch-domain fulfill, which could never reach an
-        // IPC-borne page-2 request.
-        fs.writeFileSync(process.env.WF_PROOF_SHORT_PAGES_FILE, '100');
+        // The marker is adjacent to the staged API, never a production env setting.
+        fs.writeFileSync(coverageMarker, '', { flag: 'wx' });
         await waitText(cdp, `loaded 100 of ${COUNT + 1}`, 25_000);
         shots.push({ surface: 'pane_workflows', state: 'page-2 flake: loaded < total shown honestly',
                      ...(await shoot(cdp, A.outDir, '08-coverage-partial-fetch.png', null, await stableColumnText(paneRegion))) });
-        fs.rmSync(process.env.WF_PROOF_SHORT_PAGES_FILE, { force: true });
 
         // 09 CAP TRUNCATION (ASTRA REVIEW-2 F1, follow-on PR): fulfill EVERY
         // /runs page with a full synthetic window and NO total at all — the
@@ -1564,8 +1562,10 @@ async function main() {
           die(EX.api, 'pending re-walk did not fully recover to the real all-loaded census');
         shots.push({ surface: 'pane_workflows', state: 'pending re-walk recovered the real census',
                      ...(await shoot(cdp, A.outDir, '11-coverage-pending-recovered.png', null, await stableColumnText(paneRegion))) });
+      } finally {
+        fs.rmSync(coverageMarker, { force: true });
         await mock.off();
-      } finally { await mock.off(); }
+      }
     } else {
     {
       let wT0 = Date.now();

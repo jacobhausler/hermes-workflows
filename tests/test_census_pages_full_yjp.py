@@ -28,7 +28,7 @@ Pins:
 
 Run: python3 tests/test_census_pages_full_yjp.py
 """
-import importlib.util, json, os, shutil, sys
+import importlib.util, json, os, shutil, subprocess, sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -134,8 +134,7 @@ check("(W4b) after the window the next read rescans (138 counted)",
 
 # (W7) Production route isolation. A stale proof knob must not affect the
 # actual FastAPI /runs handler, which is the backend endpoint reached over the
-# desktop IPC bridge. The Node proof bench separately injects the short page
-# at its fake server seam; no production behavior is needed for that frame.
+# desktop IPC bridge. Only the separately staged bench API can serve it.
 KN = BASE / "short-pages.knob"
 _prior_proof_knob = os.environ.get("WF_PROOF_SHORT_PAGES_FILE")
 try:
@@ -162,6 +161,40 @@ finally:
         os.environ.pop("WF_PROOF_SHORT_PAGES_FILE", None)
     else:
         os.environ["WF_PROOF_SHORT_PAGES_FILE"] = _prior_proof_knob
+
+# (W8) Stage exactly the dashboard module the live capture uses and exercise
+# its registered handler. The only difference is the owned marker at page 2.
+fixture = ROOT / "tests" / "proof-harness" / "coverage-fixture.mjs"
+staged = BASE / "coverage-plugin"
+stage = f"import {{stageCoveragePlugin}} from {json.dumps(fixture.as_uri())};"
+stage += "console.log(stageCoveragePlugin(process.argv[1], process.argv[2]));"
+marker = Path(subprocess.check_output(
+    ["node", "--input-type=module", "-e", stage, str(ROOT), str(staged)], text=True).strip())
+staged_spec = importlib.util.spec_from_file_location("dashYjpBenchPages", staged / "dashboard/plugin_api.py")
+assert staged_spec is not None and staged_spec.loader is not None
+bench = importlib.util.module_from_spec(staged_spec)
+staged_spec.loader.exec_module(bench)
+bench._workflow_common().set_owner_setting_reader(
+    lambda key: (str(RESOLVED) if key == "runs_root" else None))
+bench_app = FastAPI()
+bench_app.include_router(bench.router)
+with TestClient(bench_app) as isolated, TestClient(app) as production:
+    def get(client, offset):
+        response = client.get(f"/runs?offset={offset}&limit=100")
+        response.raise_for_status()
+        return response.json()
+
+    off = get(isolated, 100)
+    first = get(isolated, 0)
+    try:
+        marker.touch(exist_ok=False)
+        check("(W8a) bench control only changes page 2, not its total or counts",
+              off == p2 and get(isolated, 0) == first and get(isolated, 100) == {**off, "runs": []})
+        check("(W8b) production remains unchanged while the bench control is on",
+              get(production, 100) == off)
+    finally:
+        marker.unlink(missing_ok=True)
+    check("(W8c) removing the bench control restores the real page", get(isolated, 100) == off)
 
 # (W5) offset past the end: empty PAGE, not empty census.
 past = dash.list_runs(999, 100)
