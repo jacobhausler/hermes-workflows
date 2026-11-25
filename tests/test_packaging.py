@@ -246,6 +246,30 @@ def main() -> None:
                   root + "park_watch.py" in members)
             check("docs/native-hooks.md ships in the ZIP (the p3/p5 discoverability doc)",
                   root + "docs/native-hooks.md" in members)
+            # est-4vnq finding-4, mechanical form (35f): every check above is a
+            # hand-added line encoding one PAST incident, so the next omitted
+            # spec-load ships silently until a shipped test dies on it — the
+            # node_telemetry.py/runner_watchdog.py shape at 13cd52f8. Rule:
+            # shipped RUNTIME code (ZIP root-level modules plus the dashboard
+            # API) may name a ``X.py`` sibling by path literal only when that
+            # member travels in the ZIP; spec-loads are invisible to the
+            # import-closure probe below. Derived from the ZIP's own bytes —
+            # a second module list could drift, so none is added (no parallel
+            # package registry). Whole-string literal match: prose and
+            # docstrings never fullmatch, so only load targets count.
+            runtime_gaps: list[str] = []
+            for rel in sorted(m[len(root):] for m in members
+                              if re.fullmatch(r"(?:dashboard/)?[^/]+\.py", m[len(root):])):
+                mod_tree = ast.parse(archive.read(root + rel).decode("utf-8"), filename=rel)
+                for node in ast.walk(mod_tree):
+                    if (isinstance(node, ast.Constant) and isinstance(node.value, str)
+                            and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*\.py", node.value)
+                            and root + node.value not in members):
+                        runtime_gaps.append(f"{rel} -> {node.value}")
+            for gap in sorted(set(runtime_gaps)):
+                print("RUNTIME-PACK GAP:", gap)
+            check("shipped runtime modules spec-load only shipped siblings (every .py path literal in root/dashboard modules is a ZIP member; derived from ZIP bytes, no parallel registry)",
+                  not runtime_gaps)
             # est-fi21a (#538 peer miss): the glob never matched conftest.py, so the
             # ZIP shipped a pytest-capable suite WITHOUT the est-z2heo sandbox floor —
             # pytest at an unpacked root re-exposed the operator-state-write incident
