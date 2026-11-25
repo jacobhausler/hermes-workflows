@@ -2,6 +2,237 @@
 
 ## Unreleased
 
+## 1.4.13 — 2026-11-25
+
+Patch release: 27 merged commits over v1.4.12 (oldest 927f67c2,
+2026-11-22T16:16Z), assembled mechanically from `changelog.d/` fragments
+— 26 fragments folded and consumed, so the entries below name exactly
+what this tag delivers. The driver to ship now: the v1.4.12 zip omitted
+the telemetry and watchdog modules (#732/#731), so the fixes are on
+`main` but absent from the published artifact — only the zip attached to
+this tag carries them.
+
+- feat(examples): ship council-shape + crew-shape graphs and a three-step TTFW README — examples/review/council-shape.workflow.json (docket -> blind review barrier -> adjudicate -> report) and examples/build/crew-shape.workflow.json (orders -> crew barrier -> re-run verify -> closeout) are seedless wf/1 graphs that validate through the door CLI and API on the shipped bytes (tests/test_examples.py); examples/README.md opens with exactly write-goal -> workflows start -> workflows status <run_id>. (bd_2026-11-13-3wz)
+
+- feat(desktop): the gate answer surface is ONE decision surface — RC modal with durable Answer-saved receipt and a success toast whose View exact gate action re-selects the SAME run + EXACT gate; `nudgeOwner` and all five submit/draft/no-owner/no-sdk/unavailable toast variants are DELETED with no compat shim (zero composer submit/insert/hydrate/nudge/resume calls, spy-proven in `tests/test_composer_owner.mjs`). The full view gains a closed `gates` block (answer/at/_ui verbatim, `gate_answer_valid`-validated) so the receipt survives the invalidate-before-read refetch; an options-less hold names its reason instead of rendering nothing; pending disables every option; an `{ok:false}` door answer is an error (retryable options), never a successful mutation; the UI path keeps `_release_core(ui=True)` and never resumes — the nothing-restarted copy is scoped to the tested isolated runner. `ui2-proof` gains the `gate` case (held -> Fetch-intercepted REAL pending -> saved receipt -> toast -> route-away/route-back identity; frames 07-11). (bd_2026-11-13-qri)
+
+- test(door): pin the #58 write-verb asymmetry at the release_lock door — a run living ONLY under a sibling profile root answers status with resolved_via + note, yet release_lock refuses it with the verbatim sibling-root error and mutates NOTHING (runner.lock inode byte-same, zero stranded renames), while the same fixture wedge heals under a direct wfcommon.heal_wedged_runner_lock: the door's sibling branch is the only guard on the foreign root. New tests/test_release_lock_sibling_root_58.py closes the census gap on the merged #216 write branch (est-37stb, nightly sweep-c test gain).
+
+- test(proof-harness): the relocated driver carries bd_2026-11-13-yjp's coverage case — `--case coverage` seeds a 133-row census THROUGH the read model (`seed_fixture.py`, rows read `interrupted` so the pane's own 4 s poll loop drives the error frames) and lies only at the network edge via a CDP Fetch-domain transport mock, so all eight frames are the app's honest state: loading (every `/runs` page stalled), answered-empty (roots named), full census all-loaded, the deepest counted row past the 100-page ceiling plus its record page, refetch-failure with the cached census kept (clickable stale chip), retry re-walk on a census that grew to 134, and the honest `loaded 100 of 134` partial. The case keeps its CDP session across the activation reload (the armed mock must survive it) and re-arms on every reconnect, and the pane poll carries the field-proven #720 recoverances — Retry through the boot modal, re-wait the splash, re-arm rules across session churn. `tests/test_ui2_proof_driver.mjs` (manifest + eval-template laws) and `tests/test_proof_harness_repro.mjs` stay green at this head; the frames themselves are captured under the bead's PROOF_DIR with the receipt on the bead. (bd_2026-11-13-yjp)
+
+- feat(desktop): shared MiniGraph/fan-strip graph grammar (RC ch4 port) — MiniGraph/FanStrip/ItemChips/ItemDetail/FanStack + Edges now speak the ported graph grammar once for every expansion mount: routes carry a static identity layer (six deterministic host-palette aliases cycling by dependency order, 0.8px dashed overlay on the incumbent routed curve, matching open-ring endpoint echoes, edge-state titles) on top of the untouched state/dash/marker laws; ghost rings are retired in favour of footer attempt ticks (3px squares, cap 3, numeric terminal/count badge unchanged); fan-out child RECORDS project as their own node identities carrying their RAW status (Council law: 10 identities, 14 projected dependencies, 28 echoes), guarded by run-keyed fan selectors so two runs sharing a node id never share an expansion; the fan-out strip labels its fraction `fanout aggregate` (MF1 fix), adds a threshold ladder row (exact `results/total` fill + threshold tick, `Enough results to continue` copy, implicit-majority law, unknown stays unknown), and `partial` joins the terminal census as its own bucket so a raw child PARTIAL is never smoothed into the parent's `done`. Historical shelf fixtures untouched byte-for-byte; the MF1 regression is a clearly synthetic row.
+
+- fix(desktop): a running dynamic fan-out projects its live rows immediately — the GraphView fan strip previously sized actionable cards from static `fanout.items`, so an `items_from` fan-out with both spawn-time item records persisted and zero finished events rendered NO actionable cards until settle; rows now widen to the live `item.started` indices, each committed fan child projects once on the run canvas, and every item renders exactly once across collapsed and expanded states. Ported product/test delta (verified at `641de7cb`): `desktop/plugin.js` with the targeted `test_fanout_ui.mjs`, `test_fanout_expand.mjs`, `test_edge_routing.mjs` harness slice and the new native `test_native_live_fanout.py` (real runner + dashboard `_view` mid-run capture replayed through the GraphView harness, `[0, 1]` actionable live and settled). Council capture-driver and UI2 proof-driver changes from the same board delta stay out of this port.
+
+- fix(proof-harness): fail the bench-retention sweep CLOSED on every unproven leg (bd_2026-11-13-4fy, wave-B qualification of 5466268/eecc9c0) — the startup GC deleted on manifest EXISTENCE (a one-second-old run-incomplete tree with a corrupt, non-terminal manifest sailed past the ten-minute grace; the wave-B review's retention-probe.mjs reproduced the selection), read a failed `git ls-files` as zero tracked bytes, swallowed incomplete tree scans as quiet, skipped supervisor liveness on sealed trees, and kept no reason when the committed-manifest reference set itself was unreadable. The law now demands PROOF before rm: gitTrackedFiles answers the tri-state unproven→kept ('git-unproven', a repoRoot that is not a git root included); manifestTerminality accepts only the driver's own terminal record (schema proof-harness/N + captures array) as sealed — corrupt falls to the unsealed evidence law (never bypasses grace, never freezes an otherwise proved-abandoned tree), unreadable keeps outright; treeScan reports `incomplete` on any stat/readdir/lstat error and the sweep keeps ('scan-incomplete'); committedManifestText returns {text, proven} and an unproven reference set keeps every tree it would touch; and supervisors.json liveness now gates EVERY tree, sealed included — an alive detached pid without its logs/<label>.exit record contradicts terminality whatever the manifest bytes say, while a reaped corpse answers ESRCH and dead sealed trees stay reclaimable (both legs pinned). The spec tests each premise separately and drives the REAL CLI entrypoint over synthetic temp trees only: the dead sibling reclaims, the probe-shape tree survives with a kept reason. Packaging: the spec ships without its import today (the wave-B review executed the staged package and died ERR_MODULE_NOT_FOUND on capture.mjs) — registered source-only in pack.py SOURCE_ONLY_TESTS and mirrored in the test_package_source_only_756.py equality pin. The real double-run reclamation witness stays owed to the live-app gate.
+  fix(proof-harness): move the bench-retention ownership boundary to the detached PROCESS GROUP (bd_2026-11-13-4fy, recovery replay of the wave-D review receipt): the fail-closed law still proved only the WRAPPER dead — supervisors.json records a detached spawn (own pgid), so a leader that reaps to ESRCH, or even a written logs/<label>.exit, leaves reparented descendants serving inside the recorded group (the teardown window between wrapper exit and descendant exit), and the sweep selected exactly that living tree for reclaim (`run-still-owned-by-live-group` → `reclaimed:scratch`, reproduced at e19ba4af). supervisorsActive now demands group death too: after leader ESRCH or a recorded exit, kill(-pid,0) must answer ESRCH; 0 (alive), EPERM (alive, someone else's) or any unexpected error fails CLOSED and keeps the tree; recorded pid 1 keeps outright (kill(-1,·) is a broadcast). The spec pins the replay on real disposable child groups in both directions — ESRCH leader with live group kept with AND without the wrapper .exit; once the group drains, both legs reclaim, so the keep is evidence-bound and positive truly-dead reclaim stands; the sealed exit-record leg moved to an out-of-range pid so it stays deterministic under any launcher. Header law comment updated. Ordinary capture behavior, the sealed/ESRCH/zombie legs, and every wave-B protection are unchanged; the live receipt double-run passes (both legs observed kept:active-supervisor, dead control reclaimed:scratch).
+
+- ci(docs-lint): add tools/docs_lint.py — a dead-reference gate over docs/runtime:
+  extracts every shell command, door action, run-dir path, JSON field shape, env-var
+  and Citations symbol from docs/runtime/**/*.md, executes the commands and binds the
+  paths/fields against a fixture run in a temp state dir (tests/fake children and the
+  isolated door in-process, built with the repo's own test idiom), and fails on dead
+  verb, dead path, drifted field, dead env or dead symbol, each naming doc file:line.
+  Ships with tests/test_docs_lint.py, which proves the real tree is green, the
+  fixture really exercises the claims, every violation class bites under targeted
+  mutation, and the lint is read-only and idempotent. docs/runtime itself was clean:
+  zero violations at merge time.
+
+- feat(door): a profile-carried route must be COMPLETE before its node spawns (bd_2026-11-13-7rm). Papercut 2026-11-23: a seat whose target profile config.yaml carried only `model: {default: ...}` (codex route) died at connection start — `Hermes couldn't start the model connection: invalid_params` — after the run was written and the child billed a death, because the door validated the profile's existence and consent but never read the route out of the file it had just required to exist. For a node without its own `provider`, the spawn argv carries no `--provider` (wf.py builds it from `node["provider"]` alone), so the profile file is the SOLE route source. `profile_errors` now refuses, pre-spawn and typed, a consent-clean target whose config claims a model (`default`, core's documented `model` alias key, or a bare model string) without naming `model.provider` — the rule site attaches the #708 fix-shape example (`RULE_EXAMPLES["profile_route_incomplete"]`: `{"model": {"default": "my-codex-model", "provider": "openai-codex"}}`, the estate's working profile-carried stanza, golden-tested as an accepting config), and an explicit `provider: auto` passes: the door refuses MISSING decisions, never express ones. Consent failures still yield exactly one row per node (the route check runs only after clean consent — test_11's consent fixtures gained a provider so they keep pinning consent alone). Docs (grammar.md, operations.md, SKILL.md first-screen) carry the rule; the upstream half — a field-naming error at profile resolution instead of a bare code at connection start — is filed with the measured repro as bd_2026-11-13-kwf.
+
+- feat(desktop): one shared lifecycle + numeric view model (FINAL lifecycle table).
+  The public-label and number laws from ui2/synthesis/FINAL.md move into one marked
+  block in desktop/plugin.js that every production surface reads: exact safe
+  nonnegative integers for API/TOOL, attempt and membership counts (invalid or
+  fractional reads a dash, never rounded); token volume at two significant figures
+  (999999 -> 1.0M, 17739101 -> 18M) with actual zero staying 0 and absence a dash,
+  never a fabricated 0; sub-cent cost floors to '<$0.0001'; zero cost reads
+  `COST included` only with recorded activity; running statuses carry the table's
+  activity words (`Running · fresh activity` <=5 s, `Running · quiet, alive` >5 s,
+  `Running · activity unknown` for missing/invalid/future stamps — stored `running`
+  alone never pulses); a cached directive reads `Disconnected · last known <status>`;
+  successful done reads `Finished` while every other raw status keeps its exact word
+  (cancelled neutrality law). Run clocks say `run`, child clocks do not. The
+  runtray.mjs mirror takes the same Finished word (root-parity law). No palette
+  fork: tones still answer the ONE NODE_TONE/EDGE_TONE table. Behaviour tests:
+  tests/test_lifecycle_numeric_view_models.mjs renders the real Vitals,
+  inlineHeader and pillModel extracted from source; consumer pins updated to the
+  new law wording (test_inline_header, test_wf_qa_render_group,
+  test_directive_card_error stale-flag wiring, test_metrics_missing_ui,
+  test_card_frontend_contract honest-census).
+
+- docs(skill): SKILL.md opens with a first screen — five one-liners for the dispatch verbs (launch/read/gate/re-plan/pre-check) plus the three-step start path; runtime docs 03-incidents, 01-quickstart and 02-disposition (the three hottest doc_heat targets from the wave-4B wish taxonomy, 34/21/17 wishes; the heat list's "02-reading-state" maps to the shipped 02-disposition + 01 quickstart's "Reading a run" section) each OPEN with the exact command or json-path that answers their title question (answer-first doctrine). Duplicate "Smallest working graph" and "Lint before launching" blocks fold into the first screen, keeping the skill under the 110-line cap (109 lines). Citation anchors unchanged (19 links + 25 Citations bullets); docs-lint green: claims 250 to 266, exercised 57 to 65, violations 0. Docs only — no code touched. (bd_2026-11-13-bn8)
+
+- Fan-out authors can pin `quorum_mode:"all"` on council, census, and other coverage-sensitive waves. It waits for every item to settle without raising the success threshold. Omitted quorum still waits for all; authored numeric quorum and drain settings retain their existing behavior.
+
+- test(proof-harness): slice A ships its own double-run proof — the driver moved to `tests/proof-harness/`, gained `--only directive,pane` and a structured `--plan`, and every capture writes an immutable set (PNG magic+size gates, per-file `sha256`, plus a volatile-masked `contents/` layer and a repro section whose combined hash recomputes from it). A committed, in-repo capture PAIR (`captured/bd_2026-11-13-iqf/set-1|set-2`, 4 captures each: pane runs, pane run-detail, directive card full+clip) is pinned against the merged head at candidate `b677dae…`; `tests/test_proof_harness_repro.mjs` is the e2e reproducibility proof — the two independent runs' repro sections are hash-equal (double-run hash diff empty), committed bytes match their manifest hashes, the mask law has positive+negative controls, and the driver's live `--plan` must agree with the committed pair. The sessions-row probe wedge that killed earlier pair runs is bounded with a reload recovery and the boot-modal dismiss (field-proven). (bd_2026-11-13-iqf)
+
+- feat(desktop): instance-label-first display titles — pill/tray/fleet render the lane label, template demoted to metadata (bd_2026-11-13-l8i). ONE resolver (desktop/plugin.js displayTitle): title := last human segment of lane_key (after the final /; a door-synthesized start-<slug> segment is machine-derived and skipped), else the description's first clause (one line, clipped), else run.name. The template word renders ONLY as secondary metadata: hover/detail kind badge on the compact surfaces (directive pill, rail pill, tray row, record header, expanded card's second row); the fleet landing row has width and keeps a template COLUMN. Read model feeds it honestly: run_state publishes lane_key (run.json identity stamp — already persisted at launch) and description (graph root) only when present — unlabeled/legacy rows keep the exact pre-2.0 rendering — and the dashboard /runs projection passes both through on every row; a shelf envelope's meta.description rides the launched graph at the door. A shelf launch with NEITHER lane_key NOR description gains a run_warnings door note naming both missing data and the fix — warn, never block: the unlabeled launch still succeeds. Proof: tests/test_title_resolver_l8i.mjs (resolver arms + pill/tray/fleet proof-cases: 'ship20W2c' renders, 'estate-bead-crew' does not), tests/test_unlabeled_shelf_l8i.py (door warn-not-block + read-model keys end to end), proof-harness baseline seed now launches with lane_key=ship20W2c so the captured frames prove the law.
+
+- feat(desktop): the gate answer receipt carries its WHEN (bd_2026-11-13-qri, review-2 Q1/Q2)
+  Review-2 reproduced the same-mount shadowing bug: after a successful
+  answer the local `recorded = {answer}` outranked the refetched read-model
+  record forever, so `answered.at` never anchored the dwell — a 5-minute
+  hold answered at 03:00 rendered `held 26h 33m` and kept ticking. The
+  receipt also never showed WHEN the answer was written, and the success
+  toast said `◇ Held · ...` without the answer or the time: an event
+  notification, not the receipt it claims to be.
+  - `_release_core`'s success return gains an additive `at` — the SAME
+  server-stamped ISO time written into `gates/<id>.json`. Every existing
+  caller reads `.get("ok")` (tool path ignores the dict on success), so
+  this is a pure receipt-contract widening of the one answer path.
+  - `GateActions` keeps `at` in its local record and MERGES the durable
+  read: once the refetched `answered` carries an answer it OUTRANKS the
+  optimistic local state (durable truth wins, dwell freezes at the
+  server `at`), never the other way around.
+  - The receipt renders `Answered · <time>` — the door-stamped time pre-
+  refetch, the durable record's time after, and an honest
+  `time not recorded` when a record has none (never a silent drop).
+  - The success toast IS the receipt:
+  `◇ Answer saved · <answer> · <requester> · <run> / <gate> · <time>`
+  with the unchanged `View exact gate` same-run identity action. An
+  older door without `at` honestly omits the time instead of inventing
+  a client clock.
+  The ui2-proof `gate` case now refuses the run unless the rendered
+  receipt carries the door-stamped `Answered` line and the toast matches
+  the receipt prefix — the frame is the contract, verified on the real
+  renderer (SETUP.md updated; tests/test_composer_owner.mjs gains the
+  same-mount refetch case the reviewer's reproduction demanded).
+  Bench-home law (field-proven, this bead's capture attempts):
+  `_hermes_root_of` forces the default hermes root to the native
+  `~/.hermes` whenever `HERMES_HOME` lives under it, so a bench provisioned
+  under the native home resolves `ui2bench` at the REAL profile registry.
+  The app (hermes-agent >= the plugin-run-backend feature, which names the
+  active profile on registry API requests) then 403s
+  `profile_scope_mismatch` on every plugin call — the old exit-6
+  "row never rendered" was that auth failure wearing a UI costume.
+  The driver now dies at preflight (exit 4) with the law spelled out when
+  `--out` lands under the native home; provision at the repo's
+  `captured/` or a TMPDIR path and copy the finished set to the ledger.
+  - proof-harness: the bench electron boot does NOT pass
+  `HERMES_DESKTOP_HERMES` — field-proven on four bench homes that the override
+  re-parents the app's ensure to the DEFAULT profile (root fork, orphan
+  satellite, `bootstrap binding rejected` ticket storm, first-run modal wedge,
+  exit 6). Instead it names the SOURCE-rung interpreter directly
+  (`HERMES_DESKTOP_PYTHON` = the door python): a bare green-era app copy has
+  no `.venv`, and without it the answer is `bootstrap-needed` -> the 'Set up
+  Hermes Desktop' first-run modal wedge. The pin era (qri-proof18, b9b36c9
+  app) booted a healthy gateway but churned ensure (exit 7, superseded-start
+  storm); the source rung (qri-proof21) completed the full pane+gate walk.
+  The gate case shots the success toast BEFORE the receipt and locates it by
+  the `<run> / <gate>` ledger line the card never renders. The pane poll also
+  dismisses the provider-less onboarding wizard and reloads once on a
+  persistent CONNECTING splash; CDP attaches with `Page.bringToFront` so an
+  occluded window can never mask paint truth with a black frame. SETUP.md
+  documents the app-copy, app-generation and source-rung laws.
+  - door: bench-only proof knobs on POST /runs/{id}/gate —
+  UI2_PROOF_GATE_FAIL_ONCE (first armed answer is a typed ok:false before any
+  write) and UI2_PROOF_GATE_POST_DELAY_MS (sleep AFTER the durable write,
+  BEFORE the response). The current desktop's plugin REST rides the
+  'hermes:api' IPC bridge — no renderer network request exists to intercept —
+  so the gate capture's error/pending frames are real door behavior now.
+  Pinned by behavior checks in test_gate_answer_flows (33 total).
+
+- feat(desktop): the runs census fetches EVERY page, and the pane says what it has (bd_2026-11-13-yjp)
+  `GET /runs` pages — one call answers the newest 100 rows plus the
+  WHOLE-CENSUS summary (est-ey31s) — but the desktop transport never walked
+  past that first window, so the pane's census line promised 250 counted runs
+  while 100 were on screen: a full-index promise silently stopping at page 1.
+  `listQuery` now mounts `runsIndexFetcher`: bounded pages of the route's own
+  100-row window, deduped by id (a walk crossing the 2 s scan boundary may see
+  a row twice), honouring the react-query AbortSignal between pages, hard-capped
+  at 30 pages so a lying total slows the pane instead of hanging it. The
+  summary stays GLOBAL and distinct from loaded rows: a short/empty page stops
+  the walk and the census line renders `loaded N of M` rather than implying
+  coverage.
+  Pane honesty (same law as the directive card, data wins over error): a
+  refetch failure keeps the last good census on screen behind a clickable
+  `stale — retry` chip; the never-loaded error branch is a RETRY button naming
+  the failure, never a false "No runs"; loading renders `Loading…`; and only a
+  healthily-answered empty census may say "No runs" — with the roots it scanned.
+  Retry invalidates the `['hermes-workflows','runs']` key, and the fetcher holds
+  no client-side memo, so a retry re-walks from offset 0 for real.
+  Server read side unchanged (sync/threadpool reads, 2 s scan cache,
+  invalidate-before-read, hidden no-op dashboard registration, one tail route);
+  the golden `/runs` key set is byte-identical (tests/test_census_pages_full_yjp.py
+  walks a 137-row census end to end). Real-app frames — loading, empty, full
+  census past row 100 + its record, error-with-cached-data, retry recovery on a
+  grown census, and a page-2-flake partial — are captured by the ui2-proof
+  driver's new `coverage` case (scripts/ui2-proof/capture.mjs, CDP Fetch-domain
+  transport mock; the network edge lies, the app does not).
+
+- changed(#709 review): the frozen-route strip is LOUD — dropping an author-declared field silently is the same landmine class the owner killed with the marker. The spawn funnel now collects every [flag, value] pair it removes and journals one dispatch.warn {node, spawn, kind: frozen_route_strip, stripped: [...]} per spawn that dropped anything; the status read model surfaces it per node (frozen_strip key, honest absence) and run_explain composes it into its one line — including on terminal runs, where a done run that ate the author's cap was previously silent. No new knobs; argv behavior unchanged.
+  test(#709 golden portability): the workstation re-freeze had baked macOS's /private tmp prefix into the golden (10 prompt lines; main carried zero) because door resolves HERMES_HOME while tempfile hands back the symlinked /var/folders form — ubuntu CI would red that diff on sight. The solo normalizer now folds the RESOLVED temp root too, and the golden is recaptured clean (<TEMP> everywhere): Linux truth, macOS-truth, one byte.
+  test(#709 red-to-truth): two CI-shard reds closed at the truth seam, not the assert seam. enum_clamp B3-fail: the gate-400 relay under the strip can no longer see -t on argv, so the fake keys the 400 on the ATTEMPT (FAKE_NOARGV_GATE/FAKE_ATTEMPT_DIR, the pattern the sibling scenarios already use) — the typed fail-closed quarantine path under test is byte-identical, only the relay's observation channel moves from argv to attempt. run_dry_run: wf.pid has exactly one writer, the admitted runner (#8 sole-owner stamp law), so observing it after the door returns is a bounded wait, not a synchronous assumption; the ready-pipe race under sharded load is the branch's timing truth and the check now measures what the contract promises.
+  test(#709 no-core correction): the no-core toolsets check in enum_clamp was rewritten (f7efd50) to demand a dispatch.warn pair for '-t none' — a story never executed anywhere (CI seats CORE=True; the branch only runs on no-core hosts). Measured on Linux at the branch: the 'none' sentinel is consumed at the BUILDER (node.clamped kind=toolsets names the author's explicit no-selection), so -t never reaches the funnel and no dispatch.warn is owed. The check now asserts exactly that, and would have caught its own lie.
+  test(#709): run_dry_run's authors opt into require_route:false — the sibling stamp-wait fixed WHEN the check looks, not WHY the runner left: pinned profile-less nodes are route_inexpressible under the strip and die at the door in <1s, so the runner exits (stamp unlinked) before any bounded wait could catch it. The test's subject is the launch path, not routing; the fallback-ladder opt-in is the honest author voice (measured green; the ubuntu rmtree race was the same ghost).
+  test(#709): Q1's live-record window widened 30s->90s alongside the crew's pid-bearing observation fix — the old loop broke on the FIRST running face, which is the pre-exec pid=None write; a loaded ubuntu shard wins that race only by boot timing (green re-run 1, red re-run 2, same tree). The check now waits for the pid-bearing face itself; the window bounds WHEN it may appear, never any behavior.
+  test(#709 routing_routes): the fake spawn passed the TEST's own pid as the child pid — darwin's tree-proof channel killpgs the child group at settle, so the fake SIGKILLed the process running the assertions (the whole lane died mid-ledger); Linux survived only by census-guard luck. The fake now carries a real, already-reaped, setsid'd pid — killable and census-invisible on both platforms — and is call-aware (darwin run_child rides aux probes through the same patched Popen; the child entry is picked by its file stdout, not capture order). ALL PASS on macOS and Linux, measured.
+
+- test(side-effects): pin the `wf.side_effect_rows` reader contract — torn lines are never committed facts, an unreadable journal fails open to `[]`, rows filter to dicts carrying a `node` key, surviving rows keep file order (est-vy6j8, nightly sweep-c test gain).
+
+- feat(start): one verb from prose to a dispatched run
+  `workflow{action:"start", goal:<prose | five-line yaml>}` synthesizes the
+  smallest graph that satisfies the input and dispatches it through the FULL
+  existing run door — no second validator. The synthesizer lives in its own
+  module (`wfstart.py`); the verb is thin (parse -> synthesize -> act_run).
+  Smart defaults, all by reference to existing tables: model/provider stay
+  unset so the node rides the seat's own route; a `shape` name bakes the
+  measured-p95 census preset (wfcommon.SHAPE_PRESETS) for timeout and turn
+  budgets; the lane key derives as `<team>/start-<slug>` (or `start-<slug>`),
+  so a double-start of the same goal dedupes while the incumbent is unfinished.
+  v1 scope is single-node plus fixed fan-out from a json path
+  (`items_from` -> `fanout.items_from` verbatim); plural prose is NOT inferred.
+  The response carries `run_id` and the one `watch` status command; both misuse
+  paths (empty input, spec without content) refuse with the accepting example
+  rendered by the same module — until the door-side example channel (z79)
+  lands, that static string is the teach example.
+  No door/validation file is touched. Tests: tests/test_start_verb.py (7
+  behavior checks at the tool seam, spawn stubbed; the README action row is
+  pinned by the existing docs-surface drift law). The registration makes
+  wfstart.py part of the executed dispatch surface and a bind-time import, so
+  every surface-pinning fixture copy set and the pack manifest learn the file:
+  tests/test_docs_surface_drift.py, tests/test_pr_tag_audit.py,
+  tests/test_terminal_handoff_boundary_r19.py, scripts/pack.py INCLUDE_FILES
+  (one line each — the est-4vnq finding-4 law: an unshipped bind-time module
+  dies at import on every install, and test_packaging stayed green while
+  CI's copied-plugin test went red, so the manifest line is load-bearing).
+
+- feat(door): every graph_invalid rejection row carries `example` — the rule's minimal accepting fragment. Graph rejections (error_class graph_invalid, every channel: run/amend/save/submit/validate, the include envelope, and the human output of `wf.py validate`) now speak errors:[{node, field, msg, example}], where `example` is DATA on the rule: `wfcommon.RULE_EXAMPLES` maps a rule slug to the smallest value that rule admits, the rule site attaches it via `E(..., example=...)`, and `stamp_error_examples()` at the door's composition points keeps the key universal — an unbanked rule rides `example: null` instead of a missing key, so a seat's parse never branches on the envelope. Banked at minimum the four classes wave-4B seats actually hit — unknown graph key, unresolvable `fanout.items_from` ref, bad fanout shape, gate cycle — plus the node-key sibling of the graph-key law; every banked fragment is itself door-validated golden (tests/test_door_examples_z79.py), since an example that would itself be refused is a worse trap than none. Bank another rule with one table row and one kwarg at its site — no envelope change per addition. (bd_2026-11-13-z79, wave-4B lesson: seats burned turns reverse-engineering refusals from grammar prose) Consumes #706's seam: the start verb's five-line teach example is now banked here (`RULE_EXAMPLES["start_spec"]`, byte-identical to the literal it replaces) and rendered lazily through `_door_example` — one bank, no second copy to drift.
+
+- Docs-only: one-line phantom-wake triage law in references/operations.md — a wake
+  naming a run_id with no run dir anywhere cannot be a kit stamp (door refusals
+  return before any registration; notify() no-ops on a missing run dir), so
+  status's `no run at <path>` is terminal truth and the notice was confabulated in
+  the woken agent's context. Root-caused from incident 20261123-101559-ui2-receiptcheck
+  (door-refused launch at 10:54:33; no wake turn in gateway log, no user message in
+  state.db, no lane entry, no run-dir birth time in the minute).
+
+- fix(packaging): `tests/test_proof_bench_env.mjs` is declared source-only — the #729
+  bench-env spec shipped in the release ZIP while its only import, the source-only
+  proof driver `tests/proof-harness/capture.mjs`, never travels, so the packaged
+  `node --experimental-strip-types tests/test_proof_bench_env.mjs` died at
+  `ERR_MODULE_NOT_FOUND` at an unpacked root (reproduced on a fresh 1.4.12 pack);
+  the #756 invariant grew a derived shipped-`.mjs` import sweep, so a mapping
+  removed from BOTH ledgers re-ships the hole red instead of passing vacuously.
+
+- fix(packaging): `node_telemetry.py` and `runner_watchdog.py` join the release ZIP.
+  Both are spec-loaded by FILE PATH from shipped runtime code — the observer-hook
+  registration and the runner settle-seam fold load `node_telemetry.py`, and
+  `wf.py tick` plus the door's arm load `runner_watchdog.py` — so the import-closure
+  probe never saw them: packaged installs lost child telemetry silently and died on
+  `TICK REFUSED runner_watchdog.py not present`, while the shipped
+  `tests/test_wfcommon_contract_pins_batch4.py` died `ModuleNotFoundError` at an
+  unpacked root. The pack-list gate now catches the class mechanically: every `.py`
+  path literal inside shipped runtime modules (ZIP root-level + dashboard API) must
+  itself be a ZIP member, derived from the archive's own bytes — no parallel
+  package registry.
+
+- feat(defaults): redrive mode becomes OPTIONAL — an omitted mode lands on same-fingerprint-resume, the safe side that re-drives only failed lanes and REFUSES drift (redrive_fingerprint_drift, nothing written); the token-spending new-fingerprint-rerun stays explicit-only; the response echoes the applied mode and stamps mode_defaulted when the key was absent; an unknown mode keeps the redrive_mode_required closed-set refusal; CLI usage is now wf.py redrive <id> [--mode=<mode>] — wake-consumer law #692 amended, not repealed (defaults audit 2026-11-23: 10/10 production redrives answered the mandatory mode question with same-fingerprint-resume; what stays mandatory is only the decision that SPENDS tokens, never the safe resume). Companion doc-truth (same audit): the door schema text and references/grammar.md + operations.md said "timeout default 900 s", but since sprint101 #11 the door bakes the measured shape presets into every unset agent node (no shape = DEFAULT_SHAPE=build -> 65 turns / 1500 s; probe: apply_graph_defaults on a bare node) — the docs now state the baked default and scope the 900 s floor honestly to hand-edited run dirs that skipped the door bake.
+
+- feat(receipt): per-node metrics survive into the durable receipt — nodes/<id>[.<i>].json now commits a closed `metrics` block (tokens_in, tokens_out, api_calls, tool_calls, served_model, model_source) at EVERY commit site (normal, retry-resume, redrive, amend, fanout-item). A child that reported nothing writes explicit nulls, never an omitted key, so the dashboard's em-dash path is driven by the receipt itself; re-running a commit updates the block and never duplicates it. Counter precedence: child telemetry sidecar > state.db billing join > null. served_model->model_source attribution precedence (owner-chosen): node pin > run meta > billing. The #692 redrive verb archives each discarded record as one durable line (nodes/<stem>.redrive-history.jsonl) which the re-driven commit folds into attempts_log — the receipt shows the CURRENT attempt's metrics with the attempt history intact. node_facts appends the block like the est-wqml6 telemetry fact; the golden normalizer drops 'metrics' as a sanctioned delta (presence + closed set proven by tests/test_node_metrics_receipt_r4.py). (ui2 round4 mesh fix)
+
+- fix(#709): the spawn-expressibility door honors its own docstring — a PROFILE-carried pin IS expressible. With the strip unconditional, -m/--provider can never ride argv, so judging the pin only on those faces made every profile+pinned node refuse before Popen (core_alias D2, the substrate suite, every estate profile lane). The builder rides -p whenever a node declares a profile and the pair survives the funnel byte-identically; the door now returns None on that evidence and leaves the served-route truth to the downstream billing hold (the est-yq2xq legacy posture, by design). E8 rewritten to the new law; E2b extended with the collector contract (E2b2) behind every dispatch.warn row; 18 branch-red tests rewritten to assert the stripped-argv truth with the journal as the observation channel.
 ## 1.4.12 — 2026-11-22
 
 Patch release: 17 merged commits over v1.4.11 (oldest cf577a4,

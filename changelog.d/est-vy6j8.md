@@ -1,1 +1,0 @@
-test(side-effects): pin the `wf.side_effect_rows` reader contract — torn lines are never committed facts, an unreadable journal fails open to `[]`, rows filter to dicts carrying a `node` key, surviving rows keep file order (est-vy6j8, nightly sweep-c test gain).
