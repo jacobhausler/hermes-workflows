@@ -14,8 +14,11 @@
 //      'Session unavailable' and makes ZERO host calls.
 //   4. A rejection stays a local error state with the exact ID — no second
 //      call, no composer submit/insert, no notify, no fallback session.
-//   5. Rotation: the link always rides the CURRENT recorded ID (last entry of
-//      the shipped list), never a cached first ID.
+//   5. Rotation: the link always rides the CURRENT attempt's identity — the
+//      LAST entry of the shipped list, SELECTED BEFORE validation. If that one
+//      entry is unverified (runtime-shaped, malformed, or expired per the read
+//      model's authoritative row lookup) the destination is absent: there is no
+//      walk-back to an older attempt's ID, never a cached first ID.
 //   6. Back/focus restoration is a one-shot module token, never core storage.
 //   7. Gate 'View exact gate' after the viewer changed runs navigates on the
 //      TOAST's own run identity, never the stale selection.
@@ -138,8 +141,36 @@ export const Fragment = 'Fragment'
     assert.deepEqual(storedSessionIds({ session_ids: [A, B] }), [A, B],
       'chronological entries pass through in the shipped order, unsorted')
     assert.equal(latestStoredSessionId({ session_ids: [A, B] }), B, 'the link rides the NEWEST recorded attempt')
-    assert.equal(latestStoredSessionId({ session_ids: [A, RUNTIME] }), A,
-      'a fresher runtime-shaped entry is dropped, never substituted — the newest recorded-shape entry is the honest destination')
+    assert.equal(latestStoredSessionId({ session_ids: [B, A] }), A,
+      'two valid ids: the SHIPPED last entry wins — the selector never re-sorts')
+    // Captain's counterexample (bd comment 2026-11-25 03:50): the shipped list's LAST
+    // entry is the current attempt's identity (the read model orders started_at,
+    // rowid). A runtime-shaped ID there means the CURRENT attempt is unverified —
+    // the destination is absent. Wave A returned the older stored A here (the
+    // line-141 bless): a fallback to ANOTHER SESSION whose click opened the older
+    // chat under a rotation nobody verified. Select before validate, no walk-back.
+    assert.equal(latestStoredSessionId({ session_ids: [A, RUNTIME] }), null,
+      'an unverified current attempt never falls back to an older attempt’s session')
+    assert.equal(latestStoredSessionId({ session_ids: [A, '  ' + B + '  '] }), B,
+      'the last entry trims like every other recorded field')
+    for (const junk of ['local-zz', '   ', 42, null])
+      assert.equal(latestStoredSessionId({ session_ids: [A, junk] }), null,
+        `a malformed current-attempt entry (${JSON.stringify(junk)}) fails closed — no promotion`)
+    // A new rotation whose session row is NOT YET recorded: the shipped list still
+    // carries the prior stored id — that is the current RECORDED destination (never
+    // a fabricated id); the fresh row re-lands the last slot at the next fetch.
+    assert.equal(latestStoredSessionId({ session_ids: [A] }), A,
+      'an unrecorded rotation keeps the last recorded fact until the new row lands')
+    // Expiry is observable only at the authoritative lookup (the state.db row):
+    // the read model records the expired id VERBATIM at its chronological slot and
+    // flags it in session_ids_expired. A flagged LAST entry is an absent
+    // destination — the older attempt is never promoted over an expired current.
+    assert.equal(latestStoredSessionId({ session_ids: [A, B], session_ids_expired: [B] }), null,
+      'an expired current attempt renders unavailable, never promotes the older session')
+    assert.equal(latestStoredSessionId({ session_ids: [A, B], session_ids_expired: [A] }), B,
+      'an older expired attempt says nothing about a live current destination')
+    assert.equal(latestStoredSessionId({ session_ids: [A, B], session_ids_expired: ['local-zz', 7] }), B,
+      'malformed flag-list entries never veto a verified destination')
     assert.equal(latestStoredSessionId({ session_ids: [] }), null, 'an empty list is honest absence')
     assert.equal(latestStoredSessionId(undefined), null, 'absent metrics is absence, not a crash')
     assert.equal(ownerStoredSessionId({ ui_session_id: '  ' + A + '  ', session_id: B }), A,
@@ -149,6 +180,26 @@ export const Fragment = 'Fragment'
     assert.equal(ownerStoredSessionId({ ui_session_id: null, session_id: RUNTIME }), null,
       'a runtime-shaped session_id NEVER becomes a guessed destination')
     assert.equal(ownerStoredSessionId(null), null, 'absence stays absence')
+  }
+
+  // -- 1b. fan-out scoping: each item's fold is its own destination -----------
+  {
+    // The read model folds per skey and the item arm is IN the key, so an item's
+    // session_ids never carry a sibling's ids; the pane passes the picked item's
+    // own fold (item_metrics[picked.index]) to the link.
+    const item0 = { session_ids: [A] }                 // item 0: recorded stored row
+    const item1 = { session_ids: [B, RUNTIME] }        // item 1: unverified current
+    assert.equal(latestStoredSessionId(item0), A, 'item 0 rides its own recorded attempt')
+    assert.equal(latestStoredSessionId(item1), null,
+      "item 1's unverified current never borrows item 0's stored id")
+    remount()
+    globalThis.__calls.length = 0
+    const t1 = render({ storedId: latestStoredSessionId(item1) })
+    assert.ok(textOf(t1).includes('Session unavailable'),
+      'the picked fan-out item with an unverified current renders unavailable')
+    assert.equal(buttons(t1).filter(b => b.children === 'open recorded chat').length, 0,
+      "the sibling item's live id never arms this row's link")
+    assert.equal(openCalls().length, 0, 'unverified scoping makes zero navigation calls')
   }
 
   // -- 2. the adapter: ONE call, real-union options, or zero ------------------
@@ -210,6 +261,31 @@ export const Fragment = 'Fragment'
         `unverified id ${JSON.stringify(bad)} renders the honest unavailable state`)
       assert.equal(openCalls().length, 0, 'unavailable states make no navigation call')
     }
+
+    // Captain's exact reproduction (bd comment 2026-11-25 03:50), wired shape: a
+    // pane row fed the shipped list [older verified A, newest runtime-shaped
+    // RUNTIME]. Wave A called openSession(A) ONCE — one call, the wrong session;
+    // the law renders UNAVAILABLE with ZERO host, composer and notify calls.
+    remount()
+    globalThis.__calls.length = 0
+    t = render({ storedId: latestStoredSessionId({ session_ids: [A, RUNTIME] }) })
+    assert.ok(textOf(t).includes('Session unavailable'),
+      'the unverified rotation renders unavailable, not a stale link to the older chat')
+    assert.equal(buttons(t).filter(b => b.children === 'open recorded chat').length, 0,
+      'no armed link exists to click on an unverified current attempt')
+    assert.equal(openCalls().length, 0, 'zero host navigation')
+    assert.equal(globalThis.__calls.filter(c => ['submit', 'insert', 'notify', 'navigate'].includes(c[0])).length, 0,
+      'zero composer/notify/surface calls on an unverified current attempt')
+
+    // A live link whose NEXT fetch ships an expired current attempt (flagged by
+    // the authoritative state.db lookup) re-renders unavailable — no re-fire of
+    // the older destination, no call of any kind.
+    remount()
+    globalThis.__calls.length = 0
+    t = render({ storedId: latestStoredSessionId({ session_ids: [A, B], session_ids_expired: [B] }) })
+    assert.ok(textOf(t).includes('Session unavailable'),
+      'an expired current attempt renders the honest unavailable state')
+    assert.equal(openCalls().length, 0, 'expiry observed at the lookup makes zero navigation calls')
 
     // adapter rejection: local error state, the id stays inspectable, NO second call
     remount()
