@@ -329,6 +329,14 @@ SOURCE_ONLY_TESTS = {
     # bd_2026-11-13-iqf (slice A): the double-run spec reads the committed capture sets under
     # tests/proof-harness/captured/ and imports the source-only driver — same est-4vnq finding-4 shape.
     "tests/test_proof_harness_repro.mjs": "executes source-only tests/proof-harness/capture.mjs and reads tests/proof-harness/captured/ sets",
+    # bd_2026-11-13-nyf (Wave B fix-forward): the wake-evidence fixture suite
+    # subprocess-executes scripts/wake_evidence.py (declared source-only below)
+    # and reads the committed owner-bound seeds under tests/wake-evidence-nyf/
+    # (no pack pattern matches that dir) — the est-4vnq finding-4 shape, the
+    # same registration slice B later applied for its own repro spec. Wave B
+    # packaged-test-results.json records its exit 1 at an unpacked root: the
+    # tests/test_*.py glob shipped the spec without its validator or seeds.
+    "tests/test_wake_evidence_nyf.py": "executes source-only scripts/wake_evidence.py and reads tests/wake-evidence-nyf/ seed dirs",
 }
 
 # Source-only SCRIPTS: repository/estate CI tooling that never travels in the
@@ -365,6 +373,11 @@ SOURCE_ONLY_SCRIPTS = {
     # seat gets it as a deployed copy refreshed from this repo. Not release
     # surface — the plugin's own tooling does not import it.
     "scripts/retention.py": "estate retention pruner (tracker-fed never-delete law + janitor receipt spine; deployed-copy distribution path)",
+    # bd_2026-11-13-nyf: the owner-bound wake-receipt validator driven by the
+    # source-only tests/test_wake_evidence_nyf.py fixture suite. Proof tooling
+    # over committed seed dirs, imported by no shipped module — the plugin
+    # never loads it at runtime, so it is not release surface.
+    "scripts/wake_evidence.py": "wake-evidence fixture validator (executed by source-only tests/test_wake_evidence_nyf.py; not release surface, no runtime import)",
 }
 
 

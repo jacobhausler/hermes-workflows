@@ -43,6 +43,10 @@ SOURCE_ONLY_TESTS = {
     # bd_2026-11-13-iqf (slice A): executes the source-only driver AND reads
     # the committed capture sets under tests/proof-harness/captured/.
     "tests/test_proof_harness_repro.mjs",
+    # bd_2026-11-13-nyf (Wave B fix-forward): same est-4vnq finding-4 shape —
+    # the wake-evidence fixture suite executes the source-only validator
+    # scripts/wake_evidence.py and reads the seeds under tests/wake-evidence-nyf/.
+    "tests/test_wake_evidence_nyf.py",
 }
 # A shipped test that loads/executes `<root> / "scripts" / "<file>"` needs that file in the ZIP.
 SCRIPT_REF = re.compile(r'(?:ROOT|BUILD)\s*/\s*"scripts"\s*/\s*"([^"]+)"|ROOT\s*/\s*"scripts/([^"]+)"')
