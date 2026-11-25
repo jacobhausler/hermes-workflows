@@ -1130,15 +1130,10 @@ async function main() {
       }
       if (stored !== 'ok') die(EX.boot, 'localStorage never writable on the renderer — enable decision impossible');
     }
-    // bd yjp (coverage case): the transport edge is the FORK, not the Fetch
-    // domain — plugin REST rides the app's IPC bridge (preload `hermes:api`;
-    // field-proven 2026-11-24: Fetch.requestPaused never fires for plugin
-    // requests), so the LOADING costume is manufactured by SIGSTOPping the
-    // bench fork BEFORE the activation reload: the plugin's first census
-    // page then sits unanswered — honestly — until frame 02 thaws it. The
-    // mock stays mounted rule-less (a future app generation may move REST to
-    // HTTP; the re-arm sites below keep working). Baseline/gate keep their
-    // close/reconnect dance byte-for-byte.
+    // bd yjp (coverage case): plugin REST rides the app's IPC bridge
+    // (preload `hermes:api`), not Fetch. Delay/failure are therefore installed
+    // only in the staged bench's registered /runs handler; production code and
+    // the renderer transport remain untouched.
     let mock = null;
     // Rules survive session churn: every re-arm re-applies them, and every
     // setRules site records them here (the field-proven #720 lesson — the
@@ -1150,47 +1145,12 @@ async function main() {
       mock = await mockRuns(cdp);
       armRules([]);
     };
-    // Fork-edge control (coverage): freeze the gateway process itself so
-    // every IPC-borne /runs page hangs unanswered. The loop re-stops a
-    // ROTATED fork (the app's ensure may SIGKILL+restart a frozen one),
-    // holding the loading costume until covThaw.
-    let covForkState = null;
-    let covThawed = true;
-    const covForkPid = () => {
-      try { return JSON.parse(fs.readFileSync(covForkState, 'utf8')).pid ?? null; }
-      catch { return null; }   // half-written state file mid-rotation
-    };
-    const covSignal = (pid, sig) => { try { process.kill(pid, sig); return true; } catch { return false; } };
-    const covFreeze = async () => {
-      let last = null;
-      while (!covThawed) {
-        const pid = covForkPid();
-        if (pid && pid !== last && covSignal(pid, 'SIGSTOP')) last = pid;
-        await sleep(300);
-      }
-    };
-    const covFreezeAtEdge = async () => {
-      const fT0 = Date.now();
-      for (;;) {
-        covForkState = [path.join(B.profile, 'gateway_state.json'),
-                        path.join(B.home, 'gateway_state.json')].find(p => fs.existsSync(p)) ?? null;
-        const pid = covForkState && covForkPid();
-        if (pid && covSignal(pid, 'SIGSTOP')) break;
-        if (Date.now() - fT0 > A.paintBudgetMs)
-          die(EX.boot, 'coverage: fork never registered a usable gateway_state.json — cannot freeze the IPC edge');
-        await sleep(500);
-      }
-      covThawed = false;
-      covFreeze();
-    };
-    const covThaw = async () => {
-      covThawed = true;
-      await sleep(400);   // let the freeze loop exit first — a STOP landing
-                          // after the CONT would re-freeze the edge forever
-      const pid = covForkPid();
-      if (pid) covSignal(pid, 'SIGCONT');
-    };
-    if (isCoverage) { await armMock(); await covFreezeAtEdge(); }
+    const delayMarker = coverageMarker && path.join(path.dirname(coverageMarker), '.proof-delay-census');
+    const failureMarker = coverageMarker && path.join(path.dirname(coverageMarker), '.proof-fail-census');
+    if (isCoverage) {
+      await armMock();
+      fs.writeFileSync(delayMarker, '', { flag: 'wx' });
+    }
     await cdp.send('Page.reload', { ignoreCache: true });
     if (!isCoverage) {
       cdp.ws.close();
@@ -1403,20 +1363,18 @@ async function main() {
                          JSON.stringify(identity.gateway_scope_probe, null, 2) + '\n');
       } catch (e) { identity.gateway_scope_probe = { err: String(e).slice(0, 200) }; }
       try {
-        // 01 LOADING: the fork is FROZEN at the edge (SIGSTOP armed before
-        // the activation reload), so every IPC-borne /runs page sits
-        // unanswered — the pane's one honest costume for a census not yet
-        // answered.
+        // 01 LOADING: the staged /runs route delays its IPC response while
+        // the real renderer waits on its ordinary census request.
         await covPoll('Loading…', '00-diagnostic-loading.png',
                       'loading state never rendered IN THE PANE COLUMN');
-        shots.push({ surface: 'pane_workflows', state: 'loading (fork frozen at the IPC edge)',
+        shots.push({ surface: 'pane_workflows', state: 'loading (staged census IPC response delayed)',
                      ...(await shoot(cdp, A.outDir, '01-coverage-loading.png', null, await stableColumnText(paneRegion))) });
-        // 02 EMPTY: thaw the fork on the unseeded bench — an ANSWERED
+        // 02 EMPTY: remove the bench delay on the unseeded API — an ANSWERED
         // empty census names the roots it scanned; empty is not loading.
-        await covThaw();
+        fs.rmSync(delayMarker, { force: true });
         await waitText(cdp, 'No runs', 30_000);
         identity.coverage = {
-          edge: 'fork SIGSTOP/SIGKILL at the app IPC bridge; partial fetch served only by the staged bench dashboard API',
+          edge: 'delayed/failed census responses from registered staged bench /runs handler; short page served only by staged bench dashboard API',
           roots_line_seen: await cdp.evl(`document.body.innerText.includes('roots:')`) };
         shots.push({ surface: 'pane_workflows', state: 'empty census answered (roots named)',
                      ...(await shoot(cdp, A.outDir, '02-coverage-empty.png', null, await stableColumnText(paneRegion))) });
@@ -1468,19 +1426,14 @@ async function main() {
         shots.push({ surface: 'pane_workflows', state: `record page for ${deepest} opened by runQuery(id)`,
                      ...(await shoot(cdp, A.outDir, '05-coverage-record-page.png')) });
 
-        // 06 ERROR with cached data: KILL the fork — the fixture rows read
-        // `interrupted` (never TERMINAL), so the pane's own 4 s loop trips
-        // on a dead gateway (the IPC bridge answers an error, which the
-        // Fetch mock could never have laid), and the CACHED CENSUS WINS:
-        // rows stay on screen and the failure wears the clickable stale chip.
-        const deadPid = covForkPid();
-        if (!deadPid || !covSignal(deadPid, 'SIGKILL'))
-          die(EX.api, 'coverage: fork pid was unreachable for the error edge');
+        // 06 ERROR with cached data: fail only the staged registered route;
+        // the actual IPC call returns 503 and the CACHED CENSUS WINS.
+        fs.writeFileSync(failureMarker, '', { flag: 'wx' });
         await covPoll('stale — retry', '00-diagnostic-error.png',
                       'refetch failure never wore the stale chip IN THE PANE COLUMN');
         if (!(await cdp.evl(`document.body.innerText.includes('runs ${COUNT}')`)))
           die(EX.api, 'a refetch failure evicted the cached census — data must win over error');
-        shots.push({ surface: 'pane_workflows', state: 'refetch failed (fork killed): cached census kept, stale chip clickable',
+        shots.push({ surface: 'pane_workflows', state: 'bench /runs IPC failed (503): cached census kept, stale chip clickable',
                      ...(await shoot(cdp, A.outDir, '06-coverage-error-cached.png', null, await stableColumnText(paneRegion))) });
 
         // 07 RECOVERY: the chip's click invalidates the runs key — the walk
@@ -1489,6 +1442,7 @@ async function main() {
         // moving proves a real re-walk, not a redraw. The app re-ensures the
         // killed fork on its own clock; every chip click is a real
         // invalidation, so repeat until the grown census lands.
+        fs.rmSync(failureMarker, { force: true });
         seedFixture(1, COUNT);
         {
           const rT0 = Date.now();
