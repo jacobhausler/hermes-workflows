@@ -1268,7 +1268,7 @@ def grammar_errors(graph):
 # custody probe re-run per item BEFORE the child spawns; non-zero commits the item
 # `skipped` (never failed). Same no-shell law as gate wait.until_argv.
 FANOUT_KEYS = {"items", "items_from", "goal", "schema", "quorum", "quorum_drain_s", "ledger",
-               "precheck_argv"}
+               "precheck_argv", "quorum_mode"}
 # ---------- est-fanout-cell (sys-96dcod): the [fan + consolidate] cell ----------
 # Owner directive (2026-10-10): a standard unit pairing WITH the fan so operators
 # get wave-consolidation — finished members flow into consolidation while the
@@ -2410,6 +2410,12 @@ def validate_graph_errors(nodes, *, admission=False, defaults=None):
                     q = fo.get("quorum")
                     if q is not None and (not isinstance(q, int) or isinstance(q, bool) or q < 1):
                         E(nid, "fanout.quorum", "fanout.quorum must be a positive int")
+                    if "quorum_mode" in fo:
+                        if fo["quorum_mode"] != "all":
+                            E(nid, "fanout.quorum_mode", 'fanout.quorum_mode must be "all"')
+                        elif q is not None:
+                            E(nid, "fanout.quorum_mode",
+                              'fanout.quorum_mode "all" cannot be combined with fanout.quorum')
                     # est-06xk (#123): drain-with-deadline is an OPT-IN modifier of
                     # the quorum race — a number of seconds >= 0 (0 = today's
                     # immediate SIGKILL at the quorum moment). bool is not a number

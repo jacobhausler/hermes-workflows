@@ -41,7 +41,7 @@ launch a replacement or mutate configuration.
   spawn.
 - A node `schema` makes the runner write the reply contract into the prompt — keep
   contract prose out of goals.
-- Independent tasks: separate nodes or one `fanout` with `items`. `quorum` races: once N succeed, the rest are cancelled — `quorum_drain_s:<s>` (default 0) gives running stragglers a drain window; pair every fan-out with a `consolidate` partner (`{"from":"<fan>","batch":1}`) — left-open items past the cohort clock fire one `fanout.stragglers` wake, never poll.
+- Independent tasks: separate nodes or one `fanout` with `items`. Pin `quorum_mode:"all"` for coverage or dissent: wait for all items to settle. Otherwise waiting for all is still the default; numeric `quorum` opts into a race, with `quorum_drain_s:<s>` (default 0) giving stragglers a drain window. Pair every fan-out with a `consolidate` partner (`{"from":"<fan>","batch":1}`) — left-open items past the cohort clock fire one `fanout.stragglers` wake, never poll.
 - Shared settings go in a graph-level `defaults` once. Leave node budgets unset and
   name a `shape`; see [budgets](references/budgets.md). A constant travels as an
   `echo` node, never an agent spawn.
