@@ -41,3 +41,9 @@ ci/*.sh
 # NFS silly-rename phantoms (f9439b2): keep out of every listing
 .nfs*
 tests/writer_2lcp8.pids
+
+# p01 temp homes land at the repo ROOT (test_agent_experience_p01 builds them with
+# dir=ROOT); the tests/home* patterns never covered the prefix, so a crashed
+# run litters an unignored directory on an otherwise clean checkout
+# (nightly sweep-c, 2026-11-25).
+p01-home-*/
