@@ -34,16 +34,16 @@ activation reload), answered-empty (roots named), full census all-loaded, the
 deepest counted row past the first-100 ceiling + its record page, refetch
 failure with the cached census kept (fork SIGKILLed; clickable stale chip),
 retry re-walk (census grew while the gateway was dead), and partial fetch
-(server-side short-page knob: `loaded 100 of 134` while the summary stays
+(bench-only short page: `loaded 100 of 134` while the summary stays
 global). **The transport edge is the FORK, not the CDP Fetch domain:** the
 plugin's REST rides the app's IPC bridge (preload `hermes:api`,
 field-proven 2026-11-24), so `Fetch.requestPaused` never fires for plugin
 requests — the loading costume is a SIGSTOPped fork, the error costume a
-SIGKILLed one, and the partial-fetch costume is served by the route itself
-via `WF_PROOF_SHORT_PAGES_FILE` (exported by the launcher before boot — the
-fork inherits the driver env; the file's integer is an offset floor; absent
-or garbage content = no knob, fail-closed; pinned by W7 of
-`tests/test_census_pages_full_yjp.py`). The mock stays mounted rule-less for
+SIGKILLed one, and partial fetch is served by the staged bench `/runs` route.
+The driver puts a marker next to the bench API for the partial-fetch shot and
+removes it in `finally`. The marker has no effect on the production API. W7
+and W8 of `tests/test_census_pages_full_yjp.py` exercise both registered routes.
+The mock stays mounted rule-less for
 future app generations that may move REST onto HTTP. A UDS scope probe
 against the fork is recorded to `logs/scope-probe.json` before the walk
 (field-proven #12 lesson). This case does NOT use the close/reconnect reload
