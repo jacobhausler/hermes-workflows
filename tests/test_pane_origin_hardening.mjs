@@ -1,9 +1,13 @@
-// est-wk7l — the pane's originator lookup must NEVER resolve through inherited
-// properties of the session->profile map. A persisted session id that collides
-// with an Object.prototype member (toString / constructor / __proto__) used to
-// render the native function/object as the agent's name (adversary ui-probes:
-// '@function toString() { [native code] }', '@[object Object]'). The label must
-// be an own-property, typed-string read, and never be another row's origin.
+// est-wk7l + bd_2026-11-13-e7h — the pane's originator lookup must NEVER
+// resolve through inherited properties of the session->profile map. A persisted
+// session id that collides with an Object.prototype member (toString /
+// constructor / __proto__) used to render the native function/object as the
+// agent's name (adversary ui-probes: '@function toString() { [native code] }',
+// '@[object Object]'). The label must be an own-property, typed-string read,
+// and never be another row's origin. The e7h revision additionally pins that
+// the five-way sections partition every non-husk row WITHOUT rewriting any
+// row's raw status: the buckets never become a second vocabulary layered on
+// the prototype guard.
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -18,7 +22,8 @@ const grab = name => {
   return src.slice(i, j + 1)
 }
 
-const paneModel = new Function(`${grab('paneModel')}\n${grab('originLabel')}\n${grab('safeProfileLabel')}\n${grab('parseTime')}; return paneModel`)()
+const fleetConsts = src.match(/export const FLEET_SECTIONS = \[[^\]]*\]/)[0].replace('export ', '')
+const paneModel = new Function(`${fleetConsts}\n${grab('fleetSectionOf')}\n${grab('paneModel')}\n${grab('originLabel')}\n${grab('safeProfileLabel')}\n${grab('parseTime')}; return paneModel`)()
 
 const base = (id, status, session) => ({ id, status, updated: 1000, owner: session ? { session_id: session } : null })
 const map = {}   // ordinary object: prototype members are reachable unless guarded
@@ -31,7 +36,10 @@ const runs = [
   base('r-normal', 'done', 'normal-session'),
 ]
 const model = paneModel(runs, map)
-const originOf = id => (model.rest.find(r => r.id === id) || {}).origin
+const originOf = id => (model.finished.find(r => r.id === id) ||
+  model.interrupted.find(r => r.id === id) ||
+  model.held.find(r => r.id === id) ||
+  model.running.find(r => r.id === id) || {}).origin
 for (const [id, sid] of [['r-toString', 'toString'], ['r-constructor', 'constructor'], ['r-proto', '__proto__']]) {
   const o = originOf(id)
   assert.equal(typeof o, 'string', `${id}: origin must be a string, got ${typeof o}`)
@@ -48,12 +56,22 @@ assert.equal(originOf('r-normal'), 'normal-session')
 // own-property only: a map that DOES carry the session resolves normally
 const owned = { 'toString-x': 'alpha' }
 const m2 = paneModel([base('r-owned', 'done', 'toString-x')], owned)
-assert.equal(m2.rest[0].origin, 'alpha')
+assert.equal(m2.finished[0].origin, 'alpha')
 
 // __proto__ assignment can never poison later rows through the lookup
 const poisoned = {}
 poisoned['__proto__'] = { 'evil-session': 'evil' }
 const m3 = paneModel([base('r-evil', 'done', 'evil-session')], poisoned)
-assert.notEqual(m3.rest[0].origin, 'evil', 'inherited property must not resolve as an origin')
+assert.notEqual(m3.finished[0].origin, 'evil', 'inherited property must not resolve as an origin')
+
+// the taxonomy partition leaves no row's raw status rewritten (e7h): every
+// row lands in exactly one section, and every row's status is verbatim input.
+const raw = ['done', 'failed', 'stopped', 'partial', 'cancelled', 'interrupted', 'weird-new-verdict']
+const mixed = raw.map((s, i) => base(`raw-${i}`, s, 's'))
+const mm = paneModel(mixed, {})
+const placed = [...mm.held, ...mm.running, ...mm.interrupted, ...mm.finished]
+assert.equal(placed.length, mixed.length, 'every non-husk row is placed exactly once')
+assert.deepEqual(placed.map(r => r.status).sort(), [...raw].sort(),
+  'sections bucket rows without rewriting any raw status word')
 
 console.log('test_pane_origin_hardening OK')

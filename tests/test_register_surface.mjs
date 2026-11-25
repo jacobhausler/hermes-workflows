@@ -192,10 +192,13 @@ assert.equal(typeof pane.data.tabTitle, 'function', 'tabTitle renders WORKFLOWS 
 assert.equal(typeof pane.data.tabTitleText, 'function')
 assert.equal(typeof pane.render, 'function')
 
-// -- 3. paneModel (agent-first, owner 2026-10-03): RUNNING runner-backed only;
-// pending husks are never rendered; everything else (held/done/failed/stopped/
-// interrupted) is THE REST, descending by last action — one index, no queue
-// framing. Origin label resolves or falls back, never fabricates. ----------
+// -- 3. paneModel (agent-first, owner 2026-10-03; five-way taxonomy
+// bd_2026-11-13-e7h): pending husks are never rendered; held rows form the
+// Held section, runner-backed rows the Running section, clean done the
+// Finished section, and every other ending (failed/stopped/interrupted/
+// partial/cancelled) the Interrupted section — one index, no queue framing,
+// every row uncapped, raw status intact. Origin label resolves or falls back,
+// never fabricates. ----------------------------------------------------------
 const mk = (id, status, updated) => ({ id, status, updated, owner: {} })
 const runs = [
   mk('h1', 'held', 1), mk('f1', 'failed', 2), mk('i1', 'interrupted', 3),
@@ -203,9 +206,13 @@ const runs = [
   mk('d1', 'done', 6), mk('s1', 'stopped', 7)
 ]
 const g = mod.paneModel(runs, {})
-assert.deepEqual(g.running.map(r => r.id), ['r1'], 'RUNNING is runner-backed only; pending husk excluded')
-assert.deepEqual(g.rest.map(r => r.id), ['s1', 'd1', 'i1', 'f1', 'h1'],
-  'The Rest = held+done+failed+stopped+interrupted together, updated desc — held is not a section')
+assert.deepEqual(g.running.map(r => r.id), ['r1'], 'Running is runner-backed only; pending husk excluded')
+assert.deepEqual(g.held.map(r => r.id), ['h1'], 'Held is its own section — the ask, not history')
+assert.deepEqual(g.interrupted.map(r => r.id), ['s1', 'i1', 'f1'],
+  'Interrupted = failed+stopped+interrupted together, updated desc — a bucket, not a rewrite')
+assert.deepEqual(g.finished.map(r => r.id), ['d1'], 'Finished is ONLY the clean done group')
+assert.deepEqual(g.all.map(r => r.id), ['h1', 'r1', 's1', 'i1', 'f1', 'd1'],
+  'All is the union in held-first attention order; the husk renders nowhere')
 
 // -- 4. SMIL candy: <animate> ONLY on paths leaving running nodes ----------------
 const grab = name => {

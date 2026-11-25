@@ -1087,14 +1087,45 @@ export function originLabel(owner, resolvedProfile) {
   return 'unknown'
 }
 
-/** Agent-first pane model (owner directive 2026-10-03): the pane is an INDEX
- *  for a human viewer — they never launch runs, so there is no "mine" split.
- *  RUNNING on top (any owner), every other status in THE REST descending by
- *  last action (`updated`) — held/done/failed interleaved as history, never as
- *  a queue addressed to the reader ('NEEDS YOU' stays dead). No caps: a human
- *  explores every agent run like any other row. Husks (pending = runner dead +
- *  no events.jsonl) stay unrendered. Each row gains `origin` via originLabel
- *  over the census-wide session->profile map. Pure, node-testable. */
+/* ---- Fleet landing taxonomy (bd_2026-11-13-e7h, RC ch1) --------------------
+ * Five named sections; the filter pills correspond 1:1 to identically named
+ * list sections and All is their union. This explicitly replaces the
+ * RUNNING / THE REST headings while preserving the uncapped index.
+ * Interrupted holds failed, stopped, cancelled/skipped, partial (budget-capped),
+ * stale and unknown-status work — the section is a bucket, never a rewrite:
+ * every row keeps its exact status word. Finished holds ONLY clean `done`
+ * rows; failure-bearing endings never fold into it ('terminal' is not copy for
+ * successful work; 'Finished' labels only the clean group). */
+export const FLEET_SECTIONS = ['held', 'interrupted', 'running', 'finished']
+// Pill order is the named five (WO law); union RENDER order is held-first
+// attention: held, running, interrupted, finished. The two orders answer
+// different questions and are deliberately separate constants.
+export const FLEET_ATTENTION = ['held', 'running', 'interrupted', 'finished']
+export const FLEET_FILTERS = ['all', ...FLEET_SECTIONS]
+export const FLEET_LABELS = { all: 'All', held: 'Held', interrupted: 'Interrupted', running: 'Running', finished: 'Finished' }
+
+/** The ONE section-membership law. Anything that is not held, not running and
+ *  not cleanly done is interrupted work: the reader sees the raw status word
+ *  on the row, the bucket only answers 'where do I look'. */
+export function fleetSectionOf(status) {
+  if (status === 'held') return 'held'
+  if (status === 'running') return 'running'
+  if (status === 'done') return 'finished'
+  return 'interrupted'
+}
+
+/** Agent-first pane model (owner directive 2026-10-03; five-way revision
+ *  bd_2026-11-13-e7h): the pane is an INDEX for a human viewer — they never
+ *  launch runs, so there is no "mine" split. Every non-husk row lands in
+ *  exactly one of Held / Interrupted / Running / Finished, each descending by
+ *  last action (`updated`); `all` is the four blocks concatenated in held-first
+ *  attention order (held, running, interrupted, finished) — a block ordering,
+ *  not a global resort: the gate lane owns within-collection held-first
+ *  comparators and this index never re-sorts across buckets to nag the reader.
+ *  No caps: a human explores every agent run like any other row. Husks
+ *  (pending = runner dead + no events.jsonl) stay unrendered — in no section
+ *  and in no union. Each row gains `origin` via originLabel over the
+ *  census-wide session->profile map. Pure, node-testable. */
 export function paneModel(runs, profilesBySession) {
   const byUpdated = (a, b) => parseTime(b.updated) - parseTime(a.updated)
   const list = (runs || []).filter(r => r && r.status !== 'pending')
@@ -1103,10 +1134,121 @@ export function paneModel(runs, profilesBySession) {
       origin: originLabel(r.owner,
         r.owner_profile || safeProfileLabel(profilesBySession, r.owner?.session_id))
     }))
+  const sections = { held: [], interrupted: [], running: [], finished: [] }
+  for (const r of list) sections[fleetSectionOf(r.status)].push(r)
+  for (const k of FLEET_SECTIONS) sections[k].sort(byUpdated)
+  const all = [...sections.held, ...sections.running, ...sections.interrupted, ...sections.finished]
   return {
-    running: list.filter(r => r.status === 'running').sort(byUpdated),
-    rest: list.filter(r => r.status !== 'running').sort(byUpdated)
+    held: sections.held,
+    interrupted: sections.interrupted,
+    running: sections.running,
+    finished: sections.finished,
+    all,
+    counts: {
+      all: list.length, held: sections.held.length,
+      interrupted: sections.interrupted.length, running: sections.running.length,
+      finished: sections.finished.length
+    }
   }
+}
+
+/** Pure view over the pane model for one filter value: `all` is the four
+ *  blocks in held-first ATTENTION order (FLEET_ATTENTION); every other filter
+ *  is EXACTLY that one section — the filter result always equals section
+ *  membership, never a re-derivation. Unknown filter values fall back to
+ *  `all` (fail open on the union, which is every row — no filter may silently
+ *  hide counted work). */
+export function applyFleetFilter(model, filter) {
+  const want = FLEET_SECTIONS.includes(filter) ? [filter] : FLEET_ATTENTION
+  return want.map(id => ({ id, rows: (model && model[id]) || [] }))
+}
+
+/* ---- Hygiene strip (bd_2026-11-13-e7h; DESIGN.md:194-195, doctrine
+ * 254713-255448) ------------------------------------------------------------
+ * Live / Done / Unowned / Asks is a WINDOW census plus unresolved decisions,
+ * computed from current state, and it is kept structurally separate from the
+ * workflow census line above it — window counts are never inferred from worker
+ * status, and workflow counts never wear window labels.
+ *
+ * Binding honesty (the bead's law): the desktop SDK exposes this window's
+ * focused session (focusedSessionId / focusedStoredSessionId) but NO roster of
+ * the app's other windows, so window ownership for windows beyond this one is
+ * rendered as explicit `unavailable` — no fabricated cross-window census. The
+ * plugin therefore owns exactly one window record: THIS window, derived from
+ * the focused session's ownership of census runs (the ownedRuns law, including
+ * its ui_session_id rotation capture).
+ *   - focused chat owns live work            -> Live window (read-only navigation;
+ *                                               nothing silently closes a working window)
+ *   - owns only clean finished work          -> Done (explicit Close)
+ *   - owns runs that ended any other way     -> Idle (explicit Close; never sold as Done)
+ *   - owns nothing                           -> Unowned ('No work owns this window',
+ *                                               explicit Close)
+ *   - focused session unreadable / rotated   -> UNKNOWN, fail-closed: no ownership
+ *      claim, no close affordance
+ * Close removes ONLY the plugin-local record (never the chat, never
+ * conversation history) and leaves a visible receipt on the strip.
+ * Asks counts unresolved gate decisions (rows whose read model still carries
+ * a held_gate) — notices (failure reasons, cascade summaries) never become
+ * permissions and never inflate the ask census. */
+export const $closedWindows = atom([])   // [{recId, kind}] — plugin-local window state
+export const $askCursor = atom(0)        // rotation across unresolved decisions
+
+export function hygieneModel(runs, ownedList, { roster = null, closed = [] } = {}) {
+  const rows = runs || []
+  const askRuns = rows.filter(r => r && r.held_gate)
+  const byUpdated = (a, b) => parseTime(b.updated) - parseTime(a.updated)
+  askRuns.sort(byUpdated)
+  const out = {
+    live: 0, done: 0, idle: 0, unowned: 0,
+    asks: askRuns.length, askRuns,
+    record: null, rosterUnavailable: !Array.isArray(roster)
+  }
+  const owned = ownedList || []
+  if (!owned.length && ownedList !== undefined && ownedList !== null) {
+    // A resolved-but-empty ownership read is the honest Unowned fact.
+    out.unowned = 1
+    out.record = { recId: 'win:unowned', kind: 'unowned', label: 'No work owns this window' }
+  } else if (owned.length) {
+    const liveRows = owned.filter(r => !TERMINAL.has(r.status))
+    const cleanDone = owned.every(r => r.status === 'done')
+    const kind = liveRows.length ? 'live' : (cleanDone ? 'done' : 'idle')
+    out[kind] = 1
+    out.record = {
+      recId: 'win:' + kind, kind,
+      label: kind === 'live' ? 'Live window · read-only'
+        : kind === 'done' ? 'Finished here · chat kept'
+          : 'Idle window · work ended here'
+    }
+  }
+  // ownedList === null/undefined: the focused session is unreadable (no
+  // runtime or stored id yet, or both rotated away) — fail CLOSED: the strip
+  // says unknown and offers no close, rather than claiming unowned.
+  if (ownedList === null || ownedList === undefined) out.unknown = true
+  const closedHere = (closed || []).some(c => c && c.recId === out.record?.recId && c.kind === out.record?.kind)
+  if (out.record && closedHere) {
+    // A closed record is GONE from the plugin's window state — the count for
+    // its kind drops to zero (doctrine 254755: 'nvm i closed them'); only the
+    // receipt remains. Never the chat, never conversation history.
+    out[out.record.kind] = 0
+    out.closed = true
+    out.record.shown = false
+  }
+  return out
+}
+
+/** The Asks jump (F1 law, same identity discipline as gateViewAction): the
+ *  click carries the exact run + gate identity, never the viewer's selection.
+ *  `cursor` rotates across unresolved decisions; a gate with no id fails
+ *  CLOSED — no route is invented for an identity the record does not carry.
+ *  Pure, node-testable. */
+export function askJumpAt(askRuns, cursor) {
+  const rows = askRuns || []
+  if (!rows.length) return { action: null, next: 0 }
+  const i = ((cursor % rows.length) + rows.length) % rows.length
+  const r = rows[i]
+  const gateId = r?.held_gate?.id
+  if (!r?.id || !gateId || !ID_OK.test(String(gateId))) return { action: null, next: cursor }
+  return { action: gateViewAction(r.id, gateId), next: i + 1 }
 }
 
 /** Own-property-only session->profile read (est-wk7l): a persisted session id
@@ -2029,13 +2171,35 @@ NODE_TONE.waiting = NODE_TONE.pending
 // entry as skipped (stop != failure, the #7 law; a resume re-drives it).
 NODE_TONE.cancelled = NODE_TONE.skipped
 
-// Hoisted animation CSS (#48): ONE <style>, injected once by PolishStyles,
-// deduped by React 19 via the stable href — BUMP THE NUMBER per CSS edit.
-// Pulse keyframes sit behind prefers-reduced-motion: no-preference so the
-// animations simply never resolve for users who ask for calm.
-export const STYLE_HREF = 'hermes-workflows.3.css'
+// Hoisted animation CSS (#48) + the fleet landing layout CSS (bd e7h): ONE
+// <style>, injected once by PolishStyles (the pane and the record page may
+// both mount it — React 19 dedupes by the stable href), BUMP THE NUMBER per
+// CSS edit. Pulse keyframes sit behind prefers-reduced-motion: no-preference
+// so the animations simply never resolve for users who ask for calm. The
+// fleet layout rules are static geometry — motion-free at every band, and
+// the 44x44 open-arrow is a fixed box, never a grid min-width (audit must-fix
+// #6: a 532px row floor pushed the control off-viewport at 640-792).
+export const STYLE_HREF = 'hermes-workflows.4.css'
+const FLEET_LAYOUT_CSS = [
+  '.wf-fleet-pills{display:flex;flex-wrap:wrap;gap:4px;padding:2px 8px}',
+  '.wf-pill{font:inherit;font-size:11px;line-height:1.2;padding:4px 8px;min-height:28px;' +
+    'border:0;border-radius:10px;background:transparent;color:inherit;cursor:pointer}',
+  '.wf-pill:hover{background:color-mix(in srgb, currentColor 10%, transparent)}',
+  '.wf-pill[data-selected="true"]{box-shadow:inset 0 0 0 1px currentColor;' +
+    'background:color-mix(in srgb, currentColor 14%, transparent)}',
+  '.wf-hygiene{display:flex;flex-wrap:wrap;gap:8px;align-items:baseline;' +
+    'border-top:1px solid color-mix(in srgb, currentColor 18%, transparent)}',
+  '.wf-hyg-asks,.wf-hyg-close{text-decoration:underline;text-underline-offset:2px;cursor:pointer}',
+  '.wf-hyg-unavailable{opacity:.7}',
+  '.wf-pane-row{display:flex;align-items:stretch;min-width:0}',
+  '.wf-pane-row>*:first-child{flex:1 1 auto;min-width:0}',
+  '.wf-row-open{flex:0 0 auto;box-sizing:border-box;width:44px;min-width:44px;' +
+    'height:44px;min-height:44px;display:inline-flex;align-items:center;justify-content:center;' +
+    'font:inherit;background:transparent;border:0;color:inherit;cursor:pointer}',
+  '@media (max-width: 792px){.wf-pane-row{min-width:0}.wf-row-open{width:44px;height:44px}}'
+].join('\n')
 const POLISH_CSS =
-  `@media (prefers-reduced-motion: no-preference) {\n${GATE_PULSE.keyframes}\n${BREATHE.keyframes}\n}`
+  `${FLEET_LAYOUT_CSS}\n@media (prefers-reduced-motion: no-preference) {\n${GATE_PULSE.keyframes}\n${BREATHE.keyframes}\n}`
 
 // The single hoisted style injector (the ONLY style-element call in the file).
 // Styles only plugin-owned @keyframes — never global page chrome.
@@ -2998,28 +3162,43 @@ export function PaneRow({ run, thisChat }) {
     const idle = run.metrics ? idleS(run.metrics) : null
     fact = [`${nodesCount(run)}`, elapsed, idleCell(idle)].filter(Boolean).join(' · ')
   } else fact = ago(run.updated)
-  return jsx(PanelListRow, {
-    active: false,
-    lead: jsx(Dot, { status: run.status }),
-    title: jsxs('span', {
-      className: 'inline-flex min-w-0 items-center gap-1',
-      children: [
-        jsx('span', { className: 'truncate', children: displayTitle(run) }),
-        // l8i: the template COLUMN (the fleet view has the width for it).
-        // Unlabeled runs resolve to name, so the column prints only when it
-        // is a genuinely SECOND fact (templateTag nulls the duplicate).
-        t ? jsx('span', { className: 'shrink-0 text-[0.6875rem] text-(--ui-text-tertiary)', title: 'template', children: t }) : null,
-        // Agent-first (2026-10-03): who launched it, on EVERY row — including
-        // the honest word 'unknown' when the read model cannot attribute it
-        // (deep review #156 A2: 'originator on every row' is the law; silence
-        // was a contrary contract). Never a fabricated name.
-        jsx('span', { className: 'shrink-0 text-[0.6875rem] text-(--ui-text-tertiary)', title: `launched by @${run.origin || 'unknown'}`, children: `@${run.origin || 'unknown'}` }),
-        thisChat ? jsx(PanelPill, { tone: 'muted', children: 'this chat' }) : null
-      ]
-    }),
-    meta: jsx('span', { className: 'max-w-[8rem] truncate', children: fact }),
-    onSelect: open,
-    rowKey: run.id
+  // e7h row geometry (RC ch1): identity left, fact right of it, and a REAL
+  // 44x44 open-arrow on the right — a sibling button, never a min-width the
+  // grid forces on the row (the audit must-fix #6 shape: a 532px row min-width
+  // pushed the control off-viewport at the tablet bands). The row flexes, the
+  // list cell truncates, the arrow never shrinks below 44x44.
+  return jsx('div', {
+    className: 'wf-pane-row',
+    children: [
+      jsx(PanelListRow, {
+        active: false,
+        lead: jsx(Dot, { status: run.status }),
+        title: jsxs('span', {
+          className: 'inline-flex min-w-0 items-center gap-1',
+          children: [
+            jsx('span', { className: 'truncate', children: displayTitle(run) }),
+            // l8i: the template COLUMN (the fleet view has the width for it).
+            // Unlabeled runs resolve to name, so the column prints only when it
+            // is a genuinely SECOND fact (templateTag nulls the duplicate).
+            t ? jsx('span', { className: 'shrink-0 text-[0.6875rem] text-(--ui-text-tertiary)', title: 'template', children: t }) : null,
+            // Agent-first (2026-10-03): who launched it, on EVERY row — including
+            // the honest word 'unknown' when the read model cannot attribute it
+            // (deep review #156 A2: 'originator on every row' is the law; silence
+            // was a contrary contract). Never a fabricated name.
+            jsx('span', { className: 'shrink-0 text-[0.6875rem] text-(--ui-text-tertiary)', title: `launched by @${run.origin || 'unknown'}`, children: `@${run.origin || 'unknown'}` }),
+            thisChat ? jsx(PanelPill, { tone: 'muted', children: 'this chat' }) : null
+          ]
+        }),
+        meta: jsx('span', { className: 'max-w-[8rem] truncate', children: fact }),
+        onSelect: open,
+        rowKey: run.id
+      }, run.id),
+      jsx('button', {
+        type: 'button', className: 'wf-row-open', title: 'Open run',
+        'aria-label': `Open ${displayTitle(run)} in the record`,
+        onClick: open, children: '→'
+      }, 'open')
+    ]
   }, run.id)
 }
 
@@ -3045,12 +3224,22 @@ export function WorkflowsPane() {
   const runtimeSid = useValue(focusAtom(host?.state?.focusedSessionId))
   const storedSid = useValue(focusAtom(host?.state?.focusedStoredSessionId))
   const runs = data?.runs || []
-  const owned = new Set(ownedRuns(runs, runtimeSid, storedSid).map(r => r.id))
-  // Agent-first index (owner 2026-10-03): a human viewer never launches runs,
-  // so there is no 'mine' ordering — RUNNING on top, The Rest by last action,
-  // every row labelled with its originating bot. The 'this chat' chip stays:
-  // it's a fact about the row, not an ownership gate.
-  const { running, rest } = paneModel(runs, null)
+  const ownedList = ownedRuns(runs, runtimeSid, storedSid)
+  const owned = new Set(ownedList.map(r => r.id))
+  // Fleet index (bd_2026-11-13-e7h): five-way sections behind five filter pills;
+  // All is their union in held-first attention order, every row keeps its raw
+  // status word, and the index is uncapped. The 'this chat' chip stays: it's a
+  // fact about the row, not an ownership gate. The focused session's OWNED
+  // LIST (null when no focused id resolved at all) is what the hygiene strip
+  // binds against — a resolved-but-empty read is the honest Unowned fact; an
+  // unresolved focus fails CLOSED to 'unknown', never a claimed census.
+  const model = paneModel(runs, null)
+  const [filter, setFilter] = useState('all')
+  const closed = useValue(focusAtom($closedWindows))
+  const winRoster = useValue(focusAtom(host?.state?.windowRoster))
+  const hy = hygieneModel(runs, (runtimeSid || storedSid) ? ownedList : null,
+    { roster: winRoster, closed: closed || [] })
+  const askJump = askJumpAt(hy.askRuns, useValue(focusAtom($askCursor)))
   // The census counts are the backend's full-census numbers (wfcommon
   // run_summary); absent means unknown, never a fabricated zero. WF-07
   // (QA 2026-10-27): run_summary answers the full-census count at the TOP
@@ -3071,22 +3260,19 @@ export function WorkflowsPane() {
     if (typeof total === 'number' && typeof loaded === 'number' && loaded < total)
       census += ` · loaded ${loaded} of ${total}`
   }
-  // Agent-first pane law (owner, est-wk7l round): THE REST renders EVERY row —
-  // no pane-level cap, no fold. paneModel is uncapped and the consumer must
-  // not re-introduce one (the old slice(0,10)+show-all fold made the PR body's
-  // "no caps on foreign runs" a lie; the render pin mounts the pane with >10
-  // foreign rows to keep them welded together).
-  const group = (title, list) => (list.length
+  // Agent-first pane law (owner, est-wk7l round; e7h taxonomy): EVERY counted
+  // row renders — no pane-level cap, no fold. paneModel is uncapped and the
+  // consumer must not re-introduce one (the old slice(0,10)+show-all fold made
+  // the PR body's "no caps on foreign runs" a lie; the render pin mounts the
+  // pane with >100 foreign rows to keep them welded together).
+  const group = ({ id, rows }) => (rows.length || filter !== 'all'
     ? [
-        jsx(PanelSectionLabel, { children: `${title} · ${list.length}` }, title),
-        ...list.map(r => jsx(PaneRow, { run: r, thisChat: owned.has(r.id) }, r.id))
+        jsx(PanelSectionLabel, { children: `${FLEET_LABELS[id]} · ${rows.length}` }, id),
+        ...rows.map(r => jsx(PaneRow, { run: r, thisChat: owned.has(r.id) }, r.id))
       ]
     : [])
-  const body = running.length || rest.length
-    ? [
-        ...group('RUNNING', running),
-        ...group('THE REST', rest)
-      ]
+  const body = model.counts.all
+    ? applyFleetFilter(model, filter).flatMap(group)
     : data
       // A healthily-loaded empty census is the ONLY honest owner of 'No runs'
       // (bd yjp: loading and unreachable must never wear the empty costume).
@@ -3105,9 +3291,61 @@ export function WorkflowsPane() {
             children: `workflows unreachable (${error?.message || error}) — retry`
           }, 'census-error')
         : jsx(EmptyState, { title: 'Loading…' }, 'loading')
+  // Hygiene strip (bd e7h): the WINDOW census + decisions, one row BELOW the
+  // workflow census line — the two counts never share a sentence, so a reader
+  // can never mistake window state for workflow state. Unowned/Done/Idle
+  // expose an explicit Close window that removes only the plugin's own record;
+  // Live is read-only navigation and nothing silently closes a working
+  // window; Asks jumps to the exact unresolved gate (never invented).
+  const closeRecord = () => $closedWindows.set(
+    [...(closed || []), { recId: hy.record.recId, kind: hy.record.kind }])
+  const jumpAsk = () => {
+    if (!askJump.action) return
+    $askCursor.set(askJump.next)
+    askJump.action.onClick()
+  }
+  const hygiene = box(
+    'px-2 py-1 text-[0.6875rem] text-(--ui-text-tertiary) wf-hygiene',
+    jsx('span', { 'data-hyg': 'live', children: `Live ${hy.live}` }, 'h-live'),
+    jsx('span', { 'data-hyg': 'done', children: `Done ${hy.done}` }, 'h-done'),
+    jsx('span', { 'data-hyg': 'unowned', children: `Unowned ${hy.unowned}` }, 'h-unowned'),
+    jsx('button', {
+      type: 'button', className: 'wf-hyg-asks cursor-pointer',
+      title: hy.asks ? 'Jump to the unresolved decision' : 'No unresolved decisions',
+      disabled: !hy.asks || !askJump.action, onClick: jumpAsk,
+      children: `Asks ${hy.asks}`
+    }, 'h-asks'),
+    hy.record && !hy.closed ? jsx('span', { 'data-hyg': 'label', children: `· ${hy.record.label}` }, 'h-label') : null,
+    hy.rosterUnavailable
+      ? jsx('span', { className: 'wf-hyg-unavailable', children: '· other windows: unavailable' }, 'h-roster')
+      : null,
+    hy.unknown
+      ? jsx('span', { 'data-hyg': 'unknown', children: '· window: unknown (session unresolved)' }, 'h-unknown')
+      : hy.record && hy.record.kind !== 'live' && !hy.closed
+        ? jsx('button', {
+            type: 'button', className: 'wf-hyg-close cursor-pointer',
+            title: 'Remove this window from the plugin record — the chat and its history are kept',
+            onClick: closeRecord, children: 'Close window'
+          }, 'h-close')
+        : null,
+    hy.closed
+      ? jsx('span', { 'data-hyg': 'closed', children: '· closed · conversation kept' }, 'h-receipt')
+      : null
+  )
   return box(
     'flex h-full min-h-0 flex-col',
+    jsx(PolishStyles, {}),
     box('px-2 py-1.5 text-[0.6875rem] text-(--ui-text-tertiary)', census, staleChip),
+    box(
+      'wf-fleet-pills',
+      FLEET_FILTERS.map(f => jsx('button', {
+        type: 'button', className: 'wf-pill',
+        'data-selected': String(filter === f), 'aria-pressed': filter === f,
+        onClick: () => setFilter(f),
+        children: `${FLEET_LABELS[f]} ${model.counts[f] ?? 0}`
+      }, f))
+    ),
+    hygiene,
     jsx(ScrollArea, {
       className: 'min-h-0 flex-1',
       children: box(

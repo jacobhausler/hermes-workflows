@@ -125,13 +125,17 @@ assert.ok(!bare.props.children.some(c => c && c.key === 'tmpl'),
   'unlabeled row grows no template badge (the title already IS the name)')
 
 // -- 5. fleet landing row: template COLUMN beside the label -------------------
+// e7h migration: the row now returns a flex wrapper [PanelListRow, 44x44
+// open-arrow]; the l8i title cell rides the list row (children[0]).
 const row = PaneRow({ run: { ...proof, status: 'done', updated: '2026-11-24T00:00:00Z' }, thisChat: false })
-const titleChildren = row.props.title.props.children
+const rowList = row.props.children[0]
+const titleChildren = rowList.props.title.props.children
 assert.equal(titleChildren[0].props.children, 'ship20W2c', 'fleet row titles with the label')
 const col = titleChildren.find(c => c && c.props && c.props.title === 'template')
 assert.ok(col && col.props.children === 'estate-bead-crew', 'fleet row keeps the template COLUMN')
-const bareRow = PaneRow({ run: { id: 'r', name: 'tpl', status: 'done' }, thisChat: false })
-assert.ok(!bareRow.props.title.props.children.some(c => c && c.props && c.props.title === 'template'),
+assert.ok(row.props.children[1].props.className === 'wf-row-open', 'the row carries its e7h 44x44 open control')
+const bareRowEl = PaneRow({ run: { id: 'r', name: 'tpl', status: 'done' }, thisChat: false })
+assert.ok(!bareRowEl.props.children[0].props.title.props.children.some(c => c && c.props && c.props.title === 'template'),
   'unlabeled fleet row prints its name once (no duplicate column)')
 
 // -- 6. rail model: pills carry the resolved label ----------------------------
