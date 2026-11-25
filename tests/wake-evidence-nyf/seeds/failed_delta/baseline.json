@@ -1,0 +1,5 @@
+{
+  "state": {"ids": [], "efps": {}, "rev": 0, "crash_gen": null},
+  "at": "2026-11-24T00:00:00+00:00",
+  "note": "FailedSetBaseline pinned BEFORE the seeded failure commits: the first run.failed notice must therefore render failed_delta=['root'] (the newly-failed set) against this baseline, not an empty delta."
+}

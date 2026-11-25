@@ -1,0 +1,9 @@
+{
+  "name": "wake-nyf-cascade",
+  "nodes": [
+    {"id": "root", "type": "agent", "goal": "Cascade root (seeded failure).",
+     "model": "wake-nyf-model", "provider": "wake-nyf-provider", "max_turns": 1, "timeout": 60},
+    {"id": "child", "type": "agent", "after": ["root"], "goal": "Downstream of the root (seeded failure).",
+     "model": "wake-nyf-model", "provider": "wake-nyf-provider", "max_turns": 1, "timeout": 60}
+  ]
+}

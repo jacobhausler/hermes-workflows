@@ -1,0 +1,5 @@
+{
+  "root": {"error_class": "transport", "attempts": 1, "log_path": "logs/root.log"},
+  "child": {"error_class": "transport", "attempts": 1, "log_path": "logs/child.log"},
+  "note": "Committed-failure record bodies (status/efp/skey/fp_rule_version are stamped by the builder from the live graph defs, so the efp validity law holds by construction). The child folds under the open root record: causal fold wins, ONE owner notice names root + folded members."
+}

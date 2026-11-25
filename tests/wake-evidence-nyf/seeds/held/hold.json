@@ -1,0 +1,5 @@
+{
+  "since_offset_s": 90,
+  "refire_question": "Ship the wave-B receipt? (amended v2)",
+  "note": "The builder stamps gates/g1.held.json {since: now - since_offset_s} so gate_hold_dwell_s renders ~90; the re-fire amends g1's question only (options/context byte-stable) and journals ONE graph.amended event, so the diff verdict must read question=changed, options/context=unchanged at rev 1."
+}

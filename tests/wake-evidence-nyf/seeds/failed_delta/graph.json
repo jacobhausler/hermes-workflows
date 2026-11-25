@@ -1,0 +1,7 @@
+{
+  "name": "wake-nyf-failed",
+  "nodes": [
+    {"id": "root", "type": "agent", "goal": "Deterministic probe lane (seeded failure).",
+     "model": "wake-nyf-model", "provider": "wake-nyf-provider", "max_turns": 1, "timeout": 60}
+  ]
+}

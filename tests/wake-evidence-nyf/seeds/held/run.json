@@ -1,0 +1,4 @@
+{
+  "owner": {"session_id": "wake-nyf-owner-sess", "ui_session_id": null, "platform": "cli"},
+  "note": "Owner-bound wake seed (bd_2026-11-13-nyf). The owner stamp is the door's exact shape (__init__.py _session_owner): a dict with a non-empty session_id. platform 'cli' is a real stamp that routes past native admission to the configured legacy endpoint, which the isolated rig pins via WF_WAKE_SINK_PORT. An owner-null twin lives at ../seeds-owner-null/ and is the validator's rejection case: wake evidence may never be manufactured on a seed with no owner (FINAL.md:271 lesson)."
+}

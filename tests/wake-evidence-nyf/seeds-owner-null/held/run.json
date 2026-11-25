@@ -1,0 +1,4 @@
+{
+  "owner": null,
+  "note": "Owner-null twin seed (bd_2026-11-13-nyf). This is the shape FINAL.md:271 refused to manufacture wake evidence on: no owner stamp, so notify() writes NOTHING (wf.py owner-null degradation) and no wake.jsonl row may ever be read as an owner wake. The validator must reject any seed whose run.json owner is not a dict with a non-empty session_id BEFORE touching transport."
+}

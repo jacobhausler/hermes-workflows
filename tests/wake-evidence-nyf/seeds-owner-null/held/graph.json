@@ -1,0 +1,14 @@
+{
+  "name": "wake-nyf-held",
+  "nodes": [
+    {"id": "g1", "type": "gate",
+     "question": "Ship the wave-B receipt?",
+     "options": ["ship", "stop"],
+     "context": "targeted tests green at seed time",
+     "hold_timeout": 900},
+    {"id": "g2", "type": "gate",
+     "wake_tier": "silent",
+     "question": "DND probe: an author-silenced gate still writes ledger history.",
+     "options": ["ack"]}
+  ]
+}

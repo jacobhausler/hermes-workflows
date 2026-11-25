@@ -1,0 +1,4 @@
+{
+  "root": {"error_class": "transport", "attempts": 1, "log_path": "logs/root.log"},
+  "note": "Committed-failure record body for the run.failed seed (status/efp/skey/fp_rule_version stamped by the builder from the live graph def, so node_rec reads the record as an efp-valid fact by construction)."
+}
