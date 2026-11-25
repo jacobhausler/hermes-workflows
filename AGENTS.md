@@ -76,7 +76,7 @@ copy the backend and desktop halves, validate, enable, restart.
 Stock Hermes records a child that dies on its turn cap as `error_class: unknown`
 (partial output and log preserved). Applying the one-field core patch in
 [docs/patched-core.md](docs/patched-core.md) makes it `error_class: cap_exhausted` with the
-loop's own reason. It is an operator choice; the plugin never patches your core. After
+loop's own reason. The plugin never patches your core. After
 a failed child, `status` reports `turn_report: typed|untyped` so you can tell.
 
 ---
@@ -98,7 +98,7 @@ workflow { "action": "stop",   "run_id": "<id>" }         → terminal, not roll
 
 `wait` blocks while a verified runner is live and self-yields ~330 s with a
 "call wait again" note to stay under the harness tool deadline. **Stay in the loop.**
-Push delivery is best-effort, not guaranteed. `wait` can resume an interrupted run;
+`wait` can resume an interrupted run;
 `status` is read-only. A wake grants no new scope and revokes no existing authority — a failed run is assessed and, under the mandate already on the table, repaired, amended or relaunched; cards/curation stay optional.
 
 ### 3b. Minimal graph
@@ -167,9 +167,7 @@ decorative gate release itself (`gate.auto_released`); `hold_timeout` alone logs
 (default 6 h, `gate.watchdog_settled`). Fan-out `quorum` (optional) races: once N
 succeed, the rest are cancelled; without it the fan-out waits for every item;
 `goal` is optional when items carry their own. Machine gates: `wait:{"wait_s":N}` or
-`wait:{"until_argv":[…],"every_s":60,"timeout_s":3600}`. Template guarantees: [references/example-tour.md](references/example-tour.md). Tested examples:
-[examples/basics/approve-publish.json](examples/basics/approve-publish.json),
-[examples/basics/branch-on-verdict.json](examples/basics/branch-on-verdict.json).
+`wait:{"until_argv":[…],"every_s":60,"timeout_s":3600}`. Template guarantees: [references/example-tour.md](references/example-tour.md). Tested examples: [examples/basics/](examples/basics/).
 
 ### 3d. Failures, resume, amend
 
@@ -198,7 +196,7 @@ publication guards, and crash recovery.
   whole launch before any write or spawn; an already-running runner fails the node. Never
   retried, never silently defaulted to `SEATS_DEFAULT`.
   `left_live_descendants` (#61): the runner is process-tree aware — an exit-0 spawn is
-  believed only when its own process group is empty (the /proc walk behind liveness). A
+  believed only when its own process group is empty. A
   child that BACKGROUNDED the real work (detached suite) and printed progress chatter is
   `failed` with the verdict law in the error, a fenced answer over a live tree commits
   `partial` with the tree killed and proven dead, and a retry never re-spawns while the
@@ -276,6 +274,10 @@ publication guards, and crash recovery.
   `git stash push -m redrive:<run>:<node>` in the lane, or a patch at `<run>/wip/<node>.patch`.
   Bank the WIP and the re-drive proceeds; untracked files never block, git-unable lanes fail open,
   and an undeclared lane is never scanned (scan-free law).
+- Re-drive a `failed` run with `redrive`: an omitted `mode` defaults to
+  `same-fingerprint-resume` — the safe side that re-drives only failed lanes and
+  REFUSES fingerprint drift, writing nothing; the token-spending
+  `new-fingerprint-rerun` stays explicit-only (#712, amending #692).
 - A child that dies after printing a valid fenced answer (rc≠0, wall, cap) is committed as
   `status: partial` with the death cause kept as `error_class`; the harvest stays readable, but a
   plain after-edge does NOT release onto it — the descendant fails typed `blocked_by_partial_ancestor`
@@ -347,7 +349,7 @@ subscription routes.
 
 | Path | Owns |
 |---|---|
-| `__init__.py` | The tool door: schema, action dispatch (all 17: `run/status/wait/release/release_lock/steer/inbox/amend/stop/kill/diff/list/save/library/submit/validate/doctor_version` — the tool schema is the closed list), model-tier resolution, preflight, compact/full payload shaping |
+| `__init__.py` | The tool door: schema, action dispatch (all 19: `run/start/status/wait/release/release_lock/steer/inbox/amend/diff/stop/kill/redrive/list/save/library/submit/validate/doctor_version` — the tool schema is the closed list), model-tier resolution, preflight, compact/full payload shaping |
 | `wf.py` | The background runner: scheduling, child spawn (`-Q` contract), retry gate, typed error classification, steer baking, tier stamping |
 | `wfcommon.py` | The read model: run state, fingerprints (`efp`), node records, metrics join, liveness. Read-only over a run directory. Also the ONE grammar: `params`/`where`/`by` and the shared run-contract enumeration live here |
 | `cron_bridge.py`, `runner_watchdog.py` | Watchdog tick: lifecycle + tick body; revives dead runners, drains |
@@ -382,7 +384,7 @@ A change is done when: targeted test, full suite, and validate green; scrub prin
 
 ### 4b′. Navigate with the knowledge graph (optional)
 
-Optional AST-only exploration aid, folded to [references/graphify-navigation.md](references/graphify-navigation.md) to keep this file inside the hint cap. Never a gate; never committed.
+Optional AST-only exploration aid, folded to [references/graphify-navigation.md](references/graphify-navigation.md). Never a gate; never committed.
 
 ### 4c. Rules
 
