@@ -1,0 +1,16 @@
+{
+  "role": "gateway",
+  "home": "/Users/jacobhausler/code/wf-pr-20261124/e7h/tests/proof-harness/captured/fleet-e7h-run2/bench/home/profiles/ui2bench-3ac494b7",
+  "pid": 35184,
+  "createTime": 1795562502.348059,
+  "startTime": 179556250235,
+  "bootEpoch": "",
+  "host": "",
+  "port": null,
+  "protocolVersion": 1,
+  "tokenFingerprint": "",
+  "profiles": [
+    "ui2bench-3ac494b7"
+  ],
+  "updatedAt": "2026-11-24T23:21:49.610471+00:00"
+}

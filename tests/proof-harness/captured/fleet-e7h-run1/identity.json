@@ -1,0 +1,107 @@
+{
+  "ts": "2026-11-24T22:20:56.676Z",
+  "case": "fleet",
+  "plugin": {
+    "candidate": "~/code/wf-pr-20261124/e7h/desktop/plugin.js",
+    "sha256": "e77140f78f7bb74d081719c87bcc0d915f7405636eb7be6c7339d559d1805ffe",
+    "staged": "~/code/wf-pr-20261124/e7h/tests/proof-harness/captured/fleet-e7h-run1/bench/home/desktop-plugins/hermes-workflows/plugin.js",
+    "staged_sha256": "e77140f78f7bb74d081719c87bcc0d915f7405636eb7be6c7339d559d1805ffe",
+    "staged_sha256_after_load": "e77140f78f7bb74d081719c87bcc0d915f7405636eb7be6c7339d559d1805ffe"
+  },
+  "app": {
+    "repo": "~/.hermes/hermes-agent",
+    "hermes_version": "Hermes Agent v0.23.3+1142.gb9b36c9 (2026.9.24) · stable · local b9b36c933759\nInstall directory: ~/.hermes/hermes-agent\nInstall method: git\nPython: 3.14.9\nOpenAI SDK: 2.54.0\nUp to date",
+    "commit": "b9b36c933759e536e0f280f67c85f976488b5178",
+    "dirty_entries": 1,
+    "package_version": "0.0.0",
+    "electronVersion": "unknown",
+    "electron_package_version": "44.10.2"
+  },
+  "bench": {
+    "ports": {
+      "cdp": 9414,
+      "renderer": 5214
+    },
+    "discovery_copied": [
+      "spawn-ledger.json",
+      "auth.json",
+      "config.yaml"
+    ],
+    "plugins_symlink": "~/code/wf-pr-20261124/e7h",
+    "profile": "ui2bench-e88c4fec",
+    "locks": "~/code/wf-pr-20261124/e7h/tests/proof-harness/captured/fleet-e7h-run1/bench/locks",
+    "pre_ensure": "ok"
+  },
+  "seeds": {
+    "held_gate_run": {
+      "kind": "engine_seed",
+      "run_id": "20261124-162201-ui2-proof-held",
+      "graph_sha256": "04878dd342ce5de7669793e90da8a7c849744e695ce9487e3762b456d7772bba"
+    },
+    "directive_card_echo": {
+      "kind": "engine_seed",
+      "method": "oneshot_echo",
+      "ask_sha256": "4cfed43427e5adbbc263ab43f68039b4f6d58f30640d57915eb03061b6cb0428",
+      "stdout_sha256": "ea376d9ecd2139efc5d067fda1ff646d553fbc3c834d6b414a022aa64b7c0a1c",
+      "session_id": "local-c2a9a8877a8110b89e0191c91475f344d1f89355a561da4e778f1cca80989ff0",
+      "model": "seat-default"
+    }
+  },
+  "config_touched": {
+    "plugins.entries.hermes-workflows.settings.runs_root": {
+      "before": null,
+      "after": "~/code/wf-pr-20261124/e7h/tests/proof-harness/captured/fleet-e7h-run1/bench/runs",
+      "scope": "bench profile ui2bench-e88c4fec (isolated — shared config untouched)"
+    },
+    "plugins.entries.hermes-workflows.settings.tray": {
+      "before": true,
+      "after": true,
+      "scope": "bench profile ui2bench-e88c4fec (isolated — shared config untouched)"
+    }
+  },
+  "candidate_head": "93a3e916a454bc654a5c42cf026c46d6d7666fea",
+  "merge_base_origin_main": "c0a5da6bd57fd200eb6fe9b0bb2e33ddd2d5335b",
+  "registry": {
+    "routes": [
+      "hermes-workflows:page"
+    ],
+    "panes": [
+      "sessions",
+      "workspace",
+      "terminal",
+      "files",
+      "review",
+      "hermes-bots:pane",
+      "hermes-workflows:pane"
+    ],
+    "directives": [
+      "transcript.preview",
+      "hermes-workflows:directive"
+    ],
+    "composer": [
+      "hermes-workflows:session-strip"
+    ]
+  },
+  "plugin_records": {
+    "hermes-bots": {
+      "error": null,
+      "active": false
+    },
+    "kanban": {
+      "error": null,
+      "active": false
+    },
+    "radio": {
+      "error": null,
+      "active": false
+    },
+    "hermes-workflows": {
+      "error": null,
+      "active": false
+    }
+  },
+  "teardown": {
+    "survivors": [],
+    "revert_failures": []
+  }
+}

@@ -1,10 +1,19 @@
 {
   "note": "Case manifest for tests/proof-harness/capture.mjs. Every seed entry names its kind explicitly: 'engine_seed' = state this driver launches live through the plugin door (zero-token graphs; one real assistant turn for the card echo); 'historical_snapshot' = a pinned, already-committed run/session fixture read via the door's legacy-launch-root fallback (read-only, never relaunched). Adding a case ADDS A NEW TEST: a case naming a surface outside surfaces_registry fails exit 3 ('new test, not implemented') — the driver never fabricates an existing command. Baseline never captures synthesis/index.html or any file-openable RC: surfaces come from the real app renderer only.",
-  "surfaces_registry": ["directive_card", "pane_workflows", "tray_row", "gate_modal"],
+  "surfaces_registry": [
+    "directive_card",
+    "pane_workflows",
+    "tray_row",
+    "gate_modal"
+  ],
   "cases": {
     "baseline": {
       "description": "Real-app proof of the three live surfaces of the actual React/SDK renderer: the ::workflow directive card in the message stream, the WORKFLOWS pane (run list + held-gate run detail), and the settings-gated live-run tray row. All state is engine-seeded into an isolated test runs root; nothing here is a CHATFRAME reconstruction.",
-      "surfaces": ["directive_card", "pane_workflows", "tray_row"],
+      "surfaces": [
+        "directive_card",
+        "pane_workflows",
+        "tray_row"
+      ],
       "seeds": [
         {
           "name": "held_gate_run",
@@ -15,15 +24,35 @@
           "graph": {
             "name": "ui2-proof-held",
             "nodes": [
-              { "id": "say", "type": "echo", "output": { "msg": "seeded" } },
+              {
+                "id": "say",
+                "type": "echo",
+                "output": {
+                  "msg": "seeded"
+                }
+              },
               {
                 "id": "hold",
                 "type": "gate",
-                "after": ["say"],
+                "after": [
+                  "say"
+                ],
                 "question": "UI2 proof: release this held gate after capture?",
-                "options": ["release", "stop"]
+                "options": [
+                  "release",
+                  "stop"
+                ]
               },
-              { "id": "tail", "type": "echo", "after": ["hold"], "output": { "msg": "released" } }
+              {
+                "id": "tail",
+                "type": "echo",
+                "after": [
+                  "hold"
+                ],
+                "output": {
+                  "msg": "released"
+                }
+              }
             ]
           }
         },
@@ -40,7 +69,10 @@
     },
     "gate": {
       "description": "bd_2026-11-13-qri real-app proof of the ONE decision surface: held gate cell (verbatim question, declared requester, options) -> trusted click meets the bench door's REAL fail-once refusal (08b error frame, options retryable) -> second trusted click -> REAL pending frame (door sleeps UI2_PROOF_GATE_POST_DELAY_MS after its write, before responding: the answer POST rides the app IPC bridge, invisible to CDP Fetch since app b9b36c9) -> durable Answer-saved receipt carrying the door-stamped Answered time -> success toast that IS the receipt (Answer saved + exact answer + requester + run / gate + server time) with View exact gate -> route-away/route-back identity proof -> gates/<id>.json read-back (_ui:true, exact answer, events ledger byte-identical: nothing restarted for this tested isolated runner).",
-      "surfaces": ["pane_workflows", "gate_modal"],
+      "surfaces": [
+        "pane_workflows",
+        "gate_modal"
+      ],
       "seeds": [
         {
           "name": "held_gate_run",
@@ -51,16 +83,36 @@
           "graph": {
             "name": "ui2-proof-gate",
             "nodes": [
-              { "id": "say", "type": "echo", "output": { "msg": "seeded" } },
+              {
+                "id": "say",
+                "type": "echo",
+                "output": {
+                  "msg": "seeded"
+                }
+              },
               {
                 "id": "review",
                 "type": "gate",
-                "after": ["say"],
+                "after": [
+                  "say"
+                ],
                 "question": "UI2 proof: record this answer?",
-                "options": ["Approve review", "Keep for revision"],
+                "options": [
+                  "Approve review",
+                  "Keep for revision"
+                ],
                 "context": "Isolated review workflow"
               },
-              { "id": "tail", "type": "echo", "after": ["review"], "output": { "msg": "released" } }
+              {
+                "id": "tail",
+                "type": "echo",
+                "after": [
+                  "review"
+                ],
+                "output": {
+                  "msg": "released"
+                }
+              }
             ]
           }
         }
@@ -69,7 +121,9 @@
     },
     "coverage": {
       "description": "bd_2026-11-13-yjp full-census fetch frames on the REAL renderer: >1 page fixture census seeded THROUGH the read model (seed_fixture.py; rows read 'interrupted' — never TERMINAL — so the pane's own 4 s poll loop drives the frames). Frames: loading (every /runs page stalled via CDP Fetch), empty census answered (roots named), full census (133 counted rows all loaded), deepest counted row rendered past the first 100 + its record page opened, refetch-failure with cached census kept (stale chip), retry re-walk (census grew to 134 while the edge failed; chip gone, no loaded-suffix), partial fetch (page-2 fulfill short: 'loaded 100 of 134' shown honestly while the summary stays global).",
-      "surfaces": ["pane_workflows"],
+      "surfaces": [
+        "pane_workflows"
+      ],
       "seeds": [
         {
           "name": "fixture_census",
@@ -84,7 +138,9 @@
     "held-gate-snapshot-example": {
       "description": "DOCUMENTED SHAPE, not yet implemented: later beads pin an existing committed run (e.g. 20261122-113636-lookbook-canvas-held) by id + run.json sha256 and capture it via the launch-root fallback WITHOUT launching anything. Implemented when its surfaces are wired — until then it fails exit 3 like any new test.",
       "implemented": false,
-      "surfaces": ["pane_workflows"],
+      "surfaces": [
+        "pane_workflows"
+      ],
       "seeds": [],
       "historical_snapshots": [
         {
@@ -99,7 +155,10 @@
     "graph": {
       "description": "RC ch4 graph grammar on the shared expansion mounts (bd_2026-11-13-33h): the pinned wave6-council shelf snapshot, one engine-seeded quorum fan (exact ENDED census through the real door + zero-token fake children), and one CLEARLY SYNTHETIC MF1 run (done parent, raw partial + cancelled child rows — stamped with real wfcommon efp so the read model says done for the right reason). Frames: pane GraphView + fan expansion, one assistant turn echoing all three directives, child projection (10 identities / 14 routes / 28 echoes MEASURED on the rendered svg, crossings a count of THIS geometry only), threshold ladder on engine records, MF1 item detail, phone metrics 390x844@2, sparse 2560x1440.",
       "capture": "graph",
-      "surfaces": ["directive_card", "pane_workflows"],
+      "surfaces": [
+        "directive_card",
+        "pane_workflows"
+      ],
       "seeds": [
         {
           "name": "threshold_fan",
@@ -111,11 +170,45 @@
           "graph": {
             "name": "ui2-graph-thr",
             "nodes": [
-              { "id": "prep", "type": "echo", "output": { "msg": "seeded" } },
-              { "id": "work", "type": "agent", "after": ["prep"],
-                "fanout": { "quorum": 1, "goal": "probe {index}",
-                            "items": [{ "goal": "CRASHME now" }, { "goal": "fine task" }, { "goal": "other task" }] } },
-              { "id": "tail", "type": "echo", "after": ["work"], "output": { "msg": "done" } }
+              {
+                "id": "prep",
+                "type": "echo",
+                "output": {
+                  "msg": "seeded"
+                }
+              },
+              {
+                "id": "work",
+                "type": "agent",
+                "after": [
+                  "prep"
+                ],
+                "fanout": {
+                  "quorum": 1,
+                  "goal": "probe {index}",
+                  "items": [
+                    {
+                      "goal": "CRASHME now"
+                    },
+                    {
+                      "goal": "fine task"
+                    },
+                    {
+                      "goal": "other task"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "tail",
+                "type": "echo",
+                "after": [
+                  "work"
+                ],
+                "output": {
+                  "msg": "done"
+                }
+              }
             ]
           }
         },
@@ -138,6 +231,73 @@
           "note": "pinned shelf fixture — sha256 of the fixture FILE itself (the materialized run.json comes FROM it); read-only, never relaunched, refusal-on-mismatch enforced by seed_graph.py. The original file is never touched: byte-for-byte preservation holds."
         }
       ]
+    },
+    "fleet": {
+      "description": "bd_2026-11-13-e7h fleet landing taxonomy + live hygiene on the REAL renderer: a 133-row mixed fixture census (seed_fixture.py --status-mix done:25,failed:10; REALIZED statuses read back through run_state drive every count) plus two live door runs — a held-gate run (the Asks target; answered for real from the jump, durable receipt, census/Asks move on the plugin's own poll) and one slow zero-token child run stamped owner.session_id = the one-shot chat (the hygiene strip's window record is real ownership via the proven WF_OWNER_SESSION law). Frames: five-way All union held-first with the hygiene strip separate from the workflow census and 'other windows: unavailable' stated; exact Held-filter membership under a trusted pill click; the >100-row Interrupted bucket scrolled to its deepest counted row; the Asks jump to the EXACT gate cell; the answer receipt; counts after answer (dark); the same census in LIGHT after the app's own mode switch; the stopped-owner run as an Idle (never Done) window record; Close window -> record gone, counts recomputed, 'closed · conversation kept' receipt; row-open arrows measured 44x44 and in-viewport at 390/640/720/768/792/1440 (audit must-fix #6 law).",
+      "surfaces": [
+        "directive_card",
+        "pane_workflows",
+        "gate_modal"
+      ],
+      "seeds": [
+        {
+          "name": "held_gate_run",
+          "kind": "engine_seed",
+          "method": "door_run",
+          "note": "echo+gate+echo at zero tokens, runner ALIVE at the hold (no kill): the fleet answer resumes it and the row moves Held -> Running -> Finished for real, proving the dynamic section move and the ask-census drop come from the read model, not a redraw. Stopped through the door at teardown.",
+          "graph": {
+            "name": "ui2-proof-held",
+            "nodes": [
+              {
+                "id": "say",
+                "type": "echo",
+                "output": {
+                  "msg": "seeded"
+                }
+              },
+              {
+                "id": "hold",
+                "type": "gate",
+                "after": [
+                  "say"
+                ],
+                "question": "UI2 fleet proof: release this held gate after capture?",
+                "options": [
+                  "release",
+                  "stop"
+                ]
+              },
+              {
+                "id": "tail",
+                "type": "echo",
+                "after": [
+                  "hold"
+                ],
+                "output": {
+                  "msg": "released"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "name": "directive_card_echo",
+          "kind": "engine_seed",
+          "method": "oneshot_echo",
+          "note": "ONE real assistant turn echoing ::workflow — it exists here for its SESSION: the fleet hygiene strip claims window ownership only through a focused chat, and this one-shot session is the focus the slow run is owner-stamped to (the tray lane's proven WF_OWNER_SESSION law). model/provider null rides the seat default.",
+          "model": null,
+          "provider": null
+        },
+        {
+          "name": "fixture_census",
+          "kind": "engine_seed",
+          "method": "fixture_census",
+          "count": 133,
+          "status_mix": "done:25,failed:10",
+          "note": "133 read-model fixture rows (ids 20990101-100000..100132-covr): 25 done (valid efp), 10 failed (valid efp + injected error), the rest the original empty-efp interrupted rows. With the two live door runs the pane census totals 135 counted rows — >1 page, uncapped."
+        }
+      ],
+      "historical_snapshots": []
     }
   }
 }

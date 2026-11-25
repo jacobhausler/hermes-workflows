@@ -1,0 +1,19 @@
+{
+  "version": 2,
+  "primary": "local",
+  "launchMode": "primary",
+  "lastUsed": "local",
+  "connections": [
+    {
+      "id": "local",
+      "kind": "local",
+      "label": "This device"
+    }
+  ],
+  "revision": 1,
+  "importedFrom": {
+    "/Users/jacobhausler/code/wf-pr-20261124/e7h/tests/proof-harness/captured/fleet-e7h-run1/bench/userdata": {
+      "at": 1795558904834
+    }
+  }
+}

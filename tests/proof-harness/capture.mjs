@@ -684,6 +684,7 @@ async function main() {
   }
   const c = manifest.cases[A.caseName];
   const isCoverage = A.caseName === 'coverage';
+  const isFleet = A.caseName === 'fleet';
   const unwired = (c.surfaces || []).filter(s => !manifest.surfaces_registry.includes(s))
         .concat(c.implemented === false ? c.surfaces : []);
   if (unwired.length && c.implemented === false) {
@@ -1400,7 +1401,7 @@ async function main() {
         let recordUp = false;
         const recT0 = Date.now();
         while (!recordUp && Date.now() - recT0 < 20_000) {
-          recordUp = await cdp.evl(`!!document.querySelector('style[data-plugin="hermes-workflows"][href="hermes-workflows.3.css"]')`);
+          recordUp = await cdp.evl(`!!document.querySelector('style[data-plugin="hermes-workflows"][href="hermes-workflows.4.css"]')`);
           if (!recordUp) await sleep(400);
         }
         if (!recordUp) die(EX.api, 'the deepest counted row never opened its record page (hoisted record style absent)');
@@ -1443,7 +1444,7 @@ async function main() {
                      ...(await shoot(cdp, A.outDir, '08-coverage-partial-fetch.png', null, await stableColumnText(paneRegion))) });
         await mock.off();
       } finally { await mock.off(); }
-    } else {
+    } else if (!isFleet) {
     {
       let wT0 = Date.now();
       let splashWaits = 0, paneReloaded = false;
@@ -1579,7 +1580,10 @@ async function main() {
     // different route. kill_runner_after_hold: the isolated runner dies at the
     // hold BEFORE the answer, so the events ledger must stay byte-identical
     // afterwards — "nothing restarted" verified for THIS tested runner only.
-    if (surfacesWanted.has('gate_modal')) {
+    // gate_modal surface: the standalone gate case owns that walk; the fleet
+    // case runs its OWN answer sequence (bd e7h) and pushes gate_modal shots
+    // from there.
+    if (surfacesWanted.has('gate_modal') && !isFleet) {
       const gateDef = (engSeed.graph.nodes || []).find(n => n.type === 'gate');
       if (!gateDef) die(EX.preflight, 'gate case seed graph carries no gate node');
       const runDir = path.join(B.runs, runId);
@@ -2110,6 +2114,318 @@ async function main() {
             state: `sparse 2560x1440 (${method}): ${wide ? `${wide.crossings} strict crossings measured at this geometry` : 'graph off-screen'}`,
             ...(await shoot(cdp, A.outDir, '09-2560-council-card.png')) });
         }
+      }
+    }
+
+    /* ---- Fleet landing case (bd_2026-11-13-e7h) ---------------------------
+     * Five-way taxonomy, hygiene window census, Asks exact-gate jump + REAL
+     * answer, close-window receipt, and the row-open-arrow band geometry —
+     * all on the actual renderer. State: the held-gate door seed (run A,
+     * blank owner = pane-only), ONE slow zero-token child run (B) stamped
+     * owner.session_id = the one-shot session (the tray lane's proven
+     * WF_OWNER_SESSION law — so the hygiene strip's window record is real
+     * ownership, not a fixture), and a mixed-status fixture census seeded
+     * THROUGH the read model (seed_fixture.py prints the REALIZED statuses;
+     * every count this case asserts is derived from those, never from
+     * intent). Frames are numbered after the shared directive-card frames. */
+    if (isFleet) {
+      const fixture = (c.seeds || []).find(s => s.kind === 'engine_seed' && s.method === 'fixture_census')
+      if (!fixture) die(EX.preflight, 'fleet case has no fixture_census seed')
+      const sid = (identity.seeds.directive_card_echo || {}).session_id
+      if (!sid) die(EX.preflight, 'fleet hygiene needs the one-shot session id (directive_card seed parses none)')
+      // Run B: a zero-token child wrapped in a sleep so the run is verifiably
+      // RUNNING for the frames (the fake CLI stays the child; the wrapper only
+      // delays it — no timer fiction, the engine's own liveness says running).
+      const SLOW_S = 240
+      const wrapper = path.join(A.outDir, 'seed', 'slow-hermes.sh')
+      fs.writeFileSync(wrapper, `#!/bin/sh\nsleep ${SLOW_S}\nexec ${py} ${path.join(REPO, 'tests/fake_hermes.py')} "$@"\n`)
+      fs.chmodSync(wrapper, 0o755)
+      const slowGraph = path.join(A.outDir, 'seed', 'fleet-slow.graph.json')
+      fs.writeFileSync(slowGraph, JSON.stringify({ name: 'ui2-fleet-slow',
+        nodes: [{ id: 'work', type: 'agent', goal: 'slow zero-token child' }] }, null, 2) + '\n')
+      let slowRunId
+      try {
+        slowRunId = execFileSync(py, [path.join(HERE, 'seed_run.py'),
+          '--repo', REPO, '--runs-root', B.runs, '--graph-file', slowGraph, '--wait-held-s', '0'],
+          { encoding: 'utf8', timeout: 60_000,
+            env: { ...process.env, WF_RUNS_ROOT: B.runs, WF_OWNER_SESSION: sid,
+                   HERMES_WF_HERMES_BIN: wrapper, HERMES_HOME: B.home, HERMES_GATEWAY_LOCK_DIR: B.locks } }).trim()
+      } catch (e) { die(EX.api, `fleet slow seed launch failed: ${String(e.stderr || e.message).slice(0, 300)}`) }
+      seededRuns.push(slowRunId)
+      identity.seeds.fleet_slow = { kind: 'engine_seed', run_id: slowRunId, owner_stamped: sid,
+        child: `tests/fake_hermes.py behind sleep ${SLOW_S}s`, graph_sha256: sha256(slowGraph) }
+      // Mixed fixture census — the REALIZED statuses from the seed script are
+      // the only numbers this case promises.
+      const seedMix = (count, start, mix) => {
+        const out = execFileSync(py, [path.join(HERE, 'seed_fixture.py'),
+          '--repo', REPO, '--runs-root', B.runs, '--count', String(count), '--start', String(start),
+          ...(mix ? ['--status-mix', mix] : [])],
+          { encoding: 'utf8', timeout: 180_000, env: { ...process.env, HERMES_HOME: B.home } })
+        try { return JSON.parse(out) }
+        catch { die(EX.api, `seed_fixture.py printed non-JSON: ${out.slice(0, 200)}`) }
+      }
+      const seeded = seedMix(Number(fixture.count) || 133, 0, fixture.status_mix || '')
+      const R = seeded.realized || {}
+      const EXP = {
+        total: (fixture.count || 0) + 2,
+        held: 1, running: 1,
+        finished: R.done || 0,
+        interrupted: (R.interrupted || 0) + (R.failed || 0) + (R.stopped || 0) + (R.partial || 0) + (R.cancelled || 0)
+      }
+      identity.fleet_expected = { ...EXP, realized: R, run_a: runId, run_b: slowRunId }
+      const fleetPoll = async (needle, why) => {
+        const t0 = Date.now()
+        for (;;) {
+          const hit = await cdp.evl(locateJS(needle, { exact: true })).catch(e => ({ err: String(e.message) }))
+          if (!hit.err) return
+          if (Date.now() - t0 > probeBudgetMs) {
+            try { await shoot(cdp, A.outDir, '00-diagnostic-fleet.png') } catch { /* best effort */ }
+            const body = await cdp.evl(`(document.body.innerText||'').replace(/\\s+/g,' ').slice(0,300)`).catch(() => '')
+            die(EX.api, `${why}: ${JSON.stringify(hit)} | body=${JSON.stringify(body)}`)
+          }
+          const modalUp = await cdp.evl(`document.body.innerText.includes("couldn't start")`).catch(() => false)
+          if (modalUp) { try { await trustedClick(cdp, 'Retry', { exact: true, ci: true }) } catch { /* modal between frames */ } }
+          if (hit.err === 'occluded' && /get you setup|provider/i.test(String(hit.over || ''))) {
+            await cdp.evl(`(() => { const b = [...document.querySelectorAll('button')]
+                .find(b => (b.innerText||'').includes('choose a provider later')); if (b) b.click(); return !!b })()`).catch(() => false)
+          }
+          try { await trustedClick(cdp, 'workflows', { exact: true, ci: true }) } catch { /* tab not painted yet */ }
+          await sleep(1200)
+        }
+      }
+      // Ownership insurance: the fleet strip record is only as real as the
+      // FOCUSED chat. Re-open the one-shot session row (same leaf-shape
+      // probe as the card section) before asserting any window claim.
+      const refocusChat = async () => {
+        try { await trustedClick(cdp, 'sessions', { exact: true, ci: true }) } catch { /* already */ }
+        await sleep(800)
+        const hit = await cdp.evl(`(() => {
+          const cand = [...document.querySelectorAll('div,li,button,a')]
+            .map(n => ({ n, t: (n.innerText || '').trim() }))
+            .filter(({ n, t }) => {
+              if (!t || t.length > 120) return false
+              const lines = t.split('\\n').map(s => s.trim()).filter(Boolean)
+              if (lines.length < 2) return false
+              return /^(?:now|just now|\\d+\\s*(?:s|sec|secs?|m|min|mins?|h|hr|hrs?|hour|hours?|d|day|days?)\\s*ago)$/i.test(lines[lines.length - 1])
+            })
+            .filter(({ n }) => { const r = n.getBoundingClientRect(); return r.width > 60 && r.height > 16 && r.x < 420 && r.y > 40 })
+            .sort((a, b) => a.n.getBoundingClientRect().y - b.n.getBoundingClientRect().y)
+          const leaf = cand.find(({ n }) => !cand.some(o => o.n !== n && n.contains(o.n))) ?? cand[0]
+          if (!leaf) return null
+          const r = leaf.n.getBoundingClientRect()
+          return { x: r.x + r.width / 2, y: r.y + r.height / 2 } })()`)
+        if (!hit) return
+        for (const t of ['mouseMoved', 'mousePressed', 'mouseReleased'])
+          await cdp.send('Input.dispatchMouseEvent', { type: t, x: hit.x, y: hit.y,
+            button: t === 'mouseMoved' ? undefined : 'left', clickCount: 1, buttons: t === 'mouseReleased' ? 0 : 1 })
+        await sleep(1000)
+      }
+      await refocusChat()
+      await fleetPoll(`runs ${EXP.total} ·`, 'fleet census never rendered IN THE PANE COLUMN')
+      identity.api_attachment = { via: 'whole-census summary + door-seeded live runs rendered by the pane from GET /runs',
+        counted: EXP.total, realized: R }
+      const bodyHas = async t => cdp.evl(`document.body.innerText.includes(${JSON.stringify(t)})`)
+      // The hygiene record needs the focused chat to still own run B; the
+      // tab switch can hand focus to the pane — re-open the chat once and
+      // re-probe before calling it a law failure.
+      if (!(await bodyHas('Live 1'))) { await refocusChat(); await fleetPoll(`runs ${EXP.total} ·`, 'census vanished on refocus') }
+      if (!(await bodyHas('Live 1'))) { await refocusChat(); await fleetPoll(`runs ${EXP.total} ·`, 'census vanished on second refocus') }
+      // 10: the All union, dark. Held-first attention order is visible: the
+      // Held section sits above Running above Interrupted above Finished; the
+      // strip carries the WINDOW census + Asks; the workflow census never
+      // borrows a window word; and the cross-window roster is explicit
+      // 'unavailable' — the SDK exposes no window roster today.
+      for (const want of ['Held · 1', 'Running · 1', `Interrupted · ${EXP.interrupted}`,
+                          `Finished · ${EXP.finished}`, 'Live 1', 'Done 0', 'Unowned 0', 'Asks 1',
+                          '· Live window · read-only', '· other windows: unavailable',
+                          'ui2-proof-held', 'ui2-fleet-slow',
+                          'interrupted ·']) {
+        if (!(await bodyHas(want))) die(EX.api, `fleet All-dark missing: ${JSON.stringify(want)}`)
+      }
+      shots.push({ surface: 'pane_workflows', state: 'fleet All (dark): five-way union held-first, hygiene window census separate from workflow census, roster unavailable stated',
+        ...(await shoot(cdp, A.outDir, '10-fleet-all-dark.png', null, await stableColumnText(paneRegion))) })
+      // 11: the Held filter — exactly the Held section, nothing else. The
+      // click is TRUSTED (real pointer input); selection is the user's, and
+      // it survives as data-selected, never as hover.
+      await trustedClick(cdp, 'Held 1', { exact: true })
+      await sleep(900)
+      if (!(await bodyHas('Held · 1'))) die(EX.api, 'Held filter did not render the Held section')
+      for (const gone of ['Running · 1', `Interrupted · ${EXP.interrupted}`, `Finished · ${EXP.finished}`])
+        if (await bodyHas(gone)) die(EX.api, `Held filter leaked a foreign section: ${gone}`)
+      const selCount = await cdp.evl(`[...document.querySelectorAll('button.wf-pill[data-selected="true"]')].length`)
+      if (selCount !== 1) die(EX.api, `selection state must be single and explicit (data-selected), saw ${selCount}`)
+      shots.push({ surface: 'pane_workflows', state: 'Held filter: section membership exactly, one explicit selection',
+        ...(await shoot(cdp, A.outDir, '11-fleet-filter-held-dark.png', null, await stableColumnText(paneRegion))) })
+      // 12/13: the Interrupted bucket at >100 rows — the first page AND the
+      // deepest counted row after an explicit scroll (uncapped law).
+      await trustedClick(cdp, `Interrupted ${EXP.interrupted}`, { exact: true })
+      await sleep(900)
+      if (!(await bodyHas(`Interrupted · ${EXP.interrupted}`))) die(EX.api, 'Interrupted filter never rendered its section')
+      shots.push({ surface: 'pane_workflows', state: `Interrupted filter (${EXP.interrupted} rows, top of the uncapped bucket) — raw status words retained`,
+        ...(await shoot(cdp, A.outDir, '12-fleet-filter-interrupted-dark.png', null, await stableColumnText(paneRegion))) })
+      {
+        const scrolled = await cdp.evl(`(() => {
+          const hosts = [...document.querySelectorAll('*')].filter(e =>
+            e.scrollHeight > e.clientHeight + 40 && e.querySelector('.wf-pane-row'))
+          if (!hosts.length) return null
+          const el = hosts.sort((a,b) => b.scrollHeight - a.scrollHeight)[0]
+          el.scrollTop = el.scrollHeight
+          return { sh: el.scrollHeight, ch: el.clientHeight } })()`)
+        if (!scrolled) die(EX.api, 'no local scroll host carried the fleet rows')
+        await sleep(700)
+        const deepest = seeded.names[(R.done || 0) + (R.failed || 0)]   // name-DESC route order: the SMALLEST interrupted name sits at the bucket's end
+        if (!deepest) die(EX.preflight, 'no interrupted fixture rows seeded')
+        if (!(await bodyHas(deepest))) die(EX.api, `deepest counted fixture row ${deepest} never rendered after scrolling the bucket to its end`)
+        identity.fleet_deepest = { row: deepest, scroll: scrolled }
+        shots.push({ surface: 'pane_workflows', state: `deepest counted row (${deepest}) rendered past page 1 — no cap, no fold`,
+          ...(await shoot(cdp, A.outDir, '13-fleet-deepest-dark.png', null, await stableColumnText(paneRegion))) })
+      }
+      // Back to the union; 14: the Asks jump lands on the EXACT gate.
+      await trustedClick(cdp, `All ${EXP.total}`, { exact: true })
+      await sleep(600)
+      await trustedClick(cdp, 'Asks 1', { exact: true })
+      {
+        const q = (engSeed.graph.nodes || []).find(n => n.type === 'gate')?.question
+        if (!q) die(EX.preflight, 'fleet held-gate seed has no gate question')
+        const t0 = Date.now()
+        for (;;) {
+          if (await bodyHas(q)) break
+          if (Date.now() - t0 > 25_000) {
+            try { await shoot(cdp, A.outDir, '00-diagnostic-asks.png') } catch { /* best effort */ }
+            die(EX.api, 'Asks jump never surfaced the exact gate question (diagnostic shot present)')
+          }
+          await sleep(600)
+        }
+        const gateCell = await cdp.evl(`(() => {
+          const els = [...document.querySelectorAll('div,section')].filter(e =>
+            (e.innerText||'').includes(${JSON.stringify(q)}) && (e.innerText||'').includes('requester:'))
+          const cell = els.sort((a,b) => a.innerText.length - b.innerText.length)[0]
+          if (!cell) return null
+          cell.scrollIntoView({ block: 'center' })
+          const r = cell.getBoundingClientRect()
+          return { x: r.x, y: r.y, width: r.width, height: r.height, text: cell.innerText || '' } })()`)
+        if (!gateCell) die(EX.api, 'Asks jump showed the question but no gate cell with the requester line')
+        const cellText = gateCell.text
+        delete gateCell.text
+        shots.push({ surface: 'gate_modal', state: 'Asks jump: the EXACT unresolved gate cell (question + requester), reached from the strip',
+          ...(await shoot(cdp, A.outDir, '14-fleet-asks-exact-gate-dark.png', gateCell, cellText)) })
+        // 15/16: REAL answer through the same door the record page rides
+        // (no fail-once mock here — the success path is what the fleet strip
+        // consumes). Trusted click on the declared option; the durable
+        // receipt answers; then the strip updates on the plugin's own poll.
+        await trustedClick(cdp, 'release', { exact: true })
+        await waitText(cdp, 'Answer saved', 25_000)
+        const receipt = await cdp.evl(`(() => { const el = document.querySelector('[data-gate-receipt]')
+          if (!el) return null; const r = el.getBoundingClientRect()
+          return { x: r.x, y: r.y, width: r.width, height: r.height } })()`)
+        if (!receipt) die(EX.api, 'answered gate never showed the durable receipt [data-gate-receipt]')
+        shots.push({ surface: 'gate_modal', state: 'answer recorded from the fleet jump: durable Answer-saved receipt',
+          ...(await shoot(cdp, A.outDir, '15-fleet-answer-receipt-dark.png', receipt,
+            await cdp.evl(`document.querySelector('[data-gate-receipt]').innerText`))) })
+      }
+      // 16: counts AFTER the answer, dark — the ask census dropped, the held
+      // section and census word moved with it (dynamic updates through the
+      // plugin's own 4 s poll loop, no reload).
+      {
+        const t0 = Date.now()
+        for (;;) {
+          if (await bodyHas('Asks 0')) break
+          if (Date.now() - t0 > 30_000) die(EX.api, 'Asks count never fell after the durable answer (30s)')
+          await sleep(800)
+        }
+        const finT0 = Date.now()
+        while (!(await bodyHas(`Finished · ${EXP.finished + 1}`))) {
+          if (Date.now() - finT0 > 30_000) die(EX.api, `released run never joined Finished (expected Finished · ${EXP.finished + 1})`)
+          await sleep(800)
+        }
+        shots.push({ surface: 'pane_workflows', state: `after answer (dark): Asks 1->0, run moved into Finished (· ${EXP.finished + 1}), census follows`,
+          ...(await shoot(cdp, A.outDir, '16-fleet-after-answer-dark.png', null, await stableColumnText(paneRegion))) })
+      }
+      // Light theme: mode written through the app's own localStorage key
+      // (themes/context.tsx MODE_KEY), reload, and the dark class is proven
+      // gone before any light claim.
+      await cdp.evl(`(() => {
+        localStorage.setItem('hermes-desktop-mode-v1', 'light')
+        try {
+          const k = 'hermes-desktop-profile-modes-v1'
+          const cur = JSON.parse(localStorage.getItem(k) || '{}')
+          cur[${JSON.stringify(BENCH_PROFILE)}] = 'light'
+          localStorage.setItem(k, JSON.stringify(cur))
+        } catch { /* legacy key still decides */ }
+      })()`)
+      await cdp.send('Page.reload', { ignoreCache: true })
+      cdp.ws.close()
+      await sleep(2000)
+      cdp = await connectCdp(A.cdpPort, A.rendererPort, 60_000)
+      await waitPainted(cdp, A.paintBudgetMs)
+      await waitConnected(cdp, probeBudgetMs)
+      const isDark = await cdp.evl(`document.documentElement.classList.contains('dark')`)
+      identity.fleet_theme = { light_requested: true, dark_class_after_switch: isDark }
+      if (isDark) die(EX.api, 'light mode never applied (documentElement keeps .dark) — light frames would lie')
+      await refocusChat()
+      await fleetPoll(`runs ${EXP.total} ·`, 'census never re-rendered after the theme reload')
+      shots.push({ surface: 'pane_workflows', state: 'fleet All (light): same five-way census, same hygiene separation',
+        ...(await shoot(cdp, A.outDir, '17-fleet-all-light.png', null, await stableColumnText(paneRegion))) })
+      // 18/19: stop run B through the SAME door — its owner chat now holds
+      // finished-not-clean work: the record reads Idle (never sold as Done),
+      // Close window answers, and the count drops to 0 with the receipt. The
+      // chat and its history are untouched (no session mutation is even
+      // attempted by the plugin).
+      try {
+        execFileSync(py, [path.join(HERE, 'seed_run.py'), '--repo', REPO,
+          '--runs-root', B.runs, '--stop', slowRunId],
+          { encoding: 'utf8', timeout: 30_000,
+            env: { ...process.env, WF_RUNS_ROOT: B.runs, HERMES_HOME: B.home } })
+      } catch (e) { die(EX.api, `fleet stop of ${slowRunId} failed: ${String(e.stderr || e.message).slice(0, 200)}`) }
+      {
+        const t0 = Date.now()
+        for (;;) {
+          if (await bodyHas('Idle window · work ended here')) break
+          if (Date.now() - t0 > 30_000) die(EX.api, 'stopped owner run never surfaced the Idle window record (30s poll budget)')
+          await sleep(800)
+        }
+        if (!(await bodyHas('Done 0'))) die(EX.api, 'an idle ending must not read Done')
+        shots.push({ surface: 'pane_workflows', state: 'after stop (light): Idle window record (failed-ending never sold as Done), Close window explicit',
+          ...(await shoot(cdp, A.outDir, '18-fleet-idle-light.png', null, await stableColumnText(paneRegion))) })
+        await trustedClick(cdp, 'Close window', { exact: true })
+        await waitText(cdp, 'closed · conversation kept', 15_000)
+        if (await bodyHas('Close window')) die(EX.api, 'Close window affordance survived the close click')
+        if (!(await bodyHas('Unowned 0'))) die(EX.api, 'the strip never restated its counts after the close')
+        shots.push({ surface: 'pane_workflows', state: 'close window (light): record gone, counts recomputed, receipt visible — conversation history never touched',
+          ...(await shoot(cdp, A.outDir, '19-fleet-close-receipt-light.png', null, await stableColumnText(paneRegion))) })
+      }
+      // 20/21 + measured table: the audit bands. Row-open arrows stay 44x44
+      // and INSIDE the viewport at 390/640/720/768/792/1440 (the must-fix #6
+      // law: no row min-width may push the control out; the flex row
+      // truncates instead).
+      {
+        const bands = [390, 640, 720, 768, 792, 1440]
+        const rowsOut = []
+        for (const w of bands) {
+          await cdp.send('Emulation.setDeviceMetricsOverride', { width: w, height: 900, deviceScaleFactor: 1, mobile: false })
+          await sleep(1400)
+          const m = await cdp.evl(`(() => {
+            const iw = innerWidth
+            const els = [...document.querySelectorAll('button.wf-row-open')]
+            const rects = els.map(e => e.getBoundingClientRect())
+            if (!rects.length) return { iw, n: 0 }
+            return { iw, n: rects.length,
+              minW: Math.min(...rects.map(r => r.width)), maxW: Math.max(...rects.map(r => r.width)),
+              minH: Math.min(...rects.map(r => r.height)), maxH: Math.max(...rects.map(r => r.height)),
+              maxRight: Math.max(...rects.map(r => r.right)), minLeft: Math.min(...rects.map(r => r.left)) } })()`)
+          if (!m.n) die(EX.api, `no open-arrow control rendered at band ${w}`)
+          for (const [k, want] of [['minW', 44], ['maxW', 44], ['minH', 44], ['maxH', 44]])
+            if (Math.abs(m[k] - want) > 0.6) die(EX.api, `band ${w}: row-open ${k}=${m[k]} != ${want}`)
+          if (m.maxRight > m.iw + 0.5) die(EX.api, `band ${w}: row-open right=${m.maxRight} beyond viewport ${m.iw} (must-fix #6 shape)`)
+          if (m.minLeft < 0) die(EX.api, `band ${w}: row-open left=${m.minLeft} clipped`)
+          rowsOut.push({ width: w, ...m, verdict: 'PASS' })
+          if (w === 640 || w === 768)
+            shots.push({ surface: 'pane_workflows', state: `tablet band ${w}: row-open arrows 44x44 inside the viewport`,
+              ...(await shoot(cdp, A.outDir, `20-fleet-band-${w}.png`)) })
+        }
+        await cdp.send('Emulation.clearDeviceMetricsOverride', {})
+        identity.fleet_geometry = { bands: rowsOut, law: '44x44 fixed box, flex row truncates, never a grid min-width' }
+        fs.writeFileSync(path.join(A.outDir, 'logs', 'geometry-bands.json'), JSON.stringify(rowsOut, null, 2) + '\n')
       }
     }
 

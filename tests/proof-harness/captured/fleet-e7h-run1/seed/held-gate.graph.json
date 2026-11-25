@@ -1,0 +1,34 @@
+{
+  "name": "ui2-proof-held",
+  "nodes": [
+    {
+      "id": "say",
+      "type": "echo",
+      "output": {
+        "msg": "seeded"
+      }
+    },
+    {
+      "id": "hold",
+      "type": "gate",
+      "after": [
+        "say"
+      ],
+      "question": "UI2 fleet proof: release this held gate after capture?",
+      "options": [
+        "release",
+        "stop"
+      ]
+    },
+    {
+      "id": "tail",
+      "type": "echo",
+      "after": [
+        "hold"
+      ],
+      "output": {
+        "msg": "released"
+      }
+    }
+  ]
+}

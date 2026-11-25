@@ -240,6 +240,27 @@ retryable options and no receipt); report.json
 entries are `reviewed:false` until the mandatory vision pass.
 
 
+## The `fleet` case (bd_2026-11-13-e7h)
+
+`node tests/proof-harness/capture.mjs --case fleet --out "$PROOF_DIR/fleet"
+--cdp-port 9414 --renderer-port 5214 --paint-budget 300` proves the fleet
+landing on the real renderer: five named sections behind trusted pill clicks
+(exact membership), the >100-row uncapped Interrupted bucket scrolled to its
+deepest counted row, the hygiene strip's WINDOW census (Live/Done/Unowned +
+Asks) bound to a real owner-stamped focus with 'other windows: unavailable'
+stated (the SDK exposes no window roster — the case says so instead of
+guessing), the Asks jump to the EXACT gate cell, a REAL answer through the
+door with the durable receipt and the post-answer count move (Held ->
+Finished, Asks 1->0) driven by the plugin's own poll loop, the same census
+re-rendered in LIGHT (the app's own mode key, dark-class proven gone), the
+stopped owner run surfaced as an Idle (never Done) window record, Close
+window -> record gone + counts recomputed + 'closed · conversation kept'
+receipt, and row-open arrows MEASURED at 44x44 inside the viewport at
+390/640/720/768/792/1440 (logs/geometry-bands.json; the audit must-fix #6
+law). Fixture statuses come from `seed_fixture.py --status-mix` and are
+READ BACK through run_state — every count is realized, never intent.
+
+
 ## Verification (slice A command)
 
 ```sh

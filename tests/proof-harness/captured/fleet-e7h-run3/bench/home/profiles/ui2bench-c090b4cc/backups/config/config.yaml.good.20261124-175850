@@ -1,0 +1,237 @@
+model:
+  default: qwen38-next
+  provider: haus-ubuntu-qwen38-next
+providers:
+  haus-ubuntu-qwen38-next:
+    name: haus-ubuntu-qwen38-next
+    base_url: http://100.64.55.45:18030/v1
+    model: qwen38-next
+    discover_models: true
+    models:
+      qwen38-next: {}
+database:
+  journal_mode: wal
+runtime:
+  nofile_soft_limit: 4096
+agent:
+  max_turns: 500
+  service_tier: ''
+  fast_auto_seconds: 60
+  verbose: false
+  reasoning_effort: medium
+  personalities: {}
+terminal:
+  backend: local
+  cwd: .
+  timeout: 180
+  home_mode: auto
+  container_cpu: 1
+  container_memory: 5120
+  container_disk: 51200
+  container_persistent: true
+  docker_mount_cwd_to_workspace: false
+  lifetime_seconds: 300
+browser:
+  inactivity_timeout: 120
+  allow_private_urls: true
+  use_real_profile: true
+tool_loop_guardrails:
+  warnings_enabled: true
+  hard_stop_enabled: false
+  non_interactive_hard_stop_enabled: true
+  warn_after:
+    exact_failure: 2
+    same_tool_failure: 3
+    idempotent_no_progress: 2
+  hard_stop_after:
+    exact_failure: 5
+    same_tool_failure: 8
+    idempotent_no_progress: 5
+compression:
+  enabled: true
+  checkpoint_required: false
+  progress_notices: false
+  threshold: 0.85
+  target_ratio: 0.2
+  protect_last_n: 20
+  min_tail_user_messages: 1
+  max_attempts: 3
+  proactive_prune_tokens: 0
+  proactive_prune_min_result_chars: 8000
+  proactive_prune_min_reclaim_tokens: 4096
+  hygiene_max_turn_hold_seconds: 10
+  protect_first_n: 3
+  codex_gpt55_autoraise: true
+  codex_app_server_auto: native
+  codex_responses_native: false
+  idle_compact_after_seconds: 0
+prompt_caching:
+  cache_ttl: 5m
+display:
+  compact: false
+  busy_input_mode: interrupt
+  bell_on_complete: false
+  bell_on_prompt: false
+  show_reasoning: true
+  background_process_notifications: concise
+  streaming: true
+  skin: default
+  interim_assistant_messages: true
+  tool_progress: all
+  cleanup_progress: false
+  long_running_notifications: true
+  busy_ack_detail: true
+  in_app_tips: false
+  in_app_tours: false
+stt:
+  enabled: true
+  language: en
+  local:
+    model: base
+  openai:
+    model: whisper-1
+    language: ''
+memory:
+  memory_enabled: true
+  user_profile_enabled: true
+  memory_char_limit: 2200
+  user_char_limit: 1375
+  nudge_interval: 10
+delegation:
+  max_iterations: 250
+skills:
+  creation_nudge_interval: 15
+command_allowlist:
+  - shell command via -c/-lc flag
+security:
+  allow_private_urls: true
+cron:
+  catch_up_missed: true
+kanban:
+  review_dispatch: true
+code_execution:
+  timeout: 300
+  max_tool_calls: 50
+gateway:
+  signal_interrupt_grace_timeout: 1
+  delivery_ledger: true
+  platform_connect_timeout: 30
+  loop_watchdog: true
+  loop_watchdog_probe_interval_s: 30.0
+  loop_watchdog_probe_timeout_s: 10.0
+  loop_watchdog_max_strikes: 3
+  allow_all_users: false
+  bot_loop_guard:
+    enabled: true
+    max_events: 20
+    window_seconds: 300
+    cooldown_seconds: 600
+  startup_watchdog: true
+  startup_watchdog_timeout_seconds: 300
+  write_sessions_json: true
+  multiplex_profiles: true
+  auto_multiplex_migration: true
+  profile_routes: []
+  scale_to_zero:
+    idle_timeout_minutes: 2
+  restart_loop_guard:
+    max_restarts: 3
+    window_seconds: 60
+    max_gap_seconds: 300
+  respawn_storm:
+    max_starts: 5
+    window_seconds: 120
+  message_timestamps:
+    enabled: false
+  max_inbound_media_bytes: 134217728
+  trust_env: true
+  strict: false
+  media_delivery_allow_dirs: []
+  trust_recent_files: true
+  trust_recent_files_seconds: 600
+  api_server:
+    max_concurrent_runs: 10
+  standalone: true
+streaming:
+  enabled: false
+telemetry:
+  shared_metrics:
+    enabled: true
+    send: true
+    offer_version: 2
+updates:
+  check: true
+  pre_update_backup: false
+  backup_keep: 5
+  non_interactive_local_changes: stash
+_config_version: 54
+group_sessions_per_user: true
+platform_toolsets:
+  cli:
+    - hermes-cli
+    - workflows
+  telegram:
+    - hermes-telegram
+    - workflows
+  discord:
+    - hermes-discord
+    - workflows
+  whatsapp:
+    - hermes-whatsapp
+    - workflows
+  slack:
+    - hermes-slack
+    - workflows
+  signal:
+    - hermes-signal
+    - workflows
+  homeassistant:
+    - hermes-homeassistant
+    - workflows
+  qqbot:
+    - hermes-qqbot
+    - workflows
+  yuanbao:
+    - hermes-yuanbao
+    - workflows
+  teams:
+    - hermes-teams
+    - workflows
+  google_chat:
+    - hermes-google_chat
+    - workflows
+plugins:
+  enabled:
+    - hermes-rich-ui
+    - hermes-workflows
+    - homeassistant
+  disabled: []
+  entries:
+    hermes-workflows:
+      settings:
+        tray: true
+        max_concurrency: 12
+        max_item_concurrency: 12
+        runs_root: /Users/jacobhausler/code/wf-pr-20261124/e7h/tests/proof-harness/captured/fleet-e7h-run3/bench/runs
+approvals:
+  mode: 'off'
+known_plugin_toolsets:
+  acp:
+    - homeassistant
+  webhook:
+    - homeassistant
+_left_core_scoped:
+  - homeassistant
+_left_core_installed:
+  - homeassistant
+fallback_providers:
+  - provider: anthropic
+    model: claude-opus-5-5
+  - provider: openai-codex
+    model: gpt-6.2-sol
+workflows:
+  max_seats: 12
+mcp_servers:
+  fusion:
+    url: http://127.0.0.1:27182/mcp
+    enabled: true

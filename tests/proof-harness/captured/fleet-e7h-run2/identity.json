@@ -1,0 +1,128 @@
+{
+  "ts": "2026-11-24T23:21:03.059Z",
+  "case": "fleet",
+  "plugin": {
+    "candidate": "~/code/wf-pr-20261124/e7h/desktop/plugin.js",
+    "sha256": "e77140f78f7bb74d081719c87bcc0d915f7405636eb7be6c7339d559d1805ffe",
+    "staged": "~/code/wf-pr-20261124/e7h/tests/proof-harness/captured/fleet-e7h-run2/bench/home/desktop-plugins/hermes-workflows/plugin.js",
+    "staged_sha256": "e77140f78f7bb74d081719c87bcc0d915f7405636eb7be6c7339d559d1805ffe",
+    "staged_sha256_after_load": "e77140f78f7bb74d081719c87bcc0d915f7405636eb7be6c7339d559d1805ffe"
+  },
+  "app": {
+    "repo": "~/code/hermes-agent-proof-cj2",
+    "hermes_version": "Hermes Agent v0.23.3+1142.gb9b36c9 (2026.9.24) · stable · local b9b36c933759\nInstall directory: ~/.hermes/hermes-agent\nInstall method: git\nPython: 3.14.9\nOpenAI SDK: 2.54.0\nUp to date",
+    "commit": "0f602c5f6f18615632535251d62a2db74ce93b69",
+    "dirty_entries": 0,
+    "package_version": "0.0.0",
+    "electronVersion": "unknown",
+    "electron_package_version": "44.10.2"
+  },
+  "bench": {
+    "ports": {
+      "cdp": 9634,
+      "renderer": 5634
+    },
+    "discovery_copied": [
+      "spawn-ledger.json",
+      "auth.json",
+      "config.yaml"
+    ],
+    "plugins_symlink": "~/code/wf-pr-20261124/e7h",
+    "profile": "ui2bench-3ac494b7",
+    "locks": "~/code/wf-pr-20261124/e7h/tests/proof-harness/captured/fleet-e7h-run2/bench/locks",
+    "pre_ensure": "ok"
+  },
+  "seeds": {
+    "held_gate_run": {
+      "kind": "engine_seed",
+      "run_id": "20261124-172236-ui2-proof-held",
+      "graph_sha256": "04878dd342ce5de7669793e90da8a7c849744e695ce9487e3762b456d7772bba"
+    },
+    "directive_card_echo": {
+      "kind": "engine_seed",
+      "method": "oneshot_echo",
+      "ask_sha256": "7cdd77f6425fbe780e86e1c18cf6b49a85cfcd87eb241b26432e06b88c0b3570",
+      "stdout_sha256": "af574c65beb57e31578f7c0a4aa0d9fe0785d523617e33e3f5f8887758be9b55",
+      "session_id": "local-443b72839e6a2da6c1fd032d56185249420277d17b617d8dce0fcb2dd4efb4bc",
+      "model": "seat-default"
+    }
+  },
+  "config_touched": {
+    "plugins.entries.hermes-workflows.settings.runs_root": {
+      "before": null,
+      "after": "~/code/wf-pr-20261124/e7h/tests/proof-harness/captured/fleet-e7h-run2/bench/runs",
+      "scope": "bench profile ui2bench-3ac494b7 (isolated — shared config untouched)"
+    },
+    "plugins.entries.hermes-workflows.settings.tray": {
+      "before": true,
+      "after": true,
+      "scope": "bench profile ui2bench-3ac494b7 (isolated — shared config untouched)"
+    }
+  },
+  "candidate_head": "93a3e916a454bc654a5c42cf026c46d6d7666fea",
+  "merge_base_origin_main": "c0a5da6bd57fd200eb6fe9b0bb2e33ddd2d5335b",
+  "registry": {
+    "routes": [
+      "hermes-workflows:page"
+    ],
+    "panes": [
+      "sessions",
+      "workspace",
+      "terminal",
+      "files",
+      "review",
+      "hermes-bots:pane",
+      "hermes-workflows:pane"
+    ],
+    "directives": [
+      "transcript.preview",
+      "hermes-workflows:directive"
+    ],
+    "composer": [
+      "hermes-workflows:session-strip"
+    ]
+  },
+  "plugin_records": {
+    "hermes-bots": {
+      "error": null,
+      "active": false
+    },
+    "kanban": {
+      "error": null,
+      "active": false
+    },
+    "radio": {
+      "error": null,
+      "active": false
+    },
+    "hermes-workflows": {
+      "error": null,
+      "active": false
+    }
+  },
+  "teardown": {
+    "survivors": [
+      {
+        "pid": 46604,
+        "needle": "~/code/wf-pr-20261124/e7h/tests/proof-harness/captured/fleet-e7h-run2/bench/userdata",
+        "line": "node ~/.hermes/hermes-agent/apps/desktop/node_modules/.bin/../../../../node_modules/.pnpm/electron@44.10.2_supports-color@10.2.2/node_modules/electron/cli.js . --user-data-dir=/Users"
+      },
+      {
+        "pid": 46613,
+        "needle": "~/code/wf-pr-20261124/e7h/tests/proof-harness/captured/fleet-e7h-run2/bench/userdata",
+        "line": "~/.hermes/hermes-agent/node_modules/.pnpm/electron@44.10.2_supports-color@10.2.2/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron . --user-data-dir=~"
+      },
+      {
+        "pid": 46786,
+        "needle": "~/code/wf-pr-20261124/e7h/tests/proof-harness/captured/fleet-e7h-run2/bench/userdata",
+        "line": "~/.hermes/hermes-agent/node_modules/.pnpm/electron@44.10.2_supports-color@10.2.2/node_modules/electron/dist/Electron.app/Contents/Frameworks/Electron Helper.app/Contents/MacOS/Electr"
+      },
+      {
+        "pid": 46806,
+        "needle": "~/code/wf-pr-20261124/e7h/tests/proof-harness/captured/fleet-e7h-run2/bench/userdata",
+        "line": "~/.hermes/hermes-agent/node_modules/.pnpm/electron@44.10.2_supports-color@10.2.2/node_modules/electron/dist/Electron.app/Contents/Frameworks/Electron Helper.app/Contents/MacOS/Electr"
+      }
+    ],
+    "revert_failures": []
+  }
+}

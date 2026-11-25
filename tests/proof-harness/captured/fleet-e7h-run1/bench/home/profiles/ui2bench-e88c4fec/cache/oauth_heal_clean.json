@@ -1,0 +1,54 @@
+{
+  "nous": [
+    "/Users/jacobhausler/code/wf-pr-20261124/e7h/tests/proof-harness/captured/fleet-e7h-run1/bench/home/profiles/ui2bench-e88c4fec/auth.json",
+    [
+      1795558858280832718,
+      6133,
+      110851713,
+      1795558858280832718
+    ],
+    null,
+    "/Users/jacobhausler/code/wf-pr-20261124/e7h/tests/proof-harness/captured/fleet-e7h-run1/bench/home/auth.json",
+    null,
+    null
+  ],
+  "openai-codex": [
+    "/Users/jacobhausler/code/wf-pr-20261124/e7h/tests/proof-harness/captured/fleet-e7h-run1/bench/home/profiles/ui2bench-e88c4fec/auth.json",
+    [
+      1795558858280832718,
+      6133,
+      110851713,
+      1795558858280832718
+    ],
+    null,
+    "/Users/jacobhausler/code/wf-pr-20261124/e7h/tests/proof-harness/captured/fleet-e7h-run1/bench/home/auth.json",
+    null,
+    null
+  ],
+  "xai-oauth": [
+    "/Users/jacobhausler/code/wf-pr-20261124/e7h/tests/proof-harness/captured/fleet-e7h-run1/bench/home/profiles/ui2bench-e88c4fec/auth.json",
+    [
+      1795558858280832718,
+      6133,
+      110851713,
+      1795558858280832718
+    ],
+    null,
+    "/Users/jacobhausler/code/wf-pr-20261124/e7h/tests/proof-harness/captured/fleet-e7h-run1/bench/home/auth.json",
+    null,
+    null
+  ],
+  "anthropic": [
+    "/Users/jacobhausler/code/wf-pr-20261124/e7h/tests/proof-harness/captured/fleet-e7h-run1/bench/home/profiles/ui2bench-e88c4fec/auth.json",
+    [
+      1795558858280832718,
+      6133,
+      110851713,
+      1795558858280832718
+    ],
+    null,
+    "/Users/jacobhausler/code/wf-pr-20261124/e7h/tests/proof-harness/captured/fleet-e7h-run1/bench/home/auth.json",
+    null,
+    null
+  ]
+}

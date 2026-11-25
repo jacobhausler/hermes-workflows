@@ -1,0 +1,16 @@
+{
+  "packages": {
+    "venv": {
+      "environment": "/Users/jacobhausler/code/wf-pr-20261124/e7h/tests/proof-harness/captured/fleet-e7h-run2/bench/home/installs/9f341e1aa19188fa/environments/a16c9d68f4914e11bdad86611e541a5b/venv",
+      "extras": [
+        "all",
+        "doc-extract",
+        "vision",
+        "web"
+      ],
+      "resolved_lock": "/Users/jacobhausler/code/wf-pr-20261124/e7h/tests/proof-harness/captured/fleet-e7h-run2/bench/home/installs/9f341e1aa19188fa/environments/a16c9d68f4914e11bdad86611e541a5b/workspace/uv.lock",
+      "stamp": "9c951fb8e68f800b30ef281032e03612d15e82ee74234ece5490795bd2da7ce5"
+    }
+  },
+  "schema": 1
+}

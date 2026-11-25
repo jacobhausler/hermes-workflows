@@ -1,0 +1,23 @@
+{
+  "exit_code": 0,
+  "feature_list": [
+    "all",
+    "doc-extract",
+    "vision",
+    "web"
+  ],
+  "finished_at": "2026-11-24T22:21:17.766706+00:00",
+  "kind": "sync",
+  "outcome": "ok",
+  "platform": null,
+  "refusal": null,
+  "schema": 1,
+  "started_at": "2026-11-24T22:21:03.921565+00:00",
+  "steps": [],
+  "update_id": null,
+  "venv_rebuild": {
+    "ok": true,
+    "reason": ""
+  },
+  "warnings": []
+}

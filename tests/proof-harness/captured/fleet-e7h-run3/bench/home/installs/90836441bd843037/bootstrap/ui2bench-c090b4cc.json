@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "identity": "0f602c5f6f18615632535251d62a2db74ce93b69",
+  "bootstrappedAt": "2026-11-24T17:59:09-0600",
+  "results": {
+    "adopt_blessed_checkout": {
+      "ok": true,
+      "skipped": "not-a-blessed-root"
+    },
+    "migrate_config": {
+      "ok": true,
+      "skipped": "up-to-date"
+    },
+    "state_db_guard": {
+      "ok": true,
+      "skipped": "no-state-db"
+    },
+    "drop_live_plugin_catalog": {
+      "ok": true
+    },
+    "expose_cli": {
+      "ok": true,
+      "skipped": "no-store-python"
+    },
+    "install_default_plugins": {
+      "ok": true
+    }
+  }
+}
