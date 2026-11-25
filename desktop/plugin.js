@@ -1923,6 +1923,15 @@ export function NodeCard({ runId, def, st, gate, selected, owner, events, answer
     'div',
     {
       className: 'shrink-0 rounded-md border bg-transparent',
+      // Admission instrumentation (bd_2026-11-13-32i): the allocator's
+      // verdict per effect ID — the real-app proof driver reads these off
+      // the ACTUAL renderer; invisible in screenshots, never user copy.
+      'data-motion': motionAnim
+        ? motionAnim.claim.admitted
+          ? `admitted:${motionAnim.claim.reserved ? 'reserved' : 'active'}`
+          : `spill:${motionAnim.claim.reason}`
+        : 'none',
+      'data-motion-id': motionAnim ? `attention:${runId}:${def.id}` : undefined,
       style: {
         width: CARD_W,
         background: 'var(--ui-sidebar-surface-background, var(--card))',
@@ -1940,16 +1949,7 @@ export function NodeCard({ runId, def, st, gate, selected, owner, events, answer
         animation,
         // Timestamp-aligned phase (DESIGN Round 10): the offset derives from
         // the ORIGINAL hold event, so redraws and remounts cannot restart it.
-        animationDelay: motionAnim && motionAnim.claim.admitted ? `${motionAnim.claim.phaseMs}ms` : undefined,
-        // Admission instrumentation (bd_2026-11-13-32i): the allocator's
-        // verdict per effect ID — the real-app proof driver reads these off
-        // the ACTUAL renderer; invisible in screenshots, never user copy.
-        'data-motion': motionAnim
-          ? motionAnim.claim.admitted
-            ? `admitted:${motionAnim.claim.reserved ? 'reserved' : 'active'}`
-            : `spill:${motionAnim.claim.reason}`
-          : 'none',
-        'data-motion-id': motionAnim ? `attention:${runId}:${def.id}` : undefined
+        animationDelay: motionAnim && motionAnim.claim.admitted ? `${motionAnim.claim.phaseMs}ms` : undefined
       },
       children: [
         jsxs(

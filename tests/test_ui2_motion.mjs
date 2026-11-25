@@ -372,7 +372,8 @@ const alloc = () => mod.createMotionAllocator({ clock: () => tick.now })
   const ph = Number(String(card.props.style.animationDelay).replace('ms', ''))
   assert.ok(Number.isInteger(ph) && ph <= 0 && ph > -4000,
     `card phase ${ph}ms is the timestamp cycle offset inside the registered 4000ms period (the exact value rides the live clock; the law itself is pinned by the fake-clock section)`)
-  assert.equal(card.props.style['data-motion'], 'admitted:active', 'the admission verdict is instrumented on the card')
+  assert.equal(card.props['data-motion'], 'admitted:active', 'the admission verdict is instrumented as a DOM attribute (element prop, not a style key — a style-embedded data-* is dropped by React)')
+  assert.equal(card.props['data-motion-id'], 'attention:r:gate1', 'the effect ID rides the attribute for probe correlation')
   // FINAL.md reference canary: twelve transition claims deny the attention,
   // leaving ZERO gate animation and its static border.
   const A2 = await loadMint()
@@ -383,16 +384,16 @@ const alloc = () => mod.createMotionAllocator({ clock: () => tick.now })
   }
   const spilled = cardFor(A2)({ runId: 'r', def: heldDef, st: heldSt, gate: heldGate, owner: {}, events: [], selected: false })
   assert.equal(spilled.props.style.animation, undefined, 'a denied claim leaves zero gate animation')
-  assert.equal(spilled.props.style['data-motion'], 'spill:cap', 'and instruments the immediate static spill')
+  assert.equal(spilled.props['data-motion'], 'spill:cap', 'and instruments the immediate static spill')
   assert.equal(spilled.props.style.borderColor, A2.NODE_TONE.held.borderColor, 'the spilled card keeps the constant amber border')
   assert.notEqual(spilled.props.style.opacity, 0.7, 'spill settles at full opacity — never a paused/faded frame')
   // the pending card breathes through the allocator too (incumbent, W5 retires)
   const waiting = renderCard({ runId: 'r', def: { id: 'tail', type: 'agent' }, st: {}, gate: null, owner: {}, events: [], selected: false })
   assert.ok(String(waiting.props.style.animation).includes('wf-breathe'), 'waiting breathes via an allocator claim')
-  assert.equal(waiting.props.style['data-motion'], 'admitted:active', 'the breathe claim is instrumented too')
+  assert.equal(waiting.props['data-motion'], 'admitted:active', 'the breathe claim is instrumented too')
   // terminals never claim (calm law survives the allocator)
   const doneCard = renderCard({ runId: 'r', def: heldDef, st: { status: 'done' }, gate: null, owner: {}, events: [], selected: false })
-  assert.equal(doneCard.props.style['data-motion'], 'none', 'a calm terminal holds no slot')
+  assert.equal(doneCard.props['data-motion'], 'none', 'a calm terminal holds no slot')
 }
 
 // =================================================================================
