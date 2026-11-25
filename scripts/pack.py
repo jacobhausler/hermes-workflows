@@ -329,6 +329,10 @@ SOURCE_ONLY_TESTS = {
     # bd_2026-11-13-iqf (slice A): the double-run spec reads the committed capture sets under
     # tests/proof-harness/captured/ and imports the source-only driver — same est-4vnq finding-4 shape.
     "tests/test_proof_harness_repro.mjs": "executes source-only tests/proof-harness/capture.mjs and reads tests/proof-harness/captured/ sets",
+    # #729 (W8 packaged-test blocker): the bench-env isolation spec imports the
+    # source-only proof driver — the exact est-4vnq finding-4 shape, so the spec
+    # cannot ship in the release ZIP.
+    "tests/test_proof_bench_env.mjs": "imports source-only tests/proof-harness/capture.mjs (#729 bench-env spec)",
 }
 
 # Source-only SCRIPTS: repository/estate CI tooling that never travels in the
