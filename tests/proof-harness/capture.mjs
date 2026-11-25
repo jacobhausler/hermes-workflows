@@ -59,6 +59,9 @@
 // unreferenced by any committed manifest.json — a reference set that cannot
 // be fully read keeps the tree — and be either a *.stale-*/*abandoned-*
 // rotation, a run-* scratch dir, or a dead attempt (no terminal manifest).
+// The driver's own requested --out is never a sweep subject: one resolved
+// path exclusion (wave-H review) leaves it to the ordinary rotation below,
+// which archives the prior attempt instead of deleting it.
 // One log line per reclaimed tree (path, MiB) on stderr; every kept tree has
 // a reason. Net effect: proof disk caps at ~2 concurrent runs, and no
 // uncertain tree ever dies to the sweep.
@@ -437,10 +440,17 @@ function supervisorsActive(dir) {
 // proved-abandoned tree. runStartMs/nowMs/graceMs are injected so the
 // fake-tree spec is deterministic; dryRun plans without touching disk.
 // Returns {reclaimed:[{dir,mib,reason}], kept:[{dir, reason}]}; per-dir
-// errors demote that dir to kept, never to a crash.
+// errors demote that dir to kept, never to a crash. `exclude` names ONE
+// path (resolved) the sweep must skip outright — the driver's own requested
+// --out, which the caller rotates right after this sweep: it is not a
+// retention subject, and reclaiming it would destroy the prior attempt's
+// bytes before the rotation could archive them (wave-H review, the
+// ce2780fd regression pinned by the retry control in
+// tests/test_bench_retention_4fy.mjs).
 export function planBenchRetention({ proofRoot, runStartMs, nowMs = Date.now(),
-    graceMs = 600_000, repoRoot = REPO, dryRun = false } = {}) {
+    graceMs = 600_000, repoRoot = REPO, dryRun = false, exclude = null } = {}) {
   const reclaimed = [], kept = [];
+  const excluded = exclude === null ? null : path.resolve(exclude);
   let ents = [];
   try { ents = fs.readdirSync(proofRoot, { withFileTypes: true }); }
   catch { return { reclaimed, kept }; }
@@ -448,6 +458,7 @@ export function planBenchRetention({ proofRoot, runStartMs, nowMs = Date.now(),
   for (const ent of ents) {
     if (!ent.isDirectory()) continue;
     const dir = path.join(proofRoot, ent.name);
+    if (excluded !== null && path.resolve(dir) === excluded) continue;
     try {
       if (!fs.existsSync(path.join(dir, '.ui2-proof-owned')))
         { kept.push({ dir, reason: 'unowned' }); continue; }
@@ -1070,12 +1081,17 @@ async function main() {
 
   // -- owned-bench retention (bd_2026-11-13-4fy): reclaim proven-dead sibling
   //    bench trees under THIS run's proof tree before provisioning ours, so
-  //    crashed attempts can't grow disk past ~2 concurrent runs. Opportunistic
+  //    crashed attempts can't grow disk past ~2 concurrent runs. The
+  //    requested --out itself is EXCLUDED from this sweep (wave-H review):
+  //    it is not a sibling, and the rotation below must be what archives a
+  //    prior attempt — reclaiming it here deleted the prior diagnostic bytes
+  //    before the rename could preserve them. Opportunistic
   //    GC: any failure here must never fail the run — planBenchRetention
   //    demotes per-dir errors to kept and this call swallows the rest.
   try {
     const ret = planBenchRetention({
       proofRoot: path.dirname(outResolved),
+      exclude: outResolved,
       runStartMs: Date.parse(identity.ts),
       graceMs: Math.max(600_000, A.paintBudgetMs + 300_000),
     });
