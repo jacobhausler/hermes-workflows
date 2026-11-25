@@ -29,36 +29,41 @@ run ids, config-before/after, teardown survivors).
 `--case coverage` proves the full-census fetch states on the REAL surface: a
 fixture census of 133 read-model rows (seed_fixture.py — rows read
 `interrupted`, never TERMINAL, so the pane's own 4 s poll loop drives the
-error frames) plus frames for loading (fork SIGSTOPped at the edge before the
-activation reload), answered-empty (roots named), full census all-loaded, the
+error frames) plus frames for loading (`.proof-delay-census` holds the
+response before the activation reload — every IPC-borne page hangs
+unanswered), answered-empty (roots named), full census all-loaded, the
 deepest counted row past the first-100 ceiling + its record page, refetch
-failure with the cached census kept (fork SIGKILLed; clickable stale chip),
-retry re-walk (census grew while the gateway was dead), and partial fetch
-(bench-only short page: `loaded 100 of 134` while the summary stays
-global), CAP TRUNCATION (every page a full synthetic window without any
-total — the clip at the 30-page cap shows as `first 100 loaded — more exist
-(page cap)`; the `truncated` fact rides the payload, never inferred from a
-missing number), PENDING (counted 237 with zero loaded rows renders
-`Runs pending…`, never the `No runs` costume; total 237 is a synthetic edge
-answer, the bench counts 134), and PENDING RECOVERY (a trusted click on the
-re-walk button brings the real all-loaded census back). Synthetic frame
-provenance is recorded under `identity.coverage.{cap_frame,pending_frame}`.
-**The transport edge is the FORK, not the CDP Fetch domain:** the
-plugin's REST rides the app's IPC bridge (preload `hermes:api`,
+failure with the cached census kept (`.proof-fail-census` answers 503;
+clickable stale chip), retry re-walk (census grew while the route was
+failing), and partial fetch (`.proof-short-page`: an empty page 2 under the
+real census-wide summary — `loaded 100 of 134` shown honestly while the
+summary stays global), CAP TRUNCATION (`.proof-cap-census`: the route serves
+its first window WITHOUT total for every offset — the REAL fetcher's bounded
+walk clips at its own 30-page cap and the frame shows `first 100 loaded —
+more exist (page cap)`; the `truncated` fact rides the payload, never
+inferred from a missing number), PENDING (`.proof-pending-census`: an empty
+window under the honest counted total 134 renders `Runs pending…` with
+counted-vs-loaded facts, never the `No runs` costume; reviewed F4), and
+PENDING RECOVERY (the knob is removed BEFORE any control releases — the
+pending frame is proven TRANSIENT — then a trusted click on the re-walk
+button brings the real all-loaded census back). Frame provenance is recorded
+under `identity.coverage.{cap_frame,pending_frame}`.
+**The transport edge is the registered staged bench route, not the CDP Fetch
+domain:** the plugin's REST rides the app's IPC bridge (preload `hermes:api`,
 field-proven 2026-11-24), so `Fetch.requestPaused` never fires for plugin
-requests — the loading costume is a SIGSTOPped fork, the error costume a
-SIGKILLed one, and partial fetch is served by the staged bench `/runs` route.
-The driver puts a marker next to the bench API for the partial-fetch shot and
-removes it in `finally`. The marker has no effect on the production API. W7
-and W8 of `tests/test_census_pages_full_yjp.py` exercise both registered routes.
-The mock stays mounted rule-less for
-future app generations that may move REST onto HTTP. A UDS scope probe
-against the fork is recorded to `logs/scope-probe.json` before the walk
-(field-proven #12 lesson). This case does NOT use the close/reconnect reload
-dance: it arms the mock BEFORE the activation reload and keeps the session
-(Fetch survives the reload), re-arming at every reconnect site. Run on loaded
-boxes with `--paint-budget 300` and non-default ports (`--cdp-port 9594
---renderer-port 5394`) when a sibling bench owns 9394/5194.
+requests — the earlier fork SIGSTOP/SIGKILL and Fetch-fulfill eras are dead
+controls, and EVERY condition (delay, failure, short page, cap clip,
+pending) is staged INSIDE the staged `/runs` handler as one marker file
+adjacent to the staged API, removed on every exit path in `finally`. The
+markers have no effect on the production API — no production knob exists.
+`tests/test_census_pages_full_yjp.py` W7–W9 exercise every registered route
+for all five knobs: positive frame-shape pins, a production negative control,
+and restore-on-removal. A UDS scope probe against the fork is recorded to
+`logs/scope-probe.json` before the walk (field-proven #12 lesson). This case
+uses the ordinary close/reconnect reload dance like every case — there is no
+armed Fetch session to keep. Run on loaded boxes with `--paint-budget 300`
+and non-default ports (`--cdp-port 9594 --renderer-port 5394`) when a sibling
+bench owns 9394/5194.
 
 **App generation (2026-11-24, amended by field evidence):** the b9b36c9-era
 desktop app CAN bench, with two laws: (1) the bench-home corollary (outside

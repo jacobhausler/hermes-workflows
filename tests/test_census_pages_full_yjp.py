@@ -222,6 +222,60 @@ with TestClient(bench_app) as isolated, TestClient(app) as production:
     check("(W8g) removing delayed/failed controls restores baseline",
           get(isolated, 100) == off)
 
+    # (W9) Frames 09-11 ride the SAME registered bench route (no CDP Fetch —
+    # plugin REST travels the app IPC bridge, so interception there never
+    # fires). Pin the two new knobs POSITIVELY on the registered staged
+    # handler, NEGATIVELY against production, and prove removal restores.
+    cap_marker = marker.with_name(".proof-cap-census")
+    pending_marker = marker.with_name(".proof-pending-census")
+    try:
+        cap_marker.touch(exist_ok=False)
+        p1 = get(isolated, 0)
+        p2c = get(isolated, 100)
+        p30 = get(isolated, 2900)
+        check("(W9a) cap knob: the registered route answers the same total-less full window at every offset",
+              p1 == p2c == p30 and set(p1) == {"runs", "counts"}
+              and len(p1["runs"]) == 100,
+              json.dumps({"keys": sorted(p1), "n": len(p1["runs"])}))
+        # Replay the fetcher's OWN laws (plugin.js runsIndexFetcher) against
+        # the registered route: known-total covers, else walk-while-full,
+        # hard cap 30, truncated when the cap clips an uncovered walk.
+        total = p1.get("total")
+        off_w, pages, seen_w, covered = 0, 0, set(), False
+        while True:
+            w = get(isolated, off_w)
+            rows = w["runs"]
+            pages += 1
+            seen_w.update(r["id"] for r in rows)
+            covered = (off_w + len(rows) >= total) if isinstance(total, int) \
+                else len(rows) < 100
+            if not rows or covered or pages >= 30:
+                break
+            off_w += len(rows)
+        truncated = not covered and pages >= 30
+        check("(W9b) the REAL bounded walk over the staged route truncates: 30 requests, 100 unique rows, uncovered",
+              truncated and pages == 30 and len(seen_w) == 100,
+              json.dumps({"pages": pages, "unique": len(seen_w), "covered": covered}))
+        check("(W9c) production ignores the bench cap knob",
+              get(production, 100) == off and "total" in get(production, 0))
+    finally:
+        cap_marker.unlink(missing_ok=True)
+    check("(W9d) removing the cap knob restores the counted baseline",
+          get(isolated, 100) == off and get(isolated, 0) == first)
+    try:
+        pending_marker.touch(exist_ok=False)
+        pend = get(isolated, 0)
+        check("(W9e) pending knob: counted-positive, loaded-zero on the registered route (honest total, counts kept)",
+              pend["runs"] == [] and pend["total"] == N + 1
+              and isinstance(pend.get("counts"), dict),
+              json.dumps({"total": pend.get("total"), "n": len(pend["runs"])}))
+        check("(W9f) production ignores the bench pending knob",
+              len(get(production, 0)["runs"]) == 100)
+    finally:
+        pending_marker.unlink(missing_ok=True)
+    check("(W9g) removing the pending knob restores the loaded window (transient control)",
+          get(isolated, 0) == first)
+
 # (W5) offset past the end: empty PAGE, not empty census.
 past = dash.list_runs(999, 100)
 check("(W5) offset past the end is an empty page with census-wide total, no roots",

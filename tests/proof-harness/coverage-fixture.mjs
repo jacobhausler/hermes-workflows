@@ -26,6 +26,8 @@ _proof_original_list_runs = _list_runs
 _proof_short_page = Path(__file__).with_name('.proof-short-page')
 _proof_delay_census = Path(__file__).with_name('.proof-delay-census')
 _proof_fail_census = Path(__file__).with_name('.proof-fail-census')
+_proof_cap_census = Path(__file__).with_name('.proof-cap-census')
+_proof_pending_census = Path(__file__).with_name('.proof-pending-census')
 
 def _list_runs(offset=0, limit=100, *, _record=None):
     if _proof_delay_census.is_file():
@@ -33,7 +35,18 @@ def _list_runs(offset=0, limit=100, *, _record=None):
     if _proof_fail_census.is_file():
         from fastapi import HTTPException
         raise HTTPException(status_code=503, detail='bench-only census failure')
+    if _proof_cap_census.is_file():
+        # Cap-truncation frame: serve the FIRST window for EVERY offset with
+        # the total removed — the real fetcher's bounded walk can never cover,
+        # so its own 30-page cap clips (truncated:true rides the result). Real
+        # truncation at the registered route, not a synthetic network body.
+        page = _proof_original_list_runs(0, limit, _record=_record)
+        return {k: v for k, v in page.items() if k != 'total'}
     page = _proof_original_list_runs(offset, limit, _record=_record)
+    if _proof_pending_census.is_file():
+        # Pending frame: counted-positive, loaded-zero. The honest counted
+        # total rides; only the window is emptied.
+        return {**page, 'runs': []}
     if offset >= 100 and _proof_short_page.is_file():
         return {**page, 'runs': []}
     return page

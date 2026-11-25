@@ -406,58 +406,10 @@ async function trustedClick(cdp, needle, opts = {}) {
   return pt;
 }
 
-// -- CDP Fetch-domain transport mock (bd_2026-11-13-yjp, coverage case) ------
-// Manufactures loading / error / partial-fetch conditions ON THE REAL SURFACE:
-// renderer, plugin, react-query loop and backend stay the actual code — only
-// the network edge lies (stall, fail, or a short-page fulfill), so every frame
-// captured behind a rule is the app's OWN honest state, never a fake DOM.
-// Rules are evaluated in order against the paused request URL; a request that
-// matches no rule simply continues (mock mounted, traffic untouched). The
-// listener rides the raw ws (the gate case used the same trick before app
-// b9b36c9 moved plugin REST onto the IPC bridge — gate now uses the door's
-// bench knobs instead): the
-// coverage path never closes/reconnects the session it armed (a reattach
-// re-arms a fresh mock instead — see armMock at every reconnect site).
-const urlGlob = p => {
-  const re = new RegExp('^' + String(p).split('*').map(s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('.*') + '$');
-  return u => re.test(u);
-};
-async function mockRuns(cdp) {
-  let rules = [];
-  const paused = new Map(); // requestId -> url while stalled (continued on release)
-  cdp.ws.addEventListener('message', e => {
-    let m; try { m = JSON.parse(e.data); } catch { return; }
-    if (m.method !== 'Fetch.requestPaused') return;
-    const ev = m.params;
-    const url = ev.request.url;
-    const rule = rules.find(r => r.g(url));
-    if (rule && rule.action === 'stall') { paused.set(ev.requestId, url); return; }
-    paused.delete(ev.requestId);
-    if (rule && rule.action === 'fail')
-      cdp.send('Fetch.failRequest', { requestId: ev.requestId, errorReason: 'Failed' }).catch(() => {});
-    else if (rule && rule.action === 'fulfill')
-      cdp.send('Fetch.fulfillRequest', {
-        requestId: ev.requestId, responseCode: 200,
-        responseHeaders: [{ name: 'content-type', value: 'application/json' }],
-        body: Buffer.from(String(rule.body)).toString('base64')
-      }).catch(() => {});
-    else cdp.send('Fetch.continueRequest', { requestId: ev.requestId }).catch(() => {});
-  });
-  await cdp.send('Fetch.enable', { patterns: [{ urlPattern: '*workflows/runs*', requestStage: 'Request' }] });
-  return {
-    setRules(rs) { rules = rs.map(r => ({ ...r, g: urlGlob(r.urlPattern) })); },
-    releaseStalled() {
-      for (const rid of paused.keys()) cdp.send('Fetch.continueRequest', { requestId: rid }).catch(() => {});
-      paused.clear();
-      rules = [];
-    },
-    async off() {
-      for (const rid of paused.keys()) cdp.send('Fetch.continueRequest', { requestId: rid }).catch(() => {});
-      paused.clear(); rules = [];
-      try { await cdp.send('Fetch.disable'); } catch { /* disable resumes held traffic; best-effort */ }
-    }
-  };
-}
+// The transport edge for plugin REST is the app's IPC bridge (preload
+// hermes:api, field-proven 2026-11-24): CDP Fetch never pauses a plugin
+// request, so every coverage condition is staged INSIDE the registered bench
+// /runs handler (coverage-fixture.mjs markers) — see the coverage case below.
 
 // The app paints a full-window CONNECTING splash over the chrome until its
 // gateway WS attaches; input and screenshots are the SPLASH underneath it.
@@ -1131,34 +1083,19 @@ async function main() {
       if (stored !== 'ok') die(EX.boot, 'localStorage never writable on the renderer — enable decision impossible');
     }
     // bd yjp (coverage case): plugin REST rides the app's IPC bridge
-    // (preload `hermes:api`), not Fetch. Delay/failure are therefore installed
-    // only in the staged bench's registered /runs handler; production code and
-    // the renderer transport remain untouched.
-    let mock = null;
-    // Rules survive session churn: every re-arm re-applies them, and every
-    // setRules site records them here (the field-proven #720 lesson — the
-    // app's own gateway ensure can restart the fork mid-walk; the pane then
-    // wears the boot-failure modal and a rule-less poll dies at 45 s).
-    let mockRules = [];
-    const armRules = rs => { mockRules = rs; if (mock) mock.setRules(rs); };
-    const armMock = async () => {
-      mock = await mockRuns(cdp);
-      armRules([]);
-    };
+    // (preload `hermes:api`), not Fetch, so EVERY coverage condition is
+    // staged inside the staged bench's registered /runs handler — one marker
+    // file per frame, adjacent to the staged API, never a production setting;
+    // the renderer and its transport remain untouched.
     const delayMarker = coverageMarker && path.join(path.dirname(coverageMarker), '.proof-delay-census');
     const failureMarker = coverageMarker && path.join(path.dirname(coverageMarker), '.proof-fail-census');
-    if (isCoverage) {
-      await armMock();
-      fs.writeFileSync(delayMarker, '', { flag: 'wx' });
-    }
+    const capMarker = coverageMarker && path.join(path.dirname(coverageMarker), '.proof-cap-census');
+    const pendingMarker = coverageMarker && path.join(path.dirname(coverageMarker), '.proof-pending-census');
+    if (isCoverage) fs.writeFileSync(delayMarker, '', { flag: 'wx' });
     await cdp.send('Page.reload', { ignoreCache: true });
-    if (!isCoverage) {
-      cdp.ws.close();
-      await sleep(1500);
-      cdp = await connectCdp(A.cdpPort, A.rendererPort, 60_000);
-    } else {
-      await sleep(1500);   // keep the session — the armed mock must survive it
-    }
+    cdp.ws.close();
+    await sleep(1500);
+    cdp = await connectCdp(A.cdpPort, A.rendererPort, 60_000);
     // Boot can re-navigate the window (main restores the dev-server URL after
     // an early reload): be resilient — reconnect and re-paint-probe for up to
     // 60 s instead of trusting one document. On give-up, dump what we are
@@ -1179,7 +1116,6 @@ async function main() {
           }
           try { cdp.ws.close(); } catch { /* already gone */ }
           cdp = await connectCdp(A.cdpPort, A.rendererPort, 30_000);
-          if (isCoverage) await armMock();   // the session moved — re-arm
         }
       }
     }
@@ -1304,8 +1240,6 @@ async function main() {
             await sleep(1200);
             try { cdp.ws.close(); } catch { /* already gone */ }
             cdp = await connectCdp(A.cdpPort, A.rendererPort, 30_000);
-            mock = await mockRuns(cdp);
-            mock.setRules(mockRules);   // session moved: same rules back
             last = { err: 'reconnecting' };
           }
           if (Date.now() - t0 > probeBudgetMs) break;
@@ -1374,7 +1308,7 @@ async function main() {
         fs.rmSync(delayMarker, { force: true });
         await waitText(cdp, 'No runs', 30_000);
         identity.coverage = {
-          edge: 'delayed/failed census responses from registered staged bench /runs handler; short page served only by staged bench dashboard API',
+          edge: 'every frame served by the registered staged bench /runs handler: delayed response, 503 failure, short page 2, total-less first window for every offset (cap clip), empty window under the honest counted total (pending); production API untouched, no renderer injection',
           roots_line_seen: await cdp.evl(`document.body.innerText.includes('roots:')`) };
         shots.push({ surface: 'pane_workflows', state: 'empty census answered (roots named)',
                      ...(await shoot(cdp, A.outDir, '02-coverage-empty.png', null, await stableColumnText(paneRegion))) });
@@ -1387,7 +1321,7 @@ async function main() {
           ids_sha256: crypto.createHash('sha256').update(seeded.ids.join('\n')).digest('hex') };
         await cdp.send('Page.reload', { ignoreCache: true });
         await sleep(1500);
-        {   // keep the armed session across the reload; re-arm if it moved
+        {   // the session must survive the reload; re-attach if it moved
           const pT0 = Date.now();
           for (;;) {
             try { await waitPainted(cdp, 8_000); break; }
@@ -1395,8 +1329,6 @@ async function main() {
               if (Date.now() - pT0 > A.paintBudgetMs) throw e;
               try { cdp.ws.close(); } catch { /* already gone */ }
               cdp = await connectCdp(A.cdpPort, A.rendererPort, 30_000);
-              mock = await mockRuns(cdp);
-              mock.setRules(mockRules);   // session moved: same rules back
             }
           }
         }
@@ -1471,22 +1403,25 @@ async function main() {
         shots.push({ surface: 'pane_workflows', state: 'page-2 flake: loaded < total shown honestly',
                      ...(await shoot(cdp, A.outDir, '08-coverage-partial-fetch.png', null, await stableColumnText(paneRegion))) });
 
-        // 09 CAP TRUNCATION (ASTRA REVIEW-2 F1, follow-on PR): fulfill EVERY
-        // /runs page with a full synthetic window and NO total at all — the
-        // walk can never cover, the hard page cap (RUNS_MAX_PAGES=30) clips
-        // it, and the fetcher records truncated:true. The disclosure must be
-        // VISIBLE even though no numeric total implies it (the reviewer's
-        // UNKNOWN_CAP probe rendered 'runs unknown' + 3000 rows and nothing
-        // else). SYNTHETIC read-model rows, driver-built at the network edge —
-        // not historical, not a live-engine verdict.
-        const capRows = Array.from({ length: 100 }, (_, i) => ({
-          id: `20990101-9${String(i).padStart(5, '0')}-cap`, name: `cap row ${i}`,
-          status: 'interrupted', updated: '2099-01-01T00:00:00+00:00' }));
-        armRules([{ urlPattern: '*workflows/runs*', action: 'fulfill',
-                     body: JSON.stringify({ runs: capRows }) }]);
-        await waitText(cdp, 'more exist (page cap)', 30_000);
+        // The short-page control is spent: frames 09-11 install their own
+        // knob, one at a time, on the same registered bench route.
+        fs.rmSync(coverageMarker, { force: true });
+
+        // 09 CAP TRUNCATION (ASTRA REVIEW-2 F1, follow-on PR): the staged
+        // registered route serves its FIRST window for EVERY offset with the
+        // total removed — the walk can never cover, so the real fetcher clips
+        // at its own hard page cap (RUNS_MAX_PAGES=30) and records
+        // truncated:true. The disclosure is VISIBLE with no numeric total to
+        // imply it (the reviewer's UNKNOWN_CAP probe rendered 'runs unknown' +
+        // 3000 rows and nothing else). The clip is produced by the REAL walk
+        // against the REAL registered route over the IPC bridge — 30 answered
+        // page requests, 100 unique rows — not a synthetic network body.
+        fs.writeFileSync(capMarker, '', { flag: 'wx' });
+        await waitText(cdp, 'more exist (page cap)', probeBudgetMs);
+        if (await cdp.evl(`document.body.innerText.includes('runs ${COUNT + 1} ·')`))
+          die(EX.api, 'cap frame still shows the counted total — the knob did not strip it');
         identity.coverage.cap_frame = {
-          synthetic: 'driver-built fulfill body: one full 100-row page repeated (dedup keeps 100 unique), no total — the walk clips at the 30-page cap',
+          staged_route: 'registered bench /runs serves the same first window for every offset WITHOUT total; the real fetcher walks 30 pages, dedupes to 100 unique rows and records truncated:true',
           disclosure: 'first 100 loaded — more exist (page cap)' };
         shots.push({ surface: 'pane_workflows', state: 'unknown-total cap clip disclosed (truncated, no total)',
                      ...(await shoot(cdp, A.outDir, '09-coverage-cap-truncated.png', null, await stableColumnText(paneRegion))) });
@@ -1494,31 +1429,37 @@ async function main() {
         // 10 PENDING (ASTRA REVIEW-2 F4): a POSITIVE counted census with ZERO
         // loaded rows must never wear the 'No runs' costume — the honest
         // frame is 'Runs pending…' + counted-vs-loaded facts + a re-walk
-        // button. total 237 is synthetic (the bench counts COUNT+1); the
-        // renderer, plugin and react-query loop are the real ones.
-        armRules([{ urlPattern: '*workflows/runs*', action: 'fulfill',
-                     body: JSON.stringify({ runs: [], total: 237, counts: { running: 0 } }) }]);
-        await waitText(cdp, 'Runs pending', 30_000);
+        // button. The registered route empties the WINDOW only: the counted
+        // total it answers is the bench's own truth (COUNT+1), not a synthetic
+        // number; the renderer, plugin and react-query loop are the real ones.
+        fs.rmSync(capMarker, { force: true });
+        fs.writeFileSync(pendingMarker, '', { flag: 'wx' });
+        await waitText(cdp, 'Runs pending', probeBudgetMs);
         if (await cdp.evl(`document.body.innerText.includes('No runs')`))
           die(EX.api, 'counted-positive loaded-zero still renders No runs — F4 costume leak');
         identity.coverage.pending_frame = {
-          synthetic: 'driver-built fulfill body: counted total 237 vs zero loaded rows (bench actually counts ' + (COUNT + 1) + ')' };
+          staged_route: `registered bench /runs empties the window while answering the REAL counted total ${COUNT + 1}: counted-positive, loaded-zero`,
+          disclosure: `${COUNT + 1} counted · 0 loaded` };
         shots.push({ surface: 'pane_workflows', state: 'counted-positive, loaded-zero: Runs pending, never No runs',
                      ...(await shoot(cdp, A.outDir, '10-coverage-pending.png', null, await stableColumnText(paneRegion))) });
 
-        // 11 RE-WALK from pending: the button invalidates the runs key; with
-        // the edge released the REAL census answers again — recovery under the
-        // same law as frame 07, proving the pending frame is not a dead end.
-        armRules([]);
+        // 11 RE-WALK from pending — TRANSIENT BEFORE RELEASE: the knob is
+        // removed HERE (the same registered route answers with rows again),
+        // before any teardown, so the pending frame is proven temporary on the
+        // live surface; the button click is a real invalidation and the walk
+        // re-runs under the same law as frame 07.
+        fs.rmSync(pendingMarker, { force: true });
         await trustedClick(cdp, 're-walk census — retry');
         await waitText(cdp, `runs ${COUNT + 1} ·`, 25_000);
         if (await cdp.evl(`(() => { const t = document.body.innerText; return t.includes('Runs pending') || /loaded \\d+ of/.test(t); })()`))
           die(EX.api, 'pending re-walk did not fully recover to the real all-loaded census');
-        shots.push({ surface: 'pane_workflows', state: 'pending re-walk recovered the real census',
+        shots.push({ surface: 'pane_workflows', state: 'pending re-walk recovered the real census (transient before release)',
                      ...(await shoot(cdp, A.outDir, '11-coverage-pending-recovered.png', null, await stableColumnText(paneRegion))) });
       } finally {
-        fs.rmSync(coverageMarker, { force: true });
-        await mock.off();
+        // Every staged control is a bench marker, removed on every exit path —
+        // none outlives the case, and none ever existed for production.
+        for (const m of [coverageMarker, delayMarker, failureMarker, capMarker, pendingMarker])
+          if (m) fs.rmSync(m, { force: true });
       }
     } else {
     {
