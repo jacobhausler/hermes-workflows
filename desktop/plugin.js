@@ -2690,9 +2690,12 @@ export function storedSessionIds(metrics) {
   return raw.filter(s => typeof s === 'string' && STORED_SESSION_SHAPE.test(s.trim()))
             .map(s => s.trim())
 }
-/** The node's current recorded session: the newest attempt's ID, last in the
- *  recorded order the read model shipped (a rotated attempt re-lands this link
- *  on the fresh ID at the next fetch — no cached first ID, ever). */
+/** The node's current recorded session: the newest attempt's ID, LAST in the
+ *  CHRONOLOGICAL order the read model ships (child_metrics orders
+ *  started_at, rowid — attempt suffixes are never sorted lexically, or #a10
+ *  would beat #a2 and the link would open the older chat; pinned by
+ *  tests/test_stored_session_order_cj2.py). A rotated attempt re-lands this
+ *  link on the fresh ID at the next fetch — no cached first ID, ever. */
 export function latestStoredSessionId(metrics) {
   const ids = storedSessionIds(metrics)
   return ids.length ? ids[ids.length - 1] : null

@@ -130,7 +130,16 @@ export const Fragment = 'Fragment'
   {
     assert.deepEqual(storedSessionIds({ session_ids: [A, RUNTIME, B, 42, null, 'local-zz'] }), [A, B],
       'runtime-shaped and malformed entries are dropped; recorded order survives')
+    // Wave A review counterexample (additional-boundaries.json): the read model ships
+    // attempts in (started_at, rowid) order, so the OLDER #a2@t2 -> A lands FIRST and
+    // the NEWER #a10@t10 -> B lands LAST. Order survives the selector verbatim — it
+    // never re-sorts (that lexicon is what opened the older chat). Matching backend
+    // pin at the production seam: tests/test_stored_session_order_cj2.py.
+    assert.deepEqual(storedSessionIds({ session_ids: [A, B] }), [A, B],
+      'chronological entries pass through in the shipped order, unsorted')
     assert.equal(latestStoredSessionId({ session_ids: [A, B] }), B, 'the link rides the NEWEST recorded attempt')
+    assert.equal(latestStoredSessionId({ session_ids: [A, RUNTIME] }), A,
+      'a fresher runtime-shaped entry is dropped, never substituted — the newest recorded-shape entry is the honest destination')
     assert.equal(latestStoredSessionId({ session_ids: [] }), null, 'an empty list is honest absence')
     assert.equal(latestStoredSessionId(undefined), null, 'absent metrics is absence, not a crash')
     assert.equal(ownerStoredSessionId({ ui_session_id: '  ' + A + '  ', session_id: B }), A,

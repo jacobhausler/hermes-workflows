@@ -7458,11 +7458,20 @@ def child_metrics(run_id, home=None):
             # (the parity fixtures) read NULL there — honest absence, the fold
             # gains no key, and the legacy payload shape stays byte-identical.
             id_sel = "id, " if "id" in cols else "NULL, "
+            # Collapse-to-one (AGENTS 4c.12): the sort is TOTAL by (started_at,
+            # rowid). Chronology, not the attempt SUFFIX: titles end `#aN` and
+            # `#a10` sorts lexicographically BEFORE `#a2` (the Wave A review
+            # counterexample — the pane then opened the older attempt).
+            # NULL started_at (an unfinished/legacy row) sorts first: an unknown
+            # time never impersonates the NEWEST attempt. Ties break by rowid =
+            # insertion order, and a re-attempt always inserts later, so the
+            # fresh session wins the last slot — the selector's "last entry =
+            # current attempt" law holds without parsing titles.
             rows = c.execute(
                 f"select {id_sel}title, model, {bp_sel}input_tokens, output_tokens, cache_read_tokens, reasoning_tokens, "
                 "api_call_count, tool_call_count, estimated_cost_usd, last_activity_at, "
                 "last_activity_description, ended_at, started_at from sessions where title like ? "
-                "order by title, started_at, rowid",
+                "order by started_at, rowid",
                 (f"wf:{run_id}:%",)).fetchall()
         finally:
             c.close()
@@ -7486,7 +7495,8 @@ def child_metrics(run_id, home=None):
         # sessions, verbatim from the sessions.id column — the pane's read-only
         # conversation link resolves ONLY through these (recorded, never a
         # runtime-id guess). The append follows the SELECT's total order
-        # (title, started_at, rowid), so attempts land chronologically.
+        # (started_at, rowid): attempts land oldest-first, so the LAST entry is
+        # the current attempt — the selector never re-derives chronology itself.
         if isinstance(_sid, str) and _sid:
             m["session_ids"].append(_sid)
         if api is None:
