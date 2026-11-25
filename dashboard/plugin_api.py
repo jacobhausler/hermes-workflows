@@ -325,29 +325,6 @@ def _runs_cache_invalidate():
     _RUNS_CACHE["data"] = None
 
 
-# ui2-proof short-page knob (bd_2026-11-13-yjp, coverage proof frames). The
-# desktop plugin's REST rides the app's IPC bridge (preload `hermes:api`), not
-# the renderer network, so a CDP Fetch-domain mock cannot lay a partial-fetch
-# edge under the pane: the honest costume is a REAL backend answering an
-# offset>=floor page with an empty slice while the summary stays census-wide —
-# the shape the walk already reads as mid-walk shrinkage (`loaded 100 of 134`).
-# Fail-closed three ways: env unset, file absent, or non-integer content each
-# leave the route untouched. Only GET /runs consults it; direct _list_runs
-# callers keep seeing live truth.
-_SHORT_PAGES_ENV = "WF_PROOF_SHORT_PAGES_FILE"
-
-
-def _short_pages_floor():
-    path = (os.environ.get(_SHORT_PAGES_ENV) or "").strip()
-    if not path:
-        return None
-    try:
-        with open(path, encoding="utf-8") as fh:
-            return int(fh.read().strip())
-    except (OSError, ValueError):
-        return None
-
-
 if router is not None:
     @router.get("/runs")
     def list_runs(offset: int = 0, limit: int = 100):
@@ -358,13 +335,7 @@ if router is not None:
         # Default call answers exactly the pre-est-ey31s payload (newest 100
         # + summary).
         rec = _runs_snapshot()
-        page = _list_runs(offset, limit, _record=rec)
-        floor = _short_pages_floor()
-        if floor is not None and max(0, offset) >= floor and page["runs"]:
-            # Empty SLICE with the census-wide summary — exactly the past-the-
-            # end shape (W5); a genuinely empty census keeps its roots (truth).
-            page = {**page, "runs": []}
-        return page
+        return _list_runs(offset, limit, _record=rec)
 
 
 if router is not None:
