@@ -33,6 +33,36 @@
 // timestamps). The volatile classes are declared (VOLATILE_MASKS below);
 // masking is exported so the double-run spec can pin it with samples.
 //
+// Owned-bench retention law (bd_2026-11-13-4fy, fail-closed after the wave-B
+// review): every capture attempt that dies leaves its bench tree (0.5-2 GiB)
+// under the proof tree forever — the finally-teardown covers process groups,
+// not the dir, and the provision law archives instead of deleting. So every
+// STARTUP first reclaims proven-dead sibling bench dirs under its own --out
+// root's parent (see planBenchRetention below): owned-marker present; Git
+// PROVES nothing tracked inside (a failed git query keeps the tree — a
+// git error is never read as "no tracked bytes"); the recursive scan
+// completed (an unreadable subtree could hide fresh writes, so a partial
+// scan keeps the tree); not written since the run began; terminality proven
+// — a SEALED tree carries a manifest.json that parses as the harness's own
+// terminal record (schema proof-harness/N + captures list; a corrupt or
+// unreadable manifest proves NOTHING and falls to the unsealed law or is
+// kept), an unsealed dir needs BOTH a quiet grace window AND dead supervisor
+// evidence. Supervisor liveness is checked for EVERY tree, sealed included.
+// The recorded pid names a DETACHED PROCESS GROUP (the Supervisor class
+// spawns detached; teardown signals -pgid), so an ACTIVE bench is one whose
+// recorded leader is alive (kill(pid,0) ok or EPERM) without its exit record,
+// OR whose recorded process group answers kill(-pid,0): a reaped leader
+// (ESRCH) or even a written logs/<label>.exit proves only the WRAPPER died,
+// never the group — descendants can outlive the wrapper exactly through the
+// teardown window between wrapper exit and descendant exit, and an
+// unreaped zombie means the spawner itself lives. The tree must be
+// unreferenced by any committed manifest.json — a reference set that cannot
+// be fully read keeps the tree — and be either a *.stale-*/*abandoned-*
+// rotation, a run-* scratch dir, or a dead attempt (no terminal manifest).
+// One log line per reclaimed tree (path, MiB) on stderr; every kept tree has
+// a reason. Net effect: proof disk caps at ~2 concurrent runs, and no
+// uncertain tree ever dies to the sweep.
+//
 // Failure law (fail nonzero, never a green no-op):
 //   exit 2 usage / unknown case (lists known cases)
 //   exit 3 case known, surface not yet implemented (new test)
@@ -220,6 +250,249 @@ function retryCli(fn, { attempts = 12, delayMs = 5_000 } = {}) {
       execFileSync('/bin/sleep', [String(Math.round(delayMs / 1000))]);
     }
   }
+}
+
+// -- owned-bench retention (bd_2026-11-13-4fy) ------------------------------
+// Recursive stat walk (no data reads, symlinks skipped — rm never follows
+// them and their bytes belong to the target, not the tree): the honest
+// {bytes, maxMtimeMs, incomplete} of a bench dir. Mirrors scripts/retention.py's
+// law that liveness reads file/package mtimes, never only the dir mtime.
+// FAIL CLOSED (4fy wave-B qualification): every stat/readdir/lstat error
+// means the walk UNDER-reported — an unreadable subtree can hide fresh
+// writes — so any error sets incomplete=true and the sweep keeps the tree.
+function treeScan(dir, depth = 0) {
+  let bytes = 0, maxMtimeMs = 0;
+  try { maxMtimeMs = fs.statSync(dir).mtimeMs; } catch { return { bytes, maxMtimeMs, incomplete: true }; }
+  if (depth > 32) return { bytes, maxMtimeMs, incomplete: true }; // scan cap: remainder unproven
+  let ents = [];
+  try { ents = fs.readdirSync(dir, { withFileTypes: true }); } catch { return { bytes, maxMtimeMs, incomplete: true }; }
+  let incomplete = false;
+  for (const ent of ents) {
+    const p = path.join(dir, ent.name);
+    if (ent.isSymbolicLink()) continue;
+    if (ent.isDirectory()) {
+      const sub = treeScan(p, depth + 1);
+      bytes += sub.bytes;
+      incomplete = incomplete || sub.incomplete;
+      if (sub.maxMtimeMs > maxMtimeMs) maxMtimeMs = sub.maxMtimeMs;
+    } else {
+      try { const st = fs.lstatSync(p); bytes += st.size;
+            if (st.mtimeMs > maxMtimeMs) maxMtimeMs = st.mtimeMs; }
+      catch { incomplete = true; /* unreadable entry: its bytes/mtimes are unproven */ }
+    }
+  }
+  return { bytes, maxMtimeMs, incomplete };
+}
+
+// Tri-state git answer: true = some git-tracked file lives under dir
+// (committed proof bytes, wherever they sit inside the tree); false =
+// PROVEN untracked (dir sits outside a repo that demonstrably IS a repo —
+// nothing can be tracked there by that repo's own law — or the repo's own
+// index says so); 'unproven' = the git query itself failed (no git binary,
+// not a repo, index lock, …) or the named repoRoot is not a git root at
+// all. A failed query is NEVER read as "no tracked bytes" — that fail-open
+// leg is exactly what the wave-B review reproduced (retention-probe.mjs: a
+// one-second-old tree reclaimed with an unproved Git state).
+function gitTrackedFiles(repoRoot, dir) {
+  const rel = path.relative(repoRoot, dir);
+  if (!rel || rel.startsWith('..') || path.isAbsolute(rel))
+    return fs.existsSync(path.join(repoRoot, '.git')) ? false : 'unproven';
+  try {
+    return execFileSync('git', ['-C', repoRoot, 'ls-files', '--', rel + '/'],
+      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim().length > 0;
+  } catch { return 'unproven'; }
+}
+
+// The terminality of a tree's manifest.json, as the sweep must see it:
+// the driver writes manifest.json LAST and immutable (0444, writeImmutable
+// below) as the record {schema:'proof-harness/1', …, captures:[…], repro} —
+// see the manifest construction at the end of the capture flow. Returns:
+//   'absent'     — never written (crash before sealing)
+//   'sealed'     — parses AND carries the terminal shape: this IS terminal proof
+//   'corrupt'    — readable but not the terminal record (write torn mid-crash,
+//                 truncated, foreign file): proves NOTHING; the tree falls
+//                 to the unsealed evidence law (grace + dead supervisors)
+//   'unreadable' — present but the read itself failed: provenance unknown,
+//                 kept outright
+function manifestTerminality(dir) {
+  let raw;
+  try { raw = fs.readFileSync(path.join(dir, 'manifest.json'), 'utf8'); }
+  catch (e) { return e && e.code === 'ENOENT' ? 'absent' : 'unreadable'; }
+  try {
+    const m = JSON.parse(raw);
+    if (m && typeof m === 'object' && !Array.isArray(m)
+        && typeof m.schema === 'string' && m.schema.startsWith('proof-harness/')
+        && Array.isArray(m.captures)) return 'sealed';
+    return 'corrupt';
+  } catch { return 'corrupt'; }
+}
+
+// Concatenated text of every COMMITTED manifest.json under the repo's
+// captured/ dir (and any disk-side manifest of an out-of-repo proof tree):
+// a bench dir whose name appears there is referenced proof, never scratch.
+// Returns {text, proven}. FAIL CLOSED: if any manifest the scan could name
+// was unenumerable or unreadable, proven=false — an incomplete reference set
+// cannot prove ABSENCE of a reference, and the sweep then keeps every tree
+// it planned to touch.
+function committedManifestText(repoRoot, proofRoot) {
+  const files = [];
+  let proven = fs.existsSync(path.join(repoRoot, '.git')); // not a git root: the committed set is unproven
+  try {
+    const rel = path.relative(repoRoot, path.join(HERE, 'captured'));
+    if (rel && !rel.startsWith('..') && !path.isAbsolute(rel)) {
+      for (const f of execFileSync('git', ['-C', repoRoot, 'ls-files', '--', rel],
+          { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
+        .split('\n').filter(Boolean))
+        if (f.endsWith('manifest.json')) files.push(path.join(repoRoot, f));
+    }
+  } catch { proven = false; /* git dead: the committed set is unproven */ }
+  for (const root of [proofRoot]) {
+    // proof trees outside the repo carry no index; scan disk one level down
+    let ents = [];
+    try { ents = fs.readdirSync(root, { withFileTypes: true }); }
+    catch { proven = false; continue; }
+    for (const e of ents) {
+      if (e.isFile() && e.name === 'manifest.json') files.push(path.join(root, e.name));
+      else if (e.isDirectory()) {
+        try { for (const f of fs.readdirSync(path.join(root, e.name), { withFileTypes: true }))
+          if (f.isFile() && f.name === 'manifest.json')
+            files.push(path.join(root, e.name, f.name)); }
+        catch { proven = false; /* sibling unenumerable: its manifest unseen */ }
+      }
+    }
+  }
+  let text = '';
+  for (const f of files) {
+    try { text += fs.readFileSync(f, 'utf8') + '\n'; }
+    catch { proven = false; /* enumerated but unreadable: reference text unseen */ }
+  }
+  return { text, proven };
+}
+
+// Terminality evidence for a tree the sweep plans to touch: every supervisor
+// the harness spawned is recorded in the tree's own supervisors.json ({label,pid}, one
+// writeFileSync per spawn) and every reaped child appends logs/<label>.exit.
+// The Supervisor class spawns EVERY child detached (own pgid) and tears down
+// by signalling -pgid, so the recorded pid is a process-GROUP identity: the
+// ownership boundary is the group, never the wrapper pid alone.
+// A tree whose supervisors.json names a pid that is still alive (kill(pid,0)
+// ok, or EPERM = alive, owned by someone else) with no exit record has an
+// ACTIVE supervisor — a parked gate-case bench idles on disk past any grace
+// window by design, so mtime silence alone never proves it dead. A leader
+// that reaps to ESRCH proves the same nothing: the wrapper can exit while
+// its detached group still has living members (the teardown window between
+// wrapper exit and descendant exit — field-proven by the 4fy recovery
+// review, where exactly this shape selected a live tree for reclaim). So
+// after leader ESRCH, or once the wrapper's exit record is present, the
+// group itself must answer kill(-pid,0) with ESRCH before the supervisor
+// leg counts as dead; a group probe that answers 0 (alive) or EPERM (alive,
+// someone else's) — or any unexpected error (unproven) — keeps the tree.
+// The check runs for SEALED trees too (4fy wave-B qualification): a live
+// leader or a live group contradicts terminality no matter what manifest
+// bytes exist, and an unreaped zombie means the spawner itself lives, which
+// is liveness on its own.
+// A missing supervisors.json means nothing was ever spawned — that only
+// proves crash-before-first-spawn once the tree is quiet past the grace
+// window; the boot window between the owned marker and the first supervisor
+// record keeps mtimes fresh, so live-grace covers it (spec-pinned).
+// An unparseable file fails CLOSED: we cannot prove the supervisors dead.
+function supervisorsActive(dir) {
+  const p = path.join(dir, 'supervisors.json');
+  if (!fs.existsSync(p)) return false;
+  let sup;
+  try { sup = JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return true; }
+  if (!Array.isArray(sup)) return true; // malformed shape: fail closed
+  for (const s of sup) {
+    const pid = Number(s && s.pid);
+    if (!Number.isInteger(pid) || pid <= 0) return true; // malformed: fail closed
+    if (pid === 1) return true; // init is never a bench wrapper; kill(-1,·) is broadcast
+    let exited = false;
+    try { exited = fs.existsSync(path.join(dir, 'logs', `${s.label}.exit`)); }
+    catch { /* unreadable dir: treat as no exit record */ }
+    if (!exited) {
+      try { process.kill(pid, 0); return true; }
+      catch (e) { if (e && e.code === 'EPERM') return true; /* ESRCH: wrapper reaped */ }
+    }
+    // Wrapper dead (ESRCH or recorded .exit) says NOTHING about the detached
+    // group: probe it. Only ESRCH proves group death; anything else — alive,
+    // EPERM, an unexpected error — fails CLOSED and keeps the tree.
+    try { process.kill(-pid, 0); return true; }
+    catch (e) { if (!e || e.code !== 'ESRCH') return true; /* ESRCH: group dead */ }
+  }
+  return false;
+}
+
+// The retention law itself (header comment above is the contract). Plans AND
+// reclaims direct children of proofRoot. FAIL CLOSED throughout: an owned
+// tree dies only when non-tracking, scan quietness, terminal-or-abandoned
+// provenance, supervisor death and unreferencedness are each PROVEN; any
+// uncertain leg keeps the tree. NEVER deletes an unowned, tracked,
+// git-query-unproven, scan-incomplete, live (fresh writes inside graceMs,
+// or a recorded supervisor pid without its exit record — sealed trees
+// included), manifest-unreadable, or committed-manifest-referenced tree
+// (reference-set-unproven included), nor an uncommitted-but-SEALED (valid
+// terminal manifest) custom-named dir (pending proof — deleting it would
+// delete bytes, which retention must never do). A corrupt manifest is NOT
+// sealed: it never bypasses the grace window and never freezes an otherwise
+// proved-abandoned tree. runStartMs/nowMs/graceMs are injected so the
+// fake-tree spec is deterministic; dryRun plans without touching disk.
+// Returns {reclaimed:[{dir,mib,reason}], kept:[{dir, reason}]}; per-dir
+// errors demote that dir to kept, never to a crash.
+export function planBenchRetention({ proofRoot, runStartMs, nowMs = Date.now(),
+    graceMs = 600_000, repoRoot = REPO, dryRun = false } = {}) {
+  const reclaimed = [], kept = [];
+  let ents = [];
+  try { ents = fs.readdirSync(proofRoot, { withFileTypes: true }); }
+  catch { return { reclaimed, kept }; }
+  const refs = committedManifestText(repoRoot, proofRoot);
+  for (const ent of ents) {
+    if (!ent.isDirectory()) continue;
+    const dir = path.join(proofRoot, ent.name);
+    try {
+      if (!fs.existsSync(path.join(dir, '.ui2-proof-owned')))
+        { kept.push({ dir, reason: 'unowned' }); continue; }
+      if (fs.existsSync(path.join(dir, '.owner-held'))
+          || fs.existsSync(path.join(dir, 'OWNER_HELD')))
+        { kept.push({ dir, reason: 'owner-held' }); continue; }
+      // --keep is a durable operator instruction, independent of whether
+      // the recorded supervisor process group has since exited.
+      if (fs.existsSync(path.join(dir, 'logs', 'KEEP.txt')))
+        { kept.push({ dir, reason: 'explicit-keep' }); continue; }
+      const tracked = gitTrackedFiles(repoRoot, dir);
+      if (tracked === 'unproven')
+        { kept.push({ dir, reason: 'git-unproven' }); continue; }
+      if (tracked)
+        { kept.push({ dir, reason: 'committed-proof' }); continue; }
+      const scan = treeScan(dir);
+      if (scan.incomplete)
+        { kept.push({ dir, reason: 'scan-incomplete' }); continue; }
+      const manifest = manifestTerminality(dir);
+      if (manifest === 'unreadable')
+        { kept.push({ dir, reason: 'manifest-unreadable' }); continue; }
+      if (scan.maxMtimeMs >= runStartMs)
+        { kept.push({ dir, reason: 'younger-than-run' }); continue; }
+      const sealed = manifest === 'sealed';
+      if (!sealed && nowMs - scan.maxMtimeMs < graceMs)
+        { kept.push({ dir, reason: 'live-grace' }); continue; }
+      if (supervisorsActive(dir))
+        { kept.push({ dir, reason: 'active-supervisor' }); continue; }
+      if (!refs.proven)
+        { kept.push({ dir, reason: 'manifest-set-unproven' }); continue; }
+      if (refs.text.includes(ent.name))
+        { kept.push({ dir, reason: 'referenced-by-committed-manifest' }); continue; }
+      const rotation = ent.name.includes('.stale-') || ent.name.includes('abandoned-');
+      const scratch = ent.name.startsWith('run-');
+      if (!rotation && !scratch && sealed)
+        { kept.push({ dir, reason: 'pending-proof-uncommitted' }); continue; }
+      const mib = Math.round((scan.bytes / 1048576) * 10) / 10;
+      if (!dryRun) fs.rmSync(dir, { recursive: true, force: true });
+      reclaimed.push({ dir, mib,
+        reason: rotation ? 'rotation' : scratch ? 'scratch' : 'dead-attempt' });
+    } catch (e) {
+      kept.push({ dir, reason: `retention-error:${String(e && e.message).slice(0, 80)}` });
+    }
+  }
+  return { reclaimed, kept };
 }
 
 // exit codes (documented above; tests assert them)
@@ -794,6 +1067,24 @@ async function main() {
     electronVersion = fs.readFileSync(path.join(desktop, 'node_modules', 'electron', 'package.json'), 'utf8');
     identity.app.electron_package_version = JSON.parse(electronVersion).version;
   } catch { /* honest unknown */ }
+
+  // -- owned-bench retention (bd_2026-11-13-4fy): reclaim proven-dead sibling
+  //    bench trees under THIS run's proof tree before provisioning ours, so
+  //    crashed attempts can't grow disk past ~2 concurrent runs. Opportunistic
+  //    GC: any failure here must never fail the run — planBenchRetention
+  //    demotes per-dir errors to kept and this call swallows the rest.
+  try {
+    const ret = planBenchRetention({
+      proofRoot: path.dirname(outResolved),
+      runStartMs: Date.parse(identity.ts),
+      graceMs: Math.max(600_000, A.paintBudgetMs + 300_000),
+    });
+    for (const r of ret.reclaimed)
+      console.error(`[retention] reclaimed ${r.dir} ${r.mib}MiB (${r.reason})`);
+    const keptReasons = [...new Set(ret.kept.map(k => k.reason))];
+    if (ret.reclaimed.length || keptReasons.some(x => x.startsWith('retention-error')))
+      console.error(`[retention] kept ${ret.kept.length} (${keptReasons.join(',') || 'none'})`);
+  } catch (e) { console.error(`[retention] disabled this run: ${String(e.message).slice(0, 200)}`); }
 
   // -- provision (owned scratch; stale dirs are archived, never rm'd) ------
   if (fs.existsSync(A.outDir)) {
