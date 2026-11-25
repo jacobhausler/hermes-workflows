@@ -55,7 +55,7 @@ Verify/unpack the same archive locally as above. Use that machine's `HERMES_HOME
     mkdir -p "$HERMES_HOME/desktop-plugins/hermes-workflows"
     cp "$PACKAGE_DIR/desktop/plugin.js" "$HERMES_HOME/desktop-plugins/hermes-workflows/plugin.js"
 
-The desktop plugin watcher loads the changed file. Enable/check it in Settings → Plugins or Capabilities → Plugins; use Reload desktop plugins if needed. Verify the app file checksum matches the archive and the backend API is mounted.
+The desktop plugin watcher loads the changed file. Enable/check it in Settings → Plugins or Capabilities → Plugins; use Reload desktop plugins if needed. Verify the app file checksum matches the archive and the backend API is mounted. `desktop/plugin.js` is the app half's ONLY runtime asset — no sibling files to copy (the repo's `desktop/src/` mirrors are development-time, never installed). Two surfaces are opt-in on a fresh app: the live-run tray renders only when the plugin's `tray` setting reads true (config key `plugins.entries.hermes-workflows.settings.tray`; an unanswered or unreachable settings read keeps it hidden — the under-composer pill strip is always on), and a Desktop gate answer is record-only: it writes through the backend's answer door with `_ui` provenance and never auto-resumes the run — the owning agent drives it.
 
 ## Source-tree verification
 

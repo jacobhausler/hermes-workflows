@@ -26,7 +26,7 @@ a run that saw the event it names (the signature law from wf.py's module head).
 | `inbox.jsonl` | owner (via `steer`) | steering / kill lines dropped by the owner — the ONE steer channel ([05-steering.md](05-steering.md)) |
 | `steer/<node>[.<i>].a<n>.jsonl` + `.cursor` | runner at spawn | the per-spawn bake of addressed steering lines + its read cursor |
 | `quarantine/<node>[.<i>].jsonl` | runner | durable #61 tree-quarantine rows, one per kill/reap/fail-closed instant; ships in #691 (open), layout final |
-| `gates/<id>.json` | door on `release` | human-gate answers (`<id>.json.unconsumed` when an admission death refused to swallow one) |
+| `gates/<id>.json` | door on `release` | human-gate answers — the tool's `release` AND a Desktop answer land the SAME record (the UI copy carries `_ui: true` and a server-stamped `at`; a Desktop answer records only, it respawns nothing — the run consumes the answer when the runner next launches, e.g. the owner's `wait`) (`<id>.json.unconsumed` when an admission death refused to swallow one) |
 | `wake.jsonl` | runner | every owner-wake attempt with its tri-state `delivered` field |
 | `logs/<id>.a<n>.log` | runner | per-attempt child stdout (the `log_path` the records name) |
 | `nodes/<id>[.<i>].corpus/` | runner | the banked corpse of a wall-killed lane (`work/`, `stdout_tail.txt`, `manifest.json`) — death-table row `timeout` |

@@ -37,14 +37,14 @@ not re-paid.
 | **Process-tree honesty** | An exit-0 child is believed only when its whole process tree is dead; a backgrounded worker is typed, never mistaken for done, and a fenced answer over a live tree commits `partial` with proof |
 | **Compact status** | Mid-run `status`/`wait` return output *pointers* and per-node metrics (missing evidence reads unknown, never a false zero); `detail:"full"` opts into everything |
 | **Wedged-lock recovery** | The runner is admitted by a kernel flock on `runner.lock` held for the process's whole life — a dead holder's lock is released by the kernel itself, the next spawn contends cleanly, and there is no stale lock to clear by hand |
-| **Desktop DAG view** | Live graph, fan-out stacks, timeline, and a `::workflow{id="…"}` inline card in any reply; RUNNING / THE REST agent-first panes (every row carries its originating agent), and a session strip under the composer showing this chat's runs (core ≥ v2026.7.30; older shells get the fallback slot) |
+| **Desktop DAG view** | Live graph, fan-out stacks, timeline, and a `::workflow{id="…"}` inline card in any reply; RUNNING / THE REST agent-first panes over the **full census** — `/runs` is paged to census end (bounded walk; a short page reports partial coverage, never a silent page-1 truncation, and an absent count reads `?`, never a fabricated 0) — every row carrying its originating agent and its lane label first, the template name demoted to badge/hover; and a session strip under the composer (core ≥ v2026.7.30; older shells get the fallback slot): live runs as preview pills with an explicit `+N` to the full index and a `▸ N finished` fold — click a pill to expand that run's shared mini-graph node strip above the pills (same panel the tray accordion mounts; a pill re-click, chat switch, click-away or Esc collapses it). The live-run **tray** is opt-in and fail-closed: it renders only when the plugin's `tray` setting answers true (the native tray area is still pending upstream); the pill strip stays mounted regardless |
 | **Library** | `save` a proven graph (description + tags — flat or `facet:value`, e.g. `use_case:code-review`), `library` lists it richly and filters by tags (with a `tag_vocab` echo so agents reuse the live taxonomy), `run from:"<name>"` replays it; optional study-only `submit` takes a `why_not_library` receipt and is quarantined for study, never auto-saved; `inbox kind:"submissions"` lists these submissions. Ordinary one-off `run` executes without lookup or curation |
 | **Composite graphs** | A graph-level `include` expands shelved library graphs into a run at launch — namespace-isolated ids, cycle/depth/size guards, model policy unions in and never relaxes |
 | **Authoring skill** | Bundled `workflow` skill: grammar, operations, and **measured** per-shape budget presets (`recon`/`build`/`review`/`publish`) |
 
 <table><tr>
 <td width="50%"><img src="assets/fanout.png" alt="A fan-out node at 3/3 terminal with its three item rows (host-a, host-b, host-c) expanded, feeding a join node"><br><sub><b>Fan-out.</b> One node, N live children; expanded items each carry their own status and duration, and the join only releases when the quorum is terminal.</sub></td>
-<td width="50%"><img src="assets/branch-gate.png" alt="A held human gate in the middle of the run graph: question 'Ship v1.4.0?' with its two answer options pending, the completed upstream node green, the downstream node pending"><br><sub><b>Human gates.</b> A held gate parks the run at zero token cost; the answer (tool, desktop card, or <code>/wf gates</code>) releases the waiting arm.</sub></td>
+<td width="50%"><img src="assets/branch-gate.png" alt="A held human gate in the middle of the run graph: question 'Ship v1.4.0?' with its two answer options pending, the completed upstream node green, the downstream node pending"><br><sub><b>Human gates.</b> A held gate parks the run at zero token cost; an answer (tool, desktop card, or <code>/wf gates</code>) records through the one answer door and the waiting arm releases when the runner next runs.</sub></td>
 </tr></table>
 
 ## Offline checkout drift probe
@@ -71,7 +71,7 @@ One tool, action-routed — the complete surface, with the flags that matter:
 | `start` | Prose or five-line yaml in, dispatched run out: `goal` is one plain-language sentence (synthesizes a single agent node) or a spec `{name?, goal \| nodes:[{id, goal, items_from?, after?, shape?}]}` (fixed fan-out: `items_from` lands verbatim as `fanout.items_from`). Smart defaults: model unset (rides the seat's own route), `shape` names the measured-p95 census preset for timeout/turn budgets, lane-key `<team>/start-<slug>` (a double-start dedupes like `run`). The synthesized graph goes through the full run door (no second validator); the response carries `run_id` and the one `watch` status command. Misuse refusals carry the accepting `example`. v1 synthesizes single-node and fixed-fanout-from-a-json-path shapes; plural prose is not inferred. |
 | `status` | Read-only read model: per-node state, metrics, held gate, `node_facts` on failures, derived `next` steps — never spawns a runner. `lane_key` reads the incumbent instead; a lane entry whose claimed run dir no longer exists on disk reports `state: "orphaned"` (a claimed-then-lost run, not a forever-`pending` ghost). |
 | `wait` | The resume-and-watch verb: the only read action that respawns an idle runner; blocks to the next boundary (default 600 s, ceiling 1800 s), self-yielding before the host's tool deadline with a "call wait again" note. |
-| `release` | Answer a held human gate (`gate_id`, `answer`); respawns the runner when idle. A human release pre-empts a machine `wait` park. |
+| `release` | Answer a held human gate (`gate_id`, `answer`); respawns the runner when idle. A human release pre-empts a machine `wait` park. A Desktop answer shares this record path (`_ui` provenance, server-stamped `at`) but never respawns — see Install. |
 | `release_lock` | Operator escape hatch for a wedged `runner.lock`: renames the stranded inode aside under the admission heal-barrier and hands the lane a fresh lock path. REFUSES unless zero live holders are proven (kernel ledger + dead lease) — never heals on EACCES or a live holder. |
 | `steer` | Queue steering text for a running node (refused on gates and terminal nodes; delivery is cooperative via the child's `inbox` pull — never a mid-prompt injection). `cmd:"kill"` (with `node`) is the lane-kill form, identical to `kill`; it never queues text. NOTE: the runner's pre-cap budget cue rides this same channel (see [references/budgets.md](references/budgets.md)), so NodePanel steer counts can show `queued 1 · baked 1` on a run the owner never steered — `queued >= 1` does not imply owner steering; the tell is `budget_cue: true` on the inbox line. |
 | `inbox` | Child-side pull of steering lines baked for this spawn — exactly-once per spawn. Parent-side `kind:"submissions"` lists `submit` items newest-first. Lines may carry `budget_cue: true`: a runner-injected pre-cap cue, not owner text (see the `steer` row). |
@@ -173,9 +173,16 @@ stays active — between runs there is no job and nothing fires.
 Before disabling or removing the plugin, stop live runs: use `workflow {"action":"list"}`
 to find their run IDs, then `workflow {"action":"stop","run_id":"<id>"}` for each.
 Detached runners can outlive a session, gateway restart, or plugin disable until a
-boundary; disabling alone does not stop them. Desktop gate answers use the SDK to
-send a visible resume turn to the run owner's chat; older Desktop builds insert
-text for you to send, or ask you to type `workflow wait` in that owner chat.
+boundary; disabling alone does not stop them. Answering a held gate in Hermes
+Desktop (pill, tray row, or pane card — one answer surface per held run) goes
+through the SAME door as the `release` tool and records durably: `gates/<id>.json`
+with `_ui` provenance and a server-stamped `at`, and a receipt toast whose
+**View exact gate** action selects that exact run + gate's record page. Answering
+never auto-resumes: it touches no composer, hydrates no session and respawns no
+runner — the owning agent drives the run, and its next `workflow wait` consumes
+the recorded answer (the tool's `release` is the verb that respawns on write).
+The live-run tray is optional and ships OFF: it renders only once the plugin's
+`tray` setting reads true; the under-composer pill strip is always on regardless.
 If Hermes Desktop runs on a **different machine** than the backend, copy
 `desktop/plugin.js` to that machine's `~/.hermes/desktop-plugins/hermes-workflows/plugin.js`
 — the app hot-loads it. Manual/zip install and removal: [INSTALL.md](INSTALL.md).
