@@ -5,7 +5,7 @@ import importlib.util
 import re
 import tempfile
 import zipfile
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE_ONLY_TESTS = {
@@ -43,9 +43,15 @@ SOURCE_ONLY_TESTS = {
     # bd_2026-11-13-iqf (slice A): executes the source-only driver AND reads
     # the committed capture sets under tests/proof-harness/captured/.
     "tests/test_proof_harness_repro.mjs",
+    # #729 (W8 packaged-test blocker): the bench-env isolation spec imports
+    # the source-only driver — it must stay source-only like its siblings.
+    "tests/test_proof_bench_env.mjs",
 }
 # A shipped test that loads/executes `<root> / "scripts" / "<file>"` needs that file in the ZIP.
 SCRIPT_REF = re.compile(r'(?:ROOT|BUILD)\s*/\s*"scripts"\s*/\s*"([^"]+)"|ROOT\s*/\s*"scripts/([^"]+)"')
+# #729 follow-up: the same law for the .mjs half. A shipped tests/*.mjs may not
+# import a relative module that is not a ZIP member.
+MJS_REL_IMPORT = re.compile(r"""^\s*import\s+(?:[^'"]*from\s+)?['"](\.[^'"]+)['"]""", re.M)
 
 
 def main():
@@ -75,6 +81,20 @@ def main():
                     broken.append(f"{path} -> {dep}")
         assert not broken, "shipped tests need unshipped scripts:\n  " + "\n  ".join(broken)
         print("PASS no shipped test references an unshipped scripts/ file")
+        # Derived sweep (#729 follow-up): the same closure law for the .mjs half.
+        # A symmetric removal of an exclusion mapping (from pack.py AND this
+        # file's set) re-ships the test vacuously green against the sets alone;
+        # this sweep re-derives the dead-import from the ACTUAL archive, so a
+        # removed mapping turns RED even when both ledgers lose it together.
+        broken_mjs = []
+        for path in sorted(m for m in members if m.startswith("tests/") and m.endswith(".mjs")):
+            text = (ROOT / path).read_text(encoding="utf-8")
+            for m in MJS_REL_IMPORT.finditer(text):
+                dep = (PurePosixPath(path).parent / m.group(1)).as_posix()
+                if dep not in members:
+                    broken_mjs.append(f"{path} -> {dep}")
+        assert not broken_mjs, "shipped .mjs tests import unshipped modules:\n  " + "\n  ".join(broken_mjs)
+        print("PASS no shipped .mjs test imports an unshipped module")
         reasons = getattr(pack, "SOURCE_ONLY_TESTS", {})
         assert set(reasons) == SOURCE_ONLY_TESTS, "each exclusion needs an explicit include decision"
         assert all(isinstance(reason, str) and reason.strip() for reason in reasons.values())
