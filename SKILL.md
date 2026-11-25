@@ -74,7 +74,7 @@ launch a replacement or mutate configuration.
 ## Run and handoff
 
 - `running` needs a verified live runner; `interrupted` means unfinished work without
-  one — inspect surviving outputs, then `wait` to resume. Fatal runner errors are
+  one — inspect surviving outputs, then `wait` to resume; a `failed` run re-drives with `redrive` (omitted `mode` = same-fingerprint-resume: drift refuses, nothing written). Fatal runner errors are
   `failed`, not respawn loops; held gates are not running; the completion truth is the derived `completed`, not `status`. Every `status`/`wait`
   payload carries `next` — do what it says while you hold a run open; a live run with a
   stamped owner needs no loop: the wake IS your next turn. Derived, never a guess. Before `amend` or stop, read the failed node's `node_facts`
