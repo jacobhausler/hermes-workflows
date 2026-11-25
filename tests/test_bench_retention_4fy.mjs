@@ -1,8 +1,8 @@
 // Behaviour spec for the owned-bench retention step (bd_2026-11-13-4fy,
 // fail-closed after the wave-B review): the startup sweep that reclaims
 // proven-dead sibling bench trees under the driver's proof tree. Fake trees
-// only — no bench, no app, no gateway, no electron boot (the one CLI leg
-// dies in provisioning on a stub hermes, AFTER the sweep) — so it runs in
+// only — no bench, no app, no gateway, no electron boot (both CLI legs die
+// in provisioning on a stub hermes, AFTER the sweep) — so it runs in
 // CI anywhere. Pins the never-delete law: living, unknown, owner-held,
 // tracked, git-query-unproven, scan-incomplete, manifest-corrupt-while-
 // young, manifest-unreadable, reference-set-unproven and committed-manifest-
@@ -450,6 +450,90 @@ console.log('PASS active-supervisor: parked, corrupt, live-detached-sealed kept;
     assert.ok(fs.existsSync(path.join(cproof, 'run-incomplete-cli')),
       'one-second-old corrupt-manifest tree SURVIVED the real entrypoint sweep')
     console.log(`PASS real entrypoint (synthetic trees): dead sibling reclaimed, probe-shape kept, exit=${exit}`)
+  } finally {
+    fs.rmSync(cliRoot, { recursive: true, force: true })
+  }
+}
+
+// --- RETRY CONTROL (ship-2.0 wave-H review): the requested --out is not a
+// sibling. The ce2780fd sweep took only the requested output's PARENT and
+// never excluded the output itself, and an old owned prior --out is exactly
+// as eligible as any dead sibling, so the sweep rm-d it as `scratch` BEFORE
+// the ordinary rotation could archive it — the prior attempt's diagnostic
+// bytes were gone (review retention-out-control.mjs shape, banked red at
+// control-red-ce2780fd.log). The fix is one caller-resolved path exclusion;
+// pinned at the plan level here (`exclude` names a resolved path, and the
+// sibling still reclaims — never a no-op sweep) AND at the real CLI
+// entrypoint, where the operator-visible end state must be exactly one
+// prior payload under <out>.stale-<ts>, a fresh run-retry provisioned, and
+// the sibling gone.
+{
+  const xproof = path.join(root, 'retry-exclude')
+  fs.mkdirSync(xproof)
+  const xPrior = bench(xproof, 'run-retry', { extra: { 'payload.txt': 'prior attempt diagnostic\n' } })
+  const xSib = bench(xproof, 'run-dead-sibling')
+  // Negative control on the SAME trees: without the exclusion the prior
+  // --out itself reclaims — the fixture is genuinely eligible.
+  const xneg = planBenchRetention({ proofRoot: xproof, dryRun: true, ...opts })
+  assert.ok(xneg.reclaimed.some(r => r.dir === xPrior && r.reason === 'scratch'),
+    'no exclusion: an old owned prior --out is itself sweep-eligible (the ce2780fd shape)')
+  // Re-spelled path ('.' segment): the identity is the resolved path, the
+  // same normalization the CLI call site performs.
+  const xres = planBenchRetention({ proofRoot: xproof, ...opts,
+    exclude: path.join(xproof, '.', 'run-retry') })
+  assert.equal(xres.reclaimed.length, 1, 'exclusion lifts exactly the requested output')
+  assert.equal(xres.reclaimed[0].dir, xSib)
+  assert.equal(xres.reclaimed[0].reason, 'scratch',
+    'the equally-eligible sibling still reclaims (not a no-op sweep)')
+  assert.ok(!xres.kept.some(k => k.dir === xPrior),
+    'the requested --out is not a retention subject: it appears in neither list')
+  assert.ok(fs.existsSync(xPrior) &&
+    fs.readFileSync(path.join(xPrior, 'payload.txt'), 'utf8') === 'prior attempt diagnostic\n',
+    'the excluded prior --out is untouched on disk')
+  console.log('PASS retry control (plan): exclude names the prior --out by resolved path; sibling reclaims, payload survives')
+}
+{
+  const cliRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ui2-retention-4fy-retry-'))
+  try {
+    const cproof = path.join(cliRoot, 'captured')
+    fs.mkdirSync(cproof)
+    const app = path.join(cliRoot, 'app')
+    for (const bin of ['electron', 'vite', 'tsc']) {
+      const f = path.join(app, 'apps', 'desktop', 'node_modules', '.bin', bin)
+      fs.mkdirSync(path.dirname(f), { recursive: true })
+      fs.writeFileSync(f, '#!/bin/sh\nexit 9\n')
+      fs.chmodSync(f, 0o755)
+    }
+    const hermes = path.join(cliRoot, 'hermes-stub')
+    fs.writeFileSync(hermes, '#!/bin/sh\ncase "$1" in --version) echo 0.0.0-retention-lane-test; exit 0;; *) exit 77;; esac\n')
+    fs.chmodSync(hermes, 0o755)
+    const out = path.join(cproof, 'run-retry')
+    bench(cproof, 'run-retry', { extra: { 'payload.txt': 'prior attempt diagnostic\n' } })
+    bench(cproof, 'run-dead-sibling')
+    const capture = fileURLToPath(new URL('./proof-harness/capture.mjs', import.meta.url))
+    let stderr = '', exit = 0
+    try {
+      execFileSync(process.execPath, [capture, '--case', 'baseline', '--no-prebuild',
+        '--out', out, '--app-repo', app, '--hermes-bin', hermes,
+        '--cdp-port', '43951', '--renderer-port', '43952'],
+        { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+    } catch (e) {
+      stderr = String(e.stderr || '')
+      exit = typeof e.status === 'number' ? e.status : -1
+    }
+    assert.ok(exit !== 0, `stub hermes must stop the run in provisioning (exit ${exit})`)
+    assert.match(stderr, /\[retention\] reclaimed .*\/run-dead-sibling \d+(\.\d+)?MiB \(scratch\)/,
+      `the real entrypoint still evicts the eligible sibling\n${stderr}`)
+    assert.doesNotMatch(stderr, /\[retention\] reclaimed .*\/run-retry /,
+      `the real entrypoint never reclaimed the requested --out\n${stderr}`)
+    const entries = fs.readdirSync(cproof)
+    const rotated = entries.filter(n => /^run-retry\.stale-\d+$/.test(n))
+    assert.equal(rotated.length, 1, `exactly one rotation of the prior --out; entries: ${entries}\n${stderr}`)
+    assert.equal(fs.readFileSync(path.join(cproof, rotated[0], 'payload.txt'), 'utf8'),
+      'prior attempt diagnostic\n', 'the prior diagnostic payload survived by ordinary rotation')
+    assert.ok(entries.includes('run-retry'), 'a fresh run-retry was provisioned at the requested path')
+    assert.ok(!fs.existsSync(path.join(cproof, 'run-dead-sibling')), 'the sibling is gone')
+    console.log('PASS retry control (real entrypoint): prior --out rotated with its payload, sibling reclaimed, fresh out provisioned')
   } finally {
     fs.rmSync(cliRoot, { recursive: true, force: true })
   }
