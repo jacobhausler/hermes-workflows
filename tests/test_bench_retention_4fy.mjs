@@ -189,7 +189,7 @@ console.log('PASS committed proof bytes + manifest-referenced trees: never delet
   const oldScratch = bench(cproof, 'run-old-corrupt', { extra: { 'manifest.json': '{torn' } })
   const oldCustom = bench(cproof, 'set-old-corrupt', { extra: { 'manifest.json': 'x' } })
   const cres = planBenchRetention({ proofRoot: cproof,
-    runStartMs: Date.now() - 120_000, nowMs: Date.now(), graceMs: 600_000, repoRoot: root })
+    runStartMs: Date.now(), nowMs: Date.now(), graceMs: 600_000, repoRoot: root })
   const cReason = name =>
     (cres.kept.find(k => k.dir === path.join(cproof, name)) || {}).reason
   assert.equal(cReason('run-incomplete'), 'live-grace',
@@ -255,23 +255,26 @@ console.log('PASS committed proof bytes + manifest-referenced trees: never delet
     'manifest-unreadable', 'present-but-unreadable manifest: unknown provenance, kept')
   fs.chmodSync(path.join(uproof, 'run-man-unreadable', 'manifest.json'), 0o444)
 
+  // (b) one unreadable member of the reference set (a sibling tree's
+  //     manifest under proofRoot): an incomplete scan proves nothing about
+  //     the ABSENCE of a reference, so otherwise-dead trees are kept — and
+  //     once readable, the mention itself must be the keeping reason.
   const r2 = path.join(root, 'refrepo')
-  const rcap = path.join(r2, 'tests', 'proof-harness', 'captured', 'prove')
-  fs.mkdirSync(rcap, { recursive: true })
+  fs.mkdirSync(r2, { recursive: true })
+  execFileSync('git', ['-C', r2, 'init', '-q', '-b', 'main'])
   const r2proof = path.join(r2, 'proof')
   fs.mkdirSync(r2proof)
-  fs.writeFileSync(path.join(rcap, 'manifest.json'), '{"note":"mentions run-refprobe"}\n')
-  execFileSync('git', ['-C', r2, 'init', '-q', '-b', 'main'])
-  execFileSync('git', ['-C', r2, 'add', '--', 'tests/proof-harness/captured/prove/manifest.json'])
-  execFileSync('git', ['-C', r2, '-c', 'user.email=t@example.invalid',
-    '-c', 'user.name=t', 'commit', '-q', '-m', 'committed manifest'])
+  bench(r2proof, 'set-witness', { extra: { 'manifest.json': '{"note":"mentions run-refprobe"}\n' } })
   bench(r2proof, 'run-refprobe')
-  fs.chmodSync(path.join(rcap, 'manifest.json'), 0o000)
+  const wit = path.join(r2proof, 'set-witness', 'manifest.json')
+  fs.chmodSync(wit, 0o000)
   ures = planBenchRetention({ proofRoot: r2proof,
     runStartMs: Date.now() - 120_000, nowMs: Date.now(), graceMs: 600_000, repoRoot: r2 })
   assert.equal((ures.kept.find(k => k.dir === path.join(r2proof, 'run-refprobe')) || {}).reason,
-    'manifest-set-unproven', 'unreadable committed manifest: reference set unproven, kept')
-  fs.chmodSync(path.join(rcap, 'manifest.json'), 0o644)
+    'manifest-set-unproven', 'unreadable manifest member: reference set unproven, kept')
+  assert.equal((ures.kept.find(k => k.dir === path.join(r2proof, 'set-witness')) || {}).reason,
+    'manifest-unreadable', 'the unreadable tree itself is kept on unknown provenance')
+  fs.chmodSync(wit, 0o644)
   ures = planBenchRetention({ proofRoot: r2proof,
     runStartMs: Date.now() - 120_000, nowMs: Date.now(), graceMs: 600_000, repoRoot: r2 })
   assert.equal((ures.kept.find(k => k.dir === path.join(r2proof, 'run-refprobe')) || {}).reason,
