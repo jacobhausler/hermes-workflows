@@ -52,13 +52,16 @@ const { columnGroups: columnGroupsFn, bandRows: bandRowsFn } = new Function(
 const { GraphView } = new Function(
   'jsx', 'jsxs', 'box', 'cn', 'Dot', 'Vitals', 'statusLabel', 'fmtDur', 'EDGE_TONE',
   'useValue', 'useRef', 'useState', 'useCardRects', 'Edges', 'EmptyState', 'NodeCard',
-  'fanItems', 'fanCounts', 'depthMap', '$selNode', '$fanItem', '$fanExpanded',
+  'fanItems', 'fanCounts', 'fanRowPartition', 'depthMap', '$selNode', '$fanItem', '$fanExpanded',
   'useCanvasWidth', 'columnGroups', 'bandRows', 'CARD_W', 'NODE_TONE', 'edgeFlowPolicy',
-  `${['depthMap', 'columnGroups', 'bandRows', 'GraphView', 'ItemCard'].map(grab).join('\n')}\n${constGrab('ATTEMPT_TICK')}\n${grab('attemptTicks')}\n${grab('FanStack')}\nreturn { GraphView }`
+  `${['depthMap', 'columnGroups', 'bandRows', 'GraphView', 'ItemCard', 'fanProjection'].map(grab).join('\n')}
+   ${grab('fanPageProjection')}
+   ${constGrab('ATTEMPT_TICK')}\n${grab('attemptTicks')}\n${grab('FanStack')}\nreturn { GraphView }`
 )(jsx, jsxs, box, cn, 'Dot', 'Vitals', s => s || 'unknown', ms => (ms ? `${Math.round(ms / 1000)}s` : ''), EDGE_TONE,
    useValue, () => ({ current: null }), () => [null, () => {}], () => ({}), 'Edges', 'EmptyState',
    props => jsx('div', { 'data-node-stub': props.def.id }),
    fanItemsFn.fanItems, fanItemsFn.fanCounts,
+   rows => ({ committed: (rows || []).filter(r => r.recorded), live: (rows || []).filter(r => !r.recorded) }),
    nodes => new Map(nodes.map(n => [n.id, (n.after || []).length ? 1 : 0])),
    $selNode, $fanItem, $fanExpanded,
    () => 4000, columnGroupsFn, bandRowsFn, 168,
@@ -128,4 +131,41 @@ assert.deepEqual(settled.map(b => b.key), [0, 1, 2], 'finish event re-renders in
 assert.equal(new Set(settled.map(b => b.key)).size, 3, 'no thrash: one card per index')
 assert.match(JSON.stringify(settled[1].props.children), /done/, 'item 1 status moved in place (key unchanged)')
 
-console.log('fan-out expand PASS: badge toggle, per-item cards keyed by index, pick, collapse, live stability, ⌘K-safe')
+// Committed child projection and expanded membership share one run/node/item identity.
+// Committed cards remain projected; expansion adds only uncommitted live members.
+const mixed = {
+  ...detail(starts),
+  nodes: { ...detail(starts).nodes, f: { status: 'running', output: { all_results: [
+    { status: 'done', item: { id: 'a' } }, { status: 'done', item: { id: 'b' } }
+  ] } } }
+}
+const mixedOpen = view({ runId: 'r', nodeId: 'f' }, mixed)
+const mixedCards = itemBtns(mixedOpen)
+const mixedIds = mixedCards.map(b => `r/f/${b.key}`).sort()
+assert.equal(new Set(mixedIds).size, mixedIds.length, 'renderer walk has no duplicate actionable identity')
+assert.deepEqual(mixedIds, ['r/f/0', 'r/f/1', 'r/f/2'], 'committed projection plus live member appears exactly once')
+const pureLive = { ...detail(starts), nodes: { ...detail(starts).nodes, f: { status: 'running' } } }
+assert.deepEqual(itemBtns(view({ runId: 'r', nodeId: 'f' }, pureLive)).map(b => `r/f/${b.key}`).sort(),
+  ['r/f/0', 'r/f/1', 'r/f/2'], 'pure live membership remains complete and unique')
+
+// Synthetic Council shape and MF1 status split, through the actual page mount.
+const critics = { id: 'critics', after: ['charter'], fanout: { goal: 'c {index}', items: Array.from({ length: 6 }, () => ({})) } }
+const council = { id: 'council', graph: { nodes: [{ id: 'charter' }, critics,
+  { id: 'adjudicate', after: ['critics'] }, { id: 'report', after: ['adjudicate'] }] },
+  nodes: { critics: { status: 'done', metrics: { api_calls: 99 }, output: { all_results:
+    Array.from({ length: 6 }, (_, i) => ({ status: i === 1 ? 'partial' : 'done' })) } } }, events: [] }
+const page = view(null, council)
+const edges = walk(page).find(x => x.type === 'Edges').props
+assert.equal(edges.nodes.length, 10, 'Council page has ten identities before expansion')
+assert.equal(edges.nodes.reduce((n, d) => n + (d.after?.length || 0), 0), 14, 'Council page has fourteen dependencies')
+assert.equal(edges.states.critics.status, 'done', 'parent keeps aggregate')
+assert.deepEqual(edges.states['critics.1'], { status: 'partial' }, 'child cannot borrow parent status or vitals')
+const child = walk(page).find(x => x.props?.['data-node'] === 'critics.1')
+assert.match(JSON.stringify(child), /partial/)
+click(walk(child).find(x => x.type === 'button'))
+assert.deepEqual(calls, [['fanItem', { runId: 'council', nodeId: 'critics', index: 1 }],
+  ['selNode', { runId: 'council', nodeId: 'critics' }]], 'projected card opens the real parent/item report')
+assert.equal(page.props['data-graph-run'], 'council', 'page canvas exposes its exact run identity')
+assert.equal(walk(coll).filter(x => x.props?.['data-node']).length, 2, 'uncommitted fan has no projected cards')
+
+console.log('fan-out expand PASS: badge toggle, per-item cards keyed by index, pick, collapse, live stability, committed page topology and child selection, ⌘K-safe')
