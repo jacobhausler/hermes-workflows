@@ -57,6 +57,15 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
+
+// Strip ambient roots before adding the owned root to bench subprocesses.
+// Readers and seeders must agree without changing the default desktop config.
+export function buildBenchLaunchEnv(parentEnv, overrides = {}) {
+  const env = { ...parentEnv };
+  delete env.WF_RUNS_ROOT;
+  delete env.HERMES_WORKFLOWS_HOME;
+  return Object.assign(env, overrides);
+}
 const REPO = path.resolve(HERE, '..', '..');
 const MANIFEST = path.join(HERE, 'cases.json');
 
@@ -873,7 +882,7 @@ async function main() {
   identity.bench.profile = BENCH_PROFILE;
   identity.bench.locks = B.locks;
 
-  const benchEnv = { ...process.env, HERMES_HOME: B.home, HERMES_GATEWAY_LOCK_DIR: B.locks };
+  const benchEnv = buildBenchLaunchEnv(process.env, { HERMES_HOME: B.home, HERMES_GATEWAY_LOCK_DIR: B.locks, WF_RUNS_ROOT: B.runs });
   // Gate-case bench knobs (bd_2026-11-13-qri): ride the fork's env so the
   // door's fail-once / delay are armed only for THIS bench gateway (never a
   // production install, never another case). See plugin_api.release_gate.
@@ -969,13 +978,13 @@ async function main() {
     if (py && !py.includes('/')) {
       try { pyAbs = execFileSync('/usr/bin/which', [py], { encoding: 'utf8' }).trim() || py; } catch { /* stays a name */ }
     }
-    const electronEnv = { ...process.env,
+    const electronEnv = buildBenchLaunchEnv(process.env, {
       HERMES_DESKTOP_DEV_SERVER: `http://127.0.0.1:${A.rendererPort}`,
       HERMES_DESKTOP_CDP_PORT: String(A.cdpPort),
       ...(pyAbs ? { HERMES_DESKTOP_PYTHON: pyAbs } : {}),
-      HERMES_HOME: B.home, HERMES_GATEWAY_LOCK_DIR: B.locks,
+      HERMES_HOME: B.home, HERMES_GATEWAY_LOCK_DIR: B.locks, WF_RUNS_ROOT: B.runs,
       ...(A.caseName === 'gate' ? { UI2_PROOF_GATE_FAIL_ONCE: '1',
-        UI2_PROOF_GATE_POST_DELAY_MS: '2500' } : {}) };
+        UI2_PROOF_GATE_POST_DELAY_MS: '2500' } : {}) });
     sup.start('electron', path.join(desktop, 'node_modules', '.bin', 'electron'),
       ['.', `--user-data-dir=${B.userdata}`], { cwd: desktop, env: electronEnv });
 
@@ -994,8 +1003,7 @@ async function main() {
       if (!statePaths.some(p => fs.existsSync(p)))
         die(EX.boot, 'bench backend never registered gateway_state.json (see logs/electron.log)');
     }
-    for (const [key, value] of [['plugins.entries.hermes-workflows.settings.runs_root', B.runs],
-                                ['plugins.entries.hermes-workflows.settings.tray', true]]) {
+    for (const [key, value] of [['plugins.entries.hermes-workflows.settings.tray', true]]) {
       // A sibling bench mid-source-update makes EVERY CLI call exit transiently;
       // retry the read/write pair together so `before` and `after` stay coherent.
       const before = retryCli(() => {
