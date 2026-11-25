@@ -6,7 +6,20 @@ answers come from `workflow {action:"status", run_id:"<run>"}` (§"Reading a
 run"). The door writes the run directory and a detached runner owns it; you
 observe with `status` / `wait` and the lifecycle wakes (`wake.jsonl` is the
 wake ledger). Verbs and payload semantics: `references/operations.md`. This
-page is only the on-disk map — what exists, and when it appears.
+page is the on-disk map — what exists, and when it appears.
+
+For a council or census that must hear from every lane, pin the waiting policy
+on that fan-out:
+
+```json
+{"id":"review","type":"agent","fanout":{"items":["a","b","c"],"goal":"Review {item}","quorum_mode":"all"}}
+```
+
+This waits for each item to settle; it does not require each item to succeed.
+Waiting for all is still the default. Numeric `quorum` is a separate, explicit
+race; do not combine it or `quorum_drain_s` with `quorum_mode:"all"`. Check
+the per-item records below for missing or failed lanes rather than inferring
+full coverage from the parent verdict. See the [fan-out grammar](../../references/grammar.md#fan-out).
 
 ## The run directory
 

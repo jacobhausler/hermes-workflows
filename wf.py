@@ -10890,9 +10890,10 @@ def run_agent_node(run, meta, byid, node, outputs, steering):
             results = [None] * len(items)
             lock = threading.Lock()
             # wf1.1 A5: the WAIT-SET and the COMMIT THRESHOLD are split. Waiting is
-            # ALL items unless the author wrote `quorum` (straggler cancellation is a
-            # race the author must opt into — a dead lane is already handled by the
-            # early_death kill and the node wall). The commit threshold is unchanged:
+            # ALL items unless the author wrote numeric `quorum`. The shared graph
+            # validator makes authored `quorum_mode: "all"` mutually exclusive
+            # with that race, so it takes the ordinary no-cancel path even at
+            # majority. The commit threshold is unchanged:
             # explicit `quorum`, else the majority rule (sprint101 #12) so a 1-of-6
             # death still commits with partial credit.
             explicit_quorum = fo.get("quorum")
@@ -10903,8 +10904,7 @@ def run_agent_node(run, meta, byid, node, outputs, steering):
             # moment get a window to LAND their answer (a landing commits like any
             # other item — the drain cancels nothing that arrives before the
             # deadline), and at the deadline the very same _cancel_stragglers runs.
-            # 0/unset = today's behavior: SIGKILL the moment quorum is met. The
-            # future flip of the default is one constant here, not a redesign.
+            # 0/unset = today's behavior: SIGKILL the moment quorum is met.
             # Defensively parsed at the runner too: the door validates, but the
             # runner loads graph.json straight (same belt as the A5 quorum parse).
             try:
