@@ -329,6 +329,12 @@ SOURCE_ONLY_TESTS = {
     # bd_2026-11-13-iqf (slice A): the double-run spec reads the committed capture sets under
     # tests/proof-harness/captured/ and imports the source-only driver — same est-4vnq finding-4 shape.
     "tests/test_proof_harness_repro.mjs": "executes source-only tests/proof-harness/capture.mjs and reads tests/proof-harness/captured/ sets",
+    # bd_2026-11-13-xow (slice B): the gate/toast repro spec has the exact twin
+    # shape — it imports maskVolatile/canonicalJson from the source-only driver,
+    # subprocess-executes `--only gate,toast --plan`, and reads the committed
+    # pair under captured/bd_2026-11-13-xow/. Without this row the glob ships a
+    # test whose inputs exist only in the checkout (est-4vnq finding-4).
+    "tests/test_proof_harness_gate_toast_repro.mjs": "executes source-only tests/proof-harness/capture.mjs and reads tests/proof-harness/captured/ sets",
 }
 
 # Source-only SCRIPTS: repository/estate CI tooling that never travels in the

@@ -43,6 +43,9 @@ SOURCE_ONLY_TESTS = {
     # bd_2026-11-13-iqf (slice A): executes the source-only driver AND reads
     # the committed capture sets under tests/proof-harness/captured/.
     "tests/test_proof_harness_repro.mjs",
+    # bd_2026-11-13-xow (slice B): twin shape — the gate/toast repro spec
+    # executes the source-only driver (--plan) and reads the committed pair.
+    "tests/test_proof_harness_gate_toast_repro.mjs",
 }
 # A shipped test that loads/executes `<root> / "scripts" / "<file>"` needs that file in the ZIP.
 SCRIPT_REF = re.compile(r'(?:ROOT|BUILD)\s*/\s*"scripts"\s*/\s*"([^"]+)"|ROOT\s*/\s*"scripts/([^"]+)"')
