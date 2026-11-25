@@ -132,37 +132,36 @@ clock[0] += dash.RUNS_CACHE_TTL + 0.01
 check("(W4b) after the window the next read rescans (138 counted)",
       dash.list_runs(0, 100)["total"] == N + 1)
 
-# (W7) ui2-proof short-page knob: the partial-fetch frame is SERVER-side,
-# because plugin REST rides the app's IPC bridge and a CDP Fetch mock never
-# sees it. The knob file's integer is an offset floor: pages starting at or
-# past it answer an empty slice with the census-wide summary (the shape the
-# walk reads as shrinkage -> honest `loaded 100 of N`). Fail-closed: env
-# unset, file absent, or garbage content each leave the route untouched.
+# (W7) Production route isolation. A stale proof knob must not affect the
+# actual FastAPI /runs handler, which is the backend endpoint reached over the
+# desktop IPC bridge. The Node proof bench separately injects the short page
+# at its fake server seam; no production behavior is needed for that frame.
 KN = BASE / "short-pages.knob"
-os.environ["WF_PROOF_SHORT_PAGES_FILE"] = str(KN)
-dash._runs_cache_invalidate()
-p2 = dash.list_runs(100, 100)
-check("(W7a) knob file absent: page 2 serves every row",
-      [x["id"] for x in p2["runs"]] == all_ids[99:]
-      and p2["total"] == N + 1,
-      json.dumps({"n": len(p2["runs"]), "total": p2["total"]}))
-KN.write_text("100")
-p2 = dash.list_runs(100, 100)
-check("(W7b) knob floor 100: page 2 is an empty slice, summary stays census-wide",
-      p2["runs"] == [] and p2["total"] == N + 1 and "roots" not in p2
-      and set(p2) == {"runs", "total", "counts"},
-      json.dumps(sorted(p2)))
-check("(W7c) knob does not touch the first page",
-      len(dash.list_runs(0, 100)["runs"]) == 100)
-KN.write_text("not-an-int")
-check("(W7d) garbage knob content: no knob (fail-closed)",
-      len(dash.list_runs(100, 100)["runs"]) == 38)
-KN.unlink()
-KN.write_text("100")                     # file again, but the env goes away
-os.environ.pop("WF_PROOF_SHORT_PAGES_FILE")
-check("(W7e) env unset with file present: no knob (fail-closed)",
-      len(dash.list_runs(100, 100)["runs"]) == 38)
-KN.unlink()
+_prior_proof_knob = os.environ.get("WF_PROOF_SHORT_PAGES_FILE")
+try:
+    KN.write_text("100")
+    os.environ["WF_PROOF_SHORT_PAGES_FILE"] = str(KN)
+    dash._runs_cache_invalidate()
+    # Call the registered FastAPI endpoint, not _list_runs or a copied handler.
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    app = FastAPI()
+    app.include_router(dash.router)
+    with TestClient(app) as client:
+        response = client.get("/runs?offset=100&limit=100")
+    p2 = response.json()
+    check("(W7) actual FastAPI /runs endpoint ignores stale proof knob",
+          response.status_code == 200
+          and len(p2["runs"]) == 38
+          and p2["total"] == N + 1 and bool(p2["runs"]),
+          json.dumps({"status": response.status_code, "n": len(p2.get("runs", [])),
+                      "total": p2.get("total")}))
+finally:
+    KN.unlink(missing_ok=True)
+    if _prior_proof_knob is None:
+        os.environ.pop("WF_PROOF_SHORT_PAGES_FILE", None)
+    else:
+        os.environ["WF_PROOF_SHORT_PAGES_FILE"] = _prior_proof_knob
 
 # (W5) offset past the end: empty PAGE, not empty census.
 past = dash.list_runs(999, 100)
