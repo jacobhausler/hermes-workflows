@@ -19,10 +19,10 @@ metadata:
 
 Start in 3: (1) `validate` the graph; (2) `run` it and end your turn; (3) act on the wake (`wake.jsonl` is the ledger). Smallest graph: `{ "name": "check", "nodes": [{"id":"inspect","type":"agent","goal":"Inspect the specified target. Return one fenced JSON object."}] }`.
 
-Requires Hermes Agent v2026.9.21 or newer (package >=0.21.4). A Desktop gate answer
-reaches the run owner's chat via the composer SDK; on older builds it may only insert
-draft text — type the resume line in the owner chat yourself. Before disabling the
-plugin, list runs and stop each live run with `workflow{action:"stop",run_id:<id>}`.
+Requires Hermes Agent v2026.9.21 or newer (package >=0.21.4). A Desktop gate answer is
+record-only: the same gate record `release` writes, `_ui` provenance, server-stamped
+`at`, zero respawn — `release` is the verb that moves the run and `View exact gate`
+is navigation only. Before disabling the plugin, stop each live run with `workflow{action:"stop",run_id:<id>}`.
 
 Use the `workflow` tool when a task needs independent lanes, a human gate, or a
 resumable graph; for one or two independent calls, delegate instead. The authoring
