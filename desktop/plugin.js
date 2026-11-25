@@ -2678,6 +2678,10 @@ function Timeline({ detail }) {
 // stored shapes (owner.session_id, a CLI-era runtime id), only the measured
 // stored-session shape qualifies (desktop-owned rows are `local-` + 64 hex;
 // that same string is the state.db sessions.id and the openSession key).
+// Wave D: provenance is also POSITION — of a node's attempt list only the LAST
+// (chronologically newest) row's ID stands for the CURRENT attempt; the selector
+// selects that one entry FIRST and validates it (shape + the read model's
+// session_ids_expired flag) and never falls back to another session's ID.
 // Missing/expired/unverified renders unavailable and makes NO host call; an
 // absent adapter renders unavailable; a rejection stays a local error state
 // with the exact ID for inspection. No core DOM or storage mutation anywhere.
@@ -2690,15 +2694,29 @@ export function storedSessionIds(metrics) {
   return raw.filter(s => typeof s === 'string' && STORED_SESSION_SHAPE.test(s.trim()))
             .map(s => s.trim())
 }
-/** The node's current recorded session: the newest attempt's ID, LAST in the
+/** The node's CURRENT recorded session: the newest attempt's ID, LAST in the
  *  CHRONOLOGICAL order the read model ships (child_metrics orders
- *  started_at, rowid — attempt suffixes are never sorted lexically, or #a10
- *  would beat #a2 and the link would open the older chat; pinned by
- *  tests/test_stored_session_order_cj2.py). A rotated attempt re-lands this
- *  link on the fresh ID at the next fetch — no cached first ID, ever. */
+ *  started_at, rowid; the cross-home profile-transition merge sorts by the same
+ *  per-row stamp — attempt suffixes are never sorted lexically, or #a10 would
+ *  beat #a2 and the link would open the older chat; pinned by
+ *  tests/test_stored_session_order_cj2.py). SELECT BEFORE VALIDATE: the shipped
+ *  LAST entry IS the current attempt's identity — when that ONE entry is
+ *  runtime-shaped, malformed, or flagged expired by the authoritative state.db
+ *  lookup (session_ids_expired), the destination is ABSENT: the selector returns
+ *  null and NEVER walks back to an older attempt's session (the Wave A bless —
+ *  [older stored A, newest runtime RUNTIME] returning A — fell back to another
+ *  session whose click opened the older chat under a rotation nobody verified;
+ *  captain click counterexample pinned in tests/test_stored_session_nav.mjs).
+ *  A rotated attempt re-lands this link on the fresh ID at the next fetch — no
+ *  cached first ID, ever. */
 export function latestStoredSessionId(metrics) {
-  const ids = storedSessionIds(metrics)
-  return ids.length ? ids[ids.length - 1] : null
+  const raw = metrics && Array.isArray(metrics.session_ids) ? metrics.session_ids : []
+  const last = raw.length ? raw[raw.length - 1] : null
+  const id = typeof last === 'string' ? last.trim() : ''
+  if (!STORED_SESSION_SHAPE.test(id)) return null
+  const exp = metrics && Array.isArray(metrics.session_ids_expired) ? metrics.session_ids_expired : []
+  if (exp.some(s => typeof s === 'string' && s.trim() === id)) return null
+  return id
 }
 /** The run's recorded owner session: the designated ui_session_id stamp wins;
  *  otherwise the launch session_id ONLY when it already IS stored-session

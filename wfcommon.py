@@ -6761,14 +6761,30 @@ def run_child_metrics(r):
                     prev[kk] = prev.get(kk) or v.get(kk)
                 prev["api_calls_known"] = prev.get("api_calls_known", True) and v.get("api_calls_known", True)
                 prev["sessions"].update(v.get("sessions") or {})
-                # bd_2026-11-13-cj2: recorded session ids merge additively too —
-                # prev first (the earlier folded home in the sorted-name scan; a
-                # total order because names and per-home SELECTs are each
-                # deterministic), never a replacement.
+                # bd_2026-11-13-cj2: recorded session ids merge additively — but the
+                # merged LAST slot must be the GLOBALLY-newest row's id, so the list
+                # sorts by each id's own (started-known, started_at, rowid) stamp:
+                # the same total order the per-home SELECT used. Scan order is the
+                # node-record name sort, which is NOT chronology — appending
+                # prev-first would hand the current-attempt slot to a superseded
+                # home whenever the newer home happened to scan second (the
+                # profile-transition trap: merging/deduping must never let the
+                # wrong current attempt win). Dedup is first-occurrence; per-id
+                # stamps keep the newest fact; stamp ties fall to the deterministic
+                # scan-append order (collapse-to-one, AGENTS 4c.12).
                 _ids = prev.setdefault("session_ids", [])
+                _at = prev.setdefault("_session_id_at", {})
+                _exp = prev.setdefault("_session_id_expired", [])
                 for _sid in v.get("session_ids") or []:
                     if _sid not in _ids:
                         _ids.append(_sid)
+                    _st = (v.get("_session_id_at") or {}).get(_sid)
+                    if _st is not None and (_sid not in _at or tuple(_st) > tuple(_at[_sid])):
+                        _at[_sid] = _st
+                for _sid in v.get("_session_id_expired") or []:
+                    if _sid not in _exp:
+                        _exp.append(_sid)
+                _ids.sort(key=lambda _s: _at.get(_s) or (0, 0.0, 0))
     # Any node record without a profile home (and the whole-run case where NONE exist)
     # folds from the caller's home — but at most once.
     unowned = [p.name[:-5] for p in (nodes.glob("*.json") if nodes.is_dir() else [])
@@ -7458,6 +7474,17 @@ def child_metrics(run_id, home=None):
             # (the parity fixtures) read NULL there — honest absence, the fold
             # gains no key, and the legacy payload shape stays byte-identical.
             id_sel = "id, " if "id" in cols else "NULL, "
+            # Wave D (bd_2026-11-13-cj2, captain counterexample): expiry is observable
+            # ONLY at this authoritative lookup — the SDK was inspected at wiring time
+            # (apps/desktop/src/sdk/index.ts): a plain openSession never checks
+            # existence and never rejects a dead destination (only the
+            # awaitHydration/supersede paths reject), so the plugin cannot learn
+            # expiry at click time. The row's own expiry_finalized flag is the fact.
+            # Schemas without the column read never-expired (honest absence — a
+            # historical payload gains no key). rowid rides too: the per-home
+            # chronology stamp the cross-home merge in run_child_metrics sorts by
+            # (sessions is a rowid table — core persistence/sqlite/_schema_ddl.py).
+            exp_sel = "COALESCE(expiry_finalized, 0), " if "expiry_finalized" in cols else "0, "
             # Collapse-to-one (AGENTS 4c.12): the sort is TOTAL by (started_at,
             # rowid). Chronology, not the attempt SUFFIX: titles end `#aN` and
             # `#a10` sorts lexicographically BEFORE `#a2` (the Wave A review
@@ -7470,25 +7497,30 @@ def child_metrics(run_id, home=None):
             rows = c.execute(
                 f"select {id_sel}title, model, {bp_sel}input_tokens, output_tokens, cache_read_tokens, reasoning_tokens, "
                 "api_call_count, tool_call_count, estimated_cost_usd, last_activity_at, "
-                "last_activity_description, ended_at, started_at from sessions where title like ? "
+                "last_activity_description, ended_at, started_at, "
+                f"{exp_sel}rowid from sessions where title like ? "
                 "order by started_at, rowid",
                 (f"wf:{run_id}:%",)).fetchall()
         finally:
             c.close()
     except Exception:
         return {}
-    for (_sid, title, model, *rest) in rows:
+    for _db_row in rows:
+        # SELECT tail: started_at, expired, rowid.
+        started, expired, rowid = _db_row[-3], _db_row[-2], _db_row[-1]
+        (_sid, title, model, *rest) = _db_row[:-3]
         billing_provider = None
-        if len(rest) == 11:   # legacy schema (no billing_provider column): honest unknown
-            (ti, to, cr, rs, api, tools, cost, last, desc, ended, started) = rest
+        if len(rest) == 10:   # legacy schema (no billing_provider column): honest unknown
+            (ti, to, cr, rs, api, tools, cost, last, desc, ended) = rest
         else:
-            (billing_provider, ti, to, cr, rs, api, tools, cost, last, desc, ended, started) = rest
+            (billing_provider, ti, to, cr, rs, api, tools, cost, last, desc, ended) = rest
         key = title.split("#a", 1)[0]
         m = out.setdefault(key, {"tokens_in": 0, "tokens_out": 0, "cache_read": 0, "reasoning": 0,
                                  "api_calls": 0, "api_calls_known": True,
                                  "tool_calls": 0, "cost": 0.0, "attempts": 0,
                                  "model": None, "billing_provider": None, "last_activity": None, "last_desc": None,
-                                 "ended": None, "started": None, "sessions": {}, "session_ids": []})
+                                 "ended": None, "started": None, "sessions": {}, "session_ids": [],
+                                 "_session_id_at": {}, "_session_id_expired": []})
         m["sessions"][title] = {"last_activity": last or started,
                                 "last_desc": desc or None}
         # bd_2026-11-13-cj2: the recorded stored-session ids of this node's child
@@ -7497,8 +7529,16 @@ def child_metrics(run_id, home=None):
         # runtime-id guess). The append follows the SELECT's total order
         # (started_at, rowid): attempts land oldest-first, so the LAST entry is
         # the current attempt — the selector never re-derives chronology itself.
+        # Wave D: an expired row's id stays IN its chronological slot (dropping it
+        # would promote an older attempt into the current-attempt position) and is
+        # flagged; the stamp tuple is the same total order as the SELECT —
+        # (unknown-time-first, started_at, rowid) — and stays PRIVATE to the read
+        # model: fold_child_metrics (the only serializer) drops underscore keys.
         if isinstance(_sid, str) and _sid:
             m["session_ids"].append(_sid)
+            m["_session_id_at"][_sid] = (0 if started is None else 1, started or 0.0, rowid)
+            if expired and _sid not in m["_session_id_expired"]:
+                m["_session_id_expired"].append(_sid)
         if api is None:
             m["api_calls_known"] = False
         m["tokens_in"] += ti or 0; m["tokens_out"] += to or 0; m["cache_read"] += cr or 0
@@ -7627,9 +7667,11 @@ def fold_child_metrics(rows):
     ANY contributing row says api_calls_known: false — an unknown count is absent
     (the existing omission convention, R2: absent reads unknown, never invented),
     never a zero and never a partial sum advertised as exact. Pure over
-    already-read rows: no IO; the additive derived key `session_ids` (bd_2026-11-13-cj2)
-    is a passthrough of the rows' own recorded ids, present only when a row has
-    them (R10: persisted shapes unchanged — a fold over pre-cj2 rows gains no key).
+    already-read rows: no IO; the additive derived keys `session_ids` and (only
+    when some contributing row was expiry_finalized) `session_ids_expired`
+    (bd_2026-11-13-cj2) are a passthrough of the rows' own recorded ids, present
+    only when a row has them (R10: persisted shapes unchanged — a fold over
+    pre-cj2 rows gains no key; private underscore stamps never serialize).
     Both projection adapters (door act_status, dashboard _view) route EVERY
     aggregation level — node line, fanout item, run total/rollup — through here
     so the surfaces can never diverge on which levels hide an unknown.
@@ -7642,6 +7684,7 @@ def fold_child_metrics(rows):
          "last_activity": None, "last_desc": None, "models": []}
     known = True
     ids: list = []
+    expired: list = []
     for m in rows:
         for k in ("tokens_in", "tokens_out", "cache_read", "reasoning", "api_calls", "tool_calls", "cost", "attempts"):
             f[k] += m.get(k) or 0
@@ -7656,8 +7699,23 @@ def fold_child_metrics(rows):
         for sid in m.get("session_ids") or []:
             if sid not in ids:
                 ids.append(sid)
+        # Wave D: the expiry flags ride too (private underscore keys from
+        # child_metrics/run_child_metrics); underscore keys never serialize.
+        for sid in m.get("_session_id_expired") or m.get("session_ids_expired") or []:
+            if sid not in expired:
+                expired.append(sid)
     if ids:
         f["session_ids"] = ids
+        # The public flag is a SUBSEQUENCE of session_ids (total order, never
+        # set-iteration luck): the UI gate reads a flagged LAST entry as an
+        # absent destination — the expired id keeps its chronological slot, so
+        # an older attempt is never promoted over an expired current. Present
+        # only when some contributing row was expired (R10: common payloads
+        # byte-identical).
+        _expf = set(expired)
+        flags = [s for s in ids if s in _expf]
+        if flags:
+            f["session_ids_expired"] = flags
     if not known:
         f.pop("api_calls")
     return f
