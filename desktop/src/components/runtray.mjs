@@ -95,6 +95,35 @@ const NODE_TONE = {
   skipped: { color: 'var(--ui-text-tertiary)', borderColor: 'var(--ui-text-tertiary)' },
 }
 
+// l8i instance-label-first display law — VERBATIM mirror of plugin.js's ONE
+// resolver (plugin.js may never import this file, so the duplication is the
+// deliberate pattern; the parity test in tests/test_session_tray.mjs feeds a
+// lane-labeled fixture through BOTH row renderers and compares the trees, so
+// this copy can no longer drift). title := last human segment of lane_key,
+// else the description's first clause (clipped), else run.name; the template
+// word renders only as secondary metadata (null when the title IS the name).
+const TITLE_MAX = 64
+
+export function displayTitle(run) {
+  const lane = typeof run?.lane_key === 'string' ? run.lane_key.trim() : ''
+  if (lane) {
+    const seg = lane.slice(lane.lastIndexOf('/') + 1).trim()
+    if (seg && !seg.startsWith('start-')) return seg
+  }
+  const desc = typeof run?.description === 'string' ? run.description.trim() : ''
+  if (desc) {
+    const clause = desc.split(/[.,;\n]/)[0].trim()
+    if (clause) return clause.length > TITLE_MAX ? clause.slice(0, TITLE_MAX - 1) + '…' : clause
+  }
+  return run?.name || run?.id || 'workflow'
+}
+
+/** Template name as secondary metadata — mirrors plugin.js.templateTag. */
+export function templateTag(run) {
+  const t = typeof run?.name === 'string' && run.name ? run.name : null
+  return t && t !== displayTitle(run) ? t : null
+}
+
 /**
  * Pure models — REAL bodies, mirroring desktop/plugin.js.
  * Tray scoping: every run whose owner.session_id === sid — dispatch/cron-
@@ -279,7 +308,7 @@ const trayBarPct = r => (r?.nodes_done != null && r?.nodes_total != null && r.no
  *  mirror may not import app components — release-surface parity is proven
  *  plugin-side). No ack × — terminal runs LEAVE the tray, nothing to
  *  dismiss. div (never <button>): GateActions carries SDK Buttons (F6 law). */
-export function RunTrayRunRow({ run, open, band, onToggleRow, onOpenPane, gateSlot }) {
+export function RunTrayRunRow({ run, open, onToggleRow, onOpenPane, gateSlot }) {
   const r = run || {}
   const tone = NODE_TONE[runStatusOf(r)] || NODE_TONE.pending
   const nodes = r.nodes || null
@@ -302,7 +331,13 @@ export function RunTrayRunRow({ run, open, band, onToggleRow, onOpenPane, gateSl
     onClick: e => { e?.stopPropagation?.(); onToggleRow?.(r.id) },
     children: [
       jsx('span', { style: { color: tone.color }, children: statusLabel(r.status) }, 'chip'),
-      jsx('span', { style: { fontWeight: 600 }, children: r.name || r.id || 'workflow' }, 'name'),
+      jsx('span', { style: { fontWeight: 600 }, children: displayTitle(r) }, 'name'),
+      // l8i: the template word is secondary metadata — muted, after the
+      // (also-secondary) lane chip; the full lane_key chip stays so a
+      // team-prefixed key reads whole next to its short title segment.
+      templateTag(r)
+        ? jsx('span', { style: { opacity: 0.55 }, title: `template ${templateTag(r)}`, children: templateTag(r) }, 'tmpl')
+        : null,
       r.lane_key ? jsx('span', { style: { opacity: 0.7 }, children: r.lane_key }, 'lane') : null,
       // x/y rides the read model's counts, '?' when absent — never 0/N; the
       // mini bar beside it SPEAKS the ratio (key 'bar', width = pct) and

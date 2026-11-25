@@ -372,6 +372,21 @@ assert.match(src, /composerAreas\?\.tray \?\? composerAreas\?\.underside \?\? co
   assert.equal(findBy(noRatio, n => n.key === 'bar').length, 0, 'mirror renders NO bar without a real ratio (absent is not 0%)')
   assert.ok(!textOf(noRatio).includes('0%'), 'mirror never fabricates a 0% ratio')
   assert.ok(textOf(noRatio).includes('?'), 'mirror x/y reads ? when counts are absent')
+
+  // (iv) l8i LAW parity: a lane-labeled run leads with the instance label and
+  // carries the demoted template badge — identically on BOTH row renderers,
+  // so the mirror's duplicated resolver can no longer drift from plugin.js.
+  const normTxt = n => textOf(n).replace(/\s+/g, ' ').trim()
+  const labeled = mk('tpl-name', 'running', 'S1', { lane_key: 'ship20-m/W3tray', description: 'Fold the tray. Ship it.' })
+  const mL = mirror.RunTrayRunRow({ run: labeled }), pL = mod.RunTrayRunRow({ run: labeled })
+  assert.equal(normTxt(mL), normTxt(pL), 'mirror row text == plugin row text for a lane-labeled run (l8i parity)')
+  assert.ok(normTxt(pL).includes('W3tray'), 'plugin row leads with the lane label, not the template')
+  assert.ok(findBy(mL, n => n.key === 'tmpl').length === 1
+    && findBy(mL, n => n.key === 'tmpl')[0].props.children === 'tpl-name',
+    'mirror renders the demoted template badge, same key and word as plugin.js')
+  const plain = mk('b3', 'running', 'S1')
+  assert.equal(findBy(mirror.RunTrayRunRow({ run: plain }), n => n.key === 'tmpl').length, 0,
+    'an unlabeled run never prints its own name twice (mirror obeys the null rule)')
 }
 
 // -- 9. review #233 (zap @7e1cce8): blank-sid root parity + rail release surface -----
