@@ -1548,8 +1548,8 @@ async function main() {
       // the selection predicate: wrap click -> paint -> expand -> measure in
       // one bounded unit that re-clicks the row until the council svg is on
       // screen, and take 02/03 only once selection is proven.
-      const selT0 = Date.now();
-      let pageM = null, toggledOk = false, selRecovers = 0;
+      let selT0 = Date.now();
+      let pageM = null, toggledOk = false, selRecovers = 0, selReloaded = false;
       for (;;) {
         let painted = false;
         const pT0 = Date.now();
@@ -1583,10 +1583,27 @@ async function main() {
           await sleep(900);
           continue;
         }
-        if (Date.now() - selT0 > 45_000) {
+        if (Date.now() - selT0 > 180_000) {
           try { await shoot(cdp, A.outDir, '00-diagnostic-detail.png'); } catch { /* best effort */ }
           if (!painted) die(EX.api, 'council detail GraphView never painted route paths in the pane');
           die(EX.api, `council detail never became the selection (last: ${JSON.stringify(pageM)}) — diagnostic shot in captures/ if present`);
+        }
+        // Route-restore class (a8-a10): the pane tab re-claim is part of EVERY
+        // failed pass, not only the intro-copy class above — the flip-back to
+        // the chat view is silent and the tab click is idempotent once the
+        // pane is already up. A ticket-mint flap that never self-heals gets
+        // ONE bounded document reload at half budget (same law as the list
+        // wait's splash reload): the whole attach re-runs from a clean slate.
+        const modalUp = await evlPoll(`document.body.innerText.includes("couldn't start")`, false);
+        if (modalUp) { try { await trustedClick(cdp, 'Retry', { exact: true, ci: true }); } catch { /* modal between frames */ } }
+        try { await trustedClick(cdp, 'workflows', { exact: true, ci: true }); } catch { /* tab not painted yet */ }
+        if (!selReloaded && Date.now() - selT0 > 90_000) {
+          selReloaded = true;
+          try { await cdp.send('Page.reload', { ignoreCache: true }); } catch { /* navigating */ }
+          await sleep(2500);
+          try { cdp.ws.close(); } catch { /* already gone */ }
+          cdp = await connectCdp(A.cdpPort, A.rendererPort, 60_000);
+          selT0 = Date.now();
         }
         // A miss on this re-click is one more failed attempt inside the
         // selection budget (same refresh race as the first click): the budget
