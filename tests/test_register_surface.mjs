@@ -218,7 +218,7 @@ const grab = name => {
 let instance = 0
 const jsx = (type, props, key) => ({ type, props, key })
 const { Edges, depthMap } = new Function('jsx', 'jsxs', 'useId',
-`const EDGE_TONE = { done:'teal', pending:'gray', failed:'red', running:'blue', held:'orange', skipped:'gray' };\nconst NODE_TONE = Object.fromEntries(Object.entries(EDGE_TONE).map(([k,v]) => [k, { color:v, borderColor:v, shadow:null, shadowHover:null, pulseMs:null, calm:true, ui:'muted', gate:null, breathe:null }]));\nNODE_TONE.waiting = NODE_TONE.pending;\nconst ROUTE_TINTS = ['accent','purple','cyan','orange','green','yellow'];\n${['depthMap', 'edgePath', 'routeEdge', 'edgeFlowPolicy', 'edgeTone', 'nodeState', 'routeTint', 'Edges'].map(n => { try { return grab(n) } catch { return '' } }).join('\n')}\nreturn { Edges, depthMap }`)(jsx, jsx, () => `t-${++instance}`)
+`const EDGE_TONE = { done:'teal', pending:'gray', failed:'red', running:'blue', held:'orange', skipped:'gray' };\nconst NODE_TONE = Object.fromEntries(Object.entries(EDGE_TONE).map(([k,v]) => [k, { color:v, borderColor:v, shadow:null, shadowHover:null, pulseMs:null, calm:true, ui:'muted', gate:null, breathe:null }]));\nNODE_TONE.waiting = NODE_TONE.pending;\nconst ROUTE_TINTS = ['accent','purple','cyan','orange','green','yellow'];\nconst activityTsMs = m => { const la = m && m.last_activity; if (typeof la !== 'number' || !Number.isFinite(la) || la <= 0) return null; const ms = la * 1000; return ms <= Date.now() ? ms : null };\nconst motionTokenMs = t => t === '--dur-flow' ? 1200 : null;\nconst MOTION = { claim: req => ({ admitted: true, phaseMs: -100, id: req.id }) };\n${['depthMap', 'edgePath', 'routeEdge', 'edgeFlowPolicy', 'edgeTone', 'nodeState', 'routeTint', 'Edges'].map(n => { try { return grab(n) } catch { return '' } }).join('\n')}\nreturn { Edges, depthMap }`)(jsx, jsx, () => `t-${++instance}`)
 const nodes = [
   { id: 'a' }, { id: 'b', after: ['a'] }, { id: 'c', after: ['a'] }, { id: 'd', after: ['b'] },
   { id: 'e', after: ['c'] }
@@ -235,7 +235,10 @@ function rectsFor(defs) {
   return rects
 }
 {
-  const states = { a: { status: 'running' }, b: { status: 'pending' }, c: { status: 'failed' }, d: { status: 'pending' } }
+  // W5: the animate law is now "running source WITH an explicit activity
+  // stamp" — the stamp is the sandboxed stand-in's proof of life (the real
+  // law is pinned in test_ui2_motion + test_tab_polish_48 F4).
+  const states = { a: { status: 'running', metrics: { last_activity: Math.floor(Date.now() / 1000) } }, b: { status: 'pending' }, c: { status: 'failed' }, d: { status: 'pending' } }
   const svg = Edges({ nodes, rects: rectsFor(nodes), states, gate: null })
   // RC ch4: one <g> per route; the <animate> law is checked on the STATE path.
   const groups = svg.props.children.filter(x => x && x.type === 'g')

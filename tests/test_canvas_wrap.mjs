@@ -27,6 +27,12 @@ const { depthMap, columnGroups, bandRows, Edges, CARD_W, MINI } = new Function(
   'jsx', 'jsxs', 'useId',
   [constGrab('EDGE_TONE'),
     `const NODE_TONE = Object.fromEntries(Object.entries(EDGE_TONE).map(([k,v]) => [k, { color:v, borderColor:v, shadow:null, shadowHover:null, pulseMs:null, calm:true, ui:'muted', gate:null, breathe:null }]));\nNODE_TONE.waiting = NODE_TONE.pending;`,
+    // W5: the Edges tree reads the activity stamp + the ONE allocator; the
+    // sandbox supplies pure stand-ins (admit-all) — geometry is what this
+    // test measures, admissions are pinned by test_ui2_motion.
+    `const activityTsMs = m => { const la = m && m.last_activity; if (typeof la !== 'number' || !Number.isFinite(la) || la <= 0) return null; const ms = la * 1000; return ms <= Date.now() ? ms : null };
+const motionTokenMs = t => t === '--dur-flow' ? 1200 : null;
+const MOTION = { claim: req => ({ admitted: true, phaseMs: 0, id: req.id }) };`,
     constGrab('CARD_W'), constGrab('MINI'), constGrab('ROUTE_TINTS'),
     grab('edgeFlowPolicy'), grab('depthMap'), grab('columnGroups'), grab('bandRows'),
     grab('edgeTone'), grab('nodeState'), grab('routeEdge'), grab('routeTint'), grab('Edges')].join('\n')

@@ -101,14 +101,27 @@ const texts = n => walk(n).flatMap(x => typeof x === 'string' ? [x] : typeof x.p
 }
 
 // -- 4. real Vitals: counts, costs, heartbeat fresh/quiet/unknown --------------------
-const { Vitals } = new Function('EDGE_TONE', 'METER_TONE', 'jsx', 'jsxs', 'Fragment',
+// W5 (bd_2026-11-13-lv1): the beat is an allocator-admitted glyph, not a host
+// animate-* class. The sandbox injects the pure decision (the allocator's
+// behaviour itself is pinned by test_ui2_motion): same evidence law — an
+// invalid/future/absent stamp is unknown and admits nothing.
+const glyphMotionStandIn = (id, m, stale = false) => {
+  const la = m && m.last_activity
+  if (!id || stale || typeof la !== 'number' || !Number.isFinite(la) || la <= 0) return { admitted: false, reason: 'unknown-activity' }
+  const age = Date.now() / 1000 - la
+  return { admitted: true, token: age <= 5 ? '--dur-pulse-fresh' : '--dur-pulse-quiet', phaseMs: 0 }
+}
+const glyphPulseStyleStandIn = g => g && g.admitted
+  ? { animation: `wf-pulse var(${g.token}) var(--ease-breathe) infinite`, animationDelay: `${g.phaseMs}ms` }
+  : null
+const { Vitals } = new Function('EDGE_TONE', 'METER_TONE', 'jsx', 'jsxs', 'Fragment', 'glyphMotion', 'glyphPulseStyle',
   `${statusLine[0]}\n${vm[1]}\n${grab('Vitals')}; return { Vitals }`)(
-  EDGE_TONE, { 'on-track': 'R' }, jsx, jsxs, 'Frag')
+  EDGE_TONE, { 'on-track': 'R' }, jsx, jsxs, 'Frag', glyphMotionStandIn, glyphPulseStyleStandIn)
 {
   const now = () => Date.now() / 1000
   const t = row => texts(Vitals({ m: row, live: true, cost: true }))
-  const pulses = row => walk(Vitals({ m: row, live: true, cost: true }))
-    .filter(n => typeof n.props?.className === 'string' && n.props.className.includes('animate-pulse')).length
+  const pulses = row => walk(Vitals({ m: row, live: true, cost: true, motionId: 'glyph:sandbox-beat' }))
+    .filter(n => String(n.props?.style?.animation || '').includes('wf-pulse')).length
 
   // fresh: <=5 s activity — the seconds ride and the glyph pulses
   assert.ok(t({ last_activity: now() - 3, api_calls: 4 }).some(x => /^\d?s$/.test(x)), 'fresh heartbeat shows seconds')

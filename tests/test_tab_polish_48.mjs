@@ -16,8 +16,10 @@
  *    (done/failed/stopped/skipped) has pulseMs === null && shadow === null —
  *    terminal states stop every animation. failed keeps a red TINT (its glow
  *    is static, so it is not a "shadow" field — a dead node stays loud).
- *  - Edges: running edges flow; items_from data edges shimmer only WHILE the
- *    consumer runs; FanStack links animate only while live.
+ *  - Edges: W5 (bd_2026-11-13-lv1) — the flow/shimmer overlays admit ONLY on
+ *    an explicit local activity stamp (a running endpoint alone is not
+ *    transfer), ride the registered --dur-flow token and are labelled
+ *    simulated; FanStack links are static (RC ch4).
  *  - Hoisted <style> ONLY: one injector, href constant for React 19 dedupe,
  *    pulse keyframes wrapped in @media (prefers-reduced-motion: no-preference).
  *  - Banned shapes: no document.* / addEventListener, no novel bracket
@@ -162,13 +164,19 @@ for (const s of new Set(CARD_STATES)) {
   const t = NODE_TONE.running
   assert.ok(typeof t.color === 'string' && t.color.includes('--ui-accent'), 'running colour rides the accent theme var')
   assert.ok(typeof t.shadow === 'string' && t.shadow.length > 0, 'running carries a glow shadow')
-  assert.equal(typeof t.pulseMs, 'number', 'running carries a pulse period')
+  // W5 (bd_2026-11-13-lv1): every pulse period is DERIVED from the registered
+  // token table — the raw 900 (running) and the raw gate durMs are retired.
+  assert.equal(t.pulseMs, 2000, 'running.pulseMs is the parsed --dur-pulse-fresh (registered, derived — no raw 900)')
   assert.equal(t.calm, false, 'running is not calm')
-  assert.ok(t.gate && typeof t.gate.keyframes === 'string' && /border-color/.test(t.gate.keyframes),
+  assert.ok(NODE_TONE.held.gate && typeof NODE_TONE.held.gate.keyframes === 'string' && /border-color/.test(NODE_TONE.held.gate.keyframes),
     'held nag = a BORDER pulse (the gate keyframe animates border-color)')
-  assert.equal(NODE_TONE.held.pulseMs, t.gate.durMs, 'held.pulseMs is the hoisted gate-pulse duration (one source)')
-  assert.ok(t.breathe && /opacity/.test(t.breathe.keyframes), 'waiting breathes on the dashed outline (opacity keyframe)')
-  assert.equal(NODE_TONE.waiting.pulseMs, t.breathe.durMs, 'waiting.pulseMs is the breathe duration')
+  assert.ok(!('durMs' in NODE_TONE.held.gate), 'the nag spec carries NO raw duration — the token is its only source (W5)')
+  assert.equal(NODE_TONE.held.pulseMs, 4000, 'held.pulseMs is the parsed --dur-attention (one source)')
+  assert.equal(NODE_TONE.held.gate.token, '--dur-attention', 'the spec names the registered token, it does not restate it')
+  // W5: pending -> None (DESIGN Round 10 matrix) — the breathe entry is fully
+  // retired: no spec object, no period, dead CSS keyframe deleted with it.
+  assert.equal(NODE_TONE.waiting.breathe, null, 'waiting breathes NOTHING (pending -> None, W5)')
+  assert.equal(NODE_TONE.waiting.pulseMs, null, 'waiting carries no pulse period')
 }
 // terminal calm is a HARD law: pulseMs null AND shadow null for EVERY terminal
 // state in the table, not only the three the issue names.
@@ -200,14 +208,20 @@ assert.ok(/rgba?\(/.test(NODE_TONE.failed.borderColor) || /color-mix/.test(NODE_
   for (const s of ['running', 'done', 'held', 'failed', 'pending']) {
     assert.ok(edgeToneSrc.includes(NODE_TONE[s].color), `NODE_TONE.${s}.color equals the EDGE_TONE.${s} value (extracted, not invented)`)
   }
-  // 2b. Dot keeps its ui tone, and it rides the table: running keeps the
-  // animate-pulse span (pre-existing behaviour), every other state renders
-  // exactly ONE StatusDot whose tone IS the table's ui column.
+  // 2b. Dot keeps its ui tone, and it rides the table: W5 (bd_2026-11-13-lv1)
+  // binds the running dot to the ONE allocator — a bare running status admits
+  // NO effect (the old host animate-pulse utility is gone); a pulse requires
+  // the record's own activity evidence and then rides the hoisted wf-pulse.
   for (const [status, ui] of [['running', 'accent'], ['held', 'warn'], ['done', 'good'], ['failed', 'bad'], ['stopped', 'muted'], ['pending', 'muted'], ['skipped', 'muted']]) {
     assert.equal(NODE_TONE[status].ui, ui, `NODE_TONE.${status}.ui is the StatusDot tone Dot still uses`)
     if (status === 'running') {
-      const pulses = findBy(mod.Dot({ status }), n => typeof n.props?.className === 'string' && n.props.className.includes('animate-pulse'))
-      assert.equal(pulses.length, 1, 'Dot(running) keeps exactly one pulsing live-dot')
+      const bare = mod.Dot({ status })
+      assert.ok(bare, 'Dot(running) still renders')
+      const pulses = findBy(bare, n => typeof n.props?.className === 'string' && n.props.className.includes('animate-'))
+      assert.equal(pulses.length, 0, 'W5: no host animate-* class on any dot')
+      assert.equal(bare.props['data-motion'], 'spill:unevidenced', 'running alone admits no effect, disclosed on the element')
+      const evidenced = mod.Dot({ status, metrics: { last_activity: Math.floor(Date.now() / 1000) }, motionId: 'glyph:polish:run' })
+      assert.ok(String(evidenced.props.style.animation).includes('wf-pulse var(--dur-pulse-fresh)'), 'with fresh evidence the dot pulses on the registered fresh token')
       continue
     }
     // the stub StatusDot's element type is the string 'StatusDot' (the plugin
@@ -246,15 +260,22 @@ assert.ok(/rgba?\(/.test(NODE_TONE.failed.borderColor) || /color-mix/.test(NODE_
 }
 
 // =================================================================================
-// 3. edgeFlowPolicy: flows while the UPSTREAM runs; items_from data edges
-//    shimmer ONLY WHILE the consumer runs; terminals never animate
+// 3. edgeFlowPolicy: W5 (bd_2026-11-13-lv1) — flow/shimmer admit ONLY on an
+//    explicit local activity stamp (a running endpoint alone is not proof of
+//    transfer); terminals never animate.
 // =================================================================================
 {
   assert.equal(typeof mod.edgeFlowPolicy, 'function', 'edgeFlowPolicy is an exported pure decision')
+  const act = ts => ({ ts, alive: true })
+  const NOW = Date.now()
+  assert.deepEqual(mod.edgeFlowPolicy('running', 'pending', false, true, act(NOW - 2000)),
+    { flow: true, shimmer: false, dead: false, dash: '6 4', simulated: true }, 'running upstream WITH a local activity stamp flows, labelled simulated')
   assert.deepEqual(mod.edgeFlowPolicy('running', 'pending', false),
-    { flow: true, shimmer: false, dead: false, dash: '6 4' }, 'running upstream flows with the marching dash')
+    { flow: false, shimmer: false, dead: false, dash: '6 4' }, 'a running source ALONE no longer flows (false transfer retired)')
+  assert.deepEqual(mod.edgeFlowPolicy('done', 'running', true, true, act(NOW - 2000)),
+    { flow: false, shimmer: true, dead: false, dash: '6 4', simulated: true }, 'items_from edge shimmers (marching dash — a null dash would be an invisible shimmer) only on the consumer stamp')
   assert.deepEqual(mod.edgeFlowPolicy('done', 'running', true),
-    { flow: false, shimmer: true, dead: false, dash: '6 4' }, 'items_from edge shimmers (marching dash — a null dash would be an invisible shimmer) while the consumer runs')
+    { flow: false, shimmer: false, dead: false, dash: null }, 'a running consumer without a stamp is calm (no inferred arrival)')
   assert.deepEqual(mod.edgeFlowPolicy('done', 'pending', true),
     { flow: false, shimmer: false, dead: false, dash: null }, 'items_from edge is calm when the consumer is NOT running')
   assert.deepEqual(mod.edgeFlowPolicy('done', 'done', true),
@@ -300,29 +321,32 @@ assert.ok(/rgba?\(/.test(NODE_TONE.failed.borderColor) || /color-mix/.test(NODE_
 const cardProps = (def, st, gate, selected = false, hovered = false) =>
   mod.NodeCard({ runId: 'r', def, st, gate, owner: {}, events: [], selected, hovered })
 {
-  // running: accent glow + the live dot pulse; NO breathe/gate animation
+  // running: accent glow + the evidence-gated live dot (W5 binding)
   const run = render(cardProps(NODES[0], STATES.gen, null))
   assert.equal(run.props.style.boxShadow, NODE_TONE.running.shadow, 'running card glow IS NODE_TONE.running.shadow')
   assert.equal(run.props.style.borderColor, NODE_TONE.running.borderColor, 'running border from the table')
   assert.ok(!run.props.style.animation, 'running card itself carries no CSS animation (the glow + dot pulse are enough)')
-  const pulseDots = findBy(run, n => typeof n.props?.className === 'string' && n.props.className.includes('animate-pulse'))
-  assert.ok(pulseDots.length >= 1, 'running card keeps the live-dot pulse')
+  const glyphDots = findBy(run, n => n.props?.['data-motion-id'] === 'glyph:r:gen')
+  assert.equal(glyphDots.length, 1, 'running card carries exactly one glyph effect on the node Dot')
+  assert.equal(glyphDots[0].props['data-motion'], 'admitted:active', 'the fresh stamp in STATES.gen evidences the claim')
+  assert.ok(String(glyphDots[0].props.style.animation).includes('wf-pulse var(--dur-pulse-fresh)'), 'the live-dot pulse rides the hoisted wf-pulse on the registered fresh token')
+  assert.ok(!textOf(run).match(/animate-[a-z-]+/), 'no host animate-* utility remains anywhere in the card')
   // held-at-gate: slow BORDER pulse via the hoisted animation
   const held = render(cardProps(NODES[2], {}, GATE))
   assert.ok(held.props.style.animation?.includes(NODE_TONE.held.gate.name), 'held gate card runs the hoisted border-pulse animation')
-  // W4 (bd_2026-11-13-32i): the nag period/easing ride the REGISTERED tokens —
-  // one vocabulary, no second literal duration source.
+  // W4/W5 (bd_2026-11-13-32i + lv1): the nag period/easing ride the REGISTERED
+  // tokens — one vocabulary, no second literal duration source.
   assert.ok(held.props.style.animation?.includes('var(--dur-attention)'),
     'the nag duration is the registered --dur-attention token')
   assert.ok(held.props.style.animation?.includes('var(--ease-breathe)'),
     'the nag easing is the registered --ease-breathe token')
   assert.equal(held.props.style.animationDelay, '0ms', 'a gate with no recorded hold time claims no recency phase')
   assert.ok(held.props.style.borderColor, 'held border colour from the table')
-  // waiting (pending): faint dashed breathing outline
+  // waiting (pending): W5 — dashed outline, NOTHING moves (pending -> None)
   const wait = render(cardProps(NODES[3], {}, null))
   assert.equal(wait.props.style.borderStyle, 'dashed', 'waiting outline is dashed')
-  assert.ok(wait.props.style.animation?.includes(NODE_TONE.waiting.breathe.name), 'waiting breathes via the hoisted animation')
-  assert.ok(wait.props.style.animation?.includes(`${NODE_TONE.waiting.pulseMs}ms`), 'the breathe period comes from the table')
+  assert.equal(wait.props.style.animation, undefined, 'waiting animates nothing (the breathe is retired)')
+  assert.equal(wait.props['data-motion'], 'none', 'the pending card holds no allocator slot')
   // terminal: NOTHING animates, no glow (calm flat) — except failed's red tint
   const doneCard = render(cardProps(NODES[0], { status: 'done', ms: 1200 }, null))
   assert.ok(!doneCard.props.style.boxShadow, 'done card is flat (no glow)')
@@ -341,10 +365,12 @@ const cardProps = (def, st, gate, selected = false, hovered = false) =>
   const sel = render(cardProps(NODES[0], STATES.gen, null, true))
   assert.ok(sel.props.style.boxShadow.includes('inset 0 0 0 1px'), 'selected ring rides boxShadow as an inset ring (pill F8 precedent, not border)')
   assert.ok(sel.props.style.boxShadow.includes('1px'), 'selected ring is stronger than a 0px stroke')
-  // the card declares a transition (a value like "transform 120ms ease, ..." —
-  // the KEY is `transition`; the value carries the durations) so lift isn't a snap
-  assert.ok(/\d+ms\b.*ease/.test(String(hov.props.style.transition || doneCard.props.style.transition || '')),
-    'the card declares a transition so hover/lift is not a hard snap')
+  // W5: the card declares NO transition — hover/selection/inspection reframe
+  // is immediate (the 120/160ms inline transition is retired with the
+  // running-status pulse inference it rode; a raw transition would also leak
+  // motion past the reduced-motion gate).
+  assert.equal(hov.props.style.transition, undefined, 'no inline transition on the card (instant reframe)')
+  assert.ok(/translateY\(-\d+(?:\.\d+)?px\)/.test(hov.props.style.transform || ''), 'hover still lifts (static transform, lands immediately)')
 }
 
 // =================================================================================
@@ -448,8 +474,9 @@ const cardProps = (def, st, gate, selected = false, hovered = false) =>
   assert.ok(mediaAt >= 0, 'the injector honours prefers-reduced-motion')
   assert.ok(kfAt >= 0, 'the injector carries the pulse keyframes')
   assert.ok(mediaAt < kfAt, 'pulse keyframes live INSIDE the no-preference media block')
-  assert.ok(css.includes(NODE_TONE.held.gate.name) && css.includes(NODE_TONE.waiting.breathe.name),
-    'the hoisted keyframes are the SAME animation names the cards reference')
+  assert.ok(css.includes(NODE_TONE.held.gate.name) && css.includes('wf-pulse'),
+    'the hoisted keyframes are the SAME animation names the surfaces reference (gate nag + the W5 glyph pulse)')
+  assert.ok(!css.includes('wf-breathe'), 'the retired breathe keyframe left with its caller (no dead CSS)')
   assert.ok(/@keyframes\s+[A-Za-z0-9_-]+\s*\{[^}]*border-color/.test(css), 'the gate nag keyframe animates border-color')
   assert.ok(!/position:\s*fixed/.test(css) && !/html\s*\{|body\s*\{/.test(css),
     'the injector styles only plugin-owned classes (no global page styles)')
@@ -506,10 +533,12 @@ const cardProps = (def, st, gate, selected = false, hovered = false) =>
   }
   assert.deepEqual([...seen].sort(), ALLOWED_BRACKET.slice().sort(),
     'no NOVEL bracket Tailwind classes — only the pre-approved #48 allow-list (purged build)')
-  // animate-* whitelist (purged build ships animate-pulse only; anything new must be proven)
+  // W5: the animate-* utility whitelist is now EMPTY — every pulse is a
+  // plugin-owned, allocator-admitted animation on the hoisted keyframes; no
+  // host utility class may sneak motion past the budget or the reduced gate.
   const anim = new Set()
   for (const m of src.matchAll(/\banimate-[a-z-]+/g)) anim.add(m[0])
-  assert.deepEqual([...anim].sort(), ['animate-pulse'], 'the only animate-* class is the proven animate-pulse')
+  assert.deepEqual([...anim].sort(), [], 'no animate-* host class remains anywhere in the plugin (W5 purity)')
   // imports stay the 3 allowed specifiers
   const imports = [...src.matchAll(/^import[\s\S]*? from '([^']+)'/gm)].map(m => m[1])
   assert.deepEqual([...new Set(imports)].sort(), ['@hermes/plugin-sdk', 'react', 'react/jsx-runtime'],
@@ -563,17 +592,24 @@ const cardProps = (def, st, gate, selected = false, hovered = false) =>
     'F3: Pill open ring colour comes from the table too')
 
   // F3 · Dot's running branch consults the table BEFORE its early return.
+  // W5: the running dot carries the ALLOCATOR verdict, not a host class —
+  // running alone (no motionId/evidence) renders the static accent dot.
   const dot = canary.Dot({ status: 'running' })
   assert.equal(dot.props.style.background, CANARY.running.color,
     'F3: Dot(running) colour IS NODE_TONE.running.color at render time (no frozen bg-(--ui-accent) early-return)')
-  assert.ok(/animate-pulse/.test(dot.props.className), 'Dot(running) keeps the pulse')
+  assert.equal(dot.props.style.animation, undefined, 'W5: Dot(running) alone admits no pulse')
+  assert.equal(dot.props['data-motion'], 'spill:unevidenced', 'W5: and the element discloses why')
 
   // F3 · dead arrowhead follows NODE_TONE.failed like the failed stroke does.
   // RC ch4: mkEdges also needs the route-identity pair (real cycle from the
   // canary module, so the canary table probe still moves strokes+heads).
-  const mkEdges = table => new Function('jsx', 'jsxs', 'useId', 'NODE_TONE', 'edgeFlowPolicy', 'routeTint', 'ROUTE_TINTS',
+  const mkEdges = table => new Function('jsx', 'jsxs', 'useId', 'NODE_TONE', 'edgeFlowPolicy', 'routeTint', 'ROUTE_TINTS', 'MOTION', 'motionTokenMs', 'activityTsMs',
     `${grabFn('routeEdge')}\n${grabFn('edgeTone')}\n${grabFn('nodeState')}\n${grabFn('Edges')}; return Edges`)(
-    jsx, jsxs, () => 'probe-0', table, mod.edgeFlowPolicy, canary.routeTint, canary.ROUTE_TINTS)
+    jsx, jsxs, () => 'probe-0', table, mod.edgeFlowPolicy, canary.routeTint, canary.ROUTE_TINTS, canary.MOTION,
+    // W5 sandbox seams: the real token table read + the real stamp law (the
+    // allocator itself is the canary module's ONE instance).
+    t => { const v = canary.MOTION_TOKENS[t]; const m = typeof v === 'string' && /^(\d+)ms$/.exec(v); return m ? Number(m[1]) : null },
+    m => { const la = m && m.last_activity; if (typeof la !== 'number' || !Number.isFinite(la) || la <= 0) return null; const ms = la * 1000; return ms <= Date.now() ? ms : null })
   const deadEdges = mkEdges(C)({
     nodes: [{ id: 'a' }, { id: 'b', after: ['a'] }],
     rects: { a: { x: 0, y: 0, w: 100, h: 40 }, b: { x: 260, y: 0, w: 100, h: 40 } },
@@ -613,16 +649,23 @@ const cardProps = (def, st, gate, selected = false, hovered = false) =>
     ]
     const f4rects = { gen: { x: 0, y: 0, w: 100, h: 40 }, fan: { x: 260, y: 0, w: 100, h: 40 } }
     const E = mkEdges(C)
-    const both = E({ nodes: f4nodes, rects: f4rects, states: { gen: { status: 'done' }, fan: { status: 'running' } }, dataEdges: [{ from: 'gen', to: 'fan' }] })
+    // W5: the shimmer needs the consumer's OWN activity stamp — the record's
+    // last_activity (epoch seconds) is the explicit local edge-arrival event.
+    const fanLive = { status: 'running', metrics: { last_activity: Math.floor(Date.now() / 1000) } }
+    const both = E({ nodes: f4nodes, rects: f4rects, states: { gen: { status: 'done' }, fan: fanLive }, dataEdges: [{ from: 'gen', to: 'fan' }] })
     const groups = both.props.children.filter(n => n.type === 'g')
     assert.equal(groups.length, 1, 'F4: after+items_from dedupes to ONE route (no duplicate group)')
     assert.equal(groups[0].key, 'gen->fan:data', 'F4: the kept route is the DATA-classified one (dedup ORs the flags, never drops them)')
     const f4paths = groups[0].props.children.filter(c => c.type === 'path')
     assert.equal(findBy(f4paths[0], n => n.type === 'animate').length, 1,
-      'F4: producer done -> consumer running renders the <animate> shimmer (the counterexample: base rendered ZERO)')
+      'F4: producer done -> consumer running WITH a stamp renders the <animate> shimmer')
+    assert.equal(f4paths[0].props.children.props.dur, '1.2s', 'W5: the shimmer cycle is the registered --dur-flow, not a raw duration')
     assert.equal(f4paths[0].props.stroke, CANARY.running.color, 'shimmer stroke rides the perturbed table')
     assert.match(String(f4paths[0].props.markerEnd), /-live\)/, 'shimmer edge keeps the live marker')
-    const plain = E({ nodes: f4nodes, rects: f4rects, states: { gen: { status: 'done' }, fan: { status: 'running' } }, dataEdges: [] })
+    const noStamp = E({ nodes: f4nodes, rects: f4rects, states: { gen: { status: 'done' }, fan: { status: 'running' } }, dataEdges: [{ from: 'gen', to: 'fan' }] })
+    const noStampPaths = noStamp.props.children.filter(n => n.type === 'g')[0].props.children.filter(c => c.type === 'path')
+    assert.equal(findBy(noStampPaths[0], n => n.type === 'animate').length, 0, 'W5 counterexample: a running consumer WITHOUT a stamp is calm (inferred arrival retired)')
+    const plain = E({ nodes: f4nodes, rects: f4rects, states: { gen: { status: 'done' }, fan: fanLive }, dataEdges: [] })
     const plainGroups = plain.props.children.filter(n => n.type === 'g')
     assert.equal(plainGroups[0].key, 'gen->fan', 'control: without the items_from link the route is the plain after-edge')
     assert.equal(findBy(plainGroups[0].props.children.filter(c => c.type === 'path')[0], n => n.type === 'animate').length, 0, 'control: a plain done->running route stays calm (classification is what brings the shimmer)')

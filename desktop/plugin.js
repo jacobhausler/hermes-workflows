@@ -359,6 +359,18 @@ const idleS = m => {
   const s = Math.round(Date.now() / 1000 - la)
   return s >= 0 ? s : null
 }
+// The same law expressed in epoch MS for the allocator's phase arithmetic:
+// the record's last_activity (epoch SECONDS) converted, with the invalid /
+// zero-sentinel / FUTURE stamp cases collapsed to null — an unknown time
+// claims no recency cue and (W5) admits no motion. This is the ONLY activity
+// read the running-glyph and edge overlays take: a stored `running` status
+// alone is never proof of life (activityLaw's own comment).
+const activityTsMs = m => {
+  const la = m && m.last_activity
+  if (typeof la !== 'number' || !Number.isFinite(la) || la <= 0) return null
+  const ms = la * 1000
+  return ms <= Date.now() ? ms : null
+}
 const idleCell = idle => idle != null ? `IDLE ${idle}s` : 'IDLE —'
 // 0–30 s = cooking (accent), 30–90 s = watch (warning), >90 s = stalled (danger).
 // Exactly 30 s is warning and exactly 90 s danger — the registered idle-tone
@@ -376,7 +388,7 @@ const idleTone = s => s == null ? EDGE_TONE.pending : s < 30 ? EDGE_TONE.running
  *  #133: live also carries the wall meter word — `● 4s · near-wall` — the read
  *  model's {elapsed_s, wall_s, p95_s, meter} for a running node. Absent stays
  *  absent (never invented); the words are the run_state vocabulary verbatim. */
-function Vitals({ m, live, size, cost, wall }) {
+export function Vitals({ m, live, size, cost, wall, motionId = null }) {
   if (!m) return null
   const fs = size === 'xs' ? 10 : 11
   const sep = jsx('span', { style: { opacity: 0.45 }, children: '·' })
@@ -390,12 +402,23 @@ function Vitals({ m, live, size, cost, wall }) {
   }
   if (m.attempts > 1) parts.push(jsx('span', { title: 'schema/parse retry', children: `↻${exactCount(m.attempts)}` }))
   const s = live ? idleS(m) : null
+  // W5 binding: the beat never rides the host's generic pulse utility (a raw
+  // unregistered period on a class the plugin does not own). The beat is a
+  // running glyph: it goes through glyphMotion like the Dot does — the same
+  // last_activity stamp already feeding the idle seconds, the same registered
+  // fresh/quiet tokens, the same cap. Unknown activity or a denied claim is
+  // the static dot at full opacity, and the IDLE cell's word discloses the
+  // state either way.
+  const beatG = s == null ? null : glyphMotion(motionId, m)
   const beat = live
     ? jsxs('span', {
         title: m.last_desc ? `last: ${m.last_desc}` : 'seconds since the child last did something',
         style: { display: 'inline-flex', alignItems: 'center', gap: 3, color: idleTone(s), fontVariantNumeric: 'tabular-nums' },
         children: [
-          jsx('span', { className: s != null ? 'animate-pulse' : '', style: { display: 'inline-block', width: 6, height: 6, borderRadius: 999, background: idleTone(s) } }),
+          jsx('span', {
+            'data-motion': beatG ? (beatG.admitted ? 'admitted:active' : `spill:${beatG.reason}`) : 'unevidenced',
+            'data-motion-id': motionId || undefined,
+            style: { display: 'inline-block', width: 6, height: 6, borderRadius: 999, background: idleTone(s), ...(glyphPulseStyle(beatG) || {}) } }),
           jsx('span', { children: s == null ? '—' : `${s}s` })
         ]
       })
@@ -434,7 +457,7 @@ function useTick(on) {
 
 /** Per-item peek for the transcript card's FanStrip ONLY. The page's node truth
  *  lives in NodePanel (O2); the tail pre is gone — the log route is the one tail. */
-function ItemDetail({ row, compact }) {
+function ItemDetail({ row, compact, motionIdBase = null }) {
   const pre = (name, text, tone) => text
     ? box('', label(name), jsx('pre', {
         style: { maxHeight: compact ? 160 : '35vh', color: tone || 'var(--ui-text-secondary)' },
@@ -448,12 +471,12 @@ function ItemDetail({ row, compact }) {
   return box(
     'flex flex-col gap-2',
     box('flex items-center gap-2 text-xs',
-      jsx(Dot, { status: row.status }),
+      jsx(Dot, { status: row.status, metrics: m, motionId: motionIdBase ? `${motionIdBase}:${row.index}` : null }),
       jsx('span', { className: 'font-medium', children: `item ${row.index}` }),
       jsx('span', { className: 'text-(--ui-text-tertiary)', children: row.label }),
       jsx(Badge, { variant: 'outline', children: row.status }),
       row.ms ? jsx('span', { className: 'text-(--ui-text-tertiary)', children: fmtDur(row.ms) }) : null,
-      m ? jsx(Vitals, { m, live: row.status === 'running', cost: true }) : null),
+      m ? jsx(Vitals, { m, live: row.status === 'running', cost: true, motionId: motionIdBase ? `${motionIdBase}:${row.index}:beat` : null }) : null),
     lastDesc ? box('text-[0.6875rem] text-(--ui-text-tertiary)', `last: ${lastDesc}`) : null,
     pre('goal', row.goal),
     // WF-02: a cancelled child is not a failure — its reason line rides the
@@ -490,7 +513,7 @@ function ItemChips({ runId, nodeId, rows, picked, size }) {
           color: r.status === 'pending' || r.status === 'skipped' || r.status === 'stopped' || r.status === 'cancelled' ? 'var(--ui-text-tertiary)' : 'var(--ui-text-secondary)',
           textDecoration: r.status === 'skipped' ? 'line-through' : 'none'
         },
-        children: [jsx(Dot, { status: r.status }), jsx('span', { children: r.label }),
+        children: [jsx(Dot, { status: r.status, metrics: m, motionId: `glyph:item:${runId}:${nodeId}:${r.index}` }), jsx('span', { children: r.label }),
           r.status === 'running' && m
             ? jsx('span', { style: { color: idleTone(idle), opacity: 0.9 }, children: `${countCell(calls, '?')}⚡${idle != null ? ` ${idle}s` : ''}` })
             : outTok != null ? jsx('span', { style: { opacity: 0.6 }, children: kfmt(outTok) }) : null]
@@ -617,16 +640,22 @@ function bandRows(cols, availW, widthOf, colGap) {
   return bands
 }
 
-export function Dot({ status }) {
+export function Dot({ status, metrics = null, stale = false, motionId = null }) {
   if (status === 'running') {
-    // #48 F3 (deep review): the running branch consults the ONE table BEFORE
-    // its early return — the accent colour rides an inline style read from
-    // NODE_TONE.running.color at render time, so perturbing the table moves
-    // this dot too (a frozen Tailwind bg-(--ui-accent) class could not).
+    // W5 binding (bd_2026-11-13-lv1): the running glyph no longer rides the
+    // host's generic pulse utility — running status ALONE never admits an
+    // effect. The pulse goes through the ONE allocator off the record's own
+    // last_activity stamp (glyphMotion: fresh/quiet are the registered tokens,
+    // unknown/denied/stale is the static accent dot at full opacity). The
+    // accent colour still reads NODE_TONE.running.color at render time, so a
+    // table perturbation moves this dot too (#48 F3 law unchanged).
+    const g = glyphMotion(motionId, metrics, stale)
     return jsx('span', {
       'aria-hidden': true,
-      className: 'inline-block size-1.5 shrink-0 animate-pulse rounded-full',
-      style: { background: (NODE_TONE.running || NODE_TONE.pending).color }
+      className: 'inline-block size-1.5 shrink-0 rounded-full',
+      'data-motion': g.admitted ? 'admitted:active' : `spill:${g.reason}`,
+      'data-motion-id': motionId || undefined,
+      style: { background: (NODE_TONE.running || NODE_TONE.pending).color, ...(glyphPulseStyle(g) || {}) }
     })
   }
   // #48: the ui tone column of the ONE table is the single source (the old
@@ -781,7 +810,7 @@ function DirectiveBody({ id }) {
       title: pill.template ? `template ${pill.template} — Expand` : 'Expand',
       onClick: () => setOpen(true),
       children: [
-        jsx(Dot, { status: data.status }),
+        jsx(Dot, { status: data.status, metrics: data.metrics || null, stale: !!error, motionId: `glyph:directive:${data.id}` }),
         jsx('span', { className: 'text-xs text-(--ui-text-secondary)', children: pill.collapsedLine }),
         jsx('span', { className: 'text-xs text-(--ui-text-tertiary)', children: '▾' }),
         jsx('button', { type: 'button', title: 'Open in Workflows', className: 'text-xs text-(--ui-text-tertiary)',
@@ -806,7 +835,7 @@ function DirectiveBody({ id }) {
         children: [
           jsxs('span', { style: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '2px 8px' },
             className: 'text-xs text-(--ui-text-secondary)',
-            children: [jsx(Dot, { status: data.status }), ...headerRows[0].map((text, i) => jsx('span', {
+            children: [jsx(Dot, { status: data.status, metrics: data.metrics || null, stale: !!error, motionId: `glyph:directive:${data.id}:head` }), ...headerRows[0].map((text, i) => jsx('span', {
               className: i === 0 ? 'font-medium' : 'text-(--ui-text-tertiary)', children: text
             }, i)),
             jsx('button', { type: 'button', title: 'Collapse', 'aria-label': 'Collapse',
@@ -874,7 +903,7 @@ function FanStrip({ runId, def, rows, picked }) {
         ]
       }) : null,
       jsx(ItemChips, { runId, nodeId: def.id, rows, picked: picked?.index, size: 'sm' }),
-      picked ? jsx(ItemDetail, { row: picked, compact: true }) : null
+      picked ? jsx(ItemDetail, { row: picked, compact: true, motionIdBase: `glyph:item:${runId}:${def.id}` }) : null
     ]
   })
 }
@@ -916,8 +945,10 @@ export function MiniGraph({ detail }) {
     const fo = def.fanout
     const nstate = states[def.id] || null
     const out = nstate?.output
-    // read-once: the guard and the interpolation below share this binding
-    const apiCalls = nstate ? nstate.metrics?.api_calls : null
+    // read-once: one metrics binding feeds the api-cells AND the W5 Dot —
+    // the pill derefs state.metrics exactly once (test_metrics_missing_ui).
+    const nmetrics = nstate?.metrics ?? null
+    const apiCalls = nmetrics ? nmetrics.api_calls : null
     const items = out && Array.isArray(out.all_results) ? out.all_results.length : out && Array.isArray(out.items) ? out.items.length : Array.isArray(fo?.items) ? fo.items.length : null
     const isOpen = !!fo && openDef?.id === def.id
     const label = jsxs('span', {
@@ -940,7 +971,7 @@ export function MiniGraph({ detail }) {
         cursor: fo ? 'pointer' : undefined
       },
       children: [
-        jsx(Dot, { status: st }),
+        jsx(Dot, { status: st, metrics: nmetrics, motionId: `glyph:minigraph:${detail.id}:${def.id}` }),
         jsx('span', { children: def.id }),
         st === 'running' && apiCalls != null
           ? jsx('span', { title: 'api calls', style: { fontSize: 9, color: EDGE_TONE.running }, children: `${apiCalls}⚡` })
@@ -967,7 +998,7 @@ export function MiniGraph({ detail }) {
     ref,
     style: { position: 'relative', display: 'block', maxWidth: '100%', padding: MINI.pad },
     children: [
-      jsx(Edges, { nodes, rects, states, gate }),
+      jsx(Edges, { nodes, rects, states, gate, runId: detail.id }),
       ...bands.map((row, bi) =>
         jsxs('span', {
           style: { position: 'relative', display: 'flex', alignItems: 'flex-start', gap: MINI.colGap, minWidth: 0 },
@@ -1157,11 +1188,17 @@ export function railModel(ownedRunsList) {
   }
 }
 
-export function Pill({ run, sid, open, onToggle, suppressGates }) {
+export function Pill({ run, sid, open, onToggle, suppressGates, insertion = null }) {
   // #48 F3 (deep review): the ACTUAL Pill (not just pillModel) borders itself
   // from the ONE tone table — border colour and the open ring both read the
   // run's NODE_TONE entry at render time; a table perturbation moves them.
   const tone = NODE_TONE[run?.status] || NODE_TONE.pending
+  // W5: an admitted insertion reveal rides the registered --dur-insert token
+  // with its reserved delay; a spilled pill simply MOUNTS (final state, no
+  // hidden queue). Identity/status text is on screen either way.
+  const insAnim = insertion && insertion.admitted
+    ? { animation: 'wf-insert var(--dur-insert) var(--ease-settle) both', animationDelay: `${insertion.delayMs}ms` }
+    : null
   // A div, not a <button>: held pills embed GateActions whose option buttons
   // are SDK Buttons — button-in-button is invalid DOM nesting and every gate
   // click would bubble into the pill's toggle (review #28 F6). The label span
@@ -1189,7 +1226,9 @@ export function Pill({ run, sid, open, onToggle, suppressGates }) {
       // boxShadow as a centered color-mix of the state's accent).
       border: `1px solid ${tone.borderColor}`,
       boxShadow: open ? `inset 0 0 0 1px color-mix(in srgb, ${tone.color} 55%, transparent)` : undefined,
+      ...(insAnim || {}),
     },
+    'data-motion': insertion ? (insertion.admitted ? `admitted:${insertion.delayMs ? 'reserved' : 'active'}` : `spill:${insertion.reason}`) : undefined,
     children: [
       jsxs('span', {
         role: 'button',
@@ -1208,7 +1247,7 @@ export function Pill({ run, sid, open, onToggle, suppressGates }) {
           overflow: 'hidden', maxWidth: 220,
         },
         children: [
-          jsx(Dot, { status: run.status }),
+          jsx(Dot, { status: run.status, metrics: run.metrics || null, motionId: `glyph:pill:${run.id}` }),
           jsx('span', { style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }, children: displayTitle(run) }),
           jsx('span', { style: { fontVariantNumeric: 'tabular-nums', opacity: 0.7 }, children: pillProgress(run) }),
         ],
@@ -1228,8 +1267,16 @@ export function Pill({ run, sid, open, onToggle, suppressGates }) {
  *  +N overflow affordance beyond the cap. Renders nothing for an empty set —
  *  never an empty bordered box. */
 export function PillRail({ runs, sid, railOpen, onPill, suppressGates }) {
+  // W5 insertion binding: the hook sits ABOVE the early return (stable hook
+  // order, #48 law). The first render is a snapshot — mounts still; only ids
+  // NEW to this surface since the last render walk the allocator's reserved
+  // insertion ladder (<=30ms gaps, <=90ms total, inside N=12); spills mount
+  // the final static state immediately.
+  const insRef = useRef(null)
   const { pills, overflow } = railModel(runs)
+  const plan = insertionMotion(MOTION, insRef, pills.map(p => p.id))
   if (!pills.length) return null
+  const insBy = Object.fromEntries(plan.map(r => [r.id, r]))
   const byId = Object.fromEntries((runs || []).map(r => [r.id, r]))
   return jsxs('div', {
     style: {
@@ -1241,6 +1288,7 @@ export function PillRail({ runs, sid, railOpen, onPill, suppressGates }) {
         run: byId[p.id] || { id: p.id, name: p.label, status: p.status }, sid,
         open: !!(railOpen && railOpen.sid === sid && railOpen.runId === p.id),
         suppressGates,
+        insertion: insBy[p.id],
         onToggle: () => onPill?.(p.id),
       }, p.id)),
       overflow > 0
@@ -1612,6 +1660,7 @@ export function SessionStrip() {
   const trayExpanded = !!(trayState && trayState.expanded)
   const railRef = useRef(null)
   const trayRef = useRef(null)
+  const foldSeenRef = useRef(null)
   // est-z717 settings gate (in-memory atom, hook order unconditional): null =
   // unanswered => HIDDEN (default OFF); register()'s bootstrap fills it from
   // GET /settings. PillRail stays mounted regardless (always-on surface).
@@ -1643,6 +1692,12 @@ export function SessionStrip() {
   const { active, terminalFold, terminalTotal } = splitRuns(owned)
   const openRun = id => { $selRun.set(id); host.navigate('/workflows') }
   const folded = foldOpen !== pairKey
+  // W5 fold binding: an AUTOMATIC increase of the clean-finished count (a run
+  // settled while the group sat folded) is the one fold event that animates —
+  // a single --dur-collapse settle toward the disclosure, consumed once per
+  // (group, count) event identity. The user's own toggle is immediate
+  // disclosure (--dur-expand: 0ms; no tween on the chevron).
+  const foldAnim = foldBumpMotion(MOTION, foldSeenRef, terminalTotal, `collapse:${pairKey}`)
   return jsxs('div', {
     ref: railRef,
     className: 'flex flex-col gap-0.5 border-b border-(--ui-stroke-secondary) px-3 py-1',
@@ -1687,7 +1742,9 @@ export function SessionStrip() {
       terminalTotal
         ? jsxs('button', {
             type: 'button', className: 'text-[0.6875rem] text-(--ui-text-tertiary)',
-            style: { cursor: 'pointer', background: 'none', border: 'none', padding: 0, textAlign: 'left' },
+            style: { cursor: 'pointer', background: 'none', border: 'none', padding: 0, textAlign: 'left',
+              ...(foldAnim ? { animation: 'wf-collapse var(--dur-collapse) var(--ease-settle)', animationDelay: `${foldAnim.phaseMs}ms` } : null) },
+            'data-motion': foldAnim ? 'admitted:active' : undefined,
             onClick: () => $stripFold.set(folded ? pairKey : null),
             // WF-05 (QA 2026-10-27): the chevron answers the CURRENT state —
             // ▸ points right while collapsed, ▾ opens downward when expanded
@@ -1893,8 +1950,10 @@ export function NodeCard({ runId, def, st, gate, selected, owner, events, answer
   // its border. Ship 2.0 (bd_2026-11-13-32i): every animation this card may
   // run is admitted by the ONE motion allocator (W4) — a denied or preempted
   // effect renders its truthful static state IMMEDIATELY (spill, never a
-  // hidden queue). The pending breathe stays the incumbent #48 animation
-  // until the W5 binding wave applies DESIGN Round 10 ("pending -> None").
+  // hidden queue). W5 binding (bd_2026-11-13-lv1): the incumbent pending
+  // breathe is RETIRED — DESIGN Round 10 matrix, pending -> None; the held
+  // border luminance is now the card's only self-owned animation, and the
+  // running glyph inside (Dot + the beat) pulses only off explicit activity.
   const tone = NODE_TONE[status] || NODE_TONE.pending
   // Attention motion goes through the ONE allocator (W4): a denied or
   // preempted claim renders the constant amber border — the static
@@ -1905,16 +1964,9 @@ export function NodeCard({ runId, def, st, gate, selected, owner, events, answer
   const heldFromGate = liveGate ? parseTime(liveGate.held_at ?? liveGate.heldAt ?? liveGate.at ?? liveGate.held) : 0
   const heldEv = heldFromGate ? 0 : (events || []).find(e => e && e.event === 'gate.held' && e.node === def.id)
   const heldAt = heldFromGate || (heldEv ? parseTime(heldEv.ts) : 0)
-  const motionAnim = tone.calm || status === 'running' ? null
-    : status === 'held' && tone.gate
-      ? { spec: tone.gate, anim: 'var(--dur-attention) var(--ease-breathe)',
-          claim: MOTION.claim({ id: `attention:${runId}:${def.id}`, cls: 'attention', ts: heldAt || null, durToken: '--dur-attention' }) }
-      : tone.breathe
-        ? { spec: tone.breathe, anim: `${tone.pulseMs}ms ease-in-out`,
-            // The incumbent pending breathe keeps its table period until the
-            // W5 binding wave retires it (DESIGN Round 10: pending -> None).
-            claim: MOTION.claim({ id: `attention:${runId}:${def.id}:breathe`, cls: 'attention', ts: null, durMs: tone.pulseMs }) }
-        : null
+  const motionAnim = tone.calm || status !== 'held' || !tone.gate ? null
+    : { spec: tone.gate, anim: `var(${tone.gate.token}) var(--ease-breathe)`,
+        claim: MOTION.claim({ id: `attention:${runId}:${def.id}`, cls: 'attention', ts: heldAt || null, durToken: tone.gate.token }) }
   const animation = motionAnim && motionAnim.claim.admitted
     ? `${motionAnim.spec.name} ${motionAnim.anim} infinite`
     : undefined
@@ -1945,7 +1997,12 @@ export function NodeCard({ runId, def, st, gate, selected, owner, events, answer
           ? [glow, `inset 0 0 0 1px color-mix(in srgb, ${tone.color} 55%, transparent)`].filter(Boolean).join(', ')
           : glow || undefined,
         transform: hovered && !tone.calm ? 'translateY(-1px)' : undefined,
-        transition: 'transform 120ms ease, box-shadow 160ms ease, border-color 160ms ease',
+        // W5: the 120/160ms hover-lift TRANSITION is retired — inspection and
+        // selection reframe instantly (DESIGN Round 10 matrix: telemetry /
+        // selection / resize / inspection reframe -> None), and a raw inline
+        // transition is not reduced-motion-gated, so it was one way for a
+        // calm-asking user to still get animated chrome. The lift itself
+        // stays; it lands immediately.
         animation,
         // Timestamp-aligned phase (DESIGN Round 10): the offset derives from
         // the ORIGINAL hold event, so redraws and remounts cannot restart it.
@@ -1961,11 +2018,11 @@ export function NodeCard({ runId, def, st, gate, selected, owner, events, answer
             // the handler and the click dies silently (non-stack nodes never
             // opened the panel). Never call .get() on an atom.
             onClick: () => $selNode.set(selected ? null : { runId, nodeId: def.id }),
-            className: 'w-full cursor-pointer px-2 py-1.5 text-left transition-colors hover:text-foreground',
+            className: 'w-full cursor-pointer px-2 py-1.5 text-left hover:text-foreground',
             children: [
               box(
                 'flex items-center gap-1.5',
-                jsx(Dot, { status }),
+                jsx(Dot, { status, metrics: st?.metrics || null, motionId: `glyph:${runId}:${def.id}` }),
                 jsx(Codicon, { name: isGate ? 'eye' : 'robot', size: '0.8em', className: 'text-(--ui-text-tertiary)' }),
                 box('min-w-0 flex-1 truncate text-xs font-medium', def.id)
               ),
@@ -1984,7 +2041,7 @@ export function NodeCard({ runId, def, st, gate, selected, owner, events, answer
                 def.profile ? jsx('span', { title: `as @${def.profile}`, children: `as @${def.profile}` }) : null,
                 modelTag(def) ? jsx('span', { title: def.model, style: { marginLeft: 'auto', opacity: 0.85 }, children: modelTag(def) }) : null
               ),
-              m ? box('mt-1', jsx(Vitals, { m, live: status === 'running', size: 'xs' })) : null
+              m ? box('mt-1', jsx(Vitals, { m, live: status === 'running', size: 'xs', motionId: `glyph:${runId}:${def.id}:beat` })) : null
             ]
           },
           'head'
@@ -2249,21 +2306,111 @@ export const MOTION = createMotionAllocator()
 // renderer. The only global the plugin ever assigns; never read by the UI.
 globalThis.__wfMotion = MOTION
 
-const GATE_PULSE = {
-  // The held-gate nag period is the registered --dur-attention token (4000ms),
-  // not a second source (W4: no unregistered durations on new motion).
-  name: 'wf-gate-nag', durMs: 4000,
-  keyframes: '@keyframes wf-gate-nag {\n  0%, 100% { border-color: var(--ui-warning, var(--ui-accent)); }\n  50% { border-color: color-mix(in srgb, var(--ui-warning, var(--ui-accent)) 30%, transparent); }\n}'
-}
-const BREATHE = {
-  name: 'wf-breathe', durMs: 2600,
-  keyframes: '@keyframes wf-breathe {\n  0%, 100% { opacity: 1; }\n  50% { opacity: 0.45; }\n}'
+// W5 binding (bd_2026-11-13-lv1): the OS reduced-motion preference drives the
+// allocator itself, not just the CSS media gate — SMIL <animate> children and
+// inline animation strings are NOT gated by @media blocks, so the ONLY way a
+// reduced user sees zero motion on those surfaces is the allocator refusing
+// every claim. The listener rides the MediaQueryList (never window/document:
+// the #48 listener budget law holds); where matchMedia is absent (node
+// behavior tests, headless module loads) the allocator keeps its default.
+if (typeof globalThis.matchMedia === 'function') {
+  try {
+    const reducedMq = globalThis.matchMedia('(prefers-reduced-motion: reduce)')
+    const applyReduced = () => MOTION.setReduced(reducedMq.matches)
+    applyReduced()
+    if (typeof reducedMq.addEventListener === 'function') reducedMq.addEventListener('change', applyReduced)
+    else if (typeof reducedMq.addListener === 'function') reducedMq.addListener(applyReduced)
+  } catch { /* an environment without media queries keeps the default: no inferred motion */ }
 }
 
+// The held-gate nag keyframe set (W5: the old GATE_PULSE spec is retired —
+// the raw duration field it carried was a second source beside the registered
+// --dur-attention token. The border-luminance keyframe survives; the
+// DURATION has exactly one owner now, the token table.)
+const GATE_NAG = {
+  name: 'wf-gate-nag', token: '--dur-attention',
+  keyframes: '@keyframes wf-gate-nag {\n  0%, 100% { border-color: var(--ui-warning, var(--ui-accent)); }\n  50% { border-color: color-mix(in srgb, var(--ui-warning, var(--ui-accent)) 30%, transparent); }\n}'
+}
+// The running-glyph pulse (DESIGN Round 10 matrix rows 1-2 + the incumbent
+// port law): the accent status glyph ONLY — never text, metrics or the card —
+// cycling opacity to the .5 midpoint, which is the FINAL.md quiet-pulse law
+// (token duration, .5 midpoint, no raw period anywhere).
+const PULSE = {
+  name: 'wf-pulse',
+  keyframes: '@keyframes wf-pulse {\n  0%, 100% { opacity: 1; }\n  50% { opacity: 0.5; }\n}'
+}
+// One-shot insertion reveal (matrix: new run after an explicit arrow) and
+// clean-finished group fold. Both settle into the final static state; the
+// consumption ledger makes them once-per-event, never once-per-render.
+const INSERT = {
+  name: 'wf-insert',
+  keyframes: '@keyframes wf-insert {\n  from { opacity: 0; transform: translateY(-2px); }\n  to { opacity: 1; transform: none; }\n}'
+}
+const COLLAPSE = {
+  name: 'wf-collapse',
+  keyframes: '@keyframes wf-collapse {\n  from { opacity: 0.4; transform: translateY(-1px); }\n  to { opacity: 1; transform: none; }\n}'
+}
+
+// glyphMotion: the ONE running-glyph admission path (Dot + the Vitals beat
+// call it; nothing pulses off a bare status). Evidence = the record's own
+// last_activity stamp (activityTsMs) — missing, invalid, future or a stale/
+// disconnected surface is unknown activity and renders the static state.
+// The recency class comes from the allocator's recencyToken (<=5s fresh,
+// >5s quiet — the registered tokens, never an invented period); a denied or
+// preempted claim spills to the same full-opacity static glyph immediately.
+function glyphMotion (motionId, metrics, stale = false) {
+  if (!motionId) return { admitted: false, reason: 'unevidenced' }
+  const ts = stale ? null : activityTsMs(metrics)
+  const rec = MOTION.recencyToken({ ts, alive: ts != null })
+  if (rec.unknown) return { admitted: false, reason: 'unknown-activity' }
+  const claim = MOTION.claim({ id: motionId, cls: 'glyph', ts, durToken: rec.token })
+  return claim.admitted
+    ? { admitted: true, token: rec.token, phaseMs: claim.phaseMs }
+    : { admitted: false, reason: claim.reason }
+}
+// The CSS for an admitted glyph pulse (Dot + Vitals beat share it).
+function glyphPulseStyle (g) {
+  return g && g.admitted
+    ? { animation: `wf-pulse var(${g.token}) var(--ease-breathe) infinite`, animationDelay: `${g.phaseMs}ms` }
+    : null
+}
+
+// insertionMotion: the pill-rail side of planInsertion (the ONLY delayed-
+// effect scheduler). First render of a surface is a snapshot — it mounts
+// still (no animated finished state). After that, ids NEW to this surface
+// walk the reserved <=30ms / <=90ms ladder; the rest spill to static now.
+export function insertionMotion (M, ref, ids, ts = Date.now ()) {
+  const prev = ref.current
+  ref.current = new Set(ids)
+  if (prev == null) return []
+  const fresh = ids.filter(id => !prev.has(id))
+  return fresh.length ? M.planInsertion(fresh, { ts }) : []
+}
+// foldBumpMotion: the clean-finished group fold one-shot. Only an AUTOMATIC
+// increase of the folded count (a run finished while its group sat folded)
+// earns the --dur-collapse settle; a user toggle is immediate disclosure
+// (--dur-expand: 0ms) and never animates.
+export function foldBumpMotion (M, ref, total, idBase, ts = Date.now ()) {
+  const prev = ref.current
+  ref.current = total
+  if (prev == null || total <= prev) return null
+  const claim = M.claim({
+    id: `${idBase}:fold`, cls: 'transition', ts, durToken: '--dur-collapse',
+    once: true, eventKey: `${idBase}:${total}@${ts}`
+  })
+  return claim.admitted ? { phaseMs: claim.phaseMs } : null
+}
+
+// W5 binding (bd_2026-11-13-lv1): the pulseMs column carries ONLY durations
+// derived from the registered token table (motionTokenMs), never a raw
+// period; the pending/running breathe entry is RETIRED (DESIGN Round 10
+// matrix: pending -> None), so `breathe` is null everywhere and the running
+// glyph pulse lives in Dot/Vitals through glyphMotion — the tone table states
+// the palette and the registered recency period, the allocator decides.
 export const NODE_TONE = {
-  pending: { color: EDGE_TONE.pending, borderColor: EDGE_TONE.pending, shadow: null, pulseMs: BREATHE.durMs, calm: false, ui: 'muted', gate: null, breathe: BREATHE },
-  running: { color: EDGE_TONE.running, borderColor: EDGE_TONE.running, shadow: '0 0 10px 0 color-mix(in srgb, var(--ui-accent) 30%, transparent)', shadowHover: '0 2px 14px 1px color-mix(in srgb, var(--ui-accent) 45%, transparent)', pulseMs: 900, calm: false, ui: 'accent', gate: GATE_PULSE, breathe: BREATHE },
-  held: { color: EDGE_TONE.held, borderColor: EDGE_TONE.held, shadow: '0 0 10px 0 color-mix(in srgb, var(--ui-warning, var(--ui-accent)) 26%, transparent)', pulseMs: GATE_PULSE.durMs, calm: false, ui: 'warn', gate: GATE_PULSE, breathe: null },
+  pending: { color: EDGE_TONE.pending, borderColor: EDGE_TONE.pending, shadow: null, pulseMs: null, calm: false, ui: 'muted', gate: null, breathe: null },
+  running: { color: EDGE_TONE.running, borderColor: EDGE_TONE.running, shadow: '0 0 10px 0 color-mix(in srgb, var(--ui-accent) 30%, transparent)', shadowHover: '0 2px 14px 1px color-mix(in srgb, var(--ui-accent) 45%, transparent)', pulseMs: motionTokenMs('--dur-pulse-fresh'), calm: false, ui: 'accent', gate: null, breathe: null },
+  held: { color: EDGE_TONE.held, borderColor: EDGE_TONE.held, shadow: '0 0 10px 0 color-mix(in srgb, var(--ui-warning, var(--ui-accent)) 26%, transparent)', pulseMs: motionTokenMs(GATE_NAG.token), calm: false, ui: 'warn', gate: GATE_NAG, breathe: null },
   done: { color: EDGE_TONE.done, borderColor: EDGE_TONE.done, shadow: null, pulseMs: null, calm: true, ui: 'good', gate: null, breathe: null },
   failed: { color: EDGE_TONE.failed, borderColor: 'color-mix(in srgb, var(--ui-danger, var(--ui-text-tertiary)) 70%, transparent)', shadow: null, pulseMs: null, calm: true, ui: 'bad', gate: null, breathe: null },
   stopped: { color: EDGE_TONE.skipped, borderColor: EDGE_TONE.skipped, shadow: null, pulseMs: null, calm: true, ui: 'muted', gate: null, breathe: null },
@@ -2297,7 +2444,11 @@ function fnv1a64 (text) {
 // The consolidated token block: the fifteen registered dur/ease tokens are
 // the only motion vocabulary the plugin ships (DESIGN Round 10 table).
 const MOTION_TOKEN_CSS = `:root {\n${Object.keys(MOTION_TOKENS).map(k => `  ${k}: ${MOTION_TOKENS[k]};`).join('\n')}\n}`
-export const MOTION_CSS = `${MOTION_TOKEN_CSS}\n@media (prefers-reduced-motion: no-preference) {\n${GATE_PULSE.keyframes}\n${BREATHE.keyframes}\n}`
+// W5 emission inventory (every rule behind the reduced-motion gate): the gate
+// nag border, the .5-midpoint glyph pulse, the insertion reveal and the fold
+// settle. The old wf-breathe keyframe left with its pending-card caller
+// (dead-CSS law: no animation no caller references survives).
+export const MOTION_CSS = `${MOTION_TOKEN_CSS}\n@media (prefers-reduced-motion: no-preference) {\n${GATE_NAG.keyframes}\n${PULSE.keyframes}\n${INSERT.keyframes}\n${COLLAPSE.keyframes}\n}`
 export function styleHrefFor (css) { return `hermes-workflows.${fnv1a64(css)}.css` }
 export const STYLE_HREF = styleHrefFor(MOTION_CSS)
 
@@ -2309,14 +2460,22 @@ export function PolishStyles() {
 }
 
 /** Pure edge-flow decision (exported so node can pin the truth table):
- *  running upstream => march; items_from data edge => shimmer ONLY while the
- *  consumer runs (data arriving is the live moment, calm after); dead dashed,
- *  never animated, when the upstream failed OR — F5 (#48 deep review) — the
- *  downstream can no longer run (`canRun === false`, the canRun-style
- *  readiness the read model derives from dependencies + blocked_by) and its
- *  upstream is settled: done | failed | blocked. Pending => faint dots;
- *  everything else calm. */
-export function edgeFlowPolicy(upState, downState, dataFlow = false, canRun = true) {
+ *  W5 BINDING (bd_2026-11-13-lv1): a running endpoint alone NEVER flows —
+ *  "flow inferred from running sources" is false transfer (DESIGN Round 10,
+ *  rejected alternatives). The march/shimmer overlay admits ONLY on explicit
+ *  local edge activity: `activity = { ts, alive }` where ts is the feeding/
+ *  receiving record's own last_activity stamp in epoch ms (activityTsMs) and
+ *  alive is the endpoint's live status. Known activity + running upstream =>
+ *  march; items_from data edge + running consumer with known activity =>
+ *  shimmer (data arriving is the live moment, calm after). Every flow answer
+ *  carries simulated: true — the renderer names it in the edge title.
+ *  Dead dashed, never animated, when the upstream failed OR — F5 (#48 deep
+ *  review) — the downstream can no longer run (`canRun === false`, the
+ *  canRun-style readiness the read model derives from dependencies +
+ *  blocked_by) and its upstream is settled: done | failed | blocked.
+ *  Pending => faint dots; everything else calm. A running endpoint with an
+ *  unknown stamp keeps its directional dash but NEVER animates. */
+export function edgeFlowPolicy(upState, downState, dataFlow = false, canRun = true, activity = null) {
   if (upState === 'failed') return { flow: false, shimmer: false, dead: true, dash: '3 3' }
   // Readiness-aware dead-dash: a join whose deps are no longer all satisfiable
   // (a failed sibling makes dep_satisfied false / blocked_by non-empty for the
@@ -2325,10 +2484,13 @@ export function edgeFlowPolicy(upState, downState, dataFlow = false, canRun = tr
   if (downState === 'pending' && canRun === false && (upState === 'done' || upState === 'failed' || upState === 'blocked')) {
     return { flow: false, shimmer: false, dead: true, dash: '3 3' }
   }
-  if (dataFlow) return downState === 'running'
-    ? { flow: false, shimmer: true, dead: false, dash: '6 4' }
+  const known = !!(activity && typeof activity.ts === 'number' && Number.isFinite(activity.ts) && activity.alive)
+  if (dataFlow) return downState === 'running' && known
+    ? { flow: false, shimmer: true, dead: false, dash: '6 4', simulated: true }
     : { flow: false, shimmer: false, dead: false, dash: null }
-  if (upState === 'running') return { flow: true, shimmer: false, dead: false, dash: '6 4' }
+  if (upState === 'running') return known
+    ? { flow: true, shimmer: false, dead: false, dash: '6 4', simulated: true }
+    : { flow: false, shimmer: false, dead: false, dash: '6 4' }
   if (upState === 'pending') return { flow: false, shimmer: false, dead: false, dash: '2 4' }
   return { flow: false, shimmer: false, dead: false, dash: null }
 }
@@ -2524,7 +2686,7 @@ function routeEdge(x1, y1, x2, y2, rects, skip) {
   return `M ${x1} ${y1} C ${x1 + cx * 0.6} ${c1y}, ${x2 - cx * 0.6} ${c2y}, ${x2} ${y2}`
 }
 
-function Edges({ nodes, rects, states, gate, dataEdges = [] }) {
+export function Edges({ nodes, rects, states, gate, dataEdges = [], runId = '' }) {
   // Marker ids are document-global in SVG; several graphs on one page (page
   // canvas + N transcript cards) must not share them or arrowheads cross-wire.
   const mid = `wf-arrow-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`
@@ -2585,8 +2747,21 @@ function Edges({ nodes, rects, states, gate, dataEdges = [] }) {
     // (edgeFlowPolicy) — this render reads it, it does not re-decide. F5: the
     // policy gets the readiness input (canRun) derived above, so a join a
     // failed sibling doomed reads dead on EVERY feeding edge, not just the
-    // one leaving the failure.
-    const policy = edgeFlowPolicy(up, down, e.data, canRunNow(nodes.find(n => n.id === e.to)))
+    // one leaving the failure. W5: the policy ALSO gets the explicit local
+    // activity stamp — the live endpoint's own last_activity, on the SOURCE
+    // side of a dependency edge and the CONSUMER side of a data edge (data
+    // arriving at the consumer is the live moment). No stamp, no flow.
+    const flowActivity = st => ({ ts: activityTsMs(states[st] && states[st].metrics), alive: true })
+    const eActivity = flowActivity(e.data ? e.to : e.from)
+    const policy = edgeFlowPolicy(up, down, e.data, canRunNow(nodes.find(n => n.id === e.to)), eActivity)
+    // The edge overlay is the LOWEST class in the ONE budget: an admitted
+    // claim marches on the registered --dur-flow cycle, timestamp-phased; a
+    // denied/preempted/reduced claim keeps the dashed overlay STATIC (the
+    // truthful calm state) — never a queued later.
+    const edgeClaim = (policy.flow || policy.shimmer)
+      ? MOTION.claim({ id: `edge:${runId}:${e.from}->${e.to}${e.data ? ':data' : ''}`, cls: 'edge', ts: eActivity.ts, durToken: '--dur-flow' })
+      : null
+    const edgeAnim = edgeClaim && edgeClaim.admitted
     const d = routeEdge(x1, y1, x2, y2, rects, [e.from, e.to])
     // RC ch4 (identity layer): one deterministic tint per route, cycling by
     // dependency order. The identity stroke rides the SAME routed d as a
@@ -2598,7 +2773,7 @@ function Edges({ nodes, rects, states, gate, dataEdges = [] }) {
       jsxs('g', {
         children: [
           jsx('title', {
-            children: `${e.from} → ${e.to} · ${up} → ${down}${e.data ? ' · data flow' : ''}${policy.dead ? ' · unavailable' : ''}`
+            children: `${e.from} → ${e.to} · ${up} → ${down}${e.data ? ' · data flow' : ''}${policy.dead ? ' · unavailable' : ''}${policy.flow || policy.shimmer ? ' · In flight · simulated' : ''}${(policy.flow || policy.shimmer) && !edgeAnim ? ' · held still (motion budget)' : ''}`
           }, 't'),
           jsx('path', {
             d,
@@ -2606,11 +2781,19 @@ function Edges({ nodes, rects, states, gate, dataEdges = [] }) {
             strokeDasharray: policy.dash ?? undefined,
             markerEnd: `url(#${mid}-${policy.dead ? 'dead' : 'live'})`,
             opacity: up === 'pending' && !e.data ? 0.55 : 0.95,
-            // SMIL candy: flowing while live (inline <animate>, no Tailwind
-            // animate-*); terminal states never get an <animate> child — the calm
-            // law is enforced inside edgeFlowPolicy (flow/shimmer false once calm).
-            children: policy.flow || policy.shimmer
-              ? jsx('animate', { attributeName: 'stroke-dashoffset', from: 10, to: 0, dur: '0.9s', repeatCount: 'indefinite' })
+            // W5: the march is an allocator-admitted edge effect on the
+            // REGISTERED --dur-flow cycle (the old raw 0.9s SMIL duration is
+            // retired with the running-status inference it rode). The phase
+            // rides the activity event's own timestamp via a negative SMIL
+            // begin, so redraws and remounts continue the same cycle. A
+            // denied claim keeps the dashed overlay and mounts NO <animate>
+            // — the calm law is enforced inside edgeFlowPolicy and the cap.
+            children: edgeAnim
+              ? jsx('animate', {
+                  attributeName: 'stroke-dashoffset', from: 10, to: 0,
+                  dur: `${motionTokenMs('--dur-flow') / 1000}s`,
+                  begin: `${(edgeClaim.phaseMs / 1000).toFixed(3)}s`,
+                  repeatCount: 'indefinite' })
               : undefined
           }, 'state'),
           jsx('path', {
@@ -2719,21 +2902,21 @@ function ItemCard({ runId, def, row, picked, nodeSelected, ms }) {
       if (!on && !nodeSelected) $selNode.set({ runId, nodeId: def.id })
     },
     className: cn(
-      'shrink-0 rounded-md border bg-transparent text-left transition-colors hover:text-foreground',
+      'shrink-0 rounded-md border bg-transparent text-left hover:text-foreground',
       picked === row.index ? 'border-(--ui-accent)' : 'border-(--ui-stroke-secondary)'
     ),
     style: { width: 168, background: 'var(--ui-sidebar-surface-background, var(--card))', opacity: row.status === 'pending' ? 0.6 : 1 },
     children: [
       box(
         'flex items-center gap-1.5',
-        jsx(Dot, { status: row.status }),
+        jsx(Dot, { status: row.status, metrics: row.metrics || null, motionId: `glyph:item:${runId}:${def.id}:${row.index}` }),
         jsx('span', { className: 'min-w-0 flex-1 truncate text-xs font-medium', children: `#${row.index} ${row.label}` }),
         jsx('span', { className: 'shrink-0 text-[0.6875rem] text-(--ui-text-tertiary)', children: statusLabel(row.status) })
       ),
       box(
         'mt-1 flex items-center gap-1.5 text-[0.6875rem] text-(--ui-text-tertiary)',
         ms ? jsx('span', { children: ms }) : null,
-        row.metrics ? jsx(Vitals, { m: row.metrics, live: row.status === 'running', size: 'xs' }) : null
+        row.metrics ? jsx(Vitals, { m: row.metrics, live: row.status === 'running', size: 'xs', motionId: `glyph:item:${runId}:${def.id}:${row.index}:beat` }) : null
       )
     ]
   }, row.index)
@@ -2835,7 +3018,7 @@ export function GraphView({ detail }) {
     className: 'relative flex items-start flex-col',
     style: { gap: 112, padding: '20px 48px 48px' },
     children: [
-      jsx(Edges, { nodes, rects, states, gate: detail.gate, dataEdges }),
+      jsx(Edges, { nodes, rects, states, gate: detail.gate, dataEdges, runId: detail.id }),
       ...bands.map((row, bi) =>
         jsx('div', {
           className: 'flex w-full shrink-0 items-start',
@@ -2912,12 +3095,12 @@ function Timeline({ detail }) {
           jsx('div', {
             className: 'relative h-2 w-full rounded-sm bg-(--ui-stroke-secondary)/40',
             children: jsx('div', {
-              className: cn('absolute top-0 h-2 rounded-sm', !sp.end && live && 'animate-pulse'),
+              className: 'absolute top-0 h-2 rounded-sm',
               style: { left: pct(sp.start), width: `calc(${pct(end)} - ${pct(sp.start)})`, minWidth: 2, background: tone, opacity: sp.kind === 'gate' ? 0.7 : 0.9 }
             })
           }),
           nmetrics
-            ? jsx('div', { style: { display: 'flex', justifyContent: 'flex-end' }, children: jsx(Vitals, { m: nmetrics, live: !sp.end && live, size: 'xs', wall: !sp.end && live ? nstate?.wall : null }) })
+            ? jsx('div', { style: { display: 'flex', justifyContent: 'flex-end' }, children: jsx(Vitals, { m: nmetrics, live: !sp.end && live, size: 'xs', wall: !sp.end && live ? nstate?.wall : null, motionId: `glyph:timeline:${detail.id}:${sp.id}:beat` }) })
             : null
         ]
       }, sp.id)
@@ -3137,7 +3320,7 @@ function NodePanel({ detail }) {
     'flex flex-col gap-3 border-t border-(--ui-stroke-secondary) p-4',
     box(
       'flex items-center gap-2',
-      jsx(Dot, { status }),
+      jsx(Dot, { status, metrics: shown?.metrics || null, motionId: `glyph:panel:${detail.id}:${name}` }),
       box('min-w-0 flex-1 truncate text-sm font-medium', name),
       jsx(Badge, { variant: 'outline', children: statusLabel(status) }),
       // F2 desktop (RATIFY): delegation badge — ONLY when the def carries
@@ -3154,7 +3337,7 @@ function NodePanel({ detail }) {
         ? box('min-w-0 truncate text-[0.6875rem] text-(--ui-text-tertiary)',
             [def.model, def.provider, def.reasoning].filter(factKnown).join(' · '))
         : null,
-      shown.metrics ? jsx(Vitals, { m: shown.metrics, live, cost: true, wall: live ? shown.wall : null }) : null,
+      shown.metrics ? jsx(Vitals, { m: shown.metrics, live, cost: true, wall: live ? shown.wall : null, motionId: `glyph:panel:${detail.id}:${name}:beat` }) : null,
       jsx(Button, { size: 'xs', variant: 'ghost', 'aria-label': 'Close', onClick: () => { $selNode.set(null); $fanItem.set(null) }, children: '×' })
     ),
     jsx('div', {
@@ -3198,7 +3381,7 @@ export function WorkflowsPage() {
                 }, 'run-accent'),
                 box(
                   'flex items-center gap-2 border-b border-(--ui-stroke-secondary) px-4 py-2',
-                  jsx(Dot, { status: d.status }),
+                  jsx(Dot, { status: d.status, metrics: d.metrics || null, motionId: `glyph:record:${d.id}` }),
                   // l8i: the record page heads with the instance label; the
                   // demoted template rides a muted kind badge beside it.
                   box('text-sm font-medium', displayTitle(d)),
@@ -3265,7 +3448,7 @@ export function PaneRow({ run, thisChat }) {
   } else fact = ago(run.updated)
   return jsx(PanelListRow, {
     active: false,
-    lead: jsx(Dot, { status: run.status }),
+    lead: jsx(Dot, { status: run.status, metrics: run.metrics || null, motionId: `glyph:pane:${run.id}` }),
     title: jsxs('span', {
       className: 'inline-flex min-w-0 items-center gap-1',
       children: [

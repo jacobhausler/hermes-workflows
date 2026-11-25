@@ -387,15 +387,215 @@ const alloc = () => mod.createMotionAllocator({ clock: () => tick.now })
   assert.equal(spilled.props['data-motion'], 'spill:cap', 'and instruments the immediate static spill')
   assert.equal(spilled.props.style.borderColor, A2.NODE_TONE.held.borderColor, 'the spilled card keeps the constant amber border')
   assert.notEqual(spilled.props.style.opacity, 0.7, 'spill settles at full opacity — never a paused/faded frame')
-  // the pending card breathes through the allocator too (incumbent, W5 retires)
+  // W5 (bd_2026-11-13-lv1): the pending card is STILL — DESIGN Round 10
+  // matrix says pending -> None; the incumbent breathe is retired, and the
+  // dashed outline + 0.7 opacity static mark carries it.
   const waiting = renderCard({ runId: 'r', def: { id: 'tail', type: 'agent' }, st: {}, gate: null, owner: {}, events: [], selected: false })
-  assert.ok(String(waiting.props.style.animation).includes('wf-breathe'), 'waiting breathes via an allocator claim')
-  assert.equal(waiting.props['data-motion'], 'admitted:active', 'the breathe claim is instrumented too')
+  assert.equal(waiting.props.style.animation, undefined, 'a pending card animates nothing (pending -> None)')
+  assert.equal(waiting.props['data-motion'], 'none', 'the pending card holds no slot at all')
   // terminals never claim (calm law survives the allocator)
   const doneCard = renderCard({ runId: 'r', def: heldDef, st: { status: 'done' }, gate: null, owner: {}, events: [], selected: false })
   assert.equal(doneCard.props['data-motion'], 'none', 'a calm terminal holds no slot')
 }
 
+// =================================================================================
+// 13. W5 BINDING — the running glyph is evidence-gated through the allocator
+//     (Dot + the Vitals beat): running status alone never admits, the recency
+//     class comes from the record's own last_activity, the quiet pulse rides
+//     the registered token and the .5-midpoint keyframe, and reduced/spill is
+//     the full-opacity static glyph.
+// =================================================================================
+{
+  const M5 = await loadMint()
+  const nowS = () => Date.now() / 1000
+  const dotRunning = (props) => {
+    const n = M5.Dot({ status: 'running', ...props })
+    return typeof n.type === 'function' ? n.type(n.props) : n
+  }
+  // (a) running status ALONE: no motionId, no metrics — nothing pulses.
+  const bare = dotRunning({})
+  assert.equal(bare.props.style.animation, undefined, 'running alone admits no effect')
+  assert.equal(bare.props['data-motion'], 'spill:unevidenced', 'and the render says why')
+  assert.equal(bare.props.style.opacity ?? 1, 1, 'the spilled glyph sits at full opacity')
+  // (b) fresh evidence <=5s -> the registered fresh token, plugin keyframe.
+  const fresh = dotRunning({ metrics: { last_activity: nowS() - 1 }, motionId: 'glyph:t:fresh' })
+  assert.equal(fresh.props.style.animation, 'wf-pulse var(--dur-pulse-fresh) var(--ease-breathe) infinite',
+    'the fresh glyph pulses the hoisted wf-pulse on the REGISTERED fresh token (no host utility class)')
+  assert.equal(fresh.props['data-motion'], 'admitted:active', 'the glyph admission is instrumented')
+  // (c) quiet evidence >5s -> the registered quiet token (4000ms lives ONLY
+  //     in the token table; the render never spells a raw period).
+  const quiet = dotRunning({ metrics: { last_activity: nowS() - 31 }, motionId: 'glyph:t:quiet' })
+  assert.equal(quiet.props.style.animation, 'wf-pulse var(--dur-pulse-quiet) var(--ease-breathe) infinite',
+    'the quiet pulse rides the --dur-pulse-quiet token, not a raw 4000ms override')
+  // (d) unknown activity: absent / invalid / FUTURE stamps and a stale
+  //     (disconnected) surface all read as unknown and admit nothing.
+  for (const [label, props] of [
+    ['absent', { metrics: null, motionId: 'glyph:t:a' }],
+    ['invalid', { metrics: { last_activity: 'yesterday' }, motionId: 'glyph:t:b' }],
+    ['future', { metrics: { last_activity: nowS() + 600 }, motionId: 'glyph:t:c' }],
+    ['stale', { metrics: { last_activity: nowS() - 1 }, motionId: 'glyph:t:d', stale: true }]
+  ]) {
+    const d = dotRunning(props)
+    assert.equal(d.props.style.animation, undefined, `${label}: no recency cue -> no pulse`)
+    assert.equal(d.props['data-motion'], 'spill:unknown-activity', `${label}: disclosed as unknown activity`)
+  }
+  // (e) the .5 midpoint law: the emitted pulse keyframe bottoms out at 0.5
+  //     opacity — the FINAL.md quiet-pulse reference (never the 0.45 breathe).
+  const css = M5.PolishStyles().props.children
+  assert.match(css, /@keyframes wf-pulse\s*\{[\s\S]*?50%\s*\{\s*opacity:\s*0\.5/, 'the glyph pulse keyframe uses the .5 midpoint')
+  assert.ok(!css.includes('wf-breathe'), 'the retired breathe keyframe is dead CSS — it left with its caller')
+  // (f) the Vitals beat shares the ONE path (fresh metrics + motionId pulse;
+  //     no motionId -> the beat is a static dot at full opacity).
+  const v = M5.Vitals({ m: { last_activity: nowS() - 2, api_calls: 1 }, live: true, size: 'xs', motionId: 'glyph:t:beat' })
+  const beats = []
+  const walk = n => {
+    if (!n || typeof n !== 'object') return
+    if (Array.isArray(n)) return n.forEach(walk)
+    if (n.props?.['data-motion-id'] === 'glyph:t:beat') beats.push(n)
+    if (typeof n.type === 'function') return walk(n.type(n.props))
+    walk(n.props?.children)
+  }
+  walk(v)
+  assert.equal(beats.length, 1, 'the live beat instruments exactly one glyph effect')
+  assert.equal(beats[0].props.style.animation, 'wf-pulse var(--dur-pulse-fresh) var(--ease-breathe) infinite',
+    'the beat pulses through the same registered vocabulary as the Dot')
+  // (g) REDUCED PARITY on a shared timestamp schedule: the same held card,
+  //     the same words, the same border — normal animates, reduced is fully
+  //     opaque static. Text may not differ by a single character.
+  const textOf = node => {
+    if (node == null || typeof node === 'boolean') return ''
+    if (typeof node === 'string') return node
+    if (Array.isArray(node)) return node.map(textOf).join(' ')
+    if (typeof node.type === 'function') return textOf(node.type(node.props))
+    return textOf(node.props?.children)
+  }
+  const gateHeld = { id: 'gate1', held_at: new Date(Date.now() - 6000).toISOString(), question: 'q', options: ['go'] }
+  const cardProps = { runId: 'par', def: { id: 'gate1', type: 'gate' }, st: {}, gate: gateHeld, owner: {}, events: [], selected: false }
+  const normal = M5.NodeCard(cardProps)
+  assert.ok(String(normal.props.style.animation).includes('wf-gate-nag'), 'normal preference: the held border nags')
+  M5.MOTION.setReduced(true)
+  const calm = M5.NodeCard(cardProps)
+  assert.equal(calm.props.style.animation, undefined, 'reduced: the SAME schedule renders zero animation')
+  assert.equal(calm.props['data-motion'], 'spill:reduced', 'and discloses the spill reason')
+  assert.equal(textOf(normal), textOf(calm), 'every word is identical between the normal and reduced frames')
+  assert.equal(calm.props.style.borderColor, normal.props.style.borderColor, 'the constant amber base border survives the flip')
+  assert.equal(calm.props.style.opacity ?? 1, 1, 'mid-effect preference change settles at full opacity, never a paused frame')
+  const calmDot = dotRunning({ metrics: { last_activity: nowS() - 1 }, motionId: 'glyph:t:reduced' })
+  assert.equal(calmDot.props.style.animation, undefined, 'reduced cancels even a brand-fresh glyph claim')
+  M5.MOTION.setReduced(false)
+}
+
+// =================================================================================
+// 14. W5 BINDING — edges: the march/shimmer admits ONLY on an explicit local
+//     activity stamp (a running endpoint alone is not transfer), rides the
+//     registered --dur-flow token, is labelled simulated in the edge title,
+//     and spills to the static dash under the cap or the reduced flip.
+// =================================================================================
+{
+  const M6 = await loadMint()
+  const nowS = () => Date.now() / 1000
+  const rect = (x) => ({ x, y: 0, w: 100, h: 40 })
+  const nodes = [{ id: 'gen', type: 'agent' }, { id: 'use', type: 'agent', after: ['gen'] }]
+  const rects = { gen: rect(0), use: rect(300) }
+  const renderEdges = (states, dataEdges = []) => {
+    const n = M6.Edges({ nodes, rects, states, gate: null, dataEdges, runId: 'e' })
+    return typeof n.type === 'function' ? n.type(n.props) : n
+  }
+  const collect = (node, pred, out = []) => {
+    if (!node || typeof node !== 'object') return out
+    if (Array.isArray(node)) { node.forEach(c => collect(c, pred, out)); return out }
+    if (pred(node)) out.push(node)
+    if (typeof node.type === 'function') return collect(node.type(node.props), pred, out)
+    collect(node.props?.children, pred, out)
+    return out
+  }
+  // (a) running upstream WITHOUT an activity stamp: policy says no flow.
+  assert.deepEqual(M6.edgeFlowPolicy('running', 'pending', false, true, null),
+    { flow: false, shimmer: false, dead: false, dash: '6 4' },
+    'a running source alone never flows (false transfer is the rejected inference)')
+  const noStampTree = renderEdges({ gen: { status: 'running' }, use: { status: 'pending' } })
+  assert.equal(collect(noStampTree, n => n.type === 'animate').length, 0, 'the renderer mounts no SMIL animation without explicit activity')
+  // (b) running upstream WITH a stamp: march on the registered flow token,
+  //     labelled simulated in the accessible edge title.
+  const stampTree = renderEdges({ gen: { status: 'running', metrics: { last_activity: nowS() - 2 } }, use: { status: 'pending' } })
+  const anims = collect(stampTree, n => n.type === 'animate')
+  assert.equal(anims.length, 1, 'known local activity admits the march')
+  assert.equal(anims[0].props.dur, '1.2s', 'the march cycle is the registered --dur-flow (1200ms), not the old raw 0.9s')
+  assert.ok(Number(String(anims[0].props.begin).replace('s', '')) <= 0, 'the SMIL begin carries the timestamp phase (negative delay, no restart on remount)')
+  const titles = collect(stampTree, n => n.type === 'title').map(t => textOfAll(t))
+  function textOfAll (n) { return typeof n.props?.children === 'string' ? n.props.children : String(n.props?.children ?? '') }
+  assert.ok(titles.some(t => t.includes('In flight · simulated')), 'the flow overlay is labelled simulated in the edge title')
+  // (c) data edge: consumer running alone does NOT shimmer; the consumer's
+  //     own stamp does.
+  assert.deepEqual(M6.edgeFlowPolicy('done', 'running', true, true, null),
+    { flow: false, shimmer: false, dead: false, dash: null }, 'a running consumer with unknown activity is calm')
+  assert.deepEqual(M6.edgeFlowPolicy('done', 'running', true, true, { ts: Date.now() - 2000, alive: true }),
+    { flow: false, shimmer: true, dead: false, dash: '6 4', simulated: true },
+    'known consumer activity shimmers the data edge (data arriving is the live moment)')
+  // (d) cap spill: the edge class is LAST in priority — a full pool of higher
+  //     classes denies the march, and the title says the effect is held still.
+  for (let i = 0; i < 12; i++) M6.MOTION.claim({ id: `tr${i}`, cls: 'transition', ts: Date.now(), durToken: '--dur-flow' })
+  const spilledTree = renderEdges({ gen: { status: 'running', metrics: { last_activity: nowS() - 2 } }, use: { status: 'pending' } })
+  assert.equal(collect(spilledTree, n => n.type === 'animate').length, 0, 'a cap-denied edge renders the STATIC dash (immediate spill, no queue)')
+  const spilledTitles = collect(spilledTree, n => n.type === 'title').map(t => typeof t.props?.children === 'string' ? t.props.children : '')
+  assert.ok(spilledTitles.some(t => t.includes('In flight · simulated') && t.includes('held still')),
+    'the disclosure stays truthful: it names the simulated intent AND the held-still state')
+  // (e) reduced: the SMIL overlay is not CSS-media-gated, so the reduced
+  //     flip alone must cancel it — no <animate> mounts, same title.
+  for (const h of M6.MOTION.stats().holders) M6.MOTION.release({ id: h.id, gen: h.gen })
+  M6.MOTION.setReduced(true)
+  const reducedTree = renderEdges({ gen: { status: 'running', metrics: { last_activity: nowS() - 2 } }, use: { status: 'pending' } })
+  assert.equal(collect(reducedTree, n => n.type === 'animate').length, 0, 'reduced preference cancels the SMIL march (zero WAAPI/SMIL effects)')
+  M6.MOTION.setReduced(false)
+}
+
+// =================================================================================
+// 15. W5 BINDING — insertion and fold one-shots through the allocator seams:
+//     a first render is a still snapshot; arrivals reserve the <=30ms/<=90ms
+//     ladder inside N=12; only the AUTOMATIC fold bump settles once on
+//     --dur-collapse.
+// =================================================================================
+{
+  const clock = { now: 100_000 }
+  const A = mod.createMotionAllocator({ clock: () => clock.now })
+  const ref = { current: null }
+  assert.deepEqual(mod.insertionMotion(A, ref, ['r1', 'r2'], clock.now), [], 'first render mounts still (snapshot law)')
+  clock.now += 1000
+  const plan = mod.insertionMotion(A, ref, ['r1', 'r2', 'r3', 'r4', 'r5', 'r6', 'r7', 'r8'], clock.now)
+  assert.deepEqual(plan.map(p => p.delayMs), [0, 30, 60, 90, null, null],
+    'six arrivals walk the 0/30/60/90 ladder and the excess spills to static')
+  assert.equal(A.stats().reserved, 3, 'every delay reserved inside the same N=12 budget')
+  clock.now += 1000
+  assert.deepEqual(mod.insertionMotion(A, ref, ['r1', 'r2', 'r3', 'r4', 'r5', 'r6', 'r7', 'r8'], clock.now), [],
+    'a render with no new ids plans nothing (no per-render re-animation)')
+  // fold bump
+  const F = mod.createMotionAllocator({ clock: () => clock.now })
+  const fref = { current: null }
+  assert.equal(mod.foldBumpMotion(F, fref, 3, 'collapse:c', clock.now), null, 'the first render never animates the fold')
+  clock.now += 50
+  const bump = mod.foldBumpMotion(F, fref, 4, 'collapse:c', clock.now)
+  assert.ok(bump && Number.isInteger(bump.phaseMs), 'an automatic fold increase earns its --dur-collapse settle')
+  assert.equal(mod.foldBumpMotion(F, fref, 4, 'collapse:c', clock.now), null, 'the same count does not re-settle')
+  clock.now += 10_000 // the one-shot settled long ago (240ms); its slot freed
+  assert.equal(mod.foldBumpMotion(F, fref, 3, 'collapse:c', clock.now), null, 'a shrink is just data, not a fold event')
+}
+
+// =================================================================================
+// 16. W5 purity sweep: no host pulse utility, no raw duration sources, no
+//     inline transitions left on the live surfaces.
+// =================================================================================
+{
+  assert.deepEqual(((src.match(/\banimate-[a-z-]+/g) || [])).sort(), [], 'no animate-* host utility class survives in the plugin')
+  assert.ok(!/transition:\s*'/.test(src), 'no raw inline transition declaration remains (inspection reframe is instant)')
+  assert.ok(!/transition-colors/.test(src), 'no host transition-colors class remains')
+  assert.ok(!/durMs:\s*\d/.test(src), 'no spec object carries a raw numeric duration (tokens or derived values only)')
+  assert.ok(!/dur:\s*'0\.9s'/.test(src), 'the retired raw 0.9s SMIL duration is gone')
+  const raw4000 = (src.match(/4000ms/g) || []).length
+  assert.equal(raw4000, 2, '4000ms appears exactly twice — the two rows of the registered token table, nowhere else')
+  const kfNames = [...src.matchAll(/@keyframes\s+(wf-[a-z-]+)/g)].map(m => m[1]).sort()
+  assert.deepEqual(kfNames, ['wf-collapse', 'wf-gate-nag', 'wf-insert', 'wf-pulse'],
+    'the emission inventory is exactly the four live keyframes (dead CSS removed)')
+}
 // =================================================================================
 // 12. The bench seam: the plugin exposes the ONE instance (never a per-lane
 //     allocator) for real-app instrumentation.
@@ -408,4 +608,4 @@ const alloc = () => mod.createMotionAllocator({ clock: () => tick.now })
   assert.ok(s.total <= s.cap, 'at every read, active+reserved <= 12')
 }
 
-console.log('ALL PASS test_ui2_motion (token table, global N=12 cap, priority preemption + ts/id ties, timestamp phase continuity, unknown/future timestamps, stale cancellation, consume-once one-shots, insertion reservation ladder, reduced flip to zero, content-digest single emission, NodeCard spill/admit rendering, bench seam)')
+console.log('ALL PASS test_ui2_motion (token table, global N=12 cap, priority preemption + ts/id ties, timestamp phase continuity, unknown/future timestamps, stale cancellation, consume-once one-shots, insertion reservation ladder, reduced flip to zero, content-digest single emission, NodeCard spill/admit rendering, W5 glyph binding evidence-gating, W5 edge activity+simulated label, W5 insertion/fold seams, W5 purity sweep, bench seam)')
