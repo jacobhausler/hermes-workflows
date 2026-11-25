@@ -24,8 +24,15 @@ export function stageCoveragePlugin(repo, pluginDir) {
 # Coverage bench fixture; not installed with the production API.
 _proof_original_list_runs = _list_runs
 _proof_short_page = Path(__file__).with_name('.proof-short-page')
+_proof_delay_census = Path(__file__).with_name('.proof-delay-census')
+_proof_fail_census = Path(__file__).with_name('.proof-fail-census')
 
 def _list_runs(offset=0, limit=100, *, _record=None):
+    if _proof_delay_census.is_file():
+        time.sleep(2.0)
+    if _proof_fail_census.is_file():
+        from fastapi import HTTPException
+        raise HTTPException(status_code=503, detail='bench-only census failure')
     page = _proof_original_list_runs(offset, limit, _record=_record)
     if offset >= 100 and _proof_short_page.is_file():
         return {**page, 'runs': []}

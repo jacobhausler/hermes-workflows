@@ -28,7 +28,7 @@ Pins:
 
 Run: python3 tests/test_census_pages_full_yjp.py
 """
-import importlib.util, json, os, shutil, subprocess, sys
+import importlib.util, json, os, shutil, subprocess, sys, time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -195,6 +195,32 @@ with TestClient(bench_app) as isolated, TestClient(app) as production:
     finally:
         marker.unlink(missing_ok=True)
     check("(W8c) removing the bench control restores the real page", get(isolated, 100) == off)
+
+    # Registered-route edge controls exercise the bench IPC response itself,
+    # never the production API: delay and failure must be temporary and removing
+    # either marker restores the same successful page.
+    delay_marker = marker.with_name(".proof-delay-census")
+    failure_marker = marker.with_name(".proof-fail-census")
+    try:
+        delay_marker.touch(exist_ok=False)
+        delay_started = time.monotonic()
+        delayed = get(isolated, 100)
+        delay_elapsed = time.monotonic() - delay_started
+        check("(W8d) bench delay holds the registered response then returns normal data",
+              delayed == off and delay_elapsed >= 1.8, round(delay_elapsed, 2))
+    finally:
+        delay_marker.unlink(missing_ok=True)
+    try:
+        failure_marker.touch(exist_ok=False)
+        failed = isolated.get("/runs?offset=100&limit=100")
+        check("(W8e) bench failure is a registered IPC HTTP failure",
+              failed.status_code == 503)
+        check("(W8f) bench failure leaves production response unchanged",
+              get(production, 100) == off)
+    finally:
+        failure_marker.unlink(missing_ok=True)
+    check("(W8g) removing delayed/failed controls restores baseline",
+          get(isolated, 100) == off)
 
 # (W5) offset past the end: empty PAGE, not empty census.
 past = dash.list_runs(999, 100)
