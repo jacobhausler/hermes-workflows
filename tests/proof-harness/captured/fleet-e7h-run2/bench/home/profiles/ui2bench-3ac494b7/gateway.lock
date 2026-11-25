@@ -1,1 +1,0 @@
-{"pid": 35184, "kind": "hermes-gateway", "argv": ["/Users/jacobhausler/.hermes/hermes-agent/hermes_cli/main.py", "gateway", "run", "--quiet"], "start_time": 179556250235, "hermes_home": "/Users/jacobhausler/code/wf-pr-20261124/e7h/tests/proof-harness/captured/fleet-e7h-run2/bench/home/profiles/ui2bench-3ac494b7", "pidns": null}

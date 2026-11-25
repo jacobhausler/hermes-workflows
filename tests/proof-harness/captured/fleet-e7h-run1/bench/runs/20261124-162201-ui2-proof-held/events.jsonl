@@ -1,8 +1,0 @@
-{"ts": "2026-11-24T22:22:01+00:00", "event": "notice.route", "reachable": true, "error_class": null}
-{"ts": "2026-11-24T22:22:01+00:00", "event": "run.resumed"}
-{"ts": "2026-11-24T22:22:01+00:00", "event": "node.done", "node": "say", "echo": true}
-{"ts": "2026-11-24T22:22:01+00:00", "event": "gate.held", "node": "hold", "question": "UI2 fleet proof: release this held gate after capture?", "options": ["release", "stop"], "context": null}
-{"ts": "2026-11-24T22:22:01+00:00", "event": "notice.drop", "notice_event": "gate.held", "error_class": "missing_endpoint"}
-{"ts": "2026-11-24T22:36:06+00:00", "event": "notice.route", "reachable": true, "error_class": null}
-{"ts": "2026-11-24T22:36:06+00:00", "event": "run.resumed"}
-{"ts": "2026-11-24T22:36:06+00:00", "event": "run.stopped"}
