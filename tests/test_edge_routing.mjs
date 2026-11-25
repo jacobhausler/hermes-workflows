@@ -26,7 +26,7 @@ const constGrab = name => {
 let instance = 0
 const jsx = (type, props, key) => ({ type, props, key })
 const { Edges, depthMap, fanProjection, routeTint, ROUTE_TINTS } = new Function('jsx', 'jsxs', 'useId',
-  `const EDGE_TONE = { done:'teal', pending:'gray', failed:'red', running:'blue', held:'orange', skipped:'gray' };\nconst NODE_TONE = Object.fromEntries(Object.entries(EDGE_TONE).map(([k,v]) => [k, { color:v, borderColor:v, shadow:null, shadowHover:null, pulseMs:null, calm:true, ui:'muted', gate:null, breathe:null }]));\nNODE_TONE.waiting = NODE_TONE.pending;\n${['edgeFlowPolicy', 'depthMap', 'graphLinks', 'edgePath', 'routeEdge', 'edgeTone', 'nodeState', 'fanProjection', 'Edges'].map(grab).join('\n')}\n${constGrab('ROUTE_TINTS')}\n${grab('routeTint')}\nreturn { Edges, depthMap, fanProjection, routeTint, ROUTE_TINTS }`)(jsx, jsx, () => `test-${++instance}`)
+  `const EDGE_TONE = { done:'teal', pending:'gray', failed:'red', running:'blue', held:'orange', skipped:'gray' };\nconst NODE_TONE = Object.fromEntries(Object.entries(EDGE_TONE).map(([k,v]) => [k, { color:v, borderColor:v, shadow:null, shadowHover:null, pulseMs:null, calm:true, ui:'muted', gate:null, breathe:null }]));\nNODE_TONE.waiting = NODE_TONE.pending;\n${['edgeFlowPolicy', 'depthMap', 'graphLinks', 'edgePath', 'routeEdge', 'edgeTone', 'nodeState', 'fanRowPartition', 'fanProjection', 'Edges'].map(grab).join('\n')}\n${constGrab('ROUTE_TINTS')}\n${grab('routeTint')}\nreturn { Edges, depthMap, fanProjection, routeTint, ROUTE_TINTS }`)(jsx, jsx, () => `test-${++instance}`)
 const nodes = [
   {id:'hub-a'}, {id:'hub-b'}, {id:'mac'},
   {id:'coverage', after:['hub-a']},

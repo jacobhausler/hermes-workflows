@@ -28,9 +28,9 @@ const constGrab = name => {
   return src.slice(i, j)
 }
 const code = [grab('fanItems'), grab('itemLabel'), grab('renderGoal'), constGrab('fanCounts'), constGrab('fanSummary'),
-  grab('fanThreshold'), grab('fanOpenFor'), grab('fanPickedRow'), grab('fanProjection')].join('\n')
-const { fanItems, fanCounts, fanSummary, fanThreshold, fanOpenFor, fanPickedRow, fanProjection } =
-  new Function(`${code}; return { fanItems, fanCounts, fanSummary, fanThreshold, fanOpenFor, fanPickedRow, fanProjection }`)()
+  grab('fanThreshold'), grab('fanOpenFor'), grab('fanPickedRow'), grab('fanRowPartition'), grab('fanProjection')].join('\n')
+const { fanItems, fanCounts, fanSummary, fanThreshold, fanOpenFor, fanPickedRow, fanRowPartition, fanProjection } =
+  new Function(`${code}; return { fanItems, fanCounts, fanSummary, fanThreshold, fanOpenFor, fanPickedRow, fanRowPartition, fanProjection }`)()
 
 let fails = 0
 const check = (label, cond, detail = '') => { console.log((cond ? 'PASS ' : 'FAIL ') + label + (cond ? '' : `  [${detail}]`)); if (!cond) fails++ }
@@ -95,6 +95,30 @@ const load = run => {
   const def = { id: 'f', fanout: { goal: 'x {item}', items_from: 'plan.result' } }
   const rows = fanItems(def, { status: 'pending' }, [])
   check('items_from pending: zero rows, no crash', Array.isArray(rows) && rows.length === 0)
+}
+// 5b. items_from on a RUNNING node: live item.started indices are authoritative
+// members (the runner indexes into its materialized set) — zero finishes must
+// still yield one card per started index (ship-2.0 graph-native proof).
+{
+  const def = { id: 'f', fanout: { goal: 'x {item}', items_from: 'plan.result' } }
+  const st = { status: 'running', output: null }
+  const evs = [0, 1].map(i => ({ node: 'f', event: 'item.started', index: i }))
+  const rows = fanItems(def, st, evs)
+  check('items_from running: started indices widen the set (native live)',
+    rows.length === 2 && rows[0].index === 0 && rows[1].index === 1 && rows.every(r => !r.recorded),
+    JSON.stringify(rows))
+  // sparse live indices keep placeholder rows for the unstarted span (cap law)
+  const sparse = fanItems(def, st, [0, 3].map(i => ({ node: 'f', event: 'item.started', index: i })))
+  check('items_from running: sparse starts render every index up to the max, gaps pending',
+    sparse.length === 4 && sparse.map(r => r.status).join(',') === 'running,pending,pending,running',
+    JSON.stringify(sparse.map(r => r.status)))
+  // retry of a finished index: a later started event reclaims the row live,
+  // never the stale finish status, and keeps the index key
+  const retried = fanItems(def, st, [{ node: 'f', event: 'item.finished', index: 0, status: 'done', ms: 10 },
+    { node: 'f', event: 'item.started', index: 0 }])
+  check('items_from running: restarted index stays one live row',
+    retried.length === 1 && retried[0].index === 0 && retried[0].status === 'running',
+    JSON.stringify(retried))
 }
 // 6. v0.7.3: item.started present ⇒ started item running, unstarted item PENDING
 {

@@ -118,7 +118,11 @@ const $fanExpanded = atom(null) // { runId, nodeId } — page-level stacked-card
 /** One item record per fan-out child, from the best source available:
  *  v0.7.2+ committed `output.all_results` (status/error/raw per index) → older
  *  per-item records in `output.items` → live progress from `item.finished`
- *  events (index/status/error/tail) → pending placeholders from the graph def.
+ *  events (index/status/error/tail) → live membership from `item.started`
+ *  indices on a running node — a dynamic fan-out (items_from) has no def items
+ *  and no committed output until settle, and the runner emits started indices
+ *  INTO its materialized set, so a started index is an authoritative member.
+ *  → pending placeholders from the graph def.
  *  Labels come from the item's own goal/host/name/id or the rendered index. */
 function fanItems(def, st, events) {
   const fo = def.fanout
@@ -135,7 +139,18 @@ function fanItems(def, st, events) {
     if (e.event === 'item.finished') byIdx.set(e.index, e)
     else if (e.event === 'item.started') { startedIdx.add(e.index); byIdx.delete(e.index) }
   }
-  const n = recs ? recs.length : defItems ? defItems.length : byIdx.size ? Math.max(...byIdx.keys()) + 1 : 0
+  // Set-size law: rows ascend 0..n-1 (insertion order is the contract, keys are
+  // the index). n widens over committed records, declared items, finished
+  // indices, AND started indices — the runner materializes items_from at
+  // expansion and emits item.started with an index into that set (wf.py), so
+  // a started index is an authoritative live member. Without the started term
+  // a running dynamic fan-out with zero finishes renders no cards at all
+  // until settle (ship-2.0 graph-native proof). A restart of a finished index
+  // already landed in startedIdx via the byIdx.delete above: the row keeps its
+  // index and re-renders live, never the stale finish status.
+  const n = Math.max(recs?.length || 0, defItems?.length || 0,
+    byIdx.size ? Math.max(...byIdx.keys()) + 1 : 0,
+    startedIdx.size ? Math.max(...startedIdx) + 1 : 0)
   const nodeLive = st?.status === 'running'
   // v0.7.3 runners emit item.started: an unstarted item on a running node is PENDING (queued
   // behind the concurrency cap), not running. Older runs (no item.started at all) keep the
@@ -180,6 +195,15 @@ function fanItems(def, st, events) {
     })
   }
   return rows
+}
+
+// A committed child is rendered by graph projection; only uncommitted members
+// belong in the expanded list. This partition is shared by both render paths.
+function fanRowPartition(rows) {
+  return {
+    committed: (rows || []).filter(row => row.recorded),
+    live: (rows || []).filter(row => !row.recorded)
+  }
 }
 
 function itemLabel(item, i) {
@@ -271,7 +295,7 @@ export function fanProjection(detail, statesByNode) {
   const childNodes = []
   for (const n of nodes) {
     const rows = n.fanout ? rowsFor(n.id) : null
-    const kids = (rows || []).filter(r => r.recorded)
+    const kids = fanRowPartition(rows).committed
     if (!kids.length) continue
     projected = true
     for (const r of kids) {
@@ -288,6 +312,16 @@ export function fanProjection(detail, statesByNode) {
       : n.after
   }))
   return { nodes: [...nodes, ...childNodes], states, childRows: statesByNode }
+}
+
+function fanPageProjection(detail) {
+  // The page shows committed children even before expansion. Live event-only
+  // rows stay in the stack's item list; fanProjection enforces recorded-only.
+  const rowsByNode = new Map()
+  for (const def of detail.graph?.nodes || []) {
+    if (def.fanout) rowsByNode.set(def.id, fanItems(def, detail.nodes?.[def.id], detail.events))
+  }
+  return fanProjection(detail, rowsByNode)
 }
 
 // ---- vitals: dense spend + liveness ----------------------------------------------
@@ -2445,6 +2479,7 @@ export function FanStack({ children, count, terminal, expanded, onToggleExpand, 
 function ItemCard({ runId, def, row, picked, nodeSelected, ms }) {
   return jsxs('button', {
     type: 'button',
+    'data-item-identity': `${runId}/${def.id}/${row.index}`,
     title: row.error || row.goal || undefined,
     onClick: e => {
       e.stopPropagation()
@@ -2479,14 +2514,13 @@ export function GraphView({ detail }) {
   const fanPicked = useValue($fanItem)
   const expanded = useValue($fanExpanded)
   const canvasRef = useRef(null)
-  const nodes = detail.graph?.nodes || []
-  const states = detail.nodes || {}
+  const { nodes, states } = fanPageProjection(detail)
   const isExpanded = def => !!expanded && expanded.runId === detail.id && expanded.nodeId === def.id
   // While expanded, item statuses move mid-run: re-measure so edges track the
   // growing item column (the item-keyed render below keeps scroll position).
   const stateKey = nodes.map(n => `${n.id}:${states[n.id]?.status || ''}${isExpanded(n) ? `:${fanItems(n, states[n.id], detail.events)?.length ?? 0}` : ''}`).join('|')
   const rects = useCardRects(canvasRef, [detail.id, stateKey, nodes.length])
-  const picked = fanPicked && fanPicked.runId === detail.id && fanPicked.nodeId === expanded?.nodeId ? fanPicked.index : undefined
+  const picked = nodeId => fanPicked?.runId === detail.id && fanPicked.nodeId === nodeId ? fanPicked.index : undefined
   const canvasW = useCanvasWidth(canvasRef, [detail.id, nodes.length])
   // #48: hover lift rides a single hover atom for the canvas (one hook, fixed
   // order, above the empty-graph early return); entering a card lifts it.
@@ -2524,6 +2558,16 @@ export function GraphView({ detail }) {
       className: 'relative flex shrink-0 flex-col items-start',
       style: { zIndex: 1, gap: 28 },
       children: defs.flatMap(def => {
+        if (def._fanChild) {
+          const { parent, row } = def._fanChild
+          return [jsx('div', {
+            'data-node': def.id,
+            children: jsx(ItemCard, {
+              runId: detail.id, def: { id: parent }, row, picked: picked(parent), ms: fmtDur(row.ms),
+              nodeSelected: sel?.runId === detail.id && sel?.nodeId === parent
+            })
+          }, def.id)]
+        }
         const st = states[def.id]
         const card = jsx('div', {
           'data-node': def.id,
@@ -2557,9 +2601,9 @@ export function GraphView({ detail }) {
         return [stack, jsxs('div', {
           className: 'flex flex-col items-start',
           style: { gap: 8, marginTop: -16 },
-          children: (fm.rows || []).map(r =>
+          children: fanRowPartition(fm.rows).live.map(r =>
             jsx(ItemCard, {
-              runId: detail.id, def, row: r, picked, ms: fmtDur(r.ms),
+              runId: detail.id, def, row: r, picked: picked(def.id), ms: fmtDur(r.ms),
               nodeSelected: sel?.runId === detail.id && sel?.nodeId === def.id
             }, r.index))
         }, 'items')]
@@ -2567,6 +2611,7 @@ export function GraphView({ detail }) {
     }, `col-${d}`)
   return jsxs('div', {
     ref: canvasRef,
+    'data-graph-run': detail.id,
     className: 'relative flex items-start flex-col',
     style: { gap: 112, padding: '20px 48px 48px' },
     children: [
