@@ -40,8 +40,10 @@
 // sibling bench dirs under its own --out root's parent (see
 // planBenchRetention below): owned-marker present, nothing git-tracked
 // inside, not written since the run began (sealed manifest.json proves
-// terminal; unsealed dirs need a quiet grace so a concurrent crew-wave
-// bench stays alive), unreferenced by any committed manifest.json, and
+// terminal; an unsealed dir needs BOTH a quiet grace window AND dead
+// supervisor evidence — supervisors.json pids without logs/<label>.exit
+// records prove an ACTIVE parked bench, past any grace), unreferenced by any
+// committed manifest.json, and
 // either a *.stale-*/*abandoned-* rotation, a run-* scratch dir, or a dead
 // attempt (no manifest at all). One log line per reclaimed tree (path, MiB)
 // on stderr. Net effect: proof disk caps at ~2 concurrent runs.
@@ -302,10 +304,42 @@ function committedManifestText(repoRoot, proofRoot) {
   return text;
 }
 
+// Terminality evidence for an UNSEALED tree: every supervisor the harness
+// spawned is recorded in the tree's own supervisors.json ({label,pid}, one
+// writeFileSync per spawn) and every reaped child appends logs/<label>.exit.
+// A tree whose supervisors.json names a pid that is still alive (kill(pid,0)
+// ok, or EPERM = alive, owned by someone else) with no exit record has an
+// ACTIVE supervisor — a parked gate-case bench idles on disk past any grace
+// window by design, so mtime silence alone never proves it dead. A missing
+// supervisors.json means nothing was ever spawned (crash-before-boot: dead).
+// An unparseable file fails CLOSED: we cannot prove the supervisors dead.
+// Sealed trees skip this check: the 0444 manifest written last IS the
+// terminal proof, and kill(2) cannot distinguish a zombie, so a pid check
+// there could only ever add flake, never evidence.
+function supervisorsActive(dir) {
+  const p = path.join(dir, 'supervisors.json');
+  if (!fs.existsSync(p)) return false;
+  let sup;
+  try { sup = JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return true; }
+  if (!Array.isArray(sup)) return true; // malformed shape: fail closed
+  for (const s of sup) {
+    const pid = Number(s && s.pid);
+    if (!Number.isInteger(pid) || pid <= 0) return true; // malformed: fail closed
+    let exited = false;
+    try { exited = fs.existsSync(path.join(dir, 'logs', `${s.label}.exit`)); }
+    catch { /* unreadable dir: treat as no exit record */ }
+    if (exited) continue; // the supervisor's own death was recorded
+    try { process.kill(pid, 0); return true; }
+    catch (e) { if (e && e.code === 'EPERM') return true; /* ESRCH: dead */ }
+  }
+  return false;
+}
+
 // The retention law itself (header comment above is the contract). Plans AND
 // reclaims direct children of proofRoot; NEVER deletes an unowned, tracked,
-// live (fresh writes inside graceMs), or committed-manifest-referenced tree,
-// nor an uncommitted-but-sealed custom-named dir (pending proof — deleting
+// live (fresh writes inside graceMs, or an ACTIVE supervisor per the tree's
+// own supervisors.json/exit-record evidence), or committed-manifest-referenced
+// tree, nor an uncommitted-but-sealed custom-named dir (pending proof — deleting
 // it would delete bytes, which retention must never do). runStartMs/nowMs/
 // graceMs are injected so the fake-tree spec is deterministic; dryRun plans
 // without touching disk. Returns {reclaimed:[{dir,mib,reason}], kept:[{dir,
@@ -334,6 +368,8 @@ export function planBenchRetention({ proofRoot, runStartMs, nowMs = Date.now(),
       const sealed = fs.existsSync(path.join(dir, 'manifest.json'));
       if (!sealed && nowMs - scan.maxMtimeMs < graceMs)
         { kept.push({ dir, reason: 'live-grace' }); continue; }
+      if (!sealed && supervisorsActive(dir))
+        { kept.push({ dir, reason: 'active-supervisor' }); continue; }
       if (refText.includes(ent.name))
         { kept.push({ dir, reason: 'referenced-by-committed-manifest' }); continue; }
       const rotation = ent.name.includes('.stale-') || ent.name.includes('abandoned-');

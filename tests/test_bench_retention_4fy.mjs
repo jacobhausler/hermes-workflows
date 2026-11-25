@@ -158,6 +158,35 @@ assert.ok(fs.existsSync(path.join(gproof, 'run-tracked-proof'))
   'tracked + referenced survive, unreferenced scratch does not')
 console.log('PASS committed proof bytes + manifest-referenced trees: never deleted (git)')
 
+// --- active supervisors (4fy review): mtime silence is NOT terminal evidence.
+// A gate-case bench parked past the grace is disk-quiet BY DESIGN — the tree's
+// own supervisors.json (one writeFileSync per spawn) plus the ABSENT
+// logs/<label>.exit record prove its supervisor lives. Trees whose supervisors
+// are dead (exit record present, or pid ESRCH) still reclaim; a corrupt
+// supervisors.json fails CLOSED (kept); sealed trees keep the seal-is-terminal
+// law (a live pid there is teardown-in-progress, and kill(2) cannot tell a
+// zombie from the living — a pid check there adds flake, never evidence).
+const liveSup = JSON.stringify([{ label: 'gateway', pid: process.pid }])
+const esrchPid = 2_147_483_647 // out-of-range pid: kill(2) reports ESRCH everywhere
+bench(proof, 'run-parked-gate', { extra: { 'supervisors.json': liveSup, 'logs/gateway.log': 'alive\n' } })
+bench(proof, 'run-sup-exit-record', { extra: { 'supervisors.json': liveSup,
+  'logs/gateway.log': 'was\n', 'logs/gateway.exit': `${Date.now()} code=signal\n` } })
+bench(proof, 'run-sup-esrch', { extra: {
+  'supervisors.json': JSON.stringify([{ label: 'gateway', pid: esrchPid }]) } })
+bench(proof, 'run-sup-broken', { extra: { 'supervisors.json': '{oops' } })
+bench(proof, 'run-sealed-livepid', { sealed: true, extra: { 'supervisors.json': liveSup } })
+res = planBenchRetention({ proofRoot: proof, ...opts })
+assert.equal(keptReason(res, 'run-parked-gate'), 'active-supervisor',
+  'quiet past grace with a live supervisor pid = parked, not dead')
+assert.equal(keptReason(res, 'run-sup-broken'), 'active-supervisor',
+  'unparseable supervisors.json fails CLOSED: unproven-dead is never deleted')
+assert.ok(fs.existsSync(path.join(proof, 'run-parked-gate'))
+  && fs.existsSync(path.join(proof, 'run-sup-broken')))
+for (const dead of ['run-sup-exit-record', 'run-sup-esrch', 'run-sealed-livepid'])
+  assert.ok(res.reclaimed.some(r => r.dir === path.join(proof, dead) && r.reason === 'scratch'),
+    `${dead}: exit-record / ESRCH / sealed each prove terminality`)
+console.log('PASS active-supervisor: parked gate + corrupt record kept; exit-record, ESRCH, sealed reclaimed')
+
 // absent proof root: empty plan, no crash
 assert.deepEqual(planBenchRetention({ proofRoot: path.join(root, 'nope'),
   runStartMs: Date.now(), repoRoot: root }), { reclaimed: [], kept: [] })
