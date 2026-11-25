@@ -58,8 +58,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
-// The desktop backend must inherit its normal profile/run-root settings. Only
-// explicit proof-launched workflow children receive the owned bench root.
+// Strip ambient roots before adding the owned root to bench subprocesses.
+// Readers and seeders must agree without changing the default desktop config.
 export function buildBenchLaunchEnv(parentEnv, overrides = {}) {
   const env = { ...parentEnv };
   delete env.WF_RUNS_ROOT;
@@ -882,7 +882,7 @@ async function main() {
   identity.bench.profile = BENCH_PROFILE;
   identity.bench.locks = B.locks;
 
-  const benchEnv = buildBenchLaunchEnv(process.env, { HERMES_HOME: B.home, HERMES_GATEWAY_LOCK_DIR: B.locks });
+  const benchEnv = buildBenchLaunchEnv(process.env, { HERMES_HOME: B.home, HERMES_GATEWAY_LOCK_DIR: B.locks, WF_RUNS_ROOT: B.runs });
   // Gate-case bench knobs (bd_2026-11-13-qri): ride the fork's env so the
   // door's fail-once / delay are armed only for THIS bench gateway (never a
   // production install, never another case). See plugin_api.release_gate.
@@ -982,7 +982,7 @@ async function main() {
       HERMES_DESKTOP_DEV_SERVER: `http://127.0.0.1:${A.rendererPort}`,
       HERMES_DESKTOP_CDP_PORT: String(A.cdpPort),
       ...(pyAbs ? { HERMES_DESKTOP_PYTHON: pyAbs } : {}),
-      HERMES_HOME: B.home, HERMES_GATEWAY_LOCK_DIR: B.locks,
+      HERMES_HOME: B.home, HERMES_GATEWAY_LOCK_DIR: B.locks, WF_RUNS_ROOT: B.runs,
       ...(A.caseName === 'gate' ? { UI2_PROOF_GATE_FAIL_ONCE: '1',
         UI2_PROOF_GATE_POST_DELAY_MS: '2500' } : {}) });
     sup.start('electron', path.join(desktop, 'node_modules', '.bin', 'electron'),
