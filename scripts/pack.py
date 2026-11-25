@@ -161,6 +161,21 @@ INCLUDE_FILES = (
     # dead-package shape (est-4vnq finding-4 pack law; the sibling of
     # park_watch.py shipped by 8763ea1). Stdlib-only.
     "cron_bridge.py",
+    # 35f (est-wqml6 follow-up): the per-node telemetry sidecar is the
+    # cross-process channel between a CLI-spawned child's observer hooks and the
+    # runner. BOTH halves spec-load it by FILE PATH — __init__.py registers
+    # register_observer_hooks(ctx) at bind time and wf.py._node_telemetry folds
+    # the sidecar at the settle seam — so the import-closure probe never sees
+    # it: absent from the ZIP, every packaged install loses child telemetry
+    # SILENTLY (both loads are guarded) and the shipped
+    # tests/test_wfcommon_contract_pins_batch4.py dies ModuleNotFoundError at
+    # the unpacked root (the Wave E known-pre-existing, now repaired). The
+    # sibling runner_watchdog.py is the same shape caught by the new mechanical
+    # gate: wf.py's `tick` verb and __init__.py's arm spec-load it by path, so
+    # a packaged install printed "TICK REFUSED runner_watchdog.py not present"
+    # and every ZIP-installed watchdog tick died. Stdlib-only, both.
+    "node_telemetry.py",
+    "runner_watchdog.py",
     "docs/native-hooks.md",  # the p3/p5 switch board: an unshipped doc is invisible to ZIP installs
     # P41 (hw-g6v): the tick launcher law and the one-line "Gateway draining"
     # operator rule-out — the tick-ops doc of an installed plugin must travel
