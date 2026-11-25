@@ -43,6 +43,11 @@ SOURCE_ONLY_TESTS = {
     # bd_2026-11-13-iqf (slice A): executes the source-only driver AND reads
     # the committed capture sets under tests/proof-harness/captured/.
     "tests/test_proof_harness_repro.mjs",
+    # bd_2026-11-13-4fy (wave-B review BLOCKER): the retention spec imports
+    # the source-only driver (and its CLI leg executes it) — the equality
+    # pin refuses a one-sided edit; the packaged run died
+    # ERR_MODULE_NOT_FOUND on capture.mjs before this row.
+    "tests/test_bench_retention_4fy.mjs",
 }
 # A shipped test that loads/executes `<root> / "scripts" / "<file>"` needs that file in the ZIP.
 SCRIPT_REF = re.compile(r'(?:ROOT|BUILD)\s*/\s*"scripts"\s*/\s*"([^"]+)"|ROOT\s*/\s*"scripts/([^"]+)"')

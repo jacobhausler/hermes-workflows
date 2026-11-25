@@ -329,6 +329,13 @@ SOURCE_ONLY_TESTS = {
     # bd_2026-11-13-iqf (slice A): the double-run spec reads the committed capture sets under
     # tests/proof-harness/captured/ and imports the source-only driver — same est-4vnq finding-4 shape.
     "tests/test_proof_harness_repro.mjs": "executes source-only tests/proof-harness/capture.mjs and reads tests/proof-harness/captured/ sets",
+    # bd_2026-11-13-4fy (wave-B review BLOCKER): the retention behaviour spec
+    # imports planBenchRetention from the source-only driver — without this row
+    # the tests/test_*.mjs glob ships a test whose input capture.mjs never
+    # travels, and the packaged suite dies ERR_MODULE_NOT_FOUND (executed and
+    # reproduced in the wave-B review; mirrored in
+    # tests/test_package_source_only_756.py, the equality pin).
+    "tests/test_bench_retention_4fy.mjs": "executes source-only tests/proof-harness/capture.mjs (planBenchRetention + the CLI entrypoint leg)",
 }
 
 # Source-only SCRIPTS: repository/estate CI tooling that never travels in the
