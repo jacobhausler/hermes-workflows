@@ -47,10 +47,15 @@
 // terminal record (schema proof-harness/N + captures list; a corrupt or
 // unreadable manifest proves NOTHING and falls to the unsealed law or is
 // kept), an unsealed dir needs BOTH a quiet grace window AND dead supervisor
-// evidence. Supervisor liveness is checked for EVERY tree, sealed included:
-// a supervisors.json pid without its logs/<label>.exit record is an ACTIVE
-// bench whatever the manifest bytes say (a reparented corpse reaps to ESRCH;
-// an unreaped zombie means the spawner itself lives). The tree must be
+// evidence. Supervisor liveness is checked for EVERY tree, sealed included.
+// The recorded pid names a DETACHED PROCESS GROUP (the Supervisor class
+// spawns detached; teardown signals -pgid), so an ACTIVE bench is one whose
+// recorded leader is alive (kill(pid,0) ok or EPERM) without its exit record,
+// OR whose recorded process group answers kill(-pid,0): a reaped leader
+// (ESRCH) or even a written logs/<label>.exit proves only the WRAPPER died,
+// never the group — descendants can outlive the wrapper exactly through the
+// teardown window between wrapper exit and descendant exit, and an
+// unreaped zombie means the spawner itself lives. The tree must be
 // unreferenced by any committed manifest.json — a reference set that cannot
 // be fully read keeps the tree — and be either a *.stale-*/*abandoned-*
 // rotation, a run-* scratch dir, or a dead attempt (no terminal manifest).
@@ -367,15 +372,25 @@ function committedManifestText(repoRoot, proofRoot) {
 // Terminality evidence for a tree the sweep plans to touch: every supervisor
 // the harness spawned is recorded in the tree's own supervisors.json ({label,pid}, one
 // writeFileSync per spawn) and every reaped child appends logs/<label>.exit.
+// The Supervisor class spawns EVERY child detached (own pgid) and tears down
+// by signalling -pgid, so the recorded pid is a process-GROUP identity: the
+// ownership boundary is the group, never the wrapper pid alone.
 // A tree whose supervisors.json names a pid that is still alive (kill(pid,0)
 // ok, or EPERM = alive, owned by someone else) with no exit record has an
 // ACTIVE supervisor — a parked gate-case bench idles on disk past any grace
-// window by design, so mtime silence alone never proves it dead. The check
-// runs for SEALED trees too (4fy wave-B qualification): a recorded pid alive
-// without its exit record contradicts terminality no matter what manifest
-// bytes exist — a reparented corpse reaps to ESRCH (dead trees stay
-// reclaimable, see the ESRCH leg of the spec), and a zombie nobody reaped
-// means the spawner itself still lives, which is liveness on its own.
+// window by design, so mtime silence alone never proves it dead. A leader
+// that reaps to ESRCH proves the same nothing: the wrapper can exit while
+// its detached group still has living members (the teardown window between
+// wrapper exit and descendant exit — field-proven by the 4fy recovery
+// review, where exactly this shape selected a live tree for reclaim). So
+// after leader ESRCH, or once the wrapper's exit record is present, the
+// group itself must answer kill(-pid,0) with ESRCH before the supervisor
+// leg counts as dead; a group probe that answers 0 (alive) or EPERM (alive,
+// someone else's) — or any unexpected error (unproven) — keeps the tree.
+// The check runs for SEALED trees too (4fy wave-B qualification): a live
+// leader or a live group contradicts terminality no matter what manifest
+// bytes exist, and an unreaped zombie means the spawner itself lives, which
+// is liveness on its own.
 // A missing supervisors.json means nothing was ever spawned — that only
 // proves crash-before-first-spawn once the tree is quiet past the grace
 // window; the boot window between the owned marker and the first supervisor
@@ -390,12 +405,19 @@ function supervisorsActive(dir) {
   for (const s of sup) {
     const pid = Number(s && s.pid);
     if (!Number.isInteger(pid) || pid <= 0) return true; // malformed: fail closed
+    if (pid === 1) return true; // init is never a bench wrapper; kill(-1,·) is broadcast
     let exited = false;
     try { exited = fs.existsSync(path.join(dir, 'logs', `${s.label}.exit`)); }
     catch { /* unreadable dir: treat as no exit record */ }
-    if (exited) continue; // the supervisor's own death was recorded
-    try { process.kill(pid, 0); return true; }
-    catch (e) { if (e && e.code === 'EPERM') return true; /* ESRCH: dead */ }
+    if (!exited) {
+      try { process.kill(pid, 0); return true; }
+      catch (e) { if (e && e.code === 'EPERM') return true; /* ESRCH: wrapper reaped */ }
+    }
+    // Wrapper dead (ESRCH or recorded .exit) says NOTHING about the detached
+    // group: probe it. Only ESRCH proves group death; anything else — alive,
+    // EPERM, an unexpected error — fails CLOSED and keeps the tree.
+    try { process.kill(-pid, 0); return true; }
+    catch (e) { if (!e || e.code !== 'ESRCH') return true; /* ESRCH: group dead */ }
   }
   return false;
 }

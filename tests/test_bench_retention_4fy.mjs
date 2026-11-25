@@ -16,6 +16,7 @@
 // the driver module (the CLI guard proves importing never boots the bench).
 import assert from 'node:assert/strict'
 import { execFileSync, spawn } from 'node:child_process'
+import { once } from 'node:events'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -286,19 +287,20 @@ console.log('PASS committed proof bytes + manifest-referenced trees: never delet
 // A gate-case bench parked past the grace is disk-quiet BY DESIGN — the tree's
 // own supervisors.json (one writeFileSync per spawn) plus the ABSENT
 // logs/<label>.exit record prove its supervisor lives. Trees whose supervisors
-// are dead (exit record present, or pid ESRCH) still reclaim; a corrupt
-// supervisors.json fails CLOSED (kept). Since the wave-B qualification the
-// liveness check covers SEALED trees too: a recorded pid alive without its
+// are dead (exit record present AND the recorded detached group answering
+// ESRCH, or leader ESRCH with the group answering ESRCH) still reclaim; a
+// corrupt supervisors.json fails CLOSED (kept). Since the wave-B qualification
+// the liveness check covers SEALED trees too: a recorded pid alive without its
 // exit record contradicts terminality whatever the manifest says — and a
 // detached-then-dead supervisor reaps to ESRCH, so dead sealed trees stay
 // reclaimable (the sealed ESRCH leg is that negative control).
 const liveSup = JSON.stringify([{ label: 'gateway', pid: process.pid }])
 const esrchPid = 2_147_483_647 // out-of-range pid: kill(2) reports ESRCH everywhere
+const deadSup = JSON.stringify([{ label: 'gateway', pid: esrchPid }])
 bench(proof, 'run-parked-gate', { extra: { 'supervisors.json': liveSup, 'logs/gateway.log': 'alive\n' } })
-bench(proof, 'run-sup-exit-record', { extra: { 'supervisors.json': liveSup,
+bench(proof, 'run-sup-exit-record', { extra: { 'supervisors.json': deadSup,
   'logs/gateway.log': 'was\n', 'logs/gateway.exit': `${Date.now()} code=signal\n` } })
-bench(proof, 'run-sup-esrch', { extra: {
-  'supervisors.json': JSON.stringify([{ label: 'gateway', pid: esrchPid }]) } })
+bench(proof, 'run-sup-esrch', { extra: { 'supervisors.json': deadSup } })
 bench(proof, 'run-sup-broken', { extra: { 'supervisors.json': '{oops' } })
 bench(proof, 'run-sealed-livepid', { sealed: true, extra: { 'supervisors.json': liveSup } })
 // PREMISE: alive DETACHED supervisor, manifest present. A real detached child
@@ -326,7 +328,7 @@ assert.ok(fs.existsSync(path.join(proof, 'run-parked-gate'))
   && fs.existsSync(path.join(proof, 'run-sealed-detached-live')))
 for (const dead of ['run-sup-exit-record', 'run-sup-esrch'])
   assert.ok(res.reclaimed.some(r => r.dir === path.join(proof, dead) && r.reason === 'scratch'),
-    `${dead}: exit-record / ESRCH each prove terminality`)
+    `${dead}: wrapper death + group ESRCH each prove terminality`)
 try { process.kill(det.pid, 'SIGKILL') } catch { /* already gone */ }
 // await the reap (libuv waitpid completes before the exit event) so the
 // recorded pid must now answer ESRCH — then the sealed tree reclaims.
@@ -336,6 +338,47 @@ assert.ok(res.reclaimed.some(r => r.dir === path.join(proof, 'run-sealed-detache
   && r.reason === 'scratch'),
   'sealed + dead detached supervisor (ESRCH) still reclaims: the liveness gate is evidence, not a blanket keep')
 console.log('PASS active-supervisor: parked, corrupt, live-detached-sealed kept; exit-record, ESRCH (sealed included) reclaimed')
+
+// --- PREMISE (4fy recovery replay): the ownership boundary is the detached
+// PROCESS GROUP, not the wrapper pid. The review's live double-run shape: a
+// detached wrapper (/bin/sh 'sleep 20 & exit 0') that has already exited —
+// leader reaps to ESRCH — while its reparented descendant still lives inside
+// the recorded group (kill(-pid,0) answers). That tree is still owned and
+// alive: kept WITHOUT any exit record (the exact receipt shape, which the
+// pre-fix law selected for reclaim as `reclaimed:scratch`) and kept WITH one
+// (a recorded wrapper .exit proves wrapper death, never group death — the
+// teardown window between wrapper exit and descendant exit). Once the whole
+// group is proven dead, both legs reclaim: the keep is evidence-bound, not a
+// blanket keep, and positive truly-dead reclaim stands.
+{
+  const grp = spawn('/bin/sh', ['-c', 'sleep 20 & exit 0'], { detached: true, stdio: 'ignore' })
+  try {
+    await once(grp, 'exit')
+    assert.throws(() => process.kill(grp.pid, 0), { code: 'ESRCH' }, 'wrapper reaped')
+    process.kill(-grp.pid, 0) // group alive via the reparented sleep
+    const grpSup = JSON.stringify([{ label: 'bench', pid: grp.pid }])
+    bench(proof, 'run-group-alive-norecord', { extra: { 'supervisors.json': grpSup } })
+    bench(proof, 'run-group-alive-exitrec', { extra: { 'supervisors.json': grpSup,
+      'logs/bench.exit': `${Date.now()} code=0\n` } })
+    res = planBenchRetention({ proofRoot: proof, ...opts })
+    assert.equal(keptReason(res, 'run-group-alive-norecord'), 'active-supervisor',
+      'ESRCH leader with a live detached group: still-owned living tree, kept (receipt replay)')
+    assert.equal(keptReason(res, 'run-group-alive-exitrec'), 'active-supervisor',
+      'wrapper .exit present but the detached group lives: wrapper death is not group death')
+    try { process.kill(-grp.pid, 'SIGTERM') } catch { /* raced away */ }
+    const groupDead = () => { try { process.kill(-grp.pid, 0); return false } catch (e) { return e.code === 'ESRCH' } }
+    for (let waited = 0; !groupDead() && waited < 5000; waited += 50)
+      await new Promise(r => setTimeout(r, 50))
+    assert.ok(groupDead(), 'fixture group drained (descendant reparented to init, reaped there)')
+    res = planBenchRetention({ proofRoot: proof, ...opts })
+    for (const gone of ['run-group-alive-norecord', 'run-group-alive-exitrec'])
+      assert.ok(res.reclaimed.some(r => r.dir === path.join(proof, gone) && r.reason === 'scratch'),
+        `${gone}: group answers ESRCH, the keep lifts, the tree reclaims`)
+    console.log('PASS group-boundary replay: live detached group kept with and without wrapper .exit; proven-dead group reclaims')
+  } finally {
+    try { process.kill(-grp.pid, 'SIGKILL') } catch { /* already gone */ }
+  }
+}
 
 // --- PREMISE: the boot window between marker and first supervisor record ------
 // The owned marker is written before any spawn is recorded; a live tree in
