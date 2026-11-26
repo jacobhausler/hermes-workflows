@@ -1,0 +1,310 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "CJ2 selected fan-item display authority",
+    "subtitle": "Broken today: the panel re-walks live state, and a picked item has no view of its own. Fixed: each response publishes one validated revision, and one exact execution answers its view.",
+    "output": "bd-2026-11-13-cj2.html",
+    "quality_profile": "showcase"
+  },
+  "lanes": [
+    {
+      "id": "old",
+      "label": "OLD - one response re-walks live state while the runner keeps writing",
+      "variant": "exception"
+    },
+    {
+      "id": "spine",
+      "label": "Shared causes - the runner writes whether or not any panel is open; a click only picks which record answers",
+      "variant": "normal"
+    },
+    {
+      "id": "new",
+      "label": "NEW - one published revision, one exact record per view"
+    }
+  ],
+  "mainPath": [
+    "capture",
+    "commit",
+    "n_view",
+    "n_bind",
+    "n_panel",
+    "n_item"
+  ],
+  "nodes": [
+    {
+      "id": "o_view",
+      "lane": "old",
+      "col": 1,
+      "type": "backend",
+      "label": "_view re-reads",
+      "sublabel": "every join walks live state",
+      "tag": "root cause",
+      "width": 210
+    },
+    {
+      "id": "o_chat",
+      "lane": "old",
+      "col": 3,
+      "type": "security",
+      "label": "Era-mixed answer",
+      "sublabel": "new chip opens old chat",
+      "width": 210
+    },
+    {
+      "id": "o_borrow",
+      "lane": "old",
+      "col": 4,
+      "type": "frontend",
+      "label": "Borrowed facts",
+      "sublabel": "aggregate error; partial lost",
+      "width": 210
+    },
+    {
+      "id": "capture",
+      "lane": "spine",
+      "col": 0,
+      "type": "backend",
+      "label": "Dispatch capture",
+      "sublabel": "fan-out inputs frozen",
+      "width": 200
+    },
+    {
+      "id": "commit",
+      "lane": "spine",
+      "col": 1,
+      "type": "database",
+      "label": "commit_item_record",
+      "sublabel": "lands on resolve, no click",
+      "width": 210
+    },
+    {
+      "id": "prune",
+      "lane": "spine",
+      "col": 2,
+      "type": "database",
+      "label": "Retention fold",
+      "sublabel": "aged chats marked expired",
+      "width": 200
+    },
+    {
+      "id": "click",
+      "lane": "spine",
+      "col": 3,
+      "type": "frontend",
+      "label": "Tile click",
+      "sublabel": "sets selection atom only",
+      "width": 200
+    },
+    {
+      "id": "n_view",
+      "lane": "new",
+      "col": 1,
+      "type": "backend",
+      "label": "Publish one revision",
+      "sublabel": "state + memo pair ship joined",
+      "width": 215
+    },
+    {
+      "id": "n_bind",
+      "lane": "new",
+      "col": 2,
+      "type": "security",
+      "label": "resolve_item_chat",
+      "sublabel": "exact attempt, own home",
+      "width": 210
+    },
+    {
+      "id": "n_panel",
+      "lane": "new",
+      "col": 3,
+      "type": "frontend",
+      "label": "Panel branches once",
+      "sublabel": "selection picks the source",
+      "width": 210
+    },
+    {
+      "id": "n_item",
+      "lane": "new",
+      "col": 4,
+      "type": "frontend",
+      "label": "One record owns all",
+      "sublabel": "label status Output Final chat",
+      "width": 215,
+      "yOffset": 0
+    },
+    {
+      "id": "n_agg",
+      "lane": "new",
+      "col": 4,
+      "type": "backend",
+      "label": "Aggregate branch",
+      "sublabel": "no pick: node-wide read",
+      "width": 190,
+      "yOffset": -60
+    },
+    {
+      "id": "n_refuse",
+      "lane": "new",
+      "col": 3,
+      "type": "security",
+      "label": "Refuse cross-item",
+      "sublabel": "missing stale expired: 0 calls",
+      "width": 200,
+      "yOffset": 75
+    }
+  ],
+  "edges": [
+    {
+      "id": "opens",
+      "from": "click",
+      "to": "o_view",
+      "label": "panel opens today",
+      "role": "error",
+      "toSide": "right"
+    },
+    {
+      "id": "race",
+      "from": "capture",
+      "to": "o_view",
+      "label": "state moves under the read",
+      "role": "error"
+    },
+    {
+      "id": "stale",
+      "from": "o_view",
+      "to": "o_chat",
+      "label": "late aggregate ships",
+      "role": "error"
+    },
+    {
+      "id": "fallback",
+      "from": "o_view",
+      "to": "o_borrow",
+      "label": "journal fallback",
+      "role": "error",
+      "fromSide": "top",
+      "toSide": "top"
+    },
+    {
+      "id": "wave",
+      "from": "capture",
+      "to": "commit",
+      "label": "wave resolves",
+      "variant": "emphasis",
+      "role": "main"
+    },
+    {
+      "id": "journal",
+      "from": "commit",
+      "to": "n_view",
+      "label": "journal rides response",
+      "variant": "emphasis",
+      "role": "main"
+    },
+    {
+      "id": "identity",
+      "from": "capture",
+      "to": "n_view",
+      "label": "frozen inputs ship",
+      "variant": "dashed",
+      "role": "branch"
+    },
+    {
+      "id": "expired",
+      "from": "prune",
+      "to": "n_bind",
+      "label": "expired marks ride",
+      "variant": "dashed",
+      "role": "branch"
+    },
+    {
+      "id": "authority",
+      "from": "n_view",
+      "to": "n_bind",
+      "label": "one authority revision",
+      "variant": "emphasis",
+      "role": "main"
+    },
+    {
+      "id": "ships",
+      "from": "n_bind",
+      "to": "n_panel",
+      "label": "chat + display decision",
+      "variant": "emphasis",
+      "role": "main"
+    },
+    {
+      "id": "atom",
+      "from": "click",
+      "to": "n_panel",
+      "label": "selection atom",
+      "role": "main"
+    },
+    {
+      "id": "picked",
+      "from": "n_panel",
+      "to": "n_item",
+      "label": "a pick: that row only",
+      "variant": "emphasis",
+      "role": "main"
+    },
+    {
+      "id": "nopick",
+      "from": "n_panel",
+      "to": "n_agg",
+      "label": "no pick: own branch",
+      "variant": "dashed",
+      "role": "branch"
+    },
+    {
+      "id": "unread",
+      "from": "n_bind",
+      "to": "n_refuse",
+      "label": "unread or expired binds absence",
+      "variant": "dashed",
+      "role": "branch"
+    },
+    {
+      "id": "nostandin",
+      "from": "n_item",
+      "to": "n_refuse",
+      "label": "no sibling stand-in",
+      "variant": "dashed",
+      "role": "branch"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "rose",
+      "title": "Disease",
+      "items": [
+        "Retry, amend and turnover raced the read: one response showed one era's layout beside another generation's chat.",
+        "The selected item wore the node aggregate's error and refusal; the done-only gate discarded its settled partial output."
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "Runner and reader never meet",
+      "items": [
+        "The runner commits when an item resolves - panel open or not, same bytes; the click writes only a local selection atom (test_selected_item_identity_cj2.py).",
+        "With nothing picked, the detail view keeps the whole-node aggregate as its own read branch, never downstream of a selection."
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "One record, or refusal",
+      "items": [
+        "A selection binds label, status, Output, Final and recorded chat to that item's own closed record - partial output included.",
+        "A missing, stale or expired record refuses the content and the destination with zero host calls (test_selected_final_cj2.mjs, test_stored_session_nav.mjs, test_display_authority_pair_cj2.py)."
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Not claimed",
+      "items": [
+        "Panel behavior is observed through SDK/React test shims; native Electron and hosted acceptance are separate gates."
+      ]
+    }
+  ]
+}
