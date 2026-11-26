@@ -82,6 +82,9 @@ const constGrab = name => {
   return src.slice(i, i + 1 + nx)
 }
 
+// bd_2026-11-13-cj2: NodePanel/WorkflowsPage mount the real marked nav block
+const navBlock = src.match(/\/\/ BEGIN stored-session-nav\n([\s\S]*?)\/\/ END stored-session-nav/)[0].replace(/^export /gm, '')
+
 // ---- component stubs (no React, no SDK) --------------------------------------
 const jsx = (type, props) => ({ type, props })
 const jsxs = jsx
@@ -110,6 +113,7 @@ const NODE_TONE = Object.fromEntries(Object.entries(EDGE_TONE).map(([k, v]) => [
 }]))
 NODE_TONE.waiting = NODE_TONE.pending
 const sharedConsts = [
+  navBlock,
   constGrab('EDGE_TONE'), constGrab('FACT_TONE'), constGrab('UNKNOWN'), constGrab('TAIL_BYTES'),
   constGrab('defaultTabFor'), constGrab('unk'), constGrab('factText'), constGrab('logBase'), constGrab('attemptNo'),
   constGrab('CARD_W'), constGrab('modelTag'),
@@ -148,7 +152,7 @@ function makeNodePanel(srcCode) {
     'Dot', 'Badge', 'Button', 'Vitals', 'Fragment', 'jsx', 'jsxs',
     sharedConsts.join('\n') + '\n' + srcCode + '; return NodePanel'
   )(
-    a => (a === $selNode ? $selNodeHolder.v : null),
+    a => (a === $selNode ? $selNodeHolder.v : a === $fanItem ? $fanItemHolder.v : null),
     () => [panelTab, () => {}],
     () => {},
     cfg => { queries.push(cfg); return { data: cfg.enabled ? { content: 'TAIL' } : null, isPending: false } },
@@ -181,8 +185,9 @@ assert.ok(cardBaseline.match(/\bnull\b/) !== null)
 
 // ---- 3. solo snapshot equality + 4. profile badge ----------------------------
 let $selNodeHolder = { v: null }
+let $fanItemHolder = { v: null }
 let $selNode = { get: () => $selNodeHolder.v, set() {} }
-let $fanItem = { get: () => null, set() {} }
+let $fanItem = { get: () => $fanItemHolder.v, set() {} }
 let panelTab = null
 
 const detailFor = (def, shown) => ({ id: 'r1', status: shown.status, graph: { nodes: [def] }, nodes: { a: shown }, events: [] })
@@ -239,10 +244,12 @@ const baseDef = extra => ({ id: 'a', type: 'agent', goal: 'do work', model: 'm',
   // Stacked fan-out ItemCard: title already carries the row error (RATIFY:
   // tooltip shows the error string it already shows for failed nodes).
   assert.ok(/title:\s*row\.error\s*\|\|\s*row\.goal\s*\|\|\s*undefined/.test(src), 'ItemCard title = row.error (failed-node error string already surfaced)')
-  // NodePanel left column: the error <pre> renders facts.error verbatim —
-  // including `precondition unmet: fix.pr_url`. No new field is needed.
-  assert.ok(/pre\('error',\s*facts\s*&&\s*facts\.error\s*!==\s*UNKNOWN\s*\?\s*facts\.error\s*:\s*shown\.error/.test(nodePanelSrc), 'NodePanel error pre reads facts.error/shown.error verbatim')
+  // Behavioral coverage (bd_2026-11-25-cj2 partial-output): the error <pre>
+  // reads the CHOSEN record verbatim — proved by render, not by a source
+  // string. The node's precondition error must survive with no item picked,
+  // and a selected item with no error of its own must NOT inherit it.
   $selNodeHolder.v = { runId: 'r1', nodeId: 'review' }
+  $fanItemHolder.v = null
   panelTab = null
   const cur = makeNodePanel(nodePanelSrc)
   const def = { id: 'review', type: 'agent', goal: 'review', after: ['fix'], requires: { fix: ['pr_url'] } }
@@ -255,6 +262,30 @@ const baseDef = extra => ({ id: 'a', type: 'agent', goal: 'do work', model: 'm',
   const s = texts(t).join('|')
   assert.ok(s.includes('precondition unmet: fix.pr_url'), 'failed-node tooltip shows the precondition error string')
   assert.ok(s.includes('precondition'), 'error_class renders')
+  // The same aggregate error on a fan-out node: no item picked, it renders;
+  // a selected item whose own record names no error must NOT inherit it.
+  const fanDef = { id: 'review', type: 'agent', goal: 'review {item}', after: ['fix'], requires: { fix: ['pr_url'] },
+    fanout: { items: ['Amber', 'Quartz'], goal: 'review {item}' } }
+  const fanShown = {
+    status: 'failed', type: 'agent', error_class: 'precondition',
+    error: 'precondition unmet: fix.pr_url',
+    output: { items: [], all_results: [
+      { status: 'done', item: 'Amber', output: { ok: true }, ms: 1, attempts: 1 },
+      { status: 'failed', item: 'Quartz', error_class: 'forbidden_model', error: 'served a forbidden model', ms: 1, attempts: 1 }
+    ] }
+  }
+  const fanDetail = { id: 'r1', status: 'failed', graph: { nodes: [fanDef] }, nodes: { review: fanShown }, events: [] }
+  const agg = texts(cur({ detail: fanDetail })).join('|')
+  assert.ok(agg.includes('precondition unmet: fix.pr_url'), 'the fan-out node keeps the precondition error with no item picked')
+  $fanItemHolder.v = { runId: 'r1', nodeId: 'review', index: 0 }
+  const pickedClean = texts(cur({ detail: fanDetail })).join('|')
+  assert.ok(!pickedClean.includes('precondition unmet: fix.pr_url'),
+    'a selected item with no own error does NOT inherit the aggregate precondition error')
+  $fanItemHolder.v = { runId: 'r1', nodeId: 'review', index: 1 }
+  const pickedOwn = texts(cur({ detail: fanDetail })).join('|')
+  assert.ok(pickedOwn.includes('served a forbidden model') && !pickedOwn.includes('precondition unmet: fix.pr_url'),
+    'a selected item shows ITS OWN error verbatim, never the node-level precondition string')
+  $fanItemHolder.v = null
 }
 // NodeCard gate: def.profile must never leak a fabricated badge for a falsy name.
 {

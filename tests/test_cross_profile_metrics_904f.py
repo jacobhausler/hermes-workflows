@@ -134,7 +134,15 @@ check("S3 no bare child_metrics(st[\"run_id\"]) in the door",
 dash = Path(__file__).resolve().parent.parent / "dashboard" / "plugin_api.py"
 dtext = dash.read_text()
 check("S4 no bare child_metrics(st[\"run_id\"]) in the dashboard full view",
-      'child_metrics(st["run_id"])' not in dtext and "run_child_metrics(r)" in dtext)
+      'child_metrics(st["run_id"])' not in dtext
+      # bd_2026-11-13-cj2 revision repair: the seam is called WITH the graph this
+      # very response publishes — one response, one revision (mixed-revision
+      # counterexample; pinned by tests/test_selected_item_identity_cj2.py).
+      # bd_2026-11-25-cj2: the seam additionally rides the response-level memo
+      # pair — pin the seam call and its published graph, not the exact
+      # argument list (the behavior is pinned by the single-snapshot counter
+      # below and the interleave suite).
+      and "run_child_metrics(r, graph=st[\"graph\"]" in dtext)
 
 print("TOTAL", len(CHECKS), "FAIL", len(FAILS))
 sys.exit(1 if FAILS else 0)

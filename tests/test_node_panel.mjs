@@ -29,6 +29,9 @@ const constGrab = name => {
   return src.slice(i, i + 1 + nx)
 }
 
+// bd_2026-11-13-cj2: NodePanel/WorkflowsPage mount the real marked nav block
+const navBlock = src.match(/\/\/ BEGIN stored-session-nav\n([\s\S]*?)\/\/ END stored-session-nav/)[0].replace(/^export /gm, '')
+
 // ---- structural contract: Drawer is gone; the alias keeps L3 whole ----------
 assert.ok(!/function\s+Drawer\s*\(/.test(src), 'Drawer component deleted')
 assert.ok(/const\s+Drawer\s*=\s*NodePanel\b/.test(src), 'Drawer alias so the L3 call site needs no change')
@@ -54,6 +57,7 @@ const texts = node => walk(node).flatMap(n =>
 
 const EDGE_TONE = { done: 'D', running: 'R', held: 'H', failed: 'F', skipped: 'S', pending: 'P' }
 const code = [
+  navBlock,
   constGrab('EDGE_TONE'), constGrab('FACT_TONE'), constGrab('UNKNOWN'), constGrab('TAIL_BYTES'),
   constGrab('defaultTabFor'), constGrab('unk'), constGrab('factText'), constGrab('logBase'), constGrab('attemptNo'),
   grab('fanItems'), grab('itemLabel'), grab('renderGoal'),
@@ -219,6 +223,153 @@ const activeTabOf = tree => {
   assert.ok(/final: unknown/.test(t), 'typed death with no final words shows unknown')
   const t2 = texts(render({ detail: detailFor(graphNode({}), { ...shown, final: 'my last words' }), sel: { runId: 'r1', nodeId: 'a' }, tab: ['a:failed', 'Final'] })).join('|')
   assert.ok(t2.includes('my last words'), 'final words render when the record carries them')
+}
+
+// ---- bd_2026-11-25-cj2 (panel detail): the SELECTED item owns Output and Final
+// Shape mirrors the real redrive/aggregate replay (Amber committed with its own
+// output, forbidden-model Quartz with NONE, the node aggregate naming Amber's
+// answer): the selected Quartz's Output must report honest absence — the whole
+// node aggregate, sibling answer included, may NEVER stand in for an item the
+// selected row says has no output. The Final tone rides the SELECTED status,
+// and the node view (no item picked) keeps the aggregate.
+{
+  const TONES = new Function(
+    `${constGrab('EDGE_TONE')}\n${constGrab('FACT_TONE')}; return { edge: EDGE_TONE, fact: FACT_TONE }`)()
+  const fo = { id: 'f', type: 'agent', goal: 'review {item}', fanout: { items: ['Amber', 'Quartz', 'Mabel'], goal: 'review {item}' } }
+  const rec = over => ({ error_class: null, refusal: null, error: null, attempts: 1, attempts_log: null,
+    final: null, harvest: null, output: null, ms: 1, started: 1, log_path: '/run/logs/f.x.a1.log',
+    prompt_path: null, efp: 'e', skey: 'k', steer: null, ...over })
+  const shown = {
+    status: 'failed', type: 'agent', fanout: true,
+    output: { items: [], all_results: [
+      { status: 'done', item: 'Amber', output: { result: 'Amber accepted' }, ms: 1, attempts: 1 },
+      { status: 'failed', item: 'Quartz', error_class: 'forbidden_model', error: 'served a forbidden model', ms: 1, attempts: 1 },
+      { status: 'partial', item: 'Mabel', output: { saved: 'Mabel banked' }, ms: 1, attempts: 1 }] },
+    item_records: {
+      0: rec({ status: 'done', final: 'Amber signed off', output: { result: 'Amber accepted' } }),
+      1: rec({ status: 'failed', error_class: 'forbidden_model', error: 'served a forbidden model', final: 'Quartz died' }),
+      2: rec({ status: 'partial', error_class: 'timeout', error: 'wall', output: { saved: 'Mabel banked' } }) }
+  }
+  const detail = { id: 'r1', status: 'failed', graph: { nodes: [fo] }, nodes: { f: shown }, events: [] }
+  const pickTab = (index, status, tab) => render({ detail, sel: { runId: 'r1', nodeId: 'f' },
+    fanItem: { runId: 'r1', nodeId: 'f', index }, tab: [`f·${index}:${status}`, tab] })
+  const preTone = (tree, needle) => {
+    const n = walk(tree).find(x => x.type === 'pre' && texts(x).includes(needle))
+    assert.ok(n, `expected a pre carrying ${needle}`)
+    return n.props.style.color
+  }
+
+  // Failed Quartz — its own absence, never a sibling's answer.
+  const qt = pickTab(1, 'failed', 'Output')
+  assert.equal(activeTabOf(qt), 'Output', 'the explicit Output tab is the active one')
+  const qTexts = texts(qt).join('|')
+  assert.ok(qTexts.includes('No output yet.'), 'selected failed item with no own output shows honest absence')
+  assert.ok(!qTexts.includes('Amber accepted') && !qTexts.includes('all_results'),
+    'the node aggregate (a sibling answer) never stands in for the selected item\'s absence')
+
+  // Selected Amber — its OWN output only, not the aggregate.
+  const at = texts(pickTab(0, 'done', 'Output')).join('|')
+  assert.ok(at.includes('Amber accepted'), 'the selected item shows its own output')
+  assert.ok(!at.includes('all_results'), 'own output, never the aggregate')
+
+  // A partial item keeps its known partial output and its marker (no blanket hide).
+  const mt = texts(pickTab(2, 'partial', 'Output')).join('|')
+  assert.ok(mt.includes('Mabel banked') && /partial/.test(mt), 'partial item output and marker survive selection')
+
+  // Final tone rides the SELECTED status: failed stays red, done is neutral,
+  // and the words are the item's own.
+  const qf = pickTab(1, 'failed', 'Final')
+  assert.equal(preTone(qf, 'Quartz died'), TONES.edge.failed, "failed item's Final keeps the failed tone")
+  assert.ok(!texts(qf).join('|').includes('Amber signed off'), "failed item's Final never borrows a sibling's words")
+  const af = pickTab(0, 'done', 'Final')
+  assert.equal(preTone(af, 'Amber signed off'), TONES.fact, 'a successful item under a failed aggregate keeps the neutral Final tone')
+
+  // No selection: the whole-node projection keeps owning Output.
+  const nv = texts(render({ detail, sel: { runId: 'r1', nodeId: 'f' }, tab: ['f:failed', 'Output'] })).join('|')
+  assert.ok(nv.includes('all_results'), 'node Output retains the aggregate when no item is selected')
+}
+
+// ---- bd_2026-11-25-cj2 (partial output): the REAL read model, no item_records
+// The red-pin witness (receipts/ship20-recovery/cj2-partial-c93734f1,
+// partial-real-2/view.json) proves what the actual runner + _view return for a
+// settled partial fan-out: the node record merges `output.all_results` and
+// `item_metrics`, and `item_records` appears NOWHERE in the response. A test
+// that injects that carrier falsifies nothing on this path, so this block
+// feeds the merged shape itself — every fact below is a byte of the witness
+// (portable literals, no host paths).
+{
+  const fo = { id: 'review', type: 'agent', goal: 'review {item}', fanout: { items: ['Amber', 'Quartz', 'Mabel'], goal: 'review {item}' } }
+  const mrow = (skey, over) => ({ skey, ms: 1, attempts: 1, spawn: 0, ...over })
+  const im = (session, item, display) => ({ tokens_in: 1, tokens_out: 1, api_calls: 1, tool_calls: 0,
+    session_ids: [session], session_current: session, item, session_display: display })
+  const shown = {
+    status: 'partial', type: 'agent', fanout: true,
+    error_class: 'budget_exhausted',
+    error: 'budget_exhausted: 1/3 items refused at the RunBudget cap; harvested 2',
+    efp: 'c352b5c35ee9157c',
+    metrics: { session_ids: ['local-0000000000000000000000000000000000000000000000000000000000000000'],
+      session_current: 'local-0000000000000000000000000000000000000000000000000000000000000000', live: 0 },
+    item_metrics: {
+      0: im('local-0000000000000000000000000000000000000000000000000000000000000000', 'Amber', { status: 'done' }),
+      2: im('local-2222222222222222222222222222222222222222222222222222222222222222', 'Mabel',
+        { status: 'partial', error_class: 'timeout', error: 'Mabel timed out' })
+    },
+    output: {
+      items: [{ result: 'Amber exact' }, { result: 'Mabel banked' }],
+      all_results: [
+        mrow('wf:partial-panel:review:0:c352b5c3.acabec',
+          { status: 'done', output: { result: 'Amber exact' }, item: 'Amber' }),
+        mrow('wf:partial-panel:review:1:c352b5c3.d4f720',
+          { status: 'failed', error_class: 'budget_exhausted', error: 'Quartz refused at cap', item: 'Quartz' }),
+        mrow('wf:partial-panel:review:2:c352b5c3.8aae00',
+          { status: 'partial', error_class: 'timeout', error: 'Mabel timed out', harvest: { source: 'stdout' },
+            output: { result: 'Mabel banked' }, item: 'Mabel' })
+      ]
+    }
+  }
+  assert.ok(!('item_records' in shown), 'the fixture carries NO item_records — the real response shape')
+  const detail = { id: 'partial-panel', status: 'partial', graph: { nodes: [fo] }, nodes: { review: shown }, events: [] }
+  const sel = { runId: 'partial-panel', nodeId: 'review' }
+  const pickTab = (index, status, tab) => render({ detail, sel,
+    fanItem: { runId: 'partial-panel', nodeId: 'review', index }, tab: [`review·${index}:${status}`, tab] })
+  const linkStoredId = tree => {
+    const n = walk(tree).find(x => typeof x.type === 'function' && x.type.name === 'SessionLink')
+    return n ? n.props.storedId : null
+  }
+
+  // The selected partial keeps its OWN committed output and its marker.
+  const mt = pickTab(2, 'partial', 'Output')
+  const mTexts = texts(mt).join('|')
+  assert.ok(mTexts.includes('Mabel banked'), 'the selected partial item shows its committed output')
+  assert.ok(mTexts.includes('partial — harvested output'), 'the selected partial keeps the harvested marker')
+  assert.ok(!mTexts.includes('all_results') && !mTexts.includes('Amber exact'),
+    'the item shows its own output, never the aggregate or a sibling')
+  assert.equal(linkStoredId(mt), 'local-2222222222222222222222222222222222222222222222222222222222222222',
+    'the selected partial still binds its exact chat')
+
+  // The selected done item shows only its own output; no harvested marker on a done row.
+  const at = texts(pickTab(0, 'done', 'Output')).join('|')
+  assert.ok(at.includes('Amber exact'), 'the selected done item shows its own output')
+  assert.ok(!at.includes('Mabel banked') && !at.includes('partial — harvested output'),
+    'a done item shows neither the aggregate nor a partial marker it does not carry')
+  assert.equal(linkStoredId(pickTab(0, 'done', 'Output')),
+    'local-0000000000000000000000000000000000000000000000000000000000000000',
+    'the selected done item binds its own exact chat')
+
+  // A cap-refused item with no record of its own stays an honest absence.
+  const qt = pickTab(1, 'failed', 'Output')
+  const qTexts = texts(qt).join('|')
+  assert.ok(qTexts.includes('No output yet.'), 'the cap-refused item reports honest absence')
+  assert.ok(!qTexts.includes('Mabel banked') && !qTexts.includes('all_results'),
+    'honest absence borrows neither a sibling nor the aggregate')
+  assert.equal(linkStoredId(qt), null, 'an item with no metrics row has no chat to bind')
+  assert.ok(texts(pickTab(1, 'failed', 'Final')).join('|').includes('final: unknown'),
+    'a recordless Final reads unknown, never borrowed sibling words')
+
+  // No selection: the node view keeps owning the aggregate (unchanged behavior).
+  const nv = texts(render({ detail, sel, tab: ['review:partial', 'Output'] })).join('|')
+  assert.ok(nv.includes('all_results') && nv.includes('partial — harvested output'),
+    'the node view with no item picked retains the aggregate and marker')
 }
 
 console.log('ALL PASS: NodePanel — one node truth, closed facts, unknown-not-zero, tabs by status, one tail, no second assembler')

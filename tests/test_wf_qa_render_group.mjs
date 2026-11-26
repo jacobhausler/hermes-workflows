@@ -53,6 +53,9 @@ const constGrab = name => {
   const nx = Math.min(...['\nconst ', '\nfunction ', '\n\n'].map(p => { const j = rest.indexOf(p); return j < 0 ? rest.length : j }))
   return src.slice(i, i + 1 + nx) + '\n'
 }
+
+// bd_2026-11-13-cj2: NodePanel/WorkflowsPage mount the real marked nav block
+const navBlock = src.match(/\/\/ BEGIN stored-session-nav\n([\s\S]*?)\/\/ END stored-session-nav/)[0].replace(/^export /gm, '')
 const jsx = (type, props, key) => ({ type, props: props || {}, key })
 const jsxs = jsx
 // The FINAL lifecycle/numeric laws ship as one marked block; render-group
@@ -188,6 +191,7 @@ const sdkMod = await import(pathToFileURL(sdkPath).href)
   // Render the REAL NodePanel on a healthy node whose record carries the
   // sentinel everywhere: no bare 'unknown' may reach the screen.
   const code = [
+    navBlock,
     constGrab('EDGE_TONE'), constGrab('FACT_TONE'), constGrab('UNKNOWN'), constGrab('unk'), constGrab('factText'),
     constGrab('logBase'), constGrab('attemptNo'), constGrab('defaultTabFor'), constGrab('TAIL_BYTES'),
     grab('fanItems'), grab('itemLabel'), grab('renderGoal'), constGrab('fanCounts'), constGrab('fanSummary'),
