@@ -1,0 +1,199 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "Ship 2.0 carrier repair — four reviewed proofs registered in suite discovery",
+    "quality_profile": "standard",
+    "output": "s20-gate-jtf-grammar-wake.html",
+    "subtitle": "Story: the four reviewed ship-2.0 test/doc slices ship on one carrier over the fixed base 9d84714f; the repair renames the four proofs so the stock tests/test_* discovery registers them, pins every shipped boundary unchanged, and replaces the explainer with this one-page view."
+  },
+  "lanes": [
+    {
+      "id": "carrier",
+      "label": "This carrier (new test/doc material)"
+    },
+    {
+      "id": "shipped",
+      "label": "Shipped at base 9d84714f (unchanged)"
+    }
+  ],
+  "phases": [
+    {
+      "id": "register",
+      "label": "register via discovery",
+      "fromCol": 0,
+      "toCol": 2,
+      "variant": "emphasis"
+    },
+    {
+      "id": "qualify",
+      "label": "one carrier commit",
+      "fromCol": 4,
+      "toCol": 5,
+      "variant": "dashed"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "gate",
+      "lane": "carrier",
+      "col": 0,
+      "yOffset": -135,
+      "type": "backend",
+      "label": "gate acceptance",
+      "sublabel": "door+surface",
+      "width": 150
+    },
+    {
+      "id": "jtf",
+      "lane": "carrier",
+      "col": 0,
+      "yOffset": -45,
+      "type": "backend",
+      "label": "inspection source",
+      "sublabel": "16 KiB tail",
+      "width": 150
+    },
+    {
+      "id": "grammar",
+      "lane": "carrier",
+      "col": 0,
+      "yOffset": 45,
+      "type": "external",
+      "label": "operator grammar",
+      "sublabel": "2 refusals",
+      "width": 150
+    },
+    {
+      "id": "wake",
+      "lane": "carrier",
+      "col": 0,
+      "yOffset": 135,
+      "type": "backend",
+      "label": "wake owner fixture",
+      "sublabel": "loopback",
+      "width": 150
+    },
+    {
+      "id": "disc",
+      "lane": "carrier",
+      "col": 2,
+      "type": "cloud",
+      "label": "suite discovery",
+      "sublabel": "test_* globs",
+      "width": 150
+    },
+    {
+      "id": "head",
+      "lane": "carrier",
+      "col": 4,
+      "type": "cloud",
+      "label": "carrier head",
+      "sublabel": "repair commit",
+      "width": 150
+    },
+    {
+      "id": "runtime",
+      "lane": "shipped",
+      "col": 2,
+      "type": "security",
+      "label": "shipped runtime",
+      "sublabel": "unchanged",
+      "width": 200
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "from": "gate",
+      "to": "disc",
+      "label": "registers",
+      "role": "main"
+    },
+    {
+      "id": "e2",
+      "from": "jtf",
+      "to": "disc",
+      "role": "branch"
+    },
+    {
+      "id": "e3",
+      "from": "grammar",
+      "to": "disc",
+      "role": "branch"
+    },
+    {
+      "id": "e4",
+      "from": "wake",
+      "to": "disc",
+      "role": "branch"
+    },
+    {
+      "id": "e5",
+      "from": "disc",
+      "to": "head",
+      "label": "4 manifest names",
+      "role": "main"
+    },
+    {
+      "id": "e6",
+      "from": "gate",
+      "to": "runtime",
+      "label": "pins unchanged",
+      "role": "branch"
+    },
+    {
+      "id": "e7",
+      "from": "jtf",
+      "to": "runtime",
+      "role": "branch"
+    },
+    {
+      "id": "e8",
+      "from": "grammar",
+      "to": "runtime",
+      "role": "branch"
+    },
+    {
+      "id": "e9",
+      "from": "wake",
+      "to": "runtime",
+      "role": "branch"
+    }
+  ],
+  "mainPath": [
+    "gate",
+    "disc",
+    "head"
+  ],
+  "cards": [
+    {
+      "dot": "emerald",
+      "title": "repair law",
+      "items": [
+        "test blobs byte-identical (rename only)",
+        "discovery registers exactly +4 cases",
+        "no runtime, scheduler or CI-workflow change"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "proofs at this head",
+      "items": [
+        "4 discovered legs exit 0 (python3.14 + node)",
+        "wake fixture green under stock python3",
+        "validate contract: 4 accept exit 0, 2 refuse exit 1"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "what the slices pin",
+      "items": [
+        "gate: one ui=True door, invalidate-before-read",
+        "jtf: ID-only /log, 16 KiB tail, 404s",
+        "grammar: redrive default, wait-all vs quorum",
+        "wake: held asks, deltas, cascades, DND"
+      ]
+    }
+  ]
+}
