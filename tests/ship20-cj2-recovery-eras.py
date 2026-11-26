@@ -119,6 +119,11 @@ class Era:
 
         self.wf = load("cj2_rec_runner", "wf.py")
         self.door = load("cj2_rec_door", "__init__.py", package=True)
+        # #71 r5: the env pin (read below) is NOT a sandbox — the owner's
+        # settings.runs_root outranks it (resolver precedence #42). Pin the
+        # door's resolver before any door write; the per-Era re-install is an
+        # idempotent no-op.
+        load("cj2_rec_iso71", "tests/wf_test_isolation.py").install(self.door)
         self.wc = load("cj2_rec_wfcommon", "wfcommon.py")
         # the runner resolves bare run names under WF_RUNS_ROOT
         self.runs = Path(os.environ["WF_RUNS_ROOT"])
@@ -505,8 +510,10 @@ def probe_main(leg, repo, root):
     root = Path(root or Path(tempfile.mkdtemp(prefix="cj2-recovery-eras-"))).resolve()
     (root / "runs").mkdir(parents=True, exist_ok=True)
     (root / "home").mkdir(parents=True, exist_ok=True)
-    os.environ.setdefault("WF_RUNS_ROOT", str(root / "runs"))
-    os.environ.setdefault("HERMES_HOME", str(root / "home"))
+    # #71 r5: a stale/inherited pin must not redirect the door's writes
+    # outside the private root we were handed — ASSIGN, never setdefault.
+    os.environ["WF_RUNS_ROOT"] = str(root / "runs")
+    os.environ["HERMES_HOME"] = str(root / "home")
     os.environ.setdefault("HERMES_QUIET", "1")
     repo = repo or Path(__file__).resolve().parents[1]
     era = Era(repo, root, form)

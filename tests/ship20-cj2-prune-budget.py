@@ -138,6 +138,10 @@ def load(name, rel, package=False):
 
 wf = load("cj2_pb_runner", "wf.py")
 door = load("cj2_pb_door", "__init__.py", package=True)
+# #71 r5: the env pin (assigned above) is NOT a sandbox — the owner's
+# settings.runs_root outranks it (resolver precedence #42). Pin the door's
+# resolver before any door write. install() is idempotent.
+load("cj2_pb_iso71", "tests/wf_test_isolation.py").install(door)
 
 run = None
 carrier = None

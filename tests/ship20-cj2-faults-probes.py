@@ -91,6 +91,18 @@ _spec = importlib.util.spec_from_file_location(
 door = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(door)
 
+# #71 r5: the env pin is NOT a sandbox — the owner's settings.runs_root outranks
+# it (resolver precedence #42, deliberately unchanged). Pin the door's resolver
+# before any door write; module level covers every entry into this file: direct
+# leg runs, battery-spawned legs, and the clean exported replay through
+# tests/ship20-cj2-compat-probes.py, which loads this file as a library (the
+# install rides that same exec). install() is idempotent.
+_iso_spec = importlib.util.spec_from_file_location(
+    "cj2rec_iso71", REPO / "tests" / "wf_test_isolation.py")
+_iso71 = importlib.util.module_from_spec(_iso_spec)
+_iso_spec.loader.exec_module(_iso71)
+_iso71.install(door)
+
 # ---- instrumentation (M-shaped ops journal; global while inside a leg) ----
 rows = []
 _lock = threading.Lock()
