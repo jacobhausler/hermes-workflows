@@ -102,6 +102,12 @@ prune_states = wfcommon.prune_states
 # (est-7m6wv horde) `dep_satisfied` re-bind deleted: the runner enforces the
 # after-edge law through release_law, never this direct handle (zero call sites).
 active_child = wfcommon.active_child
+# bd_2026-11-13-cj2 (input capture): the shared capture-shape law binds from
+# wfcommon (ONE validator for writer and read model); the writer lives beside
+# skey_for below.
+fanout_inputs_path = wfcommon.fanout_inputs_path
+fanout_inputs_read = wfcommon.fanout_inputs_read
+fanout_input_value = wfcommon.fanout_input_value
 admission_ledger_errors = wfcommon.admission_ledger_errors   # #85: artifact-admission guard at runner re-validation
 FP_RULE_VERSION = wfcommon.FP_RULE_VERSION
 record_efp_valid = wfcommon.record_efp_valid
@@ -3989,6 +3995,18 @@ def commit_item_record(run, node, byid, index, result):
     rec = dict(rec)
     rec["status"] = rec_status
     rec["committed_at"] = now()
+    # bd_2026-11-25-cj2 (item source, frozen-record repair): the committed
+    # per-item record rides the BASE frozen byte shape — no `item` key is
+    # added here. The resolved item is authentic execution evidence the run
+    # already records; breaking the frozen runner records here would rewrite
+    # history to feed a label. bd_2026-11-13-cj2 (input capture): the
+    # pre-aggregate read model resolves a dynamic fan-out row's identity by
+    # matching the record's OWN base skey into the runner's dispatch-time
+    # input capture (wf.capture_fanout_inputs_batch for a wave's first
+    # attempts, wf.capture_fanout_input for a fresh-nonce retry;
+    # wfcommon.fanout_inputs_path), never by re-walking the ancestor's
+    # current output. The read joins
+    # evidence instead of widening the historical record format.
     for k in ("output", "error", "error_class", "reason", "ms", "attempts", "attempts_log",
               "skey", "log_path", "prompt_path", "pid", "started", "started_ns", "spawn",
               "served_model", "served_billing_provider", "billed_models", "adopted", "harvested",
@@ -10849,6 +10867,218 @@ def skey_for(run, byid, node, index=None):
     k = f"wf:{run.name}:{node['id']}" + (f":{index}" if index is not None else "")
     return f"{k}:{efp(byid, node)[:8]}.{uuid.uuid4().hex[:6]}"
 
+
+# bd_2026-11-13-cj2 (CJ2 input capture): ONE relation, ONE writer. The value
+# a fan-out child is actually dispatched with is published, under the freshly
+# minted full execution key, into a runner-owned PRESENTATION-only artifact
+# before item.started or the transport can expose a record. The read model
+# (wfcommon.resolve_item_chat) resolves a dynamic row's identity by matching
+# the record's own base key into that capture — never by re-walking the
+# ancestor's current output, which a mid-view amend may have replaced.
+# bd_2026-11-13-cj2 (write-amplification repair, independent review): the
+# FIRST launch attempt of a dynamic wave is preplanned as ONE scheduler-owned
+# batch (capture_fanout_inputs_batch) — minting a key and rewriting the whole
+# map inside every fresh _spawn serialized 1+2+…+N entries per wave, which
+# bounds no image and fails the wave budget at width 8. The single-key path
+# (capture_fanout_input) stands for fresh-nonce RETRY-lane spawns, which
+# report their write work separately and cannot hide healthy-wave costs.
+FANOUT_INPUTS_VERSION = wfcommon.FANOUT_INPUTS_VERSION
+_FANOUT_INPUTS_MAX_SLOT = 16384   # serialized bytes per capture slot
+_FANOUT_INPUTS_MAX_DOC = 65536    # serialized bytes per artifact (width-bounded)
+
+
+def _publish_fanout_inputs(run, lock, node, plans, width):
+    """Shared body of both carrier publishers: `plans` is the actual
+    (index, base execution key, dispatched item) rows. ONE read of the
+    artifact under the fan-out-local serializer, the retention law applied
+    to every plan, and AT MOST ONE whole-image write via tmp+replace — a
+    batch is one serialization and one rename, never a rewrite per entry.
+    Returns the set of indices whose key the artifact now proves (newly
+    published, or already captured where the same-key law forbids a new
+    write). A plan that is out of key scope, unrepresentable or over the
+    slot cap loses evidence for its OWN index only; a rejected or failed
+    image loses exactly the indices it would have newly written and leaves
+    every previous artifact byte untouched. Laws (identical for both
+    publishers): the same base key never takes two values — a same-key
+    re-drive reuses the captured input (spawn numbers are not input
+    identities); replacement keeps only the key still attached to a
+    retained canonical record or to a launch this wave dispatches; a re-
+    expansion or zero-item expansion neither clears a retained key nor
+    copies the new value onto it; keys are bounded by still-retained
+    canonical indices plus the current expansion width, with no retry/era
+    history; the payload never enters the journal, metrics telemetry, wake
+    text or the canonical records. The retention half of this law ENDS at
+    the canonical settlement transition: a key whose replacement record has
+    committed is no longer "attached to a retained canonical record", and
+    the SETTLE MODE of this same publisher (plans=None, reached via
+    _settle_fanout_inputs at a settled dynamic wave's join or at its
+    fanout_empty death) prunes it at that transition — a pending key is
+    never pruned before its own record settles, and a published wave never
+    carries a superseded key past its settlement. Settlement is a mode of
+    the writer, not a third writer: the pruned image serializes, bounds and
+    renames here, under the same serializer and the same evidence laws."""
+    stem_dir = run / "nodes"
+    path = wfcommon.fanout_inputs_path(run, node["id"])
+    with lock:
+        raw = wfcommon._carrier_load(path)
+        if plans is None:
+            # SETTLE MODE: drop every captured slot whose base key is no
+            # longer the key carried by that index's ON-DISK canonical
+            # record (attempt suffix ignored, exact match — the same
+            # retained-record evidence the publishers read). A superseded
+            # key never outlives the settlement of its replacement, so
+            # same-width turnover, shrink, empty and regrow all end their
+            # wave holding only currently required keys. AT MOST ONE
+            # whole-image write, ZERO when the image is already retained
+            # (replay and adoption settle without a new write or a remint);
+            # a malformed entry or an unreadable/over-cap image loses
+            # retention evidence (a stale presentation join), never
+            # reassigns it and never disturbs the wave.
+            entries = raw.get("items") if isinstance(raw, dict) else None
+            if not isinstance(entries, dict) or not entries:
+                return set()                             # absent or empty: zero write
+            parsed = wfcommon._fanout_input_slots(raw)
+            items_out = {}
+            for k, e in entries.items():
+                if k not in parsed:
+                    continue                             # malformed: lost, not reassigned
+                rec = jload(stem_dir / f"{node['id']}.{k}.json")
+                if not (isinstance(rec, dict) and isinstance(rec.get("skey"), str)):
+                    continue                             # never committed here: no anchor
+                rec_key = rec["skey"].split("#a", 1)[0]  # retained-record evidence
+                allowed = {id(s) for s in parsed[k]}
+                entry_out = {}
+                for name_, slot_ in e.items():
+                    if (isinstance(slot_, dict) and slot_.get("skey") == rec_key
+                            and id(slot_) in allowed):
+                        entry_out[name_] = slot_         # keep the slot's own name
+                if entry_out:
+                    items_out[k] = entry_out
+            if items_out == entries:
+                return set()                             # already retained: zero write
+            try:
+                blob = json.dumps({"version": FANOUT_INPUTS_VERSION, "items": items_out})
+            except (TypeError, ValueError):
+                return set()                             # unrepresentable: retention lost
+            if len(blob.encode("utf-8", errors="replace")) > _FANOUT_INPUTS_MAX_DOC:
+                return set()                             # over cap: retention lost, not guessed
+            tmp = path.with_name(path.name + f".{os.getpid()}.tmp")
+            try:
+                tmp.write_text(blob, encoding="utf-8")
+                os.replace(tmp, path)  # atomic: a reader sees the pruned or the full image
+            except OSError:
+                try:
+                    tmp.unlink(missing_ok=True)
+                except OSError:
+                    pass
+                # a failed prune leaves the previous artifact byte-untouched: a
+                # stale presentation join, healed at the next settlement.
+            return set()
+        parsed = wfcommon._fanout_input_slots(raw)
+        captured = set()
+        entries_new = {}
+        for index, base, item in plans:
+            if not str(base).startswith(f"wf:{run.name}:{node['id']}:{index}:"):
+                continue                                   # key scope, never a foreign claim
+            value = _clip_record({"item": item}).get("item")   # persisted-item policy, verbatim
+            try:
+                slot = json.dumps({"skey": base, "item": value}, allow_nan=False,
+                                  separators=(",", ":"))
+            except (TypeError, ValueError):
+                continue                                   # unrepresentable — absent, not guessed
+            if len(slot.encode("utf-8", errors="replace")) > _FANOUT_INPUTS_MAX_SLOT:
+                continue                                   # over cap — absent, not guessed
+            slots = parsed.get(str(index)) or []
+            if any(s["skey"] == base for s in slots):
+                captured.add(index)                        # same key: the captured value stands
+                continue
+            cand = json.loads(slot)                        # the exact validated bytes
+            rec = jload(stem_dir / f"{_node_file(node, index)}.json")
+            rec_key = None
+            if isinstance(rec, dict) and isinstance(rec.get("skey"), str):
+                rec_key = rec["skey"].split("#a", 1)[0]    # retained-record evidence
+            kept = [s for s in slots if s["skey"] == rec_key]
+            entries_new[str(index)] = ({"current": kept[0], "pending": cand} if kept
+                                       else {"current": cand})
+            captured.add(index)
+        if not entries_new:
+            return captured            # reused and lost keys only: a zero-write call
+        entries = raw.get("items") if isinstance(raw, dict) else None
+        items_out = {}
+        if isinstance(entries, dict):
+            for k, e in entries.items():
+                if k in entries_new or k not in parsed:
+                    continue           # rewritten now, or malformed (lost, not reassigned)
+                if int(k) < width or (stem_dir / f"{node['id']}.{k}.json").is_file():
+                    items_out[k] = e   # retained canonical index or live width
+        items_out.update(entries_new)
+        try:
+            blob = json.dumps({"version": FANOUT_INPUTS_VERSION, "items": items_out})
+        except (TypeError, ValueError):
+            return captured - {int(k) for k in entries_new}
+        if len(blob.encode("utf-8", errors="replace")) > _FANOUT_INPUTS_MAX_DOC:
+            return captured - {int(k) for k in entries_new}   # over cap — absent, not guessed
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(path.name + f".{os.getpid()}.tmp")
+        try:
+            tmp.write_text(blob, encoding="utf-8")
+            os.replace(tmp, path)   # atomic: a reader sees the full capture or the old one
+        except OSError:
+            try:
+                tmp.unlink(missing_ok=True)
+            except OSError:
+                pass
+            # publication failure loses evidence (the row reads unproved);
+            # the spawn and every canonical fact proceed untouched.
+            return captured - {int(k) for k in entries_new}
+        return captured
+
+
+def _settle_fanout_inputs(run, lock, node):
+    """The canonical settlement transition of the carrier: SETTLE MODE of
+    the one writer (see _publish_fanout_inputs, plans=None) — enforced
+    exactly once per settled dynamic wave at its join, and at the
+    fanout_empty death of a dynamic roster. Zero writes when the image is
+    already retained, so replay and adoption settle without a new write or
+    a remint; failure-safe by the publisher's own law."""
+    return _publish_fanout_inputs(run, lock, node, None, 0)
+
+
+def capture_fanout_input(run, lock, node, index, skey, item, width):
+    """Single-key capture: publish the dispatched input for one fan-out item
+    under its (freshly minted) base execution key. This is the per-attempt
+    lane — a fresh-nonce retry captures its distinct key before launch, and
+    a same-key re-drive reuses the captured value with ZERO new writes; the
+    first attempts of a dynamic wave ride the batch preplan instead. Every
+    publication law lives in _publish_fanout_inputs; a crash, an
+    unrepresentable value, an over-cap artifact or a write failure LOSES
+    evidence, never reassigns it."""
+    base = str(skey).split("#a", 1)[0]
+    _publish_fanout_inputs(run, lock, node, [(index, base, item)], width)
+
+
+def capture_fanout_inputs_batch(run, lock, node, byid, items):
+    """The scheduler-owned preplan for one freshly expanded DYNAMIC fan-out:
+    mint one dispatch key per actual first launch attempt and publish the
+    WHOLE batch into the node's capture artifact with one serialization and
+    one atomic replace, retaining every still-valid old canonical key. An
+    item whose live child the launcher's OWN verification law
+    (wfcommon.active_child) finds adoptable mints no candidate: an adopted
+    claim rides its retained capture or stands unproved, never a key the
+    batch invented for it. Plans rejected by the slot cap keep evidence
+    lost and fall through to the single-key path at launch. Returns
+    {index: base key} — the keys this wave must actually dispatch (never
+    mint a batch key and launch a different nonce); on loss returns {} and
+    every item falls back to per-spawn single-key capture."""
+    plans = []
+    for i, it in enumerate(items):
+        if active_child(run, node, byid, i) is not None:
+            continue
+        plans.append((i, skey_for(run, byid, node, i), it))
+    published = _publish_fanout_inputs(run, lock, node, plans, len(items))
+    return {i: sk for i, sk, _ in plans if i in published}
+
+
 def run_agent_node(run, meta, byid, node, outputs, steering):
     """NEVER raises: any unexpected error is committed as a node failure so the wave
     boundary and the runner's terminal event always happen (fleet-review F: silent death)."""
@@ -10873,6 +11103,20 @@ def run_agent_node(run, meta, byid, node, outputs, steering):
                                             "error_class": "fanout_empty",
                                             "output": {"items": []}})
                 log(run, "node.failed", node=nid, error="fanout empty", error_class="fanout_empty", attempts=0)
+                # bd_2026-11-13-cj2 (retention at settlement): a zero-item
+                # expansion IS a settlement transition — the wave has no
+                # dispatches left to settle, so the carrier reconciles to the
+                # canonical records on disk (at most one bounded write, zero
+                # when already retained) instead of holding superseded keys
+                # forever. A STATIC def resolves empty too but never wrote a
+                # carrier byte, so the empty branch only speaks for dynamic
+                # rosters; the failed fanout_empty record stands untouched
+                # either way.
+                if fo.get("items") is None:
+                    try:
+                        _settle_fanout_inputs(run, threading.Lock(), node)
+                    except Exception:
+                        pass                         # retention lost, never a death
                 _of = node.get("on_fail")
                 if not (isinstance(_of, str) and _of not in ("skip", "abort")):
                     # WF-GRAFT-4: a zero-item fan-out with NO else-arm is a dead
@@ -10889,6 +11133,36 @@ def run_agent_node(run, meta, byid, node, outputs, steering):
             cap = min(len(items), meta.get("item_concurrency", DEFAULT_ITEM_CONCURRENCY))
             results = [None] * len(items)
             lock = threading.Lock()
+            # bd_2026-11-13-cj2 (input capture): the fan-out-local serializer
+            # for the capture artifact (the runner's single-owner fence already
+            # serializes runner generations; the write itself is tmp+replace).
+            inputs_lock = threading.Lock()
+            # bd_2026-11-13-cj2 (input capture, write-amplification repair): the
+            # carrier speaks for DYNAMIC rosters only — an `items_from` dispatch
+            # value is provenance the graph does not hold, so it is published
+            # before any launch can expose a record. A static def's own `items`
+            # list is already graph evidence on both sides of the join, so a
+            # static wave writes ZERO carrier bytes. The dynamic wave preplans
+            # its first-attempt keys as ONE batch: the scheduler publishes each
+            # actual fresh dispatch key exactly once, and the workers below
+            # dispatch under those exact keys (never a different nonce).
+            dynamic_fanout = fo.get("items") is None
+            planned = {}
+            if dynamic_fanout:
+                try:
+                    planned = capture_fanout_inputs_batch(
+                        run, inputs_lock, node, byid, items)
+                except Exception:
+                    planned = {}               # a lost preplan costs a label, never a spawn
+            planned_slots = {i: [sk] for i, sk in planned.items()}
+
+            def _capture_input(i, sk, it):
+                try:
+                    capture_fanout_input(run, inputs_lock, node, i, sk, it, len(items))
+                except Exception:
+                    # publication is best-effort: a lost capture costs a label,
+                    # never a spawn, and never reassigns existing evidence.
+                    pass
             # wf1.1 A5: the WAIT-SET and the COMMIT THRESHOLD are split. Waiting is
             # ALL items unless the author wrote numeric `quorum`. The shared graph
             # validator makes authored `quorum_mode: "all"` mutually exclusive
@@ -11416,7 +11690,28 @@ def run_agent_node(run, meta, byid, node, outputs, steering):
                         # commit the exhausted verdict with the seeded count
                         # and the persisted ledger.
                         return _window_spent_record(meta, node, nid, i, spent)
-                    sk = skey_for(run, byid, node, i)   # fresh nonce per spawn (retry respawns
+                    slot = planned_slots.pop(i, None)
+                    if slot is not None:
+                        # bd_2026-11-13-cj2 (input capture): this wave's batch
+                        # preplan published the capture for THIS exact key before
+                        # any item.started — dispatch the key that was captured,
+                        # never a different nonce.
+                        sk = slot[0]
+                    else:
+                        sk = skey_for(run, byid, node, i)   # fresh nonce per spawn (retry respawns
+                        # bd_2026-11-13-cj2 (input capture): a fresh-nonce
+                        # RETRY-lane spawn publishes the ACTUAL dispatched input
+                        # under its actual distinct key BEFORE item.started and
+                        # before the transport can expose a record (the single-
+                        # key writer; retry write work reports separately and
+                        # cannot hide healthy-wave costs) — the substituted-
+                        # run_child seam (every offline harness) exercises this
+                        # writer too. ADOPTION (the branch above) never
+                        # captures: today's enumerated value is not the adopted
+                        # key's input — reuse that key's retained capture or
+                        # leave the input unproved. Static defs write nothing.
+                        if dynamic_fanout:
+                            _capture_input(i, sk, item)
                     log(run, "item.started", node=nid, index=i, skey=sk)   # are fresh sessions)
                     _book_launch()   # census launch stamp at the ACTUAL spawn instant
                     with _width_track(meta)(nid):   # #24 width receipt (knob-gated flush)
@@ -11457,7 +11752,27 @@ def run_agent_node(run, meta, byid, node, outputs, steering):
                         last_spawn = r.get("spawn")
                         r["attempts"] = last_spawn + 1 if isinstance(last_spawn, int) else 0
                     r.setdefault("attempts_log", [])
-                    results[i] = {**r, "item": item}
+                    row = {**r, "item": item}
+                    if r.get("adopted") and dynamic_fanout:
+                        # bd_2026-11-13-cj2 (input capture, adoption merge):
+                        # an adopted child may rejoin under a differently
+                        # materialized roster (same-definition replacement).
+                        # NEVER stamp its row with the newly enumerated
+                        # value: it rides the retained capture for ITS key,
+                        # or the item stands unproved (absence, not a label).
+                        # Scheduling and adoption ownership are untouched;
+                        # the canonical record gains no new key. A STATIC
+                        # adopted claim needs no lookup: the def's own items
+                        # list is the positional roster law both writer and
+                        # reader already apply to this wave.
+                        got, val = fanout_input_value(
+                            fanout_inputs_read(run, nid), i,
+                            str(r.get("skey") or "").split("#a", 1)[0])
+                        if got:
+                            row["item"] = val
+                        else:
+                            row.pop("item")
+                    results[i] = row
                     if r["status"] == "done":
                         done_count[0] += 1
                         # A5: straggler cancellation ONLY on an explicit `quorum` —
@@ -11519,6 +11834,20 @@ def run_agent_node(run, meta, byid, node, outputs, steering):
                     list(ex.map(lambda t: one(*t), list(enumerate(items))))
             finally:
                 strag_stop.set()
+            # bd_2026-11-13-cj2 (retention at settlement): every dispatched
+            # item's canonical record has now committed (the single-writer 765
+            # law lands each commit before its item.finished, and the pool
+            # join above is the batch's settlement transition). Reconcile the
+            # carrier to exactly the keys those records still carry: at most
+            # ONE whole-image write, zero when already retained, failure
+            # losing retention evidence only. A superseded key therefore
+            # never survives the settle of its replacement at same width,
+            # and untouched indices lose their superseded slots on shrink.
+            if dynamic_fanout:
+                try:
+                    _settle_fanout_inputs(run, inputs_lock, node)
+                except Exception:
+                    pass                             # retention lost, never a wave death
             _width_flush(meta, run)   # #24: observed item width of THIS fan-out wave
             # est-fanout-cell: the wave ends -> the open batch ALWAYS flushes with
             # its tail NAMED (never silently dropped), then the pool drains so the
@@ -11743,24 +12072,12 @@ def run_agent_node(run, meta, byid, node, outputs, steering):
 
 _MISSING = object()
 
-def resolve_ref(outputs, ref, missing=None):
-    """'plan.items.0.name' -> outputs['plan'] walked by dotted path.
-    `missing` is returned when the path does not exist; a path that exists with a
-    legitimately null value returns None — callers that must tell the two apart pass
-    `missing=_MISSING` (build_inputs does: a null field is an input, not an error)."""
-    parts = str(ref).split(".")
-    if parts[0] not in outputs:
-        return missing
-    cur = outputs[parts[0]]
-    for p in parts[1:]:
-        if isinstance(cur, list):
-            try: cur = cur[int(p)]
-            except (ValueError, IndexError): return missing
-        elif isinstance(cur, dict):
-            if p not in cur: return missing
-            cur = cur[p]
-        else: return missing
-    return cur
+# bd_2026-11-13-cj2 (list-root repair): the ONE reference law lives in the
+# shared read model (wfcommon.resolve_ref — verbatim move, call/alias and
+# missing-sentinel behavior intact) so the runner's expansion and the
+# pre-aggregate roster join cannot drift into two walkers again. The
+# historical call sites below bind through this module-level alias.
+resolve_ref = wfcommon.resolve_ref
 
 def _unmet_requires(node, outputs, provenance=None):
     """Inspect committed ancestor outputs only; null and absent are both unmet.

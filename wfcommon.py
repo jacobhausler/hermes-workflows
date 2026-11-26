@@ -33,9 +33,12 @@ from datetime import datetime, timezone
 from collections import namedtuple
 from pathlib import Path
 
-def jload(p, default=None):
+def jload(p, default=None, *, object_pairs_hook=None):
     try:
-        return json.loads(Path(p).read_text())
+        if object_pairs_hook is None:
+            return json.loads(Path(p).read_text())
+        return json.loads(Path(p).read_text(),
+                          object_pairs_hook=object_pairs_hook)
     except Exception:
         return default
 
@@ -6262,7 +6265,7 @@ def budget_tokens(m):
     except (TypeError, ValueError):
         return 0
 
-def run_state(r, *, telemetry=True, lock_state=None):
+def run_state(r, *, telemetry=True, lock_state=None, fp_memo=None, legacy_memo=None):
     """Derived truth of a run dir: status, per-node status, held gate meta.
     status: pending|running|interrupted|held|done|partial|failed|stopped.
     'interrupted' has unfinished work but NO verified runner; only wait/release/amend
@@ -6279,7 +6282,14 @@ def run_state(r, *, telemetry=True, lock_state=None):
     # single stored graph whose defs nothing here mutates, so ancestor hashes
     # computed for one node's law-check are exactly the values every other
     # node's check needs (diamond graphs make the un-memoized walk exponential).
-    fp_memo, legacy_memo = {}, {}
+    # bd_2026-11-25-cj2 (graph-work): a response may hand in the pair so the
+    # SAME walk serves its claims and facts joins too — memo values are pure
+    # functions of this one revision (wfcommon.efp's documented sharing law),
+    # so one response, one walk. Absent stays the per-read pair.
+    if fp_memo is None:
+        fp_memo = {}
+    if legacy_memo is None:
+        legacy_memo = {}
     # #44: ONE lock observation for the whole read — runner_alive consumes the
     # same (state, detail) the payload publishes as runner_lock (A2 one-read law:
     # a second probe microseconds later can flip across a dying runner's flock).
@@ -6725,7 +6735,7 @@ def node_child_home(r, nid, index=None):
         return profile_home(prof)
     return None
 
-def run_child_metrics(r):
+def run_child_metrics(r, graph=None, fp_memo=None, legacy_memo=None):
     """fb 904f5101496be8c1: the run-wide fold the STATUS/WAIT views use — per node
     record through its OWN child DB home (node_child_home), NOT a single query against
     the caller's state.db. A profile-routed node's sessions rows live in the TARGET
@@ -6733,7 +6743,18 @@ def run_child_metrics(r):
     view rendered api_calls/tool_calls 0 + idle_s null for demonstrably-live children
     (false-stall). Solo runs are byte-identical: records with no profile keys all take
     the None home = child_metrics(default). Rows fold per skey; distinct homes can
-    never collide because a title embeds the run id and the item index."""
+    never collide because a title embeds the run id and the item index.
+
+    bd_2026-11-13-cj2 (revision repair, mixed-revision counterexample
+    receipts/ship20-recovery/cj2-mixed-revision-4abf5a7c.log): callers that already
+    hold the committed revision their response publishes (dashboard._view) pass it
+    as `graph` — the claim pass then validates session authority against THAT
+    snapshot and reads no graph file, so one response carries one revision. An
+    amendment landing mid-read can no longer bind the published layout to a newer
+    era's chat (the mixed p-chip-opening-q failure) nor half-demote the era the
+    response ships; the next read converges, fail-closed. `graph=None` (door
+    status, direct callers) keeps the standalone read byte-identical: exactly one
+    internal graph load."""
     r = Path(r)
     nodes = r / "nodes"
     out = {}
@@ -6767,6 +6788,36 @@ def run_child_metrics(r):
                     prev[kk] = prev.get(kk) or v.get(kk)
                 prev["api_calls_known"] = prev.get("api_calls_known", True) and v.get("api_calls_known", True)
                 prev["sessions"].update(v.get("sessions") or {})
+                # bd_2026-11-13-cj2: recorded session ids merge additively — but the
+                # merged LAST slot must be the GLOBALLY-newest row's id, so the list
+                # sorts by each id's own (started-known, started_at, rowid) stamp:
+                # the same total order the per-home SELECT used. Scan order is the
+                # node-record name sort, which is NOT chronology — appending
+                # prev-first would hand the current-attempt slot to a superseded
+                # home whenever the newer home happened to scan second (the
+                # profile-transition trap: merging/deduping must never let the
+                # wrong current attempt win). Dedup is first-occurrence; per-id
+                # stamps keep the newest fact; stamp ties fall to the deterministic
+                # scan-append order (collapse-to-one, AGENTS 4c.12).
+                _ids = prev.setdefault("session_ids", [])
+                _at = prev.setdefault("_session_id_at", {})
+                _exp = prev.setdefault("_session_id_expired", [])
+                for _sid in v.get("session_ids") or []:
+                    if _sid not in _ids:
+                        _ids.append(_sid)
+                    _st = (v.get("_session_id_at") or {}).get(_sid)
+                    if _st is not None and (_sid not in _at or tuple(_st) > tuple(_at[_sid])):
+                        _at[_sid] = _st
+                for _sid in v.get("_session_id_expired") or []:
+                    if _sid not in _exp:
+                        _exp.append(_sid)
+                # Wave E: attempt-suffix stamps ride the merge the same way —
+                # a home's row proves the era for its own id wherever it lives.
+                _atm = prev.setdefault("_session_id_attempt", {})
+                for _sid, _att in (v.get("_session_id_attempt") or {}).items():
+                    if _atm.get(_sid, -1) < _att:
+                        _atm[_sid] = _att
+                _ids.sort(key=lambda _s: _at.get(_s) or (0, 0.0, 0))
     # Any node record without a profile home (and the whole-run case where NONE exist)
     # folds from the caller's home — but at most once.
     unowned = [p.name[:-5] for p in (nodes.glob("*.json") if nodes.is_dir() else [])
@@ -6774,15 +6825,625 @@ def run_child_metrics(r):
     if unowned or not seen_skeys:
         for k, v in child_metrics(Path(r).name).items():
             out.setdefault(k, v)
+    # bd_2026-11-13-cj2 (Wave E, captain missing-current counterexample): the
+    # CURRENT attempt is the exact title the run's OWN records name — never a
+    # guess from surviving rows. A node/item record carries the skey it spawns
+    # under and the attempt number (spawn-time records `attempt`, committed
+    # records `spawn`), and the wf.py spawn contract launches the child with
+    # `--continue <skey>#a<attempt> --create-if-missing`, so the record names
+    # the one sessions title that CAN answer for the current attempt. Rows
+    # alone cannot tell "the last surviving row IS current" from "the newest
+    # row was already expunged" — at 27d2afbd deleting only the #a10 row let
+    # the fold ship [#a2-id] and the click opened the OLDER chat; the author's
+    # deletion test removed ALL rows and missed it. The binding rides VERBATIM
+    # (shape and expiry stay the selector's select-before-validate law); a
+    # claim whose row is absent binds the computed absence None — an older
+    # survivor is never promoted over a known-newer attempt. Records without
+    # an int attempt (pre-contract fixtures) and rows whose ids carry no
+    # attempt-suffix stamp (historical/id-less schemas) gain NO key: the
+    # documented last-entry fallback stands byte-identical there.
+    # bd_2026-11-13-cj2 (Wave G, captain pending-amend counterexample,
+    # receipts/ship20-recovery/cj2-pending-amend-review.py red at 559ae1fe): a raw
+    # record skey names only the generation the record was written against. A
+    # fingerprint-changing amend re-queues the node (pending, stale_of_amend) while
+    # the OLD record survives byte-identical — the pane still offered the superseded
+    # chat and the click invoked openSession. Authority therefore comes from the
+    # SAME committed graph revision and the SAME validity law the read model
+    # applies (node_rec): an efp-stamped claim must pass record_efp_valid against
+    # the stored graph's def; a pre-efp claim must pass the legacy-chain check; a
+    # record whose node is absent from the current graph is a leftover. An
+    # invalidated claim binds the computed absence — never the old chat. An inert
+    # edit (efp unchanged — budgets/concurrency/policy are not work, and a
+    # pre-fingerprint era cannot be invalidated by one) leaves the previous valid
+    # record usable, exactly as a pre-amend read. Runs with NO committed graph
+    # (pre-graph fixtures) keep the Wave E law verbatim; there is no revision to
+    # align against. The three meanings stay distinct: a proven current title/ID
+    # binds the id; authority with no eligible destination (invalidated, or the
+    # named row absent) binds null; genuinely claimless payloads gain no key and
+    # keep the documented last-entry fallback.
+    # bd_2026-11-13-cj2 (revision repair): `graph` is the caller's already-read
+    # committed revision when the caller has one — the published snapshot IS the
+    # authority the claims validate against, and no graph file is read here.
+    # graph=None keeps the standalone read byte-identical (one internal jload).
+    # bd_2026-11-25-cj2 (graph-work): a response-level caller passes the SAME
+    # fp/legacy memo pair its other joins use — one revision, one walk (efp's
+    # sharing law); a fresh pair per call stands when none is handed in.
+    graph = jload(r / "graph.json") if graph is None else graph
+    byid = ({n["id"]: n for n in graph["nodes"] if isinstance(n, dict) and n.get("id")}
+            if isinstance(graph, dict) and isinstance(graph.get("nodes"), list) else {})
+    if fp_memo is None:
+        fp_memo = {}
+    if legacy_memo is None:
+        legacy_memo = {}
+
+    def _claim_authoritative(rec, name):
+        return _record_current(r, byid, name[:-5], rec, fp_memo, legacy_memo)
+
+    claims = {}
+    for name in names:
+        rec = jload(nodes / name)
+        if not isinstance(rec, dict):
+            continue
+        att = rec.get("attempt")
+        if type(att) is not int:                     # committed records name the attempt via `spawn`
+            att = rec.get("spawn")
+        skey = rec.get("skey")
+        if type(att) is not int or not isinstance(skey, str) or not skey:
+            continue
+        title = skey if "#a" in skey else f"{skey}#a{att}"
+        key = title.split("#a", 1)[0]
+        prev = claims.get(key)
+        # Collapse-to-one (AGENTS 4c.12): TOTAL order (attempt, record name) —
+        # duplicate claims mean an amended leftover; the highest named attempt
+        # wins, ties fall to the sorted record-name scan, never dict luck.
+        if prev is None or (att, name) > (prev[0], prev[1]):
+            claims[key] = (att, name, title, rec)
+    absent_keys = []
+    for key, (_att, name, title, rec) in claims.items():
+        row = out.get(key)
+        if not _claim_authoritative(rec, name):
+            # The committed graph no longer honors this record: its named
+            # generation is HISTORY, never the destination. The computed
+            # absence rides the claim's own era-stamped row and propagates to
+            # the group's remaining stamped survivors below — an independent
+            # binding (a still-current sibling claim) is never overwritten.
+            if isinstance(row, dict) and row.get("_session_id_attempt") \
+                    and "_session_current" not in row:
+                row["_session_current"] = None
+            absent_keys.append(key)                  # the invalidated era has no current destination
+            continue
+        if not isinstance(row, dict):
+            absent_keys.append(key)                  # no row for the named generation at all
+            continue
+        if not row.get("_session_id_attempt"):
+            continue                                 # unboundable era — last-entry law stands
+        sess = (row.get("sessions") or {}).get(title)
+        sid = sess.get("id") if isinstance(sess, dict) else None
+        row["_session_current"] = sid if isinstance(sid, str) and sid else None
+        # bd_2026-11-25-cj2 (display authority, complete): the claim pass binds
+        # the CHAT only. The raw-status pair this pass used to stamp
+        # (`_session_current_outcome`) is superseded by the COMPLETE display
+        # decision the item joins ship (bind_current_item_claims /
+        # resolve_item_chat) — a bare status never carried the error/refusal
+        # facts that turn it into the actual chip, so painting from it while
+        # the tooltip rode the journal split one execution across sources.
+    # bd_2026-11-13-cj2 (Wave F, amended-generation counterexample): an amendment that
+    # CHANGES skey leaves the only claim on a key that may have no row at all (the
+    # amended child died before first persistence, or its rows were expunged while the
+    # superseded generation's rows remain). The claim is still the authoritative record
+    # fact — the destination is the computed absence, never a last entry lifted from a
+    # SUPERSEDED key (the captain review: deleting the sole row of the new skey let the
+    # click open the old generation). The absence propagates to the surviving stamped
+    # rows of the claim's OWN fold group only — same node prefix, same fan-out item
+    # index (group derived from the claim key itself, mirroring the _view item-index
+    # rule, so a sibling item never borrows another item's absence and an item claim
+    # never lands on solo-shape rows). Unstamped siblings keep the byte-identical
+    # last-entry law (claimless/id-less historical payloads gain no key, as above);
+    # a row already bound by its own claim — verbatim id or same-key absence — is
+    # never overwritten, and the ONE fold's ranking (landing bindings outrank absence,
+    # TOTAL by chronology stamp) stays the only ranking site.
+    for key in absent_keys:
+        parts = key.split(":")
+        if "." not in parts[-1]:
+            continue                                 # not the skey contract shape — no group
+        if len(parts) >= 5 and parts[-2].isdigit():
+            prefix, want = ":".join(parts[:-2]) + ":", int(parts[-2])
+        else:
+            prefix, want = ":".join(parts[:-1]) + ":", None
+        for k, m in out.items():
+            if not k.startswith(prefix) or "_session_current" in m or not m.get("_session_id_attempt"):
+                continue
+            tail = k[len(prefix):].split(":")
+            got = int(tail[0]) if len(tail) == 2 and tail[0].isdigit() else None
+            if got == want:
+                m["_session_current"] = None
     return out
 
-def _aggregate_item_fact(r, nid, index):
-    """Read-only projection of an item from a CURRENT done fan-out aggregate.
-    Never a recovery record: node_rec still reads only the aggregate on disk."""
-    graph = jload(Path(r) / "graph.json")
-    if not isinstance(graph, dict) or not isinstance(graph.get("nodes"), list):
+def _record_current(r, byid, stem, rec, fp_memo=None, legacy_memo=None):
+    """THE existing validity law for one committed record against a GIVEN
+    revision (its byid map) — shared by the run_child_metrics claim pass and
+    the node_facts published-revision facts join, so a demotion cannot happen
+    on one surface while the other promotes the same commit. A revision with
+    no parseable nodes keeps the Wave E law verbatim (there is no revision to
+    align against). An efp-stamped record must pass record_efp_valid; a pre-efp
+    record passes only the legacy-chain check; a record whose node is absent
+    from the revision is a leftover."""
+    if not byid:
+        return True                              # no committed graph — Wave E law stands
+    node = byid.get(stem)
+    if node is None:
+        head, sep, tail = stem.rpartition(".")   # native item identity: '<node>.<index>'
+        node = byid.get(head) if sep and tail.isdigit() else None
+    if node is None:
+        return False                             # no node in the current graph — leftover
+    if "efp" in rec:
+        return record_efp_valid(rec, byid, node, memo=fp_memo)
+    return _legacy_chain_unchanged(r, node, byid, legacy_memo)
+
+
+def _item_display_decision(rec):
+    """bd_2026-11-25-cj2 (display authority, complete): the COMPLETE presentation
+    decision one selected row ships — every execution-specific fact a chip,
+    tooltip or execution section may paint for the attempt the chat join binds:
+    the raw status plus the error_class / refusal / error that normalize it
+    (failed+cancelled is the neutral word; a partial or adopted death rides its
+    own class). A field the ONE source record does not carry is an explicit
+    absence — never an advisory-event guess re-pointed at this row. No usable
+    status means no decision (the claimless/compat fallbacks stand). Only
+    nonempty strings ride, so an empty value never masks an absent one."""
+    st = rec.get("status")
+    if not (isinstance(st, str) and st):
         return None
-    byid = {n["id"]: n for n in graph["nodes"] if isinstance(n, dict) and n.get("id")}
+    disp = {"status": st}
+    for k in ("error_class", "refusal", "error"):
+        v = rec.get(k)
+        if isinstance(v, str) and v:
+            disp[k] = v
+    return disp
+
+
+def _claim_bearing_rows(published_output):
+    """bd_2026-11-25-cj2 (item source): THE one selection operation for
+    claim-bearing aggregate rows — the certified `all_results` list, or a
+    legacy status-bearing `output.items` list (the same rule the renderer
+    applies in fanItems, so one aggregate never answers the chip from one
+    row list and the chat from another). No precedence clone: exactly one
+    list is chosen, once, per response."""
+    if not isinstance(published_output, dict):
+        return None
+    rows = published_output.get("all_results")
+    if isinstance(rows, list):
+        return rows
+    rows = published_output.get("items")
+    if isinstance(rows, list) and any(isinstance(x, dict) and x.get("status") for x in rows):
+        return rows
+    return None
+
+
+def bind_current_item_claims(published_output, items, groups):
+    """bd_2026-11-25-cj2 (exact-attempt join): for a fan-out item projected under
+    a PUBLISHED certified aggregate, the current recorded chat is the join of
+    two facts the response already holds — the published row's OWN recorded
+    title (its `skey` plus the attempt it names, suffix included: the claim
+    pass's title contract) and the already-read home-scoped session row for
+    that generation key (the fold row's `sessions`, keyed by recorded title).
+    One in-memory join; no second fold, no aggregate re-read, no pairing
+    heuristic. Key membership alone is neither a claim nor a proof: a schema
+    correction advances the attempt INSIDE one skey (the same-skey red at
+    e7d521c6: the aggregate marked `#a1` done while the panel opened the
+    schema-invalid `#a0`), and a redrive or ABA restore re-keys the generation
+    entirely — the fold's era binding belongs to whatever records it observed
+    and is superseded here, never consulted as a competing authority.
+    bd_2026-11-25-cj2 (item source): a legacy status-bearing `output.items`
+    aggregate is THE SAME selection operation — a claim-bearing legacy row
+    joins its own exact title/home exactly like a certified row, and its
+    explicit absence is the computed absence, never the last entry. The
+    last-entry law falls ONLY to genuinely claimless rows (no skey, no int
+    attempt). A row that names its item ships that identity beside the pair
+    (`items[i]["item"]`) — the aggregate's layout can never answer for the
+    wrong member's label.
+
+    - stamped row, exact title landed in the read join: the binding rides that
+      row's id VERBATIM (appended last if the fold predates the landing —
+      chronology law; the expiry flag stays a SUBSEQUENCE of ids).
+    - stamped row whose named title is absent from the read join (not yet
+      landed, expunged, or the fold belongs to a superseded generation): the
+      computed absence None — an explicit unavailable, never the superseded
+      chat as a stand-in; prior attempts stay inspectable in `session_ids`.
+    - claimless row (no skey, or an skey whose recorded title cannot be
+      completed): no claim to follow — the documented last-entry law stands
+      byte-identical, exactly as the claim pass treats records without an int
+      attempt and rows without attempt stamps (unboundable eras).
+    - no published aggregate (running/pending, or a demoted `unknown`):
+      nothing happens — the running item record binds the generation it itself
+      observed with its layout/outcome, and demoted responses pay nothing.
+    Returns the number of item rows adjudicated."""
+    rows = _claim_bearing_rows(published_output)
+    if not isinstance(rows, list):
+        return 0
+    adjudicated = 0
+    for i, row in enumerate(rows):
+        if i not in items or not isinstance(row, dict):
+            continue
+        skey = row.get("skey")
+        if not (isinstance(skey, str) and skey):
+            continue                              # claimless row — last-entry law stands
+        title = skey if "#a" in skey else None
+        if title is None:
+            att = row.get("attempt")
+            if type(att) is not int:              # committed rows name the attempt via `spawn`
+                att = row.get("spawn")
+            if type(att) is not int:
+                continue                          # suffixless — no full recorded title to follow
+            title = f"{skey}#a{att}"
+        frow = (groups.get(i) or {}).get(title.split("#a", 1)[0])
+        if frow is not None and not (isinstance(frow, dict) and frow.get("_session_id_attempt")):
+            continue                              # unboundable era — last-entry law stands
+        sid = None
+        if isinstance(frow, dict):
+            sess = (frow.get("sessions") or {}).get(title)
+            if isinstance(sess, dict) and isinstance(sess.get("id"), str) and sess["id"]:
+                sid = sess["id"]
+        # bd_2026-11-25-cj2 (item source): the exact row that owns this chat also
+        # owns the item identity the aggregate publishes — the pair ships with
+        # the name, so a racing dynamic expansion can never paint '#0' over its
+        # own committed session. A row that names none keeps the def/placeholder
+        # law byte-identically.
+        if row.get("item") is not None:
+            items[i]["item"] = row["item"]
+        if sid is not None:
+            ids = items[i].setdefault("session_ids", [])
+            if sid not in ids:
+                ids.append(sid)                   # the newest stamp rides LAST (chronology law)
+                if sid in ((frow or {}).get("_session_id_expired") or []):
+                    flags = items[i].setdefault("session_ids_expired", [])
+                    if sid not in flags:
+                        flags.append(sid)         # the flag stays a SUBSEQUENCE of ids
+        items[i]["session_current"] = sid
+        # bd_2026-11-25-cj2 (display authority, complete): the published row
+        # ships its OWN complete presentation decision beside the binding —
+        # chip outcome, tooltip and chat all answer from that one published
+        # row (this branch still pays no extra read). An invalidated/suffixless
+        # row that continues above gains no decision and keeps the compat rules.
+        disp = _item_display_decision(row)
+        if disp:
+            items[i]["session_display"] = disp
+        adjudicated += 1
+    return adjudicated
+
+
+def _exact_title_lookup(r, nid, index, title):
+    """bd_2026-11-25-cj2: ONE bind-time read-only exact-title lookup in the child
+    home the item record itself names — the recorded id of the NEWEST row under
+    that title plus its expiry flag, on the fold's own total order
+    (started_at, rowid). Unreadable homes, id-less historical schemas and
+    missing rows all return the computed absence — fail closed, never the
+    superseded chat."""
+    home = node_child_home(r, nid, str(index))
+    db = (Path(home) if home else hermes_home()) / "state.db"
+    try:
+        import sqlite3
+        c = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=0.5)
+        try:
+            cols = [x[1] for x in c.execute("pragma table_info(sessions)")]
+            if "id" not in cols:
+                return None, False
+            exp_sel = "COALESCE(expiry_finalized, 0), " if "expiry_finalized" in cols else "0, "
+            rows = c.execute(f"select id, {exp_sel}rowid from sessions where title=? "
+                             "order by started_at, rowid", (title,)).fetchall()
+        finally:
+            c.close()
+    except Exception:
+        return None, False
+    if not rows:
+        return None, False
+    _id, _exp, _rowid = rows[-1]
+    return (_id if isinstance(_id, str) and _id else None), bool(_exp)
+
+
+def resolve_ref(outputs, ref, missing=None):
+    """'plan.items.0.name' -> outputs['plan'] walked by dotted path.
+    `missing` is returned when the path does not exist; a path that exists with a
+    legitimately null value returns None — callers that must tell the two apart pass
+    `missing=_MISSING` (build_inputs does: a null field is an input, not an error).
+
+    bd_2026-11-13-cj2 (list-root repair): THE ONE reference law, shared by
+    every expansion and input site in the runner — a list root is a legal
+    root the walk indexes, and a second hand-rolled walker drifting from
+    this one is the regression this pin kills. The runner binds it as
+    `wf.resolve_ref` (wf.py) so every historical call site rides the
+    identical function. (The read model no longer walks a dynamic head here:
+    the roster join was replaced by the dispatch-time input capture — see
+    fanout_inputs_path.)"""
+    parts = str(ref).split(".")
+    if parts[0] not in outputs:
+        return missing
+    cur = outputs[parts[0]]
+    for p in parts[1:]:
+        if isinstance(cur, list):
+            try: cur = cur[int(p)]
+            except (ValueError, IndexError): return missing
+        elif isinstance(cur, dict):
+            if p not in cur: return missing
+            cur = cur[p]
+        else: return missing
+    return cur
+
+
+FANOUT_INPUTS_VERSION = 1
+
+# bd_2026-11-13-cj2 (carrier decode hardening, independent-review repair): a
+# JSON object that repeats one key with two DIFFERENT values has no winner —
+# json.loads would silently keep the last. The carrier parse marks such a key
+# with this sentinel and the validator treats the marked key as lost evidence,
+# never an arbitrarily chosen one.
+_CARRIER_CONFLICT = object()
+
+
+def _carrier_pairs(pairs):
+    out = {}
+    for k, v in pairs:
+        if k in out:
+            if out[k] is not _CARRIER_CONFLICT and out[k] != v:
+                out[k] = _CARRIER_CONFLICT        # once ambiguous, stays ambiguous
+        else:
+            out[k] = v
+    return out
+
+
+def _carrier_load(path):
+    """Duplicate-key-aware load of one carrier artifact; None on absent or
+    malformed input (the honest absence, never a guessed value). The parse
+    stays behind `jload` on purpose: the frozen read seams (reviewer adjuncts,
+    the read-budget counters) patch and count THAT function, and a carrier
+    read that skipped it would read as an unattributed open."""
+    return jload(path, object_pairs_hook=_carrier_pairs)
+
+
+def fanout_inputs_path(r, nid):
+    """Path of the runner-owned, presentation-only dispatch-input artifact
+    for one fan-out node: `<run>/fanout-inputs/<nid>.json`. OUTSIDE
+    `nodes/*.json`, so record enumeration and every recovery read (node_rec,
+    run_state, the partial-rescue law) never touch it: captured inputs are
+    presentation evidence, never recovery state."""
+    return Path(r) / "fanout-inputs" / f"{nid}.json"
+
+
+def _fanout_input_slots(doc):
+    """bd_2026-11-13-cj2 (CJ2 input capture): validate a dispatch-input
+    artifact into {canonical index decimal: [slot, ...]}. Version must be the
+    INTEGER 1 — a JSON Boolean or float is a malformed version, and bare
+    equality would admit True as 1; a malformed version reads as the honest
+    absence. Index keys are canonical nonnegative decimals ("0", "12" —
+    never "01"); the `current`/`pending` names are storage slots, not
+    authority, and either slot may be absent. A slot is a dict with a
+    nonempty string `skey` and a present `item` key — a JSON null item is a
+    CAPTURED null (a present value), while a missing or malformed entry is
+    NOT a present null: it yields no evidence at all, exactly like an absent
+    file. Two slots under one index naming the SAME key with unequal values
+    is not one writer's evidence: that key fails closed here, in the
+    decoder, so no reader (and no rewriting writer copying retained entries)
+    ever adjudicates it by slot order or duplicate-key collapse. One
+    unreadable, misversioned or malformed artifact reads as the honest
+    absence, never a guessed value."""
+    if not isinstance(doc, dict):
+        return {}
+    ver = doc.get("version")
+    if type(ver) is not int or ver != FANOUT_INPUTS_VERSION:
+        return {}
+    rows = doc.get("items")
+    if not isinstance(rows, dict):
+        return {}
+    out = {}
+    for k, entry in rows.items():
+        if not (isinstance(k, str) and k.isdecimal() and (k == "0" or not k.startswith("0"))):
+            continue
+        if not isinstance(entry, dict):
+            continue
+        slots = []
+        for name in ("current", "pending"):
+            s = entry.get(name)
+            if s is None:
+                continue                       # an absent slot is legal
+            if (isinstance(s, dict) and isinstance(s.get("skey"), str)
+                    and s.get("skey") and "item" in s
+                    and s["item"] is not _CARRIER_CONFLICT):
+                slots.append(s)
+        by_key = {}
+        collide = set()
+        for s in slots:
+            b = s["skey"]
+            if b in by_key and by_key[b] != s["item"]:
+                collide.add(b)                 # one key, two values: no winner
+            by_key.setdefault(b, s["item"])
+        slots = [s for s in slots if s["skey"] not in collide]
+        if slots:
+            out[k] = slots
+    return out
+
+
+def fanout_inputs_read(r, nid):
+    """ONE read of the capture artifact — the caller memoizes it (at most
+    once per dynamic node per full response; static, aggregate and legacy
+    responses never call it). The parse is duplicate-key-aware: an object
+    that repeats a name with two different values fails closed for that key
+    at the decoder, instead of letting json.loads pick the last one."""
+    return _fanout_input_slots(_carrier_load(fanout_inputs_path(r, nid)))
+
+
+def fanout_input_value(slots, index, base_skey):
+    """The captured value for one claim, resolved by the FULL base execution
+    key and the canonical index — never by prefix, EFP, the producer's
+    current key, a journal timestamp, or the greatest attempt. Two slots
+    naming the same key with unequal values is not one writer's evidence:
+    fail closed to unproved. Returns (found, value); a captured JSON null
+    is (True, None) — distinct from (False, None)."""
+    vals = [s["item"] for s in (slots or {}).get(str(index)) or []
+            if isinstance(s, dict) and s.get("skey") == base_skey]
+    if not vals:
+        return False, None
+    if len(vals) > 1 and any(v != vals[0] for v in vals[1:]):
+        return False, None                     # same key carrying two values
+    return True, vals[0]
+
+
+def resolve_item_chat(r, nid, published_output, items, groups, graph=None, byid=None,
+                      fp_memo=None, legacy_memo=None):
+    """bd_2026-11-25-cj2 (display authority): ONE bind-time decision per fan-out
+    item row owns the displayed outcome AND the exact chat attempt (or the
+    explicit absence) together. The dashboard calls this AFTER the response's
+    events read, so a correction or commit that landed mid-view cannot ship a
+    paint riding one generation while the chat rides another (the paired
+    schedules at receipts/ship20-recovery/cj2-inverse-b6abba5f: fold-then-events
+    answers the done chip with the superseded `#a0`; a rebind without a repaint
+    answers the running chip with the later `#a1` — read order alone never
+    reconciles two decisions).
+
+    - A certified published aggregate for this node owns the join: the
+      published row's own title and status are canonical (the exact-attempt
+      join, unchanged) — no extra read; this pass pays nothing. A legacy
+      status-bearing ``output.items`` aggregate is the SAME selection
+      operation (one row list, one join — ``_claim_bearing_rows``).
+    - No published aggregate (running/pending, or a demoted `unknown`): the
+      item's own committed record, read NOW and re-adjudicated by the existing
+      published-revision validity law, is canonical for the pair — its COMPLETE
+      display decision (status + the error/refusal facts that normalize it) and
+      its session ride that one read. The id comes from the captured fold when
+      it already holds the named title; otherwise exactly one exact-title read
+      of the record's own child home decides landed versus computed absence.
+    - A record with no claim (no skey/int attempt) gains no key and no decision
+      — the documented last-entry law stands byte-identical. A record the
+      published revision does not honor binds the computed absence WITHOUT a
+      decision: history never paints and never opens.
+    Returns the number of item rows adjudicated."""
+    if _claim_bearing_rows(published_output) is not None:
+        return bind_current_item_claims(published_output, items, groups)
+    if byid is None:
+        graph = jload(Path(r) / "graph.json") if graph is None else graph
+        byid = ({n["id"]: n for n in graph["nodes"] if isinstance(n, dict) and n.get("id")}
+                if isinstance(graph, dict) and isinstance(graph.get("nodes"), list) else {})
+    decided = 0
+    _join_once = []
+
+    def _join_law():
+        # Lazy, at most once per response, and read lazily only for a def
+        # that needs it: (static def roster, is_dynamic, captured inputs).
+        # bd_2026-11-13-cj2 (input capture) removes the dynamic live-ancestor
+        # roster lookup here: the head's CURRENT output is not the roster a
+        # frozen record consumed — an amend+re-drive landing mid-view made
+        # the positional join paint the newer roster's label over the old
+        # record's exact chat (tests/test_amended_roster_race_cj2). A static
+        # def's own items list is a pure value of the captured revision and
+        # stays positional; a dynamic fan-out resolves identity from the
+        # runner's dispatch-time capture instead (one sidecar read).
+        if not _join_once:
+            n = (byid or {}).get(nid)
+            fo = n.get("fanout") if isinstance(n, dict) else None
+            static = fo.get("items") if isinstance(fo, dict) else None
+            ref = fo.get("items_from") if isinstance(fo, dict) else None
+            dyn = isinstance(ref, str) and bool(ref)
+            _join_once.append((static if isinstance(static, list) else None,
+                               dyn,
+                               fanout_inputs_read(r, nid) if dyn else {}))
+        return _join_once[0]
+    for i in sorted(items):
+        rec = jload(Path(r) / "nodes" / f"{nid}.{i}.json")
+        if not isinstance(rec, dict):
+            continue
+        att = rec.get("attempt")
+        if type(att) is not int:                     # committed records name the attempt via `spawn`
+            att = rec.get("spawn")
+        skey = rec.get("skey")
+        if type(att) is not int or not isinstance(skey, str) or not skey:
+            continue                                 # claimless — the last-entry law stands
+        title = skey if "#a" in skey else f"{skey}#a{att}"
+        key = title.split("#a", 1)[0]
+        if not _record_current(r, byid, f"{nid}.{i}", rec, fp_memo, legacy_memo):
+            # The disk moved to a generation THIS response's revision does not
+            # honor. It neither paints nor opens here — but it also cannot
+            # reach back: a binding the fold's own claim pass adjudicated
+            # against the published revision stands (test_selected_item_
+            # identity_cj2 R4: a late aggregate may not repaint the era).
+            continue
+        frow = (groups.get(i) or {}).get(key)
+        if frow is not None and not (isinstance(frow, dict) and frow.get("_session_id_attempt")):
+            continue                                 # unboundable era — last-entry law stands
+        expired = False
+        sess = (frow.get("sessions") or {}).get(title) if isinstance(frow, dict) else None
+        if isinstance(sess, dict) and isinstance(sess.get("id"), str) and sess["id"]:
+            sid = sess["id"]
+            expired = sid in (frow.get("_session_id_expired") or [])
+        else:
+            sid, expired = _exact_title_lookup(Path(r), nid, i, title)
+        items[i]["session_current"] = sid
+        # bd_2026-11-13-cj2 (CJ2 input capture): the SAME record read that
+        # names the chat also ships the item identity. A static def's own
+        # items list (a pure value of THIS response's captured revision) is
+        # joined positionally, exactly as the runner materialized it. A
+        # dynamic (items_from) fan-out no longer indexes into the head's
+        # CURRENT output here — that live-ancestor join let a mid-view
+        # amend+re-drive paint the newer roster's label over the older
+        # record's exact chat. It resolves the value the runner ACTUALLY
+        # dispatched under this claim's full base execution key (the
+        # dispatch-time capture, matched at the canonical index). An
+        # unattributed or unproved key is an honest absence: no item, no
+        # item-derived tooltip — never a guess, never a borrowed label. A
+        # captured JSON null IS a present `item: null`. A running
+        # (uncommitted) row gains none — membership stays a placeholder live
+        # chip, never a certified graph card.
+        rs, dyn, inputs = _join_law()
+        _st = rec.get("status")
+        if isinstance(_st, str) and _st and _st != "running":
+            if rs is not None:
+                if 0 <= i < len(rs):
+                    items[i]["item"] = rs[i]
+            elif dyn:
+                got, val = fanout_input_value(inputs, i, key)
+                if got:
+                    items[i]["item"] = val
+        # bd_2026-11-25-cj2 (display authority, complete): the same record read
+        # that names the chat ships the row's COMPLETE presentation decision —
+        # status plus the error_class/refusal/error that normalize it. A
+        # computed absence keeps the decision (paint without an open, zero host
+        # calls); a record this response does not honor keeps the compat rules
+        # byte-identically (the continues above), never a stale journal.
+        disp = _item_display_decision(rec)
+        if disp:
+            items[i]["session_display"] = disp
+        if sid is not None:
+            ids = items[i].setdefault("session_ids", [])
+            if sid not in ids:
+                ids.append(sid)                      # the newest stamp rides LAST (chronology law)
+            if expired:
+                flags = items[i].setdefault("session_ids_expired", [])
+                if sid not in flags:
+                    flags.append(sid)                # the flag stays a SUBSEQUENCE of ids
+        decided += 1
+    return decided
+
+def _aggregate_item_fact(r, nid, index, graph=None, byid=None, fp_memo=None, legacy_memo=None):
+    """Read-only projection of an item from a CURRENT done fan-out aggregate.
+    Never a recovery record: node_rec still reads only the aggregate on disk.
+    bd_2026-11-13-cj2 (late-boundary repair): when the caller publishes its
+    own revision (node_facts' ``graph``), THAT snapshot is the authority
+    revision — no graph file is read here and the aggregate can rescue only
+    against the exact revision the response ships.
+    bd_2026-11-25-cj2 (graph-work): this helper only projects INDEXED facts —
+    an unindexed projection returns None before anything is read or built, so
+    the dashboard's index=None aggregate pass allocates no second byid map.
+    A caller that already holds the published byid table (node_facts joined
+    against one response-level map) passes it as ``byid`` together with the
+    response's shared ``fp_memo``/``legacy_memo`` — same revision, pure memo
+    values (wfcommon.efp's own sharing law), identical results."""
+    if index is None:
+        head, sep, tail = str(nid).rpartition('.')
+        if not (sep and tail.isdecimal()):
+            return None                      # un-indexed projection: nothing to attest
+    if byid is None:
+        graph = jload(Path(r) / "graph.json") if graph is None else graph
+        if not isinstance(graph, dict) or not isinstance(graph.get("nodes"), list):
+            return None
+        byid = {n["id"]: n for n in graph["nodes"] if isinstance(n, dict) and n.get("id")}
     parent = str(nid)
     # Accept either the explicit item index or its canonical record stem, but
     # never split a real graph node whose own id happens to contain a dot.
@@ -6793,7 +7454,7 @@ def _aggregate_item_fact(r, nid, index):
     n = byid.get(parent)
     if type(index) is not int or index < 0 or not n or not n.get("fanout"):
         return None
-    st, aggregate = node_rec(Path(r), n, byid)
+    st, aggregate = node_rec(Path(r), n, byid, fp_memo, legacy_memo)
     if st != "done" or not isinstance(aggregate, dict):
         return None  # stale, amended, partial and uncommitted aggregates cannot attest
     output = aggregate.get("output")
@@ -6804,15 +7465,41 @@ def _aggregate_item_fact(r, nid, index):
     return parent + ".json", row
 
 
-def node_facts(r, nid, index=None):
+def node_facts(r, nid, index=None, *, graph=None, byid=None, fp_memo=None, legacy_memo=None):
     """Record facts for one node (fan-out item via `index`), plus its steer truth.
     A current done aggregate supersedes leftover running item spawn facts.
-    None when the node has no record at all (never fabricate a record)."""
+    None when the node has no record at all (never fabricate a record).
+    bd_2026-11-13-cj2 (late-boundary repair): a caller that publishes its
+    own revision (dashboard._view) passes it as `graph` — the record's OUTCOME
+    attestation (`output`, and the done-aggregate rescue over a running item
+    record) then rides only a commit that passes the existing validity law
+    against THAT revision (the shared claim-pass helper _record_current), so
+    the later aggregate read can neither repaint the shipped layout after a
+    mid-view amend nor keep a persistently stale commit presented as current.
+    A demoted output rides the established `unknown` — no fabricated era;
+    every other fact (error, ms, harvest, log paths, steer, stale_because)
+    rides verbatim, so history stays inspectable but cannot confer a current
+    chat. `graph=None` (door, scripts, direct callers) is byte-identical.
+    bd_2026-11-25-cj2 (graph-work): a response that joins many nodes hands in
+    the ONE byid table and the ONE fingerprint memo pair its read already
+    holds (`byid`, `fp_memo`, `legacy_memo`) — the facts join is a pure reuse
+    of the same revision's walk (efp's documented sharing law), not another
+    per-node map or an unmemoized ancestor re-walk."""
     name = str(nid) + (f".{index}" if index is not None else "")
     rec = jload(Path(r) / "nodes" / f"{name}.json")
     if not isinstance(rec, dict):
         return None
-    superseded = _aggregate_item_fact(r, nid, index) if rec.get("status") == "running" else None
+    if byid is not None:
+        byid_pub = byid
+    elif graph is not None:
+        byid_pub = ({n["id"]: n for n in graph["nodes"]
+                     if isinstance(n, dict) and n.get("id")}
+                    if isinstance(graph, dict) and isinstance(graph.get("nodes"), list) else {})
+    else:
+        byid_pub = None
+    superseded = (_aggregate_item_fact(r, nid, index, graph=graph, byid=byid_pub,
+                                       fp_memo=fp_memo, legacy_memo=legacy_memo)
+                  if rec.get("status") == "running" else None)
     if superseded:
         source, row = superseded
         # Keep spawn provenance, but outcome fields come ONLY from the committed
@@ -6822,6 +7509,16 @@ def node_facts(r, nid, index=None):
         rec.update(row)
     facts = {k: (rec[k] if k in rec and rec[k] is not None else "unknown")
              for k in FACT_KEYS}
+    if byid_pub is not None and not superseded and not _record_current(
+            r, byid_pub, name, rec, fp_memo, legacy_memo):
+        # The published revision does not honor this commit: its outcome is
+        # history, never layout (node_rec's law, applied to the facts join).
+        # `output` rides the established `unknown` and the renderer paints
+        # from the published graph's own defs — the era check the binding
+        # already passed against that same revision. A rescued running item
+        # skips this gate: its outcome fields came from an aggregate already
+        # validated against THIS revision by _aggregate_item_fact.
+        facts["output"] = "unknown"
     if superseded:
         facts["superseded_by_aggregate"] = source
         if rec["status"] == "superseded":
@@ -7448,32 +8145,94 @@ def child_metrics(run_id, home=None):
     try:
         c = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=0.5)
         try:
-            have_bp = any(r[1] == "billing_provider" for r in c.execute("pragma table_info(sessions)"))
+            cols = [r[1] for r in c.execute("pragma table_info(sessions)")]
+            have_bp = "billing_provider" in cols
             bp_sel = "billing_provider, " if have_bp else ""
+            # bd_2026-11-13-cj2: sessions.id rides the fold (recorded stored
+            # session ids). Minimal historical schemas without an id column
+            # (the parity fixtures) read NULL there — honest absence, the fold
+            # gains no key, and the legacy payload shape stays byte-identical.
+            id_sel = "id, " if "id" in cols else "NULL, "
+            # Wave D (bd_2026-11-13-cj2, captain counterexample): expiry is observable
+            # ONLY at this authoritative lookup — the SDK was inspected at wiring time
+            # (apps/desktop/src/sdk/index.ts): a plain openSession never checks
+            # existence and never rejects a dead destination (only the
+            # awaitHydration/supersede paths reject), so the plugin cannot learn
+            # expiry at click time. The row's own expiry_finalized flag is the fact.
+            # Schemas without the column read never-expired (honest absence — a
+            # historical payload gains no key). rowid rides too: the per-home
+            # chronology stamp the cross-home merge in run_child_metrics sorts by
+            # (sessions is a rowid table — core persistence/sqlite/_schema_ddl.py).
+            exp_sel = "COALESCE(expiry_finalized, 0), " if "expiry_finalized" in cols else "0, "
+            # Collapse-to-one (AGENTS 4c.12): the sort is TOTAL by (started_at,
+            # rowid). Chronology, not the attempt SUFFIX: titles end `#aN` and
+            # `#a10` sorts lexicographically BEFORE `#a2` (the Wave A review
+            # counterexample — the pane then opened the older attempt).
+            # NULL started_at (an unfinished/legacy row) sorts first: an unknown
+            # time never impersonates the NEWEST attempt. Ties break by rowid =
+            # insertion order, and a re-attempt always inserts later, so the
+            # fresh session wins the last slot — the selector's "last entry =
+            # current attempt" law holds without parsing titles.
             rows = c.execute(
-                f"select title, model, {bp_sel}input_tokens, output_tokens, cache_read_tokens, reasoning_tokens, "
+                f"select {id_sel}title, model, {bp_sel}input_tokens, output_tokens, cache_read_tokens, reasoning_tokens, "
                 "api_call_count, tool_call_count, estimated_cost_usd, last_activity_at, "
-                "last_activity_description, ended_at, started_at from sessions where title like ? "
-                "order by title, started_at, rowid",
+                "last_activity_description, ended_at, started_at, "
+                f"{exp_sel}rowid from sessions where title like ? "
+                "order by started_at, rowid",
                 (f"wf:{run_id}:%",)).fetchall()
         finally:
             c.close()
     except Exception:
         return {}
-    for (title, model, *rest) in rows:
+    for _db_row in rows:
+        # SELECT tail: started_at, expired, rowid.
+        started, expired, rowid = _db_row[-3], _db_row[-2], _db_row[-1]
+        (_sid, title, model, *rest) = _db_row[:-3]
         billing_provider = None
-        if len(rest) == 11:   # legacy schema (no billing_provider column): honest unknown
-            (ti, to, cr, rs, api, tools, cost, last, desc, ended, started) = rest
+        if len(rest) == 10:   # legacy schema (no billing_provider column): honest unknown
+            (ti, to, cr, rs, api, tools, cost, last, desc, ended) = rest
         else:
-            (billing_provider, ti, to, cr, rs, api, tools, cost, last, desc, ended, started) = rest
+            (billing_provider, ti, to, cr, rs, api, tools, cost, last, desc, ended) = rest
         key = title.split("#a", 1)[0]
         m = out.setdefault(key, {"tokens_in": 0, "tokens_out": 0, "cache_read": 0, "reasoning": 0,
                                  "api_calls": 0, "api_calls_known": True,
                                  "tool_calls": 0, "cost": 0.0, "attempts": 0,
                                  "model": None, "billing_provider": None, "last_activity": None, "last_desc": None,
-                                 "ended": None, "started": None, "sessions": {}})
-        m["sessions"][title] = {"last_activity": last or started,
-                                "last_desc": desc or None}
+                                 "ended": None, "started": None, "sessions": {}, "session_ids": [],
+                                 "_session_id_at": {}, "_session_id_expired": [], "_session_id_attempt": {}})
+        # Wave E (bd_2026-11-13-cj2): the title->row join carries the recorded id
+        # so the run's own records can bind the EXACT current-attempt title in
+        # run_child_metrics (the sessions map is in-memory plumbing — the folded
+        # payloads never serialize it, and the #127 current_attempt readers
+        # touch only their own keys). An attempt-suffix stamp per id marks a
+        # row as belonging to the `#a<attempt>` title-contract era — the gate
+        # the binding respects; a title whose suffix is not a pure decimal
+        # (a node id carrying "#a") stays unstamped, never guessed.
+        _entry = {"last_activity": last or started, "last_desc": desc or None}
+        if isinstance(_sid, str) and _sid:
+            _entry["id"] = _sid
+            _tail = title.rsplit("#a", 1)
+            if len(_tail) == 2 and _tail[1].isdigit():
+                _am = m["_session_id_attempt"]
+                if _am.get(_sid, -1) < int(_tail[1]):
+                    _am[_sid] = int(_tail[1])
+        m["sessions"][title] = _entry
+        # bd_2026-11-13-cj2: the recorded stored-session ids of this node's child
+        # sessions, verbatim from the sessions.id column — the pane's read-only
+        # conversation link resolves ONLY through these (recorded, never a
+        # runtime-id guess). The append follows the SELECT's total order
+        # (started_at, rowid): attempts land oldest-first, so the LAST entry is
+        # the current attempt — the selector never re-derives chronology itself.
+        # Wave D: an expired row's id stays IN its chronological slot (dropping it
+        # would promote an older attempt into the current-attempt position) and is
+        # flagged; the stamp tuple is the same total order as the SELECT —
+        # (unknown-time-first, started_at, rowid) — and stays PRIVATE to the read
+        # model: fold_child_metrics (the only serializer) drops underscore keys.
+        if isinstance(_sid, str) and _sid:
+            m["session_ids"].append(_sid)
+            m["_session_id_at"][_sid] = (0 if started is None else 1, started or 0.0, rowid)
+            if expired and _sid not in m["_session_id_expired"]:
+                m["_session_id_expired"].append(_sid)
         if api is None:
             m["api_calls_known"] = False
         m["tokens_in"] += ti or 0; m["tokens_out"] += to or 0; m["cache_read"] += cr or 0
@@ -7602,7 +8361,13 @@ def fold_child_metrics(rows):
     ANY contributing row says api_calls_known: false — an unknown count is absent
     (the existing omission convention, R2: absent reads unknown, never invented),
     never a zero and never a partial sum advertised as exact. Pure over
-    already-read rows: no IO, no new field, persisted shapes unchanged (R10).
+    already-read rows: no IO; the additive derived keys `session_ids`, (only
+    when some contributing row was expiry_finalized) `session_ids_expired`,
+    and (only when a row carries the record-derived current-attempt binding)
+    `session_current` (bd_2026-11-13-cj2) are a passthrough of the rows' own
+    recorded ids, present
+    only when a row has them (R10: persisted shapes unchanged — a fold over
+    pre-cj2 rows gains no key; private underscore stamps never serialize).
     Both projection adapters (door act_status, dashboard _view) route EVERY
     aggregation level — node line, fanout item, run total/rollup — through here
     so the surfaces can never diverge on which levels hide an unknown.
@@ -7614,6 +8379,8 @@ def fold_child_metrics(rows):
          "tool_calls": 0, "cost": 0.0, "attempts": 0, "children": len(rows), "live": 0,
          "last_activity": None, "last_desc": None, "models": []}
     known = True
+    ids: list = []
+    expired: list = []
     for m in rows:
         for k in ("tokens_in", "tokens_out", "cache_read", "reasoning", "api_calls", "tool_calls", "cost", "attempts"):
             f[k] += m.get(k) or 0
@@ -7621,6 +8388,61 @@ def fold_child_metrics(rows):
             known = False
         if m.get("model") and m["model"] not in f["models"]:
             f["models"].append(m["model"])
+        # bd_2026-11-13-cj2: the recorded stored-session ids pass through the ONE
+        # fold (the pane's conversation-link keys). Row-contributed order only
+        # (callers iterate projections whose SELECT order is total); rows that
+        # carry none keep the key absent — honest absence, never an empty claim.
+        for sid in m.get("session_ids") or []:
+            if sid not in ids:
+                ids.append(sid)
+        # Wave D: the expiry flags ride too (private underscore keys from
+        # child_metrics/run_child_metrics); underscore keys never serialize.
+        for sid in m.get("_session_id_expired") or m.get("session_ids_expired") or []:
+            if sid not in expired:
+                expired.append(sid)
+    if ids:
+        f["session_ids"] = ids
+        # The public flag is a SUBSEQUENCE of session_ids (total order, never
+        # set-iteration luck): the UI gate reads a flagged LAST entry as an
+        # absent destination — the expired id keeps its chronological slot, so
+        # an older attempt is never promoted over an expired current. Present
+        # only when some contributing row was expired (R10: common payloads
+        # byte-identical).
+        _expf = set(expired)
+        flags = [s for s in ids if s in _expf]
+        if flags:
+            f["session_ids_expired"] = flags
+    # Wave E (bd_2026-11-13-cj2): the current-attempt BINDING rides the ONE fold
+    # as `session_current`. A contributing row carrying the private
+    # `_session_current` says the run's own record NAMES an exact
+    # current-attempt title for that skey — the value is that row's recorded id
+    # VERBATIM, or the computed absence None when the named row has not landed
+    # or was expunged (the captain missing-current counterexample: the older
+    # survivor must NOT be promoted). The selector select-before-validates the
+    # bound entry (shape + the expiry flag above). A fold over no bound row
+    # gains NO key — historical/claimless payloads keep the documented
+    # last-entry law byte-identical. When several skeys contribute (node line,
+    # rollup), the destination is the highest-stamped bound id: TOTAL order
+    # (the id's own chronology stamp, then row contribution index) — the
+    # freshest record-named current attempt wins, never iteration luck.
+    # bd_2026-11-25-cj2 (display authority, complete): this fold binds the CHAT
+    # only — the superseded raw-status `session_outcome` ride is deleted. The
+    # display decision for an item row ships COMPLETE (status + the error/
+    # refusal facts that normalize it) from the one record the chat join reads
+    # (bind_current_item_claims / resolve_item_chat); a bare status without its
+    # error facts was a second selector, not a decision.
+    _bound = None
+    _binding = False
+    for _i, m in enumerate(rows):
+        if "_session_current" in m:
+            _binding = True
+            _sid = m["_session_current"]
+            if isinstance(_sid, str) and _sid:
+                _score = tuple((m.get("_session_id_at") or {}).get(_sid) or (0, 0.0, 0))
+                if _bound is None or (_score, _i) > _bound[0]:
+                    _bound = ((_score, _i), _sid)
+    if _binding:
+        f["session_current"] = _bound[1] if _bound else None
     if not known:
         f.pop("api_calls")
     return f

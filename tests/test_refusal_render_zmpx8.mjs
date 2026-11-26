@@ -20,6 +20,11 @@
 //   P4 source law: 'refusal' is in the ITEM_FACTS fallback list, and the section is
 //        factKnown-guarded (the file's non-refusal-death discipline), so an absent
 //        key can never print a fabricated value.
+//   P5 (bd_2026-11-25-cj2) item-source refusal law pinned BY RENDER, replacing
+//        the stale `?? shown.refusal` source literal: the aggregate/solo stamp
+//        still renders with no item picked; a picked item prints its own word
+//        (never the node's or a sibling's, never positional); a picked item's
+//        explicit absence hides the section even under a stamped parent.
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
@@ -45,6 +50,9 @@ const constGrab = name => {
   return src.slice(i, i + 1 + nx)
 }
 
+// bd_2026-11-13-cj2: NodePanel/WorkflowsPage mount the real marked nav block
+const navBlock = src.match(/\/\/ BEGIN stored-session-nav\n([\s\S]*?)\/\/ END stored-session-nav/)[0].replace(/^export /gm, '')
+
 // ---- the fixture is CAPTURED, not authored -----------------------------------
 // One read of the real read model: wfcommon.node_facts over a run dir whose node `b`
 // holds wf.py's `_window_spent_record` output verbatim.
@@ -67,6 +75,7 @@ const texts = node => walk(node).flatMap(n =>
   typeof n === 'string' ? [n] : typeof n.props?.children === 'string' ? [n.props.children] : [])
 
 const code = [
+  navBlock,
   constGrab('EDGE_TONE'), constGrab('FACT_TONE'), constGrab('UNKNOWN'), constGrab('TAIL_BYTES'),
   constGrab('defaultTabFor'), constGrab('unk'), constGrab('factText'), constGrab('logBase'), constGrab('attemptNo'),
   grab('fanItems'), grab('itemLabel'), grab('renderGoal'),
@@ -169,9 +178,13 @@ const detailFor = (def, shown) => ({ id: 'r1', status: shown.status, graph: { no
   assert.ok(itemFacts.indexOf("'refusal'") < itemFacts.indexOf("'error'"),
     'P4: the row order mirrors wfcommon.FACT_KEYS (error_class, refusal, error) — one vocabulary, one order')
   const panel = src.slice(src.indexOf('function NodePanel('), src.indexOf('const Drawer = NodePanel'))
-  const guard = /factKnown\(facts\?\.refusal \?\? shown\.refusal\)[\s\S]{0,260}?sect\('refusal'[\s\S]{0,160}?unk\(facts\?\.refusal \?\? shown\.refusal\)/
-  assert.ok(guard.test(panel),
-    'P4: the refusal section is factKnown-guarded and unk-printed — the exact discipline error_class gets (rule 8)')
+  // bd_2026-11-25-cj2 (item source): the old literal guard pinned the string
+  // `factKnown(facts?.refusal ?? shown.refusal)` — a snapshot of a fallback the
+  // CJ2 candidate deliberately dropped. The literal is replaced by behavior:
+  // the factKnown/unk discipline itself (rule 8 — guard an absence, verbatim
+  // print a presence) is now pinned by the P5 render cases, so no source
+  // rewording can stale-lock the law and no aggregate fallback can sneak back
+  // uncaught.
   assert.ok(!/sect\('refusal',[^)]*UNKNOWN/.test(panel), 'P4: no path prints the raw sentinel for refusal')
   // refusal is an ADDITIVE row: it must not reach the status truth, the tab
   // default, or the header badge — those keep reading status/error_class.
@@ -186,5 +199,57 @@ const detailFor = (def, shown) => ({ id: 'r1', status: shown.status, graph: { no
     'P4: the refusal section renders beside the error/attempts facts, not in some far corner of the sheet')
 }
 
+// ---- P5: item-source refusal law (bd_2026-11-25-cj2) — pinned by render -------
+// The selected row's own record is the ONE display authority: the panel reads
+// facts.refusal (the closed record, or the ITEM_FACTS synthesis of the fanItems
+// row). An item that refused nothing HIDES the stamp even when its node is
+// stamped — explicit absence, never a borrowed sibling/aggregate value; and
+// with no item picked the node's own aggregate stamp still renders. Behavior,
+// not a source literal, so a rewording cannot stale-lock the law and no
+// aggregate fallback can return unnoticed.
+{
+  const def = graphNode({ id: 'fan2', fanout: { items: ['x', 'y', 'z'], goal: 'work {item}' } })
+  // The node itself carries the spent-cap stamp; item 1 refused with its own
+  // word, item 2 died refused with a different one, item 0 completed clean.
+  // The renderer treats a stamp as an opaque verbatim token (today's product
+  // emits only lifetime_cap_spent): these cases pin WHICH row the printed
+  // word comes from, not the backend vocabulary.
+  const shown = {
+    status: 'failed', type: 'agent', refusal: 'lifetime_cap_spent',
+    output: {
+      all_results: [
+        { item: 'x', status: 'done', output: { ok: true }, ms: 10 },
+        { item: 'y', status: 'failed', error: 'spawn refused', refusal: 'sibling_stamp', ms: 0 },
+        { item: 'z', status: 'failed', error: 'spawn refused', refusal: 'second_stamp', ms: 0 }
+      ]
+    }
+  }
+  const pick = (index, tab) => texts(render({ detail: detailFor(def, shown),
+    sel: { runId: 'r1', nodeId: 'fan2' },
+    fanItem: index === null ? null : { runId: 'r1', nodeId: 'fan2', index }, tab: tab || 'Log'
+  })).join('|').split('|')
+  // P5a: the aggregate/solo positive — no item picked, the node's own stamp renders.
+  const aggT = pick(null)
+  assert.ok(aggT.includes('refusal') && aggT[aggT.indexOf('refusal') + 1] === 'lifetime_cap_spent',
+    'P5: a fan-out node with no item picked renders its own aggregate stamp (positive preserved)')
+  // P5b: a picked item renders its OWN stamp, never a sibling's or the node's.
+  const ownT = pick(1)
+  assert.ok(ownT.includes('refusal') && ownT[ownT.indexOf('refusal') + 1] === 'sibling_stamp',
+    'P5: the picked item renders its own stamp verbatim')
+  assert.ok(!ownT.includes('lifetime_cap_spent') && !ownT.includes('second_stamp'),
+    'P5: the picked item borrows neither the node aggregate nor a sibling stamp')
+  const ownT2 = pick(2)
+  assert.ok(ownT2.includes('refusal') && ownT2[ownT2.indexOf('refusal') + 1] === 'second_stamp',
+    'P5: the stamp follows the picked index — siblings keep distinct words (no positional borrow)')
+  // P5c: explicit absence despite a populated parent — the exact leak the
+  // dropped `?? shown.refusal` fallback would re-open.
+  const absentT = pick(0)
+  assert.ok(!absentT.includes('refusal'),
+    'P5: a picked clean item hides the section even though the parent node carries a stamp')
+  assert.ok(!absentT.includes('lifetime_cap_spent'),
+    'P5: the parent stamp never leaks through a picked item that refused nothing')
+}
+
 console.log('PASS refusal render: spent-cap stamp renders on the panel (P1); sentinel/absent hides (P2);')
 console.log('PASS refusal render: fan-item stamp rides ITEM_FACTS, clean item hides (P3); source law pinned (P4)')
+console.log('PASS refusal render: aggregate positive, own-index contrast, absence despite parent (P5)')

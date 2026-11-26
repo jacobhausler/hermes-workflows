@@ -109,8 +109,15 @@ def _node_log_tail(r, nid, index, attempt, kind, tail):
 
 def _view(r, full=False, lock_state=None):
     common = _workflow_common()
-    st = (common.run_state(r, lock_state=lock_state) if full
-          else common.run_state(r, telemetry=False, lock_state=lock_state))
+    # bd_2026-11-25-cj2: ONE fingerprint-memo pair for the whole response —
+    # run_state, the claims pass, the facts join and the turnover adjudication
+    # all walk this single stored revision (wfcommon.efp's documented sharing
+    # law: memo values are pure functions of one byid table).
+    fp_memo, legacy_memo = {}, {}
+    st = (common.run_state(r, lock_state=lock_state, fp_memo=fp_memo, legacy_memo=legacy_memo)
+          if full
+          else common.run_state(r, telemetry=False, lock_state=lock_state,
+                                fp_memo=fp_memo, legacy_memo=legacy_memo))
     if not st:
         return None
     view = {"id": st["run_id"], "name": st["name"], "status": st["status"],
@@ -153,14 +160,74 @@ def _view(r, full=False, lock_state=None):
         # (wfcommon.run_child_metrics, the fb-904f seam the door uses) — a bare
         # caller-home fold reads only the launcher's state.db and false-zeros
         # every profile-routed child in the dashboard's full view (issue #81).
-        cm = common.run_child_metrics(r)
+        # bd_2026-11-13-cj2 (revision repair + late-boundary repair): EVERY
+        # join that can confer a current chat rides the graph THIS very
+        # response publishes. run_child_metrics takes it as its authority
+        # revision (claims validate against the shipped snapshot, no graph
+        # file is read) — and the facts join takes it too: the node_facts
+        # aggregate re-read, made AFTER metrics, was the remaining raw
+        # authority. A certified re-order landing mid-view repainted the
+        # shipped layout (Case A: the visible new chip opened the OLD item's
+        # chat), and a persistently stale aggregate kept being presented as
+        # current beside the new binding (Case B: the visible old chip opened
+        # the replacement's chat) — receipts/ship20-recovery/cj2-late-
+        # boundary-db40b950/gap-replay.log, red at db40b950. With
+        # the published revision handed in, `output` attests only a commit
+        # the existing validity law honors; a demoted output rides the
+        # established `unknown`, every other fact rides verbatim, history
+        # stays inspectable. One response, one era. Amend-only half-demotions
+        # and settled reads are unchanged: a revision-honored commit rides
+        # verbatim and opens the exact ID.
+        # bd_2026-11-25-cj2 (exact-attempt join): a version/efp match is not
+        # execution identity — a same-efp ABA restore and a same-fingerprint
+        # redrive certify BOTH generations against the published revision, and a
+        # same-skey schema correction advances the attempt INSIDE one generation
+        # key, so an era check alone can ship one response with the late
+        # aggregate's layout over the fold's chat claim. EVERY join below
+        # therefore rides ONE response-level byid table and ONE fingerprint-memo
+        # pair (efp memo values are pure functions of this one revision). The
+        # fan-out items' recorded-chat binding is the join of two facts this read
+        # already holds: the published aggregate row's own full recorded title
+        # (skey + the attempt it names, suffix included) and the already-read
+        # home-scoped session rows — a landed title binds verbatim, an unread
+        # title binds the computed absence (fail closed, zero host calls), and a
+        # claimless legacy row keeps the documented last-entry law. Settled and
+        # demoted responses pay nothing: no pre-fold aggregate capture, no
+        # second fold, no pairing heuristic, no re-read loop, no per-node graph
+        # maps.
+        byid_pub = {n["id"]: n for n in st["graph"]["nodes"]}
+        cm = common.run_child_metrics(r, graph=st["graph"],
+                                      fp_memo=fp_memo, legacy_memo=legacy_memo)
+        # bd_2026-11-25-cj2 (display authority): the timeline is read BEFORE the
+        # chat join, and the join rides it — the bind-time item-record decision
+        # (common.resolve_item_chat) adjudicates the racing generation against
+        # the journal THIS response ships, so a commit landing mid-view ships
+        # its COMPLETE display decision (`session_display`: the raw status plus
+        # the error/refusal facts that normalize it) beside its exact chat,
+        # instead of splitting paint and navigation across two read orders.
+        # bd_2026-11-25-cj2 (item source, frozen-record repair): the same
+        # adjudication also ships the fan-out row's identity beside the
+        # pair. bd_2026-11-13-cj2 (input capture): a static def's own items
+        # list joins positionally (a pure value of the captured revision);
+        # a dynamic (`items_from`) fan-out resolves its item by matching
+        # the record's own base execution key into the runner's
+        # dispatch-time capture (fanout-inputs/<nid>.json) — at most ONE
+        # lazy sidecar read per dynamic node, zero for static, aggregate and
+        # legacy responses — instead of indexing the head's CURRENT output,
+        # which a mid-view amend may have replaced. A legacy status-bearing
+        # `output.items` aggregate is the SAME selection operation as a
+        # certified `all_results` row and stays ahead of the capture.
+        # The events themselves stay pure timeline: nothing here suppresses or
+        # rewrites them.
+        events = _events(r)
         nodes = {}
         for nid, v in st["nodes"].items():
             nodes[nid] = dict(v)
             # O2: ONE node truth — every node WITH a record gets the closed fact set
             # verbatim (was: done|failed only, which dropped `partial` output even
             # though the read model treats partial as output, wfcommon.run_state).
-            facts = common.node_facts(r, nid)
+            facts = common.node_facts(r, nid, graph=st["graph"], byid=byid_pub,
+                                      fp_memo=fp_memo, legacy_memo=legacy_memo)
             if facts is not None:
                 facts = {k: x for k, x in facts.items() if k != "status"}
                 nodes[nid].update(facts)
@@ -191,6 +258,11 @@ def _view(r, full=False, lock_state=None):
                         items[i].update(common.current_attempt(ms, [s for s in active
                             if s["skey"].split("#a", 1)[0].startswith(f"{prefix}{i}:")]))
                 if items:
+                    common.resolve_item_chat(
+                        r, nid, facts.get("output") if isinstance(facts, dict) else None,
+                        items, groups, byid=byid_pub,
+                        fp_memo=fp_memo, legacy_memo=legacy_memo)
+                if items:
                     nodes[nid]["item_metrics"] = items
         active = [s for v in st["nodes"].values() for s in v.get("active_spawns", [])]
         rollup = _fold_metrics(cm.values()) if cm else ({} if active else None)
@@ -200,7 +272,7 @@ def _view(r, full=False, lock_state=None):
             # #114: no local unknown-rule here — fold_child_metrics already
             # omitted api_calls for any unknown row (was: a per-copy pop, the
             # half of the divergence this fix removes).
-        view.update({"graph": st["graph"], "nodes": nodes, "events": _events(r),
+        view.update({"graph": st["graph"], "nodes": nodes, "events": events,
                      "gate": dict(st["held_gate"] or {}), "metrics": rollup})
         # bd_2026-11-13-qri: the durable answer receipt for the gate cell. Every
         # gate whose COMMITTED answer carries an 'answer' field, verbatim minus
@@ -209,12 +281,11 @@ def _view(r, full=False, lock_state=None):
         # 'answer' field and unanswered gates stay absent (honest absence). The
         # release route invalidates the census BEFORE the write resolves, so this
         # block reflects the UI's own POST on the very next GET.
-        byid_g = {n["id"]: n for n in st["graph"]["nodes"]}
         gate_records = {}
         for n in st["graph"]["nodes"]:
             if n.get("type") != "gate":
                 continue
-            ans = common.gate_answer_valid(r, n, byid_g)
+            ans = common.gate_answer_valid(r, n, byid_pub, fp_memo, legacy_memo)
             if isinstance(ans, dict) and "answer" in ans:
                 rec = {"answer": ans["answer"], "at": ans.get("at")}
                 if ans.get("_ui") is True:

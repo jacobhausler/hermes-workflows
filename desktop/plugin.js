@@ -117,8 +117,12 @@ const $fanExpanded = atom(null) // { runId, nodeId } — page-level stacked-card
 
 /** One item record per fan-out child, from the best source available:
  *  v0.7.2+ committed `output.all_results` (status/error/raw per index) → older
- *  per-item records in `output.items` → live progress from `item.finished`
- *  events (index/status/error/tail) → live membership from `item.started`
+ *  per-item records in `output.items` → the backend's ONE bind-time item
+ *  DECISION (`item_metrics[i].session_display`, shipped beside `session_current`
+ *  from the exact record the chat binds: status + the error/refusal facts that
+ *  normalize it — paint, tooltip and chat from one source, bd_2026-11-25-cj2
+ *  display authority complete) → live progress from `item.finished` events
+ *  (index/status/error/tail) → live membership from `item.started`
  *  indices on a running node — a dynamic fan-out (items_from) has no def items
  *  and no committed output until settle, and the runner emits started indices
  *  INTO its materialized set, so a started index is an authoritative member.
@@ -130,7 +134,8 @@ function fanItems(def, st, events) {
   const out = st?.output
   const defItems = Array.isArray(fo.items) ? fo.items : null
   let recs = null
-  if (out && Array.isArray(out.all_results)) recs = out.all_results
+  const publishedAggregate = !!(out && Array.isArray(out.all_results))
+  if (publishedAggregate) recs = out.all_results
   else if (out && Array.isArray(out.items) && out.items.some(i => i && typeof i === 'object' && i.status)) recs = out.items
   const byIdx = new Map()
   const startedIdx = new Set()
@@ -164,20 +169,49 @@ function fanItems(def, st, events) {
   for (let i = 0; i < n; i++) {
     const rec = recs ? recs[i] : null
     const ev = byIdx.get(i)
-    const item = rec?.item ?? (defItems ? defItems[i] : undefined)
     const metrics = im?.[i] || null
-    const ec0 = rec?.error_class || ev?.error_class || null
+    // bd_2026-11-25-cj2 (item source, frozen-record repair): the item's
+    // identity is a COMMITTED fact like its status — it rides the source the
+    // backend already read. The bind-time decision row (`metrics.item`) owns
+    // it pre-aggregate: the backend joins the record's canonical index into
+    // the fan-out's committed roster (the def's own `items`, or the
+    // `items_from` path over the head's committed output) — authentic
+    // execution evidence, while the per-item record keeps its frozen byte
+    // shape. The claim row itself (`rec.item`) owns it once the aggregate is
+    // published (certified all_results or a status-bearing legacy
+    // `output.items` row — the same rows the chat join adjudicated); the
+    // branch also serves historical runs whose item records did commit the
+    // key. Only rows no committed source owns (live/dynamic membership,
+    // pending placeholders) take the graph def item; never a positional
+    // guess over a record that names a different member.
+    const item = metrics && 'item' in metrics ? metrics.item
+      : rec && 'item' in rec ? rec.item
+        : (defItems ? defItems[i] : undefined)
+    // bd_2026-11-25-cj2 (display authority, complete): `session_display` is
+    // the backend's ONE bind-time presentation decision for the exact selected
+    // execution — the raw status AND the error_class/refusal/error that
+    // normalize it (failed+cancelled is the neutral word; partial and adopted
+    // deaths ride their own class). A sourced row reads every execution field
+    // from that single decision: an absent field is an explicit absence, never
+    // an independently captured journal guess, and the chat below binds the
+    // same decision. The certified `all_results` row is the other modern
+    // single source — the advisory journal cannot fill a field the published
+    // row itself does not name. Journal fallback stands ONLY for rows no
+    // committed source owns (live/dynamic membership, pending placeholders,
+    // genuinely claimless historical rows). Cancelled is never a failure (the
+    // #7 law) for every source alike.
+    const src = (metrics && metrics.session_display && typeof metrics.session_display === 'object'
+      && typeof metrics.session_display.status === 'string' && metrics.session_display.status
+      ? metrics.session_display : null) || (publishedAggregate ? rec : null)
     // est-zmpx8 (the #584 peer-review residual): the spent-cap refusal stamp is a
     // record fact like error_class — read it verbatim where the source carries it,
     // never invent one where it does not (AGENTS rule 8).
-    const rf0 = rec?.refusal || ev?.refusal || null
-    const rawStatus = rec?.status || (verified
+    const ec0 = src ? (src.error_class || null) : (rec?.error_class || ev?.error_class || null)
+    const rf0 = src ? (src.refusal || null) : (rec?.refusal || ev?.refusal || null)
+    const er0 = src ? (src.error || null) : (rec?.error || ev?.error || null)
+    const rawStatus = (src && src.status) || rec?.status || (verified
       ? (nodeLive && metrics?.live > 0 ? 'running' : ev?.status || 'pending')
       : ev?.status || (legacyDone ? 'done' : nodeLive ? (hasStarts ? (startedIdx.has(i) ? 'running' : 'pending') : 'running') : 'pending'))
-    // WF-02 (QA 2026-10-27): cancelled is never a failure (the #7 law — a stop
-    // re-drives cancelled work). A quorum loser / stopped straggler is recorded
-    // failed+error_class=cancelled; the panel renders it as its own neutral
-    // terminal word, never as a red 'failed'.
     const status = rawStatus === 'failed' && ec0 === 'cancelled' ? 'cancelled' : rawStatus
     const goal = item && typeof item === 'object' && typeof item.goal === 'string' ? item.goal : fo.goal ? renderGoal(fo.goal, item, i) : ''
     rows.push({
@@ -187,8 +221,26 @@ function fanItems(def, st, events) {
       // recorded rows project into the graph; live rows stay chips.
       recorded: !!rec,
       label: itemLabel(item, i),
-      output: rec && rec.status === 'done' ? rec.output : (recs == null && out && Array.isArray(out.items) && st?.status === 'done' ? out.items[i] : undefined),
-      error: rec?.error || ev?.error || null,
+      // bd_2026-11-25-cj2 (partial output): the row IS the record — read its OWN
+      // output verbatim, whatever terminal status it carries. The old `done` gate
+      // predates the partial harvest (RC ch4): it dropped a settled partial's
+      // committed answer, so the selected item painted 'No output yet.' over bytes
+      // its own all_results row names (red witness: the real _view carries no
+      // item_records carrier; the panel synthesizes facts from this row). An
+      // absent field stays an honest absence; a status gate may NOT launder a
+      // present one. The legacy aggregate `out.items[i]` fallback (no records at
+      // all, done node) is untouched — no node-output fallback is added.
+      output: rec ? rec.output : (recs == null && out && Array.isArray(out.items) && st?.status === 'done' ? out.items[i] : undefined),
+      // bd_2026-11-26-cj2 (selected Final): the committed Final is a record fact
+      // like output and error — carry the row's OWN `final` verbatim so the panel
+      // reads the Final tab from this same sourced row (the carrier-free
+      // synthesis below, and the item_records carrier when present, agree on it).
+      // A present field may not be dropped into `unknown`, and an absent one
+      // stays an honest absence — never a sibling's words, never an aggregate or
+      // card fallback (the red witness: a real settled partial whose
+      // all_results rows name distinct Finals rendered unknown for both).
+      final: rec ? rec.final : undefined,
+      error: er0,
       tail: ev?.tail || null, // O2: record `raw` is gone; the log route tails the truth
       ms: rec?.ms ?? ev?.ms,
       metrics
@@ -2705,6 +2757,156 @@ function Timeline({ detail }) {
   )
 }
 
+// -- stored-session navigation (bd_2026-11-13-cj2, UI-2 RC navigation adapter) --
+// BEGIN stored-session-nav
+// Read-only viewing law (synthesis/NAVIGATION.md §Resume-without-side-effects):
+// a conversation link opens/focuses the RECORDED stored session through
+// host.openSession — the SDK's own core door. Never composer, never a
+// hydration wait, resume, submit, insert, nudge, and never another session's
+// ID as a stand-in. The SDK was inspected at wiring time: openSession(
+// storedSessionId, options) takes the PluginOpenSessionOptions union
+// (hermes-agent apps/desktop/src/sdk/index.ts), whose `intent` admits
+// 'in-place'|'main'|'stack'|'tab'|'window'; there is NO `readOnly` option, so
+// none is invented — this block passes only the union's own default, made
+// explicit as data so the read-only route is visible at the call site.
+// Id verification is provenance, not parsing: an ID counts only when it rode a
+// designated recorded field — the run's owner stamp, or a node's backend
+// state.db-joined metrics.session_ids — and, for fields that mix runtime and
+// stored shapes (owner.session_id, a CLI-era runtime id), only the measured
+// stored-session shape qualifies (desktop-owned rows are `local-` + 64 hex;
+// that same string is the state.db sessions.id and the openSession key).
+// Wave D: provenance is also POSITION — of a node's attempt list only the LAST
+// (chronologically newest) row's ID stands for the CURRENT attempt; the selector
+// selects that one entry FIRST and validates it (shape + the read model's
+// session_ids_expired flag) and never falls back to another session's ID.
+// Wave E: where the read model can, position is REPLACED BY THE RECORD —
+// `session_current` carries the id of the exact `#a<attempt>` title the run's
+// own node/item record names as current (or null: a known attempt whose row is
+// gone). The binding outranks the last surviving entry; the last-entry law
+// stands only where no binding ships (claimless historical payloads).
+// Missing/expired/unverified renders unavailable and makes NO host call; an
+// absent adapter renders unavailable; a rejection stays a local error state
+// with the exact ID for inspection. No core DOM or storage mutation anywhere.
+const STORED_SESSION_SHAPE = /^local-[0-9a-f]{64}$/
+
+/** Recorded desktop-stored IDs only, in recorded order (runtime-shaped CLI IDs
+ *  are dropped, never repaired — structure encodes the no-guess law). */
+export function storedSessionIds(metrics) {
+  const raw = metrics && Array.isArray(metrics.session_ids) ? metrics.session_ids : []
+  return raw.filter(s => typeof s === 'string' && STORED_SESSION_SHAPE.test(s.trim()))
+            .map(s => s.trim())
+}
+/** The node's CURRENT recorded session. Wave E (captain missing-current
+ *  counterexample): when the read model BINDS the current attempt from the
+ *  run's own records (session_current — the id of the exact `#a<attempt>`
+ *  title the node/item record names, or the computed absence null when that
+ *  row never landed or was expunged), THAT binding is the destination: the
+ *  last surviving entry of session_ids is inspection data only, and an older
+ *  attempt is never promoted over a known-newer one whose row is gone. The
+ *  bound entry is select-before-validated exactly like the last entry below —
+ *  runtime-shaped, malformed, or flagged expired reads as ABSENT (null).
+ *  Where no binding ships (historical/claimless payloads — a bare
+ *  child_metrics fold has no run records in view; every navigation payload
+ *  the surfaces ship goes through the record-bound projection), the
+ *  CHRONOLOGICAL last-entry law stands: the read model ships attempts in
+ *  (started_at, rowid) order, so the LAST entry IS the newest recorded
+ *  attempt — attempt suffixes are never sorted lexically, or #a10 would beat
+ *  #a2 and the link would open the older chat (pinned by
+ *  tests/test_stored_session_order_cj2.py, replayed end-to-end by
+ *  tests/test_current_attempt_replay_cj2.py). SELECT BEFORE VALIDATE either
+ *  way: when the ONE selected entry is runtime-shaped, malformed, or flagged
+ *  expired by the authoritative state.db lookup (session_ids_expired), the
+ *  destination is ABSENT — no walk-back to an older attempt's session (the
+ *  Wave A bless fell back to another session whose click opened the older
+ *  chat under a rotation nobody verified). A rotated attempt re-lands this
+ *  link on the fresh ID at the next fetch — no cached first ID, ever. */
+export function latestStoredSessionId(metrics) {
+  if (metrics && typeof metrics === 'object' && 'session_current' in metrics) {
+    const cur = typeof metrics.session_current === 'string' ? metrics.session_current.trim() : ''
+    if (!STORED_SESSION_SHAPE.test(cur)) return null
+    const exp = Array.isArray(metrics.session_ids_expired) ? metrics.session_ids_expired : []
+    if (exp.some(s => typeof s === 'string' && s.trim() === cur)) return null
+    return cur
+  }
+  const raw = metrics && Array.isArray(metrics.session_ids) ? metrics.session_ids : []
+  const last = raw.length ? raw[raw.length - 1] : null
+  const id = typeof last === 'string' ? last.trim() : ''
+  if (!STORED_SESSION_SHAPE.test(id)) return null
+  const exp = metrics && Array.isArray(metrics.session_ids_expired) ? metrics.session_ids_expired : []
+  if (exp.some(s => typeof s === 'string' && s.trim() === id)) return null
+  return id
+}
+/** The run's recorded owner session: the designated ui_session_id stamp wins;
+ *  otherwise the launch session_id ONLY when it already IS stored-session
+ *  shaped (measured live: desktop-launched runs stamp owner.session_id as the
+ *  local-* stored id). Never another session, never the viewer's own. */
+export function ownerStoredSessionId(owner) {
+  if (!owner || typeof owner !== 'object') return null
+  const ui = typeof owner.ui_session_id === 'string' ? owner.ui_session_id.trim() : ''
+  if (ui) return ui
+  const sid = typeof owner.session_id === 'string' ? owner.session_id.trim() : ''
+  return STORED_SESSION_SHAPE.test(sid) ? sid : null
+}
+
+/** ONE host call per user action, or zero — the fail-closed adapter. */
+export async function openRecordedSession(h, storedId) {
+  const id = typeof storedId === 'string' ? storedId.trim() : ''
+  if (!id || /[\s\x00-\x1f]/.test(id) || id.length > 512)
+    return { ok: false, reason: 'unverified id — not a recorded stored session' }
+  if (!h || typeof h.openSession !== 'function')
+    return { ok: false, reason: 'host session adapter absent' }
+  try {
+    await h.openSession(id, { intent: 'in-place' })
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, reason: `host refused the recorded session (${String((e && e.message) || e).slice(0, 160)})` }
+  }
+}
+
+// Back/focus restoration: a module-owned one-shot token (never core storage).
+// The link that launched the session marks its key; the first render of that
+// key after the host navigation re-focuses exactly once and clears the token.
+let navFocusPending = null
+export function markNavFocus(key) { navFocusPending = key || null }
+export function consumeNavFocus(key) {
+  const hit = navFocusPending != null && navFocusPending === key
+  if (hit) navFocusPending = null
+  return hit
+}
+
+/** The explicit conversation link: labeled button, full recorded ID visible
+ *  and copyable, honest unavailable/error states with no execution anywhere. */
+export function SessionLink({ storedId, linkText = 'open recorded chat', note = 'no verified recorded session', focusKey }) {
+  const [refused, setRefused] = useState(null)
+  const [copied, setCopied] = useState(false)
+  const ref = useRef(null)
+  useEffect(() => { if (focusKey && consumeNavFocus(focusKey) && ref.current) ref.current.focus() }, [])
+  const id = typeof storedId === 'string' && storedId.trim() ? storedId.trim() : null
+  const copy = () => {
+    try { navigator.clipboard?.writeText(id).then(() => setCopied(true)).catch(() => {}) } catch { /* selection stays readable */ }
+  }
+  const idRow = box('flex flex-wrap items-center gap-1',
+    jsx('span', { className: 'select-text text-[0.6875rem] text-(--ui-text-tertiary)', title: id, children: id }),
+    jsx('button', { type: 'button', className: 'text-[0.6875rem] text-(--ui-text-tertiary)',
+      style: { cursor: 'pointer', background: 'none', border: 'none', padding: 0 },
+      onClick: copy, children: copied ? 'copied' : 'copy' }))
+  const known = id != null && typeof host?.openSession === 'function' && !refused
+  const reason = id == null ? note : (refused || 'host session adapter absent')
+  return box('flex flex-col gap-1',
+    known
+      ? jsx('button', {
+          ref, type: 'button', title: id, 'aria-label': `${linkText} · ${id}`,
+          onClick: async () => {
+            markNavFocus(focusKey)
+            const r = await openRecordedSession(host, id)
+            if (!r.ok) { markNavFocus(null); setRefused(r.reason) }
+          },
+          children: linkText })
+      : null,
+    known ? null : box('text-[0.6875rem] text-(--ui-text-tertiary)', `Session unavailable · ${reason}`),
+    id != null ? idRow : null)
+}
+// END stored-session-nav
 // -- O2 NodePanel: one node truth, two readers --------------------------------
 // Replaces Drawer + the drawer's ItemDetail use. Every field reads verbatim from
 // the record the backend merges into nodes[id] (wfcommon.node_facts via the
@@ -2784,6 +2986,7 @@ function NodePanel({ detail }) {
         : k === 'refusal' ? [k, picked.refusal ?? null]
         : k === 'error' ? [k, picked.error ?? null]
         : k === 'output' ? [k, picked.output ?? null]
+        : k === 'final' ? [k, picked.final ?? null]
         : k === 'ms' ? [k, picked.ms ?? null] : [k, null]))
     : shown
   const effStatus = (facts && facts.status != null && facts.status !== UNKNOWN ? facts.status : status) || 'pending'
@@ -2820,9 +3023,15 @@ function NodePanel({ detail }) {
   const budgetBits = [['max_turns', def.max_turns], ['timeout', def.timeout], ['run_budget', def.run_budget], ['shape', def.shape]]
     .filter(([, v]) => factKnown(v))
   // WF-02: a cancelled class keeps the error text but loses the red tone.
+  // bd_2026-11-25-cj2 (item source): the tone follows the SELECTED row's own
+  // class — facts carries it verbatim (the closed record, or the sourced
+  // decision synthesized into it). The node's aggregate class is a
+  // SIBLING's death, never this item's tone: when an item is picked, no
+  // 'shown' term is consulted anywhere in this panel (sourced absent
+  // optionals stay absent; the aggregate still owns everything with no
+  // item picked, and raw facts/telemetry/log routes stay separate).
   const cancelledClass = (facts && facts.error_class) === 'cancelled'
     || (picked && picked.errorClass) === 'cancelled'
-    || shown.error_class === 'cancelled'
   const steerTrip = facts?.steer
     ? `queued ${unk(facts.steer.queued)} · baked ${unk(facts.steer.baked)} · consumed ${unk(facts.steer.consumed)}`
     : null
@@ -2830,7 +3039,8 @@ function NodePanel({ detail }) {
     'flex min-w-0 flex-col gap-3',
     factKnown(def.question) || factKnown(def.goal)
       ? sect(def.type === 'gate' ? 'question' : 'goal',
-          box('text-xs whitespace-pre-wrap text-(--ui-text-secondary)', unk(def.type === 'gate' ? def.question : def.goal)))
+          box('text-xs whitespace-pre-wrap text-(--ui-text-secondary)',
+              unk(picked && picked.goal ? picked.goal : def.type === 'gate' ? def.question : def.goal)))
       : null,
     def.context ? sect('context', box('text-xs whitespace-pre-wrap text-(--ui-text-secondary)', def.context)) : null,
     sect('inputs', inputChips),
@@ -2845,15 +3055,18 @@ function NodePanel({ detail }) {
       ? sect('blocked_by', box('text-xs whitespace-pre-wrap text-(--ui-text-secondary)', shown.blocked_by.join(', ')))
       : null,
     shown.parked ? sect('parked', box('text-xs text-(--ui-text-secondary)', factText(shown.parked))) : null,
-    pre('error', facts && facts.error !== UNKNOWN ? facts.error : shown.error !== UNKNOWN ? shown.error : null, cancelledClass ? undefined : EDGE_TONE.failed),
+    pre('error', facts && facts.error !== UNKNOWN ? facts.error : null, cancelledClass ? undefined : EDGE_TONE.failed),
     // est-zmpx8 (the #584 residual): the refusal stamp — the machine-readable class
     // of a REFUSAL (wf.py `_window_spent_record` → wfcommon.FACT_KEYS `refusal`) —
     // renders verbatim beside the death facts. Same WF-03 discipline as error_class
     // above: a sentinel/absent stamp hides its section, so rule 8 holds both ways —
-    // honest absence on screen, never a fabricated value.
-    factKnown(facts?.refusal ?? shown.refusal)
+    // honest absence on screen, never a fabricated value. bd_2026-11-25-cj2 (item
+    // source): facts is the selected row's own closed fact set (or the sourced
+    // decision) — a node-level refusal never stands in for an item that refused
+    // nothing.
+    factKnown(facts?.refusal)
       ? sect('refusal', box('text-xs whitespace-pre-wrap text-(--ui-text-secondary)',
-          unk(facts?.refusal ?? shown.refusal)))
+          unk(facts.refusal)))
       : null,
     Array.isArray(facts?.attempts_log) && facts.attempts_log.length
       ? sect('attempts_log', box('text-xs whitespace-pre-wrap text-(--ui-text-secondary)',
@@ -2863,6 +3076,28 @@ function NodePanel({ detail }) {
       `${facts.efp}${shown.stale_of_amend ? ' · stale of amend' : ''}`)) : null,
     steerTrip ? sect('steer', box('text-xs text-(--ui-text-secondary)', steerTrip)) : null,
     factKnown(facts?.skey) ? sect('skey', box('text-xs select-text text-(--ui-text-tertiary)', facts.skey)) : null,
+    // bd_2026-11-13-cj2: the explicit conversation link, agent lanes only (an
+    // echo/gate node never had a child chat — the row would LIE there). The ID
+    // comes only from the backend's state.db-joined metrics.session_ids /
+    // item_metrics[i].session_ids; picked fan-out item swaps the row to that
+    // item's own recorded session. Expired row -> field gone at next fetch ->
+    // honest 'Session unavailable', never a stale link.
+    // Captain solo-to-fan correction: SELECTION IDENTITY determines the
+    // address BEFORE metrics are read. A picked item reads ONLY the evidence
+    // attached to its own row (the fanItems row carries that item's
+    // item_metrics entry verbatim — re-reading the map by index is a second
+    // lookup that can straddle a refresh) — when the whole item map or that
+    // row is absent (a real amend that turned a solo agent into a fan-out has
+    // no item data before the replacement spawns), the destination is ABSENT:
+    // the node's own metrics (its obsolete solo history) and a sibling item's
+    // row can never stand in as the item's destination. Pinned by
+    // tests/test_selected_item_identity_cj2.py, and the paint/chat pair by
+    // tests/test_display_authority_pair_cj2.py.
+    def.type === 'agent'
+      ? sect('recorded chat', jsx(SessionLink, {
+          storedId: latestStoredSessionId(picked != null ? picked.metrics : shown.metrics),
+          focusKey: `${detail.id}:${name}` }))
+      : null,
     fc
       ? box('flex flex-col gap-2',
           label(`items · ${fanSummary(fc)}`),
@@ -2876,7 +3111,14 @@ function NodePanel({ detail }) {
       ? box('text-[0.6875rem] text-(--ui-text-tertiary)', logBase(facts?.prompt_path)) : null
   const tabBody = () => {
     if (activeTab === 'Output') {
-      const out = fmtOutput(facts?.output ?? shown.output)
+      // bd_2026-11-25-cj2 (panel detail): `facts` IS the chosen record — the
+      // picked item's own closed record (or the sourced decision) when an item
+      // is selected, the whole-node projection itself otherwise. An item with
+      // no output of its own reports honest absence here; the node aggregate,
+      // which may name a SIBLING's answer, may never stand in for it. The
+      // aggregate still owns Output with no item picked, and the raw node
+      // route is untouched.
+      const out = fmtOutput(facts?.output)
       return out
         ? box('flex flex-col gap-1',
             effStatus === 'partial' ? jsx(Badge, { variant: 'outline', children: 'partial — harvested output' }) : null,
@@ -2884,8 +3126,12 @@ function NodePanel({ detail }) {
         : box('text-xs text-(--ui-text-tertiary)', 'No output yet.')
     }
     if (activeTab === 'Final') {
+      // Words AND tone ride the same selected record: effStatus is the picked
+      // item's own status (node status with no pick), so a successful item
+      // under a failed aggregate keeps the neutral tone and a failed item
+      // under a still-running node keeps the failed tone.
       const f = facts && typeof facts.final === 'string' ? facts.final : null
-      return f ? pre('final', f, status === 'failed' ? EDGE_TONE.failed : FACT_TONE)
+      return f ? pre('final', f, effStatus === 'failed' ? EDGE_TONE.failed : FACT_TONE)
         : box('text-xs text-(--ui-text-tertiary)', 'final: unknown')
     }
     if (activeTab === 'Prompt') {
@@ -2917,19 +3163,24 @@ function NodePanel({ detail }) {
     'flex flex-col gap-3 border-t border-(--ui-stroke-secondary) p-4',
     box(
       'flex items-center gap-2',
-      jsx(Dot, { status }),
+      // bd_2026-11-25-cj2 (item source): with an item picked, the header's
+      // badge and class ARE the item's — effStatus is that row's normalized
+      // status, facts.error_class the class its own record/decision names.
+      // Without a pick, facts IS shown and every expression here is the
+      // node reading it always gave.
+      jsx(Dot, { status: effStatus }),
       box('min-w-0 flex-1 truncate text-sm font-medium', name),
-      jsx(Badge, { variant: 'outline', children: statusLabel(status) }),
+      jsx(Badge, { variant: 'outline', children: statusLabel(effStatus) }),
       // F2 desktop (RATIFY): delegation badge — ONLY when the def carries
       // `profile`; a no-team def yields null and the panel is byte-identical.
       def.profile ? jsx('span', { title: `as @${def.profile}`, className: 'text-[0.6875rem] text-(--ui-text-tertiary)', children: `as @${def.profile}` }) : null,
       // WF-03: the header never prints a raw sentinel — an unknown error_class
       // hides its chip; the model·provider·reasoning line renders only the
       // parts the record actually carries.
-      factKnown(facts?.error_class ?? shown.error_class)
-        ? jsx('span', { className: 'text-[0.6875rem] text-(--ui-text-tertiary)', children: unk(facts?.error_class ?? shown.error_class) })
+      factKnown(facts?.error_class)
+        ? jsx('span', { className: 'text-[0.6875rem] text-(--ui-text-tertiary)', children: unk(facts.error_class) })
         : null,
-      (facts?.attempts ?? shown.attempts) > 1 ? jsx('span', { className: 'text-[0.6875rem] text-(--ui-text-tertiary)', children: `↻${facts.attempts}` }) : null,
+      (facts?.attempts ?? 0) > 1 ? jsx('span', { className: 'text-[0.6875rem] text-(--ui-text-tertiary)', children: `↻${facts.attempts}` }) : null,
       factKnown(def.model) || factKnown(def.provider) || factKnown(def.reasoning)
         ? box('min-w-0 truncate text-[0.6875rem] text-(--ui-text-tertiary)',
             [def.model, def.provider, def.reasoning].filter(factKnown).join(' · '))
@@ -2989,6 +3240,17 @@ export function WorkflowsPage() {
                   // honest 'unknown' included (deep review #156 A2 — one law,
                   // both surfaces; never a fabricated name).
                   jsx('span', { className: 'text-xs text-(--ui-text-tertiary)', title: 'launched by this agent', children: `@${originLabel(d.owner, d.owner_profile)}` }),
+                  // bd_2026-11-13-cj2: the launch receipt's inverse — an explicit
+                  // link to the RECORDED owner session (owner.ui_session_id, or
+                  // owner.session_id only when it is stored-shaped; never the
+                  // viewer's focused chat, never another session). Missing or
+                  // unverified ID renders unavailable with zero host calls.
+                  jsx(SessionLink, {
+                    storedId: ownerStoredSessionId(d.owner),
+                    linkText: 'owner chat',
+                    note: 'no stored owner session recorded',
+                    focusKey: `${d.id}:owner`
+                  }),
                   // WF-06 (QA 2026-10-27): the record header shows the RUN
                   // wall — the word keeps it distinct from the node cards'
                   // node clocks and the timeline's child spans.

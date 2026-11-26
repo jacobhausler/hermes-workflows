@@ -130,9 +130,11 @@ const { ItemChips } = new Function('jsx', 'jsxs', '$fanItem', 'Dot', 'EDGE_TONE'
     src.match(/export function displayTitle[\s\S]*?\n}/)[0].replace('export ', ''),
     src.match(/export function templateTag[\s\S]*?\n}/)[0].replace('export ', ''),
   ].join('\n')
+  // bd_2026-11-13-cj2: WorkflowsPage mounts the real marked nav block
+  const navBlock = src.match(/\/\/ BEGIN stored-session-nav\n([\s\S]*?)\/\/ END stored-session-nav/)[0].replace(/^export /gm, '')
   const { WorkflowsPage } = new Function('useQuery', 'useValue', '$selRun', 'listQuery', 'runQuery', 'box', 'Dot', 'statusLabel',
     'Vitals', 'Badge', 'GraphView', 'Drawer', 'Timeline', 'EmptyState', 'ScrollArea', 'RunRow', 'Fragment', 'jsx', 'jsxs', 'runHeaderModel', 'PolishStyles', 'originLabel', 'runStatusLabel',
-    `${l8iResolver}\n${grab('WorkflowsPage')}; return { WorkflowsPage }`)(
+    `${l8iResolver}\n${navBlock}\n${grab('WorkflowsPage')}; return { WorkflowsPage }`)(
     q => (q.queryKey?.[2] === 'run' ? { data: detail } : { data: { runs: [{ id: 'r1', status: 'running' }] } }),
     () => null, { get() { return null }, set() {} }, () => ({ queryKey: ['x', 'runs'] }), id => ({ queryKey: ['x', 'run', id] }),
     (t, ...k) => jsx('div', { children: k }), 'Dot', s => s, 'Vitals', 'Badge', 'GraphView', 'Drawer', 'Timeline',

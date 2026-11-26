@@ -89,11 +89,23 @@ class MetricsUnknownFold114(unittest.TestCase):
         st["run_dir"] = tmp
         fake_common = types.SimpleNamespace(
             # (#44 keeps the forge honest: plugin_api._view threads a lock_state
-            # kwarg into run_state — the forged read ignores it, est-lf0j pattern.)
-            run_state=lambda r, lock_state=None: dict(st),
-            run_child_metrics=lambda r: dict(cm),
+            # kwarg into run_state — the forged read ignores it, est-lf0j pattern.
+            # bd_2026-11-25-cj2: the response-level memo pair rides the same
+            # forged reads — the fold policy under test is memo-blind.)
+            run_state=lambda r, lock_state=None, **_: dict(st),
+            # bd_2026-11-13-cj2 revision repair: the dashboard hands the published
+            # graph to the seam — the forged read accepts (and ignores) it.
+            run_child_metrics=lambda r, graph=None, **_: dict(cm),
             current_attempt=WFC.current_attempt,        # the REAL heartbeat fn
-            node_facts=lambda r, nid, index=None: None,
+            # bd_2026-11-13-cj2 late-boundary repair: _view also hands the
+            # published graph to the facts join — the forged read accepts
+            # (and ignores) it, same est-lf0j pattern as above.
+            node_facts=lambda r, nid, index=None, **_: None,
+            # bd_2026-11-25-cj2 execution-identity join: a forged facts read
+            # publishes no aggregate, so the adjudicator has nothing to do —
+            # the forged seam agrees, and asserts the call is not this test.
+            bind_current_item_claims=lambda *a, **k: 0,
+            resolve_item_chat=lambda *a, **k: 0,
             fold_child_metrics=lambda rows: WFC.fold_child_metrics(rows),
             profiles_by_session=lambda: {})
         with patch.object(door, "_resolve_read_run", lambda rid: (tmp, dict(st), None)), \
