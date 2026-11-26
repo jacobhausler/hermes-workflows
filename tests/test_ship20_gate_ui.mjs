@@ -6,9 +6,12 @@
 //
 // Pins the shipped acceptance list:
 //   - nudge path DELETED atomically: no nudgeOwner / composer / hydration /
-//     resume calls or strings, and the answer surface keeps exactly ONE
-//     success toast variant (the exact receipt toast) and one error variant;
-//     every old toast variant string is gone.
+//     resume calls or strings (openSession is pinned absent on the ANSWER
+//     PATH, not globally — the CJ2 read-only stored-session nav adapter
+//     bd_2026-11-13-cj2 legitimately opens recorded chats through the SDK's
+//     own host.openSession door and is not the nudge path), and the answer
+//     surface keeps exactly ONE success toast variant (the exact receipt
+//     toast) and one error variant; every old toast variant string is gone.
 //   - failed-answer control: an {ok:false} door answer through the REAL api()
 //     rejects (onSuccess never sees it); onError toasts once as error, the
 //     inline row names the refusal, and the options stay retryable.
@@ -30,8 +33,18 @@ try {
   const src = readFileSync(new URL('../desktop/plugin.js', import.meta.url), 'utf8')
 
   // -- 0. atomic-removal laws (one PR deleted callers, function and variants) --
+  // openSession is deliberately NOT in the global set: the CJ2 stored-session
+  // nav adapter (bd_2026-11-13-cj2, the BEGIN/END stored-session-nav block)
+  // legitimately opens the RECORDED chat through the SDK's own
+  // host.openSession door — a read-only view whose own wiring law forbids
+  // composer, hydration wait, resume, submit, insert and nudge, and whose
+  // call counts are pinned by tests/test_stored_session_nav.mjs. A global
+  // absence could not distinguish that authorized open from a nudge-path
+  // compat shim, so the no-open law is pinned at its true scope below: 0b
+  // (static, the gate answer path, with discriminating controls) and §8
+  // (runtime, the whole flow makes zero openSession calls).
   for (const gone of [/nudgeOwner/, /composer\.submit/, /composer\.insertText/,
-                      /openSession/, /awaitHydration/, /resume it now/,
+                      /awaitHydration/, /resume it now/,
                       /press Enter there to resume/, /◇ Held ·/]) {
     assert.doesNotMatch(src, gone, `${gone} is retired with the nudge path — no compat shim`)
   }
@@ -43,6 +56,39 @@ try {
   assert.equal((region.match(/kind: 'success'/g) || []).length, 1,
     'old success toast variants are gone — one variant remains')
   assert.equal((region.match(/kind: 'error'/g) || []).length, 1, 'exactly one error variant')
+
+  // -- 0b. the no-open law, scoped to the gate answer path (0a rationale) --
+  // The answer path spans gateViewAction -> GateActions: the jump helper
+  // rides the success toast's action and the receipt's view button, so the
+  // slice starts at gateViewAction and ends where the surface stops being
+  // the answering path — every helper an answer can reach is covered.
+  const answerPath = src.slice(src.indexOf('export function gateViewAction'),
+                               src.indexOf('export function NodeCard'))
+  assert.ok(answerPath.length > region.length,
+    'answer-path slice covers the gateViewAction helper plus the whole GateActions surface')
+  assert.doesNotMatch(answerPath, /openSession/,
+    'the gate answer path never opens a session — no nudge, no navigation-as-wake, no compat shim')
+  // Discriminating control A (the matcher is not vacuous): openSession DOES
+  // live in the source — inside the authorized read-only nav adapter, which
+  // sits outside the answer-path slice. That is exactly the shape the
+  // over-broad global check punished; if the nav block were deleted this
+  // control goes red even though 0b stays green.
+  const navBeg = src.indexOf('// BEGIN stored-session-nav')
+  const navEnd = src.indexOf('// END stored-session-nav')
+  assert.ok(navBeg !== -1 && navEnd > navBeg,
+    'stored-session-nav block located (scope anchor for control A)')
+  assert.ok(navEnd <= src.indexOf('export function gateViewAction') ||
+            navBeg >= src.indexOf('export function NodeCard'),
+    'the nav adapter sits outside the gate answer path — the two scopes are disjoint')
+  assert.match(src.slice(navBeg, navEnd), /host\.openSession/,
+    '(control A) openSession matches where it is authorized — the scoped absence is a scope proof, not a dead pattern')
+  // Discriminating control B (the scoped check can fail): the same matcher
+  // applied to the same slice with a re-introduced shim must catch it.
+  const poisoned = answerPath.slice(0, answerPath.length >> 1) +
+    "\n  await host.openSession(sid, { intent: 'in-place' }) // shim reborn\n" +
+    answerPath.slice(answerPath.length >> 1)
+  assert.match(poisoned, /openSession/,
+    '(control B) a re-introduced openSession shim inside the answer path trips the 0b assertion')
 
   globalThis.__calls = []
   globalThis.__notifs = []
@@ -266,5 +312,5 @@ export const Fragment = 'Fragment'
     }
   }
 
-  console.log('ALL PASS ship20-gate-ui — nudge path atomically gone (one success variant); failed-answer and exact-toast hold with NO native acceptance; stale/duplicate/no-options/requester/focus controls pinned')
+  console.log('ALL PASS ship20-gate-ui — nudge path atomically gone (one success variant); no-open law holds scoped to the answer path with discriminating controls (CJ2 read-only nav adapter authorized outside it); failed-answer and exact-toast hold with NO native acceptance; stale/duplicate/no-options/requester/focus controls pinned')
 } finally { rmSync(tmp, { recursive: true, force: true }) }
