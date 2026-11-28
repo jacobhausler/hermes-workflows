@@ -17,7 +17,9 @@ measured is the exact walk production serves.
 Run (from the repo root):
     python3 scripts/bench_census_latency.py --json docs/measurements/census-scan-latency.json
 
-Flags: --sizes 600,3000 --reps 5 --logs-ratio 0.35 --keep (leave the seed tree).
+Flags: --sizes 600,3000,6000 (default) --reps 5 --logs-ratio 0.35 --keep
+(leave the seed tree). The committed artifact at the 3000-dir bound is what
+the shipped constants cite; the 6000 row is the linearity control (2x bound).
 """
 import argparse, json, os, platform, shutil, statistics, sys, tempfile, time
 from pathlib import Path
@@ -96,7 +98,7 @@ def measure(n: int, reps: int, logs_ratio: float, base: Path):
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--sizes", default="600,3000")
+    ap.add_argument("--sizes", default="600,3000,6000")
     ap.add_argument("--reps", type=int, default=5)
     ap.add_argument("--logs-ratio", type=float, default=0.35)
     ap.add_argument("--json", default=None, help="write report here")
