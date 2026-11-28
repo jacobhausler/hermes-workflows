@@ -34,7 +34,15 @@ Fetch edge), answered-empty (roots named), full census all-loaded, the
 deepest counted row past the first-100 ceiling + its record page, refetch
 failure with the cached census kept (clickable stale chip), retry re-walk
 (census grew while the edge was failing), and partial fetch (page-2 fulfill
-short: `loaded 100 of 134` while the summary stays global). The mock only
+short: `loaded 100 of 134` while the summary stays global), CAP TRUNCATION
+(every page a full synthetic window without any total — the clip at the
+30-page cap shows as `first 100 loaded — more exist (page cap)`; the
+`truncated` fact rides the payload, never inferred from a missing number),
+PENDING (counted 237 with zero loaded rows renders `Runs pending…`, never
+the `No runs` costume; total 237 is a synthetic edge answer, the bench
+counts 134), and PENDING RECOVERY (a trusted click on the re-walk button
+brings the real all-loaded census back). Synthetic frame provenance is
+recorded under `identity.coverage.{cap_frame,pending_frame}`. The mock only
 lies at the network edge — renderer, plugin, react-query loop and backend
 stay the actual code. A UDS scope probe against the fork is recorded to
 `logs/scope-probe.json` before the walk (field-proven #12 lesson). This case

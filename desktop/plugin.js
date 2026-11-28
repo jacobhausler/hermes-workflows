@@ -599,7 +599,11 @@ function ItemChips({ runId, nodeId, rows, picked, size }) {
 //   - honours the AbortSignal BETWEEN pages: a cancelled/invalidated query
 //     stops walking instead of continuing to hammer the route on a timer;
 //   - hard page cap — the walk is finite even against a server whose total is
-//     a lie, and the shortfall renders as a visible partial.
+//     a lie, and the shortfall renders as a visible partial. ASTRA REVIEW-2 F1:
+//     when the cap clips the walk the result carries `truncated: true` — an
+//     explicit incomplete fact INDEPENDENT of the total, so a census with no
+//     numeric total (or a lying one) still discloses the clip; the pane shows
+//     it. Truncation is never inferred from a missing number.
 // Pure over an injected request fn so node behavior tests drive a fake server.
 const RUNS_PAGE_SIZE = 100   // the server's own page size — no bespoke cap
 const RUNS_MAX_PAGES = 30    // bounded walk: a >3000-row census shows a partial, never hangs
@@ -623,7 +627,12 @@ export function runsIndexFetcher(request) {
       if (!first) first = page
       const total = typeof first.total === 'number' ? first.total : null
       const covered = total != null ? offset + rows.length >= total : rows.length < RUNS_PAGE_SIZE
-      if (!rows.length || covered || pages >= RUNS_MAX_PAGES) break
+      if (!rows.length || covered || pages >= RUNS_MAX_PAGES) {
+        // F1 law: the cap clipping a not-yet-covered walk is a measured fact,
+        // recorded independently of whether a numeric total exists to imply it.
+        if (!covered && pages >= RUNS_MAX_PAGES) first.truncated = true
+        break
+      }
       offset += rows.length
     }
     // The global summary (total/counts/roots) rides through UNTOUCHED from the
@@ -3371,6 +3380,12 @@ export function WorkflowsPane() {
   const counts = data?.counts
   const total = data?.total ?? counts?.total
   const loaded = data ? (typeof data.loaded === 'number' ? data.loaded : runs.length) : null
+  // F1 (ASTRA REVIEW-2): the fetcher records `truncated` when the hard page cap
+  // clipped the walk — a measured fact independent of any total. The census
+  // line must disclose the clip even when no numeric total implies it: a
+  // 3000-row partial under an unknown total used to render as plain
+  // 'runs unknown', concealing that more runs exist.
+  const truncated = data?.truncated === true
   let census
   if (!counts) census = 'runs unknown'
   else {
@@ -3378,6 +3393,8 @@ export function WorkflowsPane() {
     if (typeof total === 'number' && typeof loaded === 'number' && loaded < total)
       census += ` · loaded ${loaded} of ${total}`
   }
+  if (truncated && !(typeof total === 'number' && typeof loaded === 'number' && loaded < total))
+    census += ` · first ${loaded} loaded — more exist (page cap)`
   // Agent-first pane law (owner, est-wk7l round): THE REST renders EVERY row —
   // no pane-level cap, no fold. paneModel is uncapped and the consumer must
   // not re-introduce one (the old slice(0,10)+show-all fold made the PR body's
@@ -3395,16 +3412,30 @@ export function WorkflowsPane() {
         ...group('THE REST', rest)
       ]
     : data
-      // A healthily-loaded empty census is the ONLY honest owner of 'No runs'
-      // (bd yjp: loading and unreachable must never wear the empty costume).
-      // The backend names the scanned roots on an empty census — showing them
-      // turns 'nothing found' into 'nothing found WHERE'.
-      ? [
-          jsx(EmptyState, { title: 'No runs', description: 'Ask the agent to start a workflow.' }, 'empty'),
-          Array.isArray(data.roots) && data.roots.length
-            ? label(`roots: ${data.roots.join(', ')}`)
-            : null
-        ]
+      // F4 (ASTRA REVIEW-2): a TRUTHY payload is not an answered-empty census.
+      // A POSITIVE counted census with ZERO loaded rows ({runs:[], total:237,
+      // loaded:0}) must never wear the 'No runs' costume — the count says runs
+      // exist while the walk loaded none. That renders as an honest PENDING
+      // frame with a real re-walk affordance. 'No runs' stays the only-owner
+      // answer for a census that measured zero (numeric total === 0, or a
+      // legacy payload whose first page itself answered empty — the backend
+      // names the scanned roots, turning 'nothing found' into 'nothing found
+      // WHERE').
+      ? (typeof total === 'number' && total > 0
+        ? [
+            jsx(EmptyState, { title: 'Runs pending…', description: `${total} counted · ${loaded ?? 0} loaded — the rows have not come through.` }, 'pending'),
+            jsx('button', {
+              type: 'button', title: 'Retry', onClick: retry,
+              className: 'self-start text-[0.6875rem] text-(--ui-text-tertiary) cursor-pointer',
+              children: 're-walk census — retry'
+            }, 'census-pending')
+          ]
+        : [
+            jsx(EmptyState, { title: 'No runs', description: 'Ask the agent to start a workflow.' }, 'empty'),
+            Array.isArray(data.roots) && data.roots.length
+              ? label(`roots: ${data.roots.join(', ')}`)
+              : null
+          ])
       : error
         ? jsx('button', {
             type: 'button', title: 'Retry', onClick: retry,
