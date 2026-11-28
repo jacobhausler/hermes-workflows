@@ -26,6 +26,11 @@ Behaviour pins (R6: no source-text pins):
   (I) invalidation: the gate-release POST drops the snapshot even for an
       unknown id — a UI action must reflect in the next response, not one
       TTL window later.
+  (S) co-size (est-fj629): the TTL sits ABOVE the desktop's 4000 ms live
+      refetch (below it, every active-mode poll cache-misses and the
+      snapshot is pure overhead — census-staggered w1-02), and the window
+      starts at the scan's START, not its end, so scan duration can never
+      pad the freshness claim.
   (P) pagination over ONE census: default answer keeps the pre-est-ey31s
       contract (newest-100 page, whole-census total/counts incl. executed,
       golden key set); offset/limit slice the page while total/counts stay
@@ -131,6 +136,43 @@ r3 = dash.list_runs(0, 100)
 check("(T2) the first read after the window shows the new run",
       r3["total"] == 7 and any(x["id"] == rid(7) for x in r3["runs"]),
       json.dumps(r3["counts"]))
+
+# ------------------------------------------------- (S) co-size (est-fj629)
+# The shipped pair: the desktop refetches a live census every 4000 ms
+# (refetchInterval, desktop/plugin.js); RUNS_CACHE_TTL must sit ABOVE that
+# cadence or every active-mode poll cache-misses and the snapshot is pure
+# overhead — the measured failure mode of the old 2.0 (census-staggered
+# w1-02). Co-sized on docs/measurements/census-scan-latency.json.
+check("(S1) RUNS_CACHE_TTL sits above the 4.0 s desktop live cadence",
+      dash.RUNS_CACHE_TTL > 4.0, "TTL=%r" % dash.RUNS_CACHE_TTL)
+# The window starts at the scan's START, not its end: a scan that costs
+# 1.0 s of clock must not pad the freshness claim past its own duration.
+clock[0] = 5000.0
+dash._runs_cache_invalidate()
+_slow_scan = dash._scan_runs
+def _advancing_scan():
+    clock[0] += 1.0                              # the scan itself burns a second
+    return _slow_scan()
+dash._scan_runs = _advancing_scan
+dash.list_runs(0, 100)
+dash._scan_runs = _slow_scan
+check("(S2) ts stamps at scan start, not scan end",
+      dash._RUNS_CACHE["ts"] == 5000.0, "ts=%r" % dash._RUNS_CACHE["ts"])
+scans2 = {"n": 0}
+def _counting_scan():
+    scans2["n"] += 1
+    return _slow_scan()
+dash._scan_runs = _counting_scan
+clock[0] = 5000.0 + dash.RUNS_CACHE_TTL - 0.01
+dash.list_runs(0, 100)
+check("(S3) a read just inside TTL of the scan START is served from the snapshot",
+      scans2["n"] == 0, "scans=%d" % scans2["n"])
+clock[0] = 5000.0 + dash.RUNS_CACHE_TTL + 0.01
+dash.list_runs(0, 100)
+check("(S4) a read just past TTL of the scan START rescans",
+      scans2["n"] == 1, "scans=%d" % scans2["n"])
+dash._scan_runs = _slow_scan
+dash._runs_cache_invalidate()
 
 # ---------------------------------------------------------------- (C) collapse
 scans = {"n": 0}

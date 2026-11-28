@@ -369,23 +369,39 @@ def _list_runs(offset=0, limit=100, *, _record=None):
             **{k: v for k, v in rec.items() if k not in ("_roots", "runs")}}
 
 
-# est-ey31s (webui slowness at agents.hausler.cc): the census scan measured
-# 1.06-1.29s over ~560 run dirs (dir walk + ONE batch lock-probe child + a
-# per-dir _view + a per-row logs check). Two changes keep the SHARED event
-# loop responsive — the serve process hosts every agent lane's traffic:
+# est-ey31s (webui slowness at the hosted console): two changes keep the
+# SHARED event loop responsive — the serve process hosts every agent lane's
+# traffic:
 #   (a) the GET routes are plain `def`, so Starlette dispatches them to a
 #       worker thread; an `async def` calling this scan blocks the loop and
 #       every other webui call queues behind it (the owner-visible "not
 #       working"). Same dispatch the /api/sessions reads already use.
-#   (b) scans collapse through a short-TTL snapshot cache with a lock —
-#       the shape of hermes-agent's _TOPOLOGY_CACHE (web_server_gateway.py),
-#       proven against the same poll-storm class. N concurrent pollers pay
-#       ONE scan per window, not N.
-# Freshness: run progress is polled data; RUNS_CACHE_TTL staleness is
-# invisible to a human, and the gate-release POST invalidates so a UI action
-# reflects on the very next read. The cache stores the full scan RECORD;
-# responses are built per request, so no shared mutable payload.
-RUNS_CACHE_TTL = 2.0
+#   (b) scans collapse through a TTL snapshot cache with a lock — the shape
+#       of hermes-agent's _TOPOLOGY_CACHE (web_server_gateway.py). The
+#       collapse benefit is CONCURRENT-ONLY (est-fj629, census-staggered
+#       finding w1-02): pollers inside one window pay ONE scan; a lone
+#       active-mode poller pays one scan per max(TTL, its poll interval).
+# Co-size (est-fj629): TTL = desktop live refetch (4000 ms,
+# desktop/plugin.js) + the measured worst-case scan at the census bound,
+# rounded up to the whole second. Artifact:
+# docs/measurements/census-scan-latency.json (schema
+# wf-census-scan-latency/v1; rerun scripts/bench_census_latency.py):
+# linear ~0.5 ms/dir, warm median 1.50 s / max 1.63 s at the 3000-dir
+# bound — the bound is the desktop's own walk cap, RUNS_MAX_PAGES(30) x
+# RUNS_PAGE_SIZE(100) — and 3.36 s at 2x it, measured on the loaded serve
+# host (load average ~17). 4.0 + 1.63 = 5.63 -> 6.0 s. The shipped 2.0 sat
+# BELOW the 4.0 poll, so
+# every live-mode poll cache-missed and the collapse bought nothing at the
+# tuned cadence (est-ey31s' own 1.06-1.29 s @ ~560 dirs had never been
+# carried to the 3000-dir bound). Duty cycle is now bounded by scan/TTL:
+# <=27% of one worker thread at the bound.
+# Freshness: ts stamps at scan START, so a snapshot is never older than TTL
+# regardless of scan duration (was: stamped after, letting scan time pad
+# the window). Run progress is polled data; 6 s staleness is at the
+# poll's own granularity, and the gate-release POST invalidates so a UI
+# action reflects on the very next read. The cache stores the full scan
+# RECORD; responses are built per request, so no shared mutable payload.
+RUNS_CACHE_TTL = 6.0
 _monotonic = time.monotonic  # seam for time-free tests (behaviour, not source)
 _RUNS_CACHE = {"ts": 0.0, "data": None}
 _RUNS_CACHE_LOCK = threading.Lock()
@@ -401,7 +417,10 @@ def _runs_snapshot():
         if c["data"] is not None and now - c["ts"] < RUNS_CACHE_TTL:
             return c["data"]
         rec = _scan_runs()
-        _RUNS_CACHE.update(ts=_monotonic(), data=rec)
+        # est-fj629: stamp the WINDOW START (the `now` above, read before the
+        # scan), not the scan's end — a snapshot must never be fresher than
+        # its own age claims.
+        _RUNS_CACHE.update(ts=now, data=rec)
         return rec
 
 
