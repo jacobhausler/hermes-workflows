@@ -8,7 +8,13 @@ Interface (the contract later beads use — slice A, bd_2026-11-13-iqf):
 
 ```sh
 node tests/proof-harness/capture.mjs [--case CASE] [--only directive,pane,tray] [--out DIR]
+# or the bead-named path (bd_2026-11-13-33h verification command):
+node scripts/ui2-proof/capture.mjs [--case CASE] [--only TOKENS] [--out DIR]
 ```
+
+`scripts/ui2-proof/capture.mjs` is a zero-logic dispatch shim to this driver
+(argv and exit codes pass through untouched); the driver remains the single
+implementation.
 
 `--case` defaults to `baseline`; `--only` INTERSECTS the case's surfaces
 (short tokens or full surface names; an unknown token exits 2, an
