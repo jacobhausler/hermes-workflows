@@ -132,6 +132,38 @@ clock[0] += dash.RUNS_CACHE_TTL + 0.01
 check("(W4b) after the window the next read rescans (138 counted)",
       dash.list_runs(0, 100)["total"] == N + 1)
 
+# (W7) ui2-proof short-page knob: the partial-fetch frame is SERVER-side,
+# because plugin REST rides the app's IPC bridge and a CDP Fetch mock never
+# sees it. The knob file's integer is an offset floor: pages starting at or
+# past it answer an empty slice with the census-wide summary (the shape the
+# walk reads as shrinkage -> honest `loaded 100 of N`). Fail-closed: env
+# unset, file absent, or garbage content each leave the route untouched.
+KN = BASE / "short-pages.knob"
+os.environ["WF_PROOF_SHORT_PAGES_FILE"] = str(KN)
+dash._runs_cache_invalidate()
+p2 = dash.list_runs(100, 100)
+check("(W7a) knob file absent: page 2 serves every row",
+      [x["id"] for x in p2["runs"]] == all_ids[99:]
+      and p2["total"] == N + 1,
+      json.dumps({"n": len(p2["runs"]), "total": p2["total"]}))
+KN.write_text("100")
+p2 = dash.list_runs(100, 100)
+check("(W7b) knob floor 100: page 2 is an empty slice, summary stays census-wide",
+      p2["runs"] == [] and p2["total"] == N + 1 and "roots" not in p2
+      and set(p2) == {"runs", "total", "counts"},
+      json.dumps(sorted(p2)))
+check("(W7c) knob does not touch the first page",
+      len(dash.list_runs(0, 100)["runs"]) == 100)
+KN.write_text("not-an-int")
+check("(W7d) garbage knob content: no knob (fail-closed)",
+      len(dash.list_runs(100, 100)["runs"]) == 38)
+KN.unlink()
+KN.write_text("100")                     # file again, but the env goes away
+os.environ.pop("WF_PROOF_SHORT_PAGES_FILE")
+check("(W7e) env unset with file present: no knob (fail-closed)",
+      len(dash.list_runs(100, 100)["runs"]) == 38)
+KN.unlink()
+
 # (W5) offset past the end: empty PAGE, not empty census.
 past = dash.list_runs(999, 100)
 check("(W5) offset past the end is an empty page with census-wide total, no roots",
