@@ -190,7 +190,11 @@ def main() -> None:
   # est-0izi7 (PR #531): the changelog.d fragment assembler is release-commit
   # tooling over the checkout's changelog.d/ — declared source-only in pack.py
   # SOURCE_ONLY_SCRIPTS.
-  "changelog_assemble.py"}
+  "changelog_assemble.py",
+  # est-fj629 (gauntlet-1 line 9): the census scan-latency bench regenerates
+  # docs/measurements/census-scan-latency.json — measurement tooling, declared
+  # source-only in pack.py SOURCE_ONLY_SCRIPTS.
+  "bench_census_latency.py"}
                 check("pack-list contract: every repo scripts/*.py is packed or declared source-only (no silent middle)",
                       {p.name for p in (ROOT / "scripts").glob("*.py")} ==
                       {Path(s).name for s in packed_scripts} | test_side_source_only)

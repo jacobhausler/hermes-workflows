@@ -602,7 +602,10 @@ function ItemChips({ runId, nodeId, rows, picked, size }) {
 //     a lie, and the shortfall renders as a visible partial.
 // Pure over an injected request fn so node behavior tests drive a fake server.
 const RUNS_PAGE_SIZE = 100   // the server's own page size — no bespoke cap
-const RUNS_MAX_PAGES = 30    // bounded walk: a >3000-row census shows a partial, never hangs
+// bounded walk: a >3000-row census shows a partial, never hangs. 3000 is
+// also the LATENCY bound the server caches its census against — see
+// docs/measurements/census-scan-latency.json (est-fj629).
+const RUNS_MAX_PAGES = 30
 
 export function runsIndexFetcher(request) {
   return async ({ signal } = {}) => {
@@ -637,6 +640,14 @@ export function listQuery() {
   return {
     queryKey: [...Q, 'runs'],
     queryFn: runsIndexFetcher(api),
+    // est-fj629 co-sizing: the 4000ms live cadence sits BELOW the server's
+    // census cache TTL (RUNS_CACHE_TTL = 6.0, dashboard/plugin_api.py) by
+    // design — polls inside the window are served from the snapshot, so a
+    // live census costs the serve host ONE walk per TTL (measured 1.67 s
+    // worst-case at the 3000-dir bound,
+    // docs/measurements/census-scan-latency.json), not one per poll. A
+    // cadence at or above the TTL would re-scan every poll and make the
+    // cache pure overhead. 30000ms is the all-terminal idle cadence.
     refetchInterval: q => ((q.state.data?.runs || []).some(r => !TERMINAL.has(r.status)) ? 4000 : 30000)
   }
 }

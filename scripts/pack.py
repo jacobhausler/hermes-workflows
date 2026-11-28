@@ -379,6 +379,10 @@ SOURCE_ONLY_SCRIPTS = {
     # merge-assist queue (est-0izi7): changelog.d fragment assembler is release-commit tooling
     # over the checkout's changelog.d/ — a shipped plugin has no CHANGELOG.md fold to run.
     "scripts/changelog_assemble.py": "release-commit changelog fragment assembler (reads the checkout's changelog.d/; not release surface)",
+    # est-fj629 (gauntlet-1 line 9): the census scan-latency bench regenerates
+    # docs/measurements/census-scan-latency.json from a seeded census — a
+    # measurement tool over a fresh temp tree, not release surface.
+    "scripts/bench_census_latency.py": "census scan-latency bench (regenerates the measurement artifact; not release surface)",
     "scripts/registry_observe.py": "estate CI burn-token registry census (not release surface)",
     "scripts/md_inputs_observe.py": "estate CI admission md-input census (not release surface)",
     "scripts/ci_preflight_observe.py": "estate-ci P1 observe preflight runner (fetches the contract at its pin; not release surface)",
