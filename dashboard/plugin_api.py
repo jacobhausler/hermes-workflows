@@ -386,15 +386,15 @@ def _list_runs(offset=0, limit=100, *, _record=None):
 # rounded up to the whole second. Artifact:
 # docs/measurements/census-scan-latency.json (schema
 # wf-census-scan-latency/v1; rerun scripts/bench_census_latency.py):
-# linear ~0.5 ms/dir, warm median 1.64 s / max 1.67 s at the 3000-dir
+# linear ~0.5 ms/dir, warm median 1.50 s / max 1.63 s at the 3000-dir
 # bound — the bound is the desktop's own walk cap, RUNS_MAX_PAGES(30) x
-# RUNS_PAGE_SIZE(100) — and 3.33 s at 2x it, measured on the loaded serve
-# host (load average ~17). 4.0 + 1.67 = 5.67 -> 6.0 s. The shipped 2.0 sat
+# RUNS_PAGE_SIZE(100) — and 3.36 s at 2x it, measured on the loaded serve
+# host (load average ~17). 4.0 + 1.63 = 5.63 -> 6.0 s. The shipped 2.0 sat
 # BELOW the 4.0 poll, so
 # every live-mode poll cache-missed and the collapse bought nothing at the
 # tuned cadence (est-ey31s' own 1.06-1.29 s @ ~560 dirs had never been
 # carried to the 3000-dir bound). Duty cycle is now bounded by scan/TTL:
-# <=28% of one worker thread at the bound.
+# <=27% of one worker thread at the bound.
 # Freshness: ts stamps at scan START, so a snapshot is never older than TTL
 # regardless of scan duration (was: stamped after, letting scan time pad
 # the window). Run progress is polled data; 6 s staleness is at the

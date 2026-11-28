@@ -643,7 +643,7 @@ export function listQuery() {
     // est-fj629 co-sizing: the 4000ms live cadence sits BELOW the server's
     // census cache TTL (RUNS_CACHE_TTL = 6.0, dashboard/plugin_api.py) by
     // design — polls inside the window are served from the snapshot, so a
-    // live census costs the serve host ONE walk per TTL (measured 1.67 s
+    // live census costs the serve host ONE walk per TTL (measured 1.63 s
     // worst-case at the 3000-dir bound,
     // docs/measurements/census-scan-latency.json), not one per poll. A
     // cadence at or above the TTL would re-scan every poll and make the
