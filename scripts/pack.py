@@ -88,10 +88,10 @@ def _source_repo() -> str:
     return "unknown"
 
 
-def _packaged_at() -> str:
+def _packaged_at(commit: str = "HEAD") -> str:
     # Reproducibility law: no wall-clock byte may ever enter the ZIP. Pinned by
-    # SOURCE_DATE_EPOCH, else the HEAD commit's own committer date (deterministic
-    # per tree — two packs of one tree from one reported origin stay
+    # SOURCE_DATE_EPOCH, else the STAMPED commit's own committer date (deterministic
+    # per rev — two packs of one rev from one reported origin stay
     # byte-identical; origin is a build input too, see the sidecar note above),
     # else "unknown".
     epoch = os.environ.get("SOURCE_DATE_EPOCH", "").strip()
@@ -112,14 +112,100 @@ def _packaged_at() -> str:
     return "unknown"
 
 
-def install_provenance() -> bytes:
+def install_provenance(commit: str) -> bytes:
     # One sidecar schema (est-opuob): {version, source_commit, packaged_at,
     # source_repo}. Appended last — readers grow tolerant-first.
     return (json.dumps(
-        {"version": VERSION, "source_commit": _source_commit(),
-         "packaged_at": _packaged_at(), "source_repo": _source_repo()},
+        {"version": VERSION, "source_commit": commit,
+         "packaged_at": _packaged_at(commit), "source_repo": _source_repo()},
         separators=(",", ":"),
     ) + "\n").encode("utf-8")
+
+
+def dirty_tree_report() -> list[str]:
+    # Dirty-tree law: collect_sources ships WORKING-TREE bytes, so a tracked
+    # modification (or a staged deletion) under the stamped rev is the lie
+    # install.json tells about its own bytes — refuse the build (gauntlet-1
+    # provenance finding). Untracked files ship only through the include
+    # patterns, so those paths are reported too; the rest of the untracked
+    # surface (residue dirs, caches) cannot travel and never trips the gate.
+    # Override: HERMES_WF_PACK_ALLOW_DIRTY=1 (non-git dist paths own the truth).
+    if os.environ.get("HERMES_WF_PACK_ALLOW_DIRTY", "").strip() == "1":
+        return []
+    reasons: list[str] = []
+    status = subprocess.run(
+        ["git", "status", "--porcelain", "-uno"], cwd=ROOT,
+        capture_output=True, text=True, timeout=15,
+    )
+    if status.returncode != 0:
+        reasons.append("build tree is not a usable git checkout "
+                       "(no trustworthy rev to stamp)")
+    elif status.stdout.strip():
+        reasons.extend(f"dirty tracked path: {line}"
+                       for line in status.stdout.splitlines() if line.strip())
+    listing = subprocess.run(
+        ["git", "ls-files", "--others", "--exclude-standard", "--",
+         *INCLUDE_PATTERNS], cwd=ROOT, capture_output=True, text=True, timeout=15,
+    )
+    if listing.returncode == 0:
+        reasons.extend(
+            f"untracked path matched by an include pattern (no blob at any rev): {line}"
+            for line in listing.stdout.splitlines() if line.strip())
+    return reasons
+
+
+def _rev_exists(rev: str) -> bool:
+    return subprocess.run(
+        ["git", "cat-file", "-e", f"{rev}^{{commit}}"], cwd=ROOT,
+        capture_output=True, text=True, timeout=15,
+    ).returncode == 0
+
+
+def verify_archive(archive: Path) -> None:
+    # ZIP-vs-blob law: every shipped member must equal its git blob at the rev
+    # install.json stamps, and install.json must be the only generated member.
+    # This is the merge-gate leg: a ZIP whose bytes diverge from the stamped
+    # rev cannot ship, so the sidecar can never lie about its archive.
+    with zipfile.ZipFile(archive) as zip_file:
+        names = set(zip_file.namelist())
+        raw = {name: zip_file.read(name) for name in names}
+    try:
+        stamped = json.loads(raw[f"{PACKAGE_NAME}/install.json"]).get("source_commit", "")
+    except (KeyError, ValueError) as exc:
+        raise RuntimeError(f"install.json missing or unreadable in {archive.name}") from exc
+    if not _COMMIT_PIN.fullmatch(stamped):
+        raise RuntimeError(f"install.json source_commit is not a 40-hex rev: {stamped!r}")
+    sums_raw = raw.get(f"{PACKAGE_NAME}/SHA256SUMS")
+    if sums_raw is None:
+        raise RuntimeError(f"SHA256SUMS ledger missing from {archive.name}")
+    prefix = f"{PACKAGE_NAME}/"
+    shipped = {name.removeprefix(prefix): data for name, data in raw.items()
+               if name.startswith(prefix)
+               and name not in (prefix + "SHA256SUMS", prefix + "install.json")}
+    sums = {}
+    for line in sums_raw.decode("utf-8").splitlines():
+        digest, _, rel = line.partition("  ")
+        sums[rel] = digest
+    if set(sums) != set(shipped):
+        raise RuntimeError("SHA256SUMS ledger and shipped members disagree: "
+                           + ", ".join(sorted(set(sums) ^ set(shipped))))
+    for rel, data in sorted(shipped.items()):
+        digest = hashlib.sha256(data).hexdigest()
+        if digest != sums[rel]:
+            raise RuntimeError(f"SHA256SUMS row does not match shipped bytes: {rel}")
+        blob = subprocess.run(
+            ["git", "cat-file", "-e", f"{stamped}:{rel}"], cwd=ROOT,
+            capture_output=True, text=True, timeout=15,
+        )
+        if blob.returncode != 0:
+            raise RuntimeError(f"shipped member has no blob at stamped rev {stamped[:8]}: {rel}")
+        rev = subprocess.run(
+            ["git", "cat-file", "blob", f"{stamped}:{rel}"], cwd=ROOT,
+            capture_output=True, timeout=15,
+        )
+        if rev.returncode != 0 or rev.stdout != data:
+            raise RuntimeError(
+                f"shipped bytes differ from the blob at stamped rev {stamped[:8]}: {rel}")
 
 # Exact files plus deliberately narrow source patterns. Never package a worktree wholesale.
 INCLUDE_FILES = (
@@ -433,6 +519,10 @@ def _zip_info(name: str, executable: bool = False) -> zipfile.ZipInfo:
 
 
 def build(output: Path) -> tuple[str, Path]:
+    guard = dirty_tree_report()
+    if guard:
+        raise RuntimeError("refusing to pack a dirty build tree:\n  " + "\n  ".join(guard))
+    stamped = _source_commit()
     sources = collect_sources()
     output = output.expanduser().resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -459,13 +549,22 @@ def build(output: Path) -> tuple[str, Path]:
             # Provenance rides AFTER the ledger: SHA256SUMS pins sources only,
             # install.json is generated (no self-referential row).
             archive.writestr(
-                _zip_info(f"{PACKAGE_NAME}/install.json"), install_provenance(),
+                _zip_info(f"{PACKAGE_NAME}/install.json"), install_provenance(stamped),
                 compress_type=zipfile.ZIP_DEFLATED,
                 compresslevel=9,
             )
         os.replace(temporary, output)
     finally:
         temporary.unlink(missing_ok=True)
+    # The written artifact answers for its own stamp before anyone can ship it.
+    # A stamped rev that does not exist HERE is the pin seam (or a non-git
+    # dist tree): nothing to compare against at build time; `--verify` remains
+    # strict, so the release leg can never silently skip the comparison.
+    if _COMMIT_PIN.fullmatch(stamped) and _rev_exists(stamped):
+        verify_archive(output)
+    else:
+        print("pack: ZIP-vs-blob leg skipped (stamped rev "
+              f"{stamped[:8] if stamped != 'unknown' else stamped} not in this repo)")
 
     digest = hashlib.sha256(output.read_bytes()).hexdigest()
     sidecar = output.with_suffix(output.suffix + ".sha256")
@@ -480,7 +579,16 @@ def main() -> int:
         default=ROOT / "artifacts" / f"{PACKAGE_NAME}.zip",
         help="output ZIP path (default: artifacts/<package>.zip)",
     )
+    parser.add_argument(
+        "--verify", type=Path, metavar="ZIP",
+        help="verify an existing archive: every member equals its blob at the "
+             "stamped rev (no build; strict even with HERMES_WF_PACK_ALLOW_DIRTY)",
+    )
     args = parser.parse_args()
+    if args.verify:
+        verify_archive(args.verify)
+        print(f"verified: {args.verify.expanduser().resolve()}")
+        return 0
     digest, sidecar = build(args.output)
     print(f"archive: {args.output.expanduser().resolve()}")
     print(f"sha256: {digest}")

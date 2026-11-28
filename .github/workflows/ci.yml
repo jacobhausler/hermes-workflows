@@ -167,6 +167,16 @@ jobs:
           done
           python3 scripts/suite.py . ci-out --merge $dirs
 
+      - name: Release ZIP provenance (pack + ZIP-vs-blob at the stamped rev)
+        # est-wd1zu (gauntlet-1 provenance): rebuild the release ZIP from this
+        # checkout — the dirty-tree guard refuses shipped bytes that differ
+        # from the stamped rev — then demand every shipped member equal its
+        # git blob at the rev install.json itself stamps. Fails closed: an
+        # artifact whose provenance cannot be checked here cannot ship.
+        run: |
+          python3 scripts/pack.py --output /tmp/release-ship.zip
+          python3 scripts/pack.py --verify /tmp/release-ship.zip
+
       - name: Runtime docs dead-reference lint (docs/runtime)
         # bd_2026-11-13-7m0: extract every shell command, door action, run-dir
         # path, JSON field shape and citation from docs/runtime/**/*.md, execute
